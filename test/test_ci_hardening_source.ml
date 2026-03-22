@@ -216,6 +216,29 @@ let test_keeper_oas_cleanup_contracts () =
     (file_contains_pattern "lib/tool_compact.ml"
        "OAS-backed compaction pipeline")
 
+let test_dashboard_executor_pool_contracts () =
+  check bool "dashboard core defines executor pool helper" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "let run_dashboard_compute");
+  check bool "dashboard core submits compute to executor pool" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "Eio.Executor_pool.submit_exn");
+  check bool "mission refresh loop uses dashboard compute helper" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "run_dashboard_compute ~sw ~clock ~config:room_config");
+  check bool "mission actor path uses dashboard compute helper" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "run_dashboard_compute ~sw ~clock");
+  check bool "execution refresh loop uses dashboard compute helper" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "run_dashboard_compute ~sw ~clock ~config:room_config");
+  check bool "execution parameterized path uses dashboard compute helper" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "run_dashboard_compute ~sw ~clock");
+  check bool "server bootstrap wires executor pool into dashboard" true
+    (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
+       "Server_dashboard_http.set_executor_pool exec_pool")
+
 let () =
   run "ci_hardening_source"
     [
@@ -228,5 +251,7 @@ let () =
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;
            test_case "local review script contracts" `Quick test_local_review_script_contracts;
            test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;
+           test_case "dashboard executor pool contracts" `Quick
+             test_dashboard_executor_pool_contracts;
          ]);
     ]

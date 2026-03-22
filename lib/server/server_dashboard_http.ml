@@ -18,12 +18,6 @@ let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
       ("tool_usage", Tool_unified.summary_report ());
     ]
 
-(** Executor pool for offloading heavy dashboard compute to a separate
-    OS domain, bypassing Eio cooperative-scheduling starvation.
-    Set via [set_executor_pool] at server startup. *)
-let _executor_pool : Eio.Executor_pool.t option ref = ref None
-let set_executor_pool pool = _executor_pool := Some pool
-
 let _execution_json_ref : Yojson.Safe.t ref =
   ref (`Assoc [
     ("status", `String "initializing");
@@ -38,18 +32,12 @@ let _execution_json_ref : Yojson.Safe.t ref =
 let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
+  ignore net;
+  ignore mono_clock;
   let compute () =
-    match !_executor_pool with
-    | Some pool ->
-      Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
-        Eio.Switch.run @@ fun pool_sw ->
-        match Room_utils_backend_setup.with_domain_local_pg_backend ~sw:pool_sw ~net ~clock ~mono_clock room_config with
-        | Some domain_config ->
-          Dashboard_execution.json ~light:true ~config:domain_config ~sw:pool_sw ~clock ~proc_mgr ()
-        | None ->
-          failwith "domain-local PG backend creation failed; skipping pool refresh")
-    | None ->
-      Dashboard_execution.json ~light:true ~config:room_config ~sw ~clock ~proc_mgr ()
+    run_dashboard_compute ~sw ~clock ~config:room_config
+      (fun ~config ~sw ->
+        Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ())
   in
   Proactive_refresh.start ~sw ~clock
     ~config:(Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0)
@@ -76,9 +64,12 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
       ~clock ~timeout_sec:120.0 (fun () ->
-      Dashboard_execution.json ?actor ?fixture ~light
-        ~config:state.Mcp_server.room_config ~sw ~clock
-        ~proc_mgr:state.Mcp_server.proc_mgr ())
+      run_dashboard_compute ~sw ~clock
+        ~config:state.Mcp_server.room_config
+        (fun ~config ~sw ->
+          Dashboard_execution.json ?actor ?fixture ~light
+            ~config ~sw ~clock
+            ~proc_mgr:state.Mcp_server.proc_mgr ()))
 
 let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =

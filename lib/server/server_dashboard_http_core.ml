@@ -3,6 +3,49 @@ open Types
 open Server_utils
 open Server_auth
 
+(** Executor pool for CPU-heavy dashboard compute.  Parameterized dashboard
+    requests can otherwise monopolize the main Eio domain long enough to
+    starve unrelated MCP tool calls. *)
+let _executor_pool : Eio.Executor_pool.t option ref = ref None
+
+let set_executor_pool pool = _executor_pool := Some pool
+
+let run_dashboard_compute ~sw ~clock ~(config : Room.config) compute =
+  let fallback () = compute ~config ~sw in
+  let run_in_pool pool_sw =
+    match config.backend_config.Backend.backend_type with
+    | Backend.PostgresNative ->
+        let net = Eio_context.get_net () in
+        let mono_clock = Eio_context.get_mono_clock () in
+        (match
+           Room_utils_backend_setup.with_domain_local_pg_backend
+             ~sw:pool_sw ~net ~clock ~mono_clock config
+         with
+         | Some domain_config -> `Done (compute ~config:domain_config ~sw:pool_sw)
+         | None -> `Fallback)
+    | Backend.Memory | Backend.FileSystem ->
+        `Done (compute ~config ~sw:pool_sw)
+  in
+  match !_executor_pool with
+  | Some pool ->
+      (try
+         match
+           Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
+             Eio.Switch.run run_in_pool)
+         with
+         | `Done value -> value
+         | `Fallback ->
+             Log.Dashboard.warn
+               "dashboard offload fallback: domain-local backend unavailable";
+             fallback ()
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Dashboard.warn "dashboard offload failed, using inline compute: %s"
+             (Printexc.to_string exn);
+           fallback ())
+  | None -> fallback ()
+
 (* ================================================================ *)
 (* Dashboard Data (Batch API)                                       *)
 (* ================================================================ *)
@@ -323,7 +366,8 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let compute () =
-    Dashboard_mission.json ~config:room_config ~sw ~clock ~proc_mgr ()
+    run_dashboard_compute ~sw ~clock ~config:room_config
+      (fun ~config ~sw -> Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ())
   in
   Proactive_refresh.start ~sw ~clock
     ~config:{ (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0)
@@ -396,9 +440,12 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
       in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
         ~clock ~timeout_sec:120.0 (fun () ->
-        Dashboard_mission.json ?actor
-          ~config:state.Mcp_server.room_config ~sw ~clock
-          ~proc_mgr:state.Mcp_server.proc_mgr ())
+        run_dashboard_compute ~sw ~clock
+          ~config:state.Mcp_server.room_config
+          (fun ~config ~sw ->
+            Dashboard_mission.json ?actor
+              ~config ~sw ~clock
+              ~proc_mgr:state.Mcp_server.proc_mgr ()))
   in
   match mode with
   | Some "snapshot" -> mission_snapshot_of_full full_json

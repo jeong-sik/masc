@@ -47,7 +47,7 @@ The main remaining problems are no longer “missing migration” at large. They
 The bridge still throws away part of MASC session semantics:
 
 - `planned_worker` metadata is only partially projected into swarm entries
-- per-agent telemetry now exists, but only usage/turn_count are surfaced; `trace_ref` is still absent
+- per-agent telemetry now includes `trace_ref`, usage, and turn_count, so downstream proof views can link back to raw OAS runs
 - convergence now uses a single-pass success-ratio callback, but not a richer multi-iteration swarm policy
 - `resource_check` now guards on room initialization only; it is not yet a broader runtime-health probe
 - budget now derives wall-clock time from `duration_seconds`, but there is still no richer token/cost policy

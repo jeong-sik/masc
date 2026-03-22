@@ -215,10 +215,23 @@ let cascade_of_worker
 let telemetry_of_run_result (result : Oas_worker.run_result) :
     Swarm.Swarm_types.agent_telemetry =
   {
-    Swarm.Swarm_types.trace_ref = None;
+    Swarm.Swarm_types.trace_ref = result.trace_ref;
     usage = Option.map (Oas.Types.add_usage Oas.Types.empty_usage) result.response.usage;
     turn_count = max 1 result.turns;
   }
+
+let create_team_session_raw_trace ~(config : Room.config) ~(session_id : string)
+    ~(agent_name : string) : Oas.Raw_trace.t option =
+  match
+    Oas.Raw_trace.create_for_session
+      ~session_root:(Worker_container.oas_trace_session_root ~base_path:config.base_path)
+      ~session_id ~agent_name ()
+  with
+  | Ok raw_trace -> Some raw_trace
+  | Error err ->
+      Log.Session.warn "team_session_oas_bridge: raw trace disabled for %s: %s"
+        agent_name (Oas.Error.to_string err);
+      None
 
 let make_convergence_metric ~(entry_count : int)
     (success_by_agent : (string, bool) Hashtbl.t) :
@@ -255,6 +268,7 @@ let budget_of_session_timeout timeout_sec =
 
 let planned_worker_to_entry_with_state
     ~(config : Room.config)
+    ~(session_id : string)
     ~(session_cascade : string list)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -272,6 +286,9 @@ let planned_worker_to_entry_with_state
       (match pw.spawn_role with Some r -> r | None -> "execute")
   in
   let run ~sw:_ prompt =
+    let raw_trace =
+      create_team_session_raw_trace ~config ~session_id ~agent_name:name
+    in
     let dispatch_with_defaults ~name:(tool_name : string) ~(args : Yojson.Safe.t)
       =
       dispatch ~name:tool_name
@@ -281,7 +298,7 @@ let planned_worker_to_entry_with_state
       Oas_worker.run_named_with_masc_tools
         ~cascade_name ~goal:prompt ~system_prompt
         ~masc_tools ~dispatch:dispatch_with_defaults ~max_turns
-        ~temperature:0.3 ~max_tokens:4096 ()
+        ~temperature:0.3 ~max_tokens:4096 ?raw_trace ()
     with
     | Ok result ->
         Hashtbl.replace success_by_agent name true;
@@ -299,13 +316,14 @@ let planned_worker_to_entry_with_state
 
 let planned_worker_to_entry
     ~(config : Room.config)
+    ~(session_id : string)
     ~(session_cascade : string list)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     (pw : Team_session_types.planned_worker)
   : Swarm.Swarm_types.agent_entry =
   let success_by_agent = Hashtbl.create 1 in
-  planned_worker_to_entry_with_state ~config ~session_cascade ~masc_tools
+  planned_worker_to_entry_with_state ~config ~session_id ~session_cascade ~masc_tools
     ~dispatch ~success_by_agent pw
 
 (* ── session -> swarm_config ───────────────────────────────────── *)
@@ -319,7 +337,7 @@ let session_to_swarm_config
   let success_by_agent = Hashtbl.create 8 in
   let entries =
     List.map
-      (planned_worker_to_entry_with_state ~config
+      (planned_worker_to_entry_with_state ~config ~session_id:session.session_id
          ~session_cascade:session.model_cascade ~masc_tools ~dispatch
          ~success_by_agent)
       session.planned_workers
@@ -350,14 +368,39 @@ let session_to_swarm_config
 
 (* ── Inverse: swarm result -> session update ───────────────────── *)
 
+let final_outcome_of_swarm_result
+    (result : Swarm.Swarm_types.swarm_result)
+  : Team_session_types.session_status * string =
+  if result.converged then
+    (Team_session_types.Completed, "swarm_converged")
+  else
+    let last_agent_results =
+      match List.rev result.iterations with
+      | [] -> []
+      | last :: _ -> last.agent_results
+    in
+    let success_count, error_count =
+      List.fold_left
+        (fun (successes, errors) (_, status) ->
+          match status with
+          | Swarm.Swarm_types.Done_ok _ -> (successes + 1, errors)
+          | Swarm.Swarm_types.Done_error _ -> (successes, errors + 1)
+          | Swarm.Swarm_types.Idle | Swarm.Swarm_types.Working ->
+              (successes, errors))
+        (0, 0) last_agent_results
+    in
+    if success_count > 0 then
+      (Team_session_types.Interrupted, "swarm_partial_completion")
+    else if error_count > 0 then
+      (Team_session_types.Failed, "swarm_all_agents_failed")
+    else
+      (Team_session_types.Failed, "swarm_exhausted")
+
 let apply_swarm_result
     (session : Team_session_types.session)
     (result : Swarm.Swarm_types.swarm_result)
   : Team_session_types.session =
-  let final_status =
-    if result.converged then Team_session_types.Completed
-    else Team_session_types.Failed
-  in
+  let final_status, stop_reason = final_outcome_of_swarm_result result in
   let now = Time_compat.now () in
   { session with
     status = final_status;
@@ -367,6 +410,4 @@ let apply_swarm_result
     stopped_at = Some now;
     last_event_at = Some now;
     updated_at_iso = Types.now_iso ();
-    stop_reason =
-      Some (if result.converged then "swarm_converged"
-            else "swarm_exhausted") }
+    stop_reason = Some stop_reason }

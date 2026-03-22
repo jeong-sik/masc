@@ -8,6 +8,7 @@
 open Masc_mcp
 
 module Swarm = Agent_sdk_swarm
+module Oas = Agent_sdk
 
 (* ================================================================ *)
 (* Role mapping tests                                               *)
@@ -222,6 +223,43 @@ let test_session_to_swarm_config_health_contract () =
   Alcotest.(check bool) "resource check passes for initialized room" true
     resource_ok
 
+let test_telemetry_of_run_result_carries_trace_ref () =
+  let trace_ref =
+    {
+      Oas.Raw_trace.worker_run_id = "run-123";
+      path = "/tmp/oas-trace.jsonl";
+      start_seq = 1;
+      end_seq = 7;
+      agent_name = "test-agent";
+      session_id = Some "team-session-1";
+    }
+  in
+  let result : Oas_worker.run_result =
+    {
+      response =
+        {
+          Oas.Types.id = "resp-1";
+          model = "glm:auto";
+          stop_reason = Oas.Types.EndTurn;
+          content = [];
+          usage = None;
+        };
+      checkpoint = None;
+      session_id = "session-1";
+      turns = 3;
+      trace_ref = Some trace_ref;
+    }
+  in
+  let telemetry = Team_session_oas_bridge.telemetry_of_run_result result in
+  Alcotest.(check int) "turn_count preserved" 3 telemetry.turn_count;
+  match telemetry.trace_ref with
+  | Some actual ->
+      Alcotest.(check string) "worker_run_id" trace_ref.worker_run_id
+        actual.worker_run_id;
+      Alcotest.(check string) "agent_name" trace_ref.agent_name
+        actual.agent_name
+  | None -> Alcotest.fail "expected trace_ref in telemetry"
+
 (* ================================================================ *)
 (* Supported tool runtime tests                                     *)
 (* ================================================================ *)
@@ -313,6 +351,8 @@ let () =
         test_cascade_empty_model_string;
       Alcotest.test_case "session swarm health contract" `Quick
         test_session_to_swarm_config_health_contract;
+      Alcotest.test_case "telemetry carries trace_ref" `Quick
+        test_telemetry_of_run_result_carries_trace_ref;
     ];
     "supported_tools", [
       Alcotest.test_case "schemas present" `Quick

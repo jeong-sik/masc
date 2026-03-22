@@ -29,8 +29,12 @@ val cascade_of_worker :
   session_cascade:string list ->
   Team_session_types.planned_worker -> string
 
+val telemetry_of_run_result :
+  Oas_worker.run_result -> Swarm.Swarm_types.agent_telemetry
+
 val planned_worker_to_entry :
   config:Room.config ->
+  session_id:string ->
   session_cascade:string list ->
   masc_tools:Types.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->

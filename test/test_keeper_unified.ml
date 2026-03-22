@@ -251,13 +251,25 @@ let test_hooks_allowed_tools_l5 () =
 
 (* ---------- Config tests ---------- *)
 
+let with_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect ~finally:(fun () ->
+    match old with
+    | Some v -> Unix.putenv name v
+    | None -> (try Unix.putenv name "" with _ -> ()))
+    f
+
 let test_unified_turn_runtime_defaults () =
-  check (float 0.01) "unified temp default" 0.4
-    (KC.keeper_unified_temperature ());
-  check int "unified max_tokens default" 2048
-    (KC.keeper_unified_max_tokens ());
-  check int "unified max_turns default" 1000
-    (KC.keeper_unified_max_turns ())
+  with_env "MASC_KEEPER_UNIFIED_TEMP" "" (fun () ->
+  with_env "MASC_KEEPER_UNIFIED_MAX_TOKENS" "" (fun () ->
+  with_env "MASC_KEEPER_UNIFIED_MAX_TURNS" "" (fun () ->
+    check (float 0.01) "unified temp default" 0.4
+      (KC.keeper_unified_temperature ());
+    check int "unified max_tokens default" 2048
+      (KC.keeper_unified_max_tokens ());
+    check int "unified max_turns default" 1000
+      (KC.keeper_unified_max_turns ()))))
 
 (* ---------- Metrics observation tests ---------- *)
 

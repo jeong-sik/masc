@@ -52,7 +52,7 @@ export function OpsKeeperColumn() {
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">장기 실행 중인 keeper를 고르고 바로 probe나 방향 수정 메시지를 보냅니다.</p>
 
         <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
-          ${keepers.length === 0 ? html`<div class="ops-empty">지금 보이는 keeper가 없습니다.</div>` : keepers.map(keeper => html`
+          ${keepers.length === 0 ? html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">지금 보이는 keeper가 없습니다.</div>` : keepers.map(keeper => html`
             ${(() => {
               const tone = keeperPriorityTone(keeper)
               const prioritySummary = keeperPrioritySummary(keeper)
@@ -72,13 +72,13 @@ export function OpsKeeperColumn() {
                   onClick=${(e: Event) => { e.stopPropagation(); openOpsKeeperDetail(keeper) }}
                 >상세</span>
               </div>
-              <div class="ops-entity-meta">
+              <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                 <span>${keeper.last_model_used ?? keeper.model ?? 'model 확인 필요'}</span>
                 <span>${typeof keeper.context_ratio === 'number' ? `${Math.round(keeper.context_ratio * 100)}% ctx` : typeof keeper.context_tokens === 'number' ? `${Math.round(keeper.context_tokens / 1000)}k tok` : 'ctx 확인 필요'}</span>
                 <span>${relativeAge(keeper.last_turn_ago_s)}</span>
               </div>
               ${keeper.short_goal || keeper.goal ? html`
-                <div class="ops-entity-goal" title=${keeper.goal ?? ''}>${truncateGoal(keeper.short_goal ?? keeper.goal ?? '')}</div>
+                <div class="whitespace-normal mt-1.5 px-1.5 py-1 bg-[var(--card)] rounded-[4px] text-[var(--fs-xs)] text-text-muted" title=${keeper.goal ?? ''}>${truncateGoal(keeper.short_goal ?? keeper.goal ?? '')}</div>
               ` : null}
               ${tone !== 'ok'
                 ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45] mt-1.5">점검 이유: ${prioritySummary}</div>`
@@ -96,14 +96,14 @@ export function OpsKeeperColumn() {
         <div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45] mt-3">Persistent agent는 resident keeper와 분리해서 참고용으로만 보여줍니다.</div>
         <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
           ${persistentAgents.length === 0
-            ? html`<div class="ops-empty">분리된 persistent agent는 없습니다.</div>`
+            ? html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">분리된 persistent agent는 없습니다.</div>`
             : persistentAgents.map(agent => html`
                 <article key=${agent.name} class="ops-entity-card">
                   <div class="flex justify-between items-center gap-2.5 max-[880px]:flex-col max-[880px]:items-start">
                     <strong>${agent.name}</strong>
                     <span class="border border-solid border-[var(--card-border)] ${agent.status ?? 'idle'} ${agent.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(agent.status)}</span>
                   </div>
-                  <div class="ops-entity-meta">
+                  <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                     <span>persistent</span>
                     <span>${agent.model ?? 'model 확인 필요'}</span>
                     <span>${relativeAge(agent.last_turn_ago_s)}</span>
@@ -121,8 +121,8 @@ export function OpsKeeperColumn() {
 
         ${selectedKeeper ? html`
           <div class="flex flex-col gap-2">
-            <div class="ops-detail-title">${selectedKeeper.name}</div>
-            <div class="ops-detail-meta">
+            <div class="mt-1.5 whitespace-pre-wrap break-words">${selectedKeeper.name}</div>
+            <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
               <span>자율성: ${selectedKeeper.autonomy_level ?? '확인 없음'}</span>
               <span>세대: ${selectedKeeper.generation ?? 0}</span>
               <span>활성 목표: ${selectedKeeper.active_goal_ids?.length ?? 0}</span>
@@ -132,13 +132,13 @@ export function OpsKeeperColumn() {
             ${keeperPriorityTone(selectedKeeper) !== 'ok'
               ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45] mt-2">현재 점검 이유: ${keeperPrioritySummary(selectedKeeper)}</div>`
               : null}
-            ${selectedKeeper.goal ? html`<div class="ops-detail-goal">${selectedKeeper.goal}</div>` : null}
+            ${selectedKeeper.goal ? html`<div class="whitespace-normal mt-1.5 px-1.5 py-1 bg-[var(--card)] rounded-[4px] text-[var(--fs-xs)] text-text-muted">${selectedKeeper.goal}</div>` : null}
           </div>
           <${KeeperConversationPanel}
             keeperName=${selectedKeeper.name}
             placeholder="구조화된 probe, 방향 수정, 재지시 내용을 적으세요"
           />
-        ` : html`<div class="ops-empty">먼저 keeper를 하나 고르세요.</div>`}
+        ` : html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">먼저 keeper를 하나 고르세요.</div>`}
       </section>
 
       <section class="card flex flex-col gap-3 min-h-0">
@@ -167,7 +167,7 @@ export function OpsKeeperColumn() {
                 `
               })}
             </div>`
-          : html`<div class="ops-empty">액션 없음</div>`}
+          : html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">액션 없음</div>`}
       </section>
 
       <section class="card flex flex-col gap-3 min-h-0">
@@ -176,15 +176,15 @@ export function OpsKeeperColumn() {
         </div>
         <div class="flex flex-col gap-2">
           ${operatorActionLog.value.length === 0 ? html`
-            <div class="ops-empty">이 세션에서 실행한 개입이 아직 없습니다.</div>
+            <div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">이 세션에서 실행한 개입이 아직 없습니다.</div>
           ` : operatorActionLog.value.map(entry => html`
             <article key=${entry.id} class="ops-log-entry ${entry.outcome}">
-              <div class="ops-log-head">
+              <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                 <strong>${actionTypeLabel(entry.action_type)}</strong>
                 <span>${entry.target_label}</span>
                 <span>${entry.at}</span>
               </div>
-              <div class="ops-log-body">${entry.message}</div>
+              <div class="mt-1.5 whitespace-pre-wrap break-words">${entry.message}</div>
             </article>
           `)}
         </div>

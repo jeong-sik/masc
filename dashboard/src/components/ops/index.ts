@@ -171,7 +171,7 @@ export function Ops() {
           <label class="control-label" for="ops-actor">개입 ID</label>
           <input
             id="ops-actor"
-            class="control-input ops-actor-input min-w-[180px]"
+            class="control-input min-w-[180px] max-[880px]:min-w-0 max-[880px]:flex-1"
             type="text"
             value=${actorName.value}
             onInput=${(event: Event) => persistActorName((event.target as HTMLInputElement).value)}
@@ -191,18 +191,18 @@ export function Ops() {
         </div>
       </div>
 
-      ${operatorError.value ? html`<section class="ops-banner error">${operatorError.value}</section>` : null}
-      ${operatorDigestError.value ? html`<section class="ops-banner error">${operatorDigestError.value}</section>` : null}
+      ${operatorError.value ? html`<section class="rounded-[12px] px-3.5 py-3 border border-solid border-[rgba(239,68,68,0.34)] bg-[var(--bad-12)] text-[#fecaca]">${operatorError.value}</section>` : null}
+      ${operatorDigestError.value ? html`<section class="rounded-[12px] px-3.5 py-3 border border-solid border-[rgba(239,68,68,0.34)] bg-[var(--bad-12)] text-[#fecaca]">${operatorDigestError.value}</section>` : null}
       <${RoomTruthStrip} />
       ${workflowContext ? html`
-        <section class="ops-banner ${workflowReady ? 'info' : 'warn'} grid gap-2">
+        <section class="rounded-[12px] px-3.5 py-3 border border-solid ${workflowReady ? 'border-[rgba(34,211,238,0.26)] bg-[var(--cyan-12)] text-[#cffafe]' : 'border-[rgba(245,158,11,0.28)] bg-[rgba(245,158,11,0.12)] text-[#fde68a]'} grid gap-2">
           <div class="flex gap-2 flex-wrap items-center text-[rgba(255,255,255,0.72)]">
             <strong>${workflowContext.source_label}</strong>
             <span>${workflowActionLabel(workflowContext.action_type)}</span>
             <span>${workflowTargetLabel(workflowContext)}</span>
           </div>
           <div class="text-[rgba(255,255,255,0.84)] leading-[1.5]">${workflowContext.summary}</div>
-          ${workflowContext.payload_preview ? html`<div class="ops-handoff-preview">${workflowContext.payload_preview}</div>` : null}
+          ${workflowContext.payload_preview ? html`<div class="px-3 py-2.5 rounded-[12px] bg-[var(--white-5)] border border-solid border-[var(--white-8)] text-text-strong leading-[1.45]">${workflowContext.payload_preview}</div>` : null}
           <div class="text-[rgba(255,255,255,0.58)] text-[var(--fs-sm)]">
             ${workflowReady
               ? '추천 액션 기준으로 대상 선택과 입력값을 미리 맞춰 두었습니다.'
@@ -252,7 +252,7 @@ export function Ops() {
         }
         if (actions.length === 0) return null
         return html`
-          <section class="ops-action-guide">
+          <section class="rounded-[10px] px-5 py-4 mb-4 bg-[rgba(138,163,211,0.06)] border border-solid border-[rgba(138,163,211,0.15)]">
             <h3 class="text-[var(--fs-base)] font-semibold text-[rgba(255,255,255,0.6)] mb-2.5">지금 할 수 있는 것</h3>
             <div class="flex flex-col gap-2">
               ${actions.slice(0, 3).map(action => html`
@@ -271,18 +271,18 @@ export function Ops() {
           <h2 class="monitor-headline">개입 우선순위</h2>
           <p class="monitor-subheadline">지금 가장 먼저 손댈 대상이 방인지, 세션인지, 키퍼인지 먼저 좁힙니다.</p>
         </div>
-        <div class="ops-priority-grid">
+        <div class="grid grid-cols-4 gap-2.5 max-[1200px]:grid-cols-2 max-[880px]:grid-cols-1">
           ${priorityCards.map(card => html`
-            <div key=${card.key} class="ops-priority-card ${card.tone}">
+            <div key=${card.key} class="p-3.5 rounded-[12px] border border-solid bg-[var(--white-3)] grid gap-1.5 ${card.tone === 'ok' ? 'border-[var(--ok-24)]' : card.tone === 'warn' ? 'border-[var(--warn-28)]' : card.tone === 'bad' ? 'border-[rgba(248,113,113,0.34)]' : 'border-[var(--border-slate-16)]'}">
               <span class="text-text-muted text-[var(--fs-xs)] uppercase tracking-[0.06em]">${card.label}</span>
-              <strong>${card.value}</strong>
+              <strong class="text-text-strong text-2xl leading-[1.1]">${card.value}</strong>
               <div class="text-[#9ab1d7] text-[var(--fs-sm)] leading-[1.45]">${card.detail}</div>
             </div>
           `)}
         </div>
       </section>
 
-      <div class="ops-workbench">
+      <div class="grid grid-cols-[minmax(0,0.92fr)_minmax(0,0.9fr)_minmax(0,1.18fr)] gap-4 max-[1200px]:grid-cols-1">
         <${OpsRoomColumn} />
         <${OpsSessionColumn} />
         <${OpsKeeperColumn} />

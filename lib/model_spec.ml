@@ -300,7 +300,32 @@ let rec model_spec_of_string s =
         parse_provider_model ~original:s ~provider_str ~model_id
 
 (* ================================================================ *)
+(* Cascade config path resolution                                    *)
+(* Shared between Model_spec and Oas_worker.                         *)
+(* ================================================================ *)
+
+(** Locate config/cascade.json via CWD or ME_ROOT.
+    Returns [Some path] when the file exists on disk. *)
+let cascade_config_path () : string option =
+  let base dir name = Filename.concat (Filename.concat dir "config") name in
+  let cwd = Sys.getcwd () in
+  let me_root =
+    Sys.getenv_opt "ME_ROOT"
+    |> Option.value
+         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
+  in
+  let masc_root = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
+  let candidates =
+    [ base cwd "cascade.json";
+      base masc_root "cascade.json" ]
+  in
+  List.find_opt Sys.file_exists candidates
+
+(* ================================================================ *)
 (* Default model label helpers                                       *)
+(* Delegates to OAS Cascade_config.resolve_model_strings when a      *)
+(* cascade config file is available, falling back to                  *)
+(* Provider_adapter env-driven label lists.                          *)
 (* ================================================================ *)
 
 let configured_default_model_label () =
@@ -308,11 +333,30 @@ let configured_default_model_label () =
   | Ok label -> Some label
   | Error _ -> None
 
+(** Resolve model labels via OAS Cascade_config when Eio runtime is active
+    and cascade config file exists.  Falls back to [defaults] when called
+    outside Eio (e.g. top-level module initialization in tests). *)
+let resolve_cascade_labels ~name ~defaults =
+  match cascade_config_path () with
+  | None -> defaults
+  | Some config_path -> (
+      try
+        Llm_provider.Cascade_config.resolve_model_strings
+          ~config_path ~name ~defaults ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ ->
+          (* Eio.Mutex requires Eio context; gracefully fall back when
+             called during module init (before Eio.main). *)
+          defaults)
+
 let default_execution_model_labels () =
-  Provider_adapter.preferred_execution_model_labels ()
+  resolve_cascade_labels ~name:"default"
+    ~defaults:(Provider_adapter.preferred_execution_model_labels ())
 
 let default_verifier_model_labels () =
-  Provider_adapter.preferred_verifier_model_labels ()
+  resolve_cascade_labels ~name:"verifier"
+    ~defaults:(Provider_adapter.preferred_verifier_model_labels ())
 
 (* ================================================================ *)
 (* Available spec filtering                                          *)
@@ -357,6 +401,11 @@ let default_verifier_model_spec () =
   first_available_model_spec (default_verifier_model_labels ())
 
 let default_local_model_spec () =
+  (* Resolution order (cascade-aware):
+     1. Explicit user config (MASC_DEFAULT_CASCADE / MASC_DEFAULT_PROVIDER+MODEL)
+     2. Cascade "default" profile from config/cascade.json (hot-reloadable)
+     3. Env-driven execution chain (Provider_adapter)
+     4. Hardcoded glm_cloud fallback *)
   match configured_default_model_label () with
   | Some label -> (
       match model_spec_of_string label with

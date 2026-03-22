@@ -26,7 +26,8 @@ type run_result = {
   trace_ref : Oas.Raw_trace.run_ref option;
 }
 
-(** Locate config/cascade.json via CWD or ME_ROOT. *)
+(** Locate config/cascade.json via CWD or ME_ROOT.
+    Delegates to {!Model_spec.cascade_config_path}. *)
 val default_config_path : unit -> string option
 
 (** Return the default model string list for a given cascade name. *)

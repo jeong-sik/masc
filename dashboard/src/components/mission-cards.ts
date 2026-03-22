@@ -59,10 +59,10 @@ export function SummaryStat({
   tone?: string | null
 }) {
   return html`
-    <article class="rounded-xl p-3.5 border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5 ${toneClass(tone)}">
-      <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">${label}</span>
-      <strong class="text-[var(--text-strong)] text-[26px] leading-none">${value}</strong>
-      <small class="text-[rgba(255,255,255,0.68)] leading-[1.45]">${detail}</small>
+    <article class="rounded-lg p-3 border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1 ${toneClass(tone)}">
+      <span class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium">${label}</span>
+      <strong class="text-xl text-[var(--text-strong)] leading-none tabular-nums">${value}</strong>
+      <span class="text-[10px] text-[var(--text-muted)] leading-relaxed">${detail}</span>
     </article>
   `
 }

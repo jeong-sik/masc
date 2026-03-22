@@ -19,22 +19,22 @@ export function Status() {
   const section = currentSection()
 
   return html`
-    <div class="tab-unified grid gap-4">
-      <div class="tab-pill-bar">
+    <div class="flex flex-col gap-4">
+      <div class="flex gap-1 p-1 bg-[var(--white-3)] rounded-lg w-fit">
         <button
-          class="tab-pill-btn ${section === 'sessions' ? 'active' : ''}"
+          class="px-3.5 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer border-0 ${section === 'sessions' ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-body)]'}"
           onClick=${() => navigate('status', { section: 'sessions' })}
         >
           세션
         </button>
         <button
-          class="tab-pill-btn ${section === 'agents' ? 'active' : ''}"
+          class="px-3.5 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer border-0 ${section === 'agents' ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-body)]'}"
           onClick=${() => navigate('status', { section: 'agents' })}
         >
           에이전트
         </button>
         <button
-          class="tab-pill-btn ${section === 'activity' ? 'active' : ''}"
+          class="px-3.5 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer border-0 ${section === 'activity' ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-body)]'}"
           onClick=${() => navigate('status', { section: 'activity' })}
         >
           활동

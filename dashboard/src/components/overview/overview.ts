@@ -1,6 +1,5 @@
 // MASC Dashboard — Home Command Center
 // "What's happening right now?" — answer in 1 second, no scroll.
-// Quiet when healthy, loud when something needs attention.
 
 import { html } from 'htm/preact'
 import { missionSnapshot } from '../../mission-store'
@@ -50,28 +49,34 @@ function isSystemSession(session: DashboardMissionSessionBrief): boolean {
   return session.origin_kind === 'system'
 }
 
+function statusDotColor(status?: string | null): string {
+  const s = (status ?? '').trim().toLowerCase()
+  if (s === 'running') return 'bg-[var(--ok)]'
+  if (s === 'paused' || s === 'interrupted') return 'bg-[var(--warn)]'
+  if (s === 'completed' || s === 'done') return 'bg-[var(--text-muted)]'
+  return 'bg-[var(--accent)]'
+}
+
 function HomeSectionHeader({
   label,
-  copy,
+  count,
   linkLabel,
   onLink,
 }: {
   label: string
-  copy?: string
+  count?: number
   linkLabel?: string
   onLink?: () => void
 }) {
   return html`
-    <div class="flex items-start justify-between mb-2 gap-3">
-      <div>
-        <span class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">${label}</span>
-        ${copy ? html`<div class="mt-1 text-[13px] text-[var(--text-muted)] leading-[1.45]">${copy}</div>` : null}
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-semibold text-[var(--text-strong)] uppercase tracking-wider">${label}</span>
+        ${count != null ? html`<span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-8)] text-[var(--text-muted)] font-medium tabular-nums">${count}</span>` : null}
       </div>
-      <div class="inline-flex items-center gap-2 flex-wrap justify-end">
-        ${linkLabel && onLink
-          ? html`<a class="text-xs text-accent cursor-pointer no-underline hover:underline" onClick=${onLink}>${linkLabel}</a>`
-          : null}
-      </div>
+      ${linkLabel && onLink
+        ? html`<button class="text-[10px] text-[var(--accent)] cursor-pointer bg-transparent border-0 p-0 hover:underline" onClick=${onLink}>${linkLabel}</button>`
+        : null}
     </div>
   `
 }
@@ -80,29 +85,29 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
   const { primary, secondary } = splitSessionGoal(s.goal, s.session_id)
   const creator = (s.created_by ?? '').trim()
   const systemSession = isSystemSession(s)
+  const hasBlocker = Boolean(s.blocker_summary)
 
   return html`
     <div
-      class="hot-session-card rounded-xl p-4 border border-[var(--card-border)] bg-[var(--card)] cursor-pointer hover:border-[var(--accent)]/30 transition-colors ${s.blocker_summary ? 'border-[var(--bad)] bg-[rgba(239,68,68,0.06)]' : ''}"
+      class="p-4 rounded-lg border bg-[var(--card)] cursor-pointer transition-colors ${hasBlocker ? 'border-[var(--bad-30)]' : 'border-[var(--card-border)]'} hover:border-[var(--accent-20)]"
       key=${s.session_id}
       onClick=${() => navigate('status', { section: 'sessions', session_id: s.session_id })}
     >
-      <div class="text-sm font-medium text-[var(--text-strong)] leading-[1.35] line-clamp-2">${primary}</div>
-      ${secondary ? html`<div class="hot-session-card__context mt-1 text-[13px] text-[var(--text-body)]">${secondary}</div>` : null}
-      <div class="flex flex-wrap gap-1.5 mt-2.5">
-        ${creator
-          ? html`<span class="status-badge ${systemSession ? 'active' : ''}">${systemSession ? '시스템' : '주체'} · ${creator}</span>`
-          : null}
-        ${s.status ? html`<span class="status-badge">${statusLabel(s.status)}</span>` : null}
+      <div class="flex items-start gap-2 mb-2">
+        <span class="w-2 h-2 rounded-full shrink-0 mt-1 ${statusDotColor(s.status)}"></span>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-medium text-[var(--text-strong)] leading-snug truncate">${primary}</div>
+          ${secondary ? html`<div class="text-xs text-[var(--text-muted)] mt-0.5 truncate">${secondary}</div>` : null}
+        </div>
       </div>
-      <div class="flex gap-2 flex-wrap text-xs text-[var(--text-muted)] mt-2">
-        ${s.member_names?.length ? html`
-          <span>${s.member_names.slice(0, 3).join(', ')}${s.member_names.length > 3 ? ` +${s.member_names.length - 3}` : ''}</span>
-        ` : null}
+      <div class="flex items-center gap-3 text-[10px] text-[var(--text-muted)] pl-4">
+        ${creator ? html`<span>${systemSession ? '시스템' : creator}</span>` : null}
+        ${s.status ? html`<span>${statusLabel(s.status)}</span>` : null}
         ${s.elapsed_sec ? html`<span>${formatDuration(s.elapsed_sec)}</span>` : null}
+        ${s.member_names?.length ? html`<span>${s.member_names.length}명</span>` : null}
       </div>
-      ${s.blocker_summary ? html`
-        <div class="text-xs text-bad mt-1.5 overflow-hidden text-ellipsis whitespace-nowrap">${s.blocker_summary}</div>
+      ${hasBlocker ? html`
+        <div class="text-[10px] text-[var(--bad-light)] mt-2 pl-4 truncate">${s.blocker_summary}</div>
       ` : null}
     </div>
   `
@@ -110,28 +115,23 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
 
 type SessionLaneProps = {
   title: string
-  description: string
-  tone: 'human' | 'system'
+  icon: string
   sessions: DashboardMissionSessionBrief[]
   emptyCopy: string
 }
 
-function SessionLane({ title, description, tone, sessions, emptyCopy }: SessionLaneProps) {
+function SessionLane({ title, icon, sessions, emptyCopy }: SessionLaneProps) {
   return html`
-    <section class="hot-session-lane hot-session-lane--${tone} rounded-xl border border-[var(--card-border)] p-4 grid gap-4">
-      <div class="flex items-start justify-between gap-3">
-        <div>
-          <div class="flex items-center gap-2">
-            <h3 class="m-0 text-sm font-medium text-[var(--text-strong)]">${title}</h3>
-            <span class="status-badge">${sessions.length}</span>
-          </div>
-          <p class="mt-1 mb-0 text-[13px] text-[var(--text-muted)] leading-[1.45]">${description}</p>
-        </div>
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-[var(--text-muted)]">${icon}</span>
+        <span class="text-xs font-medium text-[var(--text-strong)]">${title}</span>
+        <span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-6)] text-[var(--text-muted)] tabular-nums">${sessions.length}</span>
       </div>
       ${sessions.length > 0
-        ? html`<div class="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">${sessions.map(renderSessionCard)}</div>`
-        : html`<div class="empty-state"><span class="empty-state-desc">${emptyCopy}</span></div>`}
-    </section>
+        ? html`<div class="flex flex-col gap-2">${sessions.map(renderSessionCard)}</div>`
+        : html`<div class="text-xs text-[var(--text-muted)] py-3 text-center">${emptyCopy}</div>`}
+    </div>
   `
 }
 
@@ -140,7 +140,6 @@ function HotSessions() {
   const sessions = snap?.sessions ?? snap?.session_briefs ?? []
   if (sessions.length === 0) return null
 
-  // Sort: blocker/attention first, then by elapsed time desc
   const sorted = [...sessions].sort((a, b) => {
     const aCrit = a.blocker_summary ? 2 : (a.related_attention_count > 0 ? 1 : 0)
     const bCrit = b.blocker_summary ? 2 : (b.related_attention_count > 0 ? 1 : 0)
@@ -154,41 +153,38 @@ function HotSessions() {
   const systemSessions = sorted.filter(s => isSystemSession(s)).slice(0, 3)
 
   return html`
-    <div class="hot-sessions">
+    <div>
       <${HomeSectionHeader}
-        label="팀 세션"
-        copy="홈에서는 사람 중심 작업과 자동 런타임을 나눠 보여줍니다."
-       
-        linkLabel="전체 보기"
+        label="세션"
+        count=${sessions.length}
+        linkLabel="전체 보기 ->"
         onLink=${() => navigate('status', { section: 'sessions' })}
       />
-      <div class="grid grid-cols-2 max-[960px]:grid-cols-1 gap-3">
+      <div class="grid grid-cols-2 max-[960px]:grid-cols-1 gap-4">
         <${SessionLane}
           title="사용자 작업"
-          description="사람이 직접 연 협업 세션과 지금 손대고 있는 일입니다."
-          tone="human"
+          icon="\u{1F464}"
           sessions=${userSessions}
-          emptyCopy="지금 보이는 사용자 작업 세션이 없습니다."
+          emptyCopy="사용자 세션 없음"
         />
         <${SessionLane}
           title="시스템 루프"
-          description="Gardener, keeper, operator가 자동으로 유지하거나 정리하는 런타임입니다."
-          tone="system"
+          icon="\u{2699}\u{FE0F}"
           sessions=${systemSessions}
-          emptyCopy="지금 보이는 시스템 루프 세션이 없습니다."
+          emptyCopy="시스템 세션 없음"
         />
       </div>
     </div>
   `
 }
 
-// --- Agent Pulse: top 8 active agents ---
+// --- Agent Pulse: top active agents ---
 
-function stateIcon(state: string): string {
-  if (state === 'working') return '\u26A1'
-  if (state === 'watching') return '\uD83D\uDC41\uFE0F'
-  if (state === 'quiet') return '\uD83D\uDCA4'
-  return '\u26AB'
+function agentStateDot(state: string): string {
+  if (state === 'working') return 'bg-[var(--ok)]'
+  if (state === 'watching') return 'bg-[var(--accent)]'
+  if (state === 'quiet') return 'bg-[var(--text-muted)]'
+  return 'bg-[#555]'
 }
 
 function AgentPulse() {
@@ -196,25 +192,28 @@ function AgentPulse() {
   if (agents.length === 0) return null
 
   return html`
-    <div class="agent-pulse">
+    <div>
       <${HomeSectionHeader}
         label="에이전트"
-       
-        linkLabel="전체 보기"
+        count=${agents.length}
+        linkLabel="전체 보기 ->"
         onLink=${() => navigate('status', { section: 'agents' })}
       />
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
+      <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
-            class="flex items-center gap-3 p-4 cursor-pointer transition-colors duration-150 hover:border-[var(--accent)]/30 rounded-xl border border-[var(--card-border)] bg-[var(--card)] agent-pulse-card--${a.state}"
+            class="flex items-center gap-3 p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)] cursor-pointer transition-colors hover:border-[var(--accent-20)]"
             key=${a.name}
             onClick=${() => navigate('status', { section: 'agents', agent: a.name })}
           >
             <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${32} />
-            <div class="flex flex-col min-w-0 gap-0.5">
-              <span class="text-sm font-medium text-[var(--text-strong)]">${a.koreanName ?? a.name}</span>
-              <span class="text-xs text-[var(--text-muted)] leading-[1.4] line-clamp-2">
-                ${stateIcon(a.state)} ${a.focus ?? a.currentTask ?? a.status}
+            <div class="flex flex-col min-w-0 flex-1">
+              <div class="flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full shrink-0 ${agentStateDot(a.state)}"></span>
+                <span class="text-sm font-medium text-[var(--text-strong)] truncate">${a.koreanName ?? a.name}</span>
+              </div>
+              <span class="text-[10px] text-[var(--text-muted)] leading-relaxed truncate mt-0.5">
+                ${a.focus ?? a.currentTask ?? a.status}
               </span>
             </div>
           </div>
@@ -231,27 +230,24 @@ export function Overview() {
   const roomHealth = snap?.summary?.room_health ?? null
 
   return html`
-    <div class="grid gap-4">
+    <div class="flex flex-col gap-5">
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
 
-      <section class="card grid gap-4">
+      <div class="p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)]">
         <${HotSessions} />
-      </section>
+      </div>
 
-      <section class="card grid gap-4">
+      <div class="p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)]">
         <${AgentPulse} />
-      </section>
+      </div>
 
       <${OasPipeline} />
 
-      <section class="card grid gap-4">
-        <${HomeSectionHeader}
-          label="최근 활동"
-
-        />
+      <div class="p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)]">
+        <${HomeSectionHeader} label="최근 활동" />
         <${NarrativeTimeline} entries=${journal} maxItems=${8} />
-      </section>
+      </div>
     </div>
   `
 }

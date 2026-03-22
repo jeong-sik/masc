@@ -1,4 +1,4 @@
-// MASC Dashboard — Health Beacon (room health pulsing indicator)
+// MASC Dashboard — Health Beacon (small status dot with label)
 
 import { html } from 'htm/preact'
 
@@ -23,12 +23,24 @@ function healthLabel(health: string | null | undefined): string {
   return '위험'
 }
 
+function dotColor(cls: string): string {
+  if (cls === 'ok') return 'bg-[var(--ok)]'
+  if (cls === 'warn') return 'bg-[var(--warn)]'
+  return 'bg-[var(--bad)]'
+}
+
+function textColor(cls: string): string {
+  if (cls === 'ok') return 'text-[var(--ok)]'
+  if (cls === 'warn') return 'text-[var(--warn)]'
+  return 'text-[var(--bad)]'
+}
+
 export function HealthBeacon({ health, label }: HealthBeaconProps) {
   const cls = healthClass(health)
   return html`
-    <div class="health-beacon inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-medium ${cls}">
-      <span class="health-beacon__dot w-2 h-2 rounded-full shrink-0" />
-      <span>${label ?? healthLabel(health)}</span>
+    <div class="inline-flex items-center gap-1.5 ${textColor(cls)}">
+      <span class="w-2 h-2 rounded-full shrink-0 ${dotColor(cls)} health-beacon__dot" />
+      <span class="text-xs font-medium">${label ?? healthLabel(health)}</span>
     </div>
   `
 }

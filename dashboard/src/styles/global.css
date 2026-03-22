@@ -2203,19 +2203,7 @@ button.monitor-row {
 .agent-runtime-ctx-fill.warn { background: var(--warn); }
 .agent-runtime-ctx-fill.bad { background: var(--bad-light); }
 
-/* ── Live Timeline ─────────────────────────────────────────── */
-.agent-live-chip {
-  transition: all 0.15s;
-}
-
-.agent-live-chip:hover {
-  border-color: rgba(200, 168, 78, 0.6);
-  color: var(--text-body, var(--text-body));
-}
-
-.agent-live-autoscroll {
-  transition: all 0.15s;
-}
+/* ── Live Timeline — see agent-monitor.css ─────────────────── */
 
 /* Event kind badge variants */
 .agent-event-badge--heartbeat { background: var(--ok-12); color: var(--ok); }

@@ -287,18 +287,41 @@ function PostCard({ post }: { post: BoardPost }) {
   `
 }
 
+function toggleCommentExpand(e: Event) {
+  const btn = e.currentTarget as HTMLButtonElement
+  const comment = btn.parentElement
+  if (!comment) return
+  const textEl = comment.querySelector('.comment-text')
+  if (!textEl) return
+  const isExpanded = textEl.classList.toggle('expanded')
+  btn.textContent = isExpanded ? '접기' : '더 보기...'
+}
+
+function CommentItem({ comment }: { comment: BoardComment }) {
+  const needsTruncation = (comment.content?.length ?? 0) > 300
+
+  return html`
+    <div class="board-comment rounded-lg">
+      <span class="comment-author"><a class="author-link" class="cursor-pointer underline" onClick=${() => navigate('status', { section: 'agents', agent: comment.author })}>${comment.author}</a></span>
+      <span class="comment-time"><${TimeAgo} timestamp=${comment.created_at} /></span>
+      <div class="comment-text">${comment.content}</div>
+      ${needsTruncation ? html`
+        <button
+          class="comment-expand-btn"
+          style="display: inline"
+          onClick=${toggleCommentExpand}
+        >더 보기...</button>
+      ` : null}
+    </div>
+  `
+}
+
 function CommentThread({ comments }: { comments: BoardComment[] }) {
   if (comments.length === 0) return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" class="text-[13px]">아직 댓글이 없습니다</div>`
 
   return html`
     <div class="comment-thread flex flex-col gap-2">
-      ${comments.map(comment => html`
-        <div key=${comment.id} class="board-comment rounded-lg">
-          <span class="comment-author"><a class="author-link" class="cursor-pointer underline" onClick=${() => navigate('status', { section: 'agents', agent: comment.author })}>${comment.author}</a></span>
-          <span class="comment-time"><${TimeAgo} timestamp=${comment.created_at} /></span>
-          <div class="comment-text">${comment.content}</div>
-        </div>
-      `)}
+      ${comments.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} />`)}
     </div>
   `
 }

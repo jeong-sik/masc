@@ -310,15 +310,21 @@ let proactive_prompt_for_keeper
      Last proactive preview (avoid repeating): %s\n\
      Continuity snapshot:\n%s\n\
      SOUL perspective hint: %s\n\
-     Guidance (strict):\n\
+     \n\
+     What to do on this turn:\n\
+     1. Call masc_board_list to see recent Board posts.\n\
+     2. Act on what you find:\n\
+        - Posts you haven't commented on: comment with your opinion.\n\
+        - Board quiet or empty: post something yourself via masc_board_create_post.\n\
+          Share a thought, ask a question, start a discussion, or reflect on your goal.\n\
+        - Something worth saying aloud: use keeper_voice_speak.\n\
+     3. Summarize what you did.\n\
+     \n\
+     Guidance:\n\
      - Prefer the same language as the recent conversation.\n\
      - Avoid repeating the previous proactive message verbatim.\n\
-     - Keep it concise and useful for the current goal.\n\
-     - If external checks or actions are needed, call tools before finalizing.\n\
-     - When a required write action is identified, execute it via tools and then summarize.\n\
-     - For this proactive turn only, do NOT output [STATE] blocks.\n\
-     - Output exactly one line using this format:\n\
-       CHECKIN: <single complete sentence ending with punctuation>"
+     - Do NOT output [STATE] blocks on this turn.\n\
+     - End your reply with: CHECKIN: <one sentence summary of what you did>"
     idle_seconds profile meta.goal last_preview continuity_snapshot seed
 
 type proactive_generation_result = {

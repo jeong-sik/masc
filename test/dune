@@ -281,6 +281,11 @@
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
+ (name test_race_cancel)
+ (modules test_race_cancel)
+ (libraries masc_mcp alcotest eio eio_main str unix))
+
+(test
  (name test_metrics_store_eio)
  (modules test_metrics_store_eio)
  (libraries masc_mcp alcotest str yojson))

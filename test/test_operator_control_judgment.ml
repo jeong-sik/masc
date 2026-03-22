@@ -182,7 +182,7 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
       ignore (Room.init config ~agent_name:(Some "operator"));
       let pending_dir = Filename.concat (Room.masc_dir config) "operator" in
       let path = Filename.concat pending_dir "pending_confirms.json" in
-      Masc_mcp.Room_utils.mkdir_p pending_dir;
+      Room_utils.mkdir_p pending_dir;
       let token = "retry-token" in
       let entry_json =
         `Assoc
@@ -199,7 +199,7 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
             ("expires_at", `Null);
           ]
       in
-      Masc_mcp.Room_utils.write_json config path (`List [ entry_json ]);
+      Room_utils.write_json config path (`List [ entry_json ]);
       let ctx = operator_ctx env sw config "operator" in
       (match
          Operator_control.confirm_json ctx

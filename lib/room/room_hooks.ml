@@ -95,3 +95,8 @@ let cleanup_board_artifacts_fn
 let governance_purge_fn
   : (string -> int * int) ref
   = ref (fun _base_path -> (0, 0))
+
+(** Auto-subscribe agent to messages on join — wraps Subscriptions.SubscriptionStore. *)
+let subscribe_messages_fn
+  : (subscriber:string -> unit) ref
+  = ref (fun ~subscriber:_ -> ())

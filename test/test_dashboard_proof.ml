@@ -153,13 +153,13 @@ let seed_session_artifacts ?(session = None) ?events config session_id =
   Lib.Team_session_store.write_text_file
     (Lib.Team_session_store.report_md_path config session_id)
     "# report";
-  Lib.Room_utils.write_json config
+  Room_utils.write_json config
     (Lib.Team_session_store.report_json_path config session_id)
     (`Assoc [ ("ok", `Bool true) ]);
   match Lib.Team_session_report.generate_proof config session with
   | Error msg -> fail msg
   | Ok (proof_json, proof_md) ->
-      Lib.Room_utils.write_json config
+      Room_utils.write_json config
         (Lib.Team_session_store.proof_json_path config session_id)
         proof_json;
       Lib.Team_session_store.write_text_file
@@ -167,7 +167,7 @@ let seed_session_artifacts ?(session = None) ?events config session_id =
         proof_md
 
 let write_manual_proof config session_id verdict =
-  Lib.Room_utils.write_json config
+  Room_utils.write_json config
     (Lib.Team_session_store.proof_json_path config session_id)
     (`Assoc [ ("verdict", `String verdict) ]);
   Lib.Team_session_store.write_text_file

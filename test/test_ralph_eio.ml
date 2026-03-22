@@ -37,14 +37,14 @@ let with_test_config name f =
 (** Test: Basic state machine in Eio context *)
 let test_eio_basic_state () =
   with_test_config "basic" @@ fun _env _fs config ->
-  let state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
+  let state = Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
   check bool "not running initially" false state.running;
   check bool "not paused initially" false state.paused
 
 (** Test: Control commands work in Eio context *)
 let test_eio_control_commands () =
   with_test_config "control" @@ fun _env _fs config ->
-  let state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
+  let state = Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
 
   (* Simulate running state *)
   Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
@@ -52,24 +52,24 @@ let test_eio_control_commands () =
   );
 
   (* Test PAUSE *)
-  let _ = Masc_mcp.Room_walph_eio.walph_control config
+  let _ = Room_walph_eio.walph_control config
     ~from_agent:"tester" ~command:"PAUSE" ~args:"" () in
   check bool "paused after PAUSE" true state.paused;
 
   (* Test RESUME *)
-  let _ = Masc_mcp.Room_walph_eio.walph_control config
+  let _ = Room_walph_eio.walph_control config
     ~from_agent:"tester" ~command:"RESUME" ~args:"" () in
   check bool "not paused after RESUME" false state.paused;
 
   (* Test STOP *)
-  let _ = Masc_mcp.Room_walph_eio.walph_control config
+  let _ = Room_walph_eio.walph_control config
     ~from_agent:"tester" ~command:"STOP" ~args:"" () in
   check bool "stop requested after STOP" true state.stop_requested
 
 (** Test: Concurrent control from multiple fibers *)
 let test_eio_concurrent_control () =
   with_test_config "concurrent" @@ fun _env _fs config ->
-  let state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
+  let state = Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
 
   (* Set running *)
   Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
@@ -83,13 +83,13 @@ let test_eio_concurrent_control () =
   Eio.Fiber.both
     (fun () ->
       for _ = 1 to 10 do
-        let _ = Masc_mcp.Room_walph_eio.walph_control config
+        let _ = Room_walph_eio.walph_control config
           ~from_agent:"fiber1" ~command:"PAUSE" ~args:"" () in
         incr pause_count
       done)
     (fun () ->
       for _ = 1 to 10 do
-        let _ = Masc_mcp.Room_walph_eio.walph_control config
+        let _ = Room_walph_eio.walph_control config
           ~from_agent:"fiber2" ~command:"RESUME" ~args:"" () in
         incr resume_count
       done);
@@ -101,8 +101,8 @@ let test_eio_concurrent_control () =
 let test_eio_room_isolation () =
   with_test_config "isolation" @@ fun _env _fs config ->
   (* Now we test agent isolation within same room *)
-  let state1 = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"agent1" in
-  let state2 = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"agent2" in
+  let state1 = Room_walph_eio.get_walph_state_exn config ~agent_name:"agent1" in
+  let state2 = Room_walph_eio.get_walph_state_exn config ~agent_name:"agent2" in
 
   (* Modify state1 *)
   Eio.Mutex.use_rw ~protect:true state1.mutex (fun () ->
@@ -118,14 +118,14 @@ let test_eio_room_isolation () =
 let test_eio_cleanup () =
   with_test_config "cleanup" @@ fun _env _fs config ->
   (* Create and modify state *)
-  let state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
+  let state = Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
   Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
     state.running <- true
   );
 
   (* Remove should FAIL when running (zombie prevention) *)
   let remove_failed = try
-    Masc_mcp.Room_walph_eio.remove_walph_state config ~agent_name:"tester";
+    Room_walph_eio.remove_walph_state config ~agent_name:"tester";
     false  (* Should not reach here *)
   with Failure _ -> true in
   check bool "remove fails when running" true remove_failed;
@@ -136,19 +136,19 @@ let test_eio_cleanup () =
   );
 
   (* Now remove should succeed *)
-  Masc_mcp.Room_walph_eio.remove_walph_state config ~agent_name:"tester";
+  Room_walph_eio.remove_walph_state config ~agent_name:"tester";
 
   (* Getting state again should return fresh state *)
-  let new_state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
+  let new_state = Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
   check bool "new state not running" false new_state.running
 
 (** Test: 3 agents running Ralph simultaneously (Phase 1 feature) *)
 let test_eio_multi_agent_ralph () =
   with_test_config "multi_agent" @@ fun _env _fs config ->
   (* 3 agents get their own independent Ralph states *)
-  let state_claude = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"claude" in
-  let state_codex = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"codex" in
-  let state_gemini = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"gemini" in
+  let state_claude = Room_walph_eio.get_walph_state_exn config ~agent_name:"claude" in
+  let state_codex = Room_walph_eio.get_walph_state_exn config ~agent_name:"codex" in
+  let state_gemini = Room_walph_eio.get_walph_state_exn config ~agent_name:"gemini" in
 
   (* All start as not running *)
   check bool "claude not running initially" false state_claude.running;
@@ -180,7 +180,7 @@ let test_eio_multi_agent_ralph () =
   check string "gemini preset" "refactor" state_gemini.current_preset;
 
   (* Pause only claude - others unaffected *)
-  let _ = Masc_mcp.Room_walph_eio.walph_control config
+  let _ = Room_walph_eio.walph_control config
     ~from_agent:"claude" ~command:"PAUSE" ~args:"" () in
   check bool "claude paused" true state_claude.paused;
   check bool "codex not paused" false state_codex.paused;
@@ -190,12 +190,12 @@ let test_eio_multi_agent_ralph () =
 let test_eio_list_walph_states () =
   with_test_config "list_states" @@ fun _env _fs config ->
   (* Create states for 3 agents *)
-  let _ = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-a" in
-  let _ = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-b" in
-  let _ = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-c" in
+  let _ = Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-a" in
+  let _ = Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-b" in
+  let _ = Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-c" in
 
   (* List all states *)
-  let states = Masc_mcp.Room_walph_eio.list_walph_states config in
+  let states = Room_walph_eio.list_walph_states config in
   check int "3 agents in room" 3 (List.length states);
 
   (* Check agent names are present *)

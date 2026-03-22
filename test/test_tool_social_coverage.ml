@@ -9,7 +9,7 @@
 
 module Tool_social = Masc_mcp.Tool_social
 module Room = Masc_mcp.Room
-module Room_utils = Masc_mcp.Room_utils
+module Room_utils = Room_utils
 
 (** Case-insensitive substring check for error message assertions. *)
 let msg_contains ~needle haystack =

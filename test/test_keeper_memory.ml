@@ -1,6 +1,6 @@
 open Alcotest
 
-module Mention = Masc_mcp.Mention
+module Mention = Mention
 module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_memory = Masc_mcp.Keeper_memory
 module Keeper_memory_recall = Masc_mcp.Keeper_memory_recall

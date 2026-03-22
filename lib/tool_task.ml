@@ -102,13 +102,13 @@ let handle_claim_next ctx _args =
   else
   let result = Room.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
   let message = match result with
-    | Room_task.Claim_next_claimed { task_id; message; _ } ->
+    | Room.Claim_next_claimed { task_id; message; _ } ->
         (* Auto-set current_task so planning tools pick it up immediately *)
         Planning_eio.set_current_task ctx.config ~task_id;
         message
-    | Room_task.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
-    | Room_task.Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
-    | Room_task.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
+    | Room.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
+    | Room.Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
+    | Room.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
   in
   (true, message)
 

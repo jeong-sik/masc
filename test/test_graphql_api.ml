@@ -2,7 +2,7 @@
 
 module Graphql_api = Masc_mcp.Graphql_api
 module Room = Masc_mcp.Room
-module Room_utils = Masc_mcp.Room_utils
+module Room_utils = Room_utils
 
 let temp_dir () =
   let dir = Filename.temp_file "test_graphql_api_" "" in

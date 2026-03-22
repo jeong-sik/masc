@@ -33,9 +33,9 @@ let contains str substr =
   with Not_found -> false
 
 let write_pending_confirm config session_id =
-  let operator_dir = Filename.concat (Lib.Room_utils.masc_dir config) "operator" in
-  Lib.Room_utils.mkdir_p operator_dir;
-  Lib.Room_utils.write_json config (Filename.concat operator_dir "pending_confirms.json")
+  let operator_dir = Filename.concat (Room_utils.masc_dir config) "operator" in
+  Room_utils.mkdir_p operator_dir;
+  Room_utils.write_json config (Filename.concat operator_dir "pending_confirms.json")
     (`List
       [
         `Assoc
@@ -277,7 +277,7 @@ let test_dashboard_mission_projection () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Lib.Room_utils.default_config dir in
+      let config = Room_utils.default_config dir in
       let session_id = "ts-mission-fixture-001" in
       Eio_main.run @@ fun env ->
       seed_room config session_id;
@@ -316,7 +316,7 @@ let test_dashboard_mission_projection () =
         ~allowed_tools:[ "masc_board_comment" ]
         ();
       Sys.remove
-        (Filename.concat (Lib.Room_utils.agents_dir config) "llama-local-delta.json");
+        (Filename.concat (Room_utils.agents_dir config) "llama-local-delta.json");
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_mission.json
@@ -453,7 +453,7 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Lib.Room_utils.default_config dir in
+      let config = Room_utils.default_config dir in
       Eio_main.run @@ fun env ->
       ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       Eio.Switch.run (fun sw ->

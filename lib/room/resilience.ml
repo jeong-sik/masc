@@ -1,7 +1,8 @@
 (** MASC Resilience - Single Source of Truth for Failure Handling *)
 
-(** Default zombie threshold in seconds - from Env_config *)
-let default_zombie_threshold = Env_config.Zombie.threshold_seconds
+(** Default zombie threshold in seconds (300s = 5 minutes).
+    Override via MASC_ZOMBIE_THRESHOLD_SEC env var at the caller level. *)
+let default_zombie_threshold = 300.0
 
 (** Default inactivity warning threshold in seconds (2 minutes) *)
 let default_warning_threshold = 120.0
@@ -73,7 +74,7 @@ module Zombie = struct
   let is_zombie_for_agent ~agent_name last_seen_iso =
     let threshold =
       if is_keeper_name agent_name
-      then Env_config.Zombie.keeper_threshold_seconds
+      then 3600.0  (* keeper threshold — override via MASC_KEEPER_ZOMBIE_THRESHOLD_SEC *)
       else default_zombie_threshold
     in
     is_zombie ~threshold last_seen_iso

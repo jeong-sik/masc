@@ -67,7 +67,7 @@ let test_parse_timestamp_invalid () =
 
 let test_generate_compact () =
   let dir = test_dir () in
-  let config = Lib.Room_utils.default_config dir in
+  let config = Room_utils.default_config dir in
   setup_room config;
   let output = Lib.Dashboard.generate_compact config in
   Alcotest.(check bool) "contains MASC" true (contains output "MASC");
@@ -79,7 +79,7 @@ let test_generate_compact () =
 
 let test_generate_full () =
   let dir = test_dir () in
-  let config = Lib.Room_utils.default_config dir in
+  let config = Room_utils.default_config dir in
   setup_room config;
   let output = Lib.Dashboard.generate config in
   Alcotest.(check bool) "contains MASC Dashboard" true (contains output "MASC Dashboard");
@@ -93,7 +93,7 @@ let test_generate_full () =
 
 let test_agents_section_empty () =
   let dir = test_dir () in
-  let config = Lib.Room_utils.default_config dir in
+  let config = Room_utils.default_config dir in
   setup_room config;
   let section = Lib.Dashboard.agents_section (Unix.gettimeofday ()) [] in
   Alcotest.(check string) "title" "Agents" section.title;
@@ -102,7 +102,7 @@ let test_agents_section_empty () =
 
 let test_tasks_section_empty () =
   let dir = test_dir () in
-  let config = Lib.Room_utils.default_config dir in
+  let config = Room_utils.default_config dir in
   setup_room config;
   let section = Lib.Dashboard.tasks_section [] in
   Alcotest.(check string) "title" "Tasks" section.title;
@@ -111,7 +111,7 @@ let test_tasks_section_empty () =
 
 let test_messages_section_empty () =
   let dir = test_dir () in
-  let config = Lib.Room_utils.default_config dir in
+  let config = Room_utils.default_config dir in
   setup_room config;
   let section = Lib.Dashboard.messages_section [] in
   Alcotest.(check string) "title" "Recent Messages" section.title;
@@ -120,7 +120,7 @@ let test_messages_section_empty () =
 
 let test_worktrees_section_empty () =
   let dir = test_dir () in
-  let config = Lib.Room_utils.default_config dir in
+  let config = Room_utils.default_config dir in
   setup_room config;
   let section = Lib.Dashboard.worktrees_section config in
   Alcotest.(check string) "title" "Worktrees" section.title;

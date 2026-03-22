@@ -210,7 +210,7 @@ let test_calculate_adaptive_tempo_low_priority () =
    ============================================================ *)
 
 module Backend = Backend
-module Room_utils = Masc_mcp.Room_utils
+module Room_utils = Room_utils
 
 let make_test_config ~base_path : Room_utils.config =
   let backend_config : Backend.config = {

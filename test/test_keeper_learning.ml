@@ -1,7 +1,7 @@
 open Alcotest
 
 module Learning = Masc_mcp.Keeper_learning
-module Room_utils = Masc_mcp.Room_utils
+module Room_utils = Room_utils
 module Backend = Backend
 
 (* ---------- Helpers ---------- *)

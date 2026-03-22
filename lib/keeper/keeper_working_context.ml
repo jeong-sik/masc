@@ -43,7 +43,6 @@ type checkpoint = {
 type session_context = {
   session_id : string;
   session_dir : string;
-  mutable full_history : Agent_sdk.Types.message list;
   mutable checkpoints : checkpoint list;
 }
 
@@ -298,11 +297,10 @@ let restore_checkpoint ckpt ~max_tokens =
 let create_session ~session_id ~base_dir =
   let session_dir = Filename.concat base_dir session_id in
   ensure_dir session_dir;
-  { session_id; session_dir; full_history = []; checkpoints = [] }
+  { session_id; session_dir; checkpoints = [] }
 
 let persist_message session msg =
   let msg = Inference_utils.sanitize_message_utf8 msg in
-  session.full_history <- session.full_history @ [msg];
   let path = Filename.concat session.session_dir "history.jsonl" in
   let now_ts = Time_compat.now () in
   let payload =

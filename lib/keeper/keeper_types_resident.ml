@@ -34,17 +34,6 @@ let env_present name =
   | Some value -> String.trim value <> ""
   | None -> false
 
-let ollama_port_listening () =
-  try
-    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Fun.protect
-      ~finally:(fun () -> try Unix.close sock with Unix.Unix_error _ -> ())
-      (fun () ->
-        Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, 11434));
-        true)
-  with Unix.Unix_error _ ->
-    false
-
 let model_spec_is_local_runtime (model : Model_spec.model_spec) =
   match model.provider with
   | Model_spec.Llama -> true
@@ -189,9 +178,4 @@ let maybe_rotate_file path =
 let append_jsonl_line path (json : Yojson.Safe.t) =
   maybe_rotate_file path;
   let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
-  let fd =
-    Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644
-  in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-      let _ = Unix.write_substring fd line 0 (String.length line) in
-      ())
+  Fs_compat.append_file path line

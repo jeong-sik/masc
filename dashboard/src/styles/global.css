@@ -697,3 +697,253 @@ a:hover {
 .tone-bg-bad { background: rgba(248,113,113,0.16); color: var(--bad-light); }
 
 /* monitor-row/pill state-offline, agents-workbench → Tailwind inline */
+
+/* ── Keeper (merged from keeper.css) ───────────────────── */
+
+@utility keeper-detail-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  z-index: var(--z-overlay-keeper, 3020);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+}
+
+.keeper-field-search:focus { outline: none; border-color: var(--ok-40); }
+
+.keeper-comms-diagnostics-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.keeper-comms-diagnostics-toggle::before {
+  content: ">";
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform 0.15s ease;
+  font-size: var(--fs-xs);
+}
+
+.keeper-comms-diagnostics[open] > .keeper-comms-diagnostics-toggle::before {
+  transform: rotate(90deg);
+}
+
+.keeper-chat__msg--user .keeper-chat__role {
+  text-align: right;
+}
+
+.keeper-chat__msg--user .keeper-chat__text {
+  background: var(--accent-12);
+  border: 1px solid var(--accent-20);
+  color: var(--text-body, var(--text-body));
+}
+
+.keeper-chat__msg--assistant .keeper-chat__text {
+  background: var(--ff-gold-8);
+  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
+  color: var(--text-body, var(--text-body));
+}
+
+.keeper-chat__msg--streaming .keeper-chat__text {
+  border-color: var(--ff-gold-dim);
+}
+
+@utility keeper-chat__cursor {
+  animation: keeper-blink 0.8s step-end infinite;
+  color: var(--ff-gold, var(--ff-gold));
+}
+
+.keeper-chat__messages::-webkit-scrollbar {
+  width: 4px;
+}
+
+.keeper-chat__messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.keeper-chat__messages::-webkit-scrollbar-thumb {
+  background: var(--ff-gold-20);
+  border-radius: 2px;
+}
+
+/* ── Chat (merged from chat.css) ───────────────────────── */
+
+@utility chat-transcript {
+  background:
+    radial-gradient(circle at top left, var(--accent-8), transparent 38%),
+    rgba(5, 14, 31, 0.74);
+}
+
+@utility chat-bubble {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  &.user {
+    align-self: flex-end;
+    background: linear-gradient(180deg, rgba(30, 83, 138, 0.72), rgba(18, 48, 86, 0.82));
+    border-color: rgba(71, 184, 255, 0.24);
+  }
+  &.assistant {
+    align-self: flex-start;
+    background: linear-gradient(180deg, rgba(34, 22, 82, 0.72), rgba(18, 12, 44, 0.86));
+    border-color: rgba(167, 139, 250, 0.24);
+  }
+  &.system,
+  &.error {
+    align-self: flex-start;
+  }
+  &.error {
+    border-color: rgba(239, 68, 68, 0.3);
+    background: linear-gradient(180deg, rgba(86, 24, 24, 0.72), rgba(52, 13, 13, 0.82));
+  }
+}
+
+@utility chat-avatar {
+  &.user {
+    border-color: rgba(71, 184, 255, 0.28);
+    background: var(--accent-soft);
+    color: #d8f0ff;
+  }
+  &.assistant {
+    border-color: rgba(167, 139, 250, 0.3);
+    background: rgba(167, 139, 250, 0.18);
+    color: #efe6ff;
+  }
+  &.error {
+    border-color: rgba(239, 68, 68, 0.32);
+    background: rgba(239, 68, 68, 0.18);
+    color: #ffe1e1;
+  }
+}
+
+@utility chat-role-chip {
+  &.user {
+    border-color: rgba(71, 184, 255, 0.32);
+    color: #c9ebff;
+    background: var(--accent-14);
+  }
+  &.assistant {
+    border-color: rgba(167, 139, 250, 0.32);
+    color: #ded0ff;
+    background: rgba(167, 139, 250, 0.14);
+  }
+  &.error {
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #ffb4b4;
+    background: rgba(239, 68, 68, 0.14);
+  }
+}
+
+@utility chat-detail-panel {
+  background:
+    linear-gradient(180deg, rgba(7, 17, 37, 0.9), rgba(4, 12, 28, 0.82));
+  & pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: "Fira Code", monospace;
+    font-size: var(--fs-xs);
+    line-height: 1.55;
+    color: #95f3bc;
+  }
+}
+
+@utility chat-detail-callout {
+  background: linear-gradient(180deg, rgba(18, 42, 33, 0.55), rgba(10, 25, 20, 0.48));
+}
+
+.control-btn.chat-stream-warning {
+  border-color: rgba(251, 191, 36, 0.5);
+  color: var(--warn);
+  animation: chatWarnPulse 2s ease-in-out infinite;
+}
+
+/* ── Tools (merged from tools.css) ─────────────────────── */
+
+@utility tool-inventory-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+@utility tool-inventory-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  &:hover { -webkit-line-clamp: unset; }
+}
+
+.tool-inventory-reason:hover {
+  -webkit-line-clamp: unset;
+}
+
+@utility tool-inventory-reason {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@utility tool-back-to-top {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: var(--z-tab-sticky);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.2s, background 0.15s;
+  pointer-events: none;
+  &.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  &:hover {
+    background: rgba(30, 41, 59, 0.95);
+    color: var(--text-near-white);
+  }
+}
+
+.control-btn.is-active .tool-surface-count {
+  background: rgba(14, 165, 233, 0.25);
+  color: #7dd3fc;
+}
+
+@utility tool-metrics-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@utility tool-metrics-sections {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 16px;
+}
+
+@utility tool-bar-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--fs-sm);
+}
+
+@media (max-width: 880px) {
+  .tool-inventory-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tool-metrics-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tool-metrics-sections {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-bar-row {
+    grid-template-columns: minmax(100px, 0.6fr) 56px minmax(0, 1fr) 36px;
+  }
+}

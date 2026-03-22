@@ -66,7 +66,7 @@ function OasSummaryLines() {
   const agoMin = lastEventTs != null ? Math.round((Date.now() / 1000 - lastEventTs) / 60) : null
 
   return html`
-    <div class="oas-summary-lines">
+    <div class="flex gap-3 text-[length:var(--fs-xs)] text-[color:var(--text-muted,#888)] mb-2.5">
       <span>활성 에이전트 ${activeAgents.size}명</span>
       <span>${health.totalEvents}건${snapshots.size > 0 ? ` · 키퍼 ${snapshots.size}명` : ''}</span>
       <span>${agoMin != null ? `${agoMin}분 전` : '이벤트 대기 중'}</span>
@@ -87,13 +87,13 @@ function OasKeeperBars() {
         const barClass = pct > 70 ? 'bar--warn' : pct > 50 ? 'bar--mid' : 'bar--ok'
         return html`
           <div class="oas-keeper-row rounded" key=${snap.keeper_name}>
-            <span class="oas-keeper-name">${snap.keeper_name}</span>
-            <span class="oas-keeper-gen">gen ${snap.generation}</span>
+            <span class="text-[color:var(--text-strong,var(--text-near-white))] font-medium min-w-[80px] max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">${snap.keeper_name}</span>
+            <span class="text-[color:var(--text-muted,#666)] text-[length:var(--fs-2xs)] min-w-[40px]">gen ${snap.generation}</span>
             <div class="oas-keeper-bar-wrap">
               <div class="oas-keeper-bar ${barClass}" style=${{ width: `${pct}%` }}></div>
             </div>
-            <span class="oas-keeper-pct">${pct}%</span>
-            <span class="oas-keeper-msgs">${snap.message_count} msgs</span>
+            <span class="text-[color:var(--text-muted,#888)] tabular-nums min-w-[32px] text-right">${pct}%</span>
+            <span class="text-[color:var(--text-muted,#666)] text-[length:var(--fs-2xs)] min-w-[48px]">${snap.message_count} msgs</span>
           </div>
         `
       })}
@@ -104,16 +104,16 @@ function OasKeeperBars() {
 function OasRawEventList() {
   const events = oasAgentEvents.value
   if (events.length === 0) {
-    return html`<div class="oas-empty">OAS 에이전트 이벤트 대기 중...</div>`
+    return html`<div class="text-[length:var(--fs-xs)] text-[color:var(--text-muted,#666)] py-2">OAS 에이전트 이벤트 대기 중...</div>`
   }
 
   return html`
     <div class="flex flex-col gap-0.5">
       ${events.slice(0, 15).map((ev, i) => html`
         <div class="oas-event-row rounded" key=${i}>
-          <span class="oas-event-ts">${formatTs(ev.timestamp)}</span>
-          <span class="oas-event-agent">${ev.agent_name}</span>
-          <span class="oas-event-type">${eventTypeLabel(ev.type)}</span>
+          <span class="text-[color:var(--text-muted,#666)] tabular-nums min-w-[56px]">${formatTs(ev.timestamp)}</span>
+          <span class="text-[color:var(--text-strong,var(--text-near-white))] font-medium min-w-[80px] max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">${ev.agent_name}</span>
+          <span class="text-[color:var(--text-muted,#888)] min-w-[60px]">${eventTypeLabel(ev.type)}</span>
           ${ev.action ? html`<span class="oas-event-badge ${actionBadge(ev.action)}">${ev.action}</span>` : null}
           ${ev.trigger ? html`<span class="oas-event-trigger">${ev.trigger}</span>` : null}
           ${ev.success != null ? html`<span class="oas-event-ok ${ev.success ? 'ok' : 'fail'}">${ev.success ? 'ok' : 'fail'}</span>` : null}
@@ -129,18 +129,18 @@ export function OasPipeline() {
   const eventLabel = `${health.totalEvents}건`
 
   return html`
-    <div class="oas-pipeline rounded-lg">
+    <div class="bg-[var(--card,#1a1f2e)] border border-[var(--card-border,#2a2f3e)] py-3 px-4 mt-3 rounded-lg">
       <div class="flex justify-between items-center mb-3">
-        <span class="oas-pipeline__title">실행 흐름</span>
+        <span class="text-[length:var(--fs-base)] font-semibold text-[color:var(--text-strong,var(--text-near-white))] tracking-[0.5px]">실행 흐름</span>
         <div class="home-section-actions">
-          <span class="oas-pipeline__count">${eventLabel}</span>
+          <span class="text-[length:var(--fs-xs)] text-[color:var(--text-muted,#888)] tabular-nums">${eventLabel}</span>
         </div>
       </div>
 
       <${OasSummaryLines} />
 
       <div class="mb-2.5">
-        <div class="oas-section-label">키퍼 컨텍스트</div>
+        <div class="text-[length:var(--fs-xs)] font-medium text-[color:var(--text-muted,#888)] uppercase tracking-[0.5px] mb-1.5">키퍼 컨텍스트</div>
         <${OasKeeperBars} />
       </div>
 

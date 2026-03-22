@@ -96,7 +96,7 @@ module Ring = struct
                    module_name; message }
 
   let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")
-      () : entry list =
+      ?(order = `Newest_first) () : entry list =
     let t = Atomic.get total in
     if t = 0 then []
     else begin
@@ -116,8 +116,10 @@ module Ring = struct
         end;
         decr i
       done;
-      (* Return in chronological order *)
-      !entries
+      (* Prepend builds oldest-first; reverse for newest-first *)
+      match order with
+      | `Oldest_first -> !entries
+      | `Newest_first -> List.rev !entries
     end
 
   let entry_to_json e =

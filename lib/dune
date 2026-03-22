@@ -518,6 +518,7 @@
    env_config_keeper
    runtime_params
    governance_registry
+   governance_pipeline
    tool_compact
    tool_shard
    tool_keeper

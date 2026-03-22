@@ -422,6 +422,15 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
    | Some (k, json, ts) when k = cache_key && now -. ts < _snapshot_ttl_s ->
        json
    | _ ->
+  let t0 = Time_compat.now () in
+  let timed label f =
+    let t_start = Time_compat.now () in
+    let result = f () in
+    let elapsed = Time_compat.now () -. t_start in
+    if elapsed > 0.5 then
+      Log.Dashboard.warn "[snapshot_json] %s: %.0fms" label (elapsed *. 1000.0);
+    result
+  in
   let config = ctx.config in
   let initialized = Room.is_initialized config in
   let tracked_sessions =
@@ -468,10 +477,11 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   in
   let command_plane_summary =
     if initialized then
-      Some (Command_plane_v2.summary_json ~sessions:tracked_sessions config)
+      timed "command_plane_summary" (fun () ->
+        Some (Command_plane_v2.summary_json ~sessions:tracked_sessions config))
     else None
   in
-  let summary_fields =
+  let summary_fields = timed "summary_fields" (fun () ->
     if initialized && (match view with Summary | Full -> true | _ -> false) then
       let now = Time_compat.now () in
       let session_digests =
@@ -494,10 +504,10 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
         ( "recommendation_summary",
           summary_of_recommendations ~actor:actor_name room_recommendation_items );
       ]
-    else []
+    else [])
   in
-  let command_plane_json =
-    if initialized then Command_plane_v2.snapshot_json ~sessions:tracked_sessions config else `Assoc []
+  let command_plane_json = timed "command_plane_json" (fun () ->
+    if initialized then Command_plane_v2.snapshot_json ~sessions:tracked_sessions config else `Assoc [])
   in
   let swarm_status_json =
     if initialized then
@@ -521,14 +531,17 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("provenance_summary", operator_surface_contract_json);
          ("room", room_json config);
          ( "sessions",
+           timed "sessions_json" (fun () ->
            if initialized && include_sessions then sessions_json ~status_cache config tracked_sessions
-           else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+           else `Assoc [ ("count", `Int 0); ("items", `List []) ]) );
          ( "keepers",
+           timed "keepers_json" (fun () ->
            if initialized && include_keepers then keepers_json ~keeper_names config
-           else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+           else `Assoc [ ("count", `Int 0); ("items", `List []) ]) );
          ( "persistent_agents",
+           timed "persistent_agents_json" (fun () ->
            if initialized && include_keepers then persistent_agents_json ~keeper_names config
-           else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+           else `Assoc [ ("count", `Int 0); ("items", `List []) ]) );
          ("command_plane", command_plane_json);
          ("swarm_status", swarm_status_json);
          ("role_census", aggregate_worker_class_counts tracked_sessions);
@@ -549,5 +562,10 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
        ]
       @ summary_fields)
   in
+  let elapsed_total = Time_compat.now () -. t0 in
+  if elapsed_total > 1.0 then
+    Log.Dashboard.warn "[snapshot_json] total: %.0fms (sessions=%d keepers=%d)"
+      (elapsed_total *. 1000.0)
+      (List.length tracked_sessions) (List.length keeper_names);
   _snapshot_cache := Some (cache_key, result, now);
   result)

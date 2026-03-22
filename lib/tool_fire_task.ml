@@ -44,8 +44,10 @@ let build_agent_prompt ~goal ~task_id ~worktree_path =
     task_id goal wt_section task_id
 
 (** Run the background agent lifecycle in a forked fiber.
-    This function is called inside [Eio.Fiber.fork_daemon]. *)
-let run_background_agent config ~agent_cli ~agent_name ~task_id ~goal ~worktree_path =
+    This function is called inside [Eio.Fiber.fork_daemon].
+    When [sandbox] is provided, uses sandbox worktree and cleans up on completion. *)
+let run_background_agent config ~agent_cli ~agent_name ~task_id ~goal
+    ~worktree_path ~sandbox =
   (* Step 1: ensure the spawned agent identity joins the room *)
   let _join_result =
     Room.join config ~agent_name ~capabilities:["fire_task"] ()
@@ -65,11 +67,19 @@ let run_background_agent config ~agent_cli ~agent_name ~task_id ~goal ~worktree_
 
   (* Step 5: complete or cancel based on result *)
   if result.success then begin
+    (* Collect changed files from sandbox before cleanup *)
+    let changed_note = match sandbox with
+      | Some sb ->
+        let files = Task_sandbox.changed_files sb in
+        if files = [] then ""
+        else Printf.sprintf "\nChanged files: %s" (String.concat ", " files)
+      | None -> ""
+    in
     let truncated_output =
       let s = result.output in
       if String.length s > 500 then String.sub s 0 500 ^ "..." else s
     in
-    let notes = Printf.sprintf "Agent output: %s" truncated_output in
+    let notes = Printf.sprintf "Agent output: %s%s" truncated_output changed_note in
     let _done_msg = Room.complete_task config ~agent_name ~task_id ~notes in
     Log.Misc.info "[fire_task] %s completed %s (exit=%d, %dms)"
       agent_name task_id result.exit_code result.elapsed_ms
@@ -84,7 +94,18 @@ let run_background_agent config ~agent_cli ~agent_name ~task_id ~goal ~worktree_
     Log.Misc.warn "[fire_task] %s failed %s: %s" agent_name task_id reason
   end;
 
-  (* Step 6: leave *)
+  (* Step 6: sandbox cleanup *)
+  (match sandbox with
+   | Some sb ->
+     (match Task_sandbox.cleanup ~config ~agent_name sb with
+      | Ok files ->
+        Log.Misc.info "[fire_task] sandbox cleanup for %s: %d changed files"
+          task_id (List.length files)
+      | Error e ->
+        Log.Misc.warn "[fire_task] sandbox cleanup failed for %s: %s" task_id e)
+   | None -> ());
+
+  (* Step 7: leave *)
   let _leave = Room.leave config ~agent_name in
   ()
 
@@ -107,43 +128,38 @@ let handle_fire_task ctx args =
     error_result (Printf.sprintf "Failed to create task: %s" add_result)
   | Some task_id ->
 
-  (* Step 2: optionally create worktree *)
-  let worktree_path =
+  (* Step 2: optionally create sandbox (worktree + .masc symlink + scope) *)
+  let sandbox, worktree_path =
     if use_worktree then
-      match Room.worktree_create_r ctx.config
-              ~agent_name:spawn_agent_name ~task_id ~base_branch:"main" with
-      | Ok msg ->
-        (* Extract path from success message — format includes the path *)
-        let re = Str.regexp {|\.worktrees/[^ ]+|} in
-        let path_opt =
-          try
-            let _ = Str.search_forward re msg 0 in
-            Some (Str.matched_string msg)
-          with Not_found -> None
-        in
-        (match path_opt with
-         | Some rel_path ->
-           (* Resolve to absolute path from base_path *)
-           Some (Filename.concat ctx.config.base_path rel_path)
-         | None -> None)
+      match Task_sandbox.create ~config:ctx.config ~task_id
+              ~agent_name:spawn_agent_name () with
+      | Ok sb ->
+        Log.Misc.info "[fire_task] sandbox created for %s at %s"
+          task_id sb.worktree_path;
+        (Some sb, Some sb.worktree_path)
       | Error e ->
-        Log.Misc.warn "[fire_task] worktree creation failed: %s"
-          (Types.masc_error_to_string e);
-        None
-    else None
+        Log.Misc.warn "[fire_task] sandbox creation failed: %s" e;
+        (None, None)
+    else (None, None)
   in
 
-  (* Step 3: fork background fiber — returns immediately *)
+  (* Step 3: fork background fiber -- returns immediately *)
   Eio.Fiber.fork_daemon ~sw:ctx.sw (fun () ->
     (try
        run_background_agent ctx.config
          ~agent_cli ~agent_name:spawn_agent_name
-         ~task_id ~goal ~worktree_path
+         ~task_id ~goal ~worktree_path ~sandbox
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Log.Misc.error "[fire_task] background fiber crashed for %s: %s"
          task_id (Printexc.to_string exn);
+       (* Best-effort sandbox cleanup *)
+       (match sandbox with
+        | Some sb ->
+          let _ = Task_sandbox.cleanup ~config:ctx.config
+                    ~agent_name:spawn_agent_name sb in ()
+        | None -> ());
        (* Best-effort cancel *)
        let _cancel = Room.cancel_task_r ctx.config
          ~agent_name:spawn_agent_name ~task_id
@@ -159,6 +175,9 @@ let handle_fire_task ctx args =
     ("worktree_path", match worktree_path with
       | Some p -> `String p
       | None -> `Null);
+    ("sandbox", match sandbox with
+      | Some _ -> `Bool true
+      | None -> `Bool false);
     ("status", `String "spawned");
     ("message", `String (Printf.sprintf
       "Task %s spawned to %s. Check progress with masc_status." task_id agent_cli));

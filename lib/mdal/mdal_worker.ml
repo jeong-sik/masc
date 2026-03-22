@@ -58,25 +58,25 @@ let supported_mdal_providers = [ "llama"; "claude"; "openai"; "gemini"; "glm"; "
 (** Validate that a model label uses a supported provider prefix.
     Rejects OpenRouter and Custom providers. *)
 let validate_model_label (label : string) : (string, string) result =
-  match Model_spec.model_spec_of_string label with
-  | Error _ as e -> e
-  | Ok spec ->
-    let provider_str = Model_spec.string_of_provider spec.provider in
-    match provider_str with
-    | "llama" | "claude" | "openai" | "gemini" | "glm_cloud" -> Ok label
-    | _ ->
-        Error
-          (sprintf
-             "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
-             provider_str)
+  let provider_prefix =
+    match String.index_opt label ':' with
+    | Some i -> String.sub label 0 i
+    | None -> label
+  in
+  if List.mem provider_prefix supported_mdal_providers then Ok label
+  else
+    Error
+      (sprintf
+         "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
+         provider_prefix)
 
 (** Resolve agent name + optional worker_model to a validated model label string. *)
 let resolve_model_label ~(agent : string) ~(worker_model : string option) :
     (string, string) result =
   let parse_worker_model raw =
-    match Model_spec.model_spec_of_string raw with
-    | Error _ as e -> e
-    | Ok _spec -> validate_model_label raw
+    match Llm_provider.Cascade_config.parse_model_string raw with
+    | None -> Error (sprintf "Cannot parse model label: %s" raw)
+    | Some _cfg -> validate_model_label raw
   in
   match worker_model with
   | Some raw when String.trim raw <> "" -> parse_worker_model (String.trim raw)
@@ -84,15 +84,15 @@ let resolve_model_label ~(agent : string) ~(worker_model : string option) :
       let normalized = String.trim agent |> String.lowercase_ascii in
       if String.contains normalized ':' then parse_worker_model normalized
       else
+        (* Map bare agent names to canonical provider:model strings,
+           then route through parse_worker_model for uniform validation. *)
         match normalized with
-        | "claude" -> Ok (Model_spec.label_of_model_spec Model_spec.claude_opus)
-        | "openai" | "codex-api" ->
-            Ok (Model_spec.label_of_model_spec Model_spec.openai_default)
-        | "gemini" -> Ok (Model_spec.label_of_model_spec Model_spec.gemini_pro)
+        | "claude" -> parse_worker_model "claude:opus"
+        | "openai" | "codex-api" -> parse_worker_model "openai:gpt-4o"
+        | "gemini" -> parse_worker_model "gemini:pro"
+        | "glm" -> parse_worker_model "glm:auto"
         | "ollama" ->
             Error (Provider_adapter.bare_ollama_migration_message ())
-        | "glm" ->
-            Ok (Model_spec.label_of_model_spec Model_spec.glm_cloud)
         | "llama" ->
             Error
               "MDAL strict worker requires `worker_model` for llama providers, e.g. `llama:<model-id>`."
@@ -145,10 +145,10 @@ let run ~(sw : Eio.Switch.t) ~(config : Room.config) (state : Mdal.loop_state)
         in
         raise (Invalid_argument message)
   in
-  (* Validate the label parses *)
-  (match Model_spec.model_spec_of_string model_label with
-   | Ok _ -> ()
-   | Error message -> raise (Invalid_argument message));
+  (* Validate the label parses as a known provider:model *)
+  (match Llm_provider.Cascade_config.parse_model_string model_label with
+   | Some _ -> ()
+   | None -> raise (Invalid_argument (sprintf "Cannot parse model: %s" model_label)));
   let prompt =
     Mdal.render_worker_prompt state.profile state.history current_metric
   in

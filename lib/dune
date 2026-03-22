@@ -29,6 +29,7 @@
    capability_registry
    bounded
    cache_eio
+   cascade_inference
    env_config
    capability_match
    cancellation

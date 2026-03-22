@@ -500,7 +500,11 @@ let run_proactive_generation
         else Printf.sprintf "%s\n\n%s" base_prompt retry_hint
       in
       let temperature = proactive_temperature attempt in
-      let max_tokens = 1024 in
+      let max_tokens =
+        Cascade_inference.resolve_max_tokens
+          ~cascade_name:"keeper_turn"
+          ~fallback:(fun () -> 1024)
+      in
       let (agent_result, attempt_latency) = timed (fun () ->
           Oas_worker.run_named ~cascade_name:"keeper_turn"
             ~goal:prompt ~system_prompt:turn_system_prompt

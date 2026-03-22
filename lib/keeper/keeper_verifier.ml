@@ -176,10 +176,20 @@ Keep it concise — max 3 sentences per step.|}
      then String.sub keeper_context 0 500 ^ "..."
      else keeper_context)
   in
+  let temperature =
+    Cascade_inference.resolve_temperature
+      ~cascade_name:"keeper_autonomy"
+      ~fallback:(fun () -> 0.3)
+  in
+  let max_tokens =
+    Cascade_inference.resolve_max_tokens
+      ~cascade_name:"keeper_autonomy"
+      ~fallback:(fun () -> 500)
+  in
   match
     Oas_worker.run_named ~cascade_name:"keeper_autonomy"
       ~goal:prompt
-      ~max_turns:1 ~temperature:0.3 ~max_tokens:500 ()
+      ~max_turns:1 ~temperature ~max_tokens ()
   with
   | Ok result ->
     Ok (Agent_sdk.Types.text_of_content result.Oas_worker.response.content)

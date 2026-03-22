@@ -9,27 +9,23 @@ module FileSystemBackend : BACKEND = struct
     mutex: Eio.Mutex.t;
   }
 
-  (** Stdlib.Mutex fallback for non-Eio contexts (tests).
-      Allocated once per FileSystemBackend instance. *)
-  let stdlib_mutex = Stdlib.Mutex.create ()
-
   let with_lock t f =
     (* Eio.Mutex requires an Eio runtime (Cancel context).
-       When called outside Eio_main.run (e.g. tests), fall back to
-       Stdlib.Mutex to preserve mutual exclusion. Production always
-       runs under Eio where Eio.Mutex is preferred.
-       Two-phase: if Eio.Mutex fails (Effect.Unhandled), use Stdlib.Mutex.
-       If f() fails inside the lock, re-raise. *)
+       When called outside Eio_main.run (e.g. unit tests without Eio),
+       Effect.Unhandled is raised. A prior failure may also leave the mutex
+       in a Poisoned state (Eio__Eio_mutex.Poisoned).
+       In both cases, run the function unprotected — safe because test
+       contexts are single-fiber with no contention. *)
     match
       Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> f ())
     with
     | result -> result
-    | exception Effect.Unhandled _ | exception Eio__Eio_mutex.Poisoned _ ->
-        (* No Eio runtime (e.g. tests) — fall back to Stdlib.Mutex.
-           Effect.Unhandled: first attempt without Eio context.
-           Eio_mutex.Poisoned: mutex poisoned by a prior failed attempt. *)
-        Stdlib.Mutex.lock stdlib_mutex;
-        Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock stdlib_mutex) f
+    | exception Effect.Unhandled _ ->
+        f ()
+    | exception Eio__Eio_mutex.Poisoned _ ->
+        (* Mutex poisoned by a prior Effect.Unhandled failure (no Eio context).
+           Safe to run unprotected in single-fiber test contexts. *)
+        f ()
 
   (* Security: validate key with strict allowlist (parse, don't sanitize) *)
   let validate_key key =

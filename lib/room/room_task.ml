@@ -253,21 +253,27 @@ let claim_task_r config ~agent_name ~task_id
               actual = Types_core.role_to_string agent_role;
             })
           else begin
-            let found = ref false in
-            let already_claimed = ref None in
-            let new_tasks = List.map (fun t ->
-              if t.id = task_id then begin
-                found := true;
-                match t.task_status with
-                | Todo -> { t with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
-                | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
-                    already_claimed := Some assignee; t
-              end else t
-            ) backlog.tasks in
-            if not !found then Error (Types.TaskNotFound task_id)
-            else match !already_claimed with
-              | Some other -> Error (Types.TaskAlreadyClaimed { task_id; by = other })
-              | None ->
+            (* fold_left to find+transform in a single pass without mutable refs.
+               Uses polymorphic variants for inline state tracking. *)
+            let claim_state, new_tasks =
+              List.fold_left (fun (state, acc) t ->
+                if t.id = task_id then
+                  match t.task_status with
+                  | Todo ->
+                      let t' = { t with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } } in
+                      (`Claimed_ok, t' :: acc)
+                  | Claimed { assignee; _ } | InProgress { assignee; _ }
+                  | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
+                      (`Claimed_by assignee, t :: acc)
+                else
+                  (state, t :: acc)
+              ) (`Not_found, []) backlog.tasks
+            in
+            let new_tasks = List.rev new_tasks in
+            match claim_state with
+            | `Not_found -> Error (Types.TaskNotFound task_id)
+            | `Claimed_by other -> Error (Types.TaskAlreadyClaimed { task_id; by = other })
+            | `Claimed_ok ->
                   let new_backlog = {
                     tasks = new_tasks;
                     last_updated = now_iso ();

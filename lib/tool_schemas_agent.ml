@@ -141,67 +141,7 @@ Action 'get' returns current card; 'refresh' rebuilds it from live bindings. Pai
       ]);
     ];
   };
-  {
-    name = "masc_heartbeat_result";
-    description = "Submit heartbeat completion evidence from an A2A worker after running an MCP tool loop. \
-Call when the worker finishes its heartbeat task and needs to report status, tool usage, and confidence. \
-Pair with masc_heartbeat_start on the orchestrator side. MASC records but does not proxy the board write.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("worker_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Worker agent name (e.g., 'model-worker-local')");
-        ]);
-        ("agent", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Original source agent name (e.g., 'dreamer')");
-        ]);
-        ("status", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Completion status: acted | skipped | failed");
-          ("enum", `List [`String "acted"; `String "skipped"; `String "failed"]);
-        ]);
-        ("summary", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Short completion summary");
-        ]);
-        ("tool_call_count", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Number of MCP tool calls executed by the worker");
-        ]);
-        ("tool_names", `Assoc [
-          ("type", `String "array");
-          ("description", `String "Executed MCP tool names");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-        ("decision_reason", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Why the worker chose this outcome");
-        ]);
-        ("decision_confidence", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Confidence score between 0.0 and 1.0");
-        ]);
-        ("failure_reason", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional explicit failure reason");
-        ]);
-      ]);
-      ("required",
-        `List
-          [
-            `String "worker_name";
-            `String "agent";
-            `String "status";
-            `String "summary";
-            `String "tool_call_count";
-            `String "tool_names";
-            `String "decision_reason";
-            `String "decision_confidence";
-          ]);
-    ];
-  };
+  (* masc_heartbeat_result removed: canonical definition in tool_schemas_a2a.ml *)
   {
     name = "masc_agent_fitness";
     description = "Get fitness scores for agents based on performance metrics (completion rate, reliability, speed). \

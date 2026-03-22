@@ -540,6 +540,10 @@
    autoresearch_knowledge
    tool_autoresearch_schemas
    tool_autoresearch
+   ;; Code Research Loop — automated self-improvement via LLM
+   research_config
+   research_metric
+   research_loop
    ;; Anti-Fake Test Quality Scoring (harness P2)
    anti_fake
    ;; godsplit-phase1: type/schema sub-modules

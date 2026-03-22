@@ -22,24 +22,24 @@ export function MissionContextBar({
   generatedAt?: string
 }) {
   return html`
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
-      <div class="p-3 px-3.5 rounded-[14px] border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5">
-        <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">프로젝트</span>
-        <strong class="text-[var(--text-strong)] text-base">${project ?? '확인 없음'}</strong>
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3">
+      <div class="p-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1">
+        <span class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium">프로젝트</span>
+        <span class="text-sm font-medium text-[var(--text-strong)]">${project ?? '확인 없음'}</span>
       </div>
-      <div class="p-3 px-3.5 rounded-[14px] border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5">
-        <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">방</span>
-        <strong class="text-[var(--text-strong)] text-base">${room ?? '기본 방'}</strong>
+      <div class="p-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1">
+        <span class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium">방</span>
+        <span class="text-sm font-medium text-[var(--text-strong)]">${room ?? '기본 방'}</span>
       </div>
-      <div class="p-3 px-3.5 rounded-[14px] border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5">
-        <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">갱신 시각</span>
-        <strong class="text-[var(--text-strong)] text-base">${generatedAt ? relativeTime(generatedAt) : '기록 없음'}</strong>
+      <div class="p-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1">
+        <span class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium">갱신 시각</span>
+        <span class="text-sm font-medium text-[var(--text-strong)]">${generatedAt ? relativeTime(generatedAt) : '기록 없음'}</span>
       </div>
       ${cluster && cluster !== 'unknown'
         ? html`
-            <div class="p-3 px-3.5 rounded-[14px] border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5">
-              <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">배포 메타</span>
-              <strong class="text-[var(--text-strong)] text-base">${cluster}</strong>
+            <div class="p-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1">
+              <span class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium">배포 메타</span>
+              <span class="text-sm font-medium text-[var(--text-strong)]">${cluster}</span>
             </div>
           `
         : null}

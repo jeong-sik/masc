@@ -51,6 +51,10 @@ let keeper_autoresearch_tool_names =
   Tool_shard.autoresearch_keeper_tools
   |> List.map (fun (t : Types.tool_schema) -> t.name)
 
+let keeper_research_loop_tool_names =
+  Tool_research.schemas
+  |> List.map (fun (t : Types.tool_schema) -> t.name)
+
 let is_research_profile (meta : keeper_meta) =
   meta.soul_profile = "research"
 
@@ -75,7 +79,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     in
     let with_research =
       if is_research_profile meta then
-        keeper_autoresearch_tool_names @ with_shell
+        keeper_research_loop_tool_names @ keeper_autoresearch_tool_names @ with_shell
       else with_shell
     in
     let with_coding =
@@ -88,7 +92,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     let base_names = keeper_model_tools |> List.map (fun tool -> tool.Types.name) in
     let with_research =
       if is_research_profile meta then
-        keeper_autoresearch_tool_names @ base_names
+        keeper_research_loop_tool_names @ keeper_autoresearch_tool_names @ base_names
       else base_names
     in
     if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
@@ -104,7 +108,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     let base = keeper_model_tools in
     let with_research =
       if is_research_profile meta then
-        base @ Tool_shard.autoresearch_keeper_tools
+        base @ Tool_research.schemas @ Tool_shard.autoresearch_keeper_tools
       else base
     in
     let all_tools =

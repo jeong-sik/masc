@@ -145,7 +145,8 @@ let handle_resident_keeper_msg ctx args : tool_result =
       else begin
         (match read_meta ctx.config name with
         | Ok (Some meta) ->
-            ignore (register_resident_keeper_from_meta ctx.config meta)
+            (match register_resident_keeper_from_meta ctx.config meta with
+             | Ok () -> () | Error e -> Log.Keeper.warn "register_from_meta failed: %s" e)
         | _ -> ());
         let json =
           try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
@@ -174,7 +175,8 @@ let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
       else begin
         (match read_meta ctx.config name with
         | Ok (Some meta) ->
-            ignore (register_resident_keeper_from_meta ctx.config meta)
+            (match register_resident_keeper_from_meta ctx.config meta with
+             | Ok () -> () | Error e -> Log.Keeper.warn "register_from_meta failed: %s" e)
         | _ -> ());
         let json =
           try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body

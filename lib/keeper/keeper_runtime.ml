@@ -24,7 +24,8 @@ let maybe_promote_live_legacy_keeper config name =
               | _ -> ""
             in
             if agent_type = "keeper" && List.mem status [ "active"; "busy"; "idle"; "listening" ] then
-              ignore (register_resident_keeper_from_meta config meta))
+              (match register_resident_keeper_from_meta config meta with
+               | Ok () -> () | Error e -> Log.Keeper.warn "register_from_meta failed: %s" e))
         | _ -> ()
 
 let ensure_resident_meta config (spec : resident_keeper_spec) =

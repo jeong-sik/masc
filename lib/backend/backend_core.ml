@@ -235,7 +235,7 @@ module MemoryBackend : BACKEND = struct
     mutex: Eio.Mutex.t;
   }
 
-  let stdlib_mutex = Stdlib.Mutex.create ()
+  let _mem_poisoned_warned = Atomic.make false
 
   let with_lock t f =
     match
@@ -243,8 +243,11 @@ module MemoryBackend : BACKEND = struct
     with
     | result -> result
     | exception Effect.Unhandled _ ->
-        Stdlib.Mutex.lock stdlib_mutex;
-        Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock stdlib_mutex) f
+        f ()
+    | exception Eio__Eio_mutex.Poisoned _ ->
+        if not (Atomic.exchange _mem_poisoned_warned true) then
+          Log.Backend.warn "Memory backend: Eio.Mutex poisoned, running unprotected (non-Eio context)";
+        f ()
 
   let create (_cfg : config) : (t, error) result =
     Ok {

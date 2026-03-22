@@ -158,14 +158,26 @@ let generate_hypothesis ~(config : Research_config.t)
       "-d"; body;
       "--max-time"; "120";
     ] in
-    let _status, stdout =
+    let status, stdout =
       Process_eio.run_argv_with_status ~timeout_sec:130.0 argv
     in
-    let json = Yojson.Safe.from_string stdout in
-    let open Yojson.Safe.Util in
-    let content = json |> member "choices" |> index 0
-      |> member "message" |> member "content" |> to_string in
-    parse_hypothesis content
+    let exit_code = match status with Unix.WEXITED c -> c | _ -> 1 in
+    if String.length (String.trim stdout) = 0 then begin
+      Log.Server.warn "research: LLM returned empty response (exit=%d, slots likely busy)" exit_code;
+      None
+    end else begin
+      let json = Yojson.Safe.from_string stdout in
+      let open Yojson.Safe.Util in
+      (* Check for API error response *)
+      match member "error" json with
+      | `Null ->
+        let content = json |> member "choices" |> index 0
+          |> member "message" |> member "content" |> to_string in
+        parse_hypothesis content
+      | err ->
+        Log.Server.warn "research: LLM API error: %s" (Yojson.Safe.to_string err);
+        None
+    end
   with exn ->
     Log.Server.warn "research: LLM call failed: %s" (Printexc.to_string exn);
     None

@@ -1,10 +1,6 @@
 /* ── Goals ────────────────────────────────────── */
 
-.goal-summary {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
+/* goal-summary: migrated to inline Tailwind (flex gap-3 flex-wrap) */
 
 .goal-summary-item {
   flex: 1;
@@ -72,13 +68,7 @@
   padding: 14px;
 }
 
-.planning-loop-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
+/* planning-loop-head: migrated to inline Tailwind */
 
 .planning-loop-id {
   color: var(--text-strong);
@@ -128,27 +118,14 @@
   border-left: 2px solid var(--white-8);
 }
 
-.goal-row-right {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  flex-shrink: 0;
-}
+/* goal-row-right: migrated to inline Tailwind (flex flex-col items-end gap-1 shrink-0) */
 
 .goal-updated {
   font-size: var(--fs-xs);
   color: var(--text-dim);
 }
 
-/* -- Planning toolbar (compact refresh) -- */
-
-.planning-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 8px 0;
-  margin-bottom: 4px;
-}
+/* planning-toolbar: migrated to inline Tailwind (flex justify-end py-2 mb-1) */
 
 /* -- Priority badge (inline P1-P4) -- */
 
@@ -220,4 +197,3 @@
   white-space: normal;
   text-overflow: unset;
 }
-

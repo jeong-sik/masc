@@ -16,7 +16,7 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
   return html`
     <div class="planning-loop-row rounded-xl">
       <div class="grid gap-2.5">
-        <div class="planning-loop-head">
+        <div class="flex justify-between gap-3 items-start flex-wrap">
           <div>
             <div class="planning-loop-id">${loop.profile}</div>
             <div class="planning-loop-sub">${loop.loop_id}</div>

@@ -12,31 +12,14 @@ module Time = struct
   (** Get current time as Unix float *)
   let now () = Time_compat.now ()
 
-  (** Parse ISO 8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ") to Unix epoch.
-
-      [Unix.mktime] interprets its argument as local time. To get the
-      correct UTC epoch we compute the local-UTC offset and add it.
-
-      [tz_offset = local_epoch - utc_as_local] yields a positive value
-      for east-of-UTC zones (e.g. +32400 for KST/UTC+9).
-      [local_epoch + tz_offset] then recovers the true UTC epoch. *)
+  (** Parse ISO 8601 UTC timestamp to Unix epoch.
+      Delegates to canonical implementation in Types_core. *)
   let parse_iso8601_opt s =
-    try
-      Scanf.sscanf s "%04d-%02d-%02dT%02d:%02d:%02dZ"
-        (fun year mon day hour min sec ->
-          let tm = {
-            Unix.tm_sec = sec; tm_min = min; tm_hour = hour;
-            tm_mday = day; tm_mon = mon - 1; tm_year = year - 1900;
-            tm_wday = 0; tm_yday = 0; tm_isdst = false;
-          } in
-          let local_epoch, _ = Unix.mktime tm in
-          let utc_of_local = Unix.gmtime local_epoch in
-          let utc_as_local, _ = Unix.mktime utc_of_local in
-          let tz_offset = local_epoch -. utc_as_local in
-          Some (local_epoch +. tz_offset))
-    with Scanf.Scan_failure _ | Failure _ | End_of_file ->
-      Log.Misc.error "parse_iso8601_opt failed for: %S" s;
-      None
+    match Types_core.parse_iso8601_opt s with
+    | Some _ as result -> result
+    | None ->
+        Log.Misc.error "parse_iso8601_opt failed for: %S" s;
+        None
 
   (** Check if a timestamp is older than threshold *)
   let is_stale ?(threshold=default_zombie_threshold) timestamp_str =

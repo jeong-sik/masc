@@ -110,7 +110,7 @@ let now_iso () =
     tm.tm_hour tm.tm_min tm.tm_sec
 
 (** Parse ISO8601 "YYYY-MM-DDTHH:MM:SSZ" to Unix float (UTC). *)
-let parse_iso8601_opt_internal s =
+let parse_iso8601_opt s =
   try
     Scanf.sscanf s "%04d-%02d-%02dT%02d:%02d:%02dZ"
       (fun year mon day hour min sec ->
@@ -128,7 +128,7 @@ let parse_iso8601_opt_internal s =
 
 (** Parse ISO8601 timestamp to Unix float. Returns default_time on parse failure. *)
 let parse_iso8601 ?(default_time = Time_compat.now () -. 60.0) timestamp =
-  match parse_iso8601_opt_internal timestamp with
+  match parse_iso8601_opt timestamp with
   | Some unix_ts -> unix_ts
   | None -> default_time
 

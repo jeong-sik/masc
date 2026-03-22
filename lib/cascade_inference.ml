@@ -86,12 +86,12 @@ let for_json ~(name : string) (json : Yojson.Safe.t) : t =
 
 (** Load inference parameters for a named cascade profile.
 
-    Reads from cascade.json located via {!Model_spec.cascade_config_path}.
+    Reads from cascade.json located via {!Oas_worker.default_config_path}.
     Keys follow the pattern: "{name}_temperature", "{name}_max_tokens".
     Falls back to "default_temperature" / "default_max_tokens" when the
     named key is absent. *)
 let for_cascade ~(name : string) : t =
-  match Model_spec.cascade_config_path () with
+  match Oas_worker.default_config_path () with
   | None -> empty
   | Some path ->
     match load_json path with

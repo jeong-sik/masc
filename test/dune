@@ -1022,3 +1022,9 @@
  (name test_procedure_materializer_integration)
  (modules test_procedure_materializer_integration)
  (libraries masc_mcp alcotest yojson unix))
+
+; gRPC coordination service types and config tests
+(test
+ (name test_grpc_coordination)
+ (modules test_grpc_coordination)
+ (libraries masc_mcp alcotest yojson unix))

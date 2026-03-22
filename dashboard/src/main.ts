@@ -3,7 +3,6 @@
 
 import './styles/global.css'
 import './styles/ui.css'
-import './styles/keeper.css'
 import './styles/dashboard.css'
 import './styles/governance.css'
 import './styles/ops.css'
@@ -11,8 +10,6 @@ import './styles/command-swarm.css'
 import './styles/pixel-avatars.css'
 import './styles/overview.css'
 import './styles/live.css'
-import './styles/tools.css'
-import './styles/chat.css'
 import './styles/roster.css'
 import './styles/oas-pipeline.css'
 

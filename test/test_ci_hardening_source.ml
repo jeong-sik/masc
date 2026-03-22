@@ -93,9 +93,9 @@ let test_http_write_auth_contracts () =
   check bool "keeper config update requires admin permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|with_token_permission_auth ~permission:Types.CanAdmin|});
-  check bool "board vote route requires token-bound broadcast permission" true
+  check bool "board vote route uses tool auth guard" true
     (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
-       {|with_token_permission_auth ~permission:Types.CanBroadcast|});
+       {|with_tool_auth ~tool_name:"masc_board_vote"|});
   check bool "board vote route overwrites voter from auth identity" true
     (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
        {|json_upsert_string_field "voter" agent_name|});

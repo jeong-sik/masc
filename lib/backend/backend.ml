@@ -9,6 +9,10 @@ module FileSystemBackend : BACKEND = struct
     mutex: Eio.Mutex.t;
   }
 
+  (* Once-only flag to avoid log spam in test contexts where every call
+     after the first Effect.Unhandled triggers Poisoned. *)
+  let poisoned_warned = Atomic.make false
+
   let with_lock t f =
     (* Eio.Mutex requires an Eio runtime (Cancel context).
        When called outside Eio_main.run (e.g. unit tests without Eio),
@@ -25,6 +29,8 @@ module FileSystemBackend : BACKEND = struct
     | exception Eio__Eio_mutex.Poisoned _ ->
         (* Mutex poisoned by a prior Effect.Unhandled failure (no Eio context).
            Safe to run unprotected in single-fiber test contexts. *)
+        if not (Atomic.exchange poisoned_warned true) then
+          Log.Backend.warn "Eio.Mutex poisoned, running unprotected (non-Eio context)";
         f ()
 
   (* Security: validate key with strict allowlist (parse, don't sanitize) *)

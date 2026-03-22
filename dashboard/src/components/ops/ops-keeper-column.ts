@@ -96,17 +96,20 @@ export function OpsKeeperColumn() {
             })()}
           `)}
         </div>
-        <div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45] mt-3">Persistent agent는 resident keeper와 분리해서 참고용으로만 보여줍니다.</div>
-        <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
+        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45] mt-3">Persistent agent는 resident keeper와 분리해서 참고용으로만 보여줍니다.</p>
+        <div class="flex flex-col gap-2">
           ${persistentAgents.length === 0
-            ? html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">분리된 persistent agent는 없습니다.</div>`
+            ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">분리된 persistent agent는 없습니다.</div>`
             : persistentAgents.map(agent => html`
-                <article key=${agent.name} class="ops-entity-card p-3 rounded-[10px] border border-[var(--white-8)] bg-[var(--white-3)] text-inherit text-left cursor-pointer">
+                <article key=${agent.name} class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
                   <div class="flex justify-between items-center gap-2.5 max-[880px]:flex-col max-[880px]:items-start">
-                    <strong>${agent.name}</strong>
-                    <span class="border border-solid border-[var(--card-border)] ${agent.status ?? 'idle'} ${agent.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(agent.status)}</span>
+                    <strong class="text-[13px] font-semibold">${agent.name}</strong>
+                    <span class="inline-flex items-center gap-1.5 text-[11px]">
+                      <span class="w-2 h-2 rounded-full ${agent.status === 'offline' ? 'bg-[var(--text-muted)]' : 'bg-[var(--warn)]'}"></span>
+                      ${displayStatus(agent.status)}
+                    </span>
                   </div>
-                  <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                  <div class="text-[11px] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis flex gap-2">
                     <span>persistent</span>
                     <span>${agent.model ?? 'model 확인 필요'}</span>
                     <span>${relativeAge(agent.last_turn_ago_s)}</span>
@@ -116,16 +119,14 @@ export function OpsKeeperColumn() {
         </div>
       </section>
 
-      <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
-        <div class="flex items-start justify-between gap-3 mb-[15px]">
-          <div class="card-title">선택한 Keeper 액션</div>
-        </div>
-        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel">
+        <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">선택한 Keeper 액션</h3>
+        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
 
         ${selectedKeeper ? html`
           <div class="flex flex-col gap-2">
-            <div class="mt-1.5 whitespace-pre-wrap break-words">${selectedKeeper.name}</div>
-            <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+            <div class="text-[13px] font-semibold text-[var(--text-strong)]">${selectedKeeper.name}</div>
+            <div class="text-[11px] text-[var(--text-muted)] flex flex-wrap gap-2">
               <span>자율성: ${selectedKeeper.autonomy_level ?? '확인 없음'}</span>
               <span>세대: ${selectedKeeper.generation ?? 0}</span>
               <span>활성 목표: ${selectedKeeper.active_goal_ids?.length ?? 0}</span>
@@ -133,35 +134,35 @@ export function OpsKeeperColumn() {
               ${selectedKeeper.last_model_used ? html`<span>모델: ${selectedKeeper.last_model_used}</span>` : null}
             </div>
             ${keeperPriorityTone(selectedKeeper) !== 'ok'
-              ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45] mt-2">현재 점검 이유: ${keeperPrioritySummary(selectedKeeper)}</div>`
+              ? html`<div class="text-[12px] text-[var(--text-muted)] leading-[1.45] mt-1">현재 점검 이유: ${keeperPrioritySummary(selectedKeeper)}</div>`
               : null}
-            ${selectedKeeper.goal ? html`<div class="whitespace-normal mt-1.5 py-1 px-1.5 bg-[var(--card)] rounded-[4px] text-[var(--fs-xs)] text-text-muted">${selectedKeeper.goal}</div>` : null}
+            ${selectedKeeper.goal ? html`<div class="whitespace-normal mt-1.5 py-1 px-1.5 bg-[var(--white-3)] rounded text-[11px] text-[var(--text-muted)]">${selectedKeeper.goal}</div>` : null}
           </div>
           <${KeeperConversationPanel}
             keeperName=${selectedKeeper.name}
             placeholder="구조화된 probe, 방향 수정, 재지시 내용을 적으세요"
           />
-        ` : html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">먼저 keeper를 하나 고르세요.</div>`}
+        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">먼저 keeper를 하나 고르세요.</div>`}
       </section>
 
-      <section class="card flex flex-col gap-3 min-h-0">
-        <div class="flex items-start justify-between gap-3 mb-[15px]">
-          <div class="card-title">액션</div>
-          <span style="font-size:0.75rem;opacity:0.5">${availableActions.length}개</span>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+        <div class="flex items-center justify-between pb-2 border-b border-[var(--card-border)]">
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">액션</h3>
+          <span class="text-[12px] text-[var(--text-muted)]">${availableActions.length}개</span>
         </div>
         ${availableActions.length
-          ? html`<div style="display:flex;flex-direction:column;gap:0.5rem">
+          ? html`<div class="flex flex-col gap-2">
               ${['room', 'keeper', 'team_session'].map(targetType => {
                 const group = availableActions.filter((a: any) => a.target_type === targetType)
                 if (group.length === 0) return null
                 return html`
                   <div key=${targetType}>
-                    <div style="font-size:0.7rem;opacity:0.4;margin-bottom:0.25rem">${targetTypeLabel(targetType)}</div>
-                    <div style="display:flex;flex-wrap:wrap;gap:0.25rem">
+                    <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">${targetTypeLabel(targetType)}</div>
+                    <div class="flex flex-wrap gap-1">
                       ${group.map((action: any) => html`
                         <span key=${action.action_type}
                           title=${action.description ?? ''}
-                          style="font-size:0.75rem;padding:0.15rem 0.5rem;border-radius:4px;background:${action.confirm_required ? 'rgba(255,180,50,0.15)' : 'rgba(100,200,255,0.1)'};border:1px solid ${action.confirm_required ? 'rgba(255,180,50,0.3)' : 'rgba(100,200,255,0.2)'};cursor:default">
+                          class="text-[12px] px-2 py-0.5 rounded cursor-default ${action.confirm_required ? 'bg-[var(--warn-12)] border border-[var(--warn-28)] text-[var(--warn)]' : 'bg-[var(--accent-8)] border border-[var(--accent-12)] text-[var(--accent)]'}">
                           ${actionTypeLabel(action.action_type)}
                         </span>
                       `)}
@@ -170,24 +171,22 @@ export function OpsKeeperColumn() {
                 `
               })}
             </div>`
-          : html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">액션 없음</div>`}
+          : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">액션 없음</div>`}
       </section>
 
-      <section class="card flex flex-col gap-3 min-h-0">
-        <div class="flex items-start justify-between gap-3 mb-[15px]">
-          <div class="card-title">최근 개입 로그</div>
-        </div>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+        <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">최근 개입 로그</h3>
         <div class="flex flex-col gap-2">
           ${operatorActionLog.value.length === 0 ? html`
-            <div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">이 세션에서 실행한 개입이 아직 없습니다.</div>
+            <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">이 세션에서 실행한 개입이 아직 없습니다.</div>
           ` : operatorActionLog.value.map(entry => html`
-            <article key=${entry.id} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(entry.outcome)}">
-              <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
-                <strong>${actionTypeLabel(entry.action_type)}</strong>
+            <article key=${entry.id} class="py-2.5 border-b border-[var(--white-4)] hover:bg-[var(--white-3)] transition-colors px-2 rounded ${logEntryBorderClass(entry.outcome)}">
+              <div class="text-[11px] text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis flex gap-2">
+                <strong class="font-semibold">${actionTypeLabel(entry.action_type)}</strong>
                 <span>${entry.target_label}</span>
                 <span>${entry.at}</span>
               </div>
-              <div class="mt-1.5 whitespace-pre-wrap break-words">${entry.message}</div>
+              <div class="mt-1 text-[13px] whitespace-pre-wrap break-words text-[var(--text-body)]">${entry.message}</div>
             </article>
           `)}
         </div>

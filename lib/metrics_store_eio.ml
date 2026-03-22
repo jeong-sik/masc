@@ -71,22 +71,18 @@ let generate_id () =
   let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
   Printf.sprintf "metric-%d-%05x" (int_of_float (timestamp *. 1000.)) hash
 
-(** Record a new task metric - synchronous with file locking *)
+(* Mutex protecting concurrent metric writes within this process.
+   Replaces Unix.lockf which blocks the Eio scheduler. *)
+let record_mutex = Eio.Mutex.create ()
+
+(** Record a new task metric - Eio-compatible, non-blocking *)
 let record config (metric : task_metric) : unit =
   ensure_metrics_dir config metric.agent_id;
   let file = current_month_file config metric.agent_id in
   let json = task_metric_to_yojson metric in
   let line = Yojson.Safe.to_string json ^ "\n" in
-  (* Use file locking to prevent concurrent write corruption *)
-  (* Security: 0o600 - only owner can read/write metrics data *)
-  (* FD leak fix: ensure fd is always closed with Fun.protect *)
-  let fd = Unix.openfile file [Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CREAT] 0o600 in
-  Fun.protect ~finally:(fun () -> try Unix.close fd with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (try Log.Misc.error "fd close failed: %s" (Printexc.to_string exn) with exn2 -> ignore (Printexc.to_string exn2))) (fun () ->
-    Unix.lockf fd Unix.F_LOCK 0;
-    Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (try Log.Misc.error "fd unlock failed: %s" (Printexc.to_string exn) with exn2 -> ignore (Printexc.to_string exn2))) (fun () ->
-      let _ = Unix.write_substring fd line 0 (String.length line) in
-      ()
-    )
+  Eio.Mutex.use_rw ~protect:true record_mutex (fun () ->
+    Fs_compat.append_file file line
   )
 
 (** Create a new task metric (helper) - pure *)

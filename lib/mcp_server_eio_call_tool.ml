@@ -329,13 +329,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ]
     ]
   in
-  let structured_content =
-    match name with
-    | "masc_team_session_status"
-    | "masc_operator_digest" -> (
-        try Some (Yojson.Safe.from_string message) with _ -> None)
-    | _ -> None
-  in
+  let structured_content = Tool_result.structured_payload_of_message message in
   let result_fields =
     [
       ("resultEnvelope", envelope);

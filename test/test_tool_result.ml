@@ -31,6 +31,21 @@ let test_wrap_plain_string () =
      Alcotest.(check string) "plain string preserved" "Something went wrong" s
    | _ -> Alcotest.fail "expected String for non-JSON input")
 
+let test_wrap_prefixed_json_response () =
+  let start = 1000.0 in
+  let raw =
+    ( true,
+      "✅ Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}" )
+  in
+  let r = Tool_result.wrap ~tool_name:"masc_board_post" ~start_time:start raw in
+  match r.data with
+  | `Assoc fields ->
+      Alcotest.(check string) "id parsed" "post-1"
+        Yojson.Safe.Util.(List.assoc "id" fields |> to_string);
+      Alcotest.(check string) "content parsed" "hello"
+        Yojson.Safe.Util.(List.assoc "content" fields |> to_string)
+  | _ -> Alcotest.fail "expected parsed JSON from prefixed payload"
+
 let test_to_json () =
   let start = Time_compat.now () in
   let raw = (true, "done") in
@@ -87,6 +102,8 @@ let () =
     "wrap", [
       Alcotest.test_case "json response" `Quick test_wrap_json_response;
       Alcotest.test_case "plain string" `Quick test_wrap_plain_string;
+      Alcotest.test_case "prefixed json response" `Quick
+        test_wrap_prefixed_json_response;
     ];
     "to_json", [
       Alcotest.test_case "fields present" `Quick test_to_json;

@@ -7,13 +7,42 @@ type t = {
   duration_ms : float;
 }
 
+let structured_payload_of_message (message : string) : Yojson.Safe.t option =
+  let parse_json raw =
+    try Some (Yojson.Safe.from_string raw)
+    with Yojson.Json_error _ -> None
+  in
+  let trimmed = String.trim message in
+  match parse_json trimmed with
+  | Some _ as json -> json
+  | None ->
+      let len = String.length message in
+      let rec loop from =
+        match String.index_from_opt message from '\n' with
+        | None -> None
+        | Some newline_idx ->
+            let suffix =
+              String.sub message (newline_idx + 1) (len - newline_idx - 1)
+              |> String.trim
+            in
+            if suffix = "" then loop (newline_idx + 1)
+            else
+              match suffix.[0] with
+              | '{' | '[' -> (
+                  match parse_json suffix with
+                  | Some _ as json -> json
+                  | None -> loop (newline_idx + 1))
+              | _ -> loop (newline_idx + 1)
+      in
+      loop 0
+
 let wrap ~tool_name ~start_time (success, message) =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
   let data =
-    match Yojson.Safe.from_string message with
-    | json -> json
-    | exception Yojson.Json_error _ -> `String message
+    match structured_payload_of_message message with
+    | Some json -> json
+    | None -> `String message
   in
   { success; data; tool_name; duration_ms }
 

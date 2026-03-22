@@ -70,8 +70,8 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
         <details class="pt-2 border-t border-[var(--white-6)] mt-3">
           <summary>입력 · 응답 · 도구</summary>
           <div class="grid grid-cols-2 gap-3 mt-3">
-            <${StatCell} label="최근 입력" value=${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'} />
-            <${StatCell} label="최근 응답" value=${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'} />
+            <${StatCell} label="최근 입력" value=${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'} bg="white-3" />
+            <${StatCell} label="최근 응답" value=${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'} bg="white-3" />
           </div>
           <div class="flex flex-wrap gap-3 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-snug mt-3">
             <span>최근 도구 · ${recentToolsLabel}</span>
@@ -141,8 +141,8 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
         <details class="pt-2 border-t border-[var(--white-6)] mt-3">
           <summary>입력 · 응답 · 도구</summary>
           <div class="grid grid-cols-2 gap-3 mt-3">
-            <${StatCell} label="최근 입력" value=${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'} />
-            <${StatCell} label="최근 응답" value=${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'} />
+            <${StatCell} label="최근 입력" value=${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'} bg="white-3" />
+            <${StatCell} label="최근 응답" value=${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'} bg="white-3" />
           </div>
           <div class="flex flex-wrap gap-3 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-snug mt-3">
             <span>최근 도구 · ${recentToolsLabel}</span>

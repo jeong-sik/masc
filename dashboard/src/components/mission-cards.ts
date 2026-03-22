@@ -45,5 +45,5 @@ export function SummaryStat({
   detail: string
   tone?: string | null
 }) {
-  return html`<${StatCell} label=${label} value=${value} detail=${detail} tone=${toneClass(tone)} />`
+  return html`<${StatCell} label=${label} value=${value} detail=${detail} tone=${toneClass(tone)} size="lg" />`
 }

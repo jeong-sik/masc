@@ -281,7 +281,7 @@ let get_chain_id_for_preset = function
 let walph_loop config ~net:_net ~clock ~agent_name
     ?(preset="drain") ?(max_iterations=10) ?target
     ?(max_consecutive_errors=5) ?(error_backoff_sec=2)
-    ?(default_model=Env_config.Glm.default_model)
+    ?(default_model="explicit-model-required")
     ~model_dispatch () =
   Room.ensure_initialized config;
 

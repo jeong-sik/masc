@@ -58,38 +58,63 @@ WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isola
 Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work."
 
+let apply_budget_filter ?budget_tokens schemas =
+  match budget_tokens with
+  | None -> (
+      match Tool_budget.default_budget () with
+      | None -> schemas
+      | Some budget ->
+          let usage_counts name =
+            match Tool_metrics.stats_for name with
+            | Some s -> s.Tool_metrics.call_count
+            | None -> 0
+          in
+          Tool_budget.filter_by_budget ~budget_tokens:budget ~usage_counts
+            ~tool_schemas:schemas)
+  | Some budget ->
+      let usage_counts name =
+        match Tool_metrics.stats_for name with
+        | Some s -> s.Tool_metrics.call_count
+        | None -> 0
+      in
+      Tool_budget.filter_by_budget ~budget_tokens:budget ~usage_counts
+        ~tool_schemas:schemas
+
 let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = false)
-    ?mode_override state profile =
-  match profile with
-  | Full ->
-      let categories =
-        match mode_override with
-        | Some mode_str ->
-            (match Mode.mode_of_string (String.lowercase_ascii mode_str) with
-             | Some mode -> Mode.categories_for_mode mode
-             | None ->
-                 let room_path = Room.masc_dir state.Mcp_server.room_config in
-                 let config = Config.load room_path in
-                 config.Config.enabled_categories)
-        | None ->
-            let room_path = Room.masc_dir state.Mcp_server.room_config in
-            let config = Config.load room_path in
-            config.Config.enabled_categories
-      in
-      Config.enabled_tool_schemas ~include_hidden ~include_deprecated categories
-  | Managed_agent ->
-      let passthrough =
-        Config.visible_tool_schemas ~include_hidden:false ~include_deprecated:false ()
-        |> List.filter (fun (schema : Types.tool_schema) ->
-               List.mem schema.name managed_agent_passthrough_tool_names
-               && Tool_catalog.is_visible schema.name)
-      in
-      dedupe_tool_schemas_by_name
-        (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
-  | Operator_remote -> Tool_operator.remote_schemas
-  | Role_filtered mode ->
-      let categories = Mode.categories_for_mode mode in
-      Config.enabled_tool_schemas ~include_hidden ~include_deprecated categories
+    ?mode_override ?budget_tokens state profile =
+  let schemas =
+    match profile with
+    | Full ->
+        let categories =
+          match mode_override with
+          | Some mode_str ->
+              (match Mode.mode_of_string (String.lowercase_ascii mode_str) with
+               | Some mode -> Mode.categories_for_mode mode
+               | None ->
+                   let room_path = Room.masc_dir state.Mcp_server.room_config in
+                   let config = Config.load room_path in
+                   config.Config.enabled_categories)
+          | None ->
+              let room_path = Room.masc_dir state.Mcp_server.room_config in
+              let config = Config.load room_path in
+              config.Config.enabled_categories
+        in
+        Config.enabled_tool_schemas ~include_hidden ~include_deprecated categories
+    | Managed_agent ->
+        let passthrough =
+          Config.visible_tool_schemas ~include_hidden:false ~include_deprecated:false ()
+          |> List.filter (fun (schema : Types.tool_schema) ->
+                 List.mem schema.name managed_agent_passthrough_tool_names
+                 && Tool_catalog.is_visible schema.name)
+        in
+        dedupe_tool_schemas_by_name
+          (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
+    | Operator_remote -> Tool_operator.remote_schemas
+    | Role_filtered mode ->
+        let categories = Mode.categories_for_mode mode in
+        Config.enabled_tool_schemas ~include_hidden ~include_deprecated categories
+  in
+  apply_budget_filter ?budget_tokens schemas
 
 let tool_allowed_in_profile state profile tool_name =
   match profile with

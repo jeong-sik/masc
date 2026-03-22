@@ -16,7 +16,7 @@
 
 (** Bash-like tools that need destructive pattern screening. *)
 let destructive_check_tools =
-  [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit" ]
+  [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit"; "keeper_github" ]
 
 (** Extract command or content string from tool input JSON for screening. *)
 let extract_command_from_input (input : Yojson.Safe.t) : string =
@@ -25,9 +25,12 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
     match input |> member "command" with
     | `String s -> s
     | `Null | _ ->
-      (match input |> member "content" with
+      (match input |> member "cmd" with
        | `String s -> s
-       | _ -> "")
+       | `Null | _ ->
+         (match input |> member "content" with
+          | `String s -> s
+          | _ -> ""))
   with Yojson.Safe.Util.Type_error _ -> ""
 
 (** Tools allowed at each autonomy level for the unified turn path.

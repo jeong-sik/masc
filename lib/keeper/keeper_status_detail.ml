@@ -96,15 +96,18 @@ let handle_keeper_status ctx args : tool_result =
          in
 
          let models_resolved = `List (List.filter_map (fun label ->
-           match Model_spec.model_spec_of_string label with
-           | Error _ -> None
-           | Ok s ->
-             let pricing = Model_spec.pricing_of_spec s in
+           match Llm_provider.Cascade_config.parse_model_string label with
+           | None -> None
+           | Some cfg ->
+             let pricing = Llm_provider.Pricing.pricing_for_model cfg.model_id in
+             let provider_name = Llm_provider.Provider_config.(match cfg.kind with
+               | Anthropic -> "claude" | OpenAI_compat -> "openai"
+               | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code") in
              Some (`Assoc [
-               ("provider", `String (Model_spec.string_of_provider s.provider));
-               ("model_id", `String s.model_id);
-               ("max_context", `Int (Model_spec.max_context s));
-               ("api_key_env", match s.api_key_env with None -> `Null | Some k -> `String k);
+               ("provider", `String provider_name);
+               ("model_id", `String cfg.model_id);
+               ("max_context", `Int cfg.max_tokens);
+               ("api_key_env", if cfg.api_key <> "" then `String "(set)" else `Null);
                ("cost_per_million_input", `Float pricing.input_per_million);
                ("cost_per_million_output", `Float pricing.output_per_million);
              ])

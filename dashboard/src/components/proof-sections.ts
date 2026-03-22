@@ -89,11 +89,11 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
   const validationFailures = Array.isArray(item.validation_failures) ? item.validation_failures : []
   const toolNames = Array.isArray(item.tool_names) ? item.tool_names : []
   return html`
-    <article class="mission-activity-row proof-actor-row">
-      <div class="mission-activity-head">
+    <article class="proof-actor-row">
+      <div class="flex justify-between gap-2.5 items-start">
         <div>
           <strong>${item.worker_name ?? item.worker_run_id}</strong>
-          <div class="mission-activity-meta">
+          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
             <span>${item.worker_run_id}</span>
             <span>${item.ts_iso ? relativeTime(item.ts_iso) : '기록 없음'}</span>
           </div>
@@ -102,19 +102,19 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
           ${workerRunEvidenceLabel(item)}
         </span>
       </div>
-      <div class="mission-activity-copy">
+      <div class="grid gap-1">
         <span>${workerRunEvidenceMeta(item) || 'runtime/model 메타데이터 없음'}</span>
       </div>
       ${preview
-        ? html`<div class="proof-summary-block">
-            <strong>${item.success === false || item.error || item.failure_reason ? '실패 요약' : '출력 요약'}</strong>
-            <span>${preview}</span>
+        ? html`<div class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)]">
+            <strong class="text-[var(--text-strong)]">${item.success === false || item.error || item.failure_reason ? '실패 요약' : '출력 요약'}</strong>
+            <span class="text-[rgba(255,255,255,0.8)] leading-normal">${preview}</span>
           </div>`
         : null}
       ${validationFailures.length > 0
-        ? html`<div class="proof-summary-block warn">
-            <strong>검증 실패</strong>
-            <span>${validationFailures.join(' · ')}</span>
+        ? html`<div class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--warn-soft)] bg-[rgba(251,191,36,0.08)]">
+            <strong class="text-[var(--text-strong)]">검증 실패</strong>
+            <span class="text-[rgba(255,255,255,0.8)] leading-normal">${validationFailures.join(' · ')}</span>
           </div>`
         : null}
       ${toolNames.length > 0
@@ -157,7 +157,7 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
   const lastSeen = item.last_active_at ?? item.recent_request_at ?? null
   const isPlanned = item.activity_state === 'planned_only'
   return html`
-    <article class="mission-activity-row proof-actor-row" style="${isPlanned ? 'opacity: 0.45;' : ''}">
+    <article class="proof-actor-row" style="${isPlanned ? 'opacity: 0.45;' : ''}">
       <div class="flex justify-between gap-2.5 items-start">
         <div>
           <strong>${item.actor}</strong>
@@ -170,34 +170,34 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
           ${actorActivityLabel(item)}
         </span>
       </div>
-      <div class="mission-activity-copy">
+      <div class="grid gap-1">
         <span>${actorActivityMeta(item)}</span>
       </div>
       ${item.activity_detail
-        ? html`<div class="proof-summary-block rounded-xl">
+        ? html`<div class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)]">
             <strong>현재 해석</strong>
             <span>${item.activity_detail}</span>
           </div>`
         : null}
       ${eventSummary
-        ? html`<div class="proof-summary-block rounded-xl">
+        ? html`<div class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)]">
             <strong>최근 흔적</strong>
             <span>${eventSummary}</span>
           </div>`
         : null}
       ${requestPreview && item.activity_state !== 'acted'
-        ? html`<div class="proof-summary-block rounded-xl">
+        ? html`<div class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)]">
             <strong>최근 요청</strong>
             <span>${requestPreview}</span>
           </div>`
         : null}
       ${(input || output)
-        ? html`<div class="proof-io-grid">
-            <div class="mission-activity-preview">
+        ? html`<div class="grid grid-cols-2 gap-2.5">
+            <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
               <strong>최근 입력</strong>
               <span>${input ?? '표시 가능한 입력 없음'}</span>
             </div>
-            <div class="mission-activity-preview">
+            <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
               <strong>최근 응답</strong>
               <span>${output ?? '표시 가능한 응답 없음'}</span>
             </div>

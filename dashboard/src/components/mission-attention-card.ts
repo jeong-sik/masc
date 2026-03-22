@@ -37,7 +37,7 @@ export function AttentionCard({
   const action = item.top_action ?? null
 
   return html`
-    <article class="mission-attention-card rounded-xl ${toneClass(action?.severity ?? item.severity)} ${selected ? 'is-selected' : ''}">
+    <article class="mission-attention-card p-3.5 rounded-xl border border-[var(--white-8)] bg-[linear-gradient(180deg,var(--white-6),var(--white-3))] grid gap-3 ${toneClass(action?.severity ?? item.severity)} ${selected ? 'is-selected' : ''}">
       <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => toggleAttention(item.id)}>
         <div class="flex justify-between gap-2 items-start flex-wrap">
           <div>

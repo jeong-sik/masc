@@ -293,6 +293,11 @@ a:hover {
   text-decoration: underline;
 }
 
+/* Tone border utilities — applied via toneClass() helper */
+.ok { border-color: var(--ok-22); }
+.warn { border-color: var(--warn-soft); }
+.bad { border-color: var(--bad-soft); }
+
 /* Header */
 
 

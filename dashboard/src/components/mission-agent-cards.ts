@@ -32,7 +32,7 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
       ? row.recentTools.join(', ')
       : toolAuditStateLabel(observedToolsEmptyState(row.keeper, row.brief.tool_audit_source))
   return html`
-    <article class="mission-activity-card rounded-xl ${toneClass(row.brief.status ?? row.agent?.status)}">
+    <article class="w-full p-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-3 text-inherit text-left cursor-pointer ${toneClass(row.brief.status ?? row.agent?.status)}">
       <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => openAgentDetail(row.brief.agent_name)}>
         <div class="flex justify-between gap-2.5 items-start">
           <div class="flex gap-2.5 items-start">
@@ -102,7 +102,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
       : toolAuditStateLabel(linkedRecentToolsEmptyState(row.keeper))
 
   return html`
-    <article class="mission-activity-card rounded-xl ${toneClass(row.brief.status ?? row.keeper?.status)} ${liveStateClass(row.brief.status, row.keeper?.status)}">
+    <article class="w-full p-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-3 text-inherit text-left cursor-pointer ${toneClass(row.brief.status ?? row.keeper?.status)} ${liveStateClass(row.brief.status, row.keeper?.status)}">
       <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => {
         const keeper: Keeper = row.keeper ?? {
           name: row.brief.name,
@@ -167,14 +167,14 @@ export function InternalSignalCard({ item }: { item: DashboardMissionInternalSig
   const action = item.action ?? null
   const attention = item.attention ?? null
   return html`
-    <article class="mission-action-card rounded-xl ${toneClass(item.severity)}">
+    <article class="p-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] ${toneClass(item.severity)}">
       <div class="flex justify-between gap-2 items-start flex-wrap">
         <span class="command-chip rounded-full ${toneClass(item.severity)}">
           ${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? '내부 신호'}
         </span>
         <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
       </div>
-      <p>${item.summary}</p>
+      <p class="m-0 text-[rgba(255,255,255,0.8)] leading-normal">${item.summary}</p>
       ${action ? html`<div class="py-2.5 px-3 rounded-xl bg-[var(--white-5)] border border-[var(--white-8)] text-[var(--text-strong)] leading-[1.45]">${action.reason}</div>` : null}
       <div class="flex gap-2 flex-wrap mt-2.5">
         ${action

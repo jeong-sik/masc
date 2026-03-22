@@ -198,7 +198,7 @@ export function Proof() {
           </div>
           <div class="grid gap-2.5">
             ${reasonLines.map((line, idx) => html`
-              <article class="proof-summary-block rounded-xl ${idx === 1 && verdict !== 'proven' ? verdictTone(verdict) : ''}">
+              <article class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] ${idx === 1 && verdict !== 'proven' ? verdictTone(verdict) : ''}">
                 <strong>${idx === 0 ? '지금 결론' : idx === 1 ? '왜 이렇게 판정됐나' : '다음 보강 포인트'}</strong>
                 <span>${line}</span>
               </article>

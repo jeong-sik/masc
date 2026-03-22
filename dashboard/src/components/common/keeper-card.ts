@@ -67,7 +67,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
   const toneClass = model.tone ?? ''
   const wrapperClass =
     variant === 'mission'
-      ? `mission-activity-card ${toneClass}`
+      ? `w-full p-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-3 text-inherit text-left cursor-pointer ${toneClass}`
       : 'keeper-canonical-card'
   const buttonClass =
     variant === 'mission'

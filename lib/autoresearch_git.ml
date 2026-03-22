@@ -3,70 +3,89 @@
     Provides commit, reset, tag, branch, and worktree management
     used during the experiment cycle.
 
+    Uses Process_eio for non-blocking subprocess execution to avoid
+    freezing the Eio event loop during git operations.
+
     @since 2.80.0 *)
 
-(** Run a shell command and capture stdout lines. *)
+(** Run a shell command via Process_eio and capture stdout lines.
+    Non-blocking: delegates to Eio.Process instead of Unix.open_process_in. *)
 let run_capture_lines cmd =
-  let ic = Unix.open_process_in cmd in
-  let lines = ref [] in
-  (try
-     while true do
-       lines := input_line ic :: !lines
-     done
-   with End_of_file -> ());
-  let status = Unix.close_process_in ic in
-  (status, List.rev !lines)
+  let status, raw_output =
+    Process_eio.run_argv_with_status ~timeout_sec:30.0
+      ["sh"; "-c"; cmd]
+  in
+  let lines =
+    if String.length raw_output = 0 then []
+    else String.split_on_char '\n' raw_output
+         |> List.filter (fun s -> s <> "")
+  in
+  (status, lines)
 
 (** Get current HEAD commit hash (short). *)
 let git_head_short ~workdir =
   let cmd = Printf.sprintf "cd %s && git rev-parse --short HEAD 2>/dev/null"
     (Filename.quote workdir) in
-  let ic = Unix.open_process_in cmd in
-  Fun.protect ~finally:(fun () ->
-    ignore (Unix.close_process_in ic)
-  ) (fun () ->
-    try Some (String.trim (input_line ic)) with End_of_file -> None
-  )
+  let status, raw_output =
+    Process_eio.run_argv_with_status ~timeout_sec:10.0
+      ["sh"; "-c"; cmd]
+  in
+  match status with
+  | Unix.WEXITED 0 ->
+    let trimmed = String.trim raw_output in
+    if trimmed = "" then None else Some trimmed
+  | _ -> None
 
 (** Git commit result: Ok (Some hash) on success, Ok None when no diff,
     Error msg when git commit itself fails (e.g. missing identity, hooks). *)
 let git_commit ~workdir ~message
   : (string option, string) Stdlib.result =
-  let cmd = Printf.sprintf
+  let check_cmd = Printf.sprintf
     "cd %s && git add -A && git diff --cached --quiet"
     (Filename.quote workdir) in
-  if Sys.command cmd = 0 then
+  let check_status, _check_output =
+    Process_eio.run_argv_with_status ~timeout_sec:30.0
+      ["sh"; "-c"; check_cmd]
+  in
+  match check_status with
+  | Unix.WEXITED 0 ->
     (* No staged changes -- nothing to commit *)
     Result.ok None
-  else
+  | _ ->
     let commit_cmd = Printf.sprintf
       "cd %s && git commit -m %s 2>&1 && git rev-parse --short HEAD"
       (Filename.quote workdir) (Filename.quote message) in
-    let ic = Unix.open_process_in commit_cmd in
-    let lines = ref [] in
-    (try while true do lines := input_line ic :: !lines done
-     with End_of_file -> ());
-    let status = Unix.close_process_in ic in
-    match status with
+    let status, raw_output =
+      Process_eio.run_argv_with_status ~timeout_sec:30.0
+        ["sh"; "-c"; commit_cmd]
+    in
+    let lines =
+      String.split_on_char '\n' raw_output
+      |> List.filter (fun s -> s <> "")
+      |> List.rev
+    in
+    (match status with
     | Unix.WEXITED 0 ->
-      (match !lines with
+      (match lines with
        | hash :: _ -> Result.ok (Some (String.trim hash))
        | [] -> Result.error "git commit succeeded but no hash returned")
     | _ ->
-      let output = String.concat "\n" (List.rev !lines) in
-      Result.error (Printf.sprintf "git commit failed: %s" output)
+      let output = String.concat "\n" (List.rev lines) in
+      Result.error (Printf.sprintf "git commit failed: %s" output))
 
 (** Restore worktree files to current HEAD without moving the branch. *)
 let git_restore_head ~workdir =
   let cmd = Printf.sprintf "cd %s && git reset --hard HEAD 2>/dev/null"
     (Filename.quote workdir) in
-  ignore (Sys.command cmd)
+  ignore (Process_eio.run_argv_with_status ~timeout_sec:30.0
+    ["sh"; "-c"; cmd])
 
 (** Reset to HEAD~1, discarding the last commit. *)
 let git_reset_last ~workdir =
   let cmd = Printf.sprintf "cd %s && git reset --hard HEAD~1 2>/dev/null"
     (Filename.quote workdir) in
-  ignore (Sys.command cmd)
+  ignore (Process_eio.run_argv_with_status ~timeout_sec:30.0
+    ["sh"; "-c"; cmd])
 
 (** Commit with autoresearch-formatted message. *)
 let git_commit_cycle ~workdir ~cycle ~hypothesis ~baseline =
@@ -85,7 +104,8 @@ let git_tag_best ~workdir ~cycle ~score =
   let tag = Printf.sprintf "ar-best-c%d-%.4f" cycle score in
   let cmd = Printf.sprintf "cd %s && git tag -f %s 2>/dev/null"
     (Filename.quote workdir) (Filename.quote tag) in
-  ignore (Sys.command cmd)
+  ignore (Process_eio.run_argv_with_status ~timeout_sec:10.0
+    ["sh"; "-c"; cmd])
 
 (** Get the git top-level directory for a workdir. *)
 let git_top_level ~workdir =

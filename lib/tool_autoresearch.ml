@@ -50,6 +50,16 @@ let latest_loop_id = Autoresearch.latest_loop_id
 let pending_hypotheses : (string, string) Hashtbl.t =
   Hashtbl.create 4
 
+(** Eio.Mutex protecting [pending_hypotheses] and [custom_generators]
+    against concurrent fiber access from parallel tool handlers. *)
+let hypotheses_mu = Eio.Mutex.create ()
+
+(** Execute [f] under exclusive lock on the hypotheses/generators registry. *)
+let with_hypotheses_rw f = Eio.Mutex.use_rw ~protect:true hypotheses_mu (fun () -> f ())
+
+(** Execute [f] under shared read lock on the hypotheses/generators registry. *)
+let with_hypotheses_ro f = Eio.Mutex.use_ro hypotheses_mu (fun () -> f ())
+
 (** Code generator type for test injection.
     Returns Ok (hypothesis, new_code) or Error reason. *)
 type code_generator =
@@ -65,13 +75,15 @@ let custom_generators : (string, code_generator) Hashtbl.t =
 
 (** Set a custom code generator for a loop (used in tests). *)
 let set_generator loop_id gen =
-  Hashtbl.replace custom_generators loop_id gen
+  with_hypotheses_rw (fun () ->
+    Hashtbl.replace custom_generators loop_id gen)
 
 (** Get the code generator for a loop. Falls back to Autoresearch.generate_code_change. *)
 let get_generator loop_id =
-  match Hashtbl.find_opt custom_generators loop_id with
-  | Some gen -> gen
-  | None -> Autoresearch.generate_code_change
+  with_hypotheses_ro (fun () ->
+    match Hashtbl.find_opt custom_generators loop_id with
+    | Some gen -> gen
+    | None -> Autoresearch.generate_code_change)
 
 (* ================================================================ *)
 (* SSE Broadcast                                                    *)
@@ -240,7 +252,8 @@ let status_json ctx ~loop_id json_fields =
   let link =
     Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path loop_id
   in
-  let queued_hypothesis = Hashtbl.find_opt pending_hypotheses loop_id in
+  let queued_hypothesis = with_hypotheses_ro (fun () ->
+    Hashtbl.find_opt pending_hypotheses loop_id) in
   let link_fields =
     match link with
     | Some link ->
@@ -482,7 +495,8 @@ let handle_inject _ctx args =
           else begin
             state.queued_hypothesis <- Some hypothesis;
             Autoresearch.save_state ~base_path:_ctx.base_path state;
-            Hashtbl.replace pending_hypotheses id hypothesis;
+            with_hypotheses_rw (fun () ->
+              Hashtbl.replace pending_hypotheses id hypothesis);
             `Assoc [
               ("loop_id", `String id);
               ("status", `String "hypothesis_queued");
@@ -549,13 +563,14 @@ let handle_cycle ctx args =
       let code_result =
         let forced_hypothesis =
           Autoresearch.with_loops_rw (fun () ->
-            match Hashtbl.find_opt pending_hypotheses id with
-            | Some h ->
-                Hashtbl.remove pending_hypotheses id;
-                state.queued_hypothesis <- None;
-                Autoresearch.save_state ~base_path:ctx.base_path state;
-                Some h
-            | None -> get_string_opt args "hypothesis")
+            with_hypotheses_rw (fun () ->
+              match Hashtbl.find_opt pending_hypotheses id with
+              | Some h ->
+                  Hashtbl.remove pending_hypotheses id;
+                  state.queued_hypothesis <- None;
+                  Autoresearch.save_state ~base_path:ctx.base_path state;
+                  Some h
+              | None -> get_string_opt args "hypothesis"))
         in
           let generate = get_generator id in
           (match forced_hypothesis with

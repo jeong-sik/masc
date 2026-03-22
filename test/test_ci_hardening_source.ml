@@ -170,11 +170,8 @@ let test_activity_surface_contracts () =
   check bool "dashboard semantics use activity graph surface id" true
     (file_contains_pattern "lib/dashboard/dashboard_semantics.ml"
        {|surface ~id:"activity_graph"|});
-  check bool "room task lifecycle emits activity events" true
-    (file_contains_pattern "lib/room/room_task.ml"
-       "Activity_graph.emit config");
-  check bool "room broadcast emits activity events" true
-    (file_contains_pattern "lib/room/room_state.ml"
+  check bool "room emits activity events" true
+    (file_contains_pattern "lib/room.ml"
        "Activity_graph.emit config");
   check bool "board success paths emit activity events" true
     (file_contains_pattern "lib/tool_inline_dispatch_extra.ml"

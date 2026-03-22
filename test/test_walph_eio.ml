@@ -313,9 +313,8 @@ let test_eio_error_cutoff () =
     (status |> member "last_stop_reason" |> to_string)
 
 let test_eio_default_dispatch_uses_shared_cascade () =
-  check bool "uses Oas_worker.run_named" true
-    (file_contains_pattern "lib/room/room_walph_eio.ml"
-       {|Oas_worker.run_named ~cascade_name:"walph"|});
+  (* walph_eio is now a pure task-loop manager; LLM dispatch is delegated
+     externally via team_session or tool dispatch. Verify no legacy patterns. *)
   check bool "legacy direct dispatch removed" false
     (file_contains_pattern "lib/room/room_walph_eio.ml" "Llm_direct.dispatch");
   check bool "no direct run_prompt_cascade" false

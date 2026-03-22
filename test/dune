@@ -397,6 +397,11 @@
  (modules test_cp_search_fabric)
  (libraries masc_mcp alcotest yojson unix))
 
+(test
+ (name test_cp_section_cache)
+ (modules test_cp_section_cache)
+ (libraries masc_mcp alcotest yojson unix))
+
 (executable
  (name test_cp_search_fabric_benchmark)
  (modules test_cp_search_fabric_benchmark)

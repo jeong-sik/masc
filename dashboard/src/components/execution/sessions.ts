@@ -20,16 +20,16 @@ export function SessionCard({ brief, selected }: { brief: DashboardExecutionSess
   const plannedCount = brief.planned_count ?? brief.member_names.length
   return html`
     <button
-      class="mission-card-select ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
+      class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.session-card"
       onClick=${() => {
         selectedSessionId.value = selected ? null : brief.session_id
         selectedOperationId.value = null
       }}
     >
-      <div class="mission-card-head">
+      <div class="flex justify-between gap-2 items-start flex-wrap">
         <div>
-          <div class="mission-card-target">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
+          <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           <div class="mission-card-title">${brief.goal}</div>
         </div>
         <span class="command-chip ${terminal ? 'muted' : toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
@@ -62,7 +62,7 @@ export function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecu
   const hasTerminal = terminalSessions.length > 0
 
   return html`
-    <div class="monitor-section-head">
+    <div class="mb-3.5">
       <h2 class="monitor-headline">영향받는 세션</h2>
       <p class="monitor-subheadline">대기열에서 고른 실행이 어떤 세션 목표와 실행 막힘을 갖는지 요약합니다.</p>
     </div>
@@ -73,7 +73,7 @@ export function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecu
     </div>
     ${hasTerminal
       ? html`
-          <details class="runtime-collapsible" data-testid="execution.sessions-terminal">
+          <details class="mt-1" data-testid="execution.sessions-terminal">
             <summary class="runtime-summary">종료된 세션 ${terminalSessions.length}건</summary>
             <div class="monitor-list">
               ${terminalSessions.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)}

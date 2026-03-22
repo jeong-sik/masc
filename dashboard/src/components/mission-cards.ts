@@ -22,24 +22,24 @@ export function MissionContextBar({
   generatedAt?: string
 }) {
   return html`
-    <div class="mission-context-bar">
-      <div class="mission-context-item">
-        <span>프로젝트</span>
-        <strong>${project ?? '확인 없음'}</strong>
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
+      <div class="p-3 px-3.5 rounded-[14px] border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5">
+        <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">프로젝트</span>
+        <strong class="text-[var(--text-strong)] text-base">${project ?? '확인 없음'}</strong>
       </div>
-      <div class="mission-context-item">
-        <span>방</span>
-        <strong>${room ?? '기본 방'}</strong>
+      <div class="p-3 px-3.5 rounded-[14px] border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5">
+        <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">방</span>
+        <strong class="text-[var(--text-strong)] text-base">${room ?? '기본 방'}</strong>
       </div>
-      <div class="mission-context-item">
-        <span>갱신 시각</span>
-        <strong>${generatedAt ? relativeTime(generatedAt) : '기록 없음'}</strong>
+      <div class="p-3 px-3.5 rounded-[14px] border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5">
+        <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">갱신 시각</span>
+        <strong class="text-[var(--text-strong)] text-base">${generatedAt ? relativeTime(generatedAt) : '기록 없음'}</strong>
       </div>
       ${cluster && cluster !== 'unknown'
         ? html`
-            <div class="mission-context-item">
-              <span>배포 메타</span>
-              <strong>${cluster}</strong>
+            <div class="p-3 px-3.5 rounded-[14px] border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5">
+              <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">배포 메타</span>
+              <strong class="text-[var(--text-strong)] text-base">${cluster}</strong>
             </div>
           `
         : null}
@@ -59,10 +59,10 @@ export function SummaryStat({
   tone?: string | null
 }) {
   return html`
-    <article class="mission-stat-card ${toneClass(tone)}">
-      <span class="mission-stat-label">${label}</span>
-      <strong class="mission-stat-value">${value}</strong>
-      <small class="mission-stat-detail">${detail}</small>
+    <article class="mission-stat-card p-3.5 rounded-[14px] border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5 ${toneClass(tone)}">
+      <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">${label}</span>
+      <strong class="text-[var(--text-strong)] text-[26px] leading-none">${value}</strong>
+      <small class="text-[rgba(255,255,255,0.68)] leading-[1.45]">${detail}</small>
     </article>
   `
 }

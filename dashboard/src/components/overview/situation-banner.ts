@@ -117,12 +117,12 @@ export function SituationBanner({ snap, roomHealth }: SituationBannerProps) {
   return html`
     <div class="situation-banner situation-banner--${tone}">
       <${HealthBeacon} health=${roomHealth ?? tone} />
-      <span class="situation-banner__text">${text}</span>
-      <span class="situation-banner__meta">
+      <span class="flex-1 min-w-0">${text}</span>
+      <span class="inline-flex items-center shrink-0">
       </span>
     </div>
     ${showReasons ? html`
-      <details class="situation-reasons-collapse" open=${reasons.length <= 5}>
+      <details class="situation-reasons-collapse mb-2" open=${reasons.length <= 5}>
         <summary class="situation-reasons-collapse__summary">
           상세 ${reasons.length}건
         </summary>

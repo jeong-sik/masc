@@ -192,7 +192,7 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
       return html`<div class="empty-state">실시간 워룸 불러오는 중…</div>`
     }
     return html`
-      <section class="card command-section command-warroom-empty ${wallboard ? 'wallboard' : ''}">
+      <section class="card min-h-[240px] command-warroom-empty ${wallboard ? 'wallboard' : ''}">
         <div class="card-title-row">
           <div class="card-title">실시간 워룸</div>
         </div>

@@ -17,16 +17,16 @@ export function OperationCard({ brief, selected }: { brief: DashboardExecutionOp
   const terminal = isTerminalStatus(brief.status)
   return html`
     <button
-      class="mission-card-select ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
+      class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.operation-card"
       onClick=${() => {
         selectedOperationId.value = selected ? null : brief.operation_id
         selectedSessionId.value = brief.linked_session_id ?? null
       }}
     >
-      <div class="mission-card-head">
+      <div class="flex justify-between gap-2 items-start flex-wrap">
         <div>
-          <div class="mission-card-target">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
+          <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
           <div class="mission-card-title">${brief.objective}</div>
         </div>
         <span class="command-chip ${terminal ? 'muted' : toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>
@@ -49,7 +49,7 @@ export function OperationBriefsBody({ operationRows }: { operationRows: Dashboar
   const hasTerminal = terminalOps.length > 0
 
   return html`
-    <div class="monitor-section-head">
+    <div class="mb-3.5">
       <h2 class="monitor-headline">영향받는 작전</h2>
       <p class="monitor-subheadline">지휘 평면 작전의 막힘과 다음 도구만 얇게 보여주고, 자세한 근거는 원인 화면으로 넘깁니다.</p>
     </div>
@@ -60,7 +60,7 @@ export function OperationBriefsBody({ operationRows }: { operationRows: Dashboar
     </div>
     ${hasTerminal
       ? html`
-          <details class="runtime-collapsible" data-testid="execution.operations-terminal">
+          <details class="mt-1" data-testid="execution.operations-terminal">
             <summary class="runtime-summary">종료된 작전 ${terminalOps.length}건</summary>
             <div class="monitor-list">
               ${terminalOps.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)}

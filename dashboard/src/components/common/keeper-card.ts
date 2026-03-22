@@ -71,14 +71,14 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
       : 'keeper-canonical-card'
   const buttonClass =
     variant === 'mission'
-      ? 'mission-card-select'
-      : `monitor-row ${toneClass}${model.stateClass ? ` state-${model.stateClass}` : ''}`
+      ? 'w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer'
+      : `monitor-row p-3.5 ${toneClass}${model.stateClass ? ` state-${model.stateClass}` : ''}`
 
   return html`
     <article class=${wrapperClass}>
       <button class=${buttonClass} data-testid=${testId} onClick=${onClick}>
-        <div class=${variant === 'mission' ? 'mission-activity-head' : 'monitor-row-header'}>
-          <div class=${variant === 'mission' ? 'mission-activity-title' : 'monitor-row-title'}>
+        <div class=${variant === 'mission' ? 'flex justify-between gap-2.5 items-start' : 'monitor-row-header'}>
+          <div class=${variant === 'mission' ? 'flex gap-2.5 items-start' : 'min-w-0'}>
             <span class="agent-emoji">${model.emoji ?? ''}</span>
             <div>
               <div class=${variant === 'mission' ? '' : 'monitor-name-line'}>
@@ -99,7 +99,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
             : html`<span class="command-chip ${toneClass}">${model.statusLabel}</span>`}
         </div>
 
-        <div class=${variant === 'mission' ? 'mission-activity-meta' : 'monitor-meta'}>
+        <div class=${variant === 'mission' ? 'flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]' : 'monitor-meta'}>
           ${model.lastActivityAt
             ? html`<span>최근 활동 <${TimeAgo} timestamp=${model.lastActivityAt} /></span>`
             : html`<span>${model.lastActivityFallback ?? '최근 활동 없음'}</span>`}
@@ -109,7 +109,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
           <span>컨텍스트 ${formatContext(model.contextRatio)}</span>
         </div>
 
-        <div class=${variant === 'mission' ? 'mission-activity-focus' : 'monitor-focus'}>
+        <div class=${variant === 'mission' ? 'grid gap-1' : 'monitor-focus'}>
           ${variant === 'mission'
             ? html`
                 <span>무엇을</span>
@@ -119,15 +119,15 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
         </div>
 
         ${model.summary
-          ? html`<div class=${variant === 'mission' ? 'mission-inline-note' : 'monitor-footnote'}>${model.summary}</div>`
+          ? html`<div class=${variant === 'mission' ? 'grid gap-1' : 'monitor-footnote'}>${model.summary}</div>`
           : null}
       </button>
 
       ${hasDetailDisclosure
         ? html`
-            <details class="mission-card-disclosure compact">
+            <details class="pt-1 border-t border-[var(--white-6)] mt-2">
               <summary>${model.disclosureLabel ?? '세부 정보'}</summary>
-              <div class="mission-activity-foot">
+              <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
                 ${model.recentEvent ? html`<span>최근 일 · ${model.recentEvent}</span>` : null}
                 ${model.routeSummary ? html`<span>route · ${model.routeSummary}</span>` : null}
                 ${model.auditSource ? html`<span>audit · ${model.auditSource}</span>` : null}
@@ -135,12 +135,12 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
               </div>
               ${model.recentInput || model.recentOutput
                 ? html`
-                    <div class="mission-io-stack">
-                      <div class="mission-io-item">
+                    <div class="grid grid-cols-2 gap-2.5">
+                      <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
                         <span>최근 입력</span>
                         <strong>${model.recentInput ?? '표시 가능한 최근 입력이 없습니다'}</strong>
                       </div>
-                      <div class="mission-io-item">
+                      <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
                         <span>최근 응답</span>
                         <strong>${model.recentOutput ?? '표시 가능한 최근 응답이 없습니다'}</strong>
                       </div>
@@ -149,7 +149,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
                 : null}
               ${(model.recentTools?.length ?? 0) > 0 || (model.allowedTools?.length ?? 0) > 0
                 ? html`
-                    <div class="mission-activity-foot">
+                    <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
                       <span>최근 도구 · ${renderToolSummary(model.recentTools)}</span>
                       <span>허용 도구 · ${renderToolSummary(model.allowedTools)}</span>
                     </div>

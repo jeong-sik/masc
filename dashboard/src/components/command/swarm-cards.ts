@@ -7,7 +7,7 @@ import type {
   CommandPlaneSwarmTimelineEvent,
   CommandPlaneSwarmWorker,
 } from '../../types'
-import { relativeTime, toneClass } from './helpers'
+import { alertBorderTone, relativeTime, toneClass } from './helpers'
 
 export function SwarmChecklistCard({ item }: { item: CommandPlaneSwarmChecklistItem }) {
   return html`
@@ -24,7 +24,7 @@ export function SwarmChecklistCard({ item }: { item: CommandPlaneSwarmChecklistI
 
 export function SwarmBlockerCard({ blocker }: { blocker: CommandPlaneSwarmBlocker }) {
   return html`
-    <article class="command-alert ${toneClass(blocker.severity)}">
+    <article class="command-alert ${toneClass(blocker.severity)} ${alertBorderTone(toneClass(blocker.severity))}">
       <div class="command-card-head">
         <strong>${blocker.title}</strong>
         <span class="command-chip ${toneClass(blocker.severity)}">${blocker.severity}</span>
@@ -40,7 +40,7 @@ export function SwarmBlockerCard({ blocker }: { blocker: CommandPlaneSwarmBlocke
 
 export function SwarmWorkerCard({ worker }: { worker: CommandPlaneSwarmWorker }) {
   return html`
-    <article class="command-card compact">
+    <article class="command-card p-3">
       <div class="command-card-head">
         <div>
           <strong>${worker.name}</strong>
@@ -82,8 +82,8 @@ export function SwarmWorkerGrid({ total }: { total: number }) {
   const dots = Array.from({ length: present })
 
   return html`
-    <div class="swarm-worker-grid">
-      ${dots.map(() => html`<span class="swarm-worker-dot present"></span>`)}
+    <div class="swarm-worker-grid flex flex-wrap gap-[3px] items-center">
+      ${dots.map(() => html`<span class="swarm-worker-dot w-2 h-2 rounded-full present"></span>`)}
       ${overflow > 0 ? html`<span class="swarm-worker-count">+${overflow}</span>` : null}
       <span class="swarm-worker-count">(워커 ${total})</span>
     </div>
@@ -98,7 +98,7 @@ export function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEven
     <div class="swarm-event-node">
       <span class="swarm-event-dot ${toneClass(event.tone)}"></span>
       <span class="swarm-event-time">${timeStr}</span>
-      <div class="swarm-event-body">
+      <div class="swarm-event-body min-w-0 flex-1">
         <strong>${event.title}</strong>
         <span class="swarm-event-kind">${event.kind}</span>
         ${event.detail ? html`<div class="command-card-sub">${event.detail}</div>` : null}
@@ -109,7 +109,7 @@ export function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEven
 
 export function SwarmGapDot({ gap }: { gap: CommandPlaneSwarmGap }) {
   return html`
-    <div class="swarm-gap-inline">
+    <div class="swarm-gap-inline flex items-center gap-1.5">
       <span class="swarm-gap-dot"></span>
       <span class="command-chip ${toneClass(gap.severity)}">${gap.code} (${gap.count})</span>
       <span class="command-card-sub">${gap.summary}</span>

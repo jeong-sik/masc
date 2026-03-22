@@ -99,13 +99,13 @@ export function Proof() {
   )
 
   return html`
-    <section class="dashboard-panel mission-view">
+    <section class="dashboard-panel flex flex-col gap-4">
       <div class="panel-header">
         <div>
           <h2>근거</h2>
           <p>이 세션이 실제로 여러 참여자의 흔적, 상호작용, 산출물, 실행 backing을 남겼는지 읽는 표면입니다.</p>
         </div>
-        <div class="mission-header-meta">
+        <div class="flex gap-2 flex-wrap items-center">
           <span class="command-chip ${verdictTone(verdict)}">${verdictChipLabel(verdict)}</span>
           ${snapshot?.session_id ? html`<span class="command-chip">${snapshot.session_id}</span>` : null}
           ${snapshot?.generated_at ? html`<span class="command-chip">${relativeTime(snapshot.generated_at)}</span>` : null}
@@ -118,7 +118,7 @@ export function Proof() {
 
       <${SelectionCard} selection=${selection} summary=${summary ?? null} />
 
-      <div class="mission-stat-grid">
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
         <div class="summary-stat-card ${verdictTone(verdict)}">
           <span>판정</span>
           <strong>${verdictLabel(verdict)}</strong>
@@ -137,7 +137,7 @@ export function Proof() {
       </div>
       <details class="mb-3">
         <summary style="cursor: pointer; color: rgba(255,255,255,0.5); font-size: 13px; padding: 6px 0;">상세 지표 (${7}개)</summary>
-        <div class="mission-stat-grid" class="mt-2">
+        <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3" class="mt-2">
           <div class="summary-stat-card ${verdictTone(liveVerdict)}">
             <span>Live 판정</span>
             <strong>${liveVerdict}</strong>
@@ -176,13 +176,13 @@ export function Proof() {
         </div>
       </details>
 
-      <div class="mission-human-grid">
+      <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
         <${Card} title="3줄 근거 요약" class="mission-list-card">
-          <div class="mission-section-head">
+          <div class="grid gap-1 mb-3">
             <h3>핵심 증명</h3>
             <p>결론, 왜 아직 부족한지, 다음에 무엇을 남겨야 하는지만 먼저 봅니다.</p>
           </div>
-          <div class="proof-summary-stack">
+          <div class="grid gap-2.5">
             ${reasonLines.map((line, idx) => html`
               <article class="proof-summary-block ${idx === 1 && verdict !== 'proven' ? verdictTone(verdict) : ''}">
                 <strong>${idx === 0 ? '지금 결론' : idx === 1 ? '왜 이렇게 판정됐나' : '다음 보강 포인트'}</strong>
@@ -193,25 +193,25 @@ export function Proof() {
         <//>
 
         <${Card} title="증명 대상" class="mission-list-card">
-          <div class="mission-section-head">
+          <div class="grid gap-1 mb-3">
             <h3>무엇을 증명하려는가</h3>
             <p>이 화면이 어떤 세션과 목표를 기준으로 그려졌는지 먼저 고정합니다.</p>
           </div>
           <${KeyValueGrid} rows=${goalBindingRows} />
-          <details class="mission-card-disclosure compact">
+          <details class="pt-1 border-t border-[var(--white-6)] mt-2">
             <summary>원본 목표 연결 JSON</summary>
             <pre class="command-json-block">${prettyJson(snapshot?.goal_binding ?? {})}</pre>
           </details>
         <//>
       </div>
 
-      <div class="mission-human-grid">
+      <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
         <${Card} title="협업 타임라인" class="mission-list-card">
-          <div class="mission-section-head">
+          <div class="grid gap-1 mb-3">
             <h3>협업 타임라인</h3>
             <p>team-session과 command-plane에서 같은 사건이 보이면 한 줄로 묶어 읽습니다.</p>
           </div>
-          <div class="mission-list-stack">
+          <div class="flex flex-col gap-3">
             ${dedupedTimeline.length > 0
               ? dedupedTimeline.slice(0, 18).map(item => html`<${TimelineRow} key=${item.id} item=${item} />`)
               : html`<div class="empty-state">타임라인 근거가 없습니다. 에이전트 협업이 진행되면 세션과 지휘 이벤트가 여기에 나타납니다.</div>`}
@@ -219,11 +219,11 @@ export function Proof() {
         <//>
 
         <${Card} title="참여 흔적" class="mission-list-card">
-          <div class="mission-section-head">
+          <div class="grid gap-1 mb-3">
             <h3>누가 무엇을 남겼는가</h3>
             <p>실제 흔적, 호출만 된 참여자, 계획만 된 참여자를 구분해서 봅니다.</p>
           </div>
-          <div class="mission-activity-list">
+          <div class="flex flex-col gap-3">
             ${contributions.length > 0
               ? contributions.map(item => html`<${ActorContributionRow} key=${item.actor} item=${item} />`)
               : html`<div class="empty-state">참여 흔적이 없습니다. 에이전트가 작업에 참여하면 턴, 도구 호출, 산출물이 기록됩니다.</div>`}
@@ -231,13 +231,13 @@ export function Proof() {
         <//>
       </div>
 
-      <div class="mission-human-grid">
+      <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
         <${Card} title="도구 근거" class="mission-list-card">
-          <div class="mission-section-head">
+          <div class="grid gap-1 mb-3">
             <h3>어떤 도구를 언제 썼는가</h3>
             <p>숫자만 보여주지 말고, 최근 도구 호출 근거를 직접 확인합니다.</p>
           </div>
-          <div class="mission-list-stack">
+          <div class="flex flex-col gap-3">
             ${toolEvidence.length > 0
               ? toolEvidence.map((item, idx) => html`<${ToolEvidenceRow} key=${`${item.actor ?? 'system'}-${idx}`} item=${item} />`)
               : html`<div class="empty-state">도구 근거가 없습니다. 에이전트가 MCP 도구를 사용하면 호출 내역이 여기에 기록됩니다.</div>`}
@@ -245,25 +245,25 @@ export function Proof() {
         <//>
 
         <${Card} title="실행 근거" class="mission-list-card">
-          <div class="mission-section-head">
+          <div class="grid gap-1 mb-3">
             <h3>실행 backing은 얼마나 남아 있나</h3>
             <p>작전, 분견대, 트레이스 수만 먼저 보고, 원본 CPv2 dump는 접어서 봅니다.</p>
           </div>
           <${KeyValueGrid} rows=${backingSummaryRows} />
-          <details class="mission-card-disclosure compact">
+          <details class="pt-1 border-t border-[var(--white-6)] mt-2">
             <summary>원본 CPv2 backing JSON</summary>
             <pre class="command-json-block">${prettyJson(cpEvidence ?? {})}</pre>
           </details>
         <//>
       </div>
 
-      <div class="mission-human-grid">
+      <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
         <${Card} title="산출물" class="mission-list-card">
-          <div class="mission-section-head">
+          <div class="grid gap-1 mb-3">
             <h3>어떤 파일 산출물이 남았나</h3>
             <p>proof/report/session 기록 파일의 존재 여부를 빠르게 확인합니다.</p>
           </div>
-          <div class="mission-list-stack">
+          <div class="flex flex-col gap-3">
             ${artifacts.length > 0
               ? artifacts.map(item => html`<${ArtifactRow} key=${item.path} item=${item} />`)
               : html`<div class="empty-state">산출물이 없습니다. proof/report/session 파일이 생성되면 존재 여부가 표시됩니다.</div>`}

@@ -11,10 +11,6 @@
   max-width: 960px;
 }
 
-.roster-header {
-  margin-bottom: var(--space-lg, 24px);
-}
-
 .roster-title {
   font-size: 20px;
   font-weight: 600;
@@ -26,7 +22,7 @@
 
 .agent-page__subtitle {
   font-size: var(--fs-sm);
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--white-30);
   margin-top: 4px;
 }
 
@@ -42,7 +38,7 @@
   border-radius: 4px;
   border: 1px solid var(--ff-border-subtle);
   background: var(--ff-navy);
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-90);
   font-size: var(--fs-base);
   width: 200px;
   transition: border-color 0.2s;
@@ -55,12 +51,7 @@
 }
 
 .roster-search::placeholder {
-  color: rgba(255, 255, 255, 0.25);
-}
-
-.roster-filters {
-  display: flex;
-  gap: 4px;
+  color: var(--white-25);
 }
 
 .roster-filter-btn {
@@ -68,7 +59,7 @@
   border-radius: 3px;
   border: 1px solid var(--ff-border-subtle);
   background: transparent;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-45);
   font-size: var(--fs-sm);
   cursor: pointer;
   transition: all 0.15s;
@@ -77,7 +68,7 @@
 .roster-filter-btn:hover {
   background: var(--ff-gold-dim);
   color: var(--ff-gold-bright);
-  border-color: rgba(200, 168, 78, 0.35);
+  border-color: var(--color-ff-border);
 }
 
 .roster-filter-btn.active {
@@ -100,8 +91,8 @@
   display: flex;
   gap: var(--space-md, 16px);
   padding: 16px 20px;
-  background: rgba(10, 22, 40, 0.92);
-  border: 1px solid rgba(200, 168, 78, 0.35);
+  background: var(--color-ff-panel);
+  border: 1px solid var(--color-ff-border);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
@@ -184,14 +175,14 @@
 
 .roster-card__work {
   font-size: var(--fs-base);
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-55);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .roster-card__work--empty {
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--white-20);
   font-style: italic;
 }
 
@@ -199,7 +190,7 @@
   display: flex;
   gap: var(--space-sm, 8px);
   font-size: var(--fs-xs);
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--white-30);
 }
 
 .roster-card__model {
@@ -244,7 +235,7 @@
 .roster-empty {
   padding: var(--space-xl, 32px);
   text-align: center;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--white-20);
   font-size: var(--fs-md);
   border: 1px dashed var(--ff-border-subtle);
   border-radius: 6px;
@@ -317,7 +308,7 @@
 
 .roster-card__gauge-label {
   font-size: var(--fs-xs);
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-40);
   white-space: nowrap;
   min-width: 50px;
   font-variant-numeric: tabular-nums;
@@ -327,9 +318,6 @@
    Situation Reasons (WHY panel)
    ============================================ */
 
-.situation-reasons-collapse {
-  margin-bottom: var(--space-sm, 8px);
-}
 .situation-reasons-collapse__summary {
   cursor: pointer;
   font-size: var(--fs-xs);
@@ -346,7 +334,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 6px var(--space-md, 16px);
-  border-left: 2px solid rgba(200, 168, 78, 0.35);
+  border-left: 2px solid var(--color-ff-border);
 }
 
 .situation-reason {
@@ -354,7 +342,7 @@
   align-items: center;
   gap: var(--space-sm, 8px);
   font-size: var(--fs-sm);
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-55);
 }
 
 .situation-reason--bad {

@@ -122,7 +122,7 @@ export function Execution() {
       <${RoomTruthStrip} />
       <${Card}
         title="주의 항목"
-        class="section"
+        class="section mb-3.5"
        
         testId="execution.queue"
       >
@@ -138,7 +138,7 @@ export function Execution() {
       <div class="agents-workbench">
         <${Card}
           title="관련 세션"
-          class="section"
+          class="section mb-3.5"
          
           testId="execution.session-briefs"
         >
@@ -147,7 +147,7 @@ export function Execution() {
 
         <${Card}
           title="관련 작업"
-          class="section"
+          class="section mb-3.5"
          
           testId="execution.operation-briefs"
         >
@@ -156,7 +156,7 @@ export function Execution() {
 
         <${Card}
           title="참여 에이전트"
-          class="section"
+          class="section mb-3.5"
          
           testId="execution.worker-support"
         >
@@ -169,7 +169,7 @@ export function Execution() {
 
         <${Card}
           title="키퍼 연속성"
-          class="section"
+          class="section mb-3.5"
          
           testId="execution.continuity"
         >
@@ -182,7 +182,7 @@ export function Execution() {
 
         <${Card}
           title="오프라인 에이전트"
-          class="section"
+          class="section mb-3.5"
          
           testId="execution.offline-workers"
         >

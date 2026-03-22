@@ -122,7 +122,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   return html`
     <div class="roster-page agent-page">
-      <div class="roster-header">
+      <div class="roster-header mb-6">
         <h2 class="roster-title">${keeperFilter === 'keeper-only' ? '키퍼' : keeperFilter === 'agent-only' ? '에이전트' : '에이전트'} (${filtered.length})</h2>
         <p class="agent-page__subtitle">${keeperFilter === 'keeper-only' ? '키퍼 런타임이 있는 에이전트' : keeperFilter === 'agent-only' ? '키퍼 런타임이 없는 에이전트' : '등록된 에이전트 — keeper 런타임이 있으면 컨텍스트 게이지 표시'}</p>
         <div class="roster-controls">
@@ -133,7 +133,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             value=${search}
             onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
           />
-          <div class="roster-filters">
+          <div class="flex gap-1">
             ${(['all', 'active', 'idle', 'offline'] as StatusFilter[]).map(f => html`
               <button
                 key=${f}

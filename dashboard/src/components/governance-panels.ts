@@ -38,7 +38,7 @@ export function GuardrailPane({
   const order = detail?.execution_order
   return html`
     <div class="governance-side-column">
-      <${Card} title="판정 / 집행" class="section">
+      <${Card} title="판정 / 집행" class="section mb-3.5">
         ${!item || !detail
           ? html`<div class="empty-state">사건을 고르면 판정과 집행 경로가 보입니다.</div>`
           : html`
@@ -51,11 +51,11 @@ export function GuardrailPane({
                 </div>
                 ${ruling?.summary
                   ? html`<div class="governance-summary-callout">${ruling.summary}</div>`
-                  : html`<div class="governance-side-line">아직 판정이 생성되지 않았습니다.</div>`}
+                  : html`<div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">아직 판정이 생성되지 않았습니다.</div>`}
                 <div class="governance-chip-row">
                   ${item.provenance ? html`<span class="governance-chip">${item.provenance}</span>` : null}
                   ${item.risk_class ? html`<span class="governance-chip">${item.risk_class}</span>` : null}
-                  ${item.subject_type ? html`<span class="governance-chip dim">${item.subject_type}</span>` : null}
+                  ${item.subject_type ? html`<span class="governance-chip text-[#95a9cd]">${item.subject_type}</span>` : null}
                 </div>
               </div>
               <${ActionRequestCard} order=${order} />
@@ -63,8 +63,8 @@ export function GuardrailPane({
                 ? html`
                     <div class="governance-side-block">
                       <h4>관리자 승인</h4>
-                      <div class="governance-side-line">이 집행은 고위험으로 분류되어 수동 결재가 필요합니다.</div>
-                      <div class="governance-action-row">
+                      <div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">이 집행은 고위험으로 분류되어 수동 결재가 필요합니다.</div>
+                      <div class="flex gap-2">
                         <button class="control-btn secondary" onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>
                           ${governanceActing.value ? '처리 중...' : '승인'}
                         </button>
@@ -77,7 +77,7 @@ export function GuardrailPane({
                 : null}
             `}
     <//>
-      <${Card} title="심의 입력" class="section">
+      <${Card} title="심의 입력" class="section mb-3.5">
         ${!item
           ? html`<div class="empty-state">사건을 선택한 뒤 의견을 추가하세요.</div>`
           : html`
@@ -103,7 +103,7 @@ export function GuardrailPane({
                     governanceBriefInput.value = (event.target as HTMLTextAreaElement).value
                   }}
                 ></textarea>
-                <div class="governance-action-row">
+                <div class="flex gap-2">
                   <button
                     class="control-btn secondary"
                     onClick=${submitBrief}
@@ -129,11 +129,11 @@ export function ActionRequestCard({ order }: { order: GovernanceExecutionOrder |
         <span>${request.resolved_tool || request.action_kind || request.target_type || 'action'}</span>
         <span>${orderStatusLabel(order.status)}</span>
       </div>
-      ${request.target_type ? html`<div class="governance-side-line">대상 ${request.target_type}${request.target_id ? `:${request.target_id}` : ''}</div>` : null}
-      ${request.reason ? html`<div class="governance-side-line">${request.reason}</div>` : null}
+      ${request.target_type ? html`<div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">대상 ${request.target_type}${request.target_id ? `:${request.target_id}` : ''}</div>` : null}
+      ${request.reason ? html`<div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">${request.reason}</div>` : null}
       ${request.payload_preview ? html`<pre class="council-detail governance-preview">${serializePreview(request.payload_preview)}</pre>` : null}
-      ${order.execution_ref ? html`<div class="governance-side-line">결과 참조 ${order.execution_ref}</div>` : null}
-      ${order.result_summary ? html`<div class="governance-side-line">${order.result_summary}</div>` : null}
+      ${order.execution_ref ? html`<div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">결과 참조 ${order.execution_ref}</div>` : null}
+      ${order.result_summary ? html`<div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">${order.result_summary}</div>` : null}
     </div>
   `
 }

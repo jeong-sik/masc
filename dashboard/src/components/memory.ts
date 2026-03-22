@@ -263,9 +263,9 @@ function PostCard({ post }: { post: BoardPost }) {
         <button class="vote-btn downvote" onClick=${(event: Event) => handleVote('down', event)}>▼</button>
       </div>
       <div class="post-content">
-        <div class="post-head">
+        <div class="grid gap-2">
             <div class="post-title-row">
-              <div class="post-title">${post.title}</div>
+              <div class="text-[#e8f0ff]">${post.title}</div>
               <div class="post-chip-row">
                 ${isUpdated(post) ? html`<span class="board-meta-chip">수정됨</span>` : null}
                 ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip">${boardPostKind(post)}</span>` : null}
@@ -308,6 +308,7 @@ function CommentForm({ postId }: { postId: string }) {
     <div class="comment-form" class="mt-3 flex gap-2">
       <input
         type="text"
+        class="font-[inherit]"
         placeholder="댓글 추가..."
         value=${commentText.value}
         onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}
@@ -316,6 +317,7 @@ function CommentForm({ postId }: { postId: string }) {
         disabled=${commentSubmitting.value}
       />
       <button
+        class="font-[inherit]"
         onClick=${() => submitComment(postId)}
         disabled=${commentSubmitting.value || commentText.value.trim() === ''}
         style="padding:8px 16px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222,128,0.3); border-radius:8px; color:#4ade80; cursor:pointer; font-size:13px;"
@@ -344,7 +346,7 @@ function PostDetail({ post }: { post: BoardPost }) {
     <div>
       <button class="back-btn" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
       <${Card} title=${post.title}>
-        <div class="board-detail">
+        <div class="board-detail p-5">
           <div class="post-body">
             <${Markdown} text=${stripStateBlocks(post.body)} />
           </div>
@@ -431,7 +433,7 @@ export function Memory() {
         : posts.length === 0
           ? html`<div class="empty-state">아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다.</div>`
           : html`
-              <${Card} title="사람이 쓴 글" class="section">
+              <${Card} title="사람이 쓴 글" class="section mb-3.5">
                 <div class="board-post-list">
                   ${grouped.human.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                 </div>
@@ -448,7 +450,7 @@ export function Memory() {
               <//>
               ${grouped.operations.length > 0
                 ? html`
-                    <${Card} title="자동화 · 시스템" class="section">
+                    <${Card} title="자동화 · 시스템" class="section mb-3.5">
                       <div class="board-post-list">
                         ${grouped.operations.map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                       </div>

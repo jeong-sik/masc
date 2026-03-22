@@ -79,7 +79,7 @@ export function BuildIdentityBadge() {
       : '버전 정보 없음'
 
   return html`
-    <div class="build-identity-wrap">
+    <div class="relative">
       <button
         class="version-badge build-badge-trigger"
         type="button"
@@ -144,7 +144,7 @@ export function SideRail() {
                 key=${surface.id}
                 onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
               >
-                <span class="rail-tab-icon">${surface.icon}</span>
+                <span class="text-base leading-[1.2]">${surface.icon}</span>
                 <span class="rail-tab-copy">
                   <strong>${surface.label}</strong>
                   <span>${surface.description}</span>

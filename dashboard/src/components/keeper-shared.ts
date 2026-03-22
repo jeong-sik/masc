@@ -150,7 +150,7 @@ export function KeeperDiagnosticSummary({
         ${diagnostic?.next_eligible_at_s ? html` · next eligible ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
       </div>
       ${diagnostic?.last_error
-        ? html`<div class="control-status-copy control-error-copy">${diagnostic.last_error}</div>`
+        ? html`<div class="control-status-copy text-[#ffb4b4]">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus
         ? html`<pre class="keeper-status-console">${detail?.rawText ?? 'No keeper status loaded yet.'}</pre>`
@@ -202,7 +202,7 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="keeper-conversation-shell">
-      <div class="keeper-conversation-toolbar">
+      <div class="flex justify-end">
         <button
           type="button"
           class="control-btn ghost"
@@ -226,7 +226,7 @@ export function KeeperConversationPanel({
         onSend=${() => { void submit() }}
         onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
       />
-      ${error ? html`<div class="control-status-copy control-error-copy">${error}</div>` : null}
+      ${error ? html`<div class="control-status-copy text-[#ffb4b4]">${error}</div>` : null}
     </div>
   `
 }

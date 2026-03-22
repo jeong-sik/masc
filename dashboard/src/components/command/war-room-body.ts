@@ -79,7 +79,7 @@ export function WarRoomBodyGrid({
   return html`
     <div class="command-warroom-grid ${wallboard ? 'wallboard' : ''}">
       <div class="command-warroom-column">
-        <section class="card command-section">
+        <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">실행 흐름</div>
           </div>
@@ -106,14 +106,14 @@ export function WarRoomBodyGrid({
               : html`<div class="empty-state">보이는 레인이 아직 없습니다.</div>`}
         </section>
 
-        <section class="card command-section">
+        <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">오케스트레이션</div>
           </div>
           <${WarRoomOrchestrationRail} chainOverlay=${chainOverlay} linkedAutoresearch=${linkedAutoresearch} />
         </section>
 
-        <section class="card command-section">
+        <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">워커 현황</div>
           </div>
@@ -126,7 +126,7 @@ export function WarRoomBodyGrid({
       </div>
 
       <div class="command-warroom-column">
-        <section class="card command-section">
+        <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">상황 피드</div>
           </div>
@@ -137,7 +137,7 @@ export function WarRoomBodyGrid({
             : html`<div class="empty-state">메시지, chain, autoresearch, attention feed가 아직 없습니다.</div>`}
         </section>
 
-        <section class="card command-section">
+        <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">트레이스 흐름</div>
           </div>
@@ -150,7 +150,7 @@ export function WarRoomBodyGrid({
       </div>
 
       <div class="command-warroom-column">
-        <section class="card command-section">
+        <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">Agents</div>
           </div>
@@ -161,7 +161,7 @@ export function WarRoomBodyGrid({
             : html`<div class="empty-state">가시적인 active agent가 아직 없습니다.</div>`}
         </section>
 
-        <section class="card command-section">
+        <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">Keepers</div>
           </div>
@@ -172,7 +172,7 @@ export function WarRoomBodyGrid({
             : html`<div class="empty-state">가시적인 keeper/runtime 카드가 아직 없습니다.</div>`}
         </section>
 
-        <section class="card command-section">
+        <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">압력</div>
           </div>
@@ -211,7 +211,7 @@ export function WarRoomBodyGrid({
               : null}
             ${activeLane
               ? html`
-                  <article class="command-card compact">
+                  <article class="command-card p-3">
                     <div class="command-card-head">
                       <div>
                         <strong>${activeLane.label}</strong>
@@ -230,7 +230,7 @@ export function WarRoomBodyGrid({
               : null}
             ${swarmHasEvidence && swarm?.detachment
               ? html`
-                  <article class="command-card compact">
+                  <article class="command-card p-3">
                     <div class="command-card-head">
                       <div>
                         <strong>${swarm.detachment.detachment_id}</strong>
@@ -248,7 +248,7 @@ export function WarRoomBodyGrid({
                 `
               : selectedSession
                 ? html`
-                    <article class="command-card compact">
+                    <article class="command-card p-3">
                       <div class="command-card-head">
                         <div>
                           <strong>${selectedSession.session_id}</strong>

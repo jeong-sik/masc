@@ -18,7 +18,7 @@
   max-height: 90vh;
   overflow-y: auto;
   border-radius: 14px;
-  border: 1px solid rgba(138, 163, 211, 0.3);
+  border: 1px solid var(--border-slate-30);
   background: rgba(16, 25, 45, 0.95);
   padding: 18px;
 }
@@ -43,11 +43,6 @@
   flex-wrap: wrap;
   color: #9ab3de;
   font-size: var(--fs-sm);
-}
-
-.agent-detail-actions {
-  display: flex;
-  gap: 8px;
 }
 
 .agent-detail-grid {
@@ -106,12 +101,8 @@
 .agent-history-row {
   border: 1px solid var(--card-border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
   padding: 10px;
-}
-
-.agent-history-head {
-  margin-bottom: 8px;
 }
 
 .agent-history-pre {
@@ -156,10 +147,10 @@
       rgba(10, 22, 40, 0.95) 0%,
       rgba(16, 28, 52, 0.88) 100%
     );
-  border: 1px solid rgba(200, 168, 78, 0.15);
+  border: 1px solid var(--ff-gold-15);
   box-shadow:
     0 0 20px rgba(200, 168, 78, 0.04),
-    inset 0 1px 0 rgba(200, 168, 78, 0.08);
+    inset 0 1px 0 var(--ff-gold-8);
 }
 
 .ff-plate__portrait {
@@ -167,15 +158,6 @@
   flex-direction: column;
   align-items: center;
   gap: 6px;
-}
-
-.ff-plate__class-tag {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: var(--ff-gold);
-  text-transform: uppercase;
-  text-align: center;
 }
 
 .ff-plate__info {
@@ -201,20 +183,11 @@
   gap: 6px;
 }
 
-.ff-plate__emoji {
-  font-size: 1.4em;
-}
-
-.ff-plate__sub {
-  font-size: var(--fs-base);
-  color: var(--text-muted);
-}
-
 .ff-plate__level {
   font-size: var(--fs-md);
   font-weight: 700;
   color: var(--accent);
-  background: rgba(71, 184, 255, 0.1);
+  background: var(--accent-10);
   border: 1px solid rgba(71, 184, 255, 0.25);
   border-radius: 4px;
   padding: 1px 6px;
@@ -232,7 +205,7 @@
   font-family: "IBM Plex Mono", monospace;
   font-size: var(--fs-xs);
   color: var(--text-muted);
-  background: rgba(71, 184, 255, 0.08);
+  background: var(--accent-8);
   border: 1px solid rgba(71, 184, 255, 0.15);
   border-radius: 4px;
   padding: 1px 5px;
@@ -241,8 +214,8 @@
 .ff-plate__autonomy {
   font-size: var(--fs-xs);
   color: var(--ff-gold);
-  background: rgba(200, 168, 78, 0.1);
-  border: 1px solid rgba(200, 168, 78, 0.2);
+  background: var(--ff-gold-10);
+  border: 1px solid var(--ff-gold-20);
   border-radius: 4px;
   padding: 1px 5px;
 }
@@ -257,14 +230,14 @@
 
 .ff-plate__signal--live {
   color: var(--ok);
-  background: rgba(74, 222, 128, 0.1);
-  border: 1px solid rgba(74, 222, 128, 0.2);
+  background: var(--ok-10);
+  border: 1px solid var(--ok-20);
 }
 
 .ff-plate__signal--stale {
   color: var(--ff-gold);
-  background: rgba(200, 168, 78, 0.1);
-  border: 1px solid rgba(200, 168, 78, 0.2);
+  background: var(--ff-gold-10);
+  border: 1px solid var(--ff-gold-20);
 }
 
 .ff-plate__signal--archived {
@@ -305,11 +278,6 @@
   flex-wrap: wrap;
 }
 
-.ff-plate__work {
-  font-size: var(--fs-base);
-  color: #c8daf7;
-}
-
 .ff-plate__work--idle {
   color: #6b7fa0;
   font-style: italic;
@@ -318,14 +286,9 @@
 .ff-plate__worker-state {
   font-size: var(--fs-xs);
   color: var(--accent);
-  background: rgba(71, 184, 255, 0.08);
+  background: var(--accent-8);
   padding: 1px 5px;
   border-radius: 3px;
-}
-
-.ff-plate__worker-focus {
-  font-size: var(--fs-xs);
-  color: #9ab3de;
 }
 
 .ff-plate__meta-line {
@@ -352,7 +315,7 @@
   padding: 6px 8px;
   border-radius: 6px;
   background: rgba(200, 168, 78, 0.05);
-  border: 1px solid rgba(200, 168, 78, 0.1);
+  border: 1px solid var(--ff-gold-10);
 }
 
 .ff-stat__value {
@@ -362,12 +325,6 @@
   color: var(--text-strong);
 }
 
-.ff-stat__label {
-  font-size: var(--fs-2xs);
-  color: var(--ff-gold);
-  letter-spacing: 0.5px;
-}
-
 /* --- Grid and Cards --- */
 
 .ff-profile__grid {
@@ -375,10 +332,6 @@
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   margin-bottom: 14px;
-}
-
-.ff-card--wide {
-  grid-column: 1 / -1;
 }
 
 /* Timeline events - compact FF style */
@@ -403,7 +356,7 @@
   padding: 10px 14px;
   border-radius: 8px;
   background: rgba(10, 22, 40, 0.8);
-  border: 1px solid rgba(200, 168, 78, 0.15);
+  border: 1px solid var(--ff-gold-15);
 
   & .control-input {
     flex: 1;
@@ -458,26 +411,14 @@
 }
 
 .ff-relation-count {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-50);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
-.ff-relation-time {
-  color: rgba(255, 255, 255, 0.35);
-  font-size: var(--fs-xs);
-}
-
 .ff-interests {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--white-6);
   padding-top: 8px;
-}
-
-.ff-interests-label {
-  font-size: var(--fs-xs);
-  color: rgba(255, 255, 255, 0.4);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
 .ff-interests-tags {
@@ -489,7 +430,7 @@
 
 .ff-interest-tag {
   background: rgba(255, 215, 0, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-70);
   padding: 2px 8px;
   border-radius: 3px;
   font-size: var(--fs-xs);

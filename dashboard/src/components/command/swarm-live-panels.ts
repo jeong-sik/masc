@@ -35,7 +35,7 @@ export function SwarmLivePanels() {
 
   return html`
     <div class="command-surface-grid">
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">스웜 라이브 런</div>
         </div>
@@ -81,7 +81,7 @@ export function SwarmLivePanels() {
               : html`<div class="empty-state">스웜 read-model이 아직 없습니다.</div>`}
       </section>
 
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">체크리스트</div>
         </div>
@@ -92,7 +92,7 @@ export function SwarmLivePanels() {
           : html`<div class="empty-state">체크리스트가 아직 없습니다.</div>`}
       </section>
 
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">워커</div>
         </div>
@@ -103,7 +103,7 @@ export function SwarmLivePanels() {
           : html`<div class="empty-state">워커 행이 아직 없습니다.</div>`}
       </section>
 
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">런타임</div>
         </div>
@@ -148,7 +148,7 @@ export function SwarmLivePanels() {
           : html`<div class="empty-state">런타임 telemetry가 아직 없습니다.</div>`}
       </section>
 
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">막힘 요인</div>
         </div>
@@ -159,7 +159,7 @@ export function SwarmLivePanels() {
           : html`<div class="empty-state">막힘 요인은 없습니다. 다음 액션은 ${swarm?.recommended_next_tool ?? 'masc_observe_traces'} 입니다.</div>`}
       </section>
 
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">최근 메시지</div>
         </div>
@@ -181,7 +181,7 @@ export function SwarmLivePanels() {
           : html`<div class="empty-state">run 범위 메시지가 아직 없습니다.</div>`}
       </section>
 
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">최근 트레이스 이벤트</div>
         </div>

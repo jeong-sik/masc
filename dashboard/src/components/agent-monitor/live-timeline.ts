@@ -140,7 +140,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
         </div>
         <div class="agent-live-meta">
           <span class="agent-event-rate">${eventsPerMin}/min</span>
-          <span class="agent-live-count">${filtered.length} events</span>
+          <span class="text-text-muted">${filtered.length} events</span>
           <button
             class="agent-live-autoscroll ${autoScroll.value ? 'agent-live-autoscroll--on' : ''}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}

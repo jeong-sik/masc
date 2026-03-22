@@ -125,9 +125,9 @@ export function OpsSessionColumn() {
       class="ops-entity-card ${selectedSession?.session_id === session.session_id ? 'active' : ''}"
       onClick=${() => { selectedSessionId.value = session.session_id }}
     >
-      <div class="ops-entity-title-row">
+      <div class="flex justify-between items-center gap-2.5 max-[880px]:flex-col max-[880px]:items-start">
         <strong>${session.session_id}</strong>
-        <span class="status-badge ${session.status ?? 'idle'}">${displayStatus(session.status)}</span>
+        <span class="border border-solid border-[var(--card-border)] ${session.status ?? 'idle'} ${session.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(session.status)}</span>
       </div>
       <div class="ops-entity-meta">
         <span>${Math.round(session.progress_pct ?? 0)}%</span>
@@ -138,19 +138,19 @@ export function OpsSessionColumn() {
   `
 
   return html`
-    <div class="ops-column">
-      <section class="card ops-panel ops-lane-panel">
+    <div class="flex flex-col gap-4 min-w-0">
+      <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">Session 개입</div>
         </div>
-        <p class="ops-context-note">지금 개입 가능한 세션만 위에 두고, 종료된 세션은 아래에 접어 둡니다.</p>
+        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">지금 개입 가능한 세션만 위에 두고, 종료된 세션은 아래에 접어 둡니다.</p>
 
-        <div class="ops-entity-section">
-          <div class="ops-entity-section-head">
-            <strong>개입 가능한 세션</strong>
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
+            <strong>${'개입 가능한 세션'}</strong>
             <span>${liveSessions.length}</span>
           </div>
-          <div class="ops-entity-list">
+          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
             ${liveSessions.length === 0
               ? html`<div class="ops-empty">지금 바로 개입할 live team session이 없습니다.</div>`
               : liveSessions.map(session => renderSessionCard(session))}
@@ -159,37 +159,37 @@ export function OpsSessionColumn() {
 
         ${archivedSessions.length > 0 ? html`
           <details class="ops-archive-panel">
-            <summary class="ops-archive-summary">최근 종료 세션 ${archivedSessions.length}</summary>
-            <p class="ops-context-note">완료/중단된 세션은 읽기 전용 참고용입니다. 새 노트, 작업, 중지는 위 live 세션에만 적용하세요.</p>
-            <div class="ops-entity-list">
+            <summary class="cursor-pointer text-text-muted text-[var(--fs-sm)] list-none">최근 종료 세션 ${archivedSessions.length}</summary>
+            <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">완료/중단된 세션은 읽기 전용 참고용입니다. 새 노트, 작업, 중지는 위 live 세션에만 적용하세요.</p>
+            <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
               ${archivedSessions.slice(0, 8).map(session => renderSessionCard(session, true))}
             </div>
           </details>
         ` : null}
       </section>
 
-      <section class="card ops-panel">
+      <section class="card flex flex-col gap-3 min-h-0">
         <div class="card-title-row">
           <div class="card-title">선택한 Session 요약</div>
         </div>
-        <p class="ops-context-note">snapshot이 아니라 digest 기준 attention과 worker 카드를 보여줍니다.</p>
+        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">snapshot이 아니라 digest 기준 attention과 worker 카드를 보여줍니다.</p>
         ${selectedSession && sessionDigest ? html`
           <article class="ops-guidance-card ${guidanceLayerTone(guidanceLayer)}">
-            <div class="ops-guidance-head">
+            <div class="flex flex-wrap gap-2 text-text-muted text-[var(--fs-xs)]">
               <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
               <span>${runtimeJudgeLabel(residentRuntime)}</span>
             </div>
-            <div class="ops-guidance-body">
+            <div class="text-text-strong leading-[1.5]">
               ${activeSummary?.summary ?? '현재 이 session에 대한 resident guidance가 없습니다. fallback digest를 표시합니다.'}
             </div>
-            <div class="ops-guidance-meta">
+            <div class="flex flex-wrap gap-2 text-text-muted text-[var(--fs-xs)]">
               <span>authoritative ${sessionDigest.authoritative_judgment_available ? 'yes' : 'no'}</span>
               <span>${guidanceFreshnessLabel(activeSummary)}</span>
               ${residentRuntime?.model_used ? html`<span>${residentRuntime.model_used}</span>` : null}
             </div>
           </article>
           ${activeRecommendedActions.length > 0 ? html`
-            <div class="ops-log-list">
+            <div class="flex flex-col gap-2">
               ${activeRecommendedActions.map(item => html`
                 <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'session'}`} class="ops-log-entry ${item.severity}">
                   <div class="ops-log-head">
@@ -201,7 +201,7 @@ export function OpsSessionColumn() {
               `)}
             </div>
           ` : null}
-          <div class="ops-log-list">
+          <div class="flex flex-col gap-2">
             ${sessionDigest.attention_items.length > 0 ? sessionDigest.attention_items.map(item => html`
               <article key=${`${item.kind}:${item.target_id ?? 'session'}`} class="ops-log-entry ${item.severity}">
                 <div class="ops-log-head">
@@ -229,17 +229,17 @@ export function OpsSessionColumn() {
         `}
       </section>
 
-      <section class="card ops-panel ops-lane-panel">
+      <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">선택한 Session 액션</div>
         </div>
-        <p class="ops-context-note">
+        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">
           ${selectedSessionActionable
             ? '선택한 live 세션에만 메모, 작업, 체크포인트, 중지 요청을 보냅니다.'
             : '종료된 세션은 여기서 읽기만 하고, 실제 개입은 위 live 세션을 다시 골라서 진행합니다.'}
         </p>
         ${availableSessionActions.length > 0 ? html`
-          <div class="ops-log-list">
+          <div class="flex flex-col gap-2">
             ${availableSessionActions.map(action => html`
               <article key=${action.action_type} class="ops-log-entry">
                 <div class="ops-log-head">
@@ -253,7 +253,7 @@ export function OpsSessionColumn() {
         ` : null}
 
         ${selectedSession ? html`
-          <div class="ops-detail-card">
+          <div class="flex flex-col gap-2">
             <div class="ops-detail-title">${selectedSession.session_id}</div>
             <div class="ops-detail-meta">
               <span>상태: ${displayStatus(selectedSession.status)}</span>
@@ -277,13 +277,13 @@ export function OpsSessionColumn() {
                   : null}
               </div>
               ${selectedSession.linked_autoresearch.program_note
-                ? html`<div class="ops-context-note">Program note: ${selectedSession.linked_autoresearch.program_note}</div>`
+                ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">Program note: ${selectedSession.linked_autoresearch.program_note}</div>`
                 : null}
               ${selectedSession.linked_autoresearch.queued_hypothesis
-                ? html`<div class="ops-context-note">Queued hypothesis: ${selectedSession.linked_autoresearch.queued_hypothesis}</div>`
+                ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">Queued hypothesis: ${selectedSession.linked_autoresearch.queued_hypothesis}</div>`
                 : null}
               ${selectedSession.linked_autoresearch.warnings && selectedSession.linked_autoresearch.warnings.length > 0
-                ? html`<div class="ops-context-note">Warnings: ${selectedSession.linked_autoresearch.warnings.join(', ')}</div>`
+                ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">Warnings: ${selectedSession.linked_autoresearch.warnings.join(', ')}</div>`
                 : null}
               ${selectedSession.linked_autoresearch.error
                 ? html`<div class="ops-empty">${selectedSession.linked_autoresearch.error}</div>`
@@ -301,7 +301,7 @@ export function OpsSessionColumn() {
 
         ${linkedAutoresearch?.loop_id ? html`
           <label class="control-label" for="ops-autoresearch-hypothesis">Autoresearch 제어</label>
-          <div class="control-row ops-split-row">
+          <div class="control-row items-stretch">
             <button class="control-btn ghost" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
               상태 새로고침
             </button>
@@ -321,20 +321,20 @@ export function OpsSessionColumn() {
             onInput=${(event: Event) => { autoresearchHypothesis.value = (event.target as HTMLTextAreaElement).value }}
             disabled=${busy}
           ></textarea>
-          <div class="control-row ops-split-row">
+          <div class="control-row items-stretch">
             <button class="control-btn" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
               hypothesis 주입
             </button>
-            <span class="ops-context-note">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
+            <span class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
           </div>
           ${autoresearchError.value ? html`<div class="ops-empty">${autoresearchError.value}</div>` : null}
         ` : null}
 
         <label class="control-label" for="ops-turn-kind">세션 액션</label>
-        <div class="control-row ops-split-row">
+        <div class="control-row items-stretch">
           <select
             id="ops-turn-kind"
-            class="control-input ops-select"
+            class="control-input min-w-[92px]"
             value=${teamTurnKind.value}
             onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
             disabled=${busy || !selectedSessionActionable}
@@ -348,7 +348,7 @@ export function OpsSessionColumn() {
             적용
           </button>
         </div>
-        <div class="ops-context-note">현재 선택: ${sessionActionLabel(teamTurnKind.value)}</div>
+        <div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">현재 선택: ${sessionActionLabel(teamTurnKind.value)}</div>
 
         <textarea
           class="control-textarea"
@@ -377,7 +377,7 @@ export function OpsSessionColumn() {
             disabled=${busy || !selectedSessionActionable}
           ></textarea>
           <select
-            class="control-input ops-select"
+            class="control-input min-w-[92px]"
             value=${teamTaskPriority.value}
             onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
             disabled=${busy || !selectedSessionActionable}
@@ -399,7 +399,7 @@ export function OpsSessionColumn() {
           ></textarea>
         ` : null}
 
-        <div class="control-row ops-split-row">
+        <div class="control-row items-stretch">
           <input
             class="control-input"
             type="text"

@@ -82,7 +82,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
   if (raw.length === 0) {
     return html`
       <div class="narrative-timeline">
-        <div class="narrative-timeline__empty">이벤트 대기 중...</div>
+        <div class="text-text-muted text-center p-3 text-sm">이벤트 대기 중...</div>
       </div>
     `
   }
@@ -94,13 +94,13 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
   return html`
     <div class="narrative-timeline">
       ${groups.map(group => html`
-        <div class="narrative-group" key=${group.label}>
+        <div class="flex flex-col gap-1" key=${group.label}>
           <div class="narrative-group__label">${group.label}</div>
-          <div class="narrative-group__events">
+          <div class="flex flex-col gap-0.5">
             ${group.events.map(event => html`
-              <div class="narrative-event" key=${event.timestamp}>
-                <span class="narrative-event__text">${event.text}</span>
-                <details class="narrative-event__raw">
+              <div class="py-1" key=${event.timestamp}>
+                <span class="text-text-body text-sm leading-[1.45]">${event.text}</span>
+                <details class="narrative-event__raw mt-0.5">
                   <summary>원본</summary>
                   <span>${event.raw}</span>
                 </details>

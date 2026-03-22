@@ -69,7 +69,7 @@ export function AgentsUnified() {
 
   return html`
     <div class="agents-unified">
-      <div class="agents-chip-bar">
+      <div class="flex gap-1.5">
         ${CHIPS.map(c => html`
           <button
             key=${c.id}

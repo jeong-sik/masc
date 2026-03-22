@@ -26,8 +26,8 @@ function healthLabel(health: string | null | undefined): string {
 export function HealthBeacon({ health, label }: HealthBeaconProps) {
   const cls = healthClass(health)
   return html`
-    <div class="health-beacon ${cls}">
-      <span class="health-beacon__dot" />
+    <div class="health-beacon inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-medium ${cls}">
+      <span class="health-beacon__dot w-2 h-2 rounded-full shrink-0" />
       <span>${label ?? healthLabel(health)}</span>
     </div>
   `

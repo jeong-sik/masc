@@ -73,28 +73,28 @@ export function AttentionSpotlight({ snap }: AttentionSpotlightProps) {
   if (items.length === 0) return null
 
   return html`
-    <div class="attention-spotlight">
-      <div class="home-section-header">
+    <div class="flex flex-col gap-1">
+      <div class="flex items-start justify-between mb-1 gap-3">
         <div>
-          <span class="home-section-label">주의 항목</span>
-          <div class="home-section-copy">지금 바로 확인할 blocker와 attention 신호만 상단에 압축합니다.</div>
+          <span class="text-text-muted text-xs tracking-[0.06em] uppercase">주의 항목</span>
+          <div class="mt-[3px] text-text-muted text-sm leading-[1.45]">지금 바로 확인할 blocker와 attention 신호만 상단에 압축합니다.</div>
         </div>
-        <div class="home-section-actions">
+        <div class="inline-flex items-center gap-2 flex-wrap justify-end">
         </div>
       </div>
       ${items.map(item => html`
         <div class="attention-spotlight__card ${toneClass(item.severity)}" key=${item.id}>
-          <div class="attention-spotlight__bar" />
-          <div class="attention-spotlight__body">
-            <span class="attention-spotlight__summary">
+          <div class="w-1 shrink-0 attention-spotlight__bar" />
+          <div class="grid gap-1.5 p-[10px_14px] min-w-0">
+            <span class="text-text-strong text-base font-medium leading-[1.4]">
               ${trimText(item.summary, 100)}
             </span>
-            <div class="attention-spotlight__meta">
+            <div class="flex gap-1.5 flex-wrap items-center">
               ${item.relatedNames.map(name => html`
                 <span class="attention-spotlight__chip" key=${name}>${name}</span>
               `)}
               ${item.lastSeen ? html`
-                <span class="attention-spotlight__time">${relativeTime(item.lastSeen)}</span>
+                <span class="text-text-muted text-xs">${relativeTime(item.lastSeen)}</span>
               ` : null}
             </div>
           </div>

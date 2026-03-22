@@ -44,14 +44,14 @@ export function OpsKeeperColumn() {
   const selectedKeeper = keepers.find(keeper => keeper.name === selectedKeeperName.value) ?? keepers[0] ?? null
 
   return html`
-    <div class="ops-column">
-      <section class="card ops-panel ops-lane-panel ops-keeper-section">
+    <div class="flex flex-col gap-4 min-w-0">
+      <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel ops-keeper-section">
         <div class="card-title-row">
           <div class="card-title">Keeper 개입</div>
         </div>
-        <p class="ops-context-note">장기 실행 중인 keeper를 고르고 바로 probe나 방향 수정 메시지를 보냅니다.</p>
+        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">장기 실행 중인 keeper를 고르고 바로 probe나 방향 수정 메시지를 보냅니다.</p>
 
-        <div class="ops-entity-list">
+        <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
           ${keepers.length === 0 ? html`<div class="ops-empty">지금 보이는 keeper가 없습니다.</div>` : keepers.map(keeper => html`
             ${(() => {
               const tone = keeperPriorityTone(keeper)
@@ -62,9 +62,9 @@ export function OpsKeeperColumn() {
               class="ops-entity-card ${selectedKeeper?.name === keeper.name ? 'active' : ''}"
               onClick=${() => { selectedKeeperName.value = keeper.name }}
             >
-              <div class="ops-entity-title-row">
+              <div class="flex justify-between items-center gap-2.5 max-[880px]:flex-col max-[880px]:items-start">
                 <strong>${keeper.name}</strong>
-                <span class="status-badge ${keeper.status ?? 'idle'}">${displayStatus(keeper.status)}</span>
+                <span class="border border-solid border-[var(--card-border)] ${keeper.status ?? 'idle'} ${keeper.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(keeper.status)}</span>
                 <span
                   class="ops-detail-link"
                   title="키퍼 상세 보기"
@@ -81,9 +81,9 @@ export function OpsKeeperColumn() {
                 <div class="ops-entity-goal" title=${keeper.goal ?? ''}>${truncateGoal(keeper.short_goal ?? keeper.goal ?? '')}</div>
               ` : null}
               ${tone !== 'ok'
-                ? html`<div class="ops-context-note" class="mt-1.5">점검 이유: ${prioritySummary}</div>`
+                ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45] mt-1.5">점검 이유: ${prioritySummary}</div>`
                 : null}
-              <div class="ops-entity-stats">
+              <div class="flex gap-2 text-[var(--fs-2xs)] text-text-muted mt-0.5">
                 ${typeof keeper.turn_count === 'number' ? html`<span>turns: ${keeper.turn_count}</span>` : null}
                 ${typeof keeper.autonomous_action_count === 'number' ? html`<span>actions: ${keeper.autonomous_action_count}</span>` : null}
                 ${keeper.keepalive_running ? html`<span class="keepalive-active">keepalive</span>` : null}
@@ -93,15 +93,15 @@ export function OpsKeeperColumn() {
             })()}
           `)}
         </div>
-        <div class="ops-context-note" class="mt-3">Persistent agent는 resident keeper와 분리해서 참고용으로만 보여줍니다.</div>
-        <div class="ops-entity-list">
+        <div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45] mt-3">Persistent agent는 resident keeper와 분리해서 참고용으로만 보여줍니다.</div>
+        <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
           ${persistentAgents.length === 0
             ? html`<div class="ops-empty">분리된 persistent agent는 없습니다.</div>`
             : persistentAgents.map(agent => html`
                 <article key=${agent.name} class="ops-entity-card">
-                  <div class="ops-entity-title-row">
+                  <div class="flex justify-between items-center gap-2.5 max-[880px]:flex-col max-[880px]:items-start">
                     <strong>${agent.name}</strong>
-                    <span class="status-badge ${agent.status ?? 'idle'}">${displayStatus(agent.status)}</span>
+                    <span class="border border-solid border-[var(--card-border)] ${agent.status ?? 'idle'} ${agent.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(agent.status)}</span>
                   </div>
                   <div class="ops-entity-meta">
                     <span>persistent</span>
@@ -113,14 +113,14 @@ export function OpsKeeperColumn() {
         </div>
       </section>
 
-      <section class="card ops-panel ops-lane-panel">
+      <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">선택한 Keeper 액션</div>
         </div>
-        <p class="ops-context-note">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
+        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
 
         ${selectedKeeper ? html`
-          <div class="ops-detail-card">
+          <div class="flex flex-col gap-2">
             <div class="ops-detail-title">${selectedKeeper.name}</div>
             <div class="ops-detail-meta">
               <span>자율성: ${selectedKeeper.autonomy_level ?? '확인 없음'}</span>
@@ -130,7 +130,7 @@ export function OpsKeeperColumn() {
               ${selectedKeeper.last_model_used ? html`<span>모델: ${selectedKeeper.last_model_used}</span>` : null}
             </div>
             ${keeperPriorityTone(selectedKeeper) !== 'ok'
-              ? html`<div class="ops-context-note" class="mt-2">현재 점검 이유: ${keeperPrioritySummary(selectedKeeper)}</div>`
+              ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45] mt-2">현재 점검 이유: ${keeperPrioritySummary(selectedKeeper)}</div>`
               : null}
             ${selectedKeeper.goal ? html`<div class="ops-detail-goal">${selectedKeeper.goal}</div>` : null}
           </div>
@@ -141,7 +141,7 @@ export function OpsKeeperColumn() {
         ` : html`<div class="ops-empty">먼저 keeper를 하나 고르세요.</div>`}
       </section>
 
-      <section class="card ops-panel">
+      <section class="card flex flex-col gap-3 min-h-0">
         <div class="card-title-row">
           <div class="card-title">액션</div>
           <span style="font-size:0.75rem;opacity:0.5">${availableActions.length}개</span>
@@ -170,11 +170,11 @@ export function OpsKeeperColumn() {
           : html`<div class="ops-empty">액션 없음</div>`}
       </section>
 
-      <section class="card ops-panel">
+      <section class="card flex flex-col gap-3 min-h-0">
         <div class="card-title-row">
           <div class="card-title">최근 개입 로그</div>
         </div>
-        <div class="ops-log-list">
+        <div class="flex flex-col gap-2">
           ${operatorActionLog.value.length === 0 ? html`
             <div class="ops-empty">이 세션에서 실행한 개입이 아직 없습니다.</div>
           ` : operatorActionLog.value.map(entry => html`

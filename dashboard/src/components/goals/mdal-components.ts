@@ -15,7 +15,7 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
 
   return html`
     <div class="planning-loop-row">
-      <div class="planning-loop-main">
+      <div class="grid gap-2.5">
         <div class="planning-loop-head">
           <div>
             <div class="planning-loop-id">${loop.profile}</div>
@@ -30,7 +30,7 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
         <div class="planning-loop-metrics">
           <span>Baseline ${formatMetric(loop.baseline_metric)}</span>
           <span>현재 ${formatMetric(loop.current_metric)}</span>
-          <span class=${formatMetricDelta(loop).startsWith('+') ? 'planning-loop-good' : 'planning-loop-bad'}>
+          <span class=${formatMetricDelta(loop).startsWith('+') ? 'text-[#9af3ba]' : 'text-[#fda4af]'}>
             Delta ${formatMetricDelta(loop)}
           </span>
           <span>Elapsed ${formatElapsedCompact(loop.elapsed_seconds)}</span>

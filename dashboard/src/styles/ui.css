@@ -62,7 +62,7 @@
   margin: 0;
   padding: 8px;
   border-radius: 12px;
-  border: 1px solid rgba(138, 163, 211, 0.22);
+  border: 1px solid var(--border-slate-22);
   background: rgba(17, 26, 46, 0.8);
   backdrop-filter: blur(8px);
 }
@@ -70,12 +70,12 @@
 .main-tab-btn {
   border: 1px solid transparent;
   color: #99aed8;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
   font-weight: 500;
 
   &:hover {
     color: #d6e5ff;
-    border-color: rgba(138, 163, 211, 0.35);
+    border-color: var(--border-slate-35);
   }
 
   &.active {
@@ -122,8 +122,6 @@ button.agent-card {
   }
 }
 
-button.agent:hover,
-/* Agents */
 .room-truth-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -134,7 +132,7 @@ button.agent:hover,
 .room-truth-strip-loading,
 .room-truth-strip-error {
   border-radius: 14px;
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--border-slate-18);
   background: rgba(19, 29, 51, 0.72);
   padding: 12px 14px;
   color: #9db4de;
@@ -147,7 +145,7 @@ button.agent:hover,
 
 .room-truth-card {
   border-radius: 14px;
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--border-slate-18);
   background:
     linear-gradient(180deg, rgba(40, 56, 92, 0.34), rgba(19, 29, 51, 0.9)),
     var(--card);
@@ -205,10 +203,6 @@ button.agent:hover,
   color: var(--text-muted);
 }
 
-.monitor-section-head {
-  margin-bottom: 14px;
-}
-
 .monitor-headline {
   margin: 0;
   font-size: 18px;
@@ -232,7 +226,7 @@ button.agent:hover,
 button.monitor-alert,
 button.monitor-row {
   width: 100%;
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--border-slate-18);
   background: var(--white-4);
   color: inherit;
   font: inherit;
@@ -243,16 +237,16 @@ button.monitor-row {
 
   &:hover {
     transform: translateY(-1px);
-    border-color: rgba(138, 163, 211, 0.35);
+    border-color: var(--border-slate-35);
     background: var(--white-6);
   }
 
   &.ok {
-    border-color: rgba(74, 222, 128, 0.18);
+    border-color: var(--ok-18);
   }
 
   &.warn {
-    border-color: rgba(251, 191, 36, 0.28);
+    border-color: var(--warn-28);
   }
 
   &.bad {
@@ -272,19 +266,11 @@ button.monitor-alert.bad,
   padding: 12px 14px;
 }
 
-.monitor-row {
-  padding: 14px;
-}
-
 .monitor-row-header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 10px;
-}
-
-.monitor-row-title {
-  min-width: 0;
 }
 
 .monitor-name-line {
@@ -342,21 +328,21 @@ button.monitor-alert.bad,
   padding: 2px 8px;
   border-radius: 999px;
 }
-.status-badge.active { background: rgba(74,222,128,0.15); color: var(--ok); }
-.status-badge.busy { background: rgba(251,191,36,0.15); color: var(--warn); }
+.status-badge.active { background: var(--ok-soft); color: var(--ok); }
+.status-badge.busy { background: var(--warn-15); color: var(--warn); }
 .status-badge.listening { background: rgba(56,189,248,0.15); color: #38bdf8; }
 .status-badge.idle { background: rgba(136,136,136,0.15); color: var(--text-dim); }
 .status-badge.offline { background: rgba(85,85,85,0.15); color: #555; }
 .status-badge.todo { background: rgba(136,136,136,0.15); color: var(--text-dim); }
 .status-badge.in-progress, .status-badge.in_progress {
-  background: rgba(251,191,36,0.15); color: var(--warn);
+  background: var(--warn-15); color: var(--warn);
 }
 .status-badge.done, .status-badge.completed {
-  background: rgba(74,222,128,0.15); color: var(--ok);
+  background: var(--ok-soft); color: var(--ok);
 }
-.status-badge.running { background: rgba(251,191,36,0.15); color: var(--warn); }
+.status-badge.running { background: var(--warn-15); color: var(--warn); }
 .status-badge.interrupted { background: rgba(56,189,248,0.15); color: #38bdf8; }
-.status-badge.stopped { background: rgba(148,163,184,0.15); color: var(--text-slate); }
+.status-badge.stopped { background: var(--slate-gray-15); color: var(--text-slate); }
 .status-badge.error { background: rgba(251,113,133,0.15); color: #fb7185; }
 
 /* ── Card (generic wrapper) ────────────────────────────────── */

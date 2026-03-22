@@ -77,8 +77,6 @@
   --warm-lavender: #b8a4d6;
   --warm-sage: #8dbd97;
 
-  /* FF Character Sheet theme */
-
   /* Agent status (soft tones) */
   --agent-working: #7ae09a;
   --agent-idle: #b8cae8;
@@ -90,12 +88,122 @@
   --warn-bright: #f97316;
 
   /* White overlay (glass morphism tints) */
-  --white-3: rgba(255, 255, 255, 0.03);
-  --white-4: rgba(255, 255, 255, 0.04);
-  --white-5: rgba(255, 255, 255, 0.05);
-  --white-6: rgba(255, 255, 255, 0.06);
-  --white-8: rgba(255, 255, 255, 0.08);
-  --white-10: rgba(255, 255, 255, 0.1);
+  --white-2: var(--white-2);
+  --white-3: var(--white-3);
+  --white-3h: var(--white-3h);
+  --white-4: var(--white-4);
+  --white-5: var(--white-5);
+  --white-6: var(--white-6);
+  --white-8: var(--white-8);
+  --white-10: var(--white-10);
+  --white-12: var(--white-12);
+  --white-20: var(--white-20);
+  --white-25: var(--white-25);
+  --white-30: var(--white-30);
+  --white-35: var(--white-35);
+  --white-40: var(--white-40);
+  --white-50: var(--white-50);
+  --white-55: var(--white-55);
+  --white-60: var(--white-60);
+  --white-70: var(--white-70);
+  --white-72: var(--white-72);
+
+  /* Border slate (138, 163, 211) */
+  --border-slate-8: var(--border-slate-8);
+  --border-slate-12: var(--border-slate-12);
+  --border-slate-16: var(--border-slate-16);
+  --border-slate-18: var(--border-slate-18);
+  --border-slate-22: var(--border-slate-22);
+  --border-slate-35: var(--border-slate-35);
+
+  /* OK / green (74, 222, 128) */
+  --ok-10: var(--ok-10);
+  --ok-12: var(--ok-12);
+  --ok-soft: var(--ok-soft);
+  --ok-22: var(--ok-22);
+  --ok-24: var(--ok-24);
+  --ok-25: var(--ok-25);
+  --ok-30: var(--ok-30);
+  --ok-35: var(--ok-35);
+  --ok-40: var(--ok-40);
+
+  /* Bad / red */
+  --bad-soft: var(--bad-soft);
+  --bad-12: var(--bad-12);
+
+  /* Warn / yellow (251, 191, 36) */
+  --warn-soft: var(--warn-soft);
+  --warn-12: var(--warn-12);
+
+  /* Accent / blue (71, 184, 255) */
+  --accent-8: var(--accent-8);
+  --accent-10: var(--accent-10);
+  --accent-12: var(--accent-12);
+
+  /* Cyan (34, 211, 238) */
+  --cyan-12: var(--cyan-12);
+  --cyan-16: var(--cyan-16);
+
+  /* FF gold (200, 168, 78) */
+  --ff-gold-15: var(--ff-gold-15);
+
+  /* Bad / red (248, 113, 113) */
+  --bad-8: rgba(248, 113, 113, 0.08);
+  --bad-15: rgba(248, 113, 113, 0.15);
+  --bad-30: rgba(248, 113, 113, 0.3);
+
+  /* FF gold (200, 168, 78) */
+  --ff-gold-8: rgba(200, 168, 78, 0.08);
+  --ff-gold-10: rgba(200, 168, 78, 0.1);
+  --ff-gold-20: rgba(200, 168, 78, 0.2);
+
+  /* Slate gray (148, 163, 184) */
+  --slate-gray-8: rgba(148, 163, 184, 0.08);
+  --slate-gray-10: rgba(148, 163, 184, 0.1);
+  --slate-gray-12: rgba(148, 163, 184, 0.12);
+  --slate-gray-15: rgba(148, 163, 184, 0.15);
+  --slate-gray-20: rgba(148, 163, 184, 0.2);
+
+  /* FF navy (10, 22, 40) */
+  --ff-navy-44: rgba(10, 22, 40, 0.44);
+  --ff-navy-60: rgba(10, 22, 40, 0.6);
+
+  /* Blue-400 (96, 165, 250) */
+  --blue-400-8: rgba(96, 165, 250, 0.08);
+  --blue-400-15: rgba(96, 165, 250, 0.15);
+
+  /* OK / green (74, 222, 128) */
+  --ok-8: rgba(74, 222, 128, 0.08);
+  --ok-18: rgba(74, 222, 128, 0.18);
+  --ok-20: rgba(74, 222, 128, 0.2);
+  --ok-48: rgba(74, 222, 128, 0.48);
+
+  /* Accent / crystal blue (71, 184, 255) */
+  --accent-14: rgba(71, 184, 255, 0.14);
+  --accent-18: rgba(71, 184, 255, 0.18);
+
+  /* White overlay — extended */
+  --white-45: rgba(255, 255, 255, 0.45);
+  --white-56: rgba(255, 255, 255, 0.56);
+  --white-68: rgba(255, 255, 255, 0.68);
+  --white-78: rgba(255, 255, 255, 0.78);
+  --white-82: rgba(255, 255, 255, 0.82);
+  --white-90: rgba(255, 255, 255, 0.9);
+
+  /* Warn / yellow (251, 191, 36) */
+  --warn-15: rgba(251, 191, 36, 0.15);
+  --warn-20: rgba(251, 191, 36, 0.2);
+  --warn-28: rgba(251, 191, 36, 0.28);
+  --warn-30: rgba(251, 191, 36, 0.3);
+
+  /* Frost (226, 232, 240) */
+  --frost-72: rgba(226, 232, 240, 0.72);
+
+  /* Border slate (138, 163, 211) */
+  --border-slate-30: rgba(138, 163, 211, 0.3);
+
+  /* Dark panels (15, 23, 42) */
+  --panel-dark-60: rgba(15, 23, 42, 0.6);
 
   /* Font-size scale */
   --fs-2xs: 10px;
@@ -196,10 +304,6 @@ a:hover {
   color: #9ad9ff;
 }
 
-.build-identity-wrap {
-  position: relative;
-}
-
 .build-badge-trigger {
   cursor: pointer;
   font: inherit;
@@ -237,13 +341,6 @@ a:hover {
   font-size: 12px;
   color: var(--text-muted);
 }
-.kpi-label {
-  color: var(--text-muted);
-  font-size: 12px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
 .kpi-value {
   color: var(--text-strong);
   font-size: 17px;
@@ -308,19 +405,19 @@ a:hover {
   letter-spacing: 0.08em;
   color: var(--text-body);
   background: var(--white-6);
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--border-slate-18);
 }
 
 .rail-section-chip.ok {
   color: #86efac;
-  border-color: rgba(74, 222, 128, 0.3);
-  background: rgba(74, 222, 128, 0.12);
+  border-color: var(--ok-30);
+  background: var(--ok-12);
 }
 
 .rail-section-chip.bad {
   color: #fda4af;
   border-color: rgba(239, 68, 68, 0.28);
-  background: rgba(239, 68, 68, 0.12);
+  background: var(--bad-12);
 }
 .rail-tab-list {
   display: grid;
@@ -353,11 +450,6 @@ a:hover {
   background: var(--white-10);
 }
 
-.rail-tab-icon {
-  font-size: 16px;
-  line-height: 1.2;
-}
-
 .rail-tab-copy {
   min-width: 0;
   display: grid;
@@ -384,12 +476,6 @@ a:hover {
   margin-top: 14px;
 }
 
-.rail-group-label {
-  color: var(--text-strong);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 .rail-view-note {
   margin-top: 14px;
   padding-top: 10px;
@@ -438,7 +524,7 @@ a:hover {
 }
 
 .rail-stat-card {
-  border: 1px solid rgba(138, 163, 211, 0.16);
+  border: 1px solid var(--border-slate-16);
   border-radius: 10px;
   padding: 10px 11px;
   background: var(--white-3);
@@ -461,7 +547,7 @@ a:hover {
   width: 100%;
   border: 1px solid rgba(71, 184, 255, 0.4);
   border-radius: 10px;
-  background: rgba(71, 184, 255, 0.12);
+  background: var(--accent-12);
   color: #d7efff;
   padding: 9px 11px;
   font-size: 12px;
@@ -469,7 +555,7 @@ a:hover {
 }
 
 .rail-refresh-btn:hover {
-  background: rgba(71, 184, 255, 0.2);
+  background: var(--accent-20);
 }
 
 .rail-secondary-btn {
@@ -498,13 +584,6 @@ a:hover {
   padding: 15px 14px;
 }
 
-.stat-label {
-  color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .stat-value {
   margin-top: 6px;
   color: var(--text-strong);
@@ -513,9 +592,6 @@ a:hover {
   line-height: 1;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
-}
-.section {
-  margin-bottom: 14px;
 }
 
 .section h2 {
@@ -535,7 +611,7 @@ a:hover {
 }
 
 .empty-state.ok {
-  border-color: rgba(74, 222, 128, 0.3);
+  border-color: var(--ok-30);
   color: var(--text-muted, var(--text-muted));
 }
 
@@ -638,4 +714,195 @@ a:hover {
     transition: none;
   }
 
+}
+
+/* ── Status / badges (merged from status.css) ── */
+/* ── Status / badges (extracted from global.css) ─────────── */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.connection-status.connected {
+  color: #9af3ba;
+}
+
+.connection-status.disconnected {
+  color: #f7b7b7;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot.connected,
+.status-dot.active {
+  background: var(--ok);
+  box-shadow: 0 0 9px rgba(74, 222, 128, 0.8);
+}
+
+.status-dot.disconnected,
+.status-dot.dead {
+  background: var(--bad);
+}
+
+.status-dot.busy,
+.status-dot-inline.in_progress,
+.status-dot-inline.running {
+  background: var(--warn);
+}
+
+.status-dot.listening,
+.status-dot-inline.interrupted,
+.status-dot-inline.listening {
+  background: #38bdf8;
+}
+
+.status-dot.warn {
+  background: var(--warn-bright);
+}
+
+.status-dot.inactive,
+.status-dot.offline,
+.status-dot-inline.inactive {
+  background: #5f7199;
+}
+
+.status-dot-inline {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot-inline.active {
+  background: var(--ok);
+}
+
+.status-dot-inline.busy,
+.status-dot-inline.stopped {
+  background: var(--text-slate);
+}
+.status-dot-inline.error {
+  background: #fb7185;
+}
+
+.status-dot-inline.offline,
+.event-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  min-width: 80px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--white-4);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.pill {
+  font-size: var(--fs-2xs);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(71, 184, 255, 0.36);
+  background: var(--accent-12);
+  color: #9ad9ff;
+  white-space: nowrap;
+}
+.ctx-bar {
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--white-10);
+}
+
+.ctx-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--ok));
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+.ctx-fill.warn {
+  background: linear-gradient(90deg, var(--warn), var(--warn-bright));
+}
+
+.ctx-fill.bad {
+  background: linear-gradient(90deg, var(--bad), var(--warn-bright));
+}
+
+/* ── Animations (merged from animations.css) ── */
+/* ── Pixel avatar animations ──────────────────────────── */
+
+@keyframes avatar-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes avatar-vibrate {
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-1px); }
+  50% { transform: translateX(1px); }
+  75% { transform: translateX(-1px); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes avatar-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.03); opacity: 0.85; }
+}
+
+@keyframes avatar-pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(71, 184, 255, 0); }
+  50% { box-shadow: 0 0 8px 2px rgba(71, 184, 255, 0.3); }
+}
+
+@keyframes avatar-particle {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(-12px) scale(0); opacity: 0; }
+}
+
+/* ── Agent state animations ────────────────────────────── */
+@keyframes workingPulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--ok-soft); }
+  50% { box-shadow: 0 0 12px 2px var(--ok-25); }
+}
+
+@keyframes warnBlink {
+  0%, 100% { border-color: var(--warn-28); }
+  50% { border-color: rgba(251, 191, 36, 0.50); }
+}
+
+button.monitor-row.state-offline {
+  opacity: 0.35;
+  border-color: rgba(85, 85, 85, 0.15);
+  background: rgba(0, 0, 0, 0.08);
+}
+button.monitor-row.state-offline .agent-emoji {
+  filter: grayscale(1);
+}
+button.monitor-row.state-offline:hover {
+  opacity: 0.55;
+}
+
+.monitor-pill.state-offline {
+  background: rgba(85, 85, 85, 0.20);
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+
+/* Agent group headers (alive/offline separation) */
+.agents-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.96fr) minmax(0, 0.88fr);
+  gap: 16px;
 }

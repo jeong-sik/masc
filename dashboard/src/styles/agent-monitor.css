@@ -51,7 +51,7 @@
 .agent-runtime-ctx-bar {
   width: 60px;
   height: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-6);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -73,12 +73,6 @@
 
 /* ── Live Timeline ─────────────────────────────────────────── */
 
-.agent-live-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .agent-live-header {
   display: flex;
   align-items: center;
@@ -88,11 +82,6 @@
 }
 
 /* Filter chips row */
-.agent-live-filter-bar {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
 
 .agent-live-chip {
   padding: 3px 10px;
@@ -129,13 +118,9 @@
   font-weight: 600;
   color: var(--accent);
   padding: 2px 8px;
-  background: rgba(71, 184, 255, 0.1);
-  border: 1px solid rgba(71, 184, 255, 0.2);
+  background: var(--accent-10);
+  border: 1px solid var(--accent-20);
   border-radius: 8px;
-}
-
-.agent-live-count {
-  color: var(--text-muted, var(--text-muted));
 }
 
 .agent-live-autoscroll {
@@ -151,8 +136,8 @@
 }
 
 .agent-live-autoscroll--on {
-  background: rgba(74, 222, 128, 0.1);
-  border-color: rgba(74, 222, 128, 0.25);
+  background: var(--ok-10);
+  border-color: var(--ok-25);
   color: var(--ok);
 }
 
@@ -177,7 +162,7 @@
 }
 
 .agent-live-event:hover {
-  background: var(--white-4, rgba(255, 255, 255, 0.04));
+  background: var(--white-4, var(--white-4));
 }
 
 /* Event kind badge */
@@ -194,17 +179,17 @@
 }
 
 .agent-event-badge--heartbeat {
-  background: rgba(74, 222, 128, 0.12);
+  background: var(--ok-12);
   color: var(--ok);
 }
 
 .agent-event-badge--lifecycle {
-  background: rgba(71, 184, 255, 0.12);
+  background: var(--accent-12);
   color: var(--accent);
 }
 
 .agent-event-badge--keeper {
-  background: rgba(200, 168, 78, 0.15);
+  background: var(--ff-gold-15);
   color: var(--ff-gold-bright);
 }
 
@@ -219,17 +204,17 @@
 }
 
 .agent-event-badge--task {
-  background: rgba(251, 191, 36, 0.12);
+  background: var(--warn-12);
   color: var(--warn, var(--warn));
 }
 
 .agent-event-badge--board {
-  background: rgba(34, 211, 238, 0.12);
+  background: var(--cyan-12);
   color: var(--cyan, var(--cyan));
 }
 
 .agent-event-badge--default {
-  background: rgba(138, 163, 211, 0.12);
+  background: var(--border-slate-12);
   color: var(--text-muted, var(--text-muted));
 }
 

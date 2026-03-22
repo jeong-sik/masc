@@ -79,7 +79,7 @@ export function Planning() {
       <details class="overview-section-collapsible" open=${hasGoals}>
         <summary>
           목표 파이프라인
-          <span class="monitor-pill">${goals.value.length}</span>
+          <span class="monitor-pill ml-auto">${goals.value.length}</span>
         </summary>
         <div>
           ${hasGoals ? html`
@@ -106,7 +106,7 @@ export function Planning() {
       <details class="overview-section-collapsible" open=${hasLoops}>
         <summary>
           MDAL 루프
-          <span class="monitor-pill">${loops.length}</span>
+          <span class="monitor-pill ml-auto">${loops.length}</span>
         </summary>
         <div>
           ${mdalLoading.value && loops.length === 0
@@ -116,7 +116,7 @@ export function Planning() {
               : loops.length === 0
                 ? html`<div class="empty-state">가동 중인 루프가 없습니다. <code>masc_mdal_start</code>로 시작할 수 있습니다.</div>`
                 : html`
-                  <div class="planning-loop-list">
+                  <div class="grid gap-3">
                     ${loops.map(loop => html`<${LoopRow} key=${loop.loop_id} loop=${loop} />`)}
                   </div>
                 `}

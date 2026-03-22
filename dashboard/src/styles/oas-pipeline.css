@@ -28,10 +28,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.oas-pipeline__section {
-  margin-bottom: 10px;
-}
-
 .oas-section-label {
   font-size: var(--fs-xs);
   font-weight: 500;
@@ -66,7 +62,7 @@
 
 .oas-event-row:hover,
 .oas-keeper-row:hover {
-  background: var(--white-6, rgba(255, 255, 255, 0.03));
+  background: var(--white-6, var(--white-3));
 }
 
 .oas-event-ts {
@@ -102,16 +98,6 @@
 .badge--comment { background: #1a2a3a; color: var(--accent); }
 .badge--upvote { background: #3a3a1a; color: #facc15; }
 .badge--skip { background: #2a2a2a; color: var(--text-dim); }
-
-.oas-event-trigger {
-  color: var(--text-muted, #666);
-  font-size: var(--fs-2xs);
-}
-
-.oas-event-ok {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-}
 
 .oas-event-ok.ok { color: var(--ok); }
 .oas-event-ok.fail { color: var(--bad-light); }
@@ -204,7 +190,7 @@
 
 .pipeline-stage-label {
   font-size: var(--fs-2xs);
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-35);
   letter-spacing: 0.04em;
   margin-left: 4px;
   white-space: nowrap;
@@ -219,7 +205,7 @@
 }
 
 .pipeline-stage-node.active .pipeline-stage-label {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-90);
   font-weight: 600;
 }
 
@@ -296,8 +282,8 @@
 
 .pipeline-stage-badge.stage-idle {
   color: rgba(148, 163, 184, 0.85);
-  background: rgba(148, 163, 184, 0.12);
-  border-color: rgba(148, 163, 184, 0.2);
+  background: var(--slate-gray-12);
+  border-color: var(--slate-gray-20);
 }
 
 .pipeline-stage-badge.stage-thinking {
@@ -328,7 +314,7 @@
 .pipeline-stage-badge.stage-proactive {
   color: rgba(74, 222, 128, 0.95);
   background: rgba(74, 222, 128, 0.14);
-  border-color: rgba(74, 222, 128, 0.25);
+  border-color: var(--ok-25);
 }
 
 .pipeline-stage-badge.stage-offline {

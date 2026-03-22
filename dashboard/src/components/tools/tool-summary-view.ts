@@ -19,7 +19,7 @@ export function ToolSummaryView({ inventory }: { inventory: DashboardToolInvento
   const deprecatedCount = inventory.filter(item => item.lifecycle === 'deprecated').length
 
   return html`
-    <div class="tool-summary">
+    <div class="py-2">
       <div class="tool-inventory-summary">
         <div class="tool-inventory-stat">
           <span class="stat-value">${totalCount}</span>
@@ -36,7 +36,7 @@ export function ToolSummaryView({ inventory }: { inventory: DashboardToolInvento
       </div>
 
       ${essential.length > 0 ? html`
-        <div class="tool-summary-section">
+        <div class="mt-5">
           <h4 class="tool-summary-heading">필수 도구 (상위 ${essential.length}개)</h4>
           <div class="tool-summary-list">
             ${essential.map(item => html`
@@ -51,7 +51,7 @@ export function ToolSummaryView({ inventory }: { inventory: DashboardToolInvento
       ` : null}
 
       ${neverUsed.length > 0 ? html`
-        <div class="tool-summary-section">
+        <div class="mt-5">
           <h4 class="tool-summary-heading">미사용 도구 (${neverUsed.length}개)</h4>
           <div class="tool-summary-list">
             ${neverUsed.map(item => html`

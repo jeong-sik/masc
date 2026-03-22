@@ -78,7 +78,7 @@ function GovernanceSummaryStrip() {
 
 function GovernanceToolbar() {
   return html`
-    <${Card} title="청원 콘솔" class="section">
+    <${Card} title="청원 콘솔" class="section mb-3.5">
       <div class="governance-toolbar">
         <div class="council-create">
           <input
@@ -135,7 +135,7 @@ function GovernanceToolbar() {
 function DecisionInbox() {
   const items = filteredItemsByFilter(governanceFilter.value, governanceData.value?.items ?? [])
   return html`
-    <${Card} title="사건 수신함" class="section">
+    <${Card} title="사건 수신함" class="section mb-3.5">
       <div class="council-list governance-inbox">
         ${items.length === 0
           ? html`<div class="empty-state">이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.</div>`
@@ -143,10 +143,10 @@ function DecisionInbox() {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`
                 <button
-                  class="council-row governance-decision-row ${selected ? 'selected' : ''}"
+                  class="council-row gap-3 cursor-pointer ${selected ? 'selected' : ''}"
                   onClick=${() => selectDecision(item)}
                 >
-                  <div class="council-row-main">
+                  <div class="min-w-0">
                     <div class="governance-row-head">
                       <span class="governance-kind">${kindLabel(item.kind)}</span>
                       <span class="council-topic">${item.topic}</span>
@@ -158,7 +158,7 @@ function DecisionInbox() {
                         : null}
                     </div>
                     <div class="governance-chip-row">
-                      ${item.origin ? html`<span class="governance-chip dim">${item.origin}</span>` : null}
+                      ${item.origin ? html`<span class="governance-chip text-[#95a9cd]">${item.origin}</span>` : null}
                       ${item.risk_class ? html`<span class="governance-chip">${item.risk_class}</span>` : null}
                       ${item.provenance ? html`<span class="governance-chip">${item.provenance}</span>` : null}
                       ${item.status === 'needs_human_gate'

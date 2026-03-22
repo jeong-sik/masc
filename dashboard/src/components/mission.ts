@@ -113,13 +113,13 @@ export function Mission() {
   }, [activeSessionId])
 
   return html`
-    <section class="dashboard-panel mission-view">
+    <section class="dashboard-panel flex flex-col gap-4">
       <div class="panel-header">
         <div>
           <h2>상황판</h2>
           <p>지금 어떤 세션이 돌고 있고, 누가 참여하며, 어디가 막혔는지를 한 시점에서 읽는 기본 관찰면입니다.</p>
         </div>
-        <div class="mission-header-meta">
+        <div class="flex gap-2 flex-wrap items-center">
           <span class="command-chip ${toneClass(mission.summary.room_health)}">${statusLabel(mission.summary.room_health)}</span>
           <span class="command-chip">${mission.summary.project ?? '프로젝트 미지정'}${mission.summary.current_room ? ` · ${mission.summary.current_room}` : ''}</span>
           <span class="command-chip">${mission.generated_at ? relativeTime(mission.generated_at) : '기록 없음'}</span>
@@ -133,7 +133,7 @@ export function Mission() {
         generatedAt=${mission.generated_at}
       />
 
-      <div class="mission-stat-grid">
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
         <${SummaryStat}
           label="관찰 세션"
           value=${sessionRows.length}
@@ -187,7 +187,7 @@ export function Mission() {
 
       ${activeSessionId
         ? html`
-            <div class="mission-selection-bar">
+            <div class="mt-3.5 py-2.5 px-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] flex items-center justify-between gap-3 text-[rgba(255,255,255,0.78)]">
               <span>현재 관찰 세션 · ${focusSession?.goal ?? activeSessionId}${activeAttention ? ` · ${activeAttention.summary}` : ''}</span>
               <button class="control-btn ghost" onClick=${clearMissionSelection}>선택 해제</button>
             </div>
@@ -195,12 +195,12 @@ export function Mission() {
         : null}
 
       <${Card} title="진행중인 세션" class="mission-list-card" id="mission-sessions">
-        <div class="mission-section-head">
-          <h3>지금 진행중인 일</h3>
-          <p>세션을 기준으로 목표, 최근 흐름, 막힘, 연결된 작전을 먼저 읽고 사회의 현재 상태를 파악합니다.</p>
+        <div class="grid gap-1 mb-3">
+          <h3 class="m-0 text-[var(--text-strong)] text-lg">지금 진행중인 일</h3>
+          <p class="m-0 text-[rgba(255,255,255,0.68)] leading-normal">세션을 기준으로 목표, 최근 흐름, 막힘, 연결된 작전을 먼저 읽고 사회의 현재 상태를 파악합니다.</p>
           <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
         </div>
-        <div class="mission-list-stack">
+        <div class="flex flex-col gap-3">
           ${sessionRows.length > 0
             ? sessionRows.map(row => html`<${SessionBriefCard} key=${row.session_id} brief=${row} selected=${activeSessionId === row.session_id} />`)
             : html`<div class="empty-state">지금 보이는 팀 세션이 없습니다.</div>`}
@@ -216,17 +216,17 @@ export function Mission() {
       <details open id="mission-keepers" class="mission-collapsible-section">
         <summary class="mission-collapsible-summary">키퍼 연속성 <span class="monitor-pill">${keeperRows.length}</span>${keeperStatusWarnings > 0 ? html` <span class="monitor-pill warn">${keeperStatusWarnings} 주의</span>` : null}</summary>
         <${Card} title="키퍼 연속성" class="mission-list-card">
-          <div class="mission-section-head">
-            <h3>세션 밖에서 움직이는 행위자</h3>
-            <p>키퍼는 세션과 별개로 보고, 사회의 연속성과 장기 행위자 상태를 먼저 읽습니다.</p>
+          <div class="grid gap-1 mb-3">
+            <h3 class="m-0 text-[var(--text-strong)] text-lg">세션 밖에서 움직이는 행위자</h3>
+            <p class="m-0 text-[rgba(255,255,255,0.68)] leading-normal">키퍼는 세션과 별개로 보고, 사회의 연속성과 장기 행위자 상태를 먼저 읽습니다.</p>
             <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
           </div>
-          <div class="mission-activity-list">
+          <div class="flex flex-col gap-3">
             ${keeperRows.length > 0
               ? keeperRows.map(row => html`<${KeeperBriefCard} key=${row.brief.name} row=${row} />`)
               : html`<div class="empty-state">지금 보이는 키퍼가 없습니다.</div>`}
           </div>
-          <div class="mission-card-actions">
+          <div class="flex gap-2 flex-wrap mt-2.5">
             <button class="control-btn ghost" onClick=${() => navigate('status', { section: 'sessions' })}>세션 보기</button>
             <button class="control-btn ghost" onClick=${() => navigate('operations', { section: 'command' })}>지휘 진단면 보기</button>
           </div>
@@ -236,15 +236,15 @@ export function Mission() {
       <details open id="mission-output" class="mission-collapsible-section">
         <summary class="mission-collapsible-summary">최근 사회 활동 <span class="monitor-pill">${focusSessionOutputs.length + keeperOutputRows.length}</span></summary>
         <${Card} title="최근 사회 활동" class="mission-list-card">
-          <div class="mission-section-head">
-            <h3>누가 방금 무엇을 했나</h3>
-            <p>선택된 세션과 연결된 행위자의 최근 출력만 모아 읽고, 해석은 뒤로 미룹니다.</p>
+          <div class="grid gap-1 mb-3">
+            <h3 class="m-0 text-[var(--text-strong)] text-lg">누가 방금 무엇을 했나</h3>
+            <p class="m-0 text-[rgba(255,255,255,0.68)] leading-normal">선택된 세션과 연결된 행위자의 최근 출력만 모아 읽고, 해석은 뒤로 미룹니다.</p>
             <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
           </div>
-          <div class="mission-list-stack">
+          <div class="flex flex-col gap-3">
             ${focusSessionOutputs.length > 0
               ? focusSessionOutputs.slice(0, 4).map(row => html`
-                  <div class="mission-inline-note">
+                  <div class="grid gap-1">
                     <strong>${row.agent_name ?? 'unknown actor'}</strong>
                     ${row.role ? html` · ${row.role}` : null}
                     ${row.status ? html` · ${statusLabel(row.status)}` : null}
@@ -254,7 +254,7 @@ export function Mission() {
               : html`<div class="empty-state">선택된 세션에서 바로 읽을 최근 출력이 없습니다.</div>`}
             ${keeperOutputRows.length > 0
               ? keeperOutputRows.map(row => html`
-                  <div class="mission-inline-note">
+                  <div class="grid gap-1">
                     <strong>${row.brief.name}</strong>
                     <div>${row.recentOutput}</div>
                   </div>
@@ -267,9 +267,9 @@ export function Mission() {
       <details open id="mission-attention" class="mission-collapsible-section">
         <summary class="mission-collapsible-summary">세션 우선순위 <span class="monitor-pill${attentionQueue.length > 0 ? ' warn' : ''}">${attentionQueue.length}</span></summary>
         <${Card} title="세션 우선순위" class="mission-list-card">
-          <div class="mission-section-head">
-            <h3>어느 세션을 먼저 봐야 하나</h3>
-            <p>주의 신호는 truth를 훑은 다음에만 읽고, 세션 집중 순서를 정하는 용도로만 씁니다.</p>
+          <div class="grid gap-1 mb-3">
+            <h3 class="m-0 text-[var(--text-strong)] text-lg">어느 세션을 먼저 봐야 하나</h3>
+            <p class="m-0 text-[rgba(255,255,255,0.68)] leading-normal">주의 신호는 truth를 훑은 다음에만 읽고, 세션 집중 순서를 정하는 용도로만 씁니다.</p>
             <${ProvenanceStrip} items=${[{ kind: 'derived' }]} />
           </div>
           <div class="mission-lane-stack">
@@ -281,9 +281,9 @@ export function Mission() {
       </details>
 
       ${internalSignals.length > 0 ? html`
-        <details class="mission-card-disclosure" style="margin-top: 12px;">
-          <summary>내부 신호 ${internalSignals.length}</summary>
-          <div class="mission-list-stack">
+        <details class="pt-1 border-t border-[var(--white-6)]" style="margin-top: 12px;">
+          <summary class="cursor-pointer text-[rgba(255,255,255,0.72)] text-[length:var(--fs-sm)]">내부 신호 ${internalSignals.length}</summary>
+          <div class="flex flex-col gap-3">
             ${internalSignals.map(item => html`<${InternalSignalCard} key=${item.id} item=${item} />`)}
           </div>
         </details>

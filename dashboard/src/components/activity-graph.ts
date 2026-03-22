@@ -123,9 +123,9 @@ function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
       ${events.map(event => {
         const actor = eventActor(event)
         return html`
-          <div class="monitor-row ok" key=${event.seq}>
+          <div class="monitor-row p-3.5 ok" key=${event.seq}>
             <div class="monitor-row-header">
-              <div class="monitor-row-title">
+              <div class="min-w-0">
                 <div class="monitor-name-line">
                   <span class="monitor-title">${actor || '(unknown)'}</span>
                   <span class="monitor-sub">${eventKindLabel(event.kind)}</span>
@@ -159,14 +159,14 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
   const maxWeight = agentNodes[0]?.weight ?? 1
 
   return html`
-    <div class="activity-graph-leaderboard">
+    <div class="flex flex-col gap-1.5">
       ${agentNodes.map((node, i) => {
         const pct = maxWeight > 0 ? (node.weight / maxWeight) * 100 : 0
         return html`
           <div class="activity-graph-leaderboard-row" key=${node.id}>
             <span class="activity-graph-leaderboard-rank">${i + 1}</span>
-            <div class="activity-graph-leaderboard-info">
-              <span class="activity-graph-leaderboard-name">${node.label}</span>
+            <div class="flex-1 flex flex-col gap-1 min-w-0">
+              <span class="text-base font-semibold text-[var(--text-near-white)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
               <div class="activity-graph-leaderboard-bar-wrap">
                 <div class="activity-graph-leaderboard-bar" style="width:${pct}%"></div>
               </div>
@@ -192,11 +192,11 @@ function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
   }
 
   return html`
-    <div class="activity-graph-kind-breakdown">
+    <div class="flex flex-wrap gap-2">
       ${sorted.map(([kind, count]) => html`
         <div class="activity-graph-kind-chip" key=${kind}>
-          <span class="activity-graph-kind-label">${kindLabel(kind)}</span>
-          <span class="activity-graph-kind-count">${count}</span>
+          <span class="text-sm text-text-slate-light">${kindLabel(kind)}</span>
+          <span class="text-base font-bold text-[var(--text-near-white)]">${count}</span>
         </div>
       `)}
     </div>
@@ -206,8 +206,8 @@ function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
 function EmptyActivityGraph() {
   return html`
     <div class="agents-monitor">
-      <${Card} title="활동 그래프" class="section" testId="activity_graph.graph">
-        <div class="monitor-section-head">
+      <${Card} title="활동 그래프" class="section mb-3.5" testId="activity_graph.graph">
+        <div class="mb-3.5">
           <h2 class="monitor-headline">활동 그래프가 비어 있습니다</h2>
           <p class="monitor-subheadline">이 뷰는 런타임 실행 이벤트를 읽어 그래프를 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
         </div>
@@ -235,7 +235,7 @@ export function ActivityGraphSurface() {
   if (error && !data) {
     return html`
       <div class="agents-monitor">
-        <${Card} title="오류" class="section" testId="activity_graph.error">
+        <${Card} title="오류" class="section mb-3.5" testId="activity_graph.error">
           <div class="empty-state">활동 그래프를 불러올 수 없습니다: ${error}</div>
           <button class="control-btn ghost" onClick=${loadGraph}>다시 시도</button>
         <//>
@@ -254,8 +254,8 @@ export function ActivityGraphSurface() {
   return html`
     <div class="agents-monitor">
 
-      <${Card} title="활동 그래프" class="section" testId="activity_graph.graph">
-        <div class="monitor-section-head">
+      <${Card} title="활동 그래프" class="section mb-3.5" testId="activity_graph.graph">
+        <div class="mb-3.5">
           <h2 class="monitor-headline">실행 이벤트 관계 그래프</h2>
           <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 최근 실행 이벤트 기준으로 시각화합니다. 노드 크기는 활동 빈도를 반영합니다.</p>
         </div>
@@ -269,24 +269,24 @@ export function ActivityGraphSurface() {
       <//>
 
       <div class="agents-workbench">
-        <${Card} title="활동 주체 순위" class="section" testId="activity_graph.leaderboard">
-          <div class="monitor-section-head">
+        <${Card} title="활동 주체 순위" class="section mb-3.5" testId="activity_graph.leaderboard">
+          <div class="mb-3.5">
             <h2 class="monitor-headline">활동 주체 순위</h2>
             <p class="monitor-subheadline">그래프 이벤트 빈도(weight)를 기준으로 정렬한 최근 활동 주체 순위입니다.</p>
           </div>
           <${NodeLeaderboard} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="노드 종류 분포" class="section" testId="activity_graph.kinds">
-          <div class="monitor-section-head">
+        <${Card} title="노드 종류 분포" class="section mb-3.5" testId="activity_graph.kinds">
+          <div class="mb-3.5">
             <h2 class="monitor-headline">노드 종류</h2>
             <p class="monitor-subheadline">그래프에 포함된 노드를 종류별로 분류합니다.</p>
           </div>
           <${KindBreakdown} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="최근 실행 이벤트" class="section" testId="activity_graph.timeline">
-          <div class="monitor-section-head">
+        <${Card} title="최근 실행 이벤트" class="section mb-3.5" testId="activity_graph.timeline">
+          <div class="mb-3.5">
             <h2 class="monitor-headline">타임라인</h2>
             <p class="monitor-subheadline">가장 최근의 실행 이벤트를 시간순으로 보여줍니다.</p>
           </div>

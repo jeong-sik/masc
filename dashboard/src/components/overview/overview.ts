@@ -62,12 +62,12 @@ function HomeSectionHeader({
   onLink?: () => void
 }) {
   return html`
-    <div class="home-section-header">
+    <div class="flex items-start justify-between mb-1 gap-3">
       <div>
-        <span class="home-section-label">${label}</span>
-        ${copy ? html`<div class="home-section-copy">${copy}</div>` : null}
+        <span class="text-text-muted text-xs tracking-[0.06em] uppercase">${label}</span>
+        ${copy ? html`<div class="mt-[3px] text-text-muted text-sm leading-[1.45]">${copy}</div>` : null}
       </div>
-      <div class="home-section-actions">
+      <div class="inline-flex items-center gap-2 flex-wrap justify-end">
         ${linkLabel && onLink
           ? html`<a class="home-section-link" onClick=${onLink}>${linkLabel}</a>`
           : null}
@@ -87,9 +87,9 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
       key=${s.session_id}
       onClick=${() => navigate('status', { section: 'sessions', session_id: s.session_id })}
     >
-      <div class="hot-session-card__goal">${primary}</div>
+      <div class="text-base font-semibold text-text-strong whitespace-nowrap overflow-hidden text-ellipsis">${primary}</div>
       ${secondary ? html`<div class="hot-session-card__context">${secondary}</div>` : null}
-      <div class="hot-session-card__chips">
+      <div class="flex flex-wrap gap-1.5 mt-2">
         ${creator
           ? html`<span class="hot-session-card__chip ${systemSession ? 'hot-session-card__chip--system' : ''}">
               ${systemSession ? '시스템' : '주체'} · ${creator}
@@ -97,14 +97,14 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
           : null}
         ${s.status ? html`<span class="hot-session-card__chip">${statusLabel(s.status)}</span>` : null}
       </div>
-      <div class="hot-session-card__meta">
+      <div class="flex gap-2 flex-wrap text-xs text-text-muted mt-2">
         ${s.member_names?.length ? html`
           <span>${s.member_names.slice(0, 3).join(', ')}${s.member_names.length > 3 ? ` +${s.member_names.length - 3}` : ''}</span>
         ` : null}
         ${s.elapsed_sec ? html`<span>${formatDuration(s.elapsed_sec)}</span>` : null}
       </div>
       ${s.blocker_summary ? html`
-        <div class="hot-session-card__blocker">${s.blocker_summary}</div>
+        <div class="text-xs text-bad mt-1 overflow-hidden text-ellipsis whitespace-nowrap">${s.blocker_summary}</div>
       ` : null}
     </div>
   `
@@ -121,13 +121,13 @@ type SessionLaneProps = {
 function SessionLane({ title, description, tone, sessions, emptyCopy }: SessionLaneProps) {
   return html`
     <section class="hot-session-lane hot-session-lane--${tone}">
-      <div class="hot-session-lane__header">
+      <div class="flex items-start justify-between gap-3">
         <div>
-          <div class="hot-session-lane__title-row">
-            <h3 class="hot-session-lane__title">${title}</h3>
+          <div class="flex items-center gap-2">
+            <h3 class="m-0 text-base font-semibold text-text-strong">${title}</h3>
             <span class="hot-session-lane__count">${sessions.length}</span>
           </div>
-          <p class="hot-session-lane__description">${description}</p>
+          <p class="mt-1 mb-0 text-text-muted text-sm leading-[1.45]">${description}</p>
         </div>
       </div>
       ${sessions.length > 0
@@ -205,7 +205,7 @@ function AgentPulse() {
         linkLabel="전체 보기"
         onLink=${() => navigate('status', { section: 'agents' })}
       />
-      <div class="agent-pulse__grid">
+      <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
             class="agent-pulse-card agent-pulse-card--${a.state}"
@@ -213,9 +213,9 @@ function AgentPulse() {
             onClick=${() => navigate('status', { section: 'agents', agent: a.name })}
           >
             <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${28} />
-            <div class="agent-pulse-card__info">
-              <span class="agent-pulse-card__name">${a.koreanName ?? a.name}</span>
-              <span class="agent-pulse-card__status">
+            <div class="flex flex-col min-w-0">
+              <span class="text-sm font-semibold text-text-strong whitespace-nowrap overflow-hidden text-ellipsis">${a.koreanName ?? a.name}</span>
+              <span class="text-xs text-text-muted whitespace-nowrap overflow-hidden text-ellipsis">
                 ${stateIcon(a.state)} ${a.focus ?? a.currentTask ?? a.status}
               </span>
             </div>
@@ -233,11 +233,11 @@ export function Overview() {
   const roomHealth = snap?.summary?.room_health ?? null
 
   return html`
-    <div class="overview-surface overview-surface--home">
+    <div class="grid gap-4">
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
 
-      <div class="home-body">
+      <div class="grid gap-4">
         <${HotSessions} />
         <${AgentPulse} />
 

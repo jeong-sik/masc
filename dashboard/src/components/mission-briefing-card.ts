@@ -19,7 +19,7 @@ export function MissionBriefingCard() {
 
   return html`
     <${Card} title="판단 레이어" class="mission-briefing-card">
-      <div class="mission-section-head">
+      <div class="grid gap-1 mb-3">
         <h3>왜 그렇게 보이나</h3>
         <p>사회 truth를 읽은 뒤에만 별도 판단 결과를 참고하고, 근거는 접어서 둡니다.</p>
         <${ProvenanceStrip}
@@ -30,7 +30,7 @@ export function MissionBriefingCard() {
         />
       </div>
 
-      <div class="mission-briefing-meta">
+      <div class="flex gap-2 flex-wrap mb-3">
         <span class="command-chip ${briefingTone}">
           ${statusLabel(briefing?.status ?? (missionBriefingError.value ? 'error' : 'loading'))}
         </span>
@@ -43,19 +43,19 @@ export function MissionBriefingCard() {
 
       ${missionBriefingError.value ? html`<div class="empty-state error">${missionBriefingError.value}</div>` : null}
       ${briefing?.error ? html`<div class="empty-state error">${briefing.error}</div>` : null}
-      ${briefing?.summary ? html`<div class="mission-inline-note">${briefing.summary}</div>` : null}
+      ${briefing?.summary ? html`<div class="grid gap-1">${briefing.summary}</div>` : null}
       ${briefing?.last_error && !briefing.error
-        ? html`<div class="mission-inline-note">최근 갱신 실패: ${briefing.last_error}</div>`
+        ? html`<div class="grid gap-1">최근 갱신 실패: ${briefing.last_error}</div>`
         : null}
 
       ${briefing && briefing.sections.length > 0
         ? html`
-            <div class="mission-briefing-grid">
+            <div class="grid grid-cols-3 gap-3">
               ${briefing.sections.slice(0, 3).map(section => html`
                 <article class="mission-briefing-section ${toneClass(section.status)}">
-                  <div class="mission-card-head">
+                  <div class="flex justify-between gap-2 items-start flex-wrap">
                     <strong>${section.label}</strong>
-                    <div class="mission-briefing-section-chips">
+                    <div class="flex gap-2 flex-wrap justify-end">
                       <span class="command-chip ${toneClass(section.status)}">${statusLabel(section.status)}</span>
                       ${signalClassLabel(section.signal_class)
                         ? html`<span class="command-chip ${section.signal_class === 'mixed' ? 'warn' : ''}">${signalClassLabel(section.signal_class)}</span>`
@@ -66,10 +66,10 @@ export function MissionBriefingCard() {
                   <p>${section.summary}</p>
                   ${section.evidence.length > 0
                     ? html`
-                        <details class="mission-card-disclosure compact">
+                        <details class="pt-1 border-t border-[var(--white-6)] mt-2">
                           <summary>근거 보기</summary>
-                          <div class="mission-pill-row">
-                            ${section.evidence.map(item => html`<span class="mission-pill">${item}</span>`)}
+                          <div class="flex gap-2 flex-wrap mt-2.5">
+                            ${section.evidence.map(item => html`<span class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.76)] text-[length:var(--fs-sm)] leading-[1.35]">${item}</span>`)}
                           </div>
                         </details>
                       `
@@ -90,12 +90,12 @@ export function MissionBriefingCard() {
 
       ${briefing && briefing.metadata_gaps.length > 0
         ? html`
-            <details class="mission-card-disclosure compact mission-briefing-gaps">
+            <details class="pt-1 border-t border-[var(--white-6)] mt-2 mt-3">
               <summary>관측 공백 (${briefing.metadata_gap_count ?? briefing.metadata_gaps.length})</summary>
-              <div class="mission-list-stack">
+              <div class="flex flex-col gap-3">
                 ${briefing.metadata_gaps.map(item => html`
                   <article class="mission-briefing-gap ${item.severity === 'watch' ? 'warn' : ''}">
-                    <div class="mission-card-head">
+                    <div class="flex justify-between gap-2 items-start flex-wrap">
                       <strong>${missionTargetTypeLabel(item.scope_type)}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
                       <span class="command-chip ${item.severity === 'watch' ? 'warn' : ''}">${statusLabel(item.severity)}</span>
                     </div>
@@ -107,7 +107,7 @@ export function MissionBriefingCard() {
           `
         : null}
 
-      <div class="mission-card-actions">
+      <div class="flex gap-2 flex-wrap mt-2.5">
         <button class="control-btn ghost" onClick=${() => { void refreshMissionBriefing(retryNeedsForce) }} disabled=${missionBriefingLoading.value}>
           ${missionBriefingLoading.value ? '응답 기다리는 중…' : '판단 다시 읽기'}
         </button>

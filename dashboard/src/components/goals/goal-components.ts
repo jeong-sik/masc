@@ -20,7 +20,7 @@ import {
 export function GoalRow({ goal }: { goal: Goal }) {
   return html`
     <div class="goal-row">
-      <div class="goal-row-main">
+      <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <span class="goal-horizon-badge" style="color:${horizonColor(goal.horizon)}">
             ${horizonLabel(goal.horizon)}
@@ -28,9 +28,9 @@ export function GoalRow({ goal }: { goal: Goal }) {
           <span class="goal-title">${goal.title}</span>
         </div>
         <div class="goal-meta">
-          <span class="goal-priority" title="Priority ${goal.priority}">${priorityStars(goal.priority)}</span>
-          ${goal.metric ? html`<span class="goal-metric">${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}</span>` : null}
-          ${goal.due_date ? html`<span class="goal-due">Due: <${TimeAgo} timestamp=${goal.due_date} /></span>` : null}
+          <span class="text-amber-500 tracking-[1px]" title="Priority ${goal.priority}">${priorityStars(goal.priority)}</span>
+          ${goal.metric ? html`<span class="text-cyan">${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}</span>` : null}
+          ${goal.due_date ? html`<span class="text-[var(--bad-light)]">Due: <${TimeAgo} timestamp=${goal.due_date} /></span>` : null}
         </div>
         ${goal.last_review_note ? html`
           <div class="goal-review-note">${goal.last_review_note}</div>
@@ -50,7 +50,7 @@ export function HorizonGroup({ horizon, items }: { horizon: string; items: Goal[
   if (items.length === 0) return null
   const sorted = [...items].sort((a, b) => b.priority - a.priority)
   return html`
-    <${Card} title="${horizonLabel(horizon)} 목표 (${items.length})" class="section">
+    <${Card} title="${horizonLabel(horizon)} 목표 (${items.length})" class="section mb-3.5">
       <div class="goal-list">
         ${sorted.map(g => html`<${GoalRow} key=${g.id} goal=${g} />`)}
       </div>

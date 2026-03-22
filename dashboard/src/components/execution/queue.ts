@@ -19,7 +19,7 @@ export function QueueCard({ item, selected }: { item: DashboardExecutionQueueIte
   const terminal = isTerminalStatus(item.status)
   return html`
     <button
-      class="mission-card-select ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
+      class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.queue-card"
       onClick=${() => {
         selectedQueueId.value = selected ? null : item.id
@@ -27,9 +27,9 @@ export function QueueCard({ item, selected }: { item: DashboardExecutionQueueIte
         selectedOperationId.value = null
       }}
     >
-      <div class="mission-card-head">
+      <div class="flex justify-between gap-2 items-start flex-wrap">
         <div>
-          <div class="mission-card-target">${item.kind === 'session' ? item.target_id : item.linked_session_id ?? item.target_id}</div>
+          <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${item.kind === 'session' ? item.target_id : item.linked_session_id ?? item.target_id}</div>
           <div class="mission-card-title">${item.summary}</div>
         </div>
         <span class="command-chip ${terminal ? 'muted' : toneClass(item.severity)}">${statusLabel(item.status ?? item.severity)}</span>
@@ -53,7 +53,7 @@ export function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutio
   const hasTerminal = terminalItems.length > 0
 
   return html`
-    <div class="monitor-section-head">
+    <div class="mb-3.5">
       <h2 class="monitor-headline">개입이 필요한 실행</h2>
       <p class="monitor-subheadline">진행 중인 세션과 작전 중 막힌 항목을 보여줍니다.${hasTerminal ? ' 종료된 항목은 하단에 접혀 있습니다.' : ''}</p>
     </div>
@@ -64,7 +64,7 @@ export function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutio
     </div>
     ${hasTerminal
       ? html`
-          <details class="runtime-collapsible" data-testid="execution.queue-terminal">
+          <details class="mt-1" data-testid="execution.queue-terminal">
             <summary class="runtime-summary">종료된 항목 ${terminalItems.length}건</summary>
             <div class="monitor-alert-list">
               ${terminalItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)}

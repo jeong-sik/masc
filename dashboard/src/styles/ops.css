@@ -32,10 +32,6 @@
   flex-wrap: wrap;
 }
 
-.ops-actor-input {
-  min-width: 180px;
-}
-
 .ops-banner {
   border-radius: 12px;
   padding: 12px 14px;
@@ -43,7 +39,7 @@
 }
 
 .ops-banner.error {
-  background: rgba(239, 68, 68, 0.12);
+  background: var(--bad-12);
   border-color: rgba(239, 68, 68, 0.34);
   color: #fecaca;
 }
@@ -55,22 +51,19 @@
 }
 
 .ops-banner.info {
-  background: rgba(34, 211, 238, 0.12);
+  background: var(--cyan-12);
   border-color: rgba(34, 211, 238, 0.26);
   color: #cffafe;
 }
 
-.ops-handoff-banner {
-  display: grid;
-  gap: 8px;
-}
+
 
 .ops-handoff-head {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
-  color: rgba(255,255,255,0.72);
+  color: var(--white-72);
 }
 
 .ops-handoff-head strong,
@@ -78,11 +71,6 @@
 .ops-guidance-head strong,
 .ops-entity-title-row strong {
   color: var(--text-strong);
-}
-
-.ops-handoff-body {
-  color: rgba(255,255,255,0.84);
-  line-height: 1.5;
 }
 
 .ops-handoff-preview {
@@ -123,7 +111,7 @@
 .ops-action-guide-title {
   font-size: var(--fs-base);
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-60);
   margin-bottom: 10px;
 }
 
@@ -153,27 +141,23 @@
   filter: brightness(1.15);
 }
 
-.ops-action-guide-item strong {
-  font-weight: 600;
-}
-
 .ops-action-guide-item span {
   font-size: var(--fs-sm);
   opacity: 0.7;
 }
 
 .ops-action-guide-item.bad {
-  background: rgba(239, 68, 68, 0.12);
+  background: var(--bad-12);
   color: #fca5a5;
 }
 
 .ops-action-guide-item.warn {
-  background: rgba(251, 191, 36, 0.12);
+  background: var(--warn-12);
   color: var(--warn);
 }
 
 .ops-action-guide-item.ok {
-  background: rgba(74, 222, 128, 0.08);
+  background: var(--ok-8);
   color: var(--ok);
 }
 
@@ -186,18 +170,18 @@
 .ops-priority-card {
   padding: 14px;
   border-radius: 12px;
-  border: 1px solid rgba(138, 163, 211, 0.16);
+  border: 1px solid var(--border-slate-16);
   background: var(--white-3);
   display: grid;
   gap: 6px;
 }
 
 .ops-priority-card.ok {
-  border-color: rgba(74, 222, 128, 0.24);
+  border-color: var(--ok-24);
 }
 
 .ops-priority-card.warn {
-  border-color: rgba(251, 191, 36, 0.28);
+  border-color: var(--warn-28);
 }
 
 .ops-priority-card.bad {
@@ -231,10 +215,10 @@
 }
 
 .ops-lane-panel {
-  border-color: rgba(71, 184, 255, 0.18);
+  border-color: var(--accent-18);
   background:
     linear-gradient(180deg, rgba(13, 22, 40, 0.76), rgba(13, 22, 40, 0.62)),
-    radial-gradient(circle at top right, rgba(71, 184, 255, 0.1), transparent 42%);
+    radial-gradient(circle at top right, var(--accent-10), transparent 42%);
 }
 .ops-stat-grid {
   display: grid;
@@ -265,7 +249,7 @@
 }
 
 .ops-stat.ok {
-  border-color: rgba(74, 222, 128, 0.35);
+  border-color: var(--ok-35);
 }
 
 .ops-stat.warn {
@@ -280,14 +264,6 @@
   text-transform: uppercase;
 }
 
-.ops-split-row {
-  align-items: stretch;
-}
-
-.ops-select {
-  min-width: 92px;
-}
-
 .ops-context-note {
   margin-top: -2px;
   color: var(--text-muted);
@@ -299,7 +275,7 @@
   margin-top: 2px;
   border: 1px solid var(--white-8);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
 }
 
 .ops-control-summary {
@@ -358,7 +334,7 @@
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px dashed rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
 }
 
 .ops-archive-summary {
@@ -390,17 +366,17 @@
 }
 
 .ops-guidance-card.ok {
-  border-color: rgba(74, 222, 128, 0.35);
+  border-color: var(--ok-35);
   background: rgba(74, 222, 128, 0.06);
 }
 
 .ops-guidance-card.warn {
-  border-color: rgba(251, 191, 36, 0.3);
+  border-color: var(--warn-30);
   background: rgba(251, 191, 36, 0.06);
 }
 
 .ops-guidance-card.bad {
-  border-color: rgba(248, 113, 113, 0.3);
+  border-color: var(--bad-30);
   background: rgba(248, 113, 113, 0.06);
 }
 
@@ -488,7 +464,7 @@
 .ops-entity-card:hover,
 .ops-entity-card.active {
   border-color: rgba(71, 184, 255, 0.42);
-  background: rgba(71, 184, 255, 0.08);
+  background: var(--accent-8);
 }
 
 .ops-entity-title-row {
@@ -547,7 +523,7 @@
 .ops-empty {
   padding: 12px;
   border-radius: 10px;
-  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border: 1px dashed var(--white-12);
   color: var(--text-muted);
   font-size: var(--fs-base);
 }

@@ -32,7 +32,7 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
         ${worker.related_session_id ? html`
           <div class="agent-worker-brief__row">
             <span class="agent-worker-brief__label">Session</span>
-            <span class="mono" style="font-size: 11px">${worker.related_session_id}</span>
+            <span class="font-mono" style="font-size: 11px">${worker.related_session_id}</span>
           </div>
         ` : null}
         ${worker.last_signal_at ? html`

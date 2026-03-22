@@ -1,9 +1,5 @@
 /* ── Command Swarm + Orchestra ────────────────────────────── */
 
-.command-swarm-summary {
-  margin-top: 12px;
-}
-
 .swarm-storyboard {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -16,23 +12,16 @@
   border-radius: 16px;
   background:
     linear-gradient(180deg, rgba(15,23,42,0.96), rgba(15,23,42,0.78)),
-    linear-gradient(135deg, rgba(34,211,238,0.16), transparent 55%);
+    linear-gradient(135deg, var(--cyan-16), transparent 55%);
   border: 1px solid var(--white-8);
   display: grid;
   gap: 8px;
   min-width: 0;
 }
 
-.swarm-story-card.ok { border-color: rgba(74,222,128,0.2); }
-.swarm-story-card.warn { border-color: rgba(251,191,36,0.24); }
+.swarm-story-card.ok { border-color: var(--ok-20); }
+.swarm-story-card.warn { border-color: var(--warn-soft); }
 .swarm-story-card.bad { border-color: rgba(248,113,113,0.24); }
-
-.swarm-story-topline {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  flex-wrap: wrap;
-}
 
 .swarm-story-card strong {
   color: var(--text-near-white);
@@ -43,14 +32,8 @@
 .swarm-story-card p,
 .swarm-story-card small {
   margin: 0;
-  color: rgba(226,232,240,0.72);
+  color: var(--frost-72);
   line-height: 1.5;
-}
-
-.swarm-story-strip {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 .swarm-story-strip span {
@@ -74,10 +57,6 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-.orchestra-surface {
-  overflow: hidden;
-}
-
 .orchestra-shell {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
@@ -91,8 +70,8 @@
   overflow: hidden;
   border: 1px solid rgba(125,211,252,0.12);
   background:
-    radial-gradient(circle at top, rgba(34,211,238,0.12), transparent 42%),
-    radial-gradient(circle at 20% 80%, rgba(96,165,250,0.08), transparent 35%),
+    radial-gradient(circle at top, var(--cyan-12), transparent 42%),
+    radial-gradient(circle at 20% 80%, var(--blue-400-8), transparent 35%),
     linear-gradient(180deg, rgba(15,23,42,0.98), rgba(2,6,23,0.98));
 }
 
@@ -100,15 +79,8 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 18%, transparent 82%, rgba(255,255,255,0.02));
+  background: linear-gradient(180deg, var(--white-2), transparent 18%, transparent 82%, var(--white-2));
   pointer-events: none;
-}
-
-.orchestra-canvas {
-  display: block;
-  width: 100%;
-  height: auto;
-  min-height: 720px;
 }
 
 .orchestra-grid {
@@ -128,7 +100,7 @@
   opacity: 0.62;
 }
 
-.orchestra-edge.ok { stroke: rgba(74,222,128,0.35); }
+.orchestra-edge.ok { stroke: var(--ok-35); }
 .orchestra-edge.warn { stroke: rgba(251,191,36,0.42); }
 .orchestra-edge.bad { stroke: rgba(248,113,113,0.5); }
 .orchestra-edge.active {
@@ -139,10 +111,6 @@
 .orchestra-edge.animated {
   stroke-dasharray: 10 10;
   animation: orchestraFlow 3.2s linear infinite;
-}
-
-.orchestra-node {
-  cursor: pointer;
 }
 
 .orchestra-node-body,
@@ -215,7 +183,7 @@
 }
 
 .orchestra-signal-link {
-  stroke: rgba(251,191,36,0.2);
+  stroke: var(--warn-20);
   stroke-dasharray: 5 5;
 }
 
@@ -256,25 +224,7 @@
   background: rgba(15,23,42,0.8);
 }
 
-.orchestra-drawer {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 720px;
-}
-
-.orchestra-fact-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .orchestra-fact-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border-radius: 10px;
   background: var(--white-3);
   border: 1px solid var(--white-6);
 }
@@ -303,10 +253,6 @@
 
 /* ── SwarmHealthBar ────────────────────────────── */
 .swarm-health-bar {
-  display: flex;
-  height: 8px;
-  border-radius: 4px;
-  overflow: hidden;
   background: var(--white-6);
   margin-top: 12px;
 }
@@ -319,24 +265,10 @@
 .swarm-health-seg.stalled { background: var(--bad); }
 .swarm-health-seg.terminal { background: #556; }
 .swarm-health-labels {
-  display: flex;
-  gap: 1rem;
   font-size: 0.75rem;
-  color: var(--text-dim, rgba(255,255,255,0.5));
+  color: var(--text-dim, var(--white-50));
   margin-top: 6px;
 }
-.swarm-health-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.swarm-health-swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  display: inline-block;
-}
-
 /* ── SwarmLaneStrip ────────────────────────────── */
 .swarm-lane-strip {
   padding: 0.75rem 1rem;
@@ -348,19 +280,6 @@
 .swarm-lane-strip.ok { border-left-color: var(--ok); }
 .swarm-lane-strip.warn { border-left-color: var(--warn); }
 .swarm-lane-strip.bad { border-left-color: var(--bad); }
-.swarm-lane-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.swarm-lane-head-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
 .swarm-lane-kicker {
   display: block;
   margin-bottom: 4px;
@@ -375,13 +294,6 @@
   font-size: 16px;
   line-height: 1.25;
 }
-.swarm-motion-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
 .swarm-motion-dot.moving { animation: workingPulse 1.5s ease-in-out infinite; background: var(--ok); }
 .swarm-motion-dot.stalled { animation: warnBlink 1s ease-in-out infinite; background: var(--bad); }
 .swarm-motion-dot.waiting { background: var(--warn); }
@@ -389,7 +301,7 @@
 
 .swarm-lane-reason {
   margin: 10px 0 0;
-  color: rgba(226,232,240,0.72);
+  color: var(--frost-72);
   line-height: 1.5;
 }
 
@@ -417,17 +329,10 @@
 }
 
 .swarm-lane-details {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
   font-size: 0.82rem;
 }
 .swarm-lane-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-dim, rgba(255,255,255,0.55));
+  color: var(--text-dim, var(--white-55));
 }
 .swarm-lane-row-label {
   flex-shrink: 0;
@@ -437,29 +342,14 @@
   letter-spacing: 0.04em;
   opacity: 0.6;
 }
-.swarm-worker-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  align-items: center;
-}
-.swarm-worker-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
 .swarm-worker-dot.present { background: rgba(134,160,207,0.7); }
 .swarm-worker-count {
   font-size: 0.72rem;
-  color: var(--text-dim, rgba(255,255,255,0.5));
+  color: var(--text-dim, var(--white-50));
   margin-left: 4px;
 }
 .swarm-mini-bar {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
   background: var(--white-8);
-  overflow: hidden;
 }
 .swarm-mini-bar-fill {
   height: 100%;
@@ -476,13 +366,6 @@
   color: var(--bad);
   margin-top: 4px;
 }
-.swarm-lane-flags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-}
-
 /* ── SwarmEventRail ────────────────────────────── */
 .swarm-event-rail {
   border-left: 2px solid var(--card-border, var(--white-10));
@@ -514,11 +397,7 @@
   flex-shrink: 0;
   width: 48px;
   font-size: 0.72rem;
-  color: var(--text-dim, rgba(255,255,255,0.45));
-}
-.swarm-event-body {
-  min-width: 0;
-  flex: 1;
+  color: var(--text-dim, var(--white-45));
 }
 .swarm-event-kind {
   font-size: 0.72rem;
@@ -526,9 +405,6 @@
   margin-left: 6px;
 }
 .swarm-gap-inline {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   padding: 3px 0;
   font-size: 0.78rem;
 }

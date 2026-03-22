@@ -1,10 +1,4 @@
-/* ── Health Strip (traffic-light compact) ──────────────────── */
-/* ── StatCard delta + sparkline ────────────────────────────── */
 /* ── Runtime Collapsible ──────────────────────────────────── */
-.runtime-collapsible {
-  margin-top: 4px;
-}
-
 .runtime-summary {
   cursor: pointer;
   color: var(--text-muted);
@@ -28,11 +22,10 @@
 .runtime-collapsible[open] > .runtime-summary::before {
   content: '▾ ';
 }
-/* ── Hero Section (Phase 1) ── */
 /* ── Collapsible Sections ── */
 
 .overview-section-collapsible {
-  border: 1px solid rgba(138, 163, 211, 0.12);
+  border: 1px solid var(--border-slate-12);
   border-radius: 10px;
   margin-top: 12px;
   overflow: hidden;
@@ -50,7 +43,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
   transition: background 0.15s;
 }
 
@@ -72,10 +65,6 @@
   transform: rotate(90deg);
 }
 
-.overview-section-collapsible > summary .monitor-pill {
-  margin-left: auto;
-}
-
 .overview-section-collapsible > :not(summary) {
   padding: 0 16px 12px;
 }
@@ -91,7 +80,7 @@
 }
 
 .monitor-pill.ok {
-  background: rgba(74, 222, 128, 0.12);
+  background: var(--ok-12);
   color: var(--ok);
 }
 
@@ -101,7 +90,7 @@
 }
 
 .monitor-pill.bad {
-  background: rgba(248, 113, 113, 0.15);
+  background: var(--bad-15);
   color: #fca5a5;
 }
 
@@ -111,12 +100,6 @@
   }
 }
 
-/* Activity */
-/* Journal */
-.journal-entry {
-  border-bottom-color: var(--card-border);
-}
-/* Board */
 .board-post-list,
 .comment-thread {
   display: flex;
@@ -130,10 +113,6 @@
   contain-intrinsic-size: auto 120px;
 }
 
-.post-title {
-  color: #e8f0ff;
-}
-
 .post-meta {
   display: flex;
   gap: 10px;
@@ -141,14 +120,9 @@
   flex-wrap: wrap;
 }
 
-.comment-form input,
-.comment-form button {
-  font-family: inherit;
-}
-
 .back-btn {
   margin-bottom: 12px;
-  border: 1px solid rgba(138, 163, 211, 0.3);
+  border: 1px solid var(--border-slate-30);
   border-radius: 8px;
   padding: 7px 12px;
   font-size: var(--fs-sm);
@@ -159,17 +133,6 @@
 
 .back-btn:hover {
   background: var(--white-10);
-}
-
-/* ── Density Modes (Agents + Board) ───────────────────────── */
-/* Tasks */
-/* Status badges */
-.status-badge {
-  border: 1px solid var(--card-border);
-}
-
-.status-badge.offline {
-  color: #8da4cc;
 }
 
 /* ── Control Dock ─────────────────────────────────────────── */
@@ -199,10 +162,6 @@
   line-height: 1.5;
 }
 
-.control-error-copy {
-  color: #ffb4b4;
-}
-
 .control-input,
 .control-textarea {
   width: 100%;
@@ -229,7 +188,7 @@
 .control-btn {
   border: 1px solid rgba(71, 184, 255, 0.45);
   border-radius: 8px;
-  background: rgba(71, 184, 255, 0.18);
+  background: var(--accent-18);
   color: #c9ebff;
   padding: 8px 12px;
   font-size: var(--fs-sm);
@@ -247,13 +206,13 @@
 }
 
 .control-btn.is-active {
-  border-color: rgba(74, 222, 128, 0.48);
-  background: rgba(74, 222, 128, 0.15);
+  border-color: var(--ok-48);
+  background: var(--ok-soft);
   color: #b4f5ca;
 }
 
 .control-btn.secondary {
-  border-color: rgba(74, 222, 128, 0.48);
+  border-color: var(--ok-48);
   background: rgba(74, 222, 128, 0.17);
   color: #b4f5ca;
 }
@@ -292,7 +251,7 @@
   gap: 10px;
 }
 .control-btn.ghost {
-  border-color: rgba(138, 163, 211, 0.35);
+  border-color: var(--border-slate-35);
   background: var(--white-5);
   color: #9fb8e1;
 }
@@ -312,7 +271,7 @@
 .mission-jump-link {
   padding: 4px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(138, 163, 211, 0.22);
+  border: 1px solid var(--border-slate-22);
   background: var(--white-3);
   color: #9fb8e1;
   font-size: var(--fs-sm);
@@ -326,7 +285,7 @@
 
 /* ── Mission Collapsible Sections ──────────────────────── */
 .mission-collapsible-section {
-  border: 1px solid rgba(138, 163, 211, 0.12);
+  border: 1px solid var(--border-slate-12);
   border-radius: var(--radius-md, 10px);
   overflow: hidden;
 }
@@ -351,14 +310,6 @@
 .mission-status-dot.mission-state-alive {
   background: var(--ok, var(--ok));
   box-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
-}
-
-.mission-status-dot.mission-state-idle {
-  background: var(--warn, var(--warn));
-}
-
-.mission-status-dot.mission-state-offline {
-  background: #555;
 }
 
 /* ── Card-level dimming for offline / idle ──────────────── */
@@ -388,7 +339,7 @@
 .tab-pill {
   padding: 4px 14px;
   border-radius: 16px;
-  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.1));
+  border: 1px solid var(--card-border, var(--white-10));
   background: none;
   color: var(--text-muted);
   font-size: var(--fs-sm);
@@ -406,7 +357,7 @@
 }
 
 .tab-collapsible {
-  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--card-border, var(--white-6));
   border-radius: 8px;
 }
 .tab-collapsible__summary {
@@ -419,4 +370,335 @@
 }
 .tab-collapsible__summary:hover {
   color: var(--text-strong);
+}
+
+/* ── Layout (merged from layout.css) ── */
+/* ── Responsive (components) ───────────────────────────────── */
+@media (max-width: 960px) {
+
+  .keeper-kpis { grid-template-columns: repeat(2, 1fr); }
+  .agent-detail-grid { grid-template-columns: 1fr; }
+
+}
+@media (max-width: 880px) {
+  .council-create { grid-template-columns: 1fr; }
+  .control-row { grid-template-columns: 1fr; }
+  .agent-mention-row { grid-template-columns: 1fr; }
+
+}
+@media (max-width: 600px) {
+
+  .keeper-kpis { grid-template-columns: 1fr; }
+  .metric-tip-pop {
+    left: 0;
+    transform: none;
+    min-width: 220px;
+    max-width: min(320px, calc(100vw - 56px));
+  }
+
+}
+
+/* Mitosis Ring Chart */
+.mitosis-ring-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  margin-right: 10px;
+}
+.mitosis-ring {
+  transform: rotate(-90deg);
+}
+.mitosis-ring-bg {
+  fill: none;
+  stroke: var(--white-10);
+}
+.mitosis-ring-fg {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.5s ease-out, stroke 0.3s ease;
+}
+.mitosis-safe { stroke: var(--ok); color: var(--ok); }
+.mitosis-warn { stroke: var(--warn); color: var(--warn); }
+.mitosis-critical {
+  stroke: var(--bad); color: var(--bad);
+  animation: pulse-ring 2s infinite;
+}
+.mitosis-text {
+  position: absolute;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+@keyframes pulse-ring {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
+/* Enhancements for Agent Cards */
+.agent-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  transform: translateY(-2px);
+  transition: all 0.2s ease;
+  border-color: var(--accent);
+}
+
+/* Cyberpunk Kanban Board */
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+.kanban-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: rgba(10, 15, 29, 0.5);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  border: 1px solid var(--accent-10);
+}
+.kanban-header {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-strong);
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-shadow: 0 0 10px var(--white-20);
+}
+.kanban-header.todo .kanban-badge { background: var(--white-10); color: var(--text-body); }
+.kanban-header.inprogress .kanban-badge { background: var(--accent-soft); color: var(--accent); }
+.kanban-header.done .kanban-badge { background: rgba(0, 255, 157, 0.15); color: var(--ok); }
+
+.kanban-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+.kanban-card {
+  background: var(--card);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  position: relative;
+  overflow: hidden;
+}
+.kanban-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0;
+  width: 4px; height: 100%;
+  background: var(--text-muted);
+}
+.kanban-card.p1::before { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+.kanban-card.p2::before { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.kanban-card.p3::before { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+.kanban-card:hover {
+  transform: translateY(-4px) scale(1.01);
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 240, 255, 0.1);
+}
+.kanban-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-strong);
+  line-height: 1.4;
+  margin-left: 8px;
+}
+.kanban-card-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+.kanban-assignee {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(0, 240, 255, 0.1);
+  color: var(--accent);
+  padding: 4px 8px;
+  border-radius: 8px;
+  gap: 4px;
+  font-weight: 600;
+}
+.kanban-assignee::before {
+  content: "@";
+  opacity: 0.7;
+}
+
+.memory-note {
+  font-style: italic;
+  color: var(--accent);
+}
+
+/* ── Logs (merged from logs.css) ── */
+/* System Log Viewer */
+
+.logs-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  min-height: 0;
+}
+
+.logs-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  flex-shrink: 0;
+}
+
+.logs-filters {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.logs-select {
+  background: var(--card);
+  color: var(--text-body);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+}
+
+.logs-module-input {
+  background: var(--card);
+  color: var(--text-body);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+  width: 10rem;
+}
+
+.logs-module-input::placeholder {
+  color: var(--text-muted);
+}
+
+.logs-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.logs-auto-label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: pointer;
+}
+
+.logs-refresh-btn {
+  background: var(--card);
+  color: var(--text-body);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+  cursor: pointer;
+}
+
+.logs-refresh-btn:hover {
+  border-color: var(--accent);
+}
+
+.logs-error {
+  padding: 0.5rem;
+  background: rgba(224, 80, 80, 0.15);
+  border: 1px solid #e05050;
+  border-radius: 4px;
+  color: #e05050;
+  font-size: 0.8rem;
+}
+
+.logs-table-wrap {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  background: var(--card);
+}
+
+.logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+  line-height: 1.4;
+}
+
+.logs-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  z-index: 1;
+}
+
+.logs-table th {
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--card-border);
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.logs-table td {
+  padding: 0.2rem 0.5rem;
+  border-bottom: 1px solid var(--white-4);
+  vertical-align: top;
+}
+
+.logs-col-ts {
+  width: 11rem;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.logs-col-level {
+  width: 3.5rem;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.logs-col-module {
+  width: 8rem;
+  white-space: nowrap;
+  color: var(--accent);
+}
+
+.logs-row:hover {
+  background: var(--white-3);
+}
+
+.logs-level-error {
+  background: rgba(224, 80, 80, 0.06);
+}
+
+.logs-level-warn {
+  background: rgba(230, 167, 0, 0.04);
 }

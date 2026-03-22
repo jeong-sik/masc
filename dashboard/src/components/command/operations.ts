@@ -94,7 +94,7 @@ function MermaidGraph({ source }: { source: string }) {
   }, [source])
 
   return html`
-    <div class="command-chain-graph-shell">
+    <div class="mt-3 min-h-[160px]">
       ${error ? html`<div class="empty-state error">${error}</div>` : null}
       <div class="command-chain-graph" ref=${hostRef}></div>
     </div>
@@ -127,7 +127,7 @@ function ChainOperationListItem(
 
 function ChainHistoryRow({ item }: { item: ChainHistoryEventSummary }) {
   return html`
-    <article class="command-chain-history-row">
+    <article class="command-chain-history-row text-red-300">
       <div class="command-guide-head">
         <strong>${item.chain_id ?? '알 수 없는 체인'}</strong>
         <span class="command-chip ${chainStatusTone(item.event)}">${item.event}</span>
@@ -149,7 +149,7 @@ function ChainRunNodeRow({ node }: { node: CommandPlaneChainRunNode }) {
         ${node.type ?? '노드'}
         ${typeof node.duration_ms === 'number' ? ` · ${node.duration_ms}ms` : ''}
       </div>
-      ${node.error ? html`<div class="command-card-sub error-text">${node.error}</div>` : null}
+      ${node.error ? html`<div class="command-card-sub text-red-300">${node.error}</div>` : null}
     </article>
   `
 }
@@ -172,7 +172,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
       </div>
       <div class="command-card-grid">
         <span>유닛</span><span>${card.assigned_unit_label ?? op.assigned_unit_id}</span>
-        <span>트레이스</span><span class="mono">${op.trace_id}</span>
+        <span>트레이스</span><span class="font-mono">${op.trace_id}</span>
         <span>자율성</span><span>${op.autonomy_level ?? '정보 없음'}</span>
         <span>예산 등급</span><span>${op.budget_class ?? 'standard'}</span>
         <span>출처</span><span>${op.source ?? 'managed'}</span>
@@ -244,7 +244,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
 function DetachmentCard({ card }: { card: CommandPlaneDetachmentCard }) {
   const detachment = card.detachment
   return html`
-    <article class="command-card compact">
+    <article class="command-card p-3">
       <div class="command-card-head">
         <div>
           <strong>${detachment.detachment_id}</strong>
@@ -278,7 +278,7 @@ export function OperationsSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <div class="command-surface-grid">
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">작전</div>
         </div>
@@ -288,7 +288,7 @@ export function OperationsSurface() {
             </div>`
           : html`<div class="empty-state">관리형 또는 투영된 작전이 없습니다.</div>`}
       </section>
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">분견대</div>
         </div>
@@ -324,7 +324,7 @@ export function ChainsSurface() {
 
   return html`
     <div class="command-grid">
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">Chains</div>
         </div>
@@ -378,7 +378,7 @@ export function ChainsSurface() {
         </div>
       </section>
 
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">체인 상세</div>
         </div>

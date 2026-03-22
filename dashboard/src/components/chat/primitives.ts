@@ -172,7 +172,7 @@ export function ChatMessageBubble({
                       <div class="chat-detail-callout-label">스킬 경로</div>
                       <div class="chat-detail-callout-value">${entry.details.skillPrimary}</div>
                       ${entry.details.skillReason
-                        ? html`<div class="chat-detail-callout-copy">${entry.details.skillReason}</div>`
+                        ? html`<div class="text-[#bfe8cf] leading-[1.55]">${entry.details.skillReason}</div>`
                         : null}
                     </div>
                   `
@@ -282,7 +282,7 @@ export function ChatComposer({
   return html`
     <div class="chat-composer">
       <textarea
-        class="control-textarea chat-composer-input"
+        class="control-textarea min-h-[72px]"
         placeholder=${placeholder}
         value=${draft}
         onInput=${(event: Event) => { onDraftChange((event.target as HTMLTextAreaElement).value) }}

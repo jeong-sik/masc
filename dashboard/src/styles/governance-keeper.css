@@ -1,6 +1,6 @@
 /* ── Keeper Rich Card (Overview) ──────────────────────────── */
 @keyframes keeperPulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(74,222,128,0.4); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--ok-40); }
   50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(74,222,128,0); }
 }
 /* ── Metric explain tooltip ──────────────────────────────── */
@@ -31,7 +31,7 @@
   max-width: 320px;
   padding: 9px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(138, 163, 211, 0.35);
+  border: 1px solid var(--border-slate-35);
   background: rgba(10, 18, 34, 0.96);
   color: #d3e3ff;
   display: none;
@@ -54,18 +54,12 @@
   margin-top: 4px;
 }
 
-.metric-tip-pop code {
-  color: #9ad9ff;
-}
-
 .metric-tip:hover .metric-tip-pop,
 .metric-tip:focus .metric-tip-pop,
 .metric-tip:focus-within .metric-tip-pop {
   display: block;
 }
 
-/* ── Core keeper card (6 key metrics) ───────────────────── */
-/* ── Keeper detail tabs ──────────────────────────────────── */
 /* --- Governance staleness warning --- */
 .governance-stale-warning {
   padding: 10px 14px;
@@ -81,11 +75,11 @@
 /* ── Activity Timeline (case-grouped) ────────────────────── */
 
 .governance-case-group {
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-6);
   border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
 }
 
 .governance-case-header {
@@ -99,7 +93,7 @@
 .governance-case-topic {
   font-size: var(--fs-base);
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-90);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -111,7 +105,7 @@
   flex-direction: column;
   gap: 4px;
   padding-left: 4px;
-  border-left: 2px solid rgba(255, 255, 255, 0.08);
+  border-left: 2px solid var(--white-8);
 }
 
 .governance-case-events .governance-activity-row {
@@ -124,14 +118,14 @@
 
 .governance-event-summary {
   flex: 1;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-60);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .governance-event-time {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-35);
   font-size: var(--fs-xs);
   flex-shrink: 0;
 }
@@ -152,13 +146,13 @@
 }
 
 .lifecycle-pending {
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--white-25);
   background: transparent;
 }
 
 .lifecycle-done {
   color: rgba(74, 222, 128, 0.7);
-  background: rgba(74, 222, 128, 0.08);
+  background: var(--ok-8);
 }
 
 .lifecycle-current {
@@ -173,5 +167,5 @@
 }
 
 .lifecycle-arrow.done {
-  color: rgba(74, 222, 128, 0.4);
+  color: var(--ok-40);
 }

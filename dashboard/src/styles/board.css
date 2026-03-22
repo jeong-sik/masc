@@ -1,27 +1,5 @@
 /* ── Board (Posts) ─────────────────────────────────────────── */
 
-.board-controls {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.board-toolbar {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  margin-bottom: 15px;
-}
-
-.board-toolbar-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .board-summary-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -32,7 +10,7 @@
 .board-summary-item {
   padding: 12px 14px;
   border-radius: 10px;
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--border-slate-18);
   background: rgba(13, 22, 40, 0.62);
   display: flex;
   flex-direction: column;
@@ -62,9 +40,9 @@
 }
 .board-sort-btn:hover { background: var(--white-8); color: #ccc; }
 .board-sort-btn.active {
-  background: rgba(74,222,128,0.15);
+  background: var(--ok-soft);
   color: var(--ok);
-  border-color: rgba(74,222,128,0.3);
+  border-color: var(--ok-30);
 }
 
 .board-post {
@@ -85,14 +63,6 @@
 }
 
 /* Vote column */
-.vote-column {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  min-width: 52px;
-  padding-top: 2px;
-}
 .vote-btn {
   background: none;
   border: none;
@@ -109,24 +79,6 @@
 .vote-count { font-size: var(--fs-md); font-weight: bold; color: #ccc; }
 
 /* Post content */
-.post-content {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  gap: 10px;
-}
-
-.post-head {
-  display: grid;
-  gap: 8px;
-}
-
-.post-title-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-}
 
 .post-title {
   font-size: var(--fs-lg);
@@ -135,21 +87,13 @@
   color: var(--text-strong);
 }
 
-.post-chip-row {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
 .board-meta-chip {
   font-size: var(--fs-2xs);
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid rgba(71, 184, 255, 0.3);
   color: #9ad9ff;
-  background: rgba(71, 184, 255, 0.12);
+  background: var(--accent-12);
 }
 
 .post-meta {
@@ -166,10 +110,7 @@
   line-height: 1.6;
 }
 
-/* Post flair badges */
-
 /* Board detail */
-.board-detail { padding: 20px; }
 .board-detail .post-body { font-size: var(--fs-md); line-height: 1.7; margin: 15px 0; }
 
 /* Board comments */

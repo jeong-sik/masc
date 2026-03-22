@@ -24,6 +24,22 @@ Root causes:
 - **Existing pattern**: `Dashboard_governance_judge.start` uses `Eio.Fiber.fork_daemon` with a periodic loop. The new judge follows this same pattern.
 - **OAS Agent.run**: The new judge uses `Oas_worker.run_named_with_masc_tools` to give the LLM read-only tools for inspecting room state, instead of a single-turn prompt with a factual JSON dump.
 
+## OAS/MASC 계층 분리 (Inference belongs in OAS)
+
+LLM judge는 본질적으로 추론/평가 태스크다. "Inference belongs in OAS" 원칙에 따라 판단 로직과 트리거를 분리한다.
+
+| 계층 | 책임 | 위치 |
+|------|------|------|
+| **OAS** | Judge agent 정의, scoring 로직, 도구 스키마, 출력 파싱, confidence 계산 | `oas/lib/judge/` (신규 모듈) |
+| **MASC** | 트리거 (주기적 fiber), 컨텍스트 수집 (room/keeper/task 상태), 결과 캐시, SSE emit, dashboard 렌더링 | `masc/lib/dashboard/dashboard_judge.ml` |
+
+MASC는 OAS에 "이 컨텍스트로 판단해달라"고 요청한다. OAS가 "어떻게 판단할지" (프롬프트, scoring, 구조화)를 소유한다.
+
+이 분리의 이점:
+- OAS judge를 다른 프로젝트에서도 재사용 가능
+- MASC에 inference 코드가 누적되지 않음 (god object 방지)
+- Judge 로직 테스트가 MASC room 의존성 없이 가능
+
 ## Architecture
 
 ```mermaid

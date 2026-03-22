@@ -42,7 +42,7 @@ function DecisionCard({ decision }: { decision: CommandPlaneDecisionRecord }) {
           <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${decision.requested_action}</strong>
           <div class="text-[11px] text-[var(--text-muted)] mt-0.5">${decision.scope_type}:${decision.scope_id}</div>
         </div>
-        <span class="cmd-chip rounded-full ${toneClass(decision.status)}">${controlStatusLabel(decision.status ?? 'pending')}</span>
+        <span class="rounded-full ${toneClass(decision.status)}">${controlStatusLabel(decision.status ?? 'pending')}</span>
       </div>
       <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[12px] mt-2">
         <span class="text-[var(--text-muted)]">결정 ID</span><span class="text-[var(--text-body)]">${decision.decision_id}</span>
@@ -83,7 +83,7 @@ function CapacityRowCard({ row }: { row: CommandPlaneCapacityRow }) {
           <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${unit.label}</strong>
           <div class="text-[11px] text-[var(--text-muted)] mt-0.5">${unit.unit_id}</div>
         </div>
-        <span class="cmd-chip rounded-full ${toneClass(utilization > 100 ? 'bad' : utilization > 70 ? 'warn' : 'ok')}">${utilization}%</span>
+        <span class="rounded-full ${toneClass(utilization > 100 ? 'bad' : utilization > 70 ? 'warn' : 'ok')}">${utilization}%</span>
       </div>
       <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[12px] mt-2">
         <span class="text-[var(--text-muted)]">편성</span><span class="text-[var(--text-body)]">${row.roster_live ?? 0}/${row.roster_total ?? 0}</span>

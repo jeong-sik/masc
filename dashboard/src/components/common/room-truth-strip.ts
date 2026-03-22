@@ -31,7 +31,7 @@ export function RoomTruthStrip() {
         <span class="room-truth-label">세션</span>
         <strong>활성 ${execution?.active_sessions ?? 0} · 막힘 ${blocked}</strong>
         <div class="flex flex-wrap gap-2">
-          <span class="cmd-chip rounded-full ${toneClass(blocked > 0 ? 'warn' : 'ok')}">
+          <span class="rounded-full ${toneClass(blocked > 0 ? 'warn' : 'ok')}">
             우선 ${execution?.priority_items ?? 0}
           </span>
         </div>

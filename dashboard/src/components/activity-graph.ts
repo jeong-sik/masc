@@ -89,27 +89,27 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
   return html`
     <div class="stats-grid grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
       <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="stat-label">노드</div>
+        <div>노드</div>
         <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.node_count}</div>
       </div>
       <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="stat-label">엣지</div>
+        <div>엣지</div>
         <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.edge_count}</div>
       </div>
       <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="stat-label">에이전트</div>
+        <div>에이전트</div>
         <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.agent_count}</div>
       </div>
       <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="stat-label">활성</div>
+        <div>활성</div>
         <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums text-[var(--ok)]">${s.active_agents}</div>
       </div>
       <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="stat-label">작업</div>
+        <div>작업</div>
         <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.task_count}</div>
       </div>
       <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="stat-label">이벤트</div>
+        <div>이벤트</div>
         <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.event_count}</div>
       </div>
     </div>

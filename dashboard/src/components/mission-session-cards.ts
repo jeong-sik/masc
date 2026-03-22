@@ -44,7 +44,7 @@ export function SessionBriefCard({
             </div>
             <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           </div>
-          <span class="cmd-chip rounded-full ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
+          <span class="rounded-full ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
         </div>
 
         <div class="grid grid-cols-2 gap-2.5">
@@ -163,7 +163,7 @@ export function SessionDetailCard({
         <div class="grid gap-2.5">
           <div class="flex justify-between gap-2 items-start flex-wrap">
             <strong>타임라인</strong>
-            <span class="cmd-chip rounded-full">${detail.timeline.length}</span>
+            <span class="rounded-full">${detail.timeline.length}</span>
           </div>
           <div class="flex flex-col gap-2.5">
             ${detail.timeline.length > 0
@@ -183,7 +183,7 @@ export function SessionDetailCard({
         <div class="grid gap-2.5">
           <div class="flex justify-between gap-2 items-start flex-wrap">
             <strong>참여자</strong>
-            <span class="cmd-chip rounded-full">${detail.participants.length}</span>
+            <span class="rounded-full">${detail.participants.length}</span>
           </div>
           <div class="flex flex-col gap-3 compact">
             ${detail.participants.length > 0
@@ -206,7 +206,7 @@ export function SessionDetailCard({
         <div class="grid gap-2.5">
           <div class="flex justify-between gap-2 items-start flex-wrap">
             <strong>연결된 작전</strong>
-            <span class="cmd-chip rounded-full">${detail.operations.length}</span>
+            <span class="rounded-full">${detail.operations.length}</span>
           </div>
           <div class="flex flex-col gap-2 mt-2.5">
             ${detail.operations.length > 0
@@ -224,7 +224,7 @@ export function SessionDetailCard({
         <div class="grid gap-2.5">
           <div class="flex justify-between gap-2 items-start flex-wrap">
             <strong>연속성 관찰</strong>
-            <span class="cmd-chip rounded-full">${detail.keepers.length}</span>
+            <span class="rounded-full">${detail.keepers.length}</span>
           </div>
           <div class="flex flex-col gap-2 mt-2.5">
             ${detail.keepers.length > 0

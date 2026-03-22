@@ -334,7 +334,7 @@ export function OrchestraSurface() {
       <div class="card rounded-xl-title-row">
         <div class="card rounded-xl-title">오케스트라 맵</div>
       </div>
-      <p class="cmd-card rounded-xl-sub">
+      <p class="rounded-xl-sub">
         룸 전체를 한 장의 작전판으로 읽는 시각화입니다. 확대/이동으로 밀집 구간을 읽고, 노드를 눌러 상세 신호와 연결 대상을 확인합니다.
       </p>
 
@@ -356,7 +356,7 @@ export function OrchestraSurface() {
           >
             축소
           <//>
-          <span class="cmd-chip rounded-full">${Math.round(camera.zoom * 100)}%</span>
+          <span class="rounded-full">${Math.round(camera.zoom * 100)}%</span>
         </div>
         <div class="orchestra-toolbar-group">
           <${ActionButton}
@@ -377,7 +377,7 @@ export function OrchestraSurface() {
           >
             집약
           <//>
-          <span class="cmd-chip rounded-full">${densityLabel(density)}</span>
+          <span class="rounded-full">${densityLabel(density)}</span>
         </div>
       </div>
 
@@ -422,13 +422,13 @@ export function OrchestraSurface() {
             </g>
           </svg>
           <div class="absolute left-3.5 right-3.5 bottom-3 flex flex-wrap gap-2 pointer-events-none">
-            <span class="cmd-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">세션 ${orchestra.summary?.session_count ?? 0}</span>
-            <span class="cmd-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">워커 ${orchestra.summary?.worker_count ?? 0}</span>
-            <span class="cmd-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">키퍼 ${orchestra.summary?.keeper_count ?? 0}</span>
-            <span class="cmd-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)] ${toneClass(orchestra.signals.some(signalNode => signalNode.tone === 'bad') ? 'bad' : orchestra.signals.length > 0 ? 'warn' : 'ok')}">
+            <span class="rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">세션 ${orchestra.summary?.session_count ?? 0}</span>
+            <span class="rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">워커 ${orchestra.summary?.worker_count ?? 0}</span>
+            <span class="rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">키퍼 ${orchestra.summary?.keeper_count ?? 0}</span>
+            <span class="rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)] ${toneClass(orchestra.signals.some(signalNode => signalNode.tone === 'bad') ? 'bad' : orchestra.signals.length > 0 ? 'warn' : 'ok')}">
               신호 ${orchestra.summary?.signal_count ?? orchestra.signals.length}
             </span>
-            <span class="cmd-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">갱신 ${relativeTime(orchestra.generated_at)}</span>
+            <span class="rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">갱신 ${relativeTime(orchestra.generated_at)}</span>
           </div>
         </div>
 

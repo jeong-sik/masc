@@ -43,7 +43,7 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
               <span>${info.model !== info.nickname ? `${info.model} · ` : ''}${info.nickname}</span>
             </div>
           </div>
-          <span class="cmd-chip rounded-full ${toneClass(row.brief.status ?? row.agent?.status)}">${statusLabel(row.brief.status ?? row.agent?.status)}</span>
+          <span class="rounded-full ${toneClass(row.brief.status ?? row.agent?.status)}">${statusLabel(row.brief.status ?? row.agent?.status)}</span>
         </div>
 
         <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
@@ -122,7 +122,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
               ${row.keeper?.koreanName ? html`<span>${row.keeper.koreanName}</span>` : null}
             </div>
           </div>
-          <span class="cmd-chip rounded-full ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
+          <span class="rounded-full ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
         </div>
 
         <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
@@ -170,7 +170,7 @@ export function InternalSignalCard({ item }: { item: DashboardMissionInternalSig
   return html`
     <article class="p-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] ${toneClass(item.severity)}">
       <div class="flex justify-between gap-2 items-start flex-wrap">
-        <span class="cmd-chip rounded-full ${toneClass(item.severity)}">
+        <span class="rounded-full ${toneClass(item.severity)}">
           ${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? '내부 신호'}
         </span>
         <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>

@@ -30,9 +30,9 @@ export function CommandWorkflowBanner() {
     <section class="rounded-[14px] border border-[rgba(34,211,238,0.26)] bg-[linear-gradient(180deg,rgba(34,211,238,0.1),var(--white-3))] p-[14px_16px] grid gap-2">
       <div class="flex gap-2 flex-wrap items-center">
         <strong>${context.source_label}</strong>
-        <span class="cmd-chip rounded-full">${workflowActionLabel(context.action_type)}</span>
-        <span class="cmd-chip rounded-full">${workflowTargetLabel(context)}</span>
-        <span class="cmd-chip rounded-full">${workflowCommandSurfaceLabel(route.value.params.surface ?? 'warroom')}</span>
+        <span class="rounded-full">${workflowActionLabel(context.action_type)}</span>
+        <span class="rounded-full">${workflowTargetLabel(context)}</span>
+        <span class="rounded-full">${workflowCommandSurfaceLabel(route.value.params.surface ?? 'warroom')}</span>
       </div>
       <div class="text-[rgba(255,255,255,0.84)] leading-normal">${context.summary}</div>
       ${context.payload_preview
@@ -159,10 +159,10 @@ export function SummaryHero() {
         <h3>${headline}</h3>
         <p>${subcopy}</p>
         <div class="flex flex-wrap gap-2">
-        <span class="cmd-chip rounded-full ${toneClass(activeOps > 0 ? 'ok' : 'warn')}">활성 작전 ${activeOps}</span>
-          <span class="cmd-chip rounded-full ${toneClass(movingLanes > 0 ? 'ok' : activeLanes > 0 ? 'warn' : 'warn')}">이동 레인 ${movingLanes}/${Math.max(activeLanes, movingLanes)}</span>
-          <span class="cmd-chip rounded-full ${toneClass(badAlerts > 0 ? 'bad' : warnAlerts > 0 ? 'warn' : 'ok')}">치명 알림 ${badAlerts}</span>
-          <span class="cmd-chip rounded-full ${toneClass(pendingApprovals > 0 ? 'warn' : 'ok')}">승인 대기 ${pendingApprovals}</span>
+        <span class="rounded-full ${toneClass(activeOps > 0 ? 'ok' : 'warn')}">활성 작전 ${activeOps}</span>
+          <span class="rounded-full ${toneClass(movingLanes > 0 ? 'ok' : activeLanes > 0 ? 'warn' : 'warn')}">이동 레인 ${movingLanes}/${Math.max(activeLanes, movingLanes)}</span>
+          <span class="rounded-full ${toneClass(badAlerts > 0 ? 'bad' : warnAlerts > 0 ? 'warn' : 'ok')}">치명 알림 ${badAlerts}</span>
+          <span class="rounded-full ${toneClass(pendingApprovals > 0 ? 'warn' : 'ok')}">승인 대기 ${pendingApprovals}</span>
         </div>
       </div>
 
@@ -245,13 +245,13 @@ export function SummaryCards() {
   const cache = microarch?.cache
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 주의</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 주의</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}</small></div>
     </div>
   `
 }

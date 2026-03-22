@@ -30,7 +30,7 @@ export function OperationCard({ brief, selected }: { brief: DashboardExecutionOp
           <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
           <div class="mission-card rounded-xl-title">${brief.objective}</div>
         </div>
-        <span class="cmd-chip rounded-full ${terminal ? 'muted' : toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>
+        <span class="rounded-full ${terminal ? 'muted' : toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>
       </div>
       <div class="mission-card rounded-xl-meta">
         ${brief.stage ? html`<span>단계 · ${brief.stage}</span>` : null}

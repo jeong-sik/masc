@@ -11,13 +11,13 @@ import { alertBorderTone, relativeTime, toneClass } from './helpers'
 
 export function SwarmChecklistCard({ item }: { item: CommandPlaneSwarmChecklistItem }) {
   return html`
-    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${toneClass(item.status)}">
+    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl ${toneClass(item.status)}">
       <div class="flex justify-between gap-2.5 items-start">
         <strong>${item.title}</strong>
-        <span class="cmd-chip rounded-full ${toneClass(item.status)}">${item.status}</span>
+        <span class="rounded-full ${toneClass(item.status)}">${item.status}</span>
       </div>
-      <p>${item.detail}</p>
-      <div class="cmd-card rounded-xl-foot">Next tool: ${item.next_tool}</div>
+      <p class="[overflow-wrap:anywhere]">${item.detail}</p>
+      <div class="rounded-xl-foot">Next tool: ${item.next_tool}</div>
     </article>
   `
 }
@@ -25,9 +25,9 @@ export function SwarmChecklistCard({ item }: { item: CommandPlaneSwarmChecklistI
 export function SwarmBlockerCard({ blocker }: { blocker: CommandPlaneSwarmBlocker }) {
   return html`
     <article class="cmd-alert ${toneClass(blocker.severity)} ${alertBorderTone(toneClass(blocker.severity))}">
-      <div class="cmd-card rounded-xl-head">
+      <div class="rounded-xl-head">
         <strong>${blocker.title}</strong>
-        <span class="cmd-chip rounded-full ${toneClass(blocker.severity)}">${blocker.severity}</span>
+        <span class="rounded-full ${toneClass(blocker.severity)}">${blocker.severity}</span>
       </div>
       <div class="flex justify-between items-start">
         <span>${blocker.code}</span>
@@ -40,17 +40,17 @@ export function SwarmBlockerCard({ blocker }: { blocker: CommandPlaneSwarmBlocke
 
 export function SwarmWorkerCard({ worker }: { worker: CommandPlaneSwarmWorker }) {
   return html`
-    <article class="cmd-card rounded-xl p-3">
-      <div class="cmd-card rounded-xl-head">
+    <article class="rounded-xl p-3">
+      <div class="rounded-xl-head">
         <div>
           <strong>${worker.name}</strong>
-          <div class="cmd-card rounded-xl-sub">${worker.role} · ${worker.lane}</div>
+          <div class="rounded-xl-sub">${worker.role} · ${worker.lane}</div>
         </div>
-        <span class="cmd-chip rounded-full ${toneClass(worker.joined ? (worker.heartbeat_fresh ? 'ok' : 'warn') : 'bad')}">
+        <span class="rounded-full ${toneClass(worker.joined ? (worker.heartbeat_fresh ? 'ok' : 'warn') : 'bad')}">
           ${worker.status}
         </span>
       </div>
-      <div class="cmd-card rounded-xl-grid">
+      <div class="rounded-xl-grid">
         <span>Joined</span><span>${worker.joined ? 'yes' : 'no'}</span>
         <span>Live</span><span>${worker.live_presence ? 'yes' : 'no'}</span>
         <span>Completed</span><span>${worker.completed ? 'yes' : 'no'}</span>
@@ -61,15 +61,15 @@ export function SwarmWorkerCard({ worker }: { worker: CommandPlaneSwarmWorker })
         <span>Squad</span><span>${worker.squad_member ? 'yes' : 'no'}</span>
         <span>Detachment</span><span>${worker.detachment_member ? 'yes' : 'no'}</span>
       </div>
-      <div class="cmd-tag rounded-full-row">
-        <span class="cmd-tag rounded-full">${worker.lane}</span>
-        <span class="cmd-tag rounded-full ${worker.current_task_matches_run ? 'ok' : 'warn'}">current_task</span>
-        <span class="cmd-tag rounded-full ${worker.claim_marker_seen ? 'ok' : 'warn'}">claim</span>
-        <span class="cmd-tag rounded-full ${worker.done_marker_seen ? 'ok' : 'warn'}">done</span>
-        <span class="cmd-tag rounded-full ${worker.final_marker_seen ? 'ok' : 'warn'}">final</span>
+      <div class="rounded-full-row">
+        <span class="rounded-full">${worker.lane}</span>
+        <span class="rounded-full ${worker.current_task_matches_run ? 'ok' : 'warn'}">current_task</span>
+        <span class="rounded-full ${worker.claim_marker_seen ? 'ok' : 'warn'}">claim</span>
+        <span class="rounded-full ${worker.done_marker_seen ? 'ok' : 'warn'}">done</span>
+        <span class="rounded-full ${worker.final_marker_seen ? 'ok' : 'warn'}">final</span>
       </div>
       ${worker.last_message
-        ? html`<div class="cmd-card rounded-xl-foot">${relativeTime(worker.last_message.timestamp)} · ${worker.last_message.content}</div>`
+        ? html`<div class="rounded-xl-foot">${relativeTime(worker.last_message.timestamp)} · ${worker.last_message.content}</div>`
         : null}
     </article>
   `
@@ -101,7 +101,7 @@ export function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEven
       <div class="min-w-0 flex-1">
         <strong>${event.title}</strong>
         <span class="text-[0.72rem] opacity-60 ml-1.5">${event.kind}</span>
-        ${event.detail ? html`<div class="cmd-card rounded-xl-sub">${event.detail}</div>` : null}
+        ${event.detail ? html`<div class="rounded-xl-sub">${event.detail}</div>` : null}
       </div>
     </div>
   `
@@ -111,8 +111,8 @@ export function SwarmGapDot({ gap }: { gap: CommandPlaneSwarmGap }) {
   return html`
     <div class="flex items-center gap-1.5 py-[3px] text-[0.78rem]">
       <span class="swarm-gap-dot"></span>
-      <span class="cmd-chip rounded-full ${toneClass(gap.severity)}">${gap.code} (${gap.count})</span>
-      <span class="cmd-card rounded-xl-sub">${gap.summary}</span>
+      <span class="rounded-full ${toneClass(gap.severity)}">${gap.code} (${gap.count})</span>
+      <span class="rounded-xl-sub">${gap.summary}</span>
     </div>
   `
 }
@@ -127,14 +127,14 @@ export function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
           ? 'ok'
           : 'warn'
   return html`
-    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${toneClass(tone)}">
+    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl ${toneClass(tone)}">
         <div class="flex justify-between gap-2.5 items-start">
           <strong>Hot Proof / 가동 증거</strong>
-          <span class="cmd-chip rounded-full ${toneClass(tone)}">${proof?.status ?? 'missing'}</span>
+          <span class="rounded-full ${toneClass(tone)}">${proof?.status ?? 'missing'}</span>
         </div>
       ${proof
         ? html`
-            <div class="cmd-card rounded-xl-grid">
+            <div class="rounded-xl-grid">
               <span>소스</span><span>${proof.source}</span>
               <span>런</span><span>${proof.run_id ?? 'n/a'}</span>
               <span>수집 시각</span><span>${relativeTime(proof.captured_at)}</span>
@@ -144,7 +144,7 @@ export function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
               <span>워커 증거</span><span>${proof.workers.expected ?? 'n/a'} 예상 · ${proof.workers.done ?? 'n/a'} 완료 · ${proof.workers.final ?? 'n/a'} 최종</span>
             </div>
             ${proof.artifact_ref
-              ? html`<div class="cmd-card rounded-xl-foot">${proof.artifact_ref}</div>`
+              ? html`<div class="rounded-xl-foot">${proof.artifact_ref}</div>`
               : null}
             ${proof.missing_reason
               ? html`<p>${proof.missing_reason}</p>`

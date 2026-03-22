@@ -33,7 +33,7 @@ export function QueueCard({ item, selected }: { item: DashboardExecutionQueueIte
           <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${item.kind === 'session' ? item.target_id : item.linked_session_id ?? item.target_id}</div>
           <div class="mission-card rounded-xl-title">${item.summary}</div>
         </div>
-        <span class="cmd-chip rounded-full ${terminal ? 'muted' : toneClass(item.severity)}">${statusLabel(item.status ?? item.severity)}</span>
+        <span class="rounded-full ${terminal ? 'muted' : toneClass(item.severity)}">${statusLabel(item.status ?? item.severity)}</span>
       </div>
       <div class="mission-card rounded-xl-meta">
         <span>${queueKindLabel(item.kind)}</span>

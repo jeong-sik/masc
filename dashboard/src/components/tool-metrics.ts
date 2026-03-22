@@ -116,23 +116,23 @@ export function ToolMetrics() {
         <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-2.5 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
           <div class="tool-metrics-stat">
             <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.total_calls}</span>
-            <span class="stat-label">총 호출 수</span>
+            <span>총 호출 수</span>
           </div>
           <div class="tool-metrics-stat">
             <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.distinct_tools_called}</span>
-            <span class="stat-label">사용된 도구</span>
+            <span>사용된 도구</span>
           </div>
           <div class="tool-metrics-stat">
             <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.never_called_count}</span>
-            <span class="stat-label">미사용 도구</span>
+            <span>미사용 도구</span>
           </div>
           <div class="tool-metrics-stat">
             <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.registered_count}</span>
-            <span class="stat-label">등록됨 (v2)</span>
+            <span>등록됨 (v2)</span>
           </div>
           <div class="tool-metrics-stat">
             <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.dispatch_v2_enabled ? 'ON' : 'OFF'}</span>
-            <span class="stat-label">Dispatch v2</span>
+            <span>Dispatch v2</span>
           </div>
         </div>
 

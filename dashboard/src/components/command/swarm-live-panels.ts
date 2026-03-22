@@ -46,24 +46,24 @@ export function SwarmLivePanels() {
             ? html`<${ErrorState}>${commandPlaneSwarmError.value}<//>`
             : swarm
               ? html`
-                  <div class="cmd-tag rounded-full-row">
-                    <span class="cmd-tag rounded-full">experimental</span>
+                  <div class="rounded-full-row">
+                    <span class="rounded-full">experimental</span>
                     <${ProvenanceChip} item=${{ kind: 'derived', label: 'derived read-model' }} />
-                    <span class="cmd-tag rounded-full ${swarm.run_resolution || swarm.resolution_recommendation ? 'warn' : 'ok'}">
+                    <span class="rounded-full ${swarm.run_resolution || swarm.resolution_recommendation ? 'warn' : 'ok'}">
                       ${swarm.run_resolution || swarm.resolution_recommendation ? 'operator resolution aware' : 'no resolution advice'}
                     </span>
                   </div>
-                  <div class="cmd-card rounded-xl-sub">
+                  <div class="rounded-xl-sub">
                     이 화면은 swarm-live의 사회 truth 자체가 아니라, 실험적 오케스트레이션을 읽기 위한 파생 관찰면입니다.
                   </div>
                   <div class="command-summary-grid">
-                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>실행 런</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room 정보 없음'}</small></div>
-                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>워커</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0}개 가동 · ${swarm.summary?.completed_workers ?? 0}개 완료</small></div>
-                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>런타임</span><strong>${runtimeState}</strong><small>slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
-                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>고동시성</span><strong>${swarm.summary?.pass_hot_concurrency ? '통과' : '확인 필요'}</strong><small>${swarm.provider?.slot_url ?? 'slot 정보 없음'}</small></div>
-                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>종단 점검</span><strong>${swarm.summary?.pass_end_to_end ? '통과' : '확인 필요'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
+                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>실행 런</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room 정보 없음'}</small></div>
+                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>워커</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0}개 가동 · ${swarm.summary?.completed_workers ?? 0}개 완료</small></div>
+                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>런타임</span><strong>${runtimeState}</strong><small>slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
+                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>고동시성</span><strong>${swarm.summary?.pass_hot_concurrency ? '통과' : '확인 필요'}</strong><small>${swarm.provider?.slot_url ?? 'slot 정보 없음'}</small></div>
+                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>종단 점검</span><strong>${swarm.summary?.pass_end_to_end ? '통과' : '확인 필요'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
                   </div>
-                  <div class="cmd-card rounded-xl-grid">
+                  <div class="rounded-xl-grid">
                     <span>작전</span><span>${swarm.operation?.operation_id ?? operationId ?? '없음'}</span>
                     <span>분대</span><span>${swarm.squad?.label ?? '없음'}</span>
                     <span>실행체</span><span>${swarm.detachment?.detachment_id ?? '없음'}</span>
@@ -73,8 +73,8 @@ export function SwarmLivePanels() {
                     <span>추천 도구</span><span>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</span>
                   </div>
                   ${swarm.truth_notes.length > 0
-                    ? html`<div class="cmd-tag rounded-full-row">
-                        ${swarm.truth_notes.map(note => html`<span class="cmd-tag rounded-full">${note}</span>`)}
+                    ? html`<div class="rounded-full-row">
+                        ${swarm.truth_notes.map(note => html`<span class="rounded-full">${note}</span>`)}
                       </div>`
                     : null}
                   <${SwarmRunResolutionCard} swarm=${swarm} />
@@ -87,7 +87,7 @@ export function SwarmLivePanels() {
           <div class="card rounded-xl-title">체크리스트</div>
         </div>
         ${swarm && swarm.checklist.length > 0
-          ? html`<div class="cmd-card rounded-xl-stack">
+          ? html`<div class="rounded-xl-stack">
               ${swarm.checklist.map(item => html`<${SwarmChecklistCard} item=${item} />`)}
             </div>`
           : html`<${EmptyState}>체크리스트가 아직 없습니다.<//>`}
@@ -98,7 +98,7 @@ export function SwarmLivePanels() {
           <div class="card rounded-xl-title">워커</div>
         </div>
         ${swarm && swarm.workers.length > 0
-          ? html`<div class="cmd-card rounded-xl-stack">
+          ? html`<div class="rounded-xl-stack">
               ${swarm.workers.map(worker => html`<${SwarmWorkerCard} worker=${worker} />`)}
             </div>`
           : html`<${EmptyState}>워커 행이 아직 없습니다.<//>`}
@@ -110,7 +110,7 @@ export function SwarmLivePanels() {
         </div>
         ${swarm?.provider
           ? html`
-              <div class="cmd-card rounded-xl-grid">
+              <div class="rounded-xl-grid">
                 <span>Provider</span><span>${swarm.provider.provider_base_url ?? 'n/a'}</span>
                 <span>Provider Reachable</span><span>${swarm.provider.provider_reachable == null ? 'n/a' : swarm.provider.provider_reachable ? 'yes' : 'no'}</span>
                 <span>Requested Model</span><span>${swarm.provider.provider_model_id ?? 'n/a'}</span>
@@ -128,7 +128,7 @@ export function SwarmLivePanels() {
                 <span>Doctor Checked</span><span>${swarm.provider.checked_at ? relativeTime(swarm.provider.checked_at) : 'n/a'}</span>
               </div>
               ${swarm.provider.detail
-                ? html`<div class="cmd-card rounded-xl-sub">${swarm.provider.detail}</div>`
+                ? html`<div class="rounded-xl-sub">${swarm.provider.detail}</div>`
                 : null}
               ${swarm.provider.timeline.length > 0
                 ? html`<div class="flex flex-col gap-3">
@@ -137,9 +137,9 @@ export function SwarmLivePanels() {
                         <div class="min-w-0 [overflow-wrap:anywhere] break-words">
                           <div class="flex justify-between items-start">
                             <strong>${sample.active_slots} active</strong>
-                            <span class="cmd-chip rounded-full">${relativeTime(sample.timestamp)}</span>
+                            <span class="rounded-full">${relativeTime(sample.timestamp)}</span>
                           </div>
-                          <div class="cmd-card rounded-xl-sub">slots ${sample.active_slot_ids.join(', ') || 'none'}</div>
+                          <div class="rounded-xl-sub">slots ${sample.active_slot_ids.join(', ') || 'none'}</div>
                         </div>
                       </article>
                     `)}
@@ -154,7 +154,7 @@ export function SwarmLivePanels() {
           <div class="card rounded-xl-title">막힘 요인</div>
         </div>
         ${swarm && swarm.blockers.length > 0
-          ? html`<div class="cmd-card rounded-xl-stack">
+          ? html`<div class="rounded-xl-stack">
               ${swarm.blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)}
             </div>`
           : html`<${EmptyState}>막힘 요인은 없습니다. 다음 액션은 ${swarm?.recommended_next_tool ?? 'masc_observe_traces'} 입니다.<//>`}
@@ -171,9 +171,9 @@ export function SwarmLivePanels() {
                   <div class="min-w-0 [overflow-wrap:anywhere] break-words">
                     <div class="flex justify-between items-start">
                       <strong>${message.from}</strong>
-                      <span class="cmd-chip rounded-full">${relativeTime(message.timestamp)}</span>
+                      <span class="rounded-full">${relativeTime(message.timestamp)}</span>
                     </div>
-                    <div class="cmd-card rounded-xl-sub">seq ${message.seq}</div>
+                    <div class="rounded-xl-sub">seq ${message.seq}</div>
                   </div>
                   <pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[length:var(--fs-sm)] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${formatMessageContent(message.content)}</pre>
                 </article>

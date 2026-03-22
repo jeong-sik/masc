@@ -78,25 +78,25 @@ function warRoomMarkerLabel(marker: string): string {
 
 export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
   return html`
-    <article class="cmd-card rounded-xl p-3 warroom-worker-card ${toneClass(sessionStatusTone(worker.status))}">
-      <div class="cmd-card rounded-xl-head">
+    <article class="rounded-xl p-3 warroom-worker-card ${toneClass(sessionStatusTone(worker.status))}">
+      <div class="rounded-xl-head">
         <div>
           <strong>${worker.name}</strong>
-          <div class="cmd-card rounded-xl-sub">${worker.role} · ${worker.lane}</div>
+          <div class="rounded-xl-sub">${worker.role} · ${worker.lane}</div>
         </div>
-        <span class="cmd-chip rounded-full ${toneClass(sessionStatusTone(worker.status))}">${displayStatus(worker.status)}</span>
+        <span class="rounded-full ${toneClass(sessionStatusTone(worker.status))}">${displayStatus(worker.status)}</span>
       </div>
-      <div class="cmd-card rounded-xl-grid">
+      <div class="rounded-xl-grid">
         <span>출처</span><span>${warRoomSourceLabel(worker.source)}</span>
         <span>과업</span><span>${worker.task}</span>
         <span>최근 신호</span><span>${worker.heartbeat}</span>
         <span>근거</span><span>${worker.detail}</span>
       </div>
-      <div class="cmd-tag rounded-full-row mt-2.5">
-        ${worker.markers.map(marker => html`<span class="cmd-tag rounded-full">${warRoomMarkerLabel(marker)}</span>`)}
+      <div class="rounded-full-row mt-2.5">
+        ${worker.markers.map(marker => html`<span class="rounded-full">${warRoomMarkerLabel(marker)}</span>`)}
       </div>
       ${worker.note
-        ? html`<div class="cmd-card rounded-xl-foot">${truncate(worker.note, 220)}</div>`
+        ? html`<div class="rounded-xl-foot">${truncate(worker.note, 220)}</div>`
         : null}
     </article>
   `
@@ -104,23 +104,23 @@ export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
 
 export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
   return html`
-    <article class="cmd-card rounded-xl p-3 cmd-presence-card ${toneBorder(item.tone)}">
-      <div class="cmd-card rounded-xl-head">
+    <article class="rounded-xl p-3 cmd-presence-card ${toneBorder(item.tone)}">
+      <div class="rounded-xl-head">
         <div>
           <strong>${item.name}</strong>
-          <div class="cmd-card rounded-xl-sub">${item.role} · ${item.source}</div>
+          <div class="rounded-xl-sub">${item.role} · ${item.source}</div>
         </div>
-        <span class="cmd-chip rounded-full ${item.tone}">${item.status}</span>
+        <span class="rounded-full ${item.tone}">${item.status}</span>
       </div>
-      <div class="cmd-card rounded-xl-grid">
+      <div class="rounded-xl-grid">
         <span>현재 과업</span><span>${item.task}</span>
         <span>최근 신호</span><span>${item.signal}</span>
         <span>근거</span><span>${item.detail}</span>
       </div>
-      <div class="cmd-tag rounded-full-row">
-        ${item.chips.map(chip => html`<span class="cmd-tag rounded-full">${chip}</span>`)}
+      <div class="rounded-full-row">
+        ${item.chips.map(chip => html`<span class="rounded-full">${chip}</span>`)}
       </div>
-      ${item.note ? html`<div class="cmd-card rounded-xl-foot">${truncate(item.note, 200)}</div>` : null}
+      ${item.note ? html`<div class="rounded-xl-foot">${truncate(item.note, 200)}</div>` : null}
     </article>
   `
 }
@@ -131,9 +131,9 @@ export function WarRoomFeedCard({ item }: { item: WarRoomFeedItem }) {
       <div class="min-w-0 [overflow-wrap:anywhere] break-words">
         <div class="flex justify-between items-start">
           <strong>${item.title}</strong>
-          <span class="cmd-chip rounded-full ${item.tone}">${item.timestamp ? relativeTime(item.timestamp) : item.source}</span>
+          <span class="rounded-full ${item.tone}">${item.timestamp ? relativeTime(item.timestamp) : item.source}</span>
         </div>
-        <div class="cmd-card rounded-xl-sub">${item.meta}</div>
+        <div class="rounded-xl-sub">${item.meta}</div>
       </div>
       <div class="text-[rgba(226,232,240,0.86)] leading-[1.55] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${item.detail}</div>
     </article>

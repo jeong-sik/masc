@@ -859,13 +859,7 @@ tbody tr:hover {
   50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(74,222,128,0); }
 }
 
-/* State tone utilities */
-.tone-border-ok { border-color: var(--ok-24); }
-.tone-border-warn { border-color: rgba(251,191,36,0.22); }
-.tone-border-bad { border-color: rgba(248,113,113,0.26); }
-.tone-bg-ok { background: var(--ok-soft); color: var(--ok); }
-.tone-bg-warn { background: rgba(251,191,36,0.16); color: var(--warn); }
-.tone-bg-bad { background: rgba(248,113,113,0.16); color: var(--bad-light); }
+/* .tone-border-*, .tone-bg-* — REMOVED: migrated to inline Tailwind */
 
 /* monitor-row/pill state-offline, agents-workbench → Tailwind inline */
 
@@ -883,43 +877,7 @@ tbody tr:hover {
   isolation: isolate;
 }
 
-.keeper-chat__msg--user .keeper-chat__role {
-  text-align: right;
-}
-
-.keeper-chat__msg--user .keeper-chat__text {
-  background: var(--accent-12);
-  border: 1px solid var(--accent-20);
-  color: var(--text-body, var(--text-body));
-}
-
-.keeper-chat__msg--assistant .keeper-chat__text {
-  background: var(--ff-gold-8);
-  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-  color: var(--text-body, var(--text-body));
-}
-
-.keeper-chat__msg--streaming .keeper-chat__text {
-  border-color: var(--ff-gold-dim);
-}
-
-@utility keeper-chat__cursor {
-  animation: keeper-blink 0.8s step-end infinite;
-  color: var(--ff-gold, var(--ff-gold));
-}
-
-.keeper-chat__messages::-webkit-scrollbar {
-  width: 4px;
-}
-
-.keeper-chat__messages::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.keeper-chat__messages::-webkit-scrollbar-thumb {
-  background: var(--ff-gold-20);
-  border-radius: 2px;
-}
+/* .keeper-chat__* — REMOVED: migrated to keeper-chat-panel.ts inline Tailwind */
 
 /* ── Chat (merged from chat.css) ───────────────────────── */
 

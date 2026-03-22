@@ -33,14 +33,14 @@ export function MissionBriefingCard() {
       </div>
 
       <div class="flex gap-2 flex-wrap mb-3">
-        <span class="cmd-chip rounded-full ${briefingTone}">
+        <span class="rounded-full ${briefingTone}">
           ${statusLabel(briefing?.status ?? (missionBriefingError.value ? 'error' : 'loading'))}
         </span>
-        ${briefing?.model ? html`<span class="cmd-chip rounded-full">${briefing.model}</span>` : null}
-        ${briefing?.generated_at ? html`<span class="cmd-chip rounded-full">${relativeTime(briefing.generated_at)}</span>` : null}
-        ${briefing?.cached ? html`<span class="cmd-chip rounded-full">캐시</span>` : null}
-        ${briefing?.stale ? html`<span class="cmd-chip rounded-full warn">오래됨</span>` : null}
-        ${briefing?.refreshing ? html`<span class="cmd-chip rounded-full warn">갱신 중</span>` : null}
+        ${briefing?.model ? html`<span class="rounded-full">${briefing.model}</span>` : null}
+        ${briefing?.generated_at ? html`<span class="rounded-full">${relativeTime(briefing.generated_at)}</span>` : null}
+        ${briefing?.cached ? html`<span class="rounded-full">캐시</span>` : null}
+        ${briefing?.stale ? html`<span class="rounded-full warn">오래됨</span>` : null}
+        ${briefing?.refreshing ? html`<span class="rounded-full warn">갱신 중</span>` : null}
       </div>
 
       ${missionBriefingError.value ? html`<${ErrorState}>${missionBriefingError.value}<//>` : null}
@@ -58,11 +58,11 @@ export function MissionBriefingCard() {
                   <div class="flex justify-between gap-2 items-start flex-wrap">
                     <strong>${section.label}</strong>
                     <div class="flex gap-2 flex-wrap justify-end">
-                      <span class="cmd-chip rounded-full ${toneClass(section.status)}">${statusLabel(section.status)}</span>
+                      <span class="rounded-full ${toneClass(section.status)}">${statusLabel(section.status)}</span>
                       ${signalClassLabel(section.signal_class)
-                        ? html`<span class="cmd-chip rounded-full ${section.signal_class === 'mixed' ? 'warn' : ''}">${signalClassLabel(section.signal_class)}</span>`
+                        ? html`<span class="rounded-full ${section.signal_class === 'mixed' ? 'warn' : ''}">${signalClassLabel(section.signal_class)}</span>`
                         : null}
-                      ${section.evidence_quality ? html`<span class="cmd-chip rounded-full">${section.evidence_quality}</span>` : null}
+                      ${section.evidence_quality ? html`<span class="rounded-full">${section.evidence_quality}</span>` : null}
                     </div>
                   </div>
                   <p class="m-0 text-[rgba(255,255,255,0.8)] leading-normal">${section.summary}</p>
@@ -99,7 +99,7 @@ export function MissionBriefingCard() {
                   <article class="p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] grid gap-2 ${item.severity === 'watch' ? 'warn' : ''}">
                     <div class="flex justify-between gap-2 items-start flex-wrap">
                       <strong>${missionTargetTypeLabel(item.scope_type)}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
-                      <span class="cmd-chip rounded-full ${item.severity === 'watch' ? 'warn' : ''}">${statusLabel(item.severity)}</span>
+                      <span class="rounded-full ${item.severity === 'watch' ? 'warn' : ''}">${statusLabel(item.severity)}</span>
                     </div>
                     <p class="m-0 text-[rgba(255,255,255,0.78)] leading-[1.45]">${item.summary}</p>
                   </article>

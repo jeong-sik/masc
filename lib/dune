@@ -546,6 +546,7 @@
    research_config
    research_metric
    research_loop
+   tool_research
    ;; Anti-Fake Test Quality Scoring (harness P2)
    anti_fake
    ;; godsplit-phase1: type/schema sub-modules

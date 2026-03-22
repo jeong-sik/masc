@@ -544,6 +544,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           agent_name = Some agent_name; start_operation = None;
           start_team_session = None } in
         Tool_autoresearch.dispatch ctx ~name ~args:arguments
+    | Mod_research ->
+        let ctx : Tool_research.context = { base_path = config.base_path;
+          agent_name = Some agent_name } in
+        Tool_research.dispatch ctx ~name ~args:arguments
     | Mod_shard ->
         let (ok, json) = Tool_shard.execute name arguments in
         Some (ok, Yojson.Safe.to_string json)

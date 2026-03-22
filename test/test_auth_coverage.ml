@@ -261,6 +261,47 @@ let test_permission_for_tool_interrupt () =
   | _ -> fail "expected CanInterrupt"
 
 (* ============================================================
+   HTTP same-origin mutation guard regressions
+   ============================================================ *)
+
+let test_same_origin_browser_request_allows_missing_origin () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers = Httpun.Headers.of_list [ ("host", "127.0.0.1:8935") ] in
+  let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
+  match Server_auth.ensure_same_origin_browser_request request with
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
+let test_same_origin_browser_request_allows_matching_origin () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "127.0.0.1:8935");
+        ("origin", "http://127.0.0.1:8935");
+      ]
+  in
+  let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
+  match Server_auth.ensure_same_origin_browser_request request with
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
+let test_same_origin_browser_request_rejects_cross_origin () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "127.0.0.1:8935");
+        ("origin", "https://evil.example");
+      ]
+  in
+  let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
+  match Server_auth.ensure_same_origin_browser_request request with
+  | Ok () -> fail "expected cross-origin browser request to be rejected"
+  | Error (Types.Forbidden _) -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
+(* ============================================================
    HTTP auth extraction regressions
    ============================================================ *)
 
@@ -559,5 +600,11 @@ let () =
       test_case "header token only" `Quick test_http_auth_token_from_header_only;
       test_case "reject query token fallback" `Quick
         test_http_auth_rejects_query_token_fallback;
+      test_case "same-origin allows missing origin" `Quick
+        test_same_origin_browser_request_allows_missing_origin;
+      test_case "same-origin allows matching origin" `Quick
+        test_same_origin_browser_request_allows_matching_origin;
+      test_case "same-origin rejects cross origin" `Quick
+        test_same_origin_browser_request_rejects_cross_origin;
     ];
   ]

@@ -203,7 +203,9 @@
 
 /* ── Keeper Cards v2 ─────────────────────────── */
 /* ── Layout ──────────────────────────────────── */
-.overview-surface {
+.overview-surface,
+.overview-surface--home,
+.home-body {
   display: grid;
   gap: var(--space-md, 16px);
 }
@@ -259,16 +261,6 @@
 .dashboard-layout--home { grid-template-columns: 1fr; }
 
 /* ── Home Command Center ─────────────────────── */
-
-.overview-surface--home {
-  display: grid;
-  gap: var(--space-md, 16px);
-}
-
-.home-body {
-  display: grid;
-  gap: var(--space-md, 16px);
-}
 
 .home-section-header {
   display: flex;

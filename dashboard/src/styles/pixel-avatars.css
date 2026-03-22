@@ -158,15 +158,12 @@
 }
 
 /* Show on hover */
-.pixel-avatar:hover .pixel-avatar__speech-bubble {
-  opacity: 1;
-}
-
-/* Top 5 active agents always show */
+.pixel-avatar:hover .pixel-avatar__speech-bubble,
 .pixel-avatar__speech-bubble.always-visible {
   opacity: 1;
 }
 
+/* Top 5 active agents always show */
 /* Avatar name label */
 .pixel-avatar-wrap {
   display: flex;

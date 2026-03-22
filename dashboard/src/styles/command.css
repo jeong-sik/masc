@@ -1,5 +1,6 @@
 /* ── Command Plane ─────────────────────────────────────────── */
-.dashboard-panel {
+.dashboard-panel,
+.command-plane-view {
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -23,7 +24,9 @@
   line-height: 1.5;
 }
 
-.panel-actions {
+.panel-actions,
+.command-surface-tabs,
+.command-card-grid {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
@@ -62,12 +65,6 @@
 .monitor-stat-card small {
   color: rgba(255,255,255,0.5);
   font-size: var(--fs-sm);
-}
-
-.command-plane-view {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
 }
 
 .command-plane-view.wallboard {
@@ -224,7 +221,8 @@
   line-height: 1.6;
 }
 
-.command-hero-badges {
+.command-hero-badges,
+.command-tab-group-items {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -236,13 +234,15 @@
   gap: 16px;
 }
 
-.command-guide-list {
+.command-guide-list,
+.command-trace-stack {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.command-guide-card {
+.command-guide-card,
+.command-tree-node {
   background: var(--white-4);
   border: 1px solid var(--white-8);
   border-radius: 12px;
@@ -258,11 +258,13 @@
   box-shadow: 0 0 0 1px rgba(34,211,238,0.16);
 }
 
-.command-guide-card.ok {
+.command-guide-card.ok,
+.warroom-feed-card.ok {
   border-color: rgba(74,222,128,0.24);
 }
 
-.command-guide-card.warn {
+.command-guide-card.warn,
+.command-readiness-row.warn {
   border-color: rgba(251,191,36,0.24);
 }
 
@@ -300,10 +302,6 @@
   border-color: rgba(74,222,128,0.22);
 }
 
-.command-readiness-row.warn {
-  border-color: rgba(251,191,36,0.24);
-}
-
 .command-readiness-row.bad {
   border-color: rgba(248,113,113,0.28);
 }
@@ -314,7 +312,8 @@
   line-height: 1.5;
 }
 
-.command-readiness-title-row {
+.command-readiness-title-row,
+.command-guide-head {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -326,14 +325,8 @@
   gap: 12px;
 }
 
-.command-guide-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: flex-start;
-}
-
-.command-guide-inline {
+.command-guide-inline,
+.command-chain-node-row {
   padding: 12px;
   border-radius: 10px;
   background: rgba(9,12,20,0.5);
@@ -377,12 +370,6 @@
   gap: 16px;
 }
 
-.command-surface-tabs {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
 .command-surface-tabs.grouped {
   flex-direction: column;
   gap: 12px;
@@ -401,12 +388,6 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding-left: 4px;
-}
-
-.command-tab-group-items {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 .command-surface-tab {
@@ -561,10 +542,6 @@
 }
 
 .warroom-presence-card.ok,
-.warroom-feed-card.ok {
-  border-color: rgba(74,222,128,0.24);
-}
-
 .warroom-presence-card.warn,
 .warroom-feed-card.warn {
   border-color: rgba(251,191,36,0.22);
@@ -636,12 +613,6 @@
 }
 
 .command-card-stack,
-.command-trace-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 .command-chain-list,
 .command-chain-history {
   display: flex;
@@ -657,24 +628,11 @@
 .command-card,
 .command-alert,
 .command-trace-row,
-.command-tree-node {
-  background: var(--white-4);
-  border: 1px solid var(--white-8);
-  border-radius: 12px;
-  padding: 14px;
-}
-
 .command-card-head,
 .command-tree-head,
 .command-trace-head,
 .command-tree-title-row,
 .command-alert-meta,
-.command-card-grid {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
 .command-card-head {
   justify-content: space-between;
   align-items: flex-start;
@@ -696,7 +654,8 @@
   border: 1px solid var(--white-8);
 }
 
-.command-topology-explainer p {
+.command-topology-explainer p,
+.command-alert p {
   margin: 10px 0 0;
   color: rgba(255,255,255,0.78);
   line-height: 1.5;
@@ -779,13 +738,6 @@
 }
 
 .command-chain-history-row,
-.command-chain-node-row {
-  padding: 12px;
-  border-radius: 10px;
-  background: rgba(9,12,20,0.5);
-  border: 1px solid var(--white-6);
-}
-
 .error-text {
   color: #fca5a5;
 }
@@ -889,14 +841,6 @@
 
 .command-alert.warn {
   border-color: rgba(251,191,36,0.26);
-}
-
-.command-alert p {
-  margin: 10px 0 0;
-  color: rgba(255,255,255,0.78);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
 .command-trace-row {

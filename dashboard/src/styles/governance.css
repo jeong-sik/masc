@@ -14,7 +14,9 @@
   color: #f7b6b6;
   font-size: var(--fs-sm);
 }
-.council-list {
+.council-list,
+.governance-side-block,
+.governance-activity-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -79,7 +81,8 @@ button.council-row.selected {
   color: #b7cbee;
 }
 
-.council-state.open {
+.council-state.open,
+.council-state.positive {
   border-color: rgba(74, 222, 128, 0.48);
   background: rgba(74, 222, 128, 0.15);
   color: #b4f5ca;
@@ -179,7 +182,8 @@ button.council-row.selected {
   font-size: var(--fs-2xs);
 }
 
-.governance-chip.ok {
+.governance-chip.ok,
+.governance-badge.positive {
   border-color: rgba(74, 222, 128, 0.4);
   background: rgba(74, 222, 128, 0.12);
   color: #b4f5ca;
@@ -193,12 +197,6 @@ button.council-row.selected {
 
 .governance-chip.dim {
   color: #95a9cd;
-}
-
-.council-state.positive {
-  border-color: rgba(74, 222, 128, 0.48);
-  background: rgba(74, 222, 128, 0.15);
-  color: #b4f5ca;
 }
 
 .council-state.negative {
@@ -297,12 +295,6 @@ button.council-row.selected {
   color: #b7cbee;
 }
 
-.governance-badge.positive {
-  border-color: rgba(74, 222, 128, 0.4);
-  background: rgba(74, 222, 128, 0.12);
-  color: #b4f5ca;
-}
-
 .governance-badge.negative {
   border-color: rgba(239, 68, 68, 0.44);
   background: rgba(239, 68, 68, 0.12);
@@ -317,12 +309,6 @@ button.council-row.selected {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.governance-side-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 .governance-side-block h4 {
@@ -349,12 +335,6 @@ button.council-row.selected {
   gap: 8px;
 }
 
-.governance-activity-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 @media (max-width: 1200px) {
 
   .governance-layout {
@@ -366,4 +346,3 @@ button.council-row.selected {
   }
 
 }
-

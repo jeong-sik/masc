@@ -340,7 +340,8 @@ a:hover {
   color: #bde6ff;
 }
 
-.rail-tab-btn:hover {
+.rail-tab-btn:hover,
+.rail-secondary-btn:hover {
   background: var(--white-10);
 }
 
@@ -389,7 +390,8 @@ a:hover {
   gap: 4px;
 }
 
-.rail-view-note-label {
+.rail-view-note-label,
+.rail-stat-card span {
   color: var(--text-muted);
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -436,13 +438,6 @@ a:hover {
   gap: 4px;
 }
 
-.rail-stat-card span {
-  color: var(--text-muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
 .rail-stat-card strong {
   color: var(--text-strong);
   font-size: 18px;
@@ -478,10 +473,6 @@ a:hover {
   color: var(--text-body);
   font-size: 12px;
   cursor: pointer;
-}
-
-.rail-secondary-btn:hover {
-  background: var(--white-10);
 }
 
 /* Core cards and sections */

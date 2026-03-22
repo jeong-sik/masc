@@ -46,7 +46,7 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
       ${items.map(item => {
         const pct = maxCount > 0 ? (item.call_count / maxCount) * 100 : 0
         return html`
-          <div class="tool-bar-row" key=${item.name}>
+          <div class="grid grid-cols-[minmax(140px,0.8fr)_68px_minmax(0,1fr)_48px] gap-2 items-center text-[length:var(--fs-sm)] max-[880px]:grid-cols-[minmax(100px,0.6fr)_56px_minmax(0,1fr)_36px]" key=${item.name}>
             <span class="text-[color:var(--text-body)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[length:var(--fs-xs)]">${item.name}</span>
             <span class="px-1.5 py-px rounded-[3px] text-[length:var(--fs-2xs)] font-semibold text-center ${tierBadgeClass(item.tier)}">${tierLabel(item.tier)}</span>
             <div class="h-3.5 rounded-[3px] bg-[var(--white-6)] overflow-hidden">
@@ -139,7 +139,7 @@ export function ToolMetrics() {
           </div>
         </div>
 
-        <div class="tool-metrics-sections">
+        <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4 max-[880px]:grid-cols-1">
           <div>
             <h4 class="text-[color:var(--text-muted)] text-[length:var(--fs-xs)] uppercase tracking-[0.05em] mb-2.5 mt-0">계층 분포</h4>
             <${TierDistribution} dist=${data.tier_distribution} />

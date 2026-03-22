@@ -102,7 +102,7 @@ function MermaidGraph({ source }: { source: string }) {
   return html`
     <div class="mt-3 min-h-[160px]">
       ${error ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${error}</div>` : null}
-      <div class="overflow-auto rounded-[10px] p-3 bg-[rgba(9,12,20,0.7)] command-chain-graph" ref=${hostRef}></div>
+      <div class="overflow-auto rounded-[10px] p-3 bg-[rgba(9,12,20,0.7)] [&_svg]:block [&_svg]:min-w-full [&_svg]:h-auto" ref=${hostRef}></div>
     </div>
   `
 }
@@ -113,7 +113,7 @@ function ChainOperationListItem(
   const chain = overlay.operation.chain
   const runtime = overlay.runtime
   return html`
-    <button class="w-full text-left text-inherit font-[inherit] cursor-pointer bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-chain-item ${selected ? 'selected' : ''}" onClick=${onSelect}>
+    <button class="w-full text-left text-inherit font-[inherit] cursor-pointer p-3.5 rounded-xl border ${selected ? 'border-[rgba(34,211,238,0.38)] shadow-[inset_0_0_0_1px_rgba(34,211,238,0.2)] bg-[linear-gradient(180deg,var(--cyan-12),var(--white-3))]' : 'bg-[var(--white-4)] border-[var(--white-8)]'}" onClick=${onSelect}>
       <div class="command-card rounded-xl-head">
         <div>
           <strong>${overlay.operation.objective}</strong>

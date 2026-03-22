@@ -1,12 +1,5 @@
-/* ── Tools — kept: auto-fit grid, webkit-line-clamp, back-to-top,
-   bar-row grid, tier badges, responsive, surface-count active ── */
-
-.tool-inventory-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
-  margin: 18px 0;
-}
+/* ── Tools — kept: webkit-line-clamp, back-to-top visibility/hover,
+   surface-count active state ── */
 
 /* webkit-line-clamp — not expressible in Tailwind v4 */
 .tool-inventory-desc {
@@ -54,45 +47,4 @@
 .control-btn.is-active .tool-surface-count {
   background: rgba(14, 165, 233, 0.25);
   color: #7dd3fc;
-}
-
-/* ── Tool Metrics ── */
-.tool-metrics-summary {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.tool-metrics-sections {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: 16px;
-}
-
-/* Bar chart row — complex grid template */
-.tool-bar-row {
-  display: grid;
-  grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
-  gap: 8px;
-  align-items: center;
-  font-size: var(--fs-sm);
-}
-
-/* ── Responsive ── */
-@media (max-width: 880px) {
-  .tool-inventory-summary {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .tool-metrics-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .tool-metrics-sections {
-    grid-template-columns: 1fr;
-  }
-
-  .tool-bar-row {
-    grid-template-columns: minmax(100px, 0.6fr) 56px minmax(0, 1fr) 36px;
-  }
 }

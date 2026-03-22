@@ -112,9 +112,8 @@ export function KeeperDetailOverlay() {
 
   return html`
     <div
-      class="keeper-detail-overlay"
+      class="keeper-detail-overlay fixed inset-0 bg-black/60 backdrop-blur-[4px] z-[var(--z-overlay-keeper,3020)] flex items-center justify-center isolate p-5"
       data-testid="keeper-detail-overlay"
-      class="flex items-center justify-center p-5"
       onClick=${(e: Event) => {
         if ((e.target as HTMLElement).classList.contains('keeper-detail-overlay')) {
           closeKeeperDetail()

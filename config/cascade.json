@@ -35,5 +35,6 @@
   "auto_responder_claude_models": ["claude:auto", "glm:auto"],
   "auto_responder_gemini_models": ["gemini:auto", "glm:auto"],
   "auto_responder_glm_models": ["glm:auto"],
-  "spawn_glm_models": ["glm:auto"]
+  "spawn_glm_models": ["glm:auto"],
+  "materialized_procedure_models": ["llama:auto", "glm:auto"]
 }

@@ -30,6 +30,7 @@ import {
   taskPriority,
   taskTitle,
   formatMessageContent,
+  logEntryBorderClass,
 } from './helpers'
 import { selectPendingConfirmState } from '../../pending-confirm'
 

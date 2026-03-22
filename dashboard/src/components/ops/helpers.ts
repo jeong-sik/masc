@@ -631,3 +631,14 @@ export function formatMessageContent(content: string): string {
       return match
     })
 }
+
+/** Map log entry severity/outcome to Tailwind border class */
+export function logEntryBorderClass(severity?: string | null): string {
+  switch (severity) {
+    case 'preview': return 'border-[rgba(251,191,36,0.26)]'
+    case 'confirmed':
+    case 'executed': return 'border-[rgba(74,222,128,0.26)]'
+    case 'error': return 'border-[rgba(239,68,68,0.26)]'
+    default: return ''
+  }
+}

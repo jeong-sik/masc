@@ -35,7 +35,7 @@ export function ActivityRail() {
           ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">거버넌스 활동이 아직 없습니다.</div>`
           : Array.from(grouped.entries()).map(([, group]) => html`
               <div class="governance-case-group rounded-lg">
-                <div class="governance-case-header">
+                <div class="flex items-center justify-between mb-2 gap-2">
                   <span class="governance-case-topic">${group.topic}</span>
                   <${LifecycleProgress} events=${group.events} />
                 </div>
@@ -68,7 +68,7 @@ function LifecycleProgress({ events }: { events: GovernanceTimelineEvent[] }) {
   const reached = new Set(events.map(event => LIFECYCLE_ORDER[event.kind] ?? -1))
   const maxStep = Math.max(...Array.from(reached), -1)
   return html`
-    <div class="governance-lifecycle">
+    <div class="flex items-center gap-0.5 shrink-0">
       ${LIFECYCLE_STEPS.map((label, index) => {
         const done = reached.has(index)
         const current = index === maxStep

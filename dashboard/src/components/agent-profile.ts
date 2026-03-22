@@ -225,37 +225,37 @@ function CharacterPlate({ name }: { name: string }) {
 
       <div class="flex flex-col gap-1.5 min-w-0">
         <div class="flex items-baseline gap-2 flex-wrap">
-          <h2 class="ff-plate__name">
+          <h2 class="m-0 text-[20px] text-[color:var(--ff-gold)] flex items-center gap-1.5">
             ${agentEmoji ? html`<span class="text-[1.4em]">${agentEmoji}</span>` : ''}
             ${displayName}
           </h2>
           ${koreanName ? html`<span class="text-[length:var(--fs-base)] text-[color:var(--text-muted)]">(${koreanName})</span>` : ''}
-          ${generation != null ? html`<span class="ff-plate__level rounded">Lv.${generation}</span>` : null}
+          ${generation != null ? html`<span class="text-[length:var(--fs-md)] font-bold text-[color:var(--accent)] bg-[var(--accent-10)] border border-[rgba(71,184,255,0.25)] px-1.5 py-px tabular-nums rounded">Lv.${generation}</span>` : null}
         </div>
 
         <div class="flex items-center gap-1.5 flex-wrap">
           <${StatusBadge} status=${headerStatus} />
-          ${model ? html`<span class="ff-plate__model rounded">${model}</span>` : null}
-          ${autonomy ? html`<span class="ff-plate__autonomy rounded">${autonomy}</span>` : null}
+          ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-[length:var(--fs-xs)] text-[color:var(--text-muted)] bg-[var(--accent-8)] border border-[rgba(71,184,255,0.15)] px-[5px] py-px rounded">${model}</span>` : null}
+          ${autonomy ? html`<span class="text-[length:var(--fs-xs)] text-[color:var(--ff-gold)] bg-[var(--ff-gold-10)] border border-[var(--ff-gold-20)] px-[5px] py-px rounded">${autonomy}</span>` : null}
           ${signalTruth ? html`<span class="ff-plate__signal rounded ff-plate__signal--${signalTruth}">${signalTruth}</span>` : null}
         </div>
 
         ${ctxPct != null ? html`
           <div class="flex items-center gap-2 mt-0.5">
-            <span class="ff-plate__bar-label">CTX</span>
+            <span class="text-[length:var(--fs-xs)] font-bold text-[color:var(--ff-gold)] tracking-[1px] w-7">CTX</span>
             <div class="h-1.5 mt-1.5 rounded-full overflow-hidden bg-[var(--white-10)]" style="flex:1">
               <div class="ctx-fill rounded-full ${ctxBarClass(ctxRatio)}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
-            <span class="ff-plate__bar-value">${ctxPct}%</span>
+            <span class="text-[length:var(--fs-sm)] tabular-nums text-[color:var(--text-strong)] min-w-9 text-right">${ctxPct}%</span>
           </div>
         ` : null}
 
         <div class="flex gap-2 items-center flex-wrap">
           ${currentWork
             ? html`<span class="text-[length:var(--fs-base)] text-[#c8daf7]">${currentWork}</span>`
-            : html`<span class="text-[length:var(--fs-base)] text-[#c8daf7] ff-plate__work--idle">대기 중</span>`
+            : html`<span class="text-[length:var(--fs-base)] text-[#6b7fa0] italic">대기 중</span>`
           }
-          ${workerState ? html`<span class="ff-plate__worker-state">${workerState}</span>` : null}
+          ${workerState ? html`<span class="text-[length:var(--fs-xs)] text-[color:var(--accent)] bg-[var(--accent-8)] px-[5px] py-px rounded-[3px]">${workerState}</span>` : null}
           ${workerFocus ? html`<span class="text-[length:var(--fs-xs)] text-[#9ab3de]">${workerFocus}</span>` : null}
         </div>
 
@@ -276,40 +276,40 @@ function CharacterPlate({ name }: { name: string }) {
       </div>
 
       ${isKeeper ? html`
-        <div class="ff-plate__stats ff-plate__stats--keeper">
-          <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${ctxPct != null ? `${ctxPct}%` : 'N/A'}</span>
+        <div class="grid grid-cols-2 gap-1.5 self-center min-w-[100px]">
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${ctxPct != null ? `${ctxPct}%` : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">CTX</span>
           </div>
-          <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${generation ?? 0}</span>
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${generation ?? 0}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">세대</span>
           </div>
-          <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${keeper.turn_count ?? 0}</span>
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${keeper.turn_count ?? 0}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">턴</span>
           </div>
-          <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${keeper.autonomous_action_count ?? 0}</span>
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${keeper.autonomous_action_count ?? 0}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">행동</span>
           </div>
         </div>
       ` : html`
-        <div class="ff-plate__stats">
-          <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${summary ? summary.tasks_completed : 'N/A'}</span>
+        <div class="grid grid-cols-2 gap-1.5 self-center min-w-[100px]">
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary ? summary.tasks_completed : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">완료</span>
           </div>
-          <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${summary ? summary.tasks_claimed : 'N/A'}</span>
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary ? summary.tasks_claimed : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">수임</span>
           </div>
-          <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${summary ? summary.messages_sent : 'N/A'}</span>
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary ? summary.messages_sent : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">메시지</span>
           </div>
-          <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${summary && summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : summary ? '0m' : 'N/A'}</span>
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary && summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : summary ? '0m' : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">활동</span>
           </div>
         </div>
@@ -332,7 +332,7 @@ export function AgentProfile({ name }: { name: string }) {
   const isKeeper = keeper != null
 
   return html`
-    <div class="ff-profile ${isKeeper ? 'ff-profile--keeper' : ''}">
+    <div class="px-1 ${isKeeper ? 'ff-profile--keeper' : ''}">
       <div class="flex gap-2 mb-3">
         <button class="control-btn rounded-lg ghost" onClick=${() => navigate('status', { section: 'agents' })}>← 목록</button>
         <button class="control-btn rounded-lg ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
@@ -358,9 +358,9 @@ export function AgentProfile({ name }: { name: string }) {
           ${owned.length === 0
             ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">할당된 태스크 없음</div>`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
-                <div class="agent-detail-task rounded-lg" key=${t.id}>
+                <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded-lg" key=${t.id}>
                   <span class="pill rounded-full">${t.id}</span>
-                  <span class="agent-detail-task rounded-lg-title">${t.title}</span>
+                  <span class="flex-1 text-[#d7e7ff]">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
                 </div>
               `)}</div>`}
@@ -379,23 +379,23 @@ export function AgentProfile({ name }: { name: string }) {
               ${collabs.length > 0 ? html`
                 <div class="flex flex-col gap-1">
                   ${collabs.map(c => html`
-                    <div class="ff-relation-row rounded" key=${c.name}
+                    <div class="flex items-center gap-2 px-2 py-1.5 transition-colors duration-150 hover:bg-[rgba(255,215,0,0.08)] rounded" key=${c.name}
                       onClick=${() => navigate('status', { section: 'agents', agent: c.name })}
                       style="cursor:pointer;"
                     >
-                      <span class="ff-relation-name">${c.name}</span>
-                      <span class="ff-relation-count">${c.collaborations}회</span>
+                      <span class="text-[color:var(--ff-gold)] font-semibold text-[length:var(--fs-base)] flex-1">${c.name}</span>
+                      <span class="text-[color:var(--white-50)] text-[length:var(--fs-sm)] tabular-nums">${c.collaborations}회</span>
                       ${c.last_collab ? html`<span class="ff-relation-time"><${TimeAgo} timestamp=${c.last_collab} /></span>` : null}
                     </div>
                   `)}
                 </div>
               ` : null}
               ${interests.length > 0 ? html`
-                <div class="ff-interests" class="mt-2">
+                <div class="border-t border-[var(--white-6)] pt-2 mt-2">
                   <span class="ff-interests-label">관심사</span>
                   <div class="flex flex-wrap gap-1 mt-1.5">
-                    ${interests.slice(0, 12).map(t => html`<span class="ff-interest-tag" key=${t}>${t}</span>`)}
-                    ${interests.length > 12 ? html`<span class="ff-interest-tag">+${interests.length - 12}</span>` : null}
+                    ${interests.slice(0, 12).map(t => html`<span class="bg-[rgba(255,215,0,0.1)] text-[color:var(--white-70)] px-2 py-0.5 rounded-[3px] text-[length:var(--fs-xs)] border border-[rgba(255,215,0,0.15)]" key=${t}>${t}</span>`)}
+                    ${interests.length > 12 ? html`<span class="bg-[rgba(255,215,0,0.1)] text-[color:var(--white-70)] px-2 py-0.5 rounded-[3px] text-[length:var(--fs-xs)] border border-[rgba(255,215,0,0.15)]">+${interests.length - 12}</span>` : null}
                   </div>
                 </div>
               ` : null}
@@ -411,8 +411,8 @@ export function AgentProfile({ name }: { name: string }) {
                 const title = detail.title ?? detail.content ?? ''
                 return html`
                   <div class="agent-timeline-event rounded" key=${idx}>
-                    <span class="ff-event-type">${timelineEventLabel(evt.type)}</span>
-                    ${title ? html`<span class="ff-event-detail">${compactCopy(title, 80)}</span>` : null}
+                    <span class="text-[length:var(--fs-xs)] font-semibold text-[color:var(--ff-gold)] min-w-8">${timelineEventLabel(evt.type)}</span>
+                    ${title ? html`<span class="flex-1 text-[length:var(--fs-sm)] text-[#c8daf7]">${compactCopy(title, 80)}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
                   </div>
                 `
@@ -426,16 +426,16 @@ export function AgentProfile({ name }: { name: string }) {
         <${Card} title="Room 활동" class="ff-card rounded-xl">
           ${lines.length === 0
             ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">관련 활동 없음</div>`
-            : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) =>
-                html`<div key=${idx} class="agent-activity-line rounded-lg">${line}</div>`)}</div>`}
+            : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${lines.map((line: string, idx: number) =>
+                html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[length:var(--fs-sm)] text-[#c8daf7] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
         <//>
 
         ${taskHistories.value.length > 0 ? html`
           <${Card} title="태스크 이력" class="ff-card rounded-xl col-span-full">
             <div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`
-              <div class="agent-history-row" key=${row.taskId}>
+              <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
                 <div class="mb-2"><span class="pill rounded-full">${row.taskId}</span></div>
-                <pre class="agent-history-pre">${row.text || 'No history yet'}</pre>
+                <pre class="m-0 whitespace-pre-wrap text-[length:var(--fs-sm)] leading-[1.5] text-[#cfe0ff] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || 'No history yet'}</pre>
               </div>
             `)}</div>
           <//>
@@ -445,8 +445,8 @@ export function AgentProfile({ name }: { name: string }) {
       ${isKeeper ? html`
         <${KeeperChatPanel} name=${name} />
       ` : html`
-        <div class="ff-profile__mention rounded-lg">
-          <span class="ff-profile__mention rounded-lg-label">@${name}</span>
+        <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[rgba(10,22,40,0.8)] border border-[var(--ff-gold-15)] rounded-lg">
+          <span class="text-[length:var(--fs-sm)] font-semibold text-[color:var(--ff-gold)] whitespace-nowrap">@${name}</span>
           <input
             class="control-input rounded-lg"
             type="text"

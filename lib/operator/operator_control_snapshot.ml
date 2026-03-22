@@ -478,7 +478,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   let command_plane_summary =
     if initialized then
       timed "command_plane_summary" (fun () ->
-        Some (Command_plane_v2.summary_json ~sessions:tracked_sessions config))
+        Some (Command_plane_v2.summary_json config))
     else None
   in
   let summary_fields = timed "summary_fields" (fun () ->
@@ -507,7 +507,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     else [])
   in
   let command_plane_json = timed "command_plane_json" (fun () ->
-    if initialized then Command_plane_v2.snapshot_json ~sessions:tracked_sessions config else `Assoc [])
+    if initialized then Command_plane_v2.snapshot_json config else `Assoc [])
   in
   let swarm_status_json =
     if initialized then

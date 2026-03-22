@@ -5,6 +5,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { streamKeeperMessage, type KeeperChatStreamEvent } from '../api/keeper'
+import { asString, isRecord } from './common/normalize'
 import { showToast } from './common/toast'
 
 interface ChatMessage {
@@ -20,6 +21,25 @@ const streamBuffer = signal('')
 const chatError = signal('')
 
 let activeAbort: AbortController | null = null
+
+export function isKeeperTextContentEvent(event: KeeperChatStreamEvent): boolean {
+  return event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'TEXT_DELTA'
+}
+
+export function normalizeKeeperChatErrorValue(value: unknown): string {
+  const direct = asString(value)
+  if (direct) return direct
+  if (isRecord(value)) {
+    const nestedError = isRecord(value.error) ? value.error : null
+    const message =
+      asString(value.message)
+      ?? asString(value.error)
+      ?? asString(nestedError?.message)
+      ?? asString(nestedError?.error)
+    if (message) return message
+  }
+  return 'Stream error'
+}
 
 function cancelStream(): void {
   if (activeAbort) {
@@ -49,7 +69,7 @@ async function sendChat(keeperName: string): Promise<void> {
     await streamKeeperMessage(keeperName, text, undefined, {
       signal: activeAbort.signal,
       onEvent: (event: KeeperChatStreamEvent) => {
-        if (event.type === 'TEXT_DELTA' && event.delta) {
+        if (isKeeperTextContentEvent(event) && event.delta) {
           streamBuffer.value += event.delta
         } else if (event.type === 'RUN_FINISHED') {
           const finalText = streamBuffer.value.trim() || '(no response)'
@@ -59,7 +79,7 @@ async function sendChat(keeperName: string): Promise<void> {
           ]
           streamBuffer.value = ''
         } else if (event.type === 'RUN_ERROR') {
-          chatError.value = String(event.value ?? 'Stream error')
+          chatError.value = normalizeKeeperChatErrorValue(event.value)
         }
       },
     })

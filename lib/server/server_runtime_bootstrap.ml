@@ -133,6 +133,17 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      Log.Misc.error "startup checkpoint prune failed: %s" (Printexc.to_string exn));
+  (* Startup GC: archive stale rooms, tasks, sessions, etc.
+     Prevents .masc/ from growing unbounded and slowing snapshots.
+     Runs at server start so no manual masc_gc invocation is needed. *)
+  (try
+     let gc_days = Safe_ops.get_env_int_logged "MASC_GC_RETENTION_DAYS" ~default:7 in
+     let (_gc_result : string) = Room.gc state.room_config ~days:gc_days () in
+     Log.Misc.info "startup gc completed (retention=%dd)" gc_days
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Misc.error "startup gc failed: %s" (Printexc.to_string exn));
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =

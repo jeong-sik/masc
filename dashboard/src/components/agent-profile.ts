@@ -10,6 +10,7 @@ import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import { keeperIdentityHint } from './common/keeper-identity'
 import { EmptyState } from './common/empty-state'
+import { StatGrid } from './common/stat-tile'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
   agents,
@@ -276,45 +277,23 @@ function CharacterPlate({ name }: { name: string }) {
         ` : null}
       </div>
 
-      ${isKeeper ? html`
-        <div class="grid grid-cols-4 gap-2 w-full mt-2">
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
-            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${ctxPct != null ? `${ctxPct}%` : 'N/A'}</span>
-            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">CTX</span>
-          </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
-            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${generation ?? 0}</span>
-            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">세대</span>
-          </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
-            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${keeper.turn_count ?? 0}</span>
-            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">턴</span>
-          </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
-            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${keeper.autonomous_action_count ?? 0}</span>
-            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">행동</span>
-          </div>
-        </div>
-      ` : html`
-        <div class="grid grid-cols-4 gap-2 w-full mt-2">
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
-            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary ? summary.tasks_completed : 'N/A'}</span>
-            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">완료</span>
-          </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
-            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary ? summary.tasks_claimed : 'N/A'}</span>
-            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">수임</span>
-          </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
-            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary ? summary.messages_sent : 'N/A'}</span>
-            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">메시지</span>
-          </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
-            <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary && summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : summary ? '0m' : 'N/A'}</span>
-            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">활동</span>
-          </div>
-        </div>
-      `}
+      <div class="w-full mt-2">
+        ${isKeeper ? html`
+          <${StatGrid} cols=${4} items=${[
+            { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : 'N/A', variant: 'gold' },
+            { label: '세대', value: generation ?? 0, variant: 'gold' },
+            { label: '턴', value: keeper.turn_count ?? 0, variant: 'gold' },
+            { label: '행동', value: keeper.autonomous_action_count ?? 0, variant: 'gold' },
+          ]} />
+        ` : html`
+          <${StatGrid} cols=${4} items=${[
+            { label: '완료', value: summary ? summary.tasks_completed : 'N/A', variant: 'gold' },
+            { label: '수임', value: summary ? summary.tasks_claimed : 'N/A', variant: 'gold' },
+            { label: '메시지', value: summary ? summary.messages_sent : 'N/A', variant: 'gold' },
+            { label: '활동', value: summary && summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : summary ? '0m' : 'N/A', variant: 'gold' },
+          ]} />
+        `}
+      </div>
     </div>
   `
 }

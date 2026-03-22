@@ -138,11 +138,6 @@
   gap: var(--space-md, 16px);
 }
 
-.agents-chip-bar {
-  display: flex;
-  gap: 6px;
-}
-
 .agents-chip {
   padding: 4px 14px;
   border-radius: 16px;

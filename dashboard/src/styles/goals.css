@@ -88,21 +88,11 @@
 .goal-row:hover {
   background: var(--white-5);
 }
-.planning-loop-list {
-  display: grid;
-  gap: 12px;
-}
-
 .planning-loop-row {
   border: 1px solid var(--card-border);
   border-radius: 12px;
   background: rgba(13, 22, 40, 0.58);
   padding: 14px;
-}
-
-.planning-loop-main {
-  display: grid;
-  gap: 10px;
 }
 
 .planning-loop-head {
@@ -153,11 +143,6 @@
   line-height: 1.5;
 }
 
-.goal-row-main {
-  flex: 1;
-  min-width: 0;
-}
-
 .goal-title {
   font-size: var(--fs-base);
   font-weight: 500;
@@ -178,11 +163,6 @@
   margin-top: 4px;
   font-size: var(--fs-xs);
   color: var(--text-dim);
-}
-
-.goal-priority {
-  color: #f59e0b;
-  letter-spacing: 1px;
 }
 
 .goal-review-note {

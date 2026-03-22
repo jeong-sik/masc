@@ -15,7 +15,7 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
 
   return html`
     <div class="planning-loop-row">
-      <div class="planning-loop-main">
+      <div class="grid gap-2.5">
         <div class="planning-loop-head">
           <div>
             <div class="planning-loop-id">${loop.profile}</div>

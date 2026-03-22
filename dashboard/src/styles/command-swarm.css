@@ -342,9 +342,6 @@
   letter-spacing: 0.04em;
   opacity: 0.6;
 }
-.swarm-worker-grid {
-  gap: 3px;
-}
 .swarm-worker-dot.present { background: rgba(134,160,207,0.7); }
 .swarm-worker-count {
   font-size: 0.72rem;

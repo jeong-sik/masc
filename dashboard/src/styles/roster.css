@@ -54,11 +54,6 @@
   color: var(--white-25);
 }
 
-.roster-filters {
-  display: flex;
-  gap: 4px;
-}
-
 .roster-filter-btn {
   padding: 4px 10px;
   border-radius: 3px;

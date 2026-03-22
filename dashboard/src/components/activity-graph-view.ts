@@ -174,7 +174,7 @@ export function GraphView({ data }: GraphViewProps) {
 
   return html`
     <div ref=${containerRef} class="activity-graph-container">
-      <canvas ref=${canvasRef} class="activity-graph-canvas" />
+      <canvas ref=${canvasRef} class="block w-full cursor-crosshair" />
       ${hoveredNode ? html`
         <div class="activity-graph-tooltip">
           <strong>${hoveredNode.label}</strong>

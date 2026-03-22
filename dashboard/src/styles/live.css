@@ -12,7 +12,6 @@
   min-height: 56px;
 }
 
-/* pulse-strip-empty: inlined as Tailwind */
 
 .pulse-bubble {
   display: flex;
@@ -38,20 +37,10 @@
   animation: livePulse 2s ease-in-out infinite;
 }
 
-.pulse-stale {
-  border-color: rgba(239,68,68,0.3);
-  opacity: 0.6;
-}
-
 .pulse-selected {
   border-color: rgba(96,165,250,0.6);
   background: rgba(96,165,250,0.08);
   box-shadow: 0 0 8px rgba(96,165,250,0.15);
-}
-
-.pulse-emoji {
-  font-size: 1.15rem;
-  line-height: 1;
 }
 
 .pulse-name {
@@ -86,29 +75,11 @@
   min-height: 0;
 }
 
-.activity-stream-head,
-.focus-sidebar-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .activity-stream-head h3,
 .focus-sidebar-head h3 {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
-}
-
-.activity-count,
-.focus-count {
-  font-size: 0.75rem;
-  color: var(--white-40);
-}
-
-.activity-filter-bar {
-  display: flex;
-  gap: 6px;
 }
 
 .activity-filter-btn {
@@ -174,13 +145,6 @@
 @keyframes activityFadeIn {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
-}
-
-.activity-item-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 2px;
 }
 
 .activity-kind-chip {
@@ -255,14 +219,6 @@
   background: rgba(96,165,250,0.05);
 }
 
-.focus-agent-header,
-.focus-agent-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 .focus-agent-name {
   font-size: 0.85rem;
   font-weight: 500;
@@ -325,11 +281,6 @@
   min-width: 0;
 }
 
-.focus-no-activity {
-  font-style: italic;
-  color: var(--white-25);
-}
-
 .focus-agent-footer .time-ago {
   font-size: 0.68rem;
   color: var(--white-30);
@@ -347,18 +298,6 @@
    Live Monitor Tab
    ══════════════════════════════════════════════════════════ */
 
-.live-monitor {
-  display: grid;
-  gap: 16px;
-}
-
-.live-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .live-header h2 {
   margin: 0;
   font-size: 1.25rem;
@@ -371,12 +310,6 @@
   align-items: center;
   font-size: 0.8rem;
   color: var(--white-50);
-}
-
-.live-stat {
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 
 .live-stat-dot {

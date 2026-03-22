@@ -391,7 +391,7 @@ export function OrchestraSurface() {
           onPointerLeave=${() => stopDrag()}
         >
           <svg
-            class=${`orchestra-canvas ${orchestraDragging.value ? 'is-dragging' : ''}`}
+            class=${`orchestra-canvas block w-full h-auto min-h-[720px] ${orchestraDragging.value ? 'is-dragging' : ''}`}
             viewBox=${`0 0 ${viewport.width} ${viewport.height}`}
             preserveAspectRatio="xMidYMid meet"
           >

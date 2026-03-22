@@ -363,11 +363,11 @@ export function OrchestraNodeLayer({
 
 export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOrchestraResponse }) {
   const selected = selectedTarget(orchestra)
-  if (!selected) return html`<aside class="orchestra-drawer card"><div class="empty-state">선택 가능한 대상이 아직 없습니다.</div></aside>`
+  if (!selected) return html`<aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card"><div class="empty-state">선택 가능한 대상이 아직 없습니다.</div></aside>`
   if (selected.type === 'signal') {
     const signalNode = selected.value
     return html`
-      <aside class="orchestra-drawer card ${toneClass(signalNode.tone)}">
+      <aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card ${toneClass(signalNode.tone)}">
         <div class="card-title-row">
           <div class="card-title">${signalNode.label}</div>
           <span class="command-chip ${toneClass(signalNode.tone)}">${orchestraNodeKindLabel(signalNode.kind)}</span>
@@ -393,15 +393,15 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
   const relatedSignals = orchestra.signals.filter(signalNode => signalNode.source_id === node.id || signalNode.target_id === node.id)
   const relatedEdges = orchestra.edges.filter(edge => edge.source === node.id || edge.target === node.id)
   return html`
-    <aside class="orchestra-drawer card ${toneClass(node.tone)}">
+    <aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card ${toneClass(node.tone)}">
       <div class="card-title-row">
         <div class="card-title">${node.label}</div>
         <span class="command-chip ${toneClass(node.tone)}">${orchestraNodeKindLabel(node.kind)}</span>
       </div>
       ${node.subtitle ? html`<p class="command-card-sub">${node.subtitle}</p>` : null}
-      <div class="orchestra-fact-list">
+      <div class="orchestra-fact-list flex flex-col gap-2">
         ${node.facts.map(factRow => html`
-          <div class="orchestra-fact-row">
+          <div class="orchestra-fact-row flex justify-between gap-3 py-2 px-2.5 rounded-[10px]">
             <span>${factRow.label}</span>
             <strong>${factRow.value}</strong>
           </div>

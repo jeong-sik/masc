@@ -63,21 +63,21 @@ export function OpsRoomColumn() {
   }
 
   return html`
-    <div class="ops-column">
-      <section class="card ops-panel">
+    <div class="flex flex-col gap-4 min-w-0">
+      <section class="card flex flex-col gap-3 min-h-0">
         <div class="card-title-row">
           <div class="card-title">추천 개입</div>
         </div>
-        <p class="ops-context-note">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
+        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
         <article class="ops-guidance-card ${guidanceLayerTone(guidanceLayer)}">
-          <div class="ops-guidance-head">
+          <div class="flex flex-wrap gap-2 text-text-muted text-[var(--fs-xs)]">
             <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
             <span>${residentRuntime?.keeper_name ?? roomDigest?.judgment_owner ?? 'judge 없음'}</span>
           </div>
-          <div class="ops-guidance-body">
+          <div class="text-text-strong leading-[1.5]">
             ${activeSummary?.summary ?? '현재 active guidance 요약이 없습니다. fallback queue만 표시합니다.'}
           </div>
-          <div class="ops-guidance-meta">
+          <div class="flex flex-wrap gap-2 text-text-muted text-[var(--fs-xs)]">
             <span>authoritative ${roomDigest?.authoritative_judgment_available ? 'yes' : 'no'}</span>
             <span>${guidanceFreshnessLabel(activeSummary)}</span>
             ${residentRuntime?.model_used ? html`<span>${residentRuntime.model_used}</span>` : null}
@@ -86,7 +86,7 @@ export function OpsRoomColumn() {
         ${operatorDigestLoading.value && !roomDigest ? html`
           <div class="ops-empty">개입 추천을 불러오는 중입니다...</div>
         ` : activeRecommendedActions.length > 0 ? html`
-          <div class="ops-log-list">
+          <div class="flex flex-col gap-2">
             ${activeRecommendedActions.map(item => html`
               <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="ops-log-entry ${item.severity}">
                 <div class="ops-log-head">
@@ -96,7 +96,7 @@ export function OpsRoomColumn() {
                 </div>
                 <div class="ops-log-body">${item.reason}</div>
                 ${item.suggested_payload ? html`
-                  <div class="ops-confirmation-actions">
+                  <div class="flex justify-between items-center gap-3 mt-2.5 max-[880px]:flex-col max-[880px]:items-start">
                     <button class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item); openRoomControlDisclosure() }} disabled=${operatorActionBusy.value}>
                       폼에 채우기
                     </button>
@@ -110,17 +110,17 @@ export function OpsRoomColumn() {
         `}
       </section>
 
-      <section class="card ops-panel ops-pending-section">
+      <section class="card flex flex-col gap-3 min-h-0 ops-pending-section">
         <div class="card-title-row">
           <div class="card-title">승인 대기</div>
         </div>
-        <p class="ops-context-note">
+        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">
           ${actorFilter
             ? `현재 actor ${actorFilter} 기준 queue를 읽습니다. 승인 대기는 즉시 실행이 아니라 preview-confirm 경로를 타는 액션만 쌓입니다.`
             : '승인 대기는 즉시 실행이 아니라 preview-confirm 경로를 타는 액션만 쌓입니다.'}
         </p>
         ${confirmRequiredActions.length > 0 ? html`
-          <div class="ops-log-list">
+          <div class="flex flex-col gap-2">
             ${confirmRequiredActions.map(item => html`
               <article key=${`${item.action_type}:${item.target_type}`} class="ops-log-entry">
                 <div class="ops-log-head">
@@ -134,23 +134,23 @@ export function OpsRoomColumn() {
           </div>
         ` : null}
         ${pendingConfirms.length > 0 ? html`
-          <div class="ops-confirmation-list">
+          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
             ${pendingConfirms.map(item => html`
               <article key=${item.confirm_token} class="ops-confirmation-card">
-                <div class="ops-confirmation-meta">
+                <div class="flex flex-wrap gap-2 text-text-muted text-[var(--fs-xs)]">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                   <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
                 </div>
                 ${item.preview ? html`<pre class="ops-code-block compact">${prettyJson(item.preview)}</pre>` : null}
-                <div class="ops-confirmation-actions">
+                <div class="flex justify-between items-center gap-3 mt-2.5 max-[880px]:flex-col max-[880px]:items-start">
                   <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
                     실행
                   </button>
                   <button class="control-btn ghost" onClick=${() => { void confirmPending(item.confirm_token, 'deny') }} disabled=${operatorActionBusy.value}>
                     거부
                   </button>
-                  <span class="ops-token">${item.confirm_token}</span>
+                  <span class="text-text-muted text-[var(--fs-xs)] font-mono break-all">${item.confirm_token}</span>
                 </div>
               </article>
             `)}
@@ -164,11 +164,11 @@ export function OpsRoomColumn() {
         `}
       </section>
 
-      <section class="card ops-panel ops-lane-panel">
+      <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">Room 상태</div>
         </div>
-        <p class="ops-context-note">평소에는 추천 개입만 보면 됩니다. room 전체를 건드릴 때만 아래 고급 제어를 여세요.</p>
+        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">평소에는 추천 개입만 보면 됩니다. room 전체를 건드릴 때만 아래 고급 제어를 여세요.</p>
 
         <div class="ops-stat-grid">
           <div class="ops-stat">
@@ -199,7 +199,7 @@ export function OpsRoomColumn() {
           open=${room.paused ? true : undefined}
         >
           <summary class="ops-control-summary">
-            <span class="ops-control-kicker">고급 room 제어</span>
+            <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 room 제어</span>
             <strong>${room.paused ? '지금은 room이 멈춰 있어 재개 동선이 열려 있습니다.' : '방송 · 일시정지/재개 · 작업 주입'}</strong>
             <span>${room.paused ? '운영 점검 후 재개하거나 공지를 보내세요.' : 'room 전체에 영향 주는 액션만 이 안에 넣었습니다.'}</span>
           </summary>
@@ -240,7 +240,7 @@ export function OpsRoomColumn() {
               </button>
             </div>
 
-            <div class="ops-section-head">작업 주입</div>
+            <div class="mt-0.5 text-text-muted text-[var(--fs-xs)] tracking-[0.05em] uppercase">작업 주입</div>
             <input
               class="control-input"
               type="text"
@@ -278,13 +278,13 @@ export function OpsRoomColumn() {
         </details>
       </section>
 
-      <section class="card ops-panel">
+      <section class="card flex flex-col gap-3 min-h-0">
         <div class="card-title-row">
           <div class="card-title">최근 Room 메시지</div>
         </div>
-        <p class="ops-context-note">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
+        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
         ${roomFeed.length > 0 ? html`
-          <div class="ops-feed-list">
+          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
             ${roomFeed.map(message => html`
               <article key=${message.seq ?? message.id ?? message.timestamp} class="ops-feed-item">
                 <div class="ops-feed-meta">

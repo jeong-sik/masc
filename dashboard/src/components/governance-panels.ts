@@ -64,7 +64,7 @@ export function GuardrailPane({
                     <div class="governance-side-block">
                       <h4>관리자 승인</h4>
                       <div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">이 집행은 고위험으로 분류되어 수동 결재가 필요합니다.</div>
-                      <div class="governance-action-row">
+                      <div class="flex gap-2">
                         <button class="control-btn secondary" onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>
                           ${governanceActing.value ? '처리 중...' : '승인'}
                         </button>
@@ -103,7 +103,7 @@ export function GuardrailPane({
                     governanceBriefInput.value = (event.target as HTMLTextAreaElement).value
                   }}
                 ></textarea>
-                <div class="governance-action-row">
+                <div class="flex gap-2">
                   <button
                     class="control-btn secondary"
                     onClick=${submitBrief}

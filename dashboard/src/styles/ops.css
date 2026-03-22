@@ -73,11 +73,6 @@
   color: var(--text-strong);
 }
 
-.ops-handoff-body {
-  color: rgba(255,255,255,0.84);
-  line-height: 1.5;
-}
-
 .ops-handoff-preview {
   padding: 10px 12px;
   border-radius: 12px;

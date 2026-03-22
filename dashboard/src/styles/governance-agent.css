@@ -45,11 +45,6 @@
   font-size: var(--fs-sm);
 }
 
-.agent-detail-actions {
-  display: flex;
-  gap: 8px;
-}
-
 .agent-detail-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

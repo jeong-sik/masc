@@ -159,14 +159,14 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
   const maxWeight = agentNodes[0]?.weight ?? 1
 
   return html`
-    <div class="activity-graph-leaderboard">
+    <div class="flex flex-col gap-1.5">
       ${agentNodes.map((node, i) => {
         const pct = maxWeight > 0 ? (node.weight / maxWeight) * 100 : 0
         return html`
           <div class="activity-graph-leaderboard-row" key=${node.id}>
             <span class="activity-graph-leaderboard-rank">${i + 1}</span>
-            <div class="activity-graph-leaderboard-info">
-              <span class="activity-graph-leaderboard-name">${node.label}</span>
+            <div class="flex-1 flex flex-col gap-1 min-w-0">
+              <span class="text-base font-semibold text-[var(--text-near-white)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
               <div class="activity-graph-leaderboard-bar-wrap">
                 <div class="activity-graph-leaderboard-bar" style="width:${pct}%"></div>
               </div>
@@ -192,11 +192,11 @@ function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
   }
 
   return html`
-    <div class="activity-graph-kind-breakdown">
+    <div class="flex flex-wrap gap-2">
       ${sorted.map(([kind, count]) => html`
         <div class="activity-graph-kind-chip" key=${kind}>
-          <span class="activity-graph-kind-label">${kindLabel(kind)}</span>
-          <span class="activity-graph-kind-count">${count}</span>
+          <span class="text-sm text-text-slate-light">${kindLabel(kind)}</span>
+          <span class="text-base font-bold text-[var(--text-near-white)]">${count}</span>
         </div>
       `)}
     </div>

@@ -140,7 +140,7 @@ export function AgentDetailOverlay() {
                 `
               : null}
           </div>
-          <div class="agent-detail-actions">
+          <div class="flex gap-2">
             <button class="control-btn ghost" onClick=${() => { void refreshAgentDetail() }} disabled=${loading.value}>
               ${loading.value ? '새로고침 중...' : '새로고침'}
             </button>

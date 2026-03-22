@@ -133,7 +133,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             value=${search}
             onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
           />
-          <div class="roster-filters">
+          <div class="flex gap-1">
             ${(['all', 'active', 'idle', 'offline'] as StatusFilter[]).map(f => html`
               <button
                 key=${f}

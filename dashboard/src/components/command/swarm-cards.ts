@@ -109,7 +109,7 @@ export function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEven
 
 export function SwarmGapDot({ gap }: { gap: CommandPlaneSwarmGap }) {
   return html`
-    <div class="swarm-gap-inline">
+    <div class="swarm-gap-inline flex items-center gap-1.5">
       <span class="swarm-gap-dot"></span>
       <span class="command-chip ${toneClass(gap.severity)}">${gap.code} (${gap.count})</span>
       <span class="command-card-sub">${gap.summary}</span>

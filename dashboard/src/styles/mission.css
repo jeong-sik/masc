@@ -1,15 +1,4 @@
-.mission-view {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
 
-.mission-header-meta {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
 
 .mission-context-bar {
   display: grid;
@@ -74,19 +63,6 @@
   line-height: 1.45;
 }
 .mission-list-stack,
-.mission-activity-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.mission-card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
 
 .mission-card-target {
   color: rgba(255,255,255,0.52);
@@ -119,8 +95,6 @@
   color: var(--text-strong);
   line-height: 1.45;
 }
-
-
 
 .proof-summary-block {
   display: grid;
@@ -172,23 +146,10 @@
   line-height: 1.45;
 }
 
-.mission-card-actions,
-.mission-pill-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
 .mission-human-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
   gap: 16px;
-}
-
-.mission-section-head {
-  display: grid;
-  gap: 4px;
-  margin-bottom: 12px;
 }
 
 .mission-section-head h3 {
@@ -201,13 +162,6 @@
   margin: 0;
   color: rgba(255,255,255,0.68);
   line-height: 1.5;
-}
-
-.mission-briefing-meta {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
 }
 
 .mission-briefing-grid {
@@ -223,13 +177,6 @@
   background: var(--white-4);
   display: grid;
   gap: 8px;
-}
-
-.mission-briefing-section-chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 .mission-briefing-section.ok,
@@ -337,13 +284,6 @@
   font-size: var(--fs-sm);
 }
 
-.mission-link-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-}
-
 .mission-link-row {
   width: 100%;
   padding: 10px 12px;
@@ -380,12 +320,6 @@
 
 .mission-pill.action {
   cursor: pointer;
-}
-
-.mission-evidence-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
 }
 
 .mission-evidence-list span {
@@ -470,19 +404,6 @@
 .mission-activity-card.warn { border-color: var(--warn-soft); }
 .mission-activity-card.bad { border-color: var(--bad-soft); }
 
-.mission-activity-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: flex-start;
-}
-
-.mission-activity-title {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-}
-
 .mission-activity-title strong {
   display: block;
   color: var(--text-strong);
@@ -528,12 +449,6 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   margin-top: 12px;
-}
-
-.mission-timeline-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 
 @media (max-width: 1100px) {

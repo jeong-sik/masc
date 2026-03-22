@@ -116,7 +116,7 @@ export function Planning() {
               : loops.length === 0
                 ? html`<div class="empty-state">가동 중인 루프가 없습니다. <code>masc_mdal_start</code>로 시작할 수 있습니다.</div>`
                 : html`
-                  <div class="planning-loop-list">
+                  <div class="grid gap-3">
                     ${loops.map(loop => html`<${LoopRow} key=${loop.loop_id} loop=${loop} />`)}
                   </div>
                 `}

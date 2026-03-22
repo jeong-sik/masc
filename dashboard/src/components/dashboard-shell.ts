@@ -144,7 +144,7 @@ export function SideRail() {
                 key=${surface.id}
                 onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
               >
-                <span class="rail-tab-icon">${surface.icon}</span>
+                <span class="text-base leading-[1.2]">${surface.icon}</span>
                 <span class="rail-tab-copy">
                   <strong>${surface.label}</strong>
                   <span>${surface.description}</span>

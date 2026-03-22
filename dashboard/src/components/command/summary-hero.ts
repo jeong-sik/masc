@@ -34,7 +34,7 @@ export function CommandWorkflowBanner() {
         <span class="command-chip">${workflowTargetLabel(context)}</span>
         <span class="command-chip">${workflowCommandSurfaceLabel(route.value.params.surface ?? 'warroom')}</span>
       </div>
-      <div class="command-focus-body">${context.summary}</div>
+      <div class="text-[rgba(255,255,255,0.84)] leading-normal">${context.summary}</div>
       ${context.payload_preview
         ? html`<div class="command-focus-preview">${context.payload_preview}</div>`
         : null}

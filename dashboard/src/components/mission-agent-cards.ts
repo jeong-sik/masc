@@ -33,9 +33,9 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
       : toolAuditStateLabel(observedToolsEmptyState(row.keeper, row.brief.tool_audit_source))
   return html`
     <article class="mission-activity-card ${toneClass(row.brief.status ?? row.agent?.status)}">
-      <button class="mission-card-select" onClick=${() => openAgentDetail(row.brief.agent_name)}>
-        <div class="mission-activity-head">
-          <div class="mission-activity-title">
+      <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => openAgentDetail(row.brief.agent_name)}>
+        <div class="flex justify-between gap-2.5 items-start">
+          <div class="flex gap-2.5 items-start">
             <span class="agent-emoji">${row.agent?.emoji ?? row.keeper?.emoji ?? ''}</span>
             <div>
               <strong>${row.brief.agent_name}</strong>
@@ -45,39 +45,39 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
           <span class="command-chip ${toneClass(row.brief.status ?? row.agent?.status)}">${statusLabel(row.brief.status ?? row.agent?.status)}</span>
         </div>
 
-        <div class="mission-activity-meta">
+        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
           <span>어디서 · ${row.where}</span>
           <span>누구와 · ${who}</span>
           <span>주의 신호 · ${row.brief.related_attention_count}</span>
         </div>
 
-        <div class="mission-activity-focus">
+        <div class="grid gap-1">
           <span>무엇을</span>
           <strong>${row.currentWork}</strong>
           ${row.how ? html`<small>어떻게 · ${row.how}</small>` : null}
         </div>
       </button>
 
-      <details class="mission-card-disclosure">
+      <details class="pt-1 border-t border-[var(--white-6)]">
         <summary>최근 흐름</summary>
-        <div class="mission-activity-foot">
+        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
           ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : html`<span>최근 사건 요약 없음</span>`}
           <span>관련 세션 · ${row.brief.related_session_id ?? '없음'}</span>
         </div>
 
-        <details class="mission-card-disclosure compact">
+        <details class="pt-1 border-t border-[var(--white-6)] mt-2">
           <summary>입력 · 응답 · 도구</summary>
-          <div class="mission-io-stack">
-            <div class="mission-io-item">
+          <div class="grid grid-cols-2 gap-2.5">
+            <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
               <span>최근 입력</span>
               <strong>${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'}</strong>
             </div>
-            <div class="mission-io-item">
+            <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
               <span>최근 응답</span>
               <strong>${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'}</strong>
             </div>
           </div>
-          <div class="mission-activity-foot">
+          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
             <span>최근 도구 · ${recentToolsLabel}</span>
           </div>
         </details>
@@ -103,7 +103,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
 
   return html`
     <article class="mission-activity-card ${toneClass(row.brief.status ?? row.keeper?.status)} ${liveStateClass(row.brief.status, row.keeper?.status)}">
-      <button class="mission-card-select" onClick=${() => {
+      <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => {
         const keeper: Keeper = row.keeper ?? {
           name: row.brief.name,
           agent_name: row.brief.agent_name ?? row.brief.name,
@@ -112,8 +112,8 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
         } as Keeper
         openKeeperDetail(keeper)
       }}>
-        <div class="mission-activity-head">
-          <div class="mission-activity-title">
+        <div class="flex justify-between gap-2.5 items-start">
+          <div class="flex gap-2.5 items-start">
             <div class="mission-status-dot ${liveStateClass(row.brief.status, row.keeper?.status)} ${dotStateBg(liveStateClass(row.brief.status, row.keeper?.status))}"></div>
             <span class="agent-emoji">${row.keeper?.emoji ?? ''}</span>
             <div>
@@ -124,37 +124,37 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
           <span class="command-chip ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
         </div>
 
-        <div class="mission-activity-meta">
+        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
           <span>최근 하트비트 · ${row.keeper?.last_heartbeat ? relativeTime(row.keeper.last_heartbeat) : '기록 없음'}</span>
           <span>${continuity || '연속성 정보 없음'}</span>
         </div>
 
-        <div class="mission-activity-focus">
+        <div class="grid gap-1">
           <span>무엇을</span>
           <strong>${row.currentWork}</strong>
           ${row.keeper?.skill_reason ? html`<small>판단 요약 · ${trimText(row.keeper.skill_reason, 120)}</small>` : null}
         </div>
       </button>
 
-      <details class="mission-card-disclosure">
+      <details class="pt-1 border-t border-[var(--white-6)]">
         <summary>연속성 상세</summary>
-        <div class="mission-activity-foot">
+        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
           <span>에이전트 · ${row.brief.agent_name ?? row.keeper?.agent_name ?? '기록 없음'}</span>
           ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : null}
         </div>
-        <details class="mission-card-disclosure compact">
+        <details class="pt-1 border-t border-[var(--white-6)] mt-2">
           <summary>입력 · 응답 · 도구</summary>
-          <div class="mission-io-stack">
-            <div class="mission-io-item">
+          <div class="grid grid-cols-2 gap-2.5">
+            <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
               <span>최근 입력</span>
               <strong>${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'}</strong>
             </div>
-            <div class="mission-io-item">
+            <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
               <span>최근 응답</span>
               <strong>${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'}</strong>
             </div>
           </div>
-          <div class="mission-activity-foot">
+          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
             <span>최근 도구 · ${recentToolsLabel}</span>
           </div>
         </details>
@@ -168,15 +168,15 @@ export function InternalSignalCard({ item }: { item: DashboardMissionInternalSig
   const attention = item.attention ?? null
   return html`
     <article class="mission-action-card ${toneClass(item.severity)}">
-      <div class="mission-card-head">
+      <div class="flex justify-between gap-2 items-start flex-wrap">
         <span class="command-chip ${toneClass(item.severity)}">
           ${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? '내부 신호'}
         </span>
-        <span class="mission-card-target">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
+        <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
       </div>
       <p>${item.summary}</p>
-      ${action ? html`<div class="mission-action-preview">${action.reason}</div>` : null}
-      <div class="mission-card-actions">
+      ${action ? html`<div class="py-2.5 px-3 rounded-xl bg-[var(--white-5)] border border-[var(--white-8)] text-[var(--text-strong)] leading-[1.45]">${action.reason}</div>` : null}
+      <div class="flex gap-2 flex-wrap mt-2.5">
         ${action
           ? html`
               <button class="control-btn ghost" onClick=${() => openActionIntervene(action, attention, '상황판 내부 신호')}>이 액션으로 개입 열기</button>

@@ -202,7 +202,7 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="keeper-conversation-shell">
-      <div class="keeper-conversation-toolbar">
+      <div class="flex justify-end">
         <button
           type="button"
           class="control-btn ghost"

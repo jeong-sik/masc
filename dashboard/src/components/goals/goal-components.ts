@@ -20,7 +20,7 @@ import {
 export function GoalRow({ goal }: { goal: Goal }) {
   return html`
     <div class="goal-row">
-      <div class="goal-row-main">
+      <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <span class="goal-horizon-badge" style="color:${horizonColor(goal.horizon)}">
             ${horizonLabel(goal.horizon)}
@@ -28,7 +28,7 @@ export function GoalRow({ goal }: { goal: Goal }) {
           <span class="goal-title">${goal.title}</span>
         </div>
         <div class="goal-meta">
-          <span class="goal-priority" title="Priority ${goal.priority}">${priorityStars(goal.priority)}</span>
+          <span class="text-amber-500 tracking-[1px]" title="Priority ${goal.priority}">${priorityStars(goal.priority)}</span>
           ${goal.metric ? html`<span class="text-cyan">${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}</span>` : null}
           ${goal.due_date ? html`<span class="text-[var(--bad-light)]">Due: <${TimeAgo} timestamp=${goal.due_date} /></span>` : null}
         </div>

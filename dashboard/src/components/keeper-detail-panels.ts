@@ -222,30 +222,30 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
       />
       ${filtered.map(f => html`
         <div class="keeper-field-row">
-          <span class="keeper-field-title">${f.title}</span>
+          <span class="font-semibold min-w-[90px]">${f.title}</span>
           <span class="keeper-field-key">${f.key}</span>
           <span class="flex-1 text-right text-[#ccc]">${f.value}</span>
         </div>
       `)}
-      ${keeper.trace_id ? html`<div class="keeper-field-row"><span class="keeper-field-title">Trace ID</span><span class="keeper-field-key font-mono">${keeper.trace_id}</span></div>` : ''}
-      ${keeper.agent_name ? html`<div class="keeper-field-row"><span class="keeper-field-title">Agent</span><span class="flex-1 text-right text-[#ccc]">${keeper.agent_name}</span></div>` : ''}
-      ${keeper.primary_model ? html`<div class="keeper-field-row"><span class="keeper-field-title">Primary Model</span><span class="font-mono" class="flex-1 text-right text-[#ccc]">${keeper.primary_model}</span></div>` : ''}
-      ${keeper.active_model ? html`<div class="keeper-field-row"><span class="keeper-field-title">Active Model</span><span class="font-mono" class="flex-1 text-right text-[#ccc]">${keeper.active_model}</span></div>` : ''}
-      ${keeper.next_model_hint ? html`<div class="keeper-field-row"><span class="keeper-field-title">Next Model Hint</span><span class="font-mono" class="flex-1 text-right text-[#ccc]">${keeper.next_model_hint}</span></div>` : ''}
-      ${keeper.skill_primary ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill (Primary)</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_primary}</span></div>` : ''}
-      ${keeper.skill_secondary ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill (Secondary)</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_secondary}</span></div>` : ''}
-      ${keeper.skill_reason ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill Reason</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_reason}</span></div>` : ''}
-      ${keeper.context_source ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Source</span><span class="flex-1 text-right text-[#ccc]">${keeper.context_source}</span></div>` : ''}
-      ${keeper.context_tokens != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Tokens</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.context_tokens)}</span></div>` : ''}
-      ${keeper.context_max != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Max</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.context_max)}</span></div>` : ''}
-      ${keeper.memory_recent_note ? html`<div class="keeper-field-row"><span class="keeper-field-title">Memory Note</span><span class="flex-1 text-right text-[#ccc]">${keeper.memory_recent_note}</span></div>` : ''}
-      ${keeper.k2k_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">K2K Count</span><span class="flex-1 text-right text-[#ccc]">${keeper.k2k_count}</span></div>` : ''}
-      ${keeper.conversation_tail_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Conv Tail</span><span class="flex-1 text-right text-[#ccc]">${keeper.conversation_tail_count}</span></div>` : ''}
-      ${keeper.handoff_count_total != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Total Handoffs</span><span class="flex-1 text-right text-[#ccc]">${keeper.handoff_count_total}</span></div>` : ''}
-      ${keeper.compaction_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Compactions</span><span class="flex-1 text-right text-[#ccc]">${keeper.compaction_count}</span></div>` : ''}
-      ${keeper.last_compaction_saved_tokens != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Last Compact Saved</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.last_compaction_saved_tokens)}</span></div>` : ''}
-      ${keeper.context?.message_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Message Count</span><span class="flex-1 text-right text-[#ccc]">${keeper.context.message_count}</span></div>` : ''}
-      ${keeper.context?.has_checkpoint != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Has Checkpoint</span><span class="flex-1 text-right text-[#ccc]">${keeper.context.has_checkpoint ? 'Yes' : 'No'}</span></div>` : ''}
+      ${keeper.trace_id ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Trace ID</span><span class="keeper-field-key font-mono">${keeper.trace_id}</span></div>` : ''}
+      ${keeper.agent_name ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Agent</span><span class="flex-1 text-right text-[#ccc]">${keeper.agent_name}</span></div>` : ''}
+      ${keeper.primary_model ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Primary Model</span><span class="font-mono" class="flex-1 text-right text-[#ccc]">${keeper.primary_model}</span></div>` : ''}
+      ${keeper.active_model ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Active Model</span><span class="font-mono" class="flex-1 text-right text-[#ccc]">${keeper.active_model}</span></div>` : ''}
+      ${keeper.next_model_hint ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Next Model Hint</span><span class="font-mono" class="flex-1 text-right text-[#ccc]">${keeper.next_model_hint}</span></div>` : ''}
+      ${keeper.skill_primary ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Skill (Primary)</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_primary}</span></div>` : ''}
+      ${keeper.skill_secondary ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Skill (Secondary)</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_secondary}</span></div>` : ''}
+      ${keeper.skill_reason ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Skill Reason</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_reason}</span></div>` : ''}
+      ${keeper.context_source ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Context Source</span><span class="flex-1 text-right text-[#ccc]">${keeper.context_source}</span></div>` : ''}
+      ${keeper.context_tokens != null ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Context Tokens</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.context_tokens)}</span></div>` : ''}
+      ${keeper.context_max != null ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Context Max</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.context_max)}</span></div>` : ''}
+      ${keeper.memory_recent_note ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Memory Note</span><span class="flex-1 text-right text-[#ccc]">${keeper.memory_recent_note}</span></div>` : ''}
+      ${keeper.k2k_count != null ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">K2K Count</span><span class="flex-1 text-right text-[#ccc]">${keeper.k2k_count}</span></div>` : ''}
+      ${keeper.conversation_tail_count != null ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Conv Tail</span><span class="flex-1 text-right text-[#ccc]">${keeper.conversation_tail_count}</span></div>` : ''}
+      ${keeper.handoff_count_total != null ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Total Handoffs</span><span class="flex-1 text-right text-[#ccc]">${keeper.handoff_count_total}</span></div>` : ''}
+      ${keeper.compaction_count != null ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Compactions</span><span class="flex-1 text-right text-[#ccc]">${keeper.compaction_count}</span></div>` : ''}
+      ${keeper.last_compaction_saved_tokens != null ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Last Compact Saved</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.last_compaction_saved_tokens)}</span></div>` : ''}
+      ${keeper.context?.message_count != null ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Message Count</span><span class="flex-1 text-right text-[#ccc]">${keeper.context.message_count}</span></div>` : ''}
+      ${keeper.context?.has_checkpoint != null ? html`<div class="keeper-field-row"><span class="font-semibold min-w-[90px]">Has Checkpoint</span><span class="flex-1 text-right text-[#ccc]">${keeper.context.has_checkpoint ? 'Yes' : 'No'}</span></div>` : ''}
     </div>
   `
 }

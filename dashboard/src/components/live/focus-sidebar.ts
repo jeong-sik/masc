@@ -29,7 +29,7 @@ export function FocusSidebar() {
     <div class="focus-sidebar">
       <div class="focus-sidebar-head">
         <h3>Agents</h3>
-        <span class="focus-count">${list.length} active</span>
+        <span class="text-xs text-[rgba(255,255,255,0.4)]">${list.length} active</span>
       </div>
       <div class="focus-sidebar-list">
         ${list.length === 0
@@ -56,7 +56,7 @@ export function FocusSidebar() {
               <div class="focus-agent-footer">
                 ${agent.lastActivityText
                   ? html`<span class="focus-activity-text">${agent.lastActivityText}</span>`
-                  : html`<span class="focus-activity-text focus-no-activity">No recent activity</span>`}
+                  : html`<span class="focus-activity-text italic text-[rgba(255,255,255,0.25)]">No recent activity</span>`}
                 ${agent.lastActivityAt
                   ? html`<${TimeAgo} timestamp=${agent.lastActivityAt} />`
                   : null}

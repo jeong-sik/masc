@@ -43,7 +43,7 @@ export function ActivityStream() {
     <div class="activity-stream">
       <div class="activity-stream-head">
         <h3>Activity Stream</h3>
-        <span class="activity-count">${entries.length} events</span>
+        <span class="text-xs text-[rgba(255,255,255,0.4)]">${entries.length} events</span>
       </div>
       <${FilterBar} />
       <div class="activity-stream-list">

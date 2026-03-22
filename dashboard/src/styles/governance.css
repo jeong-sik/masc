@@ -299,11 +299,6 @@ button.council-row.selected {
   overflow: auto;
 }
 
-.governance-action-row {
-  display: flex;
-  gap: 8px;
-}
-
 @media (max-width: 1200px) {
 
   .governance-layout {

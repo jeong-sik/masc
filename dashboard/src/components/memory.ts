@@ -263,7 +263,7 @@ function PostCard({ post }: { post: BoardPost }) {
         <button class="vote-btn downvote" onClick=${(event: Event) => handleVote('down', event)}>▼</button>
       </div>
       <div class="post-content">
-        <div class="post-head">
+        <div class="grid gap-2">
             <div class="post-title-row">
               <div class="text-[#e8f0ff]">${post.title}</div>
               <div class="post-chip-row">

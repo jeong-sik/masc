@@ -199,20 +199,23 @@ function AgentPulse() {
         linkLabel="전체 보기 ->"
         onLink=${() => navigate('status', { section: 'agents' })}
       />
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+      <div class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
-            class="flex items-center gap-3 p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)] cursor-pointer transition-colors hover:border-[var(--accent-20)]"
+            class="flex items-start gap-3 p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)] cursor-pointer transition-colors hover:border-[var(--accent-20)]"
             key=${a.name}
             onClick=${() => navigate('status', { section: 'agents', agent: a.name })}
           >
-            <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${32} />
-            <div class="flex flex-col min-w-0 flex-1">
+            <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${36} />
+            <div class="flex flex-col min-w-0 flex-1 gap-1">
               <div class="flex items-center gap-1.5">
-                <span class="w-1.5 h-1.5 rounded-full shrink-0 ${agentStateDot(a.state)}"></span>
-                <span class="text-sm font-medium text-[var(--text-strong)] truncate">${a.koreanName ?? a.name}</span>
+                <span class="w-2 h-2 rounded-full shrink-0 ${agentStateDot(a.state)}"></span>
+                <span class="text-sm font-semibold text-[var(--text-strong)]">${a.koreanName ?? a.name}</span>
               </div>
-              <span class="text-[10px] text-[var(--text-muted)] leading-relaxed truncate mt-0.5">
+              ${a.koreanName && a.koreanName !== a.name ? html`
+                <span class="text-[10px] text-[var(--text-dim)] font-mono leading-none">${a.name}</span>
+              ` : null}
+              <span class="text-[11px] text-[var(--text-muted)] leading-relaxed" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
                 ${a.focus ?? a.currentTask ?? a.status}
               </span>
             </div>

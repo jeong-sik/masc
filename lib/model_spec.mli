@@ -1,8 +1,16 @@
-(** Model_spec — MODEL provider types, preset specs, and model spec parsing.
+(** Model_spec — OAS-backed model identity and resolution.
 
-    Extracted from {!Cascade} to decouple model identity from cascade orchestration.
+    Types and parsing remain for MASC-specific alias resolution
+    (Provider_adapter) and "default"/"default:override" forms.
+    Metadata (URLs, API keys, context sizes, costs) is sourced
+    from OAS Provider_registry and Pricing — single source of truth.
 
-    @since 2.117.0 *)
+    Default/preset resolution delegates to OAS Cascade_config
+    when [config/cascade.json] is present (hot-reloadable).
+
+    @since 2.117.0 — original extraction from Cascade
+    @since 2.123.0 — rewritten as OAS facade
+    @since 2.129.0 — default resolution via Cascade_config *)
 
 (** MODEL provider discriminator. *)
 type provider =
@@ -44,15 +52,25 @@ val gemini_pro : model_spec
     Returns [Error msg] on unrecognised input. *)
 val model_spec_of_string : string -> (model_spec, string) result
 
+(** {2 Cascade config} *)
+
+(** Locate [config/cascade.json] via CWD or ME_ROOT.
+    Returns [Some path] when the file exists on disk. *)
+val cascade_config_path : unit -> string option
+
 (** {2 Default model labels} *)
 
 (** Configured default model label from env, if any. *)
 val configured_default_model_label : unit -> string option
 
-(** Preferred execution model labels (env-driven). *)
+(** Preferred execution model labels.
+    Consults OAS [Cascade_config.resolve_model_strings] with
+    [config/cascade.json] when available, falling back to env-driven labels. *)
 val default_execution_model_labels : unit -> string list
 
-(** Preferred verifier model labels (env-driven). *)
+(** Preferred verifier model labels.
+    Consults OAS [Cascade_config.resolve_model_strings] with
+    [config/cascade.json] when available, falling back to env-driven labels. *)
 val default_verifier_model_labels : unit -> string list
 
 (** {2 Filtering and resolution} *)

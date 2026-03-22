@@ -268,22 +268,8 @@ let run_with_masc_tools
 (* Cascade profile defaults (moved from Cascade module)              *)
 (* ================================================================ *)
 
-(** Locate config/cascade.json via CWD or ME_ROOT.
-    Returns [Some path] when the file exists on disk. *)
-let default_config_path () : string option =
-  let base dir name = Filename.concat (Filename.concat dir "config") name in
-  let cwd = Sys.getcwd () in
-  let me_root =
-    Sys.getenv_opt "ME_ROOT"
-    |> Option.value
-         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
-  in
-  let masc_root = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
-  let candidates =
-    [ base cwd "cascade.json";
-      base masc_root "cascade.json" ]
-  in
-  List.find_opt Sys.file_exists candidates
+(** Delegate to {!Model_spec.cascade_config_path}. *)
+let default_config_path = Model_spec.cascade_config_path
 
 (** Hardcoded fallback defaults — used only when cascade.json is missing
     and the cascade name has no "{name}_models" entry.

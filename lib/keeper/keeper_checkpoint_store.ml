@@ -116,4 +116,5 @@ let load_latest ~(session_dir : string) : Keeper_working_context.checkpoint opti
   | [] -> None
   | latest :: _ ->
     let path = Filename.concat session_dir latest in
-    Some (parse_checkpoint_file path)
+    (try Some (parse_checkpoint_file path)
+     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)

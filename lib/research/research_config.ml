@@ -16,7 +16,10 @@ type t = {
   max_iterations : int;
   time_budget_per_experiment_sec : float;
   results_file : string;
-  cascade_name : string;       (** OAS cascade name for LLM calls *)
+  cascade_name : string;       (** model name for LLM calls *)
+  llm_url : string;            (** OpenAI-compatible endpoint URL *)
+  llm_api_key : string;        (** API key (empty = no auth header) *)
+  llm_timeout_sec : float;     (** per-request timeout *)
   system_prompt : string;
 }
 
@@ -36,6 +39,13 @@ let default ?(repo = default_repo_config ()) () : t =
     time_budget_per_experiment_sec = 600.0;
     results_file = "research_results.tsv";
     cascade_name = "llama";
+    llm_url = (match Sys.getenv_opt "RESEARCH_LLM_URL" with
+      | Some u -> u
+      | None -> "http://127.0.0.1:8085/v1/chat/completions");
+    llm_api_key = (match Sys.getenv_opt "RESEARCH_LLM_API_KEY" with
+      | Some k -> k
+      | None -> "");
+    llm_timeout_sec = 120.0;
     system_prompt =
       "You are a code improvement researcher for an OCaml codebase (MASC MCP server). \
        Propose ONE focused, small change per experiment. Prioritize: \

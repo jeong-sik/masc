@@ -48,7 +48,7 @@ export function SwarmOverviewPanel() {
 
             ${lanes.length > 0 ? html`<${SwarmHealthBar} lanes=${lanes} />` : null}
 
-            <div class="command-swarm-layout ${compactLayout ? 'compact' : ''}">
+            <div class="${compactLayout ? 'grid grid-cols-[minmax(0,1fr)] gap-4 mt-4' : 'grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] max-[1100px]:grid-cols-[minmax(0,1fr)] gap-4 mt-4'}">
               <div class="command-card rounded-xl-stack">
                 ${lanes.length > 0
                   ? lanes.map(lane => html`<${SwarmLaneStrip} lane=${lane} />`)

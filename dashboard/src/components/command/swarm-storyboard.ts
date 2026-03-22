@@ -42,12 +42,12 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
 
   return html`
     <article class="swarm-lane-strip transition-colors duration-200 ${toneClass(tone)}">
-      <div class="swarm-lane-head flex items-center justify-between gap-2">
-        <div class="swarm-lane-head-left flex items-center gap-2 min-w-0">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
           <span class="swarm-motion-dot inline-block rounded-full shrink-0 w-2.5 h-2.5 ${lane.motion_state}"></span>
           <div>
-            <span class="swarm-lane-kicker">${lane.kind} · ${lane.source_of_truth}</span>
-            <strong>${lane.label}</strong>
+            <span class="block mb-1 text-[rgba(125,211,252,0.78)] text-[length:var(--fs-2xs)] tracking-[0.1em] uppercase">${lane.kind} · ${lane.source_of_truth}</span>
+            <strong class="text-[color:var(--text-near-white)] text-[16px] leading-[1.25]">${lane.label}</strong>
           </div>
         </div>
         <div class="command-tag rounded-full-row">
@@ -56,41 +56,41 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
           <span class="command-chip rounded-full">${relativeTime(lane.last_movement_at)}</span>
         </div>
       </div>
-      <p class="swarm-lane-reason">${lane.movement_reason}</p>
+      <p class="mt-2.5 mb-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.movement_reason}</p>
       <div class="swarm-lane-track rounded-full">
         <span class="${toneClass(tone)}" style=${`width:${progressPercent}%`}></span>
       </div>
-      <div class="swarm-lane-details flex flex-col gap-1.5 mt-2">
-        <div class="swarm-lane-row flex items-center gap-1.5">
-          <span class="swarm-lane-row-label">Step</span>
+      <div class="flex flex-col gap-1.5 mt-2 text-[0.82rem]">
+        <div class="flex items-center gap-1.5 text-[color:var(--text-dim,var(--white-55))]">
+          <span class="shrink-0 w-14 text-[0.72rem] uppercase tracking-[0.04em] opacity-60">Step</span>
           <span>${lane.current_step}</span>
         </div>
         ${totalWorkers > 0
           ? html`
-              <div class="swarm-lane-row flex items-center gap-1.5">
-                <span class="swarm-lane-row-label">워커</span>
+              <div class="flex items-center gap-1.5 text-[color:var(--text-dim,var(--white-55))]">
+                <span class="shrink-0 w-14 text-[0.72rem] uppercase tracking-[0.04em] opacity-60">워커</span>
                 <${SwarmWorkerGrid} total=${totalWorkers} />
               </div>
             `
           : null}
         ${totalOps > 0
           ? html`
-              <div class="swarm-lane-row flex items-center gap-1.5">
-                <span class="swarm-lane-row-label">흐름</span>
-                <div class="swarm-mini-bar flex-1 h-1 rounded-sm overflow-hidden">
-                  <div class="swarm-mini-bar-fill" style="width: ${totalOps > 0 ? Math.round((ops / totalOps) * 100) : 0}%; background: var(--${tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'ok'})"></div>
+              <div class="flex items-center gap-1.5 text-[color:var(--text-dim,var(--white-55))]">
+                <span class="shrink-0 w-14 text-[0.72rem] uppercase tracking-[0.04em] opacity-60">흐름</span>
+                <div class="flex-1 h-1 rounded-sm overflow-hidden bg-[var(--white-8)]">
+                  <div class="h-full rounded-sm bg-[var(--ok)] transition-[width] duration-300 ease-in-out" style="width: ${totalOps > 0 ? Math.round((ops / totalOps) * 100) : 0}%; background: var(--${tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'ok'})"></div>
                 </div>
-                <span class="swarm-worker-count">작전 ${ops} · 실행체 ${dets}</span>
+                <span class="text-[0.72rem] text-[color:var(--text-dim,var(--white-50))] ml-1">작전 ${ops} · 실행체 ${dets}</span>
               </div>
             `
           : null}
       </div>
       ${lane.blockers.length > 0
-        ? html`<div class="swarm-lane-blockers rounded-md">막힘: ${lane.blockers.join(' · ')}</div>`
+        ? html`<div class="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.25)] py-1.5 px-2.5 text-[0.78rem] text-[color:var(--bad)] mt-1 rounded-md">막힘: ${lane.blockers.join(' · ')}</div>`
         : null}
       ${lane.hard_flags.length > 0
         ? html`
-            <div class="swarm-lane-flags flex flex-wrap gap-1 mt-1">
+            <div class="flex flex-wrap gap-1 mt-1">
               ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<span class="command-chip rounded-full ${toneClass(flag.severity)}">${flag.code}</span>`)}
             </div>
           `
@@ -103,7 +103,7 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
   const featured = lanes.slice(0, 4)
   if (featured.length === 0) return null
   return html`
-    <div class="swarm-storyboard">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2.5 mb-3.5">
       ${featured.map(lane => {
         const tone = swarmLaneTone(lane)
         const workers = lane.counts.workers ?? 0
@@ -115,14 +115,14 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
               <span class="command-chip rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
               <span class="command-chip rounded-full">${lane.phase}</span>
             </div>
-            <strong>${lane.label}</strong>
-            <p>${lane.current_step}</p>
-            <div class="swarm-story-strip flex gap-2 flex-wrap">
-              <span>워커 ${workers}</span>
-              <span>작전 ${operations}</span>
-              <span>실행체 ${detachments}</span>
+            <strong class="text-[color:var(--text-near-white)] text-[length:var(--fs-lg)] leading-[1.3]">${lane.label}</strong>
+            <p class="m-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.current_step}</p>
+            <div class="flex gap-2 flex-wrap">
+              ${[`워커 ${workers}`, `작전 ${operations}`, `실행체 ${detachments}`].map(t => html`
+                <span class="inline-flex items-center py-1 px-2 bg-[var(--white-6)] text-[rgba(191,219,254,0.9)] text-[length:var(--fs-xs)]">${t}</span>
+              `)}
             </div>
-            <small>${lane.movement_reason}</small>
+            <small class="m-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.movement_reason}</small>
           </article>
         `
       })}
@@ -149,15 +149,15 @@ export function SwarmHealthBar({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
 
   return html`
     <div>
-      <div class="swarm-health-bar flex h-2 rounded overflow-hidden">
+      <div class="flex h-2 rounded overflow-hidden bg-[var(--white-6)] mt-3">
         ${segments.filter(s => s.count > 0).map(s => html`
           <div class="swarm-health-seg ${s.key}" style="flex: ${s.count}"></div>
         `)}
       </div>
-      <div class="swarm-health-labels flex gap-4">
+      <div class="flex gap-4 text-[0.75rem] text-[color:var(--text-dim,var(--white-50))] mt-1.5">
         ${segments.filter(s => s.count > 0).map(s => html`
-          <span class="swarm-health-label flex items-center gap-1">
-            <span class="swarm-health-swatch w-2 h-2 rounded-sm inline-block" style="background: ${s.color}"></span>
+          <span class="flex items-center gap-1">
+            <span class="w-2 h-2 rounded-sm inline-block" style="background: ${s.color}"></span>
             ${s.count} ${s.key}
           </span>
         `)}

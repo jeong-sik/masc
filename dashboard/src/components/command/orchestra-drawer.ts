@@ -401,9 +401,9 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
       ${node.subtitle ? html`<p class="command-card rounded-xl-sub">${node.subtitle}</p>` : null}
       <div class="orchestra-fact-list flex flex-col gap-2">
         ${node.facts.map(factRow => html`
-          <div class="orchestra-fact-row flex justify-between gap-3 py-2 px-2.5 rounded-[10px]">
-            <span>${factRow.label}</span>
-            <strong>${factRow.value}</strong>
+          <div class="flex justify-between gap-3 py-2 px-2.5 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-6)]">
+            <span class="text-[rgba(226,232,240,0.64)] text-[0.82rem]">${factRow.label}</span>
+            <strong class="text-[color:var(--text-near-white)] text-[0.84rem] text-right">${factRow.value}</strong>
           </div>
         `)}
       </div>

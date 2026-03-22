@@ -1,11 +1,6 @@
 /* ── Command Swarm + Orchestra ────────────────────────────── */
 
-.swarm-storyboard {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
+/* swarm-storyboard → Tailwind (grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2.5 mb-3.5) */
 
 .swarm-story-card {
   padding: 14px;
@@ -23,45 +18,10 @@
 .swarm-story-card.warn { border-color: var(--warn-soft); }
 .swarm-story-card.bad { border-color: rgba(248,113,113,0.24); }
 
-.swarm-story-card strong {
-  color: var(--text-near-white);
-  font-size: var(--fs-lg);
-  line-height: 1.3;
-}
-
-.swarm-story-card p,
-.swarm-story-card small {
-  margin: 0;
-  color: var(--frost-72);
-  line-height: 1.5;
-}
-
-.swarm-story-strip span {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  background: var(--white-6);
-  color: rgba(191,219,254,0.9);
-  font-size: var(--fs-xs);
-}
-
-.command-swarm-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
-  gap: 16px;
-  margin-top: 16px;
-}
-
-.command-swarm-layout.compact {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.orchestra-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
-  gap: 16px;
-  margin-top: 16px;
-}
+/* swarm-story-card strong/p/small → Tailwind inline */
+/* swarm-story-strip span → Tailwind inline */
+/* command-swarm-layout → Tailwind inline */
+/* orchestra-shell → Tailwind inline */
 
 .orchestra-canvas-wrap {
   position: relative;
@@ -207,37 +167,8 @@
   font-weight: 700;
 }
 
-.orchestra-summary-strip {
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 12px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  pointer-events: none;
-}
-
-.orchestra-summary-strip .command-chip {
-  pointer-events: auto;
-  background: rgba(15,23,42,0.8);
-}
-
-.orchestra-fact-row {
-  background: var(--white-3);
-  border: 1px solid var(--white-6);
-}
-
-.orchestra-fact-row span {
-  color: rgba(226,232,240,0.64);
-  font-size: 0.82rem;
-}
-
-.orchestra-fact-row strong {
-  color: var(--text-near-white);
-  font-size: 0.84rem;
-  text-align: right;
-}
+/* orchestra-summary-strip → Tailwind inline */
+/* orchestra-fact-row → Tailwind inline */
 
 @keyframes orchestraFlow {
   to {
@@ -251,10 +182,7 @@
 }
 
 /* ── SwarmHealthBar ────────────────────────────── */
-.swarm-health-bar {
-  background: var(--white-6);
-  margin-top: 12px;
-}
+/* swarm-health-bar → Tailwind inline (flex h-2 rounded overflow-hidden bg-[var(--white-6)] mt-3) */
 .swarm-health-seg {
   transition: flex 0.3s ease;
   min-width: 0;
@@ -263,11 +191,8 @@
 .swarm-health-seg.waiting { background: var(--warn); }
 .swarm-health-seg.stalled { background: var(--bad); }
 .swarm-health-seg.terminal { background: #556; }
-.swarm-health-labels {
-  font-size: 0.75rem;
-  color: var(--text-dim, var(--white-50));
-  margin-top: 6px;
-}
+/* swarm-health-labels → Tailwind inline */
+
 /* ── SwarmLaneStrip ────────────────────────────── */
 .swarm-lane-strip {
   padding: 0.75rem 1rem;
@@ -278,30 +203,15 @@
 .swarm-lane-strip.ok { border-left-color: var(--ok); }
 .swarm-lane-strip.warn { border-left-color: var(--warn); }
 .swarm-lane-strip.bad { border-left-color: var(--bad); }
-.swarm-lane-kicker {
-  display: block;
-  margin-bottom: 4px;
-  color: rgba(125,211,252,0.78);
-  font-size: var(--fs-2xs);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
+/* swarm-lane-kicker → Tailwind inline */
+/* swarm-lane-head-left strong → Tailwind inline */
 
-.swarm-lane-head-left strong {
-  color: var(--text-near-white);
-  font-size: 16px;
-  line-height: 1.25;
-}
 .swarm-motion-dot.moving { animation: workingPulse 1.5s ease-in-out infinite; background: var(--ok); }
 .swarm-motion-dot.stalled { animation: warnBlink 1s ease-in-out infinite; background: var(--bad); }
 .swarm-motion-dot.waiting { background: var(--warn); }
 .swarm-motion-dot.terminal { background: #556; }
 
-.swarm-lane-reason {
-  margin: 10px 0 0;
-  color: var(--frost-72);
-  line-height: 1.5;
-}
+/* swarm-lane-reason → Tailwind inline */
 
 .swarm-lane-track {
   margin-top: 10px;
@@ -324,52 +234,14 @@
   background: linear-gradient(90deg, rgba(248,113,113,0.92), rgba(244,63,94,0.9));
 }
 
-.swarm-lane-details {
-  font-size: 0.82rem;
-}
-.swarm-lane-row {
-  color: var(--text-dim, var(--white-55));
-}
-.swarm-lane-row-label {
-  flex-shrink: 0;
-  width: 56px;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.6;
-}
-.swarm-worker-dot.present { background: rgba(134,160,207,0.7); }
-.swarm-worker-count {
-  font-size: 0.72rem;
-  color: var(--text-dim, var(--white-50));
-  margin-left: 4px;
-}
-.swarm-mini-bar {
-  background: var(--white-8);
-}
-.swarm-mini-bar-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: var(--ok);
-  transition: width 0.3s ease;
-}
-.swarm-lane-blockers {
-  background: rgba(239,68,68,0.1);
-  border: 1px solid rgba(239,68,68,0.25);
-  padding: 6px 10px;
-  font-size: 0.78rem;
-  color: var(--bad);
-  margin-top: 4px;
-}
+/* swarm-lane-details/row/row-label → Tailwind inline */
+/* swarm-worker-dot.present → Tailwind inline */
+/* swarm-worker-count → Tailwind inline */
+/* swarm-mini-bar/fill → Tailwind inline */
+/* swarm-lane-blockers → Tailwind inline */
+
 /* ── SwarmEventRail ────────────────────────────── */
-.swarm-event-node {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  position: relative;
-  padding: 4px 0;
-  font-size: 0.82rem;
-}
+/* swarm-event-node → Tailwind inline */
 .swarm-event-dot {
   width: 10px;
   height: 10px;
@@ -381,21 +253,9 @@
 .swarm-event-dot.ok { background: var(--ok); }
 .swarm-event-dot.warn { background: var(--warn); }
 .swarm-event-dot.bad { background: var(--bad); }
-.swarm-event-time {
-  flex-shrink: 0;
-  width: 48px;
-  font-size: 0.72rem;
-  color: var(--text-dim, var(--white-45));
-}
-.swarm-event-kind {
-  font-size: 0.72rem;
-  opacity: 0.6;
-  margin-left: 6px;
-}
-.swarm-gap-inline {
-  padding: 3px 0;
-  font-size: 0.78rem;
-}
+/* swarm-event-time → Tailwind inline */
+/* swarm-event-kind → Tailwind inline */
+/* swarm-gap-inline → Tailwind inline */
 .swarm-gap-dot {
   width: 10px;
   height: 10px;
@@ -404,12 +264,4 @@
   margin-left: -1.35rem;
   flex-shrink: 0;
   background: transparent;
-}
-
-@media (max-width: 1100px) {
-
-  .command-swarm-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
 }

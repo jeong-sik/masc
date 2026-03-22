@@ -425,7 +425,10 @@ let apply_settings_update
       drift_min_turn_gap;
       updated_at = now_iso ();
     } in
-    (try ignore (write_meta config updated)
+    (try
+       (match write_meta config updated with
+        | Ok () -> ()
+        | Error e -> Log.Keeper.warn "write_meta failed (settings): %s" e)
      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn ~label:"write_meta (settings) failed" exn);
     updated
 

@@ -14,25 +14,25 @@ let contains haystack needle =
 let test_should_retry_unix_fallback_on_bind_error () =
   let exn = Unix.Unix_error (Unix.EADDRINUSE, "bind", "") in
   check bool "retry bind eaddrinuse" true
-    (M.Process_eio.should_retry_unix_fallback exn)
+    (Process_eio.should_retry_unix_fallback exn)
 
 let test_should_retry_unix_fallback_on_cancelled_bind_error () =
   let exn =
     Eio.Cancel.Cancelled (Unix.Unix_error (Unix.EADDRINUSE, "bind", ""))
   in
   check bool "retry cancelled bind eaddrinuse" true
-    (M.Process_eio.should_retry_unix_fallback exn)
+    (Process_eio.should_retry_unix_fallback exn)
 
 let test_run_argv_fallback_preserves_env () =
   let output =
-    M.Process_eio.run_argv ~env:[| "PROCESS_EIO_TEST_VAR=ok" |] [ "/usr/bin/env" ]
+    Process_eio.run_argv ~env:[| "PROCESS_EIO_TEST_VAR=ok" |] [ "/usr/bin/env" ]
   in
   check bool "env visible in fallback" true
     (contains output "PROCESS_EIO_TEST_VAR=ok")
 
 let test_run_argv_with_stdin_fallback_preserves_input () =
   let output =
-    M.Process_eio.run_argv_with_stdin ~stdin_content:"ping\n" [ "/bin/cat" ]
+    Process_eio.run_argv_with_stdin ~stdin_content:"ping\n" [ "/bin/cat" ]
   in
   check string "stdin content round-trips" "ping\n" output
 
@@ -41,12 +41,12 @@ let test_init_exposes_complete_runtime () =
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let cwd_default = Eio.Stdenv.fs env in
-  M.Process_eio.init ~cwd_default ~proc_mgr ~clock;
-  check bool "initialized" true (M.Process_eio.is_initialized ());
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  check bool "initialized" true (Process_eio.is_initialized ());
   check bool "proc_mgr available" true
-    (match M.Process_eio.get_proc_mgr () with Ok _ -> true | Error _ -> false);
+    (match Process_eio.get_proc_mgr () with Ok _ -> true | Error _ -> false);
   check bool "clock available" true
-    (match M.Process_eio.get_clock () with Ok _ -> true | Error _ -> false)
+    (match Process_eio.get_clock () with Ok _ -> true | Error _ -> false)
 
 (** Verify that Eio.Cancel.Cancelled is re-raised, not swallowed *)
 let test_run_argv_propagates_cancelled () =
@@ -54,12 +54,12 @@ let test_run_argv_propagates_cancelled () =
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let cwd_default = Eio.Stdenv.fs env in
-  M.Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
   let raised = ref false in
   (try
      Eio.Cancel.sub (fun cc ->
          Eio.Cancel.cancel cc (Failure "test cancel");
-         ignore (M.Process_eio.run_argv [ "/bin/echo"; "should-not-run" ]))
+         ignore (Process_eio.run_argv [ "/bin/echo"; "should-not-run" ]))
    with Eio.Cancel.Cancelled _ -> raised := true);
   check bool "Cancelled propagated from run_argv" true !raised
 
@@ -68,12 +68,12 @@ let test_run_argv_with_status_propagates_cancelled () =
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let cwd_default = Eio.Stdenv.fs env in
-  M.Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
   let raised = ref false in
   (try
      Eio.Cancel.sub (fun cc ->
          Eio.Cancel.cancel cc (Failure "test cancel");
-         ignore (M.Process_eio.run_argv_with_status [ "/bin/echo"; "nope" ]))
+         ignore (Process_eio.run_argv_with_status [ "/bin/echo"; "nope" ]))
    with Eio.Cancel.Cancelled _ -> raised := true);
   check bool "Cancelled propagated from run_argv_with_status" true !raised
 
@@ -82,13 +82,13 @@ let test_run_argv_with_stdin_propagates_cancelled () =
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let cwd_default = Eio.Stdenv.fs env in
-  M.Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
   let raised = ref false in
   (try
      Eio.Cancel.sub (fun cc ->
          Eio.Cancel.cancel cc (Failure "test cancel");
          ignore
-           (M.Process_eio.run_argv_with_stdin ~stdin_content:"x"
+           (Process_eio.run_argv_with_stdin ~stdin_content:"x"
               [ "/bin/cat" ]))
    with Eio.Cancel.Cancelled _ -> raised := true);
   check bool "Cancelled propagated from run_argv_with_stdin" true !raised
@@ -98,13 +98,13 @@ let test_run_argv_with_stdin_and_status_propagates_cancelled () =
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let cwd_default = Eio.Stdenv.fs env in
-  M.Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
   let raised = ref false in
   (try
      Eio.Cancel.sub (fun cc ->
          Eio.Cancel.cancel cc (Failure "test cancel");
          ignore
-           (M.Process_eio.run_argv_with_stdin_and_status ~stdin_content:"x"
+           (Process_eio.run_argv_with_stdin_and_status ~stdin_content:"x"
               [ "/bin/cat" ]))
    with Eio.Cancel.Cancelled _ -> raised := true);
   check bool "Cancelled propagated from run_argv_with_stdin_and_status" true

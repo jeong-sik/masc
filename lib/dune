@@ -129,7 +129,6 @@
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly
    encryption
-   file_lock_eio
    gcm_compat
    graphql_client
    graphql_endpoint
@@ -259,7 +258,6 @@
    post_verifier
    post_verifier_model
    provider_adapter
-   process_eio
    progress
    pulse
    relay
@@ -806,6 +804,8 @@
    masc_eio_context
    ;; Backend storage (extracted sub-library)
    masc_backend
+   ;; Process execution + file locking (extracted sub-library)
+   masc_process
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

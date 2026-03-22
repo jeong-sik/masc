@@ -46,7 +46,6 @@ module Sse = Masc_mcp.Sse
 module Safe_ops = Safe_ops
 module Tool_mdal = Masc_mcp.Tool_mdal
 module Tool_board = Masc_mcp.Tool_board
-module Process_eio = Masc_mcp.Process_eio
 module Mdal = Masc_mcp.Mdal
 module Server_command_plane_http = Masc_mcp.Server_command_plane_http
 module Server_mcp_transport_http = Masc_mcp.Server_mcp_transport_http

@@ -89,25 +89,25 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
 
   return html`
     <div
-      class="p-4 rounded-lg border bg-[var(--card)] cursor-pointer transition-colors ${hasBlocker ? 'border-[var(--bad-30)]' : 'border-[var(--card-border)]'} hover:border-[var(--accent-20)]"
+      class="p-4 rounded-xl border bg-card/60 backdrop-blur-md cursor-pointer transition-all duration-200 shadow-sm shadow-black/10 hover:shadow-md hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/50' : 'border-card-border hover:border-accent/40'}"
       key=${s.session_id}
       onClick=${() => navigate('status', { section: 'sessions', session_id: s.session_id })}
     >
-      <div class="flex items-start gap-2 mb-2">
-        <span class="w-2 h-2 rounded-full shrink-0 mt-1 ${statusDotColor(s.status)}"></span>
+      <div class="flex items-start gap-3 mb-2">
+        <span class="w-2 h-2 rounded-full shrink-0 mt-1.5 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${statusDotColor(s.status)}"></span>
         <div class="min-w-0 flex-1">
-          <div class="text-sm font-medium text-[var(--text-strong)] leading-snug truncate">${primary}</div>
-          ${secondary ? html`<div class="text-xs text-[var(--text-muted)] mt-0.5 truncate">${secondary}</div>` : null}
+          <div class="text-[13px] font-semibold text-text-strong leading-snug truncate group-hover:text-accent transition-colors">${primary}</div>
+          ${secondary ? html`<div class="text-xs text-text-muted mt-1 truncate">${secondary}</div>` : null}
         </div>
       </div>
-      <div class="flex items-center gap-3 text-[10px] text-[var(--text-muted)] pl-4">
+      <div class="flex items-center gap-3 text-[11px] text-text-muted/80 pl-5 font-medium">
         ${creator ? html`<span>${systemSession ? '시스템' : creator}</span>` : null}
         ${s.status ? html`<span>${statusLabel(s.status)}</span>` : null}
         ${s.elapsed_sec ? html`<span>${formatDuration(s.elapsed_sec)}</span>` : null}
         ${s.member_names?.length ? html`<span>${s.member_names.length}명</span>` : null}
       </div>
       ${hasBlocker ? html`
-        <div class="text-[10px] text-[var(--bad-light)] mt-2 pl-4 truncate">${s.blocker_summary}</div>
+        <div class="text-[11px] text-bad-light mt-2.5 pl-5 truncate bg-bad/10 py-1 px-2 rounded-md">${s.blocker_summary}</div>
       ` : null}
     </div>
   `

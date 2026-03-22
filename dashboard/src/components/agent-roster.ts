@@ -146,7 +146,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         </div>
       </div>
 
-      <div class="flex flex-col gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
         ${filtered.map((agent: Agent) => {
           const brief = briefMap.get(agent.name)
           const keeper = findKeeper(agent.name, keeperList, keeperBriefs)

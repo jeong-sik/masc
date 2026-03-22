@@ -104,9 +104,7 @@ let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
           ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
       in
       let llama_listening =
-        match Masc_mcp.Keeper_types.model_specs_of_strings ["llama:qwen3.5-35b-a3b-ud-q8-xl"] with
-        | Ok [spec] -> Masc_mcp.Keeper_types.model_spec_is_available spec
-        | _ -> false
+        Masc_mcp.Keeper_types.label_is_available "llama:qwen3.5-35b-a3b-ud-q8-xl"
       in
       let expected =
         if llama_listening then

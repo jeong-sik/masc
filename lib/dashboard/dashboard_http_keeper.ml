@@ -222,9 +222,11 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
                 ]
             | None ->
-                (match Keeper_types.model_specs_of_strings m.models with
-                 | Error _ -> `Assoc [("has_checkpoint", `Bool false)]
-                 | Ok specs ->
+                (let specs = Model_spec.available_model_specs_of_strings m.models in
+                 match specs with
+                 | [] when m.models <> [] ->
+                     `Assoc [("has_checkpoint", `Bool false)]
+                 | _ ->
                      let primary =
                        match specs with m0 :: _ -> m0 | [] -> Model_spec.llama_default
                      in

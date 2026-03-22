@@ -11,7 +11,7 @@ function AvatarGallery() {
   const displayAgents = agentList.slice(0, 12)
 
   if (displayAgents.length === 0) {
-    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">에이전트 데이터를 불러오는 중...</div>`
+    return html`<div class="empty-state">에이전트 데이터를 불러오는 중...</div>`
   }
 
   return html`

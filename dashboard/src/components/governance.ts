@@ -141,7 +141,7 @@ function DecisionInbox() {
     <${Card} title="사건 수신함" class="section mb-3.5">
       <div class="flex flex-col gap-2 governance-inbox">
         ${items.length === 0
-          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.</div>`
+          ? html`<div class="empty-state">이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.</div>`
           : items.map(item => {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`

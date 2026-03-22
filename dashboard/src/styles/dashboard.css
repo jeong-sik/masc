@@ -102,13 +102,76 @@
   opacity: 0.85;
 }
 
-/* ── Tab pill (hover/active transitions) ── */
-.tab-pill {
-  transition: all 0.15s;
+/* ── Tab pill bar (GCP-style segmented control) ── */
+.tab-pill-bar {
+  display: flex;
+  gap: 4px;
+  background: var(--white-3);
+  padding: 4px;
+  border-radius: 10px;
 }
-.tab-pill:hover {
-  border-color: var(--accent);
-  color: var(--text-strong);
+.tab-pill-btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+  background: transparent;
+  white-space: nowrap;
+}
+.tab-pill-btn:hover {
+  color: var(--text-body);
+  background: var(--white-6);
+}
+.tab-pill-btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  cursor: default;
+}
+
+/* ── Empty state (standardized) ── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 16px;
+  text-align: center;
+}
+.empty-state-icon {
+  font-size: 1.875rem;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+.empty-state-title {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-body);
+  margin-bottom: 4px;
+}
+.empty-state-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+/* ── Loading state (standardized) ── */
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 16px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+@keyframes loadingPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.loading-pulse {
+  animation: loadingPulse 1.5s ease-in-out infinite;
 }
 
 .tab-collapsible__summary:hover {

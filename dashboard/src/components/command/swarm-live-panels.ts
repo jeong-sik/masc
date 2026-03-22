@@ -40,9 +40,9 @@ export function SwarmLivePanels() {
           <div class="card rounded-xl-title">스웜 라이브 런</div>
         </div>
         ${commandPlaneSwarmLoading.value
-          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">Loading swarm live state…</div>`
+          ? html`<div class="empty-state">Loading swarm live state…</div>`
           : commandPlaneSwarmError.value
-            ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneSwarmError.value}</div>`
+            ? html`<div class="empty-state error">${commandPlaneSwarmError.value}</div>`
             : swarm
               ? html`
                   <div class="cmd-tag rounded-full-row">
@@ -78,7 +78,7 @@ export function SwarmLivePanels() {
                     : null}
                   <${SwarmRunResolutionCard} swarm=${swarm} />
                 `
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">스웜 read-model이 아직 없습니다.</div>`}
+              : html`<div class="empty-state">스웜 read-model이 아직 없습니다.</div>`}
       </section>
 
       <section class="card rounded-xl min-h-[240px]">
@@ -89,7 +89,7 @@ export function SwarmLivePanels() {
           ? html`<div class="cmd-card rounded-xl-stack">
               ${swarm.checklist.map(item => html`<${SwarmChecklistCard} item=${item} />`)}
             </div>`
-          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">체크리스트가 아직 없습니다.</div>`}
+          : html`<div class="empty-state">체크리스트가 아직 없습니다.</div>`}
       </section>
 
       <section class="card rounded-xl min-h-[240px]">
@@ -100,7 +100,7 @@ export function SwarmLivePanels() {
           ? html`<div class="cmd-card rounded-xl-stack">
               ${swarm.workers.map(worker => html`<${SwarmWorkerCard} worker=${worker} />`)}
             </div>`
-          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">워커 행이 아직 없습니다.</div>`}
+          : html`<div class="empty-state">워커 행이 아직 없습니다.</div>`}
       </section>
 
       <section class="card rounded-xl min-h-[240px]">
@@ -143,9 +143,9 @@ export function SwarmLivePanels() {
                       </article>
                     `)}
                   </div>`
-                : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">slot telemetry가 아직 없습니다.</div>`}
+                : html`<div class="empty-state">slot telemetry가 아직 없습니다.</div>`}
             `
-          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">런타임 telemetry가 아직 없습니다.</div>`}
+          : html`<div class="empty-state">런타임 telemetry가 아직 없습니다.</div>`}
       </section>
 
       <section class="card rounded-xl min-h-[240px]">
@@ -156,7 +156,7 @@ export function SwarmLivePanels() {
           ? html`<div class="cmd-card rounded-xl-stack">
               ${swarm.blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)}
             </div>`
-          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">막힘 요인은 없습니다. 다음 액션은 ${swarm?.recommended_next_tool ?? 'masc_observe_traces'} 입니다.</div>`}
+          : html`<div class="empty-state">막힘 요인은 없습니다. 다음 액션은 ${swarm?.recommended_next_tool ?? 'masc_observe_traces'} 입니다.</div>`}
       </section>
 
       <section class="card rounded-xl min-h-[240px]">
@@ -178,7 +178,7 @@ export function SwarmLivePanels() {
                 </article>
               `)}
             </div>`
-          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">run 범위 메시지가 아직 없습니다.</div>`}
+          : html`<div class="empty-state">run 범위 메시지가 아직 없습니다.</div>`}
       </section>
 
       <section class="card rounded-xl min-h-[240px]">
@@ -189,7 +189,7 @@ export function SwarmLivePanels() {
           ? html`<div class="flex flex-col gap-3">
               ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
             </div>`
-          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">run 범위 trace event가 아직 없습니다.</div>`}
+          : html`<div class="empty-state">run 범위 trace event가 아직 없습니다.</div>`}
       </section>
     </div>
   `

@@ -57,7 +57,7 @@ export function TaskBacklog() {
             <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${todo.length}</span>
           </div>
           ${sortedTodo.length === 0
-            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)] opacity-50">대기 중인 태스크가 없습니다</div>`
+            ? html`<div class="empty-state">대기 중인 태스크가 없습니다</div>`
             : sortedTodo.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         </div>
         <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
@@ -66,7 +66,7 @@ export function TaskBacklog() {
             <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${inProgress.length}</span>
           </div>
           ${sortedInProgress.length === 0
-            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)] opacity-50">진행 중인 태스크가 없습니다</div>`
+            ? html`<div class="empty-state">진행 중인 태스크가 없습니다</div>`
             : sortedInProgress.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         </div>
         <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
@@ -75,10 +75,10 @@ export function TaskBacklog() {
             <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${done.length}</span>
           </div>
           ${sortedDone.length === 0
-            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)] opacity-50">완료된 태스크가 없습니다</div>`
+            ? html`<div class="empty-state">완료된 태스크가 없습니다</div>`
             : sortedDone.slice(0, 20).map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
           ${sortedDone.length > 20
-            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)] opacity-50">...외 ${sortedDone.length - 20}개 더 있음</div>`
+            ? html`<div class="empty-state">...외 ${sortedDone.length - 20}개 더 있음</div>`
             : null}
         </div>
       </div>

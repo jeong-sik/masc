@@ -69,7 +69,7 @@ export function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecu
     <div class="flex flex-col gap-2.5">
       ${hasActive
         ? activeSessions.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)
-        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${hasTerminal ? '진행 중인 세션이 없습니다.' : '선택된 실행과 연결된 세션이 없습니다.'}</div>`}
+        : html`<div class="empty-state">${hasTerminal ? '진행 중인 세션이 없습니다.' : '선택된 실행과 연결된 세션이 없습니다.'}</div>`}
     </div>
     ${hasTerminal
       ? html`

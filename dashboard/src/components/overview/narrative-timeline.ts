@@ -82,10 +82,10 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
   if (raw.length === 0) {
     return html`
       <div class="narrative-timeline">
-        <div class="flex flex-col items-center justify-center gap-3 py-10 px-4 border border-dashed border-[var(--border-slate-16)] rounded-lg bg-[var(--white-2)]">
-          <span class="text-2xl opacity-40">📡</span>
-          <div class="text-text-muted text-sm text-center">이벤트 대기 중</div>
-          <div class="text-text-muted text-xs text-center opacity-60 max-w-[32ch] leading-[1.5]">에이전트 활동, 세션 변경, 시스템 이벤트가 여기에 실시간으로 나타납니다.</div>
+        <div class="empty-state">
+          <span class="empty-state-icon">📡</span>
+          <div class="empty-state-title">이벤트 대기 중</div>
+          <div class="empty-state-desc">에이전트 활동, 세션 변경, 시스템 이벤트가 여기에 실시간으로 나타납니다.</div>
         </div>
       </div>
     `

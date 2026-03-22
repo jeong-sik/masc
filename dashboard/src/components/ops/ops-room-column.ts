@@ -85,7 +85,7 @@ export function OpsRoomColumn() {
           </div>
         </article>
         ${operatorDigestLoading.value && !roomDigest ? html`
-          <div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">개입 추천을 불러오는 중입니다...</div>
+          <div class="loading-state loading-pulse">개입 추천을 불러오는 중입니다...</div>
         ` : activeRecommendedActions.length > 0 ? html`
           <div class="flex flex-col gap-2">
             ${activeRecommendedActions.map(item => html`

@@ -130,7 +130,7 @@ export function SessionDetailCard({
   if (loading && !detail) {
     return html`
       <${Card} title="세션 상세" class="mission-list-card rounded-xl">
-        <div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">세션 상세 불러오는 중...</div>
+        <div class="loading-state loading-pulse">세션 상세 불러오는 중...</div>
       <//>
     `
   }
@@ -138,7 +138,7 @@ export function SessionDetailCard({
   if (error && !detail) {
     return html`
       <${Card} title="세션 상세" class="mission-list-card rounded-xl">
-        <div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${error}</div>
+        <div class="empty-state error">${error}</div>
       <//>
     `
   }
@@ -174,7 +174,7 @@ export function SessionDetailCard({
                     <small class="text-[rgba(255,255,255,0.68)] leading-[1.45]">${item.actor ? `${item.actor} · ` : ''}${item.event_type ?? '이벤트'}</small>
                   </article>
                 `)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">표시할 세션 이벤트가 없습니다.</div>`}
+              : html`<div class="empty-state">표시할 세션 이벤트가 없습니다.</div>`}
           </div>
         </div>
 
@@ -195,7 +195,7 @@ export function SessionDetailCard({
                     </small>
                   </button>
                 `)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">세션 참여자 미리보기가 없습니다.</div>`}
+              : html`<div class="empty-state">세션 참여자 미리보기가 없습니다.</div>`}
           </div>
         </div>
       </div>
@@ -215,7 +215,7 @@ export function SessionDetailCard({
                     <small class="text-[rgba(255,255,255,0.7)] leading-[1.45]">${operation.detachment_status ?? operation.objective ?? '분견대 정보 없음'}</small>
                   </button>
                 `)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">연결된 작전이 없습니다.</div>`}
+              : html`<div class="empty-state">연결된 작전이 없습니다.</div>`}
           </div>
         </div>
 
@@ -233,7 +233,7 @@ export function SessionDetailCard({
                     <small class="text-[rgba(255,255,255,0.7)] leading-[1.45]">${keeper.current_work ?? '현재 작업 정보 없음'}</small>
                   </div>
                 `)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">직접 연결된 키퍼는 없습니다.</div>`}
+              : html`<div class="empty-state">직접 연결된 키퍼는 없습니다.</div>`}
           </div>
         </div>
       </div>

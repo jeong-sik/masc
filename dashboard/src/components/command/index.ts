@@ -266,10 +266,10 @@ export function Command() {
       `}
 
       ${commandPlaneError.value
-        ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneError.value}</div>`
+        ? html`<div class="empty-state error">${commandPlaneError.value}</div>`
         : null}
       ${commandPlaneActionError.value
-        ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneActionError.value}</div>`
+        ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
         : null}
       ${wallboardMode ? null : html`<${RoomTruthStrip} />`}
       ${wallboardMode ? null : html`<${CommandWorkflowBanner} />`}

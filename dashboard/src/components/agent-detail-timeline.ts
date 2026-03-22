@@ -43,7 +43,7 @@ export function AgentTimelineSection() {
         </div>
       ` : null}
       ${events.length === 0
-        ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">타임라인 이벤트 없음</div>`
+        ? html`<div class="empty-state">타임라인 이벤트 없음</div>`
         : html`
             <div class="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">
               ${events.map((evt: AgentTimelineEvent, idx: number) => {

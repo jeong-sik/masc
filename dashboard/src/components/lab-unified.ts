@@ -18,21 +18,21 @@ export function LabSurface() {
 
   return html`
     <div class="tab-unified grid gap-[var(--space-md,16px)]">
-      <div class="tab-pill rounded-full-bar flex flex-wrap gap-1.5">
+      <div class="tab-pill-bar">
         <button
-          class="tab-pill rounded-full ${section === 'overview' ? 'tab-pill--active' : ''}"
+          class="tab-pill-btn ${section === 'overview' ? 'active' : ''}"
           onClick=${() => navigate('lab', { section: 'overview' })}
         >
           개요
         </button>
         <button
-          class="tab-pill rounded-full ${section === 'trpg' ? 'tab-pill--active' : ''}"
+          class="tab-pill-btn ${section === 'trpg' ? 'active' : ''}"
           onClick=${() => navigate('lab', { section: 'trpg' })}
         >
           TRPG
         </button>
         <button
-          class="tab-pill rounded-full ${section === 'avatars' ? 'tab-pill--active' : ''}"
+          class="tab-pill-btn ${section === 'avatars' ? 'active' : ''}"
           onClick=${() => navigate('lab', { section: 'avatars' })}
         >
           아바타

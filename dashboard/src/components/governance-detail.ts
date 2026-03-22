@@ -65,9 +65,9 @@ export function DecisionDetail() {
      
     >
       ${detailLoading.value
-        ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">거버넌스 상세 불러오는 중...</div>`
+        ? html`<div class="loading-state loading-pulse">거버넌스 상세 불러오는 중...</div>`
         : !item || !detail
-          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">왼쪽 수신함에서 사건을 선택하면 청원, 심의, 판정, 집행 기록이 여기에 표시됩니다.</div>`
+          ? html`<div class="empty-state">왼쪽 수신함에서 사건을 선택하면 청원, 심의, 판정, 집행 기록이 여기에 표시됩니다.</div>`
           : html`
               <div class="flex justify-between items-start gap-4 mb-3.5">
                 <div>
@@ -89,12 +89,12 @@ export function DecisionDetail() {
               </div>
               <div class="flex flex-col gap-2.5">
                 ${petitions.length === 0
-                  ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">기록된 청원이 없습니다.</div>`
+                  ? html`<div class="empty-state">기록된 청원이 없습니다.</div>`
                   : petitions.map(petition => html`<${PetitionEntry} key=${petition.id} petition=${petition} />`)}
               </div>
               <div class="flex flex-col gap-2.5">
                 ${briefs.length === 0
-                  ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">심의 의견이 아직 없습니다.</div>`
+                  ? html`<div class="empty-state">심의 의견이 아직 없습니다.</div>`
                   : briefs.map(brief => html`<${BriefEntry} key=${brief.id} brief=${brief} />`)}
               </div>
               <${ActivityRail} />

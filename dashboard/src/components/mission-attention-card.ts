@@ -86,7 +86,7 @@ export function AttentionCard({
                 `)}
               </div>
             `
-          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">직접 연결된 세션이 아직 없습니다.</div>`}
+          : html`<div class="empty-state">직접 연결된 세션이 아직 없습니다.</div>`}
 
         ${item.related_agent_names.length > 0
           ? html`

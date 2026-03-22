@@ -28,12 +28,12 @@ export function Work() {
     : 'board'
 
   return html`
-    <div class="tab-unified grid gap-[var(--space-md,16px)]">
-      <div class="tab-pill rounded-full-bar flex flex-wrap gap-1.5">
+    <div class="tab-unified grid gap-4">
+      <div class="tab-pill-bar">
         ${SECTIONS.map(s => html`
           <button
             key=${s.id}
-            class="tab-pill rounded-full ${current === s.id ? 'tab-pill--active' : ''}"
+            class="tab-pill-btn ${current === s.id ? 'active' : ''}"
             title=${s.tooltip}
             onClick=${() => navigate('work', { section: s.id })}
           >

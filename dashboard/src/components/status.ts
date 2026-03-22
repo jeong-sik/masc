@@ -19,22 +19,22 @@ export function Status() {
   const section = currentSection()
 
   return html`
-    <div class="tab-unified grid gap-[var(--space-md,16px)]">
-      <div class="tab-pill rounded-full-bar flex flex-wrap gap-1.5">
+    <div class="tab-unified grid gap-4">
+      <div class="tab-pill-bar">
         <button
-          class="tab-pill rounded-full ${section === 'sessions' ? 'tab-pill--active' : ''}"
+          class="tab-pill-btn ${section === 'sessions' ? 'active' : ''}"
           onClick=${() => navigate('status', { section: 'sessions' })}
         >
           세션
         </button>
         <button
-          class="tab-pill rounded-full ${section === 'agents' ? 'tab-pill--active' : ''}"
+          class="tab-pill-btn ${section === 'agents' ? 'active' : ''}"
           onClick=${() => navigate('status', { section: 'agents' })}
         >
           에이전트
         </button>
         <button
-          class="tab-pill rounded-full ${section === 'activity' ? 'tab-pill--active' : ''}"
+          class="tab-pill-btn ${section === 'activity' ? 'active' : ''}"
           onClick=${() => navigate('status', { section: 'activity' })}
         >
           활동

@@ -66,7 +66,7 @@ function OasSummaryLines() {
   const agoMin = lastEventTs != null ? Math.round((Date.now() / 1000 - lastEventTs) / 60) : null
 
   return html`
-    <div class="flex gap-3 text-[length:var(--fs-xs)] text-[color:var(--text-muted,#888)] mb-2.5">
+    <div class="flex gap-3 text-[13px] text-[var(--text-body)] mb-3">
       <span>활성 에이전트 ${activeAgents.size}명</span>
       <span>${health.totalEvents}건${snapshots.size > 0 ? ` · 키퍼 ${snapshots.size}명` : ''}</span>
       <span>${agoMin != null ? `${agoMin}분 전` : '이벤트 대기 중'}</span>
@@ -129,18 +129,16 @@ export function OasPipeline() {
   const eventLabel = `${health.totalEvents}건`
 
   return html`
-    <div class="bg-[var(--card,#1a1f2e)] border border-[var(--card-border,#2a2f3e)] py-3 px-4 mt-3 rounded-lg">
-      <div class="flex justify-between items-center mb-3">
-        <span class="text-[length:var(--fs-base)] font-semibold text-[color:var(--text-strong,var(--text-near-white))] tracking-[0.5px]">실행 흐름</span>
-        <div class="home-section-actions">
-          <span class="text-[length:var(--fs-xs)] text-[color:var(--text-muted,#888)] tabular-nums">${eventLabel}</span>
-        </div>
+    <div class="card">
+      <div class="flex justify-between items-center mb-4">
+        <span class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">실행 흐름</span>
+        <span class="text-xs text-[var(--text-muted)] tabular-nums">${eventLabel}</span>
       </div>
 
       <${OasSummaryLines} />
 
-      <div class="mb-2.5">
-        <div class="text-[length:var(--fs-xs)] font-medium text-[color:var(--text-muted,#888)] uppercase tracking-[0.5px] mb-1.5">키퍼 컨텍스트</div>
+      <div class="mb-3">
+        <div class="text-xs text-[var(--text-muted)] uppercase tracking-wider font-medium mb-1.5">키퍼 컨텍스트</div>
         <${OasKeeperBars} />
       </div>
 

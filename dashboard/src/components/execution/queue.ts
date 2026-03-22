@@ -60,7 +60,7 @@ export function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutio
     <div class="flex flex-col gap-2.5">
       ${hasActive
         ? activeItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)
-        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금은 개입이 필요한 실행이 없습니다.</div>`}
+        : html`<div class="empty-state">지금은 개입이 필요한 실행이 없습니다.</div>`}
     </div>
     ${hasTerminal
       ? html`

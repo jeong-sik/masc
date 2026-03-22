@@ -250,9 +250,9 @@ function GuidedPanel() {
           <div class="card rounded-xl-title">운영 경로</div>
         </div>
         ${commandPlaneHelpLoading.value
-          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">CPv2 runbook 불러오는 중…</div>`
+          ? html`<div class="empty-state">CPv2 runbook 불러오는 중…</div>`
           : commandPlaneHelpError.value
-            ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneHelpError.value}</div>`
+            ? html`<div class="empty-state error">${commandPlaneHelpError.value}</div>`
             : html`
                 <div class="grid gap-3">
                   ${renderedPaths.map(path => html`
@@ -295,10 +295,10 @@ export function SummarySurface() {
 
 export function DetailLoadingState() {
   if (commandPlaneDetailLoading.value) {
-    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">command-plane detail 불러오는 중…</div>`
+    return html`<div class="empty-state">command-plane detail 불러오는 중…</div>`
   }
   if (commandPlaneDetailError.value) {
-    return html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneDetailError.value}</div>`
+    return html`<div class="empty-state error">${commandPlaneDetailError.value}</div>`
   }
-  return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">surface를 선택하면 command-plane detail을 로드합니다.</div>`
+  return html`<div class="empty-state">surface를 선택하면 command-plane detail을 로드합니다.</div>`
 }

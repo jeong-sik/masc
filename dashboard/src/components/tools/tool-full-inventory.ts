@@ -197,7 +197,7 @@ export function FullInventoryView({
             getKey=${(item: DashboardToolInventoryItem) => item.name}
             className="flex flex-col gap-3"
           />`
-        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">조건에 맞는 도구가 없습니다.</div>`}
+        : html`<div class="empty-state">조건에 맞는 도구가 없습니다.</div>`}
     </div>
 
     <button

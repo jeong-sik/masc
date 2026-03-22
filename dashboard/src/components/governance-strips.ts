@@ -3,11 +3,16 @@ import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { governanceToneClass } from '../lib/tone'
 import type { GovernanceTimelineEvent } from '../types'
+import type { RuntimeParamsSurface } from '../api'
 import {
   governanceData,
+  runtimeLoading,
+  runtimeParams,
+  runtimeSurfaces,
 } from './governance-store'
 import {
   activityKindLabel,
+  formatParamValue,
 } from './governance-utils'
 
 export function ActivityRail() {
@@ -27,7 +32,7 @@ export function ActivityRail() {
     <${Card} title="활동 타임라인" class="section mb-3.5">
       <div class="flex flex-col gap-2">
         ${grouped.size === 0
-          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">거버넌스 활동이 아직 없습니다.</div>`
+          ? html`<div class="empty-state">거버넌스 활동이 아직 없습니다.</div>`
           : Array.from(grouped.entries()).map(([, group]) => html`
               <div class="governance-case-group rounded-lg">
                 <div class="flex items-center justify-between mb-2 gap-2">
@@ -77,3 +82,61 @@ function LifecycleProgress({ events }: { events: GovernanceTimelineEvent[] }) {
   `
 }
 
+export function GovernanceFreshnessStrip() {
+  const data = governanceData.value
+  if (!data) return null
+  const itemCount = data.items?.length ?? 0
+  const activityCount = data.activity?.length ?? 0
+  return html`
+    <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]" style="margin-top:4px;margin-bottom:8px">
+      <span>데이터 범위: 진행 중 ${itemCount}건</span>
+      <span>최근 활동: ${activityCount}건</span>
+      ${data.generated_at ? html`<span>생성 시각: ${data.generated_at}</span>` : null}
+    </div>
+  `
+}
+
+export function RuntimeParamsPanel() {
+  const params = runtimeParams.value
+  const surfaces = runtimeSurfaces.value
+  if (params.length === 0 && !runtimeLoading.value) return null
+
+  return html`
+    <${Card} title="Runtime Parameters" class="section mb-3.5">
+      ${runtimeLoading.value
+        ? html`<div class="loading-state loading-pulse">파라미터 로딩 중...</div>`
+        : html`
+            <div class="governance-params-surfaces">
+              ${surfaces.map((surface: RuntimeParamsSurface) => {
+                const surfaceParams = params.filter(p => surface.param_keys.includes(p.key))
+                return html`
+                  <div class="governance-surface-group">
+                    <div class="governance-surface-head">
+                      <strong>${surface.id}</strong>
+                      <span class="governance-chip rounded-full ${surface.risk === 'high' ? 'warn' : ''}">${surface.risk}</span>
+                      <span class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">${surface.description}</span>
+                    </div>
+                    <div class="governance-params-table">
+                      ${surfaceParams.map(param => html`
+                        <div class="governance-param-row ${param.has_override ? 'overridden' : ''}">
+                          <span class="governance-param-key">${param.key}</span>
+                          <span class="governance-param-value">
+                            ${formatParamValue(param.current)}
+                            ${param.has_override
+                              ? html`<span class="governance-chip rounded-full warn" style="margin-left:4px">override</span>`
+                              : null}
+                          </span>
+                          <span class="governance-param-default mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">
+                            기본: ${formatParamValue(param.default)}
+                          </span>
+                        </div>
+                      `)}
+                    </div>
+                  </div>
+                `
+              })}
+            </div>
+          `}
+    <//>
+  `
+}

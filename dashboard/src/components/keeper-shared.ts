@@ -63,26 +63,26 @@ function quietReasonLabel(reason?: string | null): string {
 function nextActionLabel(path: string): string {
   switch (path) {
     case 'manual_social_sweep':
-      return '소셜 스윕 실행'
+      return 'social sweep'
     case 'probe':
-      return '프로브'
+      return 'probe'
     case 'recover':
-      return '복구'
+      return 'recover'
     default:
-      return '메시지'
+      return 'message'
   }
 }
 
 function continuityStateLabel(state?: KeeperDiagnostic['continuity_state']): string | null {
   switch (state) {
     case 'healthy':
-      return '정상'
+      return 'healthy'
     case 'recovering':
-      return '복구 중'
+      return 'recovering'
     case 'desired_offline':
-      return '의도적 오프라인'
+      return 'desired offline'
     case 'offline':
-      return '오프라인'
+      return 'offline'
     default:
       return null
   }
@@ -107,6 +107,16 @@ function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnosti
   return detail?.diagnostic ?? keeper.diagnostic ?? null
 }
 
+// ── Diagnostic chip ──────────────────────────────────────
+
+function DiagChip({ label }: { label: string }) {
+  return html`
+    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${label}</span>
+  `
+}
+
+// ── Diagnostic Summary ───────────────────────────────────
+
 export function KeeperDiagnosticSummary({
   keeper,
   showRawStatus = false,
@@ -121,7 +131,7 @@ export function KeeperDiagnosticSummary({
   }, [keeper?.name])
 
   if (!keeper) {
-    return html`<div class="control-status-copy text-[#d5e5fb] text-[length:var(--fs-sm)] leading-[1.5]">Select a keeper to inspect direct reply state.</div>`
+    return html`<div class="text-xs text-[var(--text-muted)] leading-relaxed py-2">Select a keeper to inspect direct reply state.</div>`
   }
 
   const detail = keeperStatusDetails.value[keeper.name]
@@ -129,35 +139,37 @@ export function KeeperDiagnosticSummary({
   const busy = keeperHydrating.value[keeper.name]
 
   return html`
-    <div class="py-[10px] px-3 rounded-[10px] border border-solid border-[rgba(138,163,211,0.24)] bg-[rgba(5,14,31,0.55)]">
-      <div class="control-inline-meta flex flex-wrap gap-1.5">
+    <div class="py-3 px-4 rounded-xl border border-[var(--card-border)] bg-[rgba(5,14,31,0.55)]">
+      <div class="flex flex-wrap gap-1.5 mb-2">
         ${continuityStateLabel(diagnostic?.continuity_state)
-          ? html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${continuityStateLabel(diagnostic?.continuity_state)}</span>`
+          ? html`<${DiagChip} label=${continuityStateLabel(diagnostic?.continuity_state)} />`
           : null}
-        <span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${diagnostic?.health_state ?? 'unknown'}</span>
-        <span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${quietReasonLabel(diagnostic?.quiet_reason)}</span>
-        <span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">next ${nextActionLabel(diagnostic?.next_action_path ?? 'direct_message')}</span>
-        ${busy ? html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">refreshing</span>` : null}
+        <${DiagChip} label=${diagnostic?.health_state ?? 'unknown'} />
+        <${DiagChip} label=${quietReasonLabel(diagnostic?.quiet_reason)} />
+        <${DiagChip} label=${'next: ' + nextActionLabel(diagnostic?.next_action_path ?? 'direct_message')} />
+        ${busy ? html`<${DiagChip} label="refreshing" />` : null}
       </div>
-      <div class="control-status-copy text-[#d5e5fb] text-[length:var(--fs-sm)] leading-[1.5]">
+      <div class="text-xs text-[var(--text-body)] leading-relaxed">
         ${diagnostic?.continuity_summary
           ?? diagnostic?.summary
           ?? 'Keeper diagnostic summary is not available yet. Probe or open the detail overlay to inspect current runtime state.'}
       </div>
-      <div class="control-status-copy text-[#d5e5fb] text-[length:var(--fs-sm)] leading-[1.5]">
+      <div class="text-xs text-[var(--text-body)] leading-relaxed mt-1">
         Reply: ${diagnostic?.last_reply_status ?? 'unknown'}
-        ${diagnostic?.last_reply_at ? html` · ${formatTime(diagnostic.last_reply_at)}` : null}
-        ${diagnostic?.next_eligible_at_s ? html` · next eligible ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
+        ${diagnostic?.last_reply_at ? html` -- ${formatTime(diagnostic.last_reply_at)}` : null}
+        ${diagnostic?.next_eligible_at_s ? html` -- next eligible ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
       </div>
       ${diagnostic?.last_error
-        ? html`<div class="control-status-copy text-[#ffb4b4] text-[length:var(--fs-sm)] leading-[1.5]">${diagnostic.last_error}</div>`
+        ? html`<div class="text-xs text-[#ffb4b4] leading-relaxed mt-1">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus
-        ? html`<pre class="mt-2 py-[10px] px-3 rounded-[10px] border border-solid border-[var(--card-border)] bg-[rgba(2,10,24,0.82)] text-[#9ad8b6] text-[length:var(--fs-sm)] leading-[1.55] whitespace-pre-wrap break-words font-[family:'Fira_Code',monospace] max-h-[240px] overflow-auto">${detail?.rawText ?? 'No keeper status loaded yet.'}</pre>`
+        ? html`<pre class="mt-3 py-3 px-4 rounded-lg border border-[var(--card-border)] bg-[rgba(2,10,24,0.82)] text-[#9ad8b6] text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono max-h-[240px] overflow-auto">${detail?.rawText ?? 'No keeper status loaded yet.'}</pre>`
         : null}
     </div>
   `
 }
+
+// ── Conversation Panel ───────────────────────────────────
 
 export function KeeperConversationPanel({
   keeperName,
@@ -180,7 +192,7 @@ export function KeeperConversationPanel({
   }, [showMetadata])
 
   const rawThread = keeperThreads.value[keeperName] ?? []
-  // Filter out system/tool messages — only show user and assistant conversation
+  // Filter out system/tool messages -- only show user and assistant conversation
   const thread = rawThread.filter(
     entry => entry.role === 'user' || entry.role === 'assistant',
   )
@@ -201,19 +213,19 @@ export function KeeperConversationPanel({
   }
 
   return html`
-    <div class="keeper-conversation-shell flex flex-col gap-2.5">
+    <div class="flex flex-col gap-3">
       <div class="flex justify-end">
         <button
           type="button"
-          class="control-btn rounded-lg ghost"
+          class="py-1 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer"
           onClick=${() => { setShowMetadata(!showMetadata) }}
         >
-          ${showMetadata ? '메타 숨기기' : '메타 표시'}
+          ${showMetadata ? 'Hide metadata' : 'Show metadata'}
         </button>
       </div>
       <${ChatTranscript}
         entries=${thread}
-        emptyText="아직 직접 대화 기록이 없습니다."
+        emptyText="No direct conversation history yet."
         showMetadata=${showMetadata}
       />
       <${ChatComposer}
@@ -226,10 +238,12 @@ export function KeeperConversationPanel({
         onSend=${() => { void submit() }}
         onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
       />
-      ${error ? html`<div class="control-status-copy text-[#ffb4b4] text-[length:var(--fs-sm)] leading-[1.5]">${error}</div>` : null}
+      ${error ? html`<div class="text-xs text-[#ffb4b4] leading-relaxed">${error}</div>` : null}
     </div>
   `
 }
+
+// ── Runtime Actions ──────────────────────────────────────
 
 export function KeeperRuntimeActions({
   actor,
@@ -247,10 +261,16 @@ export function KeeperRuntimeActions({
   const recommended = diagnostic?.next_action_path ?? 'direct_message'
   const canRecover = diagnostic?.recoverable ?? recommended === 'recover'
 
+  const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-medium cursor-pointer transition-colors border'
+  const ghostBtn = `${btnBase} border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]`
+  const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.2)]`
+  const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[rgba(251,191,36,0.08)] text-[#fbbf24] hover:bg-[rgba(251,191,36,0.15)]`
+  const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[rgba(251,191,36,0.15)] text-[#fbbf24] hover:bg-[rgba(251,191,36,0.2)]`
+
   return html`
-    <div class="control-actions flex flex-wrap gap-1.5">
+    <div class="flex flex-wrap gap-2">
       <button
-        class=${`control-btn ghost ${recommended === 'probe' ? 'is-active' : ''}`}
+        class=${recommended === 'probe' ? activeGhostBtn : ghostBtn}
         onClick=${() => {
           void probeKeeperRuntime(keeper.name, actor).catch(err => {
             const message = err instanceof Error ? err.message : `Failed to probe ${keeper.name}`
@@ -259,10 +279,10 @@ export function KeeperRuntimeActions({
         }}
         disabled=${probing || !actor.trim()}
       >
-        ${probing ? '프로브 중...' : '프로브'}
+        ${probing ? 'Probing...' : 'Probe'}
       </button>
       <button
-        class=${`control-btn secondary ${recommended === 'recover' ? 'is-active' : ''}`}
+        class=${recommended === 'recover' ? activeSecondaryBtn : secondaryBtn}
         onClick=${() => {
           void recoverKeeperRuntime(keeper.name, actor).catch(err => {
             const message = err instanceof Error ? err.message : `Failed to recover ${keeper.name}`
@@ -271,13 +291,13 @@ export function KeeperRuntimeActions({
         }}
         disabled=${recovering || !canRecover || !actor.trim()}
       >
-        ${recovering ? '복구 중...' : '복구'}
+        ${recovering ? 'Recovering...' : 'Recover'}
       </button>
       <button
-        class=${`control-btn ghost ${recommended === 'manual_social_sweep' ? 'is-active' : ''}`}
+        class=${recommended === 'manual_social_sweep' ? activeGhostBtn : ghostBtn}
         onClick=${onSocialSweep}
       >
-        소셜 스윕 실행
+        Social sweep
       </button>
     </div>
   `

@@ -1,12 +1,10 @@
 // Keeper detail overlay — full keeper info with KPIs, field dictionary,
 // memory, conversations, equipment, relationships, handoff timeline
-// CSS classes: .keeper-kpis, .keeper-field-dict, .keeper-memory-list, etc. (components.css)
+// Redesigned: professional dashboard-grade layout with Tailwind inline styles.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { runOperatorAction } from '../api'
-import { Card } from './common/card'
-import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
@@ -48,7 +46,7 @@ export function closeKeeperDetail() {
   resetKeeperConfig()
 }
 
-// ── Main Detail Overlay ───────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────
 
 function currentOperatorActor(): string {
   const q = new URLSearchParams(window.location.search)
@@ -75,24 +73,57 @@ async function runSocialSweep(): Promise<void> {
   }
 }
 
+// ── Status Badge (colored pill) ──────────────────────────
+
+function statusColor(status: string): { bg: string; text: string; dot: string } {
+  switch (status.trim().toLowerCase()) {
+    case 'active':
+    case 'running':
+      return { bg: 'bg-[rgba(74,222,128,0.12)]', text: 'text-[#4ade80]', dot: 'bg-[#4ade80]' }
+    case 'working':
+      return { bg: 'bg-[rgba(74,222,128,0.12)]', text: 'text-[#7ae09a]', dot: 'bg-[#7ae09a]' }
+    case 'idle':
+    case 'quiet':
+      return { bg: 'bg-[rgba(251,191,36,0.12)]', text: 'text-[#fbbf24]', dot: 'bg-[#fbbf24]' }
+    case 'offline':
+    case 'inactive':
+      return { bg: 'bg-[rgba(148,163,184,0.12)]', text: 'text-[#94a3b8]', dot: 'bg-[#64748b]' }
+    case 'error':
+    case 'critical':
+      return { bg: 'bg-[rgba(239,68,68,0.12)]', text: 'text-[#ef4444]', dot: 'bg-[#ef4444]' }
+    default:
+      return { bg: 'bg-[rgba(138,163,211,0.1)]', text: 'text-[#86a0cf]', dot: 'bg-[#86a0cf]' }
+  }
+}
+
+function KeeperStatusPill({ status }: { status: string }) {
+  const c = statusColor(status)
+  return html`
+    <span class="inline-flex items-center gap-1.5 py-1 px-3 rounded-full text-xs font-medium ${c.bg} ${c.text}">
+      <span class="size-2 rounded-full ${c.dot}"></span>
+      ${status}
+    </span>
+  `
+}
+
+// ── Comms Panel ──────────────────────────────────────────
+
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   return html`
-    <div class="mt-5 border-t border-[var(--white-10)] pt-5">
-      <h3 class="m-0 mb-3.5 text-cyan text-[var(--fs-lg)]">Direct Comms</h3>
+    <div class="mt-6 border-t border-[var(--border-slate-12)] pt-6">
+      <h3 class="m-0 mb-4 text-[15px] font-semibold text-[var(--text-strong)]">Direct Comms</h3>
 
-      <div class="flex flex-col gap-3.5">
-        ${'' /* Chat takes full width — the primary interaction surface */}
+      <div class="flex flex-col gap-4">
         <div class="w-full">
           <${KeeperConversationPanel}
             keeperName=${keeper.name}
-            placeholder="이 키퍼에게 직접 프롬프트"
+            placeholder="Send a direct prompt to this keeper"
           />
         </div>
 
-        ${'' /* Diagnostics and actions in a collapsible panel below */}
-        <details class="keeper-comms-diagnostics">
-          <summary class="keeper-comms-diagnostics-toggle cursor-pointer py-2.5 px-3.5 text-[var(--fs-sm)] text-text-muted tracking-[0.03em] list-none select-none">런타임 진단 및 액션</summary>
-          <div class="flex flex-col gap-3 px-3.5 pb-3.5">
+        <details class="keeper-comms-diagnostics group">
+          <summary class="keeper-comms-diagnostics-toggle cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)]">Runtime diagnostics</summary>
+          <div class="flex flex-col gap-3 px-4 pb-4 pt-2">
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}
               actor=${currentOperatorActor()}
@@ -106,6 +137,19 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   `
 }
 
+// ── Section Card (detail page variant) ───────────────────
+
+function SectionCard({ title, children }: { title: string; children: preact.ComponentChildren }) {
+  return html`
+    <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-3">${title}</div>
+      ${children}
+    </div>
+  `
+}
+
+// ── Main Detail Overlay ─────────────────────────────────
+
 export function KeeperDetailOverlay() {
   const keeper = selectedKeeper.value
   if (!keeper) return null
@@ -114,142 +158,148 @@ export function KeeperDetailOverlay() {
     <div
       class="keeper-detail-overlay"
       data-testid="keeper-detail-overlay"
-      class="flex items-center justify-center p-5"
       onClick=${(e: Event) => {
         if ((e.target as HTMLElement).classList.contains('keeper-detail-overlay')) {
           closeKeeperDetail()
         }
       }}
     >
-      <div style="max-width:1100px; width:100%; max-height:90vh; overflow-y:auto; background:#1a1a2e; border-radius:16px; border:1px solid rgba(255,255,255,0.08); padding:24px;">
-        ${'' /* Header */}
-        <div class="flex items-center justify-between mb-5">
-          <div class="flex items-center gap-3">
-            <span class="text-[32px]">${keeper.emoji}</span>
-            <div>
-              <h2 class="m-0 text-xl text-[#e0e0e0]">${keeper.name}</h2>
-              ${keeper.koreanName ? html`<div class="text-[13px] text-[var(--text-dim)]">${keeper.koreanName}</div>` : null}
+      <div class="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#111a2e] rounded-2xl border border-[var(--card-border)] p-6 shadow-2xl">
+
+        ${'' /* ── Header ── */}
+        <div class="flex items-start justify-between mb-6">
+          <div class="flex items-center gap-3.5">
+            <span class="text-[32px] leading-none">${keeper.emoji}</span>
+            <div class="flex flex-col">
+              <div class="flex items-center gap-2.5">
+                <h2 class="m-0 text-xl font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
+                <${KeeperStatusPill} status=${keeper.status} />
+                ${keeper.model ? html`
+                  <span class="inline-flex items-center py-0.5 px-2.5 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${keeper.model}</span>
+                ` : null}
+              </div>
+              ${keeper.koreanName ? html`<div class="text-[13px] text-[var(--text-muted)] mt-0.5">${keeper.koreanName}</div>` : null}
             </div>
-            <${StatusBadge} status=${keeper.status} />
-            ${keeper.model ? html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${keeper.model}</span>` : null}
           </div>
           <button
             onClick=${() => closeKeeperDetail()}
-            style="background:none; border:none; color:#888; cursor:pointer; font-size:20px; padding:4px 8px;"
-          >✕</button>
+            class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm"
+            aria-label="Close"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
+          </button>
         </div>
 
-        ${'' /* Pipeline stage indicator */}
+        ${'' /* ── Pipeline stage indicator ── */}
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
 
-        ${'' /* KPIs */}
+        ${'' /* ── KPIs ── */}
         <${KpiGrid} keeper=${keeper} />
 
-        ${'' /* Context chart */}
+        ${'' /* ── Context chart ── */}
         <${ContextChart} keeper=${keeper} />
 
-        ${'' /* Direct conversation — placed prominently before detail cards */}
+        ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
 
-        ${'' /* Two-column grid for sections */}
-        <div class="grid grid-cols-2 gap-4 mt-4">
+        ${'' /* ── Detail sections grid ── */}
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
 
-          ${'' /* Left: Field Dictionary */}
-          <${Card} title="필드 사전">
+          <${SectionCard} title="Field Dictionary">
             <${FieldDictionary} keeper=${keeper} />
           <//>
 
-          ${'' /* Right: Traits + Interests */}
-          <${Card} title="프로필">
-            <${TraitsList} traits=${keeper.traits ?? []} label="특성" />
-            <${TraitsList} traits=${keeper.interests ?? []} label="관심사" />
+          <${SectionCard} title="Profile">
+            <${TraitsList} traits=${keeper.traits ?? []} label="Traits" />
+            <${TraitsList} traits=${keeper.interests ?? []} label="Interests" />
             ${keeper.primaryValue
-              ? html`<div class="text-xs text-[var(--text-dim)]">핵심 가치: <span class="text-[var(--ok)]">${keeper.primaryValue}</span></div>`
+              ? html`<div class="flex items-center gap-2 mt-3 text-xs text-[var(--text-muted)]">
+                  <span class="text-[var(--text-muted)]">Core value:</span>
+                  <span class="font-medium text-[var(--ok)]">${keeper.primaryValue}</span>
+                </div>`
               : null}
             ${keeper.skill_primary
-              ? html`<div class="text-xs text-[var(--text-dim)] mt-1.5">
-                  스킬 경로: <span class="text-[var(--cyan)]">${keeper.skill_primary}</span>
+              ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
+                  <span>Skill path:</span>
+                  <span class="font-medium text-[var(--cyan)]">${keeper.skill_primary}</span>
                 </div>`
               : null}
             ${keeper.skill_reason
-              ? html`<div class="text-xs text-[var(--text-dim)] mt-1">${keeper.skill_reason}</div>`
+              ? html`<div class="text-[11px] text-[var(--text-muted)] mt-1 leading-relaxed">${keeper.skill_reason}</div>`
               : null}
             ${keeper.last_heartbeat
-              ? html`<div class="text-xs text-[var(--text-dim)] mt-1.5">
-                  마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} />
+              ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
+                  <span>Last heartbeat:</span>
+                  <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                 </div>`
               : null}
           <//>
 
-          ${'' /* Autonomy Level (if available) */}
           ${keeper.autonomy_level
             ? html`
-              <${Card} title="자율성">
+              <${SectionCard} title="Autonomy">
                 <${AutonomyMeter} keeper=${keeper} />
               <//>
             `
             : null}
 
-          ${'' /* TRPG Stats (if available) */}
           ${keeper.trpg_stats
             ? html`
-              <${Card} title="TRPG Stats">
+              <${SectionCard} title="TRPG Stats">
                 <${TrpgStats} stats=${keeper.trpg_stats} />
               <//>
             `
             : null}
 
-          ${'' /* Equipment */}
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`
-              <${Card} title="Equipment (${keeper.inventory.length})">
+              <${SectionCard} title="Equipment (${keeper.inventory.length})">
                 <${EquipmentList} items=${keeper.inventory} />
               <//>
             `
             : null}
 
-          ${'' /* Relationships */}
           ${keeper.relationships && Object.keys(keeper.relationships).length > 0
             ? html`
-              <${Card} title="Relationships (${Object.keys(keeper.relationships).length})">
+              <${SectionCard} title="Relationships (${Object.keys(keeper.relationships).length})">
                 <${RelationshipList} rels=${keeper.relationships} />
               <//>
             `
             : null}
 
-          <${Card} title="런타임 신호">
+          <${SectionCard} title="Runtime Signals">
             <${RuntimeSignals} keeper=${keeper} />
           <//>
 
-          <${Card} title="이웃 관계 및 도구 감사">
+          <${SectionCard} title="Neighborhood & Tool Audit">
             <${KeeperNeighborhood} keeper=${keeper} />
           <//>
 
-          <${Card} title="Config">
+          <${SectionCard} title="Config">
             <${KeeperConfigPanel} keeperName=${keeper.name} />
           <//>
 
-          <${Card} title="메모리 및 컨텍스트">
-            <div class="flex flex-col gap-1.5">
-              <div class="keeper-signal-row rounded-lg">
-                <span>Context source</span>
-                <strong>${keeper.context_source ?? keeper.context?.source ?? '-'}</strong>
+          <${SectionCard} title="Memory & Context">
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+                <span class="text-xs text-[var(--text-muted)]">Context source</span>
+                <span class="text-xs font-medium text-[var(--text-strong)]">${keeper.context_source ?? keeper.context?.source ?? '-'}</span>
               </div>
-              <div class="keeper-signal-row rounded-lg">
-                <span>Context tokens</span>
-                <strong>
+              <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+                <span class="text-xs text-[var(--text-muted)]">Context tokens</span>
+                <span class="text-xs font-medium text-[var(--text-strong)]">
                   ${keeper.context_tokens ?? keeper.context?.context_tokens ?? '-'}
                   /
                   ${keeper.context_max ?? keeper.context?.context_max ?? '-'}
-                </strong>
+                </span>
               </div>
               ${keeper.memory_recent_note
                 ? html`
-                  <div class="keeper-memory-note rounded-lg">
+                  <div class="py-2 px-3 rounded-lg bg-[rgba(167,139,250,0.06)] border border-[rgba(167,139,250,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
                     ${keeper.memory_recent_note}
                   </div>
                 `
-                : html`<div class="empty-state">No recent memory note</div>`}
+                : html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">No recent memory note</div>`}
             </div>
           <//>
         </div>

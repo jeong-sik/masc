@@ -1,7 +1,6 @@
-// Keeper config panel — structured config viewer with inline editing.
+// Keeper config panel -- structured config viewer with inline editing.
 // Fetches /api/v1/keepers/:name/config and renders grouped sections.
-// Edit mode enables PATCH for prompt-related fields (goal, soul, will, needs,
-// desires, instructions, drift).
+// Redesigned: clean section headers, consistent row styling, proper form controls.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -98,46 +97,45 @@ export function resetKeeperConfig(): void {
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
-    <div class="keeper-signal-row rounded-lg">
-      <span>${label}</span>
-      <strong>${value}</strong>
+    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <span class="text-xs text-[var(--text-muted)]">${label}</span>
+      <span class="text-xs font-medium text-[var(--text-strong)]">${value}</span>
     </div>
   `
 }
 
 function SectionHeader({ title }: { title: string }) {
   return html`
-    <div style="font-size:12px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:1px; margin-top:16px; margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid rgba(167,139,250,0.2);">
+    <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--purple)] mt-4 mb-2 pb-1 border-b border-[rgba(167,139,250,0.15)]">
       ${title}
     </div>
   `
 }
 
 function BoolBadge({ value }: { value: boolean }) {
-  const color = value ? '#4ade80' : '#6b7280'
-  const text = value ? 'on' : 'off'
-  return html`<span style="color:${color}; font-weight:600;">${text}</span>`
+  return value
+    ? html`<span class="text-xs font-semibold text-[#4ade80]">on</span>`
+    : html`<span class="text-xs font-semibold text-[#6b7280]">off</span>`
 }
 
 function ModelList({ models }: { models: string[] }) {
-  if (models.length === 0) return html`<span class="text-[#666]">none</span>`
+  if (models.length === 0) return html`<span class="text-[11px] text-[var(--text-muted)] italic">none</span>`
   return html`
     <div class="flex flex-wrap gap-1">
-      ${models.map(m => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full" style="font-size:11px;">${m}</span>`)}
+      ${models.map(m => html`<span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${m}</span>`)}
     </div>
   `
 }
 
 function LongText({ text }: { text: string }) {
-  if (!text || text.trim() === '') return html`<span class="text-[#666]">--</span>`
+  if (!text || text.trim() === '') return html`<span class="text-[11px] text-[var(--text-muted)] italic">--</span>`
   const truncated = text.length > 200 ? text.slice(0, 200) + '...' : text
-  return html`<div style="font-size:12px; color:#ccc; white-space:pre-wrap; max-height:120px; overflow-y:auto; background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:4px; margin-top:4px;">${truncated}</div>`
+  return html`<div class="text-xs text-[var(--text-body)] whitespace-pre-wrap max-h-[120px] overflow-y-auto bg-[var(--white-3)] py-2 px-3 rounded-lg mt-1 leading-relaxed">${truncated}</div>`
 }
 
 const SOUL_PROFILES = ['balanced', 'safety', 'delivery', 'research', 'relationship', 'minimal'] as const
 
-const fieldStyle = 'width:100%; background:#1a1a2e; color:#ccc; border:1px solid #333; border-radius:4px; padding:6px 8px; font-size:12px; font-family:inherit; resize:vertical;'
-const btnBase = 'border:none; border-radius:4px; padding:4px 12px; font-size:12px; cursor:pointer; font-weight:600;'
+const fieldStyle = 'width:100%; background:rgba(11,18,32,0.8); color:var(--text-body); border:1px solid var(--card-border); border-radius:8px; padding:8px 10px; font-size:12px; font-family:inherit; resize:vertical;'
 
 // ── Edit field components ────────────────────────────────
 
@@ -153,7 +151,7 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
   const val = d[field] as string
   return html`
     <div class="mt-2">
-      <div class="text-[11px] text-[var(--text-dim)] mb-0.5">${label}</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">${label}</div>
       <textarea
         style=${fieldStyle}
         rows=${rows}
@@ -170,7 +168,7 @@ function EditSelect({ field, label, options }: { field: keyof EditDraft; label: 
   const val = d[field] as string
   return html`
     <div class="mt-2">
-      <div class="text-[11px] text-[var(--text-dim)] mb-0.5">${label}</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">${label}</div>
       <select
         style=${fieldStyle}
         value=${val}
@@ -187,11 +185,12 @@ function EditCheckbox({ field, label }: { field: keyof EditDraft; label: string 
   if (!d) return null
   const val = d[field] as boolean
   return html`
-    <div class="keeper-signal-row rounded-lg mt-1">
-      <span>${label}</span>
+    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)] mt-1">
+      <span class="text-xs text-[var(--text-muted)]">${label}</span>
       <input
         type="checkbox"
         checked=${val}
+        class="cursor-pointer"
         onChange=${(e: Event) => updateDraft(field, (e.target as HTMLInputElement).checked)}
       />
     </div>
@@ -203,11 +202,11 @@ function EditNumber({ field, label, min, max }: { field: keyof EditDraft; label:
   if (!d) return null
   const val = d[field] as number
   return html`
-    <div class="keeper-signal-row rounded-lg mt-1">
-      <span>${label}</span>
+    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)] mt-1">
+      <span class="text-xs text-[var(--text-muted)]">${label}</span>
       <input
         type="number"
-        style="width:60px; background:#1a1a2e; color:#ccc; border:1px solid #333; border-radius:4px; padding:4px 6px; font-size:12px;"
+        class="w-16 bg-[rgba(11,18,32,0.8)] text-[var(--text-body)] border border-[var(--card-border)] rounded-md py-1 px-2 text-xs"
         value=${val}
         min=${min}
         max=${max}
@@ -231,11 +230,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   }
 
   if (state.status === 'loading') {
-    return html`<div class="flex flex-col gap-1.5"><div style="color:#888; font-size:13px; padding:12px 0;">Loading config...</div></div>`
+    return html`<div class="py-3 text-xs text-[var(--text-muted)]">Loading config...</div>`
   }
 
   if (state.status === 'error') {
-    return html`<div class="flex flex-col gap-1.5"><div style="color:#ef4444; font-size:13px; padding:12px 0;">${state.message}</div></div>`
+    return html`<div class="py-3 text-xs text-[#ef4444]">${state.message}</div>`
   }
 
   if (state.status !== 'loaded') return null
@@ -278,27 +277,29 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     }
   }
 
+  const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-semibold cursor-pointer border-none'
+
   // --- Toolbar ---
   const toolbar = html`
-    <div class="flex gap-1.5 items-center mb-2">
+    <div class="flex gap-2 items-center mb-3">
       ${isEditing ? html`
         <button
-          style="${btnBase} background:#4ade80; color:#000;"
+          class="${btnBase} bg-[#4ade80] text-[#000]"
           onClick=${saveConfig}
           disabled=${isSaving}
         >${isSaving ? 'Saving...' : 'Save'}</button>
         <button
-          style="${btnBase} background:#444; color:#ccc;"
+          class="${btnBase} bg-[var(--white-10)] text-[var(--text-body)]"
           onClick=${cancelEdit}
           disabled=${isSaving}
         >Cancel</button>
       ` : html`
         <button
-          style="${btnBase} background:#a78bfa; color:#000;"
+          class="${btnBase} bg-[var(--purple)] text-[#000]"
           onClick=${enterEditMode}
         >Edit</button>
       `}
-      ${saveError.value ? html`<span style="color:#ef4444; font-size:12px;">${saveError.value}</span>` : null}
+      ${saveError.value ? html`<span class="text-xs text-[#ef4444]">${saveError.value}</span>` : null}
     </div>
   `
 
@@ -316,26 +317,26 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${EditTextarea} field="instructions" label="Instructions" rows=${4} />
   ` : html`
     <${SectionHeader} title="Prompt" />
-    <div class="text-[11px] text-[var(--text-dim)] mb-0.5">Goal</div>
+    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Goal</div>
     <${LongText} text=${c.prompt.goal} />
     ${c.prompt.short_goal ? html`
-      <div class="text-[11px] text-[var(--text-dim)] mt-2 mb-0.5">Short-term goal</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Short-term goal</div>
       <${LongText} text=${c.prompt.short_goal} />
     ` : null}
     ${c.prompt.mid_goal ? html`
-      <div class="text-[11px] text-[var(--text-dim)] mt-2 mb-0.5">Mid-term goal</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Mid-term goal</div>
       <${LongText} text=${c.prompt.mid_goal} />
     ` : null}
     ${c.prompt.long_goal ? html`
-      <div class="text-[11px] text-[var(--text-dim)] mt-2 mb-0.5">Long-term goal</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Long-term goal</div>
       <${LongText} text=${c.prompt.long_goal} />
     ` : null}
     ${c.prompt.soul_profile ? html`
-      <div class="text-[11px] text-[var(--text-dim)] mt-2 mb-0.5">Soul profile</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Soul profile</div>
       <${LongText} text=${c.prompt.soul_profile} />
     ` : null}
     ${c.prompt.instructions ? html`
-      <div class="text-[11px] text-[var(--text-dim)] mt-2 mb-0.5">Instructions</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Instructions</div>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
   `
@@ -349,9 +350,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     ${c.drift.last_reason ? html`<${ConfigRow} label="Last reason" value=${c.drift.last_reason} />` : null}
   ` : html`
     <${SectionHeader} title="Drift" />
-    <div class="keeper-signal-row rounded-lg">
-      <span>Enabled</span>
-      <strong><${BoolBadge} value=${c.drift.enabled} /></strong>
+    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <span class="text-xs text-[var(--text-muted)]">Enabled</span>
+      <${BoolBadge} value=${c.drift.enabled} />
     </div>
     <${ConfigRow} label="Min turn gap" value=${String(c.drift.min_turn_gap)} />
     <${ConfigRow} label="Count total" value=${String(c.drift.count_total)} />
@@ -368,17 +369,17 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="Active model" value=${c.execution.active_model || '--'} />
       <${ConfigRow} label="Policy mode" value=${c.execution.policy_mode || '--'} />
       <${ConfigRow} label="Shell mode" value=${c.execution.policy_shell_mode || '--'} />
-      <div class="keeper-signal-row rounded-lg">
-        <span>Verify</span>
-        <strong><${BoolBadge} value=${c.execution.verify} /></strong>
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">Verify</span>
+        <${BoolBadge} value=${c.execution.verify} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[11px] text-[var(--text-dim)] mb-1">Models</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Models</div>
         <${ModelList} models=${c.execution.models} />
       </div>
       ${c.execution.allowed_models.length > 0 ? html`
         <div class="mt-1.5">
-          <div class="text-[11px] text-[var(--text-dim)] mb-1">Allowed models</div>
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Allowed models</div>
           <${ModelList} models=${c.execution.allowed_models} />
         </div>
       ` : null}
@@ -393,9 +394,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* --- Proactive (read-only) --- */}
       <${SectionHeader} title="Proactive" />
-      <div class="keeper-signal-row rounded-lg">
-        <span>Enabled</span>
-        <strong><${BoolBadge} value=${c.proactive.enabled} /></strong>
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">Enabled</span>
+        <${BoolBadge} value=${c.proactive.enabled} />
       </div>
       <${ConfigRow} label="Idle trigger" value=${c.proactive.idle_sec + 's'} />
       <${ConfigRow} label="Cooldown" value=${c.proactive.cooldown_sec + 's'} />
@@ -405,9 +406,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* --- Initiative (read-only) --- */}
       <${SectionHeader} title="Initiative" />
-      <div class="keeper-signal-row rounded-lg">
-        <span>Enabled</span>
-        <strong><${BoolBadge} value=${c.initiative.enabled} /></strong>
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">Enabled</span>
+        <${BoolBadge} value=${c.initiative.enabled} />
       </div>
       <${ConfigRow} label="Scope" value=${c.initiative.scope || '--'} />
       <${ConfigRow} label="Idle trigger" value=${c.initiative.idle_sec + 's'} />
@@ -416,9 +417,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* --- Handoff (read-only) --- */}
       <${SectionHeader} title="Handoff" />
-      <div class="keeper-signal-row rounded-lg">
-        <span>Auto</span>
-        <strong><${BoolBadge} value=${c.handoff.auto} /></strong>
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">Auto</span>
+        <${BoolBadge} value=${c.handoff.auto} />
       </div>
       <${ConfigRow} label="Threshold" value=${(c.handoff.threshold * 100).toFixed(0) + '%'} />
       <${ConfigRow} label="Cooldown" value=${c.handoff.cooldown_sec + 's'} />

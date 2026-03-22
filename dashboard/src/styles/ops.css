@@ -172,11 +172,6 @@
   background: var(--accent-8);
 }
 
-.ops-entity-stats .keepalive-active {
-  color: var(--accent);
-  font-weight: 600;
-}
-
 
 @media (max-width: 1200px) {
 

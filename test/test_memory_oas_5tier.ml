@@ -116,9 +116,8 @@ let test_memory_scratchpad_lifecycle () =
     Memory_oas_bridge.create_memory ~agent_name:"test-scratch" ()
   in
   (* Store to scratchpad *)
-  let (_ : (unit, string) result) =
-    Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
-      "current_tool" (`String "bash") in
+  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
+    "current_tool" (`String "bash"));
   let (sp, _, _, _, _) = Oas.Memory.stats memory in
   Alcotest.(check int) "scratchpad has 1" 1 sp;
   (* Clear scratchpad (simulating turn boundary) *)
@@ -132,12 +131,10 @@ let test_memory_working_survives_clear () =
   let memory =
     Memory_oas_bridge.create_memory ~agent_name:"test-working" ()
   in
-  let (_ : (unit, string) result) =
-    Oas.Memory.store memory ~tier:Oas.Memory.Working
-      "session_goal" (`String "deploy v2") in
-  let (_ : (unit, string) result) =
-    Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
-      "temp" (`String "ephemeral") in
+  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Working
+    "session_goal" (`String "deploy v2"));
+  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
+    "temp" (`String "ephemeral"));
   Oas.Memory.clear_scratchpad memory;
   let (sp, wk, _, _, _) = Oas.Memory.stats memory in
   Alcotest.(check int) "scratchpad cleared" 0 sp;
@@ -153,9 +150,8 @@ let test_memory_promote_scratchpad_to_working () =
   let memory =
     Memory_oas_bridge.create_memory ~agent_name:"test-promote" ()
   in
-  let (_ : (unit, string) result) =
-    Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
-      "important_finding" (`String "bug in auth") in
+  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
+    "important_finding" (`String "bug in auth"));
   let promoted = Oas.Memory.promote memory "important_finding" in
   Alcotest.(check bool) "promote succeeded" true promoted;
   Oas.Memory.clear_scratchpad memory;
@@ -181,7 +177,7 @@ let test_episodic_store_recall () =
     salience = 0.8;
     metadata = [];
   } in
-  Oas.Memory.store_episode memory ep;
+  ignore (Oas.Memory.store_episode memory ep);
   let recalled = Oas.Memory.recall_episodes memory ~limit:10 () in
   Alcotest.(check int) "1 episode recalled" 1 (List.length recalled);
   let r = List.hd recalled in
@@ -204,8 +200,8 @@ let test_episodic_salience_ordering () =
     participants = []; action = "critical";
     outcome = Oas.Memory.Neutral; salience = 0.9; metadata = [];
   } in
-  Oas.Memory.store_episode memory ep_low;
-  Oas.Memory.store_episode memory ep_high;
+  ignore (Oas.Memory.store_episode memory ep_low);
+  ignore (Oas.Memory.store_episode memory ep_high);
   let recalled = Oas.Memory.recall_episodes memory ~limit:2 () in
   Alcotest.(check int) "2 episodes" 2 (List.length recalled);
   Alcotest.(check string) "highest salience first"
@@ -229,7 +225,7 @@ let test_procedural_store_recall () =
     last_used = Unix.gettimeofday ();
     metadata = [];
   } in
-  Oas.Memory.store_procedure memory proc;
+  ignore (Oas.Memory.store_procedure memory proc);
   (match Oas.Memory.best_procedure memory ~pattern:"deploy" with
    | Some p ->
      Alcotest.(check string) "id matches" "pr-1" p.id;
@@ -250,7 +246,7 @@ let test_procedural_record_success () =
     last_used = 0.0;
     metadata = [];
   } in
-  Oas.Memory.store_procedure memory proc;
+  ignore (Oas.Memory.store_procedure memory proc);
   Oas.Memory.record_success memory "pr-s";
   (match Oas.Memory.best_procedure memory ~pattern:"test" with
    | Some p ->
@@ -293,7 +289,7 @@ let test_flush_procedures_dedupes_legacy_records () =
     last_used = 210.0;
     metadata = [];
   } in
-  Oas.Memory.store_procedure memory oas_proc;
+  ignore (Oas.Memory.store_procedure memory oas_proc);
   let flushed = Memory_oas_bridge.flush_procedures ~memory ~agent_name in
   Alcotest.(check int) "no flush when latest record already matches" 0 flushed;
   let persisted = Procedural_memory.load_procedures ~agent_name in
@@ -313,24 +309,21 @@ let test_flush_procedures_dedupes_legacy_records () =
 let test_stats_all_tiers () =
   let dir = setup_tmp_dir () in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-stats" () in
-  let (_ : (unit, string) result) =
-    Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad "s1" (`Int 1) in
-  let (_ : (unit, string) result) =
-    Oas.Memory.store memory ~tier:Oas.Memory.Working "w1" (`Int 2) in
-  let (_ : (unit, string) result) =
-    Oas.Memory.store memory ~tier:Oas.Memory.Working "w2" (`Int 3) in
+  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad "s1" (`Int 1));
+  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Working "w1" (`Int 2));
+  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Working "w2" (`Int 3));
   let ep : Oas.Memory.episode = {
     id = "stat-ep"; timestamp = 0.0; participants = [];
     action = "a"; outcome = Oas.Memory.Neutral;
     salience = 0.5; metadata = [];
   } in
-  Oas.Memory.store_episode memory ep;
+  ignore (Oas.Memory.store_episode memory ep);
   let proc : Oas.Memory.procedure = {
     id = "stat-pr"; pattern = "p"; action = "a";
     success_count = 1; failure_count = 0; confidence = 1.0;
     last_used = 0.0; metadata = [];
   } in
-  Oas.Memory.store_procedure memory proc;
+  ignore (Oas.Memory.store_procedure memory proc);
   let (sp, wk, epc, prc, _lt) = Oas.Memory.stats memory in
   Alcotest.(check int) "scratchpad = 1" 1 sp;
   Alcotest.(check int) "working = 2" 2 wk;

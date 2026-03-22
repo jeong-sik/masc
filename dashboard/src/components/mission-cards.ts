@@ -59,7 +59,7 @@ export function SummaryStat({
   tone?: string | null
 }) {
   return html`
-    <article class="mission-stat-card rounded-xl p-3.5 rounded-[14px] border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5 ${toneClass(tone)}">
+    <article class="rounded-xl p-3.5 border border-[var(--white-8)] bg-[var(--white-4)] grid gap-1.5 ${toneClass(tone)}">
       <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">${label}</span>
       <strong class="text-[var(--text-strong)] text-[26px] leading-none">${value}</strong>
       <small class="text-[rgba(255,255,255,0.68)] leading-[1.45]">${detail}</small>

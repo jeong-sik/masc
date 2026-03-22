@@ -272,7 +272,7 @@ export function Mission() {
             <p class="m-0 text-[rgba(255,255,255,0.68)] leading-normal">주의 신호는 truth를 훑은 다음에만 읽고, 세션 집중 순서를 정하는 용도로만 씁니다.</p>
             <${ProvenanceStrip} items=${[{ kind: 'derived' }]} />
           </div>
-          <div class="mission-lane-stack">
+          <div class="p-3.5 rounded-xl border border-[var(--white-8)] bg-[linear-gradient(180deg,var(--white-6),var(--white-3))] grid gap-3">
             ${attentionQueue.length > 0
               ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${activeSelectedAttentionId === item.id} sessionLookup=${sessionLookup} />`)
               : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금 세션 단위 주의 대기열은 비어 있습니다.</div>`}

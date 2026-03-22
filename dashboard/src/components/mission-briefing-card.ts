@@ -52,7 +52,7 @@ export function MissionBriefingCard() {
         ? html`
             <div class="grid grid-cols-3 gap-3">
               ${briefing.sections.slice(0, 3).map(section => html`
-                <article class="mission-briefing-section rounded-xl ${toneClass(section.status)}">
+                <article class="p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-2 ${toneClass(section.status)}">
                   <div class="flex justify-between gap-2 items-start flex-wrap">
                     <strong>${section.label}</strong>
                     <div class="flex gap-2 flex-wrap justify-end">
@@ -63,7 +63,7 @@ export function MissionBriefingCard() {
                       ${section.evidence_quality ? html`<span class="command-chip rounded-full">${section.evidence_quality}</span>` : null}
                     </div>
                   </div>
-                  <p>${section.summary}</p>
+                  <p class="m-0 text-[rgba(255,255,255,0.8)] leading-normal">${section.summary}</p>
                   ${section.evidence.length > 0
                     ? html`
                         <details class="pt-1 border-t border-[var(--white-6)] mt-2">
@@ -94,12 +94,12 @@ export function MissionBriefingCard() {
               <summary>관측 공백 (${briefing.metadata_gap_count ?? briefing.metadata_gaps.length})</summary>
               <div class="flex flex-col gap-3">
                 ${briefing.metadata_gaps.map(item => html`
-                  <article class="mission-briefing-gap rounded-xl ${item.severity === 'watch' ? 'warn' : ''}">
+                  <article class="p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] grid gap-2 ${item.severity === 'watch' ? 'warn' : ''}">
                     <div class="flex justify-between gap-2 items-start flex-wrap">
                       <strong>${missionTargetTypeLabel(item.scope_type)}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
                       <span class="command-chip rounded-full ${item.severity === 'watch' ? 'warn' : ''}">${statusLabel(item.severity)}</span>
                     </div>
-                    <p>${item.summary}</p>
+                    <p class="m-0 text-[rgba(255,255,255,0.78)] leading-[1.45]">${item.summary}</p>
                   </article>
                 `)}
               </div>

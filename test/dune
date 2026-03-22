@@ -1029,6 +1029,12 @@
  (modules test_grpc_coordination)
  (libraries masc_mcp alcotest yojson unix))
 
+; gRPC client types, transport selection, and round-trip tests
+(test
+ (name test_grpc_client)
+ (modules test_grpc_client)
+ (libraries masc_mcp alcotest yojson unix))
+
 ; Context Budget Manager — session-level budget tracking with compression phases
 (test
  (name test_context_budget)

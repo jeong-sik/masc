@@ -5,11 +5,16 @@
     All public APIs accept string model labels; no [Model_spec.model_spec]
     type is exposed.
 
+    Transport selection: all [run_*] functions accept an optional
+    [~transport] parameter. When omitted, the transport is resolved
+    from [MASC_AGENT_TRANSPORT] env var (default: [Local]).
+
     @since Phase 1 — MASC->OAS migration
     @since Phase 4 — public API restricted to named cascade functions
     @since Phase 5 — run_model_by_label added (string-based API)
     @since Phase 6 — Model_spec.model_spec type fully eliminated from API
-    @since Phase 8 — Cascade module deleted, defaults moved here *)
+    @since Phase 8 — Cascade module deleted, defaults moved here
+    @since Phase 9 — gRPC transport option added (#2381) *)
 
 module Oas = Agent_sdk
 
@@ -45,6 +50,7 @@ val run_named :
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?agent_ref:Oas.Agent.t option ref ->
+  ?transport:Masc_grpc_transport.t ->
   unit ->
   (run_result, string) result
 
@@ -64,6 +70,7 @@ val run_model_by_label :
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?transport:Masc_grpc_transport.t ->
   unit ->
   (run_result, string) result
 
@@ -81,6 +88,7 @@ val run_named_with_masc_tools :
   ?memory:Oas.Memory.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?transport:Masc_grpc_transport.t ->
   unit ->
   (run_result, string) result
 
@@ -98,5 +106,6 @@ val run_model_with_masc_tools :
   ?memory:Oas.Memory.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?transport:Masc_grpc_transport.t ->
   unit ->
   (run_result, string) result

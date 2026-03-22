@@ -433,6 +433,8 @@
    masc_grpc_types
    masc_grpc_service
    masc_grpc_server
+   masc_grpc_client
+   masc_grpc_transport
    udp_socket_eio
    shutdown
    supervisor

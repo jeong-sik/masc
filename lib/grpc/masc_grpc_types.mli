@@ -1,7 +1,11 @@
 (** MASC gRPC Coordination Types.
 
     Wire format: JSON-encoded strings over gRPC framing.
-    See proto/masc_coordination.proto for the canonical API contract. *)
+    See proto/masc_coordination.proto for the canonical API contract.
+
+    Each message provides [to_bytes] and [of_bytes] for both server
+    (request decode + response encode) and client (request encode +
+    response decode) usage. *)
 
 (** {1 Shared Types} *)
 
@@ -35,6 +39,7 @@ module JoinRequest : sig
 end
 
 val agent_info_to_json : agent_info -> Yojson.Safe.t
+val agent_info_of_json : Yojson.Safe.t -> agent_info
 
 module JoinResponse : sig
   type t = {
@@ -43,6 +48,7 @@ module JoinResponse : sig
     session_id : string;
     active_agents : agent_info list;
   }
+  val of_bytes : string -> t
   val to_bytes : t -> string
 end
 
@@ -60,6 +66,7 @@ module LeaveResponse : sig
     success : bool;
     message : string;
   }
+  val of_bytes : string -> t
   val to_bytes : t -> string
 end
 
@@ -73,6 +80,7 @@ module HeartbeatPing : sig
     current_task_id : string;
   }
   val of_bytes : string -> t
+  val to_bytes : t -> string
 end
 
 module HeartbeatAck : sig
@@ -82,6 +90,7 @@ module HeartbeatAck : sig
     pending_task_count : int;
     directives : string list;
   }
+  val of_bytes : string -> t
   val to_bytes : t -> string
 end
 
@@ -97,6 +106,11 @@ module SubscribeRequest : sig
   val of_bytes : string -> t
 end
 
+(** Client-side serialization for SubscribeRequest. *)
+module SubscribeRequest_serde : sig
+  val to_bytes : SubscribeRequest.t -> string
+end
+
 module Event : sig
   type t = {
     seq : int64;
@@ -105,6 +119,7 @@ module Event : sig
     timestamp_ms : int64;
     payload_json : string;
   }
+  val of_bytes : string -> t
   val to_bytes : t -> string
 end
 
@@ -118,6 +133,7 @@ module ToolCallRequest : sig
     arguments_json : string;
   }
   val of_bytes : string -> t
+  val to_bytes : t -> string
 end
 
 module ToolCallResponse : sig
@@ -127,6 +143,7 @@ module ToolCallResponse : sig
     error_message : string;
     error_code : int;
   }
+  val of_bytes : string -> t
   val to_bytes : t -> string
 end
 
@@ -139,6 +156,7 @@ module BroadcastRequest : sig
     mentions : string list;
   }
   val of_bytes : string -> t
+  val to_bytes : t -> string
 end
 
 module BroadcastResponse : sig
@@ -146,12 +164,14 @@ module BroadcastResponse : sig
     success : bool;
     seq : int64;
   }
+  val of_bytes : string -> t
   val to_bytes : t -> string
 end
 
 (** {1 Status} *)
 
 val task_info_to_json : task_info -> Yojson.Safe.t
+val task_info_of_json : Yojson.Safe.t -> task_info
 
 module StatusResponse : sig
   type t = {
@@ -160,5 +180,6 @@ module StatusResponse : sig
     message_count : int;
     room_path : string;
   }
+  val of_bytes : string -> t
   val to_bytes : t -> string
 end

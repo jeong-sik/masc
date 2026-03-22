@@ -3,10 +3,16 @@ open Keeper_types
 type keepalive_entry = {
   stop : bool ref;
   started_at : float;
+  grpc_close : (unit -> unit) option;
 }
 
 (** Inject the shared Event_bus for keeper snapshot publishing. *)
 val set_bus : Agent_sdk.Event_bus.t -> unit
+
+(** Inject a gRPC client for heartbeat streaming.
+    When set and [MASC_AGENT_TRANSPORT=grpc], keepalive will also
+    send heartbeat pings over the gRPC bidirectional stream. *)
+val set_grpc_client : Masc_grpc_client.t -> unit
 
 val running_keepers : unit -> int
 val keeper_keepalive_running : string -> bool

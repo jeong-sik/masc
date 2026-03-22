@@ -37,6 +37,7 @@ type config = {
   named_cascade : Oas.Api.named_cascade option;
   initial_messages : Oas.Types.message list;
   raw_trace : Oas.Raw_trace.t option;
+  transport : Masc_grpc_transport.t;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -55,6 +56,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     named_cascade = None;
     initial_messages = [];
     raw_trace = None;
+    transport = Masc_grpc_transport.from_env ();
   }
 
 (* ================================================================ *)
@@ -207,6 +209,11 @@ let run
         (int_of_float (Time_compat.now () *. 1000.0))
         (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF)
   in
+  (match config.transport with
+  | Masc_grpc_transport.Local -> ()
+  | t ->
+    Log.Misc.info "oas_worker %s: transport=%s"
+      config.name (Masc_grpc_transport.to_string t));
   Option.iter (fun bus ->
     publish_lifecycle bus ~name:config.name ~event:"build" ~detail:goal
   ) config.event_bus;
@@ -391,6 +398,7 @@ let run_named
     ?raw_trace
     ?on_event
     ?agent_ref
+    ?transport
     ()
   : (run_result, string) result =
   match require_eio () with
@@ -417,6 +425,10 @@ let run_named
   let provider : Oas.Provider.config =
     Oas_type_adapters.provider_config_to_oas primary_provider
   in
+  let transport_resolved = match transport with
+    | Some t -> t
+    | None -> Masc_grpc_transport.from_env ()
+  in
   let config =
     { (default_config ~name ~provider ~model_id:primary_provider.model_id
          ~system_prompt ~tools)
@@ -424,6 +436,7 @@ let run_named
       max_turns; max_tokens; temperature;
       guardrails; hooks; context_reducer; memory;
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
+      transport = transport_resolved;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in
@@ -448,6 +461,7 @@ let run_model_by_label
     ?context_reducer
     ?memory
     ?on_event
+    ?transport
     ()
   : (run_result, string) result =
   (* Validate the label parses before proceeding *)
@@ -457,6 +471,10 @@ let run_model_by_label
     match require_eio () with
     | Error e -> Error e
     | Ok (sw, net) ->
+        let transport_resolved = match transport with
+          | Some t -> t
+          | None -> Masc_grpc_transport.from_env ()
+        in
         let config =
           config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
             ~tools ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
@@ -464,6 +482,7 @@ let run_model_by_label
             ~description:(Some (Printf.sprintf "model_label:%s" model_label))
             ()
         in
+        let config = { config with transport = transport_resolved } in
         (match run ~sw ~net ~config ?on_event goal with
         | Ok result when accept result.response -> Ok result
         | Ok _ ->
@@ -485,6 +504,7 @@ let run_named_with_masc_tools
     ?memory
     ?raw_trace
     ?on_event
+    ?transport
     ()
   : (run_result, string) result =
   (* Convert MASC tools to OAS tools, then delegate to run_named.
@@ -497,7 +517,7 @@ let run_named_with_masc_tools
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
-    ?raw_trace ?on_event ()
+    ?raw_trace ?on_event ?transport ()
 
 let run_model_with_masc_tools
     ~(model_label : string)
@@ -513,11 +533,16 @@ let run_model_with_masc_tools
     ?memory
     ?raw_trace
     ?on_event
+    ?transport
     ()
   : (run_result, string) result =
   match require_eio () with
   | Error e -> Error e
   | Ok (sw, net) ->
+      let transport_resolved = match transport with
+        | Some t -> t
+        | None -> Masc_grpc_transport.from_env ()
+      in
       let config =
         config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
           ~tools:[] ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
@@ -525,6 +550,6 @@ let run_model_with_masc_tools
           ~description:(Some (Printf.sprintf "model_label:%s" model_label))
           ()
       in
-      let config = { config with raw_trace } in
+      let config = { config with raw_trace; transport = transport_resolved } in
       run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event
         goal

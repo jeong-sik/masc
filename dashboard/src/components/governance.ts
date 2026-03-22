@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
+import { EmptyState } from './common/empty-state'
 import { governanceToneClass } from '../lib/tone'
 import type { GovernanceFilter } from './governance-utils'
 import {
@@ -153,7 +154,7 @@ function DecisionInbox() {
     <${Card} title="사건 수신함" class="section mb-4">
       <div class="flex flex-col gap-2 governance-inbox">
         ${items.length === 0
-          ? html`<div class="empty-state">이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.</div>`
+          ? html`<${EmptyState} message="이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요." />`
           : items.map(item => {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`

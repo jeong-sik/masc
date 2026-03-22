@@ -1,4 +1,6 @@
-/* ── Pulse Strip ────────────────────────────────────── */
+/* MASC Dashboard -- Live Monitor (retained: animations, stateful variants, compound selectors) */
+
+/* ── Pulse Strip ── */
 
 .pulse-strip {
   display: flex;
@@ -10,7 +12,6 @@
   align-items: center;
   min-height: 56px;
 }
-
 
 .pulse-bubble {
   display: flex;
@@ -42,21 +43,12 @@
   box-shadow: 0 0 8px var(--blue-400-15);
 }
 
-.pulse-name {
-  font-size: 0.65rem;
-  color: var(--white-55);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 64px;
-}
-
 @keyframes livePulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
   50% { box-shadow: 0 0 8px 2px var(--ok-12); }
 }
 
-/* ── Live Panels (Activity + Focus) ──────────────────── */
+/* ── Live Panels ── */
 
 .live-panels {
   display: grid;
@@ -65,14 +57,7 @@
   min-height: 480px;
 }
 
-/* ── Activity Stream ─────────────────────────────────── */
-
-.activity-stream-head h3,
-.focus-sidebar-head h3 {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-}
+/* ── Activity Stream ── */
 
 .activity-filter-btn {
   padding: 3px 10px;
@@ -102,14 +87,6 @@
   overflow-y: auto;
   max-height: 520px;
   padding-right: 4px;
-}
-
-.activity-empty,
-.focus-empty {
-  padding: 24px;
-  text-align: center;
-  color: var(--white-25);
-  font-size: 0.8rem;
 }
 
 .activity-item {
@@ -150,35 +127,7 @@
 .activity-kind-chip.live-event-keeper { background: rgba(168,85,247,0.15); color: #a855f7; }
 .activity-kind-chip.live-event-system { background: var(--white-6); color: var(--white-50); }
 
-.activity-agent {
-  font-size: 0.75rem;
-  color: var(--white-60);
-  font-weight: 500;
-}
-
-.activity-time {
-  font-size: 0.7rem;
-  color: var(--white-30);
-  margin-left: auto;
-}
-
-.activity-item-text {
-  font-size: 0.8rem;
-  color: var(--white-70);
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-/* ── Focus Sidebar ───────────────────────────────────── */
-
-.focus-sidebar-list {
-  display: grid;
-  gap: 6px;
-  align-content: start;
-  overflow-y: auto;
-  max-height: 560px;
-  padding-right: 4px;
-}
+/* ── Focus Sidebar ── */
 
 .focus-agent-card {
   padding: 10px 12px;
@@ -199,14 +148,6 @@
 .focus-agent-selected {
   border-color: rgba(96,165,250,0.4);
   background: rgba(96,165,250,0.05);
-}
-
-.focus-agent-name {
-  font-size: 0.85rem;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 
 .focus-pressure-badge {
@@ -233,63 +174,13 @@
   color: var(--warn);
 }
 
-.focus-task-count {
-  background: var(--white-10);
-  padding: 0 4px;
-  font-size: 0.6rem;
-}
-
-.focus-current-task {
-  font-size: 0.75rem;
-  color: var(--white-55);
-  padding: 3px 8px;
-  background: var(--white-3);
-  border: 1px solid var(--white-5);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.focus-activity-text {
-  font-size: 0.72rem;
-  color: var(--white-40);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-  min-width: 0;
-}
-
 .focus-agent-footer .time-ago {
   font-size: 0.68rem;
   color: var(--white-30);
   flex-shrink: 0;
 }
 
-/* ── Live Responsive ─────────────────────────────────── */
-
-@media (max-width: 1100px) {
-  .live-panels {
-    grid-template-columns: 1fr;
-  }
-}
-/* ══════════════════════════════════════════════════════════
-   Live Monitor Tab
-   ══════════════════════════════════════════════════════════ */
-
-.live-header h2 {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-
-.live-header-stats {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  font-size: 0.8rem;
-  color: var(--white-50);
-}
+/* ── Live Stat Dot ── */
 
 .live-stat-dot {
   width: 6px;
@@ -304,4 +195,12 @@
 
 .live-stat-dot.disconnected {
   background: var(--bad);
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 1100px) {
+  .live-panels {
+    grid-template-columns: 1fr;
+  }
 }

@@ -14,8 +14,8 @@ export function Live() {
   return html`
     <div class="grid gap-4">
       <div class="live-header">
-        <h2>라이브 모니터</h2>
-        <div class="live-header-stats">
+        <h2 class="m-0 text-[1.25rem] font-semibold">라이브 모니터</h2>
+        <div class="flex gap-3 items-center text-[0.8rem] text-[color:var(--white-50)]">
           <span class="live-stat">
             <span class="live-stat-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
             ${isConnected ? '연결됨' : '오프라인'}

@@ -42,24 +42,24 @@ export function ActivityStream() {
   return html`
     <div class="grid gap-2.5 grid-rows-[auto_auto_1fr] min-h-0">
       <div class="activity-stream-head">
-        <h3>Activity Stream</h3>
+        <h3 class="m-0 text-[0.95rem] font-semibold">Activity Stream</h3>
         <span class="text-xs text-[rgba(255,255,255,0.4)]">${entries.length} events</span>
       </div>
       <${FilterBar} />
       <div class="activity-stream-list">
         ${entries.length === 0
-          ? html`<div class="activity-empty">필터에 맞는 이벤트 없음</div>`
+          ? html`<div class="py-6 text-center text-[color:var(--white-25)] text-[0.8rem]">필터에 맞는 이벤트 없음</div>`
           : entries.map((entry, i) => html`
             <div
               key=${`${entry.timestamp}-${i}`}
               class="activity-item rounded-lg ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
             >
-              <div class="activity-item rounded-lg-head">
+              <div class="activity-item-head">
                 <span class="activity-kind-chip rounded ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
-                <span class="activity-agent">${entry.agent}</span>
-                <span class="activity-time">${formatTimeAgo(entry.timestamp)}</span>
+                <span class="text-[0.75rem] text-[color:var(--white-60)] font-medium">${entry.agent}</span>
+                <span class="text-[0.7rem] text-[color:var(--white-30)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
               </div>
-              <div class="activity-item rounded-lg-text">${entry.text}</div>
+              <div class="text-[0.8rem] text-[color:var(--white-70)] leading-[1.4] break-words">${entry.text}</div>
             </div>
           `)}
       </div>

@@ -120,14 +120,14 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   }
 
   return html`
-    <div class="roster-page agent-page">
-      <div class="roster-header mb-6">
-        <h2 class="roster-title">${keeperFilter === 'keeper-only' ? '키퍼' : keeperFilter === 'agent-only' ? '에이전트' : '에이전트'} (${filtered.length})</h2>
-        <p class="agent-page__subtitle">${keeperFilter === 'keeper-only' ? '키퍼 런타임이 있는 에이전트' : keeperFilter === 'agent-only' ? '키퍼 런타임이 없는 에이전트' : '등록된 에이전트 — keeper 런타임이 있으면 컨텍스트 게이지 표시'}</p>
+    <div class="p-[var(--space-lg,24px)] max-w-[960px] agent-page">
+      <div class="mb-6">
+        <h2 class="text-[20px] font-semibold text-[color:var(--ff-gold-bright)] mb-[var(--space-md,16px)] tracking-[0.5px] [text-shadow:0_1px_4px_rgba(212,169,75,0.2)]">${keeperFilter === 'keeper-only' ? '키퍼' : keeperFilter === 'agent-only' ? '에이전트' : '에이전트'} (${filtered.length})</h2>
+        <p class="text-[length:var(--fs-sm)] text-[color:var(--white-30)] mt-1">${keeperFilter === 'keeper-only' ? '키퍼 런타임이 있는 에이전트' : keeperFilter === 'agent-only' ? '키퍼 런타임이 없는 에이전트' : '등록된 에이전트 — keeper 런타임이 있으면 컨텍스트 게이지 표시'}</p>
         <div class="flex gap-[var(--space-md,16px)] items-center flex-wrap">
           <input
             type="text"
-            class="roster-search rounded transition-colors duration-200"
+            class="py-1.5 px-3 border border-[var(--ff-border-subtle)] bg-[var(--ff-navy)] text-[color:var(--white-90)] text-[length:var(--fs-base)] w-[200px] rounded transition-colors duration-200 focus:outline-none focus:border-[var(--ff-gold)] focus:shadow-[0_0_0_2px_var(--ff-gold-dim)] placeholder:text-[color:var(--white-25)]"
             placeholder="이름 검색..."
             value=${search}
             onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
@@ -157,13 +157,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <div
-              class="roster-card rounded-xl rounded-md transition-all duration-200 ${isKeeper ? 'roster-card--keeper' : ''}"
+              class="roster-card rounded-md transition-all duration-200 ${isKeeper ? 'roster-card--keeper' : ''}"
               key=${agent.name}
               onClick=${() => openAgentDetail(agent.name)}
               role="button"
               tabindex="0"
             >
-              <div class="roster-card__avatar">
+              <div class="shrink-0 relative roster-card__avatar">
                 <${AgentAvatar}
                   name=${agent.name}
                   status=${agent.status}
@@ -173,9 +173,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   activityAge=${lastActivity}
                 />
               </div>
-              <div class="roster-card__info">
+              <div class="flex-1 min-w-0 flex flex-col gap-[5px] justify-center">
                 <div class="flex items-center gap-[var(--space-sm,8px)]">
-                  <strong class="roster-card__name">${agent.name}</strong>
+                  <strong class="text-[length:var(--fs-lg)] text-[color:var(--ff-gold-bright)] font-semibold tracking-[0.3px]">${agent.name}</strong>
                   ${isKeeper ? html`
                     <span class="roster-card__keeper-tag">keeper</span>
                   ` : null}
@@ -195,21 +195,21 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                         style=${{ width: `${ctxPct}%` }}
                       />
                     </div>
-                    <span class="roster-card__gauge-label">ctx ${ctxPct}%</span>
+                    <span class="text-[length:var(--fs-xs)] text-[color:var(--white-40)] whitespace-nowrap min-w-[50px] tabular-nums">ctx ${ctxPct}%</span>
                   </div>
                 ` : null}
 
                 ${currentWork ? html`
-                  <div class="roster-card__work">${currentWork}</div>
+                  <div class="text-[length:var(--fs-base)] text-[color:var(--white-55)] overflow-hidden text-ellipsis whitespace-nowrap">${currentWork}</div>
                 ` : html`
-                  <div class="roster-card__work roster-card__work--empty">작업 없음</div>
+                  <div class="text-[length:var(--fs-base)] text-[color:var(--white-20)] overflow-hidden text-ellipsis whitespace-nowrap italic">작업 없음</div>
                 `}
-                <div class="roster-card__meta">
+                <div class="flex gap-[var(--space-sm,8px)] text-[length:var(--fs-xs)] text-[color:var(--white-30)]">
                   ${lastActivity != null ? html`
                     <span>${formatDuration(lastActivity)} 전</span>
                   ` : null}
                   ${keeper?.model ? html`
-                    <span class="roster-card__model">${keeper.model}</span>
+                    <span class="py-px px-1.5 bg-[rgba(212,169,75,0.08)] border border-[var(--ff-border-subtle)] rounded-[3px] text-[rgba(212,169,75,0.6)]">${keeper.model}</span>
                   ` : null}
                 </div>
               </div>
@@ -217,7 +217,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           `
         })}
         ${filtered.length === 0 ? html`
-          <div class="roster-empty rounded-md">조건에 맞는 에이전트가 없습니다.</div>
+          <div class="py-[var(--space-xl,32px)] text-center text-[color:var(--white-20)] text-[length:var(--fs-md)] border border-dashed border-[var(--ff-border-subtle)] rounded-md">조건에 맞는 에이전트가 없습니다.</div>
         ` : null}
       </div>
     </div>

@@ -80,7 +80,7 @@ function GovernanceToolbar() {
   return html`
     <${Card} title="청원 콘솔" class="section mb-3.5">
       <div class="flex flex-col gap-3">
-        <div class="council-create">
+        <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 items-center">
           <input
             class="control-input rounded-lg"
             type="text"
@@ -126,7 +126,7 @@ function GovernanceToolbar() {
             </button>
           `)}
         </div>
-        ${governanceError.value ? html`<div class="council-error rounded-lg">${governanceError.value}</div>` : null}
+        ${governanceError.value ? html`<div class="mt-2.5 border border-[rgba(239,68,68,0.35)] py-2 px-2.5 text-[#f7b6b6] text-[length:var(--fs-sm)] rounded-lg">${governanceError.value}</div>` : null}
       </div>
     <//>
   `
@@ -136,7 +136,7 @@ function DecisionInbox() {
   const items = filteredItemsByFilter(governanceFilter.value, governanceData.value?.items ?? [])
   return html`
     <${Card} title="사건 수신함" class="section mb-3.5">
-      <div class="council-list governance-inbox">
+      <div class="flex flex-col gap-2 governance-inbox">
         ${items.length === 0
           ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.</div>`
           : items.map(item => {
@@ -147,11 +147,11 @@ function DecisionInbox() {
                   onClick=${() => selectDecision(item)}
                 >
                   <div class="min-w-0">
-                    <div class="governance-row-head">
+                    <div class="flex items-center gap-2 min-w-0">
                       <span class="governance-kind rounded-full">${kindLabel(item.kind)}</span>
-                      <span class="council-topic">${item.topic}</span>
+                      <span class="text-[#e8f0ff] text-[length:var(--fs-md)] font-semibold break-words">${item.topic}</span>
                     </div>
-                    <div class="council-sub">
+                    <div class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">
                       <span>${item.truth_summary || '사실 요약이 아직 없습니다'}</span>
                       ${item.last_activity_at
                         ? html`<span><${TimeAgo} timestamp=${item.last_activity_at} /></span>`
@@ -169,7 +169,7 @@ function DecisionInbox() {
                         : null}
                     </div>
                   </div>
-                  <div class="governance-row-side">
+                  <div class="flex flex-col items-end gap-2">
                     <span class="council-state rounded-full ${governanceToneClass(item.status)}">${caseStatusLabel(item.status)}</span>
                     <span class="governance-vote-meter">${item.brief_count ?? 0}건</span>
                   </div>

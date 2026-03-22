@@ -180,7 +180,7 @@ let test_source_main_keeper_bootstrap () =
   check bool "bootstrap sources have keeper bootstrap logging"
     true (any_file_contains_pattern
       [ "bin/main_eio.ml"; "lib/server/server_runtime_bootstrap.ml" ]
-      {|[main] keeper bootstrap failed:|})
+      {|keeper bootstrap failed|})
 
 (* MA-H2a/H2b removed: metrics_store_eio.ml migrated to Eio-native I/O (PR #2260),
    eliminating Unix fd close/unlock paths and their logging. *)

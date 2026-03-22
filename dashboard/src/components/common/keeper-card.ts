@@ -96,7 +96,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
                 ${model.pipelineStage ? html`<${PipelineStageBadge} stage=${model.pipelineStage} />` : null}
                 ${model.stateLabel ? html`<span class="monitor-pill ${toneClass} inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em]">${model.stateLabel}</span>` : null}
               `
-            : html`<span class="command-chip rounded-full ${toneClass}">${model.statusLabel}</span>`}
+            : html`<span class="cmd-chip rounded-full ${toneClass}">${model.statusLabel}</span>`}
         </div>
 
         <div class=${variant === 'mission' ? 'flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]' : 'monitor-meta'}>

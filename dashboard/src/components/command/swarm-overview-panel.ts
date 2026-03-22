@@ -40,47 +40,47 @@ export function SwarmOverviewPanel() {
         ? html`
             <${SwarmStoryboard} lanes=${lanes} />
             <div class="command-summary-grid mt-3">
-              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>활성 레인</span><strong>${overview?.active_lanes ?? 0}</strong><small>${overview?.moving_lanes ?? 0}개 이동 중</small></div>
-              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>정체</span><strong>${overview?.stalled_lanes ?? 0}</strong><small>${overview?.projected_lanes ?? 0}개 예상 레인</small></div>
-              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>마지막 이동</span><strong>${relativeTime(overview?.last_movement_at)}</strong><small>${swarm.generated_at ? `스냅샷 ${relativeTime(swarm.generated_at)}` : '방금 스냅샷'}</small></div>
-              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>다음 액션</span><strong>${recommendation?.label ?? '운영자 상태 확인'}</strong><small>${recommendation?.tool ?? 'masc_operator_snapshot'}</small></div>
+              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>활성 레인</span><strong>${overview?.active_lanes ?? 0}</strong><small>${overview?.moving_lanes ?? 0}개 이동 중</small></div>
+              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>정체</span><strong>${overview?.stalled_lanes ?? 0}</strong><small>${overview?.projected_lanes ?? 0}개 예상 레인</small></div>
+              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>마지막 이동</span><strong>${relativeTime(overview?.last_movement_at)}</strong><small>${swarm.generated_at ? `스냅샷 ${relativeTime(swarm.generated_at)}` : '방금 스냅샷'}</small></div>
+              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>다음 액션</span><strong>${recommendation?.label ?? '운영자 상태 확인'}</strong><small>${recommendation?.tool ?? 'masc_operator_snapshot'}</small></div>
             </div>
 
             ${lanes.length > 0 ? html`<${SwarmHealthBar} lanes=${lanes} />` : null}
 
             <div class="${compactLayout ? 'grid grid-cols-[minmax(0,1fr)] gap-4 mt-4' : 'grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] max-[1100px]:grid-cols-[minmax(0,1fr)] gap-4 mt-4'}">
-              <div class="command-card rounded-xl-stack">
+              <div class="cmd-card rounded-xl-stack">
                 ${lanes.length > 0
                   ? lanes.map(lane => html`<${SwarmLaneStrip} lane=${lane} />`)
                   : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">활성 스웜 레인이 없습니다.</div>`}
               </div>
 
-              <div class="command-card rounded-xl-stack">
-                <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card highlight ${focusKey === 'recommendation' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
+              <div class="cmd-card rounded-xl-stack">
+                <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card highlight ${focusKey === 'recommendation' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
                   <div class="flex justify-between gap-2.5 items-start">
                     <strong>${recommendation?.label ?? '운영자 상태 확인'}</strong>
-                    <span class="command-chip rounded-full">${recommendation?.lane_id ?? '전체'}</span>
+                    <span class="cmd-chip rounded-full">${recommendation?.lane_id ?? '전체'}</span>
                   </div>
                   <p>${recommendation?.reason ?? '보이는 활성 스웜 레인이 아직 없습니다.'}</p>
-                  <div class="command-card rounded-xl-foot">${recommendation?.tool ?? 'masc_operator_snapshot'}</div>
+                  <div class="cmd-card rounded-xl-foot">${recommendation?.tool ?? 'masc_operator_snapshot'}</div>
                 </div>
 
                 <${SwarmProofPanel} proof=${proof} />
 
-                <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card ${gaps.length > 0 ? 'warn' : 'ok'} ${focusKey === 'gaps' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
+                <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${gaps.length > 0 ? 'warn' : 'ok'} ${focusKey === 'gaps' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
                   <div class="flex justify-between gap-2.5 items-start">
                     <strong>핵심 공백</strong>
-                    <span class="command-chip rounded-full ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
+                    <span class="cmd-chip rounded-full ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
                   </div>
                   ${gaps.length > 0
                     ? html`<div class="border-l-2 border-[var(--card-border,var(--white-10))] pl-4 flex flex-col gap-0.5">${gaps.slice(0, 4).map(gap => html`<${SwarmGapDot} gap=${gap} />`)}</div>`
                     : html`<p>지금 보이는 핵심 공백은 없습니다.</p>`}
                 </div>
 
-                <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card">
+                <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card">
                   <div class="flex justify-between gap-2.5 items-start">
                     <strong>이동 타임라인</strong>
-                    <span class="command-chip rounded-full">${timeline.length}</span>
+                    <span class="cmd-chip rounded-full">${timeline.length}</span>
                   </div>
                   ${timeline.length > 0
                     ? html`<div class="border-l-2 border-[var(--card-border,var(--white-10))] pl-4 flex flex-col gap-0.5">${timeline.map(event => html`<${SwarmEventNode} event=${event} />`)}</div>`

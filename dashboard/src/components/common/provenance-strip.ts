@@ -54,7 +54,7 @@ export function ProvenanceChip({ item }: { item: ProvenanceItem }) {
   const label = provenanceLabel(item)
   const tone = provenanceTone(item.kind)
   return html`
-    <span class="command-chip rounded-full ${tone}" title=${provenanceDetail(item.kind)}>
+    <span class="cmd-chip rounded-full ${tone}" title=${provenanceDetail(item.kind)}>
       ${label}
     </span>
   `

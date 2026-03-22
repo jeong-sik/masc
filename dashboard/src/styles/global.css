@@ -255,6 +255,319 @@ a:hover {
 
 /* Header/Main-layout/Core-cards → Tailwind inline */
 
+/* ── Command Plane utilities (migrated from command.css) ──── */
+
+@utility cmd-plane-view {
+  &.wallboard {
+    background:
+      radial-gradient(circle at top left, var(--cyan-12), transparent 22%),
+      radial-gradient(circle at top right, var(--ok-10), transparent 24%),
+      linear-gradient(180deg, rgba(3,7,18,0.98), rgba(8,14,28,0.96));
+    box-shadow: inset 0 1px 0 var(--white-5);
+  }
+}
+
+@utility cmd-stat-card {
+  &.highlight {
+    border-color: rgba(34,211,238,0.34);
+    box-shadow: 0 0 0 1px var(--cyan-16);
+  }
+  & span {
+    color: var(--white-60);
+    font-size: var(--fs-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+    line-height: 1.3;
+  }
+  & strong { font-size: 28px; line-height: 1; }
+  & small { color: var(--white-50); font-size: var(--fs-sm); }
+}
+
+@utility cmd-focus-banner {
+  background: linear-gradient(180deg, rgba(34,211,238,0.1), var(--white-3));
+}
+
+@utility cmd-entry-card {
+  & strong {
+    color: var(--text-near-white);
+    font-size: 18px;
+    line-height: 1.2;
+    word-break: break-word;
+  }
+  & p { margin: 0; color: var(--frost-72); line-height: 1.5; }
+}
+
+@utility cmd-hero {
+  background:
+    radial-gradient(circle at top right, rgba(103,232,249,0.16), transparent 34%),
+    radial-gradient(circle at bottom left, rgba(244,114,182,0.12), transparent 28%),
+    linear-gradient(180deg, rgba(8,16,34,0.94), rgba(8,14,28,0.88));
+  box-shadow: inset 0 1px 0 var(--white-4);
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: auto -10% -35% auto;
+    width: 220px;
+    height: 220px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--ok-12), transparent 62%);
+    pointer-events: none;
+  }
+}
+
+@utility cmd-hero-copy {
+  & h3 {
+    margin: 0;
+    font-size: 28px;
+    line-height: 1.1;
+    color: #f5fbff;
+    letter-spacing: -0.02em;
+  }
+  & p {
+    margin: 0;
+    max-width: 60ch;
+    color: rgba(226, 232, 240, 0.76);
+    line-height: 1.6;
+  }
+}
+
+@utility cmd-tree-node {
+  &.depth-3 { background: var(--white-3); }
+}
+
+@utility cmd-guide-card {
+  &.highlight {
+    border-color: rgba(34,211,238,0.32);
+    background: linear-gradient(180deg, var(--cyan-12), var(--white-3));
+  }
+  &.ok,
+  &.warn,
+  &.bad {
+    border-color: rgba(248,113,113,0.24);
+  }
+  & p { margin: 10px 0 0; color: var(--white-82); line-height: 1.5; }
+}
+
+@utility cmd-readiness-row {
+  &.warn { border-color: var(--warn-soft); }
+  &.ok { border-color: var(--ok-22); }
+  &.bad { border-color: var(--bad-soft); }
+  & p { margin: 8px 0 0; color: var(--white-82); line-height: 1.5; }
+}
+
+@utility cmd-surface-tab {
+  &.active {
+    background: var(--cyan-16);
+    color: #67e8f9;
+    border-color: rgba(34,211,238,0.38);
+  }
+}
+
+@utility cmd-warroom-strip {
+  background:
+    radial-gradient(circle at top left, var(--cyan-16), transparent 32%),
+    linear-gradient(135deg, rgba(7,10,18,0.94), rgba(12,18,30,0.94));
+  &.warn { border-color: rgba(251,191,36,0.32); }
+  &.wallboard { padding: 22px; border-radius: 22px; }
+}
+
+@utility cmd-warroom-strip-head {
+  & strong {
+    display: block;
+    font-size: 24px;
+    line-height: 1.15;
+  }
+}
+
+@utility cmd-warroom-grid {
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(320px, 0.9fr);
+  &.wallboard {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.12fr) minmax(320px, 0.9fr);
+  }
+}
+
+@utility cmd-orch-card {
+  background: linear-gradient(180deg, var(--white-5), var(--white-3h));
+  border-color: rgba(148,163,184,0.18);
+  &.ok { border-color: var(--ok-24); }
+  &.warn { border-color: rgba(251,191,36,0.22); }
+  &.bad { border-color: rgba(248,113,113,0.26); }
+}
+
+@utility cmd-presence-card {
+  background: linear-gradient(180deg, var(--white-5), var(--white-3h));
+  border-color: rgba(148,163,184,0.18);
+  &.ok { border-color: var(--ok-24); display: grid; gap: 10px; }
+  &.warn { border-color: rgba(251,191,36,0.22); display: grid; gap: 10px; }
+  &.bad { border-color: rgba(248,113,113,0.26); display: grid; gap: 10px; }
+}
+
+@utility cmd-feed-card {
+  background: linear-gradient(180deg, var(--white-5), var(--white-3h));
+  border-color: rgba(148,163,184,0.18);
+  display: grid;
+  gap: 10px;
+  &.ok { border-color: var(--ok-24); }
+  &.warn { border-color: rgba(251,191,36,0.22); }
+  &.bad { border-color: rgba(248,113,113,0.26); }
+}
+
+@utility cmd-warroom-guidance {
+  & strong { color: rgba(255,255,255,0.96); }
+  &.ok { border-color: var(--ok-35); background: var(--ok-8); }
+  &.warn { border-color: var(--warn-30); background: rgba(251,191,36,0.08); }
+  &.bad { border-color: var(--bad-30); background: var(--bad-8); }
+}
+
+@utility cmd-alert {
+  & p {
+    margin: 10px 0 0;
+    color: var(--white-78);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}
+
+@utility cmd-chain-item {
+  &.selected {
+    border-color: rgba(34,211,238,0.38);
+    box-shadow: 0 0 0 1px rgba(34,211,238,0.2) inset;
+    background: linear-gradient(180deg, var(--cyan-12), var(--white-3));
+  }
+}
+
+@utility cmd-chain-graph {
+  & svg { display: block; min-width: 100%; height: auto; }
+}
+
+@utility cmd-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
+  background: var(--white-8);
+  color: rgba(255,255,255,0.86);
+  &.ok { background: var(--ok-soft); color: var(--ok); }
+  &.warn { background: rgba(251,191,36,0.16); color: var(--warn); }
+  &.bad { background: rgba(248,113,113,0.16); color: var(--bad-light); }
+  &.muted { background: var(--white-6); color: var(--white-35); }
+}
+
+@utility cmd-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
+  background: var(--white-8);
+  color: rgba(255,255,255,0.86);
+  &.ok { background: var(--ok-soft); color: var(--ok); }
+  &.warn { background: rgba(251,191,36,0.16); color: var(--warn); }
+  &.bad { background: rgba(248,113,113,0.16); color: var(--bad-light); }
+  &.muted { background: var(--white-6); color: var(--white-35); }
+}
+
+@utility cmd-tag-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  color: var(--white-56);
+  font-size: var(--fs-sm);
+}
+
+/* ── Command Gauge + Signal ───────────────────────────────── */
+
+@utility cmd-gauge-ring {
+  width: 88px;
+  height: 88px;
+  padding: 9px;
+  border-radius: 50%;
+  background: conic-gradient(var(--gauge-color) 0deg var(--gauge-angle), var(--white-8) var(--gauge-angle) 360deg);
+  box-shadow: inset 0 0 0 1px var(--white-4);
+}
+
+@utility cmd-gauge-core {
+  & strong {
+    color: var(--text-near-white);
+    font-size: 18px;
+    line-height: 1.1;
+  }
+  & span { color: rgba(148, 163, 184, 0.88); font-size: var(--fs-xs); margin-top: 4px; }
+}
+
+@utility cmd-gauge-copy {
+  & span { color: rgba(191, 219, 254, 0.92); font-size: var(--fs-sm); letter-spacing: 0.08em; text-transform: uppercase; }
+  & small { color: rgba(226, 232, 240, 0.7); line-height: 1.5; }
+}
+
+@utility cmd-signal-rail {
+  &.ok { border-color: var(--ok-18); }
+  &.warn { border-color: var(--warn-20); }
+  &.bad { border-color: rgba(248,113,113,0.22); }
+  & small { color: rgba(226, 232, 240, 0.66); line-height: 1.5; }
+}
+
+@utility cmd-signal-copy {
+  & strong {
+    color: var(--text-near-white);
+    font-size: 18px;
+    line-height: 1.1;
+  }
+  & span {
+    color: rgba(148, 163, 184, 0.9);
+    font-size: var(--fs-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+}
+
+@utility cmd-signal-bar {
+  & span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, rgba(103,232,249,0.86), rgba(74,222,128,0.9));
+  }
+  & span.warn {
+    background: linear-gradient(90deg, rgba(251,191,36,0.88), rgba(249,115,22,0.9));
+  }
+  & span.bad {
+    background: linear-gradient(90deg, rgba(248,113,113,0.9), rgba(244,63,94,0.9));
+  }
+}
+
+/* Word-break safety for guide/readiness/swarm text */
+.cmd-guide-card p,
+.cmd-readiness-row p,
+.swarm-event-node,
+.swarm-event-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* ── Command responsive breakpoints ───────────────────────── */
+
+@media (max-width: 1450px) {
+  .cmd-warroom-grid,
+  .cmd-warroom-grid.wallboard,
+  .cmd-hero-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1100px) {
+  .cmd-warroom-grid,
+  .cmd-warroom-grid.wallboard,
+  .cmd-hero-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cmd-warroom-strip { position: static; }
+}
 
 @keyframes fadeSlide {
   from {

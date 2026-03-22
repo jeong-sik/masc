@@ -370,7 +370,7 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
       <aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card rounded-xl ${toneClass(signalNode.tone)}">
         <div class="card rounded-xl-title-row">
           <div class="card rounded-xl-title">${signalNode.label}</div>
-          <span class="command-chip rounded-full ${toneClass(signalNode.tone)}">${orchestraNodeKindLabel(signalNode.kind)}</span>
+          <span class="cmd-chip rounded-full ${toneClass(signalNode.tone)}">${orchestraNodeKindLabel(signalNode.kind)}</span>
         </div>
         <p>${signalNode.detail ?? '세부 설명이 없습니다.'}</p>
         ${signalNode.suggested_surface
@@ -396,9 +396,9 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
     <aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card rounded-xl ${toneClass(node.tone)}">
       <div class="card rounded-xl-title-row">
         <div class="card rounded-xl-title">${node.label}</div>
-        <span class="command-chip rounded-full ${toneClass(node.tone)}">${orchestraNodeKindLabel(node.kind)}</span>
+        <span class="cmd-chip rounded-full ${toneClass(node.tone)}">${orchestraNodeKindLabel(node.kind)}</span>
       </div>
-      ${node.subtitle ? html`<p class="command-card rounded-xl-sub">${node.subtitle}</p>` : null}
+      ${node.subtitle ? html`<p class="cmd-card rounded-xl-sub">${node.subtitle}</p>` : null}
       <div class="orchestra-fact-list flex flex-col gap-2">
         ${node.facts.map(factRow => html`
           <div class="flex justify-between gap-3 py-2 px-2.5 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-6)]">
@@ -408,11 +408,11 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
         `)}
       </div>
       ${relatedSignals.length > 0 ? html`
-        <div class="command-tag rounded-full-row">
-          ${relatedSignals.map(signalNode => html`<span class="command-chip rounded-full ${toneClass(signalNode.tone)}">${signalNode.label}</span>`)}
+        <div class="cmd-tag rounded-full-row">
+          ${relatedSignals.map(signalNode => html`<span class="cmd-chip rounded-full ${toneClass(signalNode.tone)}">${signalNode.label}</span>`)}
         </div>
       ` : null}
-      <div class="command-card rounded-xl-sub">연결 ${relatedEdges.length}개 · 근거 ${node.provenance}</div>
+      <div class="cmd-card rounded-xl-sub">연결 ${relatedEdges.length}개 · 근거 ${node.provenance}</div>
       ${(node.link_tab && (node.link_surface || Object.keys(node.link_params ?? {}).length > 0))
         ? html`
             <div class="flex gap-2.5 flex-wrap mt-3">

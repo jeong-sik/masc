@@ -25,13 +25,6 @@
    board_dispatch
    board_listener
    capability_registry
-   backend_core
-   backend
-   backend_pg
-   backend_eio
-   backend_eio_compression
-   backend_eio_pg
-   backend_eio_types
    bounded
    cache_eio
    env_config
@@ -54,7 +47,6 @@
    cp_lifecycle_search
    cp_lifecycle_intents
    cp_lifecycle_policy
-   compression_dict
    config
    context_router
    dashboard
@@ -136,7 +128,6 @@
    model_spec
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly
-   eio_context
    encryption
    file_lock_eio
    gcm_compat
@@ -391,7 +382,6 @@
    tool_walph
    tool_agent
    tool_task
-   task_pg
    task_dispatch
    tool_room
    workflow_guide
@@ -462,7 +452,6 @@
    tool_social
    transport
    udp_socket_eio
-   types
    shutdown
    supervisor
    keeper_chat_ag_ui
@@ -737,7 +726,6 @@
   autoresearch_codegen
   autoresearch_knowledge
   tool_autoresearch_schemas
-  backend_eio_compression
   room_multi
   room_init
   room_lifecycle
@@ -827,6 +815,10 @@
    masc_types
    ;; Core utilities (extracted sub-library)
    masc_core
+   ;; Eio context (extracted sub-library)
+   masc_eio_context
+   ;; Backend storage (extracted sub-library)
+   masc_backend
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

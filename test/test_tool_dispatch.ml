@@ -1,7 +1,7 @@
 (** Tests for Tool_dispatch — O(1) central dispatch registry. *)
 
 module Tool_dispatch = Masc_mcp.Tool_dispatch
-module Types = Masc_mcp.Types
+module Types = Types
 
 (** Helper: create a minimal tool_schema for registration. *)
 let make_schema name =

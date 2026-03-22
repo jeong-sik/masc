@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module Compression_dict = Masc_mcp.Compression_dict
+module Compression_dict = Compression_dict
 
 (* ============================================================
    Threshold Constants Tests

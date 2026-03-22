@@ -38,7 +38,7 @@ let () =
               in
               let schema_names =
                 List.map
-                  (fun (s : Masc_mcp.Types.tool_schema) -> s.name)
+                  (fun (s : Types.tool_schema) -> s.name)
                   all_schemas
               in
               let names =

@@ -21,7 +21,7 @@ let test_list_masc_tools_exposes_board_and_lodge_schemas () =
         with
         | Ok schemas ->
             let names =
-              List.map (fun (schema : Lib.Types.tool_schema) -> schema.name) schemas
+              List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
             in
             check bool "masc_board_post" true (List.mem "masc_board_post" names);
             check bool "masc_board_list" true (List.mem "masc_board_list" names);

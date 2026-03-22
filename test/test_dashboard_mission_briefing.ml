@@ -216,13 +216,13 @@ let test_compact_keeper_json_normalizes_missing_fields () =
   check_list_field compact "active_goal_ids" 0
 
 let test_compact_agent_json_uses_current_focus () =
-  let agent : Masc_mcp.Types.agent =
+  let agent : Types.agent =
     {
       name = "worker-1";
       agent_type = "codex";
       capabilities = [ "ops"; "review"; "debug" ];
       current_task = None;
-      status = Masc_mcp.Types.Active;
+      status = Types.Active;
       joined_at = "2026-03-11T08:00:00Z";
       last_seen = "2026-03-11T08:05:00Z";
       meta = None;
@@ -305,13 +305,13 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
           ]);
     ]
   in
-  let agent : Masc_mcp.Types.agent =
+  let agent : Types.agent =
     {
       name = "agent-gap";
       agent_type = "codex";
       capabilities = [];
       current_task = None;
-      status = Masc_mcp.Types.Active;
+      status = Types.Active;
       joined_at = "2026-03-11T08:00:00Z";
       last_seen = "2026-03-11T08:05:00Z";
       meta = None;
@@ -324,23 +324,23 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
   check int "gap count" 4 (List.length gaps)
 
 let test_collect_metadata_gaps_ignores_inactive_agents () =
-  let inactive_agent : Masc_mcp.Types.agent =
+  let inactive_agent : Types.agent =
     {
       name = "agent-idle";
       agent_type = "codex";
       capabilities = [];
       current_task = None;
-      status = Masc_mcp.Types.Inactive;
+      status = Types.Inactive;
       joined_at = "2026-03-11T08:00:00Z";
       last_seen = "2026-03-11T08:05:00Z";
       meta = None;
     }
   in
-  let active_agent : Masc_mcp.Types.agent =
+  let active_agent : Types.agent =
     {
       inactive_agent with
       name = "agent-live";
-      status = Masc_mcp.Types.Active;
+      status = Types.Active;
     }
   in
   let gaps =

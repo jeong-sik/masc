@@ -1,0 +1,33 @@
+(include_subdirs no)
+(library
+ (name masc_backend)
+ (public_name masc_mcp.masc_backend)
+ (wrapped false)
+ (modules
+  compression_dict
+  backend_core
+  backend
+  backend_eio_types
+  backend_eio_compression
+  backend_eio_pg
+  backend_eio
+  backend_pg
+  task_pg)
+ (libraries
+  masc_types
+  masc_core
+  masc_log
+  masc_eio_context
+  time_compat
+  fs_compat
+  yojson
+  unix
+  eio
+  eio.unix
+  caqti
+  caqti-eio
+  caqti-eio.unix
+  caqti-driver-postgresql
+  uri
+  zstd)
+ (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

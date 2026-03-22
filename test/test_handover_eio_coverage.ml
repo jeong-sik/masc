@@ -165,7 +165,7 @@ let test_generate_id_unique () =
    Eio Helpers
    ============================================================ *)
 
-module Backend = Masc_mcp.Backend
+module Backend = Backend
 module Room_utils = Masc_mcp.Room_utils
 
 let rec rm_rf path =

@@ -25,7 +25,7 @@ open Alcotest
 let test_notify_query_compiles () =
   (* The Caqti query is compiled at module load time.
      If this test runs, the query is syntactically valid. *)
-  let module B = Masc_mcp.Backend in
+  let module B = Backend in
   (* Just verify the module loads without error *)
   let _ = B.PostgresNative.create {
     B.default_config with

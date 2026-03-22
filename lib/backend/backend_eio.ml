@@ -374,10 +374,8 @@ module FileSystem = struct
                 true
               with Unix.Unix_error (Unix.EAGAIN, _, _)
                  | Unix.Unix_error (Unix.EACCES, _, _) ->
-                (* Lock held by another process, backoff and retry *)
-                (match Process_eio.get_clock () with
-                 | Ok clk -> Eio.Time.sleep clk 0.001
-                 | Error _ -> Eio.Fiber.yield ());
+                (* Lock held by another process, yield and retry *)
+                Eio.Fiber.yield ();
                 try_lock (retries - 1)
           in
           let _ = try_lock max_retries in
@@ -464,7 +462,7 @@ module FileSystem = struct
                 true
               with Unix.Unix_error (Unix.EAGAIN, _, _)
                  | Unix.Unix_error (Unix.EACCES, _, _) ->
-                (match Process_eio.get_clock () with Ok clk -> Eio.Time.sleep clk 0.001 | Error _ -> ());
+                Eio.Fiber.yield ();
                 try_lock (retries - 1)
           in
           let _ = try_lock max_retries in

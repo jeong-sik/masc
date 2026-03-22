@@ -11,7 +11,7 @@
 open Alcotest
 
 module Room_utils = Masc_mcp.Room_utils
-module Backend = Masc_mcp.Backend
+module Backend = Backend
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in

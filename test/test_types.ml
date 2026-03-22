@@ -1,6 +1,6 @@
 (** Tests for Types module *)
 
-open Masc_mcp.Types
+open Types
 
 let test_agent_status_roundtrip () =
   let statuses = [Active; Busy; Listening; Inactive] in

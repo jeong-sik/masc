@@ -1,7 +1,5 @@
 (** Tests for Backend_eio: OCaml 5.x Eio-native storage backend *)
 
-open Masc_mcp
-
 (** Recursive directory cleanup *)
 let rec rm_rf path =
   if Sys.is_directory path then begin

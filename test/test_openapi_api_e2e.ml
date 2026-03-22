@@ -190,6 +190,11 @@ let with_server f =
         ("MASC_LODGE_DAEMON_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+        ("MASC_POSTGRES_URL", "");
+        ("DATABASE_URL", "");
+        ("SUPABASE_DB_URL", "");
+        ("SB_PG_URL", "");
+        ("MASC_BOARD_BACKEND", "jsonl");
       ]
   in
   let argv =
@@ -212,14 +217,28 @@ let with_server f =
 
 let test_openapi_route_serves_document () =
   with_server @@ fun ~port ->
-  let res = run_curl ~port ~path:"/api/v1/openapi.json" () in
-  (match res.status with
-  | Some code -> check int "openapi route returns 200" 200 code
-  | None ->
-      fail
-        (Printf.sprintf "missing HTTP status (curl_exit=%d, stderr=%s)"
-           res.curl_exit res.stderr));
-  let json = Yojson.Safe.from_string res.body in
+  (* Retry up to 5 times: /health returns 200 before server_state is set,
+     so the openapi route may initially return {"error":"not initialized"} *)
+  let rec fetch_openapi retries =
+    let res = run_curl ~port ~path:"/api/v1/openapi.json" () in
+    (match res.status with
+    | Some code -> check int "openapi route returns 200" 200 code
+    | None ->
+        fail
+          (Printf.sprintf "missing HTTP status (curl_exit=%d, stderr=%s)"
+             res.curl_exit res.stderr));
+    let json = Yojson.Safe.from_string res.body in
+    let open Yojson.Safe.Util in
+    match json |> member "openapi" |> to_string_option with
+    | Some _ -> json
+    | None when retries > 0 ->
+        Unix.sleepf 0.5;
+        fetch_openapi (retries - 1)
+    | None ->
+        fail
+          (Printf.sprintf "openapi field missing after retries\nbody=%s" res.body)
+  in
+  let json = fetch_openapi 5 in
   let open Yojson.Safe.Util in
   check string "openapi version" "3.1.0" (json |> member "openapi" |> to_string);
   check bool "/mcp path present" true

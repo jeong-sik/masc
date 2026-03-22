@@ -93,7 +93,7 @@ let test_http_write_auth_contracts () =
   check bool "keeper config update requires admin permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|with_token_permission_auth ~permission:Types.CanAdmin|});
-  check bool "board vote route uses tool auth guard" true
+  check bool "board vote route requires board vote tool auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
        {|with_tool_auth ~tool_name:"masc_board_vote"|});
   check bool "board vote route overwrites voter from auth identity" true
@@ -105,6 +105,28 @@ let test_http_write_auth_contracts () =
   check bool "provider runs post requires admin permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        {|with_token_permission_auth ~permission:Types.CanAdmin|})
+
+let test_http_read_surface_contracts () =
+  check bool "room status route now requires read auth" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       {|"/api/v1/status" (fun request reqd ->
+       with_read_auth|});
+  check bool "room tasks route now requires read auth" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       {|"/api/v1/tasks" (fun request reqd ->
+       with_read_auth|});
+  check bool "room agents route now requires read auth" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       {|"/api/v1/agents" (fun request reqd ->
+       with_read_auth|});
+  check bool "room messages route now requires read auth" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       {|"/api/v1/messages" (fun request reqd ->
+       with_read_auth|});
+  check bool "provider run status route now requires read auth" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
+       {|"/api/v1/agent-runs/" (fun request reqd ->
+       with_read_auth|})
 
 let test_input_validation_contracts () =
   (* Bug #1602: broadcast must reject empty messages *)
@@ -295,6 +317,7 @@ let () =
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
+           test_case "http read surface contracts" `Quick test_http_read_surface_contracts;
            test_case "input validation contracts" `Quick test_input_validation_contracts;
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;

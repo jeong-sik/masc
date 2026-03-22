@@ -52,7 +52,7 @@ let add_routes ~sw router =
                         ])))
        ) request reqd)
   |> Http.Router.prefix_get "/api/v1/agent-runs/" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_read_auth (fun _state req reqd ->
          let req_path = Http.Request.path req in
          match extract_path_param ~prefix:"/api/v1/agent-runs/" req_path with
          | None ->

@@ -416,6 +416,48 @@ let serve ~sw ~clock ~socket ~request_handler =
   in
   accept_loop 0.05
 
+let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
+  let is_cancelled exn =
+    match exn with
+    | Eio.Cancel.Cancelled _ -> true
+    | _ -> false
+  in
+  Log.Server.info "HTTP/2 h2c mode activated (MASC_USE_H2=1)";
+  let rec accept_loop backoff_s =
+    try
+      let flow, client_addr = Eio.Net.accept ~sw socket in
+      Eio.Fiber.fork ~sw (fun () ->
+          Eio.Switch.run (fun conn_sw ->
+              Eio.Switch.on_release conn_sw (fun () ->
+                  try Eio.Flow.close flow
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn -> Log.Misc.warn "[h2] flow close: %s" (Printexc.to_string exn));
+              try
+                H2_eio.Server.create_connection_handler ~sw:conn_sw
+                  ~request_handler:h2_request_handler
+                  ~error_handler:h2_error_handler
+                  client_addr
+                  flow
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Misc.error "[h2] Connection error: %s"
+                  (Printexc.to_string exn)));
+      accept_loop 0.05
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      if is_cancelled exn then ()
+      else begin
+        Log.Misc.error "[h2] Accept error: %s" (Printexc.to_string exn);
+        (try Eio.Time.sleep clock backoff_s
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn -> Log.Misc.warn "[h2] backoff sleep: %s" (Printexc.to_string exn));
+        accept_loop (Float.min 2.0 (backoff_s *. 1.5))
+      end
+  in
+  accept_loop 0.05
+
 let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler =
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
@@ -430,10 +472,15 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   let config = make_http_config ~host ~port in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
   let request_handler = make_request_handler routes in
-  let _h2_request_handler =
+  let h2_request_handler =
     make_h2_request_handler ~sw ~clock ~server_start_time
   in
-  let _h2_error_handler = make_h2_error_handler () in
+  let h2_error_handler = make_h2_error_handler () in
+  let use_h2 =
+    match Sys.getenv_opt "MASC_USE_H2" with
+    | Some "1" | Some "true" -> true
+    | _ -> false
+  in
   let socket = listen_socket ~sw ~net config in
 
   (* 2. All init in background fiber — protected so failures don't kill HTTP *)
@@ -491,4 +538,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         (Printexc.to_string exn));
 
   (* 3. Start serving — /health responds before init completes *)
-  serve ~sw ~clock ~socket ~request_handler
+  if use_h2 then
+    serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler
+  else
+    serve ~sw ~clock ~socket ~request_handler

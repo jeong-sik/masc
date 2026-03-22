@@ -18,35 +18,14 @@ let keeper_dir_ (config : Room.config) =
 let session_base_dir_ (config : Room.config) =
   Filename.concat (Filename.concat config.base_path ".masc") "perpetual"
 
-let model_specs_of_strings (model_strs : string list) :
-    (Model_spec.model_spec list, string) result =
-  let rec go acc = function
-    | [] -> Ok (List.rev acc)
-    | s :: rest -> (
-        match Model_spec.model_spec_of_string s with
-        | Ok spec -> go (spec :: acc) rest
-        | Error e -> Error (Printf.sprintf "Bad model spec %s: %s" s e))
-  in
-  go [] model_strs
-
 let env_present name =
   match Sys.getenv_opt name with
   | Some value -> String.trim value <> ""
   | None -> false
 
-let model_spec_is_local_runtime (model : Model_spec.model_spec) =
-  match model.provider with
-  | Model_spec.Llama -> true
-  | _ -> false
-
 let label_is_local_runtime (label : string) =
   let l = String.lowercase_ascii (String.trim label) in
   String.length l >= 6 && String.sub l 0 6 = "llama:"
-
-let model_spec_is_available (model : Model_spec.model_spec) =
-  match model.provider with
-  | Model_spec.Llama -> true
-  | _ -> true
 
 (** Check whether a model label refers to an available provider.
     Currently always returns true (all providers are considered available). *)
@@ -86,21 +65,6 @@ let maybe_append_keeper_fallback_models (models : string list) =
     in
     if extra = [] then models else models @ extra
 
-let ensure_api_keys (models : Model_spec.model_spec list) : (unit, string) result =
-  let missing =
-    List.filter_map (fun (m : Model_spec.model_spec) ->
-      match m.api_key_env with
-      | None -> None
-      | Some env ->
-          let v = Sys.getenv_opt env |> Option.value ~default:"" in
-          if v = "" then Some env else None)
-      models
-  in
-  match missing with
-  | [] -> Ok ()
-  | xs ->
-      Error (Printf.sprintf "Missing API key env vars: %s" (String.concat ", " xs))
-
 (** Check API key availability using model label strings (no model_spec needed).
     Parses labels to extract api_key_env, filtering out unparseable labels. *)
 let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
@@ -109,7 +73,19 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
     Error (Printf.sprintf "No valid/available model specs for labels: %s"
       (String.concat ", " labels))
   else
-    ensure_api_keys specs
+    let missing =
+      List.filter_map (fun (m : Model_spec.model_spec) ->
+        match m.api_key_env with
+        | None -> None
+        | Some env ->
+            let v = Sys.getenv_opt env |> Option.value ~default:"" in
+            if v = "" then Some env else None)
+        specs
+    in
+    match missing with
+    | [] -> Ok ()
+    | xs ->
+        Error (Printf.sprintf "Missing API key env vars: %s" (String.concat ", " xs))
 
 (** Legacy single-file metrics path (for fallback reads). *)
 let keeper_metrics_path config name =

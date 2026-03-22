@@ -65,12 +65,14 @@ let trpg_keeper_models_for_round () : string list =
     | Some models -> models
     | None -> trpg_default_fast_keeper_models ()
   in
-  match Keeper_types.model_specs_of_strings chosen with
-  | Ok _ -> chosen
-  | Error e ->
-      if chosen <> [] then
-        Log.Trpg.info "invalid keeper model override ignored: %s" e;
-      []
+  let valid_specs = Model_spec.available_model_specs_of_strings chosen in
+  if valid_specs <> [] || chosen = [] then
+    chosen
+  else begin
+    Log.Trpg.info "invalid keeper model override ignored: no valid specs for %s"
+      (String.concat ", " chosen);
+    []
+  end
 
 let trim_trailing_slashes (raw : string) : string =
   let rec loop value =

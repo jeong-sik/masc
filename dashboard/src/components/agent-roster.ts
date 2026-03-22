@@ -120,7 +120,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   }
 
   return html`
-    <div class="p-[var(--space-lg,24px)] max-w-[960px] agent-page">
+    <div class="p-[var(--space-lg,24px)] max-w-[1200px] agent-page">
       <div class="mb-6">
         <h2 class="text-[20px] font-semibold text-[color:var(--ff-gold-bright)] mb-[var(--space-md,16px)] tracking-[0.5px] [text-shadow:0_1px_4px_rgba(212,169,75,0.2)]">${keeperFilter === 'keeper-only' ? '키퍼' : keeperFilter === 'agent-only' ? '에이전트' : '에이전트'} (${filtered.length})</h2>
         <p class="text-[length:var(--fs-sm)] text-[color:var(--white-30)] mt-1">${keeperFilter === 'keeper-only' ? '키퍼 런타임이 있는 에이전트' : keeperFilter === 'agent-only' ? '키퍼 런타임이 없는 에이전트' : '등록된 에이전트 — keeper 런타임이 있으면 컨텍스트 게이지 표시'}</p>
@@ -146,7 +146,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         </div>
       </div>
 
-      <div class="flex flex-col gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         ${filtered.map((agent: Agent) => {
           const brief = briefMap.get(agent.name)
           const keeper = findKeeper(agent.name, keeperList, keeperBriefs)
@@ -157,67 +157,66 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <div
-              class="roster-card rounded-md p-4 transition-all duration-200 ${isKeeper ? 'roster-card--keeper' : ''}"
+              class="group flex flex-col gap-3 p-5 bg-[var(--bg-1)] border border-[var(--card-border)] rounded-2xl hover:border-[var(--accent-soft)] hover:bg-[var(--bg-0)] transition-all duration-200 shadow-sm cursor-pointer relative overflow-hidden"
               key=${agent.name}
               onClick=${() => openAgentDetail(agent.name)}
               role="button"
               tabindex="0"
             >
-              <div class="shrink-0 relative roster-card__avatar">
-                <${AgentAvatar}
-                  name=${agent.name}
-                  status=${agent.status}
-                  traits=${agent.traits}
-                  size="xl"
-                  currentWork=${currentWork}
-                  activityAge=${lastActivity}
-                />
-              </div>
-              <div class="flex-1 min-w-0 flex flex-col gap-2 justify-center">
-                <div class="flex items-center gap-[var(--space-sm,8px)]">
-                  <strong class="text-[length:var(--fs-lg)] text-[color:var(--ff-gold-bright)] font-semibold tracking-[0.3px]">${agent.name}</strong>
-                  ${isKeeper ? html`
-                    <span class="roster-card__keeper-tag">keeper</span>
-                  ` : null}
-                  ${keeper?.generation != null ? html`
-                    <span class="roster-card__gen">G${keeper.generation}</span>
-                  ` : null}
-                  <span class="roster-badge ${statusBadgeClass(agent.status)}">
-                    ${statusLabel(agent.status)}
-                  </span>
+              ${isKeeper && ctxPct != null ? html`<div class="absolute bottom-0 left-0 h-1 bg-linear-to-r from-[var(--accent)] to-[var(--ok)] transition-all duration-300 opacity-80 group-hover:opacity-100" style=${{ width: \`\${ctxPct}%\` }}></div>` : null}
+              
+              <div class="flex items-start gap-4">
+                <div class="shrink-0 relative">
+                  <${AgentAvatar}
+                    name=${agent.name}
+                    status=${agent.status}
+                    traits=${agent.traits}
+                    size="xl"
+                    currentWork=${currentWork}
+                    activityAge=${lastActivity}
+                  />
+                  ${isKeeper ? html`<div class="absolute -bottom-2 left-1/2 -translate-x-1/2 text-[9px] font-bold tracking-[0.1em] text-[color:var(--ff-gold)] bg-[rgba(20,20,30,0.95)] border border-[var(--ff-gold-20)] px-2 py-0.5 rounded-full shadow-md z-10 uppercase">KEEPER</div>` : null}
                 </div>
-
-                ${isKeeper && ctxPct != null ? html`
-                  <div class="flex items-center gap-2">
-                    <div class="roster-card__gauge-track">
-                      <div
-                        class="roster-card__gauge-bar ${pressureClass(keeper.context_ratio)}"
-                        style=${{ width: `${ctxPct}%` }}
-                      />
-                    </div>
-                    <span class="text-[length:var(--fs-xs)] text-[color:var(--white-40)] whitespace-nowrap min-w-[50px] tabular-nums">ctx ${ctxPct}%</span>
+                
+                <div class="flex flex-col min-w-0 flex-1 justify-center py-1">
+                  <div class="flex items-center gap-2 flex-wrap mb-1">
+                    <strong class="text-lg text-[color:var(--text-strong)] font-semibold truncate leading-tight group-hover:text-[var(--accent)] transition-colors">${agent.name}</strong>
+                    <span class="roster-badge ${statusBadgeClass(agent.status)}">${statusLabel(agent.status)}</span>
                   </div>
-                ` : null}
+                  
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    ${keeper?.model ? html`<span class="font-mono text-[10px] text-[color:var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-1.5 py-px rounded">${keeper.model}</span>` : null}
+                    ${keeper?.generation != null ? html`<span class="text-[11px] text-[color:var(--accent)] font-medium bg-[var(--accent-10)] px-1.5 py-px rounded border border-[rgba(71,184,255,0.15)]">Lv.${keeper.generation}</span>` : null}
+                  </div>
+                </div>
+              </div>
 
-                ${currentWork ? html`
-                  <div class="text-[length:var(--fs-base)] text-[color:var(--white-55)] overflow-hidden text-ellipsis whitespace-nowrap">${currentWork}</div>
-                ` : html`
-                  <div class="text-[length:var(--fs-base)] text-[color:var(--white-20)] overflow-hidden text-ellipsis whitespace-nowrap italic">작업 없음</div>
-                `}
-                <div class="flex gap-[var(--space-sm,8px)] text-[length:var(--fs-xs)] text-[color:var(--white-30)]">
-                  ${lastActivity != null ? html`
-                    <span>${formatDuration(lastActivity)} 전</span>
-                  ` : null}
-                  ${keeper?.model ? html`
-                    <span class="py-px px-1.5 bg-[rgba(212,169,75,0.08)] border border-[var(--ff-border-subtle)] rounded-[3px] text-[rgba(212,169,75,0.6)]">${keeper.model}</span>
-                  ` : null}
+              <div class="flex flex-col gap-2 mt-2 pt-3 border-t border-[var(--border-slate-12)]">
+                <div class="flex justify-between items-center text-[10px] text-[var(--text-muted)]">
+                  <div class="flex items-center gap-1.5 truncate max-w-[65%]">
+                    ${currentWork 
+                      ? html`<span class="text-[12px] text-[color:var(--accent)] bg-[var(--accent-soft)] px-2 py-0.5 rounded-md truncate font-medium border border-[rgba(71,184,255,0.1)] shadow-sm">${currentWork}</span>`
+                      : html`<span class="text-[12px] text-[color:var(--text-dim)] italic px-2 py-0.5 bg-[var(--white-2)] rounded-md">대기 중</span>`
+                    }
+                  </div>
+                  
+                  <div class="flex flex-col items-end gap-1">
+                    ${lastActivity != null ? html`
+                      <span class="flex items-center gap-1 text-[11px]">
+                        ⚡ ${formatDuration(lastActivity)} 전
+                      </span>
+                    ` : html`<span></span>`}
+                    ${isKeeper && ctxPct != null ? html`
+                      <span class="font-medium text-[11px]"><span class="text-[color:var(--ff-gold)] mr-1">CTX</span><span class="text-[color:var(--text-strong)]">${ctxPct}%</span></span>
+                    ` : null}
+                  </div>
                 </div>
               </div>
             </div>
           `
         })}
         ${filtered.length === 0 ? html`
-          <div class="py-[var(--space-xl,32px)] text-center text-[color:var(--white-20)] text-[length:var(--fs-md)] border border-dashed border-[var(--ff-border-subtle)] rounded-md">조건에 맞는 에이전트가 없습니다.</div>
+          <div class="py-[var(--space-xl,32px)] text-center text-[color:var(--white-20)] text-[length:var(--fs-md)] border border-dashed border-[var(--ff-border-subtle)] rounded-md col-span-full">조건에 맞는 에이전트가 없습니다.</div>
         ` : null}
       </div>
     </div>

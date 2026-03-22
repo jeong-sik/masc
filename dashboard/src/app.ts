@@ -62,27 +62,35 @@ export function App() {
   const currentSection = currentSectionForRoute(route.value)
 
   return html`
-    <div class="flex flex-col h-screen overflow-hidden bg-[var(--bg-0)]">
-      <!-- Top Bar (GCP-style slim header) -->
-      <header class="flex items-center justify-between h-12 px-5 border-b border-[var(--card-border)] bg-[rgba(8,15,29,0.95)] backdrop-blur-md shrink-0 z-50">
-        <div class="flex items-center gap-3">
-          <h1 class="text-[15px] font-semibold text-[var(--text-strong)] tracking-tight">MASC</h1>
-          <span class="text-[12px] text-[var(--text-muted)] hidden sm:inline">${currentSection?.description ?? currentView?.description ?? ''}</span>
-          <${BuildIdentityBadge} />
+    <div class="flex flex-col h-screen overflow-hidden bg-bg-0 text-text-body font-sans">
+      <!-- Top Bar (Modern frosted glass header) -->
+      <header class="flex items-center justify-between h-14 px-6 border-b border-card-border bg-bg-0/80 backdrop-blur-xl shrink-0 z-50 shadow-sm shadow-black/10">
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <div class="size-6 rounded-md bg-gradient-to-br from-accent to-blue-600 shadow-inner flex items-center justify-center">
+              <span class="text-[10px] font-bold text-white tracking-tighter">M</span>
+            </div>
+            <h1 class="text-base font-semibold text-text-strong tracking-wide">MASC</h1>
+          </div>
+          <div class="w-[1px] h-4 bg-card-border mx-1"></div>
+          <span class="text-[13px] font-medium text-text-muted hidden sm:inline">${currentSection?.description ?? currentView?.description ?? ''}</span>
+          <div class="ml-2">
+            <${BuildIdentityBadge} />
+          </div>
         </div>
         <${ConnectionStatus} />
       </header>
 
       <!-- Body: Sidebar + Main -->
-      <div class="flex flex-1 overflow-hidden">
-        <!-- Sidebar (fixed 240px) -->
-        <aside class="w-60 shrink-0 border-r border-[var(--card-border)] bg-[rgba(10,18,34,0.6)] overflow-y-auto">
+      <div class="flex flex-1 overflow-hidden relative">
+        <!-- Sidebar (fixed 260px) -->
+        <aside class="w-[260px] shrink-0 border-r border-card-border bg-bg-1/40 overflow-y-auto flex flex-col">
           <${SideRail} />
         </aside>
 
         <!-- Main Content -->
-        <main class="flex-1 overflow-y-auto p-6 min-w-0">
-          <div class="max-w-[1400px] mx-auto">
+        <main class="flex-1 overflow-y-auto p-8 min-w-0 bg-gradient-to-b from-transparent to-bg-0/50">
+          <div class="max-w-[1400px] mx-auto pb-12">
             <${DashboardMain} />
           </div>
         </main>

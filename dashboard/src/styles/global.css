@@ -236,7 +236,33 @@ body {
   font-family: "IBM Plex Sans KR", "IBM Plex Sans", "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   color: var(--text-body);
   line-height: 1.5;
-  background: var(--bg-0);
+  background:
+    radial-gradient(circle at 12% 12%, rgba(71, 184, 255, 0.18), transparent 26%),
+    radial-gradient(circle at 88% 14%, rgba(74, 222, 128, 0.12), transparent 20%),
+    radial-gradient(circle at 50% 100%, rgba(168, 85, 247, 0.1), transparent 28%),
+    linear-gradient(180deg, #06101d 0%, #0b1220 48%, #070d18 100%);
+  background-attachment: fixed;
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(255,255,255,0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.024) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(circle at center, black, transparent 88%);
+  opacity: 0.28;
+  z-index: 0;
+}
+
+#app {
+  position: relative;
+  min-height: 100vh;
+  z-index: 1;
 }
 
 a {

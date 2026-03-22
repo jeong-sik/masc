@@ -6,7 +6,6 @@ import { TimeAgo } from './common/time-ago'
 import { EmptyState } from './common/empty-state'
 import { FilterChips } from './common/filter-chips'
 import { governanceToneClass } from '../lib/tone'
-import type { GovernanceFilter } from './governance-utils'
 import {
   governanceData,
   governanceError,

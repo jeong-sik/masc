@@ -9,8 +9,6 @@ import { roomTruthInitializing } from '../room-truth-store'
 import { Overview } from './overview/overview'
 import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
-import { LoadingState } from './common/feedback-state'
-import { NavItem, SubNavItem, NavSectionLabel } from './common/nav-item'
 import {
   DASHBOARD_SURFACES,
   DASHBOARD_NAV_ITEMS,
@@ -18,7 +16,7 @@ import {
   sectionItemsForTab,
   surfaceForTab,
 } from '../config/navigation'
-import { InterveneRailCard, SnapshotCard } from './resident-runtime-rail'
+import { SnapshotCard } from './resident-runtime-rail'
 
 const buildIdentityOpen = signal(false)
 
@@ -29,7 +27,7 @@ const LazyLabSurface = lazy(async () => ({ default: (await import('./lab-unified
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
 function lazyTabFallback(label: string) {
-  return html`<${LoadingState}>${label} 불러오는 중...<//>`
+  return html`<div class="loading-state loading-pulse">${label} 불러오는 중...</div>`
 }
 
 function formatDisconnectDuration(): string {
@@ -52,7 +50,7 @@ export function ConnectionStatus() {
     : `재연결 중...${formatDisconnectDuration()}`
 
   return html`
-    <div class="flex items-center gap-2 text-[13px] whitespace-nowrap ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}">
+    <div class="flex items-center gap-2 text-[length:var(--fs-sm)] whitespace-nowrap ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}">
       <span class="size-[9px] rounded-full inline-block ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_9px_rgba(74,222,128,0.8)]' : 'bg-[var(--bad)]'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
@@ -83,7 +81,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button
-        class="text-[11px] py-[2px] px-[9px] rounded-full border border-solid border-[rgba(71,184,255,0.35)] bg-[var(--accent-soft)] text-[#9ad9ff] cursor-pointer font-[inherit]"
+        class="text-[11px] py-[6px] px-[11px] rounded-full border border-solid border-[rgba(71,184,255,0.28)] bg-[rgba(71,184,255,0.12)] text-[#bfe7ff] cursor-pointer font-[inherit] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-colors duration-150 hover:bg-[rgba(71,184,255,0.18)]"
         type="button"
         aria-expanded=${buildIdentityOpen.value}
         onClick=${() => {
@@ -94,31 +92,77 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="absolute top-[calc(100%+10px)] left-0 min-w-[280px] py-3 px-3.5 border border-solid border-[var(--card-border)] rounded-xl bg-[rgba(10,18,34,0.96)] shadow-[0_18px_34px_rgba(0,0,0,0.34)] grid gap-2">
-              <div class="flex justify-between gap-3 text-xs text-[var(--text-muted)]">
+            <div class="absolute top-[calc(100%+10px)] right-0 min-w-[300px] py-3 px-3.5 border border-solid border-[var(--card-border)] rounded-[18px] bg-[rgba(6,14,28,0.97)] shadow-[0_24px_44px_rgba(0,0,0,0.36)] grid gap-2">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>릴리즈</span>
-                <strong class="text-[var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>커밋</span>
-                <strong class="text-[var(--text-strong)] text-right">${build?.commit ?? 'git 미감지 (dev)'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${build?.commit ?? 'git 미감지 (dev)'}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>서버 시작</span>
-                <strong class="text-[var(--text-strong)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>업타임</span>
-                <strong class="text-[var(--text-strong)] text-right">${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : '알 수 없음'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : '알 수 없음'}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>쉘 스냅샷</span>
-                <strong class="text-[var(--text-strong)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
               </div>
             </div>
           `
         : null}
     </div>
+  `
+}
+
+function SurfaceLead() {
+  const currentTab = route.value.tab
+  const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
+  const currentSection = currentSectionForRoute(route.value)
+  const activeSectionCount = sectionItemsForTab(currentTab).length
+
+  return html`
+    <section class="mb-5 overflow-hidden rounded-[26px] border border-[rgba(138,163,211,0.16)] bg-[linear-gradient(135deg,rgba(9,22,42,0.96),rgba(6,12,24,0.92))] px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0 max-w-[820px]">
+          <div class="flex flex-wrap items-center gap-2">
+            ${currentView?.icon
+              ? html`<span class="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-[rgba(71,184,255,0.18)] bg-[rgba(71,184,255,0.08)] text-[18px]">${currentView.icon}</span>`
+              : null}
+            <span class="text-[10px] font-semibold uppercase tracking-[0.22em] text-[rgba(154,217,255,0.72)]">Current Surface</span>
+            ${currentSection && currentSection.label !== currentView?.label
+              ? html`<span class="rounded-full border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.05)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">${currentSection.label}</span>`
+              : null}
+          </div>
+          <h2 class="mt-3 text-[28px] font-semibold tracking-[-0.04em] text-[var(--text-strong)]">
+            ${currentSection?.label ?? currentView?.label ?? '홈'}
+          </h2>
+          <p class="mt-2 max-w-[72ch] text-[13px] leading-relaxed text-[var(--text-muted)]">
+            ${currentSection?.description ?? currentView?.description ?? '지금 필요한 신호를 가장 안정적으로 읽을 수 있는 기본 화면입니다.'}
+          </p>
+        </div>
+
+        <div class="grid min-w-[240px] gap-2 rounded-[22px] border border-[rgba(255,255,255,0.07)] bg-[rgba(255,255,255,0.04)] p-3">
+          <div class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
+            <span>현재 탭</span>
+            <strong class="text-[var(--text-strong)]">${currentView?.label ?? currentTab}</strong>
+          </div>
+          <div class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
+            <span>하위 섹션</span>
+            <strong class="text-[var(--text-strong)] tabular-nums">${activeSectionCount}</strong>
+          </div>
+          <div class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
+            <span>연결 상태</span>
+            <strong class="${connected.value ? 'text-[#91f2b4]' : 'text-[#f7b7b7]'}">${connected.value ? 'live' : 'reconnecting'}</strong>
+          </div>
+        </div>
+      </div>
+    </section>
   `
 }
 
@@ -131,38 +175,74 @@ export function SideRail() {
 
   return html`
     <nav class="flex flex-col h-full">
-      <!-- Navigation -->
-      <div class="flex-1 overflow-y-auto py-4 px-3">
-        <${NavSectionLabel}>탐색<//>
-
-        <div class="flex flex-col gap-1">
-          ${DASHBOARD_SURFACES.map(surface => html`
-            <${NavItem}
-              key=${surface.id}
-              active=${surface.id === currentSurface}
-              icon=${surface.icon}
-              onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
-            >
-              ${surface.label}
-            <//>
-          `)}
+      <div class="flex-1 overflow-y-auto px-3 py-4">
+        <div class="mb-4 rounded-[22px] border border-[rgba(255,255,255,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.02))] px-3 py-3">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">Navigation</div>
+          <div class="mt-2 text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">Surface Atlas</div>
+          <p class="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+            주요 면을 먼저 고르고, 같은 맥락의 하위 섹션을 바로 이동합니다.
+          </p>
         </div>
 
-        <!-- Sub-sections -->
+        <div class="flex flex-col gap-2">
+          ${DASHBOARD_SURFACES.map(surface => {
+            const isActive = surface.id === currentSurface
+            return html`
+              <button
+                class="w-full rounded-[22px] border border-solid px-3 py-3 text-left cursor-pointer transition-all duration-150 ${isActive ? 'border-[rgba(71,184,255,0.28)] bg-[linear-gradient(135deg,rgba(71,184,255,0.18),rgba(255,255,255,0.04))] shadow-[0_14px_28px_rgba(0,0,0,0.18)]' : 'border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.02)] hover:border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.04)]'}"
+                key=${surface.id}
+                onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
+              >
+                <div class="flex items-start gap-3">
+                  <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] text-[18px]">
+                    ${surface.icon}
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="text-[13px] font-semibold ${isActive ? 'text-[#d9f2ff]' : 'text-[var(--text-strong)]'}">${surface.label}</span>
+                      ${isActive
+                        ? html`<span class="rounded-full border border-[rgba(71,184,255,0.24)] bg-[rgba(71,184,255,0.14)] px-2 py-0.5 text-[10px] font-medium text-[#9ad9ff]">active</span>`
+                        : null}
+                    </div>
+                    <p class="mt-1 text-[11px] leading-relaxed ${isActive ? 'text-[rgba(214,236,255,0.78)]' : 'text-[var(--text-muted)]'}">
+                      ${surface.description}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            `
+          })}
+        </div>
+
         ${(() => {
           if (sectionItems.length === 0) return null
           return html`
-            <div class="mt-5 pt-4 mx-4 border-t border-[var(--border-slate-12)]">
-              <${NavSectionLabel}>${currentView?.label ?? currentSurface}<//>
-              <div class="flex flex-col gap-1">
+            <div class="mt-5 rounded-[22px] border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.025)] px-3 py-3">
+              <div class="flex items-center justify-between gap-2">
+                <div>
+                  <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">
+                    ${currentView?.label ?? currentSurface}
+                  </div>
+                  <div class="mt-1 text-[13px] font-semibold text-[var(--text-strong)]">
+                    ${currentSection?.label ?? 'Sections'}
+                  </div>
+                </div>
+                <span class="rounded-full border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 text-[10px] text-[var(--text-muted)] tabular-nums">
+                  ${sectionItems.length}
+                </span>
+              </div>
+              <div class="mt-3 flex flex-col gap-1.5">
                 ${sectionItems.map(item => html`
-                  <${SubNavItem}
+                  <button
+                    class="w-full rounded-[16px] border border-solid px-3 py-2 text-left cursor-pointer text-[12px] transition-all duration-150 ${currentSection?.id === item.id ? 'border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.14)] text-[#cfeaff] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]' : 'border-transparent bg-transparent text-[var(--text-muted)] hover:border-[rgba(255,255,255,0.08)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-body)]'}"
                     key=${item.id}
-                    active=${currentSection?.id === item.id}
                     onClick=${() => navigate(currentSurface, item.params)}
                   >
-                    ${item.label}
-                  <//>
+                    <div class="font-medium">${item.label}</div>
+                    <div class="mt-1 text-[10px] leading-relaxed ${currentSection?.id === item.id ? 'text-[rgba(222,240,255,0.72)]' : 'text-[var(--text-muted)]'}">
+                      ${item.description}
+                    </div>
+                  </button>
                 `)}
               </div>
             </div>
@@ -170,8 +250,7 @@ export function SideRail() {
         })()}
       </div>
 
-      <!-- Status Footer -->
-      <div class="shrink-0 border-t border-[var(--border-slate-12)] p-3">
+      <div class="shrink-0 border-t border-[rgba(255,255,255,0.06)] p-3">
         <${SnapshotCard} currentTab=${current} />
       </div>
     </nav>
@@ -221,7 +300,7 @@ export function TabContent() {
 
 export function DashboardMain() {
   if (dashboardLoading.value && !connected.value && !roomTruthInitializing.value) {
-    return html`<${LoadingState}>대시보드 불러오는 중...<//>`
+    return html`<div class="loading-state loading-pulse">대시보드 불러오는 중...</div>`
   }
 
   const routeLabel = [
@@ -236,8 +315,9 @@ export function DashboardMain() {
 
   return html`
     ${roomTruthInitializing.value ? html`
-      <div class="text-center py-[6px] px-4 bg-[rgba(230,167,0,0.12)] border-b border-solid border-b-[rgba(230,167,0,0.3)] text-[#e6a700] text-[13px] shrink-0">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
+      <div class="text-center py-[6px] px-4 bg-[rgba(230,167,0,0.12)] border-b border-solid border-b-[rgba(230,167,0,0.3)] text-[#e6a700] text-[0.8rem] shrink-0">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
     ` : null}
+    <${SurfaceLead} />
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <${TabContent} />
     <//>

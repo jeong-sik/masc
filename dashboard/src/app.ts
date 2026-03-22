@@ -60,37 +60,49 @@ export function App() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
+  const showSectionChip = currentSection != null && currentSection.label !== currentView?.label
 
   return html`
-    <div class="flex flex-col h-screen overflow-hidden bg-bg-0 text-text-body font-sans">
-      <!-- Top Bar (Modern frosted glass header) -->
-      <header class="flex items-center justify-between h-14 px-6 border-b border-card-border bg-bg-0/80 backdrop-blur-xl shrink-0 z-50 shadow-sm shadow-black/10">
-        <div class="flex items-center gap-4">
-          <div class="flex items-center gap-2">
-            <div class="size-6 rounded-md bg-gradient-to-br from-accent to-blue-600 shadow-inner flex items-center justify-center">
-              <span class="text-[10px] font-bold text-white tracking-tighter">M</span>
+    <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--bg-0)] text-[var(--text-body)]">
+      <header class="shrink-0 border-b border-[rgba(138,163,211,0.16)] bg-[rgba(4,9,18,0.78)] px-4 py-4 backdrop-blur-xl">
+        <div class="mx-auto flex w-full max-w-[1680px] items-start justify-between gap-6 max-[860px]:flex-col max-[860px]:items-stretch">
+          <div class="min-w-0">
+            <div class="flex items-center gap-3">
+              <div class="flex size-11 shrink-0 items-center justify-center rounded-[18px] border border-[rgba(113,214,255,0.28)] bg-[linear-gradient(145deg,rgba(61,157,255,0.34),rgba(10,28,58,0.95))] text-[15px] font-semibold text-white shadow-[0_18px_36px_rgba(3,8,18,0.38)]">
+                M
+              </div>
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-[10px] font-semibold uppercase tracking-[0.22em] text-[rgba(154,217,255,0.7)]">MASC Control Deck</span>
+                  ${currentView
+                    ? html`<span class="rounded-full border border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.12)] px-2 py-0.5 text-[10px] font-medium text-[#9ad9ff]">${currentView.label}</span>`
+                    : null}
+                  ${showSectionChip
+                    ? html`<span class="rounded-full border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.05)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">${currentSection?.label}</span>`
+                    : null}
+                </div>
+                <h1 class="mt-1 text-[20px] font-semibold tracking-[-0.03em] text-[var(--text-strong)]">Multi-Agent Room Console</h1>
+                <p class="mt-1 max-w-[760px] text-[12px] leading-relaxed text-[var(--text-muted)]">
+                  ${currentSection?.description ?? currentView?.description ?? 'Rooms, keepers, governance, and operational signals in one place.'}
+                </p>
+              </div>
             </div>
-            <h1 class="text-base font-semibold text-text-strong tracking-wide">MASC</h1>
           </div>
-          <div class="w-[1px] h-4 bg-card-border mx-1"></div>
-          <span class="text-[13px] font-medium text-text-muted hidden sm:inline">${currentSection?.description ?? currentView?.description ?? ''}</span>
-          <div class="ml-2">
+
+          <div class="flex shrink-0 flex-col items-end gap-2">
+            <${ConnectionStatus} />
             <${BuildIdentityBadge} />
           </div>
         </div>
-        <${ConnectionStatus} />
       </header>
 
-      <!-- Body: Sidebar + Main -->
-      <div class="flex flex-1 overflow-hidden relative">
-        <!-- Sidebar (fixed 260px) -->
-        <aside class="w-[260px] shrink-0 border-r border-card-border bg-bg-1/40 overflow-y-auto flex flex-col">
+      <div class="flex flex-1 gap-4 overflow-hidden px-4 pb-4 pt-4 max-[1100px]:flex-col">
+        <aside class="w-[296px] shrink-0 overflow-y-auto rounded-[28px] border border-[rgba(138,163,211,0.16)] bg-[linear-gradient(180deg,rgba(9,17,31,0.94),rgba(7,14,26,0.9))] shadow-[0_30px_80px_rgba(2,6,14,0.42)] max-[1100px]:w-full max-[1100px]:max-h-[360px]">
           <${SideRail} />
         </aside>
 
-        <!-- Main Content -->
-        <main class="flex-1 overflow-y-auto p-8 min-w-0 bg-gradient-to-b from-transparent to-bg-0/50">
-          <div class="max-w-[1400px] mx-auto pb-12">
+        <main class="min-w-0 flex-1 overflow-hidden rounded-[30px] border border-[rgba(138,163,211,0.16)] bg-[linear-gradient(180deg,rgba(8,15,28,0.92),rgba(9,14,25,0.88))] shadow-[0_30px_80px_rgba(2,6,14,0.4)] max-[1100px]:min-h-0">
+          <div class="mx-auto h-full max-w-[1500px] overflow-y-auto px-5 py-5 lg:px-8 lg:py-7">
             <${DashboardMain} />
           </div>
         </main>

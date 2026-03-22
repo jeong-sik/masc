@@ -233,7 +233,7 @@ let with_file_lock config path f =
           match backend_acquire_lock config ~key ~ttl_seconds ~owner with
           | Ok true -> true
           | _ ->
-              Unix.sleepf delay;
+              Eio_unix.sleep delay;
               acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
       in
       if acquire 20 0.005 then
@@ -256,7 +256,7 @@ let with_file_lock_r config path f : ('a, masc_error) result =
         else
           match backend_acquire_lock config ~key ~ttl_seconds ~owner with
           | Ok true -> true
-          | _ -> Unix.sleepf delay; acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
+          | _ -> Eio_unix.sleep delay; acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
       in
       if acquire 20 0.005 then
         Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"

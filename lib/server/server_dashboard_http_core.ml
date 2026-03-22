@@ -12,21 +12,26 @@ let set_executor_pool pool = _executor_pool := Some pool
 
 let run_dashboard_compute ~sw ~clock ~(config : Room.config) compute =
   let fallback () = compute ~config ~sw in
+  let run_in_pool pool_sw =
+    match config.backend_config.Backend.backend_type with
+    | Backend.PostgresNative ->
+        let net = Eio_context.get_net () in
+        let mono_clock = Eio_context.get_mono_clock () in
+        (match
+           Room_utils_backend_setup.with_domain_local_pg_backend
+             ~sw:pool_sw ~net ~clock ~mono_clock config
+         with
+         | Some domain_config -> `Done (compute ~config:domain_config ~sw:pool_sw)
+         | None -> `Fallback)
+    | Backend.Memory | Backend.FileSystem ->
+        `Done (compute ~config ~sw:pool_sw)
+  in
   match !_executor_pool with
   | Some pool ->
       (try
-         let net = Eio_context.get_net () in
-         let mono_clock = Eio_context.get_mono_clock () in
          match
            Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
-             Eio.Switch.run @@ fun pool_sw ->
-             match
-               Room_utils_backend_setup.with_domain_local_pg_backend
-                 ~sw:pool_sw ~net ~clock ~mono_clock config
-             with
-             | Some domain_config ->
-                 `Done (compute ~config:domain_config ~sw:pool_sw)
-             | None -> `Fallback)
+             Eio.Switch.run run_in_pool)
          with
          | `Done value -> value
          | `Fallback ->

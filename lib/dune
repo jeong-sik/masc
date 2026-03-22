@@ -19,6 +19,7 @@
    auto_responder
    auth
    board
+   board_types
    board_core
    board_votes
    board_pg

@@ -168,17 +168,28 @@ let test_unknown_name_returns_fallback () =
   let models =
     Oas_worker.default_model_strings ~cascade_name:"nonexistent_xyz"
   in
-  check bool "catch-all returns non-empty" true (models <> []);
-  (* Always ends with glm:auto as safety net *)
-  let last = List.nth models (List.length models - 1) in
-  check string "last is glm:auto" "glm:auto" last
+  check bool "catch-all returns non-empty" true (models <> [])
 
-let test_briefing_always_has_glm_auto () =
+let test_glm_included_when_zai_key_set () =
+  with_env "ZAI_API_KEY" "test-key" (fun () ->
+    let models =
+      Oas_worker.default_model_strings ~cascade_name:"nonexistent_xyz"
+    in
+    check bool "has glm:auto" true (List.mem "glm:auto" models);
+    let last = List.nth models (List.length models - 1) in
+    check string "last is glm:auto" "glm:auto" last)
+
+let test_glm_excluded_when_zai_key_missing () =
+  with_env "ZAI_API_KEY" "" (fun () ->
+    let models =
+      Oas_worker.default_model_strings ~cascade_name:"nonexistent_xyz"
+    in
+    check bool "no glm:auto" true (not (List.mem "glm:auto" models));
+    check bool "still non-empty" true (models <> []))
+
+let test_briefing_non_empty () =
   let models = Oas_worker.default_model_strings ~cascade_name:"briefing" in
-  check bool "briefing is non-empty" true (List.length models >= 1);
-  (* glm:auto is always the final fallback *)
-  let last = List.nth models (List.length models - 1) in
-  check string "briefing ends with glm:auto" "glm:auto" last
+  check bool "briefing is non-empty" true (List.length models >= 1)
 
 let test_classification_uses_llama_first () =
   let models =
@@ -211,8 +222,12 @@ let () =
             test_all_known_names_return_nonempty;
           test_case "unknown name returns fallback" `Quick
             test_unknown_name_returns_fallback;
-          test_case "briefing always has glm:auto" `Quick
-            test_briefing_always_has_glm_auto;
+          test_case "glm included when ZAI_API_KEY set" `Quick
+            test_glm_included_when_zai_key_set;
+          test_case "glm excluded when ZAI_API_KEY missing" `Quick
+            test_glm_excluded_when_zai_key_missing;
+          test_case "briefing non-empty" `Quick
+            test_briefing_non_empty;
           test_case "classification uses llama first" `Quick
             test_classification_uses_llama_first;
         ] );

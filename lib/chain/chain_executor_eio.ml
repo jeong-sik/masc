@@ -21,7 +21,7 @@ include Chain_executor_leaf
 (** Forward declaration for recursive execution *)
 let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string, string) result =
   match node.node_type with
-  | Model _ -> execute_model_node ctx ~exec_fn ~node node.node_type
+  | Model _ -> execute_model_node ctx ~clock ~exec_fn ~node node.node_type
   | Tool _ -> execute_tool_node ctx ~tool_exec ~node node.node_type
   | Pipeline nodes -> execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec node nodes
   | Fanout nodes -> execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec node nodes

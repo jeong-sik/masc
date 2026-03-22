@@ -11,9 +11,9 @@
 include Chain_executor_helpers
 
 (** Execute a single MODEL node *)
-let execute_model_node ctx ~(exec_fn : exec_fn) ~(node : node) (model : node_type) : (string, string) result =
+let execute_model_node ctx ~clock ~(exec_fn : exec_fn) ~(node : node) (model : node_type) : (string, string) result =
   match model with
-  | Model { model; system; prompt; timeout = _; tools; prompt_ref; prompt_vars = _; thinking } ->
+  | Model { model; system; prompt; timeout; tools; prompt_ref; prompt_vars = _; thinking } ->
       let inputs = resolve_inputs ctx node.input_mapping in
       let resolved_prompt = substitute_prompt prompt inputs in
       (* Apply iteration variable substitution if in GoalDriven context *)
@@ -205,7 +205,21 @@ let execute_model_node ctx ~(exec_fn : exec_fn) ~(node : node) (model : node_typ
             (* Pass through MODEL errors as before *)
             Error msg
       in
-      let final_result = try_with_empty_guard ~attempt:1 ~prompt_to_use:prompt_with_context in
+      let final_result =
+        let run () = try_with_empty_guard ~attempt:1 ~prompt_to_use:prompt_with_context in
+        match timeout with
+        | Some secs when secs > 0 ->
+            let timeout_s = float_of_int secs in
+            (match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (run ())) with
+             | Ok r -> r
+             | Error `Timeout ->
+                 let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
+                 record_complete ctx node.id ~duration_ms ~success:false ~node_type:"model";
+                 record_error ctx node.id ~node_type:"model"
+                   (Printf.sprintf "MODEL node timed out after %ds" secs);
+                 Error (Printf.sprintf "MODEL node timed out after %ds" secs))
+        | _ -> run ()
+      in
       (match final_result with
       | Ok output -> Ok output
       | Error msg ->

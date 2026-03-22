@@ -554,7 +554,7 @@ let keeper_unified_max_tokens () : int =
     ~max_v:16000
 
 (** Max agent turns (tool loops) for unified keeper turns.
-    Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 10. *)
+    Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 1000. *)
 let keeper_unified_max_turns () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TURNS"

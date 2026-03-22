@@ -1028,3 +1028,9 @@
  (name test_grpc_coordination)
  (modules test_grpc_coordination)
  (libraries masc_mcp alcotest yojson unix))
+
+; Context Budget Manager — session-level budget tracking with compression phases
+(test
+ (name test_context_budget)
+ (modules test_context_budget)
+ (libraries masc_mcp alcotest))

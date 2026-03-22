@@ -147,6 +147,64 @@
   /* FF gold (200, 168, 78) */
   --ff-gold-15: var(--ff-gold-15);
 
+  /* Bad / red (248, 113, 113) */
+  --bad-8: rgba(248, 113, 113, 0.08);
+  --bad-15: rgba(248, 113, 113, 0.15);
+  --bad-30: rgba(248, 113, 113, 0.3);
+
+  /* FF gold (200, 168, 78) */
+  --ff-gold-8: rgba(200, 168, 78, 0.08);
+  --ff-gold-10: rgba(200, 168, 78, 0.1);
+  --ff-gold-20: rgba(200, 168, 78, 0.2);
+
+  /* Slate gray (148, 163, 184) */
+  --slate-gray-8: rgba(148, 163, 184, 0.08);
+  --slate-gray-10: rgba(148, 163, 184, 0.1);
+  --slate-gray-12: rgba(148, 163, 184, 0.12);
+  --slate-gray-15: rgba(148, 163, 184, 0.15);
+  --slate-gray-20: rgba(148, 163, 184, 0.2);
+
+  /* FF navy (10, 22, 40) */
+  --ff-navy-44: rgba(10, 22, 40, 0.44);
+  --ff-navy-60: rgba(10, 22, 40, 0.6);
+
+  /* Blue-400 (96, 165, 250) */
+  --blue-400-8: rgba(96, 165, 250, 0.08);
+  --blue-400-15: rgba(96, 165, 250, 0.15);
+
+  /* OK / green (74, 222, 128) */
+  --ok-8: rgba(74, 222, 128, 0.08);
+  --ok-18: rgba(74, 222, 128, 0.18);
+  --ok-20: rgba(74, 222, 128, 0.2);
+  --ok-48: rgba(74, 222, 128, 0.48);
+
+  /* Accent / crystal blue (71, 184, 255) */
+  --accent-14: rgba(71, 184, 255, 0.14);
+  --accent-18: rgba(71, 184, 255, 0.18);
+
+  /* White overlay — extended */
+  --white-45: rgba(255, 255, 255, 0.45);
+  --white-56: rgba(255, 255, 255, 0.56);
+  --white-68: rgba(255, 255, 255, 0.68);
+  --white-78: rgba(255, 255, 255, 0.78);
+  --white-82: rgba(255, 255, 255, 0.82);
+  --white-90: rgba(255, 255, 255, 0.9);
+
+  /* Warn / yellow (251, 191, 36) */
+  --warn-15: rgba(251, 191, 36, 0.15);
+  --warn-20: rgba(251, 191, 36, 0.2);
+  --warn-28: rgba(251, 191, 36, 0.28);
+  --warn-30: rgba(251, 191, 36, 0.3);
+
+  /* Frost (226, 232, 240) */
+  --frost-72: rgba(226, 232, 240, 0.72);
+
+  /* Border slate (138, 163, 211) */
+  --border-slate-30: rgba(138, 163, 211, 0.3);
+
+  /* Dark panels (15, 23, 42) */
+  --panel-dark-60: rgba(15, 23, 42, 0.6);
+
   /* Font-size scale */
   --fs-2xs: 10px;
   --fs-xs: 11px;
@@ -820,7 +878,7 @@ a:hover {
 }
 
 @keyframes warnBlink {
-  0%, 100% { border-color: rgba(251, 191, 36, 0.28); }
+  0%, 100% { border-color: var(--warn-28); }
   50% { border-color: rgba(251, 191, 36, 0.50); }
 }
 

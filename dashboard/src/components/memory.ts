@@ -433,7 +433,7 @@ export function Memory() {
         : posts.length === 0
           ? html`<div class="empty-state">아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다.</div>`
           : html`
-              <${Card} title="사람이 쓴 글" class="section">
+              <${Card} title="사람이 쓴 글" class="section mb-3.5">
                 <div class="board-post-list">
                   ${grouped.human.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                 </div>
@@ -450,7 +450,7 @@ export function Memory() {
               <//>
               ${grouped.operations.length > 0
                 ? html`
-                    <${Card} title="자동화 · 시스템" class="section">
+                    <${Card} title="자동화 · 시스템" class="section mb-3.5">
                       <div class="board-post-list">
                         ${grouped.operations.map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                       </div>

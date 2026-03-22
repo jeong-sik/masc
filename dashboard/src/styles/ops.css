@@ -157,7 +157,7 @@
 }
 
 .ops-action-guide-item.ok {
-  background: rgba(74, 222, 128, 0.08);
+  background: var(--ok-8);
   color: var(--ok);
 }
 
@@ -181,7 +181,7 @@
 }
 
 .ops-priority-card.warn {
-  border-color: rgba(251, 191, 36, 0.28);
+  border-color: var(--warn-28);
 }
 
 .ops-priority-card.bad {
@@ -215,7 +215,7 @@
 }
 
 .ops-lane-panel {
-  border-color: rgba(71, 184, 255, 0.18);
+  border-color: var(--accent-18);
   background:
     linear-gradient(180deg, rgba(13, 22, 40, 0.76), rgba(13, 22, 40, 0.62)),
     radial-gradient(circle at top right, var(--accent-10), transparent 42%);
@@ -371,12 +371,12 @@
 }
 
 .ops-guidance-card.warn {
-  border-color: rgba(251, 191, 36, 0.3);
+  border-color: var(--warn-30);
   background: rgba(251, 191, 36, 0.06);
 }
 
 .ops-guidance-card.bad {
-  border-color: rgba(248, 113, 113, 0.3);
+  border-color: var(--bad-30);
   background: rgba(248, 113, 113, 0.06);
 }
 

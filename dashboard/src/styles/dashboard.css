@@ -90,7 +90,7 @@
 }
 
 .monitor-pill.bad {
-  background: rgba(248, 113, 113, 0.15);
+  background: var(--bad-15);
   color: #fca5a5;
 }
 
@@ -122,7 +122,7 @@
 
 .back-btn {
   margin-bottom: 12px;
-  border: 1px solid rgba(138, 163, 211, 0.3);
+  border: 1px solid var(--border-slate-30);
   border-radius: 8px;
   padding: 7px 12px;
   font-size: var(--fs-sm);
@@ -188,7 +188,7 @@
 .control-btn {
   border: 1px solid rgba(71, 184, 255, 0.45);
   border-radius: 8px;
-  background: rgba(71, 184, 255, 0.18);
+  background: var(--accent-18);
   color: #c9ebff;
   padding: 8px 12px;
   font-size: var(--fs-sm);
@@ -206,13 +206,13 @@
 }
 
 .control-btn.is-active {
-  border-color: rgba(74, 222, 128, 0.48);
+  border-color: var(--ok-48);
   background: var(--ok-soft);
   color: #b4f5ca;
 }
 
 .control-btn.secondary {
-  border-color: rgba(74, 222, 128, 0.48);
+  border-color: var(--ok-48);
   background: rgba(74, 222, 128, 0.17);
   color: #b4f5ca;
 }

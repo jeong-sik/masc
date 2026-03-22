@@ -18,7 +18,7 @@
   max-height: 90vh;
   overflow-y: auto;
   border-radius: 14px;
-  border: 1px solid rgba(138, 163, 211, 0.3);
+  border: 1px solid var(--border-slate-30);
   background: rgba(16, 25, 45, 0.95);
   padding: 18px;
 }
@@ -150,7 +150,7 @@
   border: 1px solid var(--ff-gold-15);
   box-shadow:
     0 0 20px rgba(200, 168, 78, 0.04),
-    inset 0 1px 0 rgba(200, 168, 78, 0.08);
+    inset 0 1px 0 var(--ff-gold-8);
 }
 
 .ff-plate__portrait {
@@ -214,8 +214,8 @@
 .ff-plate__autonomy {
   font-size: var(--fs-xs);
   color: var(--ff-gold);
-  background: rgba(200, 168, 78, 0.1);
-  border: 1px solid rgba(200, 168, 78, 0.2);
+  background: var(--ff-gold-10);
+  border: 1px solid var(--ff-gold-20);
   border-radius: 4px;
   padding: 1px 5px;
 }
@@ -231,13 +231,13 @@
 .ff-plate__signal--live {
   color: var(--ok);
   background: var(--ok-10);
-  border: 1px solid rgba(74, 222, 128, 0.2);
+  border: 1px solid var(--ok-20);
 }
 
 .ff-plate__signal--stale {
   color: var(--ff-gold);
-  background: rgba(200, 168, 78, 0.1);
-  border: 1px solid rgba(200, 168, 78, 0.2);
+  background: var(--ff-gold-10);
+  border: 1px solid var(--ff-gold-20);
 }
 
 .ff-plate__signal--archived {
@@ -315,7 +315,7 @@
   padding: 6px 8px;
   border-radius: 6px;
   background: rgba(200, 168, 78, 0.05);
-  border: 1px solid rgba(200, 168, 78, 0.1);
+  border: 1px solid var(--ff-gold-10);
 }
 
 .ff-stat__value {

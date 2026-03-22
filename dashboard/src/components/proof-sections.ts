@@ -111,10 +111,10 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
   const isPlanned = item.activity_state === 'planned_only'
   return html`
     <article class="mission-activity-row proof-actor-row" style="${isPlanned ? 'opacity: 0.45;' : ''}">
-      <div class="mission-activity-head">
+      <div class="flex justify-between gap-2.5 items-start">
         <div>
           <strong>${item.actor}</strong>
-          <div class="mission-activity-meta">
+          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
             <span>${item.role ?? '참여자'}</span>
             <span>${lastSeen ? relativeTime(lastSeen) : '기록 없음'}</span>
           </div>
@@ -192,7 +192,7 @@ export function KeyValueGrid({
   return html`
     <div class="grid gap-2.5">
       ${title ? html`<strong>${title}</strong>` : null}
-      <div class="proof-kv-grid">
+      <div class="grid grid-cols-[132px_minmax(0,1fr)] gap-x-3 gap-y-2">
         ${rows.map(row => html`
           <span>${row.label}</span>
           <strong>${row.value}</strong>

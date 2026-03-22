@@ -79,7 +79,7 @@ export function BuildIdentityBadge() {
       : '버전 정보 없음'
 
   return html`
-    <div class="build-identity-wrap">
+    <div class="relative">
       <button
         class="version-badge build-badge-trigger"
         type="button"

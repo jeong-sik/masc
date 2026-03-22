@@ -140,7 +140,7 @@
 
   & p {
     margin: 0;
-    color: rgba(226, 232, 240, 0.72);
+    color: var(--frost-72);
     line-height: 1.5;
   }
 }
@@ -272,7 +272,7 @@
 
 .command-guide-card p {
   margin: 10px 0 0;
-  color: rgba(255,255,255,0.82);
+  color: var(--white-82);
   line-height: 1.5;
 }
 
@@ -305,7 +305,7 @@
 
   & p {
     margin: 8px 0 0;
-    color: rgba(255,255,255,0.82);
+    color: var(--white-82);
     line-height: 1.5;
   }
 }
@@ -612,7 +612,7 @@
 }
 
 .command-card-sub {
-  color: rgba(255,255,255,0.56);
+  color: var(--white-56);
   font-size: var(--fs-sm);
   margin-top: 4px;
   overflow-wrap: anywhere;
@@ -630,7 +630,7 @@
 .command-topology-explainer p,
 .command-alert p {
   margin: 10px 0 0;
-  color: rgba(255,255,255,0.78);
+  color: var(--white-78);
   line-height: 1.5;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -641,7 +641,7 @@
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 8px 12px;
   margin-top: 12px;
-  color: rgba(255,255,255,0.82);
+  color: var(--white-82);
 }
 
 .command-card-foot {
@@ -744,7 +744,7 @@
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 8px;
-  color: rgba(255,255,255,0.56);
+  color: var(--white-56);
   font-size: var(--fs-sm);
 }
 
@@ -766,17 +766,17 @@
 
   &.ok {
     border-color: var(--ok-35);
-    background: rgba(74,222,128,0.08);
+    background: var(--ok-8);
   }
 
   &.warn {
-    border-color: rgba(251,191,36,0.3);
+    border-color: var(--warn-30);
     background: rgba(251,191,36,0.08);
   }
 
   &.bad {
-    border-color: rgba(248,113,113,0.3);
-    background: rgba(248,113,113,0.08);
+    border-color: var(--bad-30);
+    background: var(--bad-8);
   }
 }
 
@@ -918,8 +918,8 @@
   gap: 10px;
 }
 
-.command-signal-rail.ok { border-color: rgba(74,222,128,0.18); }
-.command-signal-rail.warn { border-color: rgba(251,191,36,0.2); }
+.command-signal-rail.ok { border-color: var(--ok-18); }
+.command-signal-rail.warn { border-color: var(--warn-20); }
 .command-signal-rail.bad { border-color: rgba(248,113,113,0.22); }
 
 .command-signal-copy {

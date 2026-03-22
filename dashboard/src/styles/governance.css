@@ -44,7 +44,7 @@ button.council-row:hover {
 
 button.council-row.selected {
   border-color: rgba(71, 184, 255, 0.5);
-  background: rgba(71, 184, 255, 0.14);
+  background: var(--accent-14);
 }
 
 .council-topic {
@@ -75,7 +75,7 @@ button.council-row.selected {
 
 .council-state.open,
 .council-state.positive {
-  border-color: rgba(74, 222, 128, 0.48);
+  border-color: var(--ok-48);
   background: var(--ok-soft);
   color: #b4f5ca;
 }

@@ -17,16 +17,16 @@ export function OperationCard({ brief, selected }: { brief: DashboardExecutionOp
   const terminal = isTerminalStatus(brief.status)
   return html`
     <button
-      class="mission-card-select ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
+      class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.operation-card"
       onClick=${() => {
         selectedOperationId.value = selected ? null : brief.operation_id
         selectedSessionId.value = brief.linked_session_id ?? null
       }}
     >
-      <div class="mission-card-head">
+      <div class="flex justify-between gap-2 items-start flex-wrap">
         <div>
-          <div class="mission-card-target">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
+          <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
           <div class="mission-card-title">${brief.objective}</div>
         </div>
         <span class="command-chip ${terminal ? 'muted' : toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>

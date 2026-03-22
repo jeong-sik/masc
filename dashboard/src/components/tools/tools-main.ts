@@ -29,7 +29,7 @@ export function Tools() {
 
   return html`
     <div>
-      <${Card} title="시스템 도구 목록" class="section">
+      <${Card} title="시스템 도구 목록" class="section mb-3.5">
         <div class="mb-3.5">
           <h2 class="monitor-headline">시스템 도구 목록</h2>
           <p class="monitor-subheadline">
@@ -56,7 +56,7 @@ export function Tools() {
         }
       <//>
 
-      <${Card} title="도구 사용 현황" class="section">
+      <${Card} title="도구 사용 현황" class="section mb-3.5">
         ${usage
           ? html`
               <div class="tool-inventory-usage-hint">

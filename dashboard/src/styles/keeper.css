@@ -211,7 +211,7 @@
   justify-content: space-between;
   padding: 10px 14px;
   border-bottom: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-  background: rgba(10, 22, 40, 0.6);
+  background: var(--ff-navy-60);
 }
 
 .keeper-chat__title {
@@ -278,7 +278,7 @@
 }
 
 .keeper-chat__msg--assistant .keeper-chat__text {
-  background: rgba(200, 168, 78, 0.08);
+  background: var(--ff-gold-8);
   border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
   color: var(--text-body, var(--text-body));
 }
@@ -306,8 +306,8 @@
   padding: 6px 14px;
   font-size: var(--fs-sm);
   color: var(--ff-hp-low, var(--bad-light));
-  background: rgba(248, 113, 113, 0.08);
-  border-top: 1px solid rgba(248, 113, 113, 0.15);
+  background: var(--bad-8);
+  border-top: 1px solid var(--bad-15);
 }
 
 .keeper-chat__input-row {
@@ -315,7 +315,7 @@
   gap: 8px;
   padding: 10px 14px;
   border-top: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-  background: rgba(10, 22, 40, 0.6);
+  background: var(--ff-navy-60);
 }
 
 /* Scrollbar */
@@ -328,7 +328,7 @@
 }
 
 .keeper-chat__messages::-webkit-scrollbar-thumb {
-  background: rgba(200, 168, 78, 0.2);
+  background: var(--ff-gold-20);
   border-radius: 2px;
 }
 
@@ -350,7 +350,7 @@
   justify-content: space-between;
   padding: 10px 14px;
   border-bottom: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-  background: rgba(10, 22, 40, 0.6);
+  background: var(--ff-navy-60);
 }
 
 .keeper-chat__title {
@@ -417,7 +417,7 @@
 }
 
 .keeper-chat__msg--assistant .keeper-chat__text {
-  background: rgba(200, 168, 78, 0.08);
+  background: var(--ff-gold-8);
   border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
   color: var(--text-body, var(--text-body));
 }
@@ -445,8 +445,8 @@
   padding: 6px 14px;
   font-size: var(--fs-sm);
   color: var(--ff-hp-low, var(--bad-light));
-  background: rgba(248, 113, 113, 0.08);
-  border-top: 1px solid rgba(248, 113, 113, 0.15);
+  background: var(--bad-8);
+  border-top: 1px solid var(--bad-15);
 }
 
 .keeper-chat__input-row {
@@ -454,7 +454,7 @@
   gap: 8px;
   padding: 10px 14px;
   border-top: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-  background: rgba(10, 22, 40, 0.6);
+  background: var(--ff-navy-60);
 }
 
 /* Scrollbar */
@@ -467,6 +467,6 @@
 }
 
 .keeper-chat__messages::-webkit-scrollbar-thumb {
-  background: rgba(200, 168, 78, 0.2);
+  background: var(--ff-gold-20);
   border-radius: 2px;
 }

@@ -20,16 +20,16 @@ export function SessionCard({ brief, selected }: { brief: DashboardExecutionSess
   const plannedCount = brief.planned_count ?? brief.member_names.length
   return html`
     <button
-      class="mission-card-select ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
+      class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.session-card"
       onClick=${() => {
         selectedSessionId.value = selected ? null : brief.session_id
         selectedOperationId.value = null
       }}
     >
-      <div class="mission-card-head">
+      <div class="flex justify-between gap-2 items-start flex-wrap">
         <div>
-          <div class="mission-card-target">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
+          <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           <div class="mission-card-title">${brief.goal}</div>
         </div>
         <span class="command-chip ${terminal ? 'muted' : toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>

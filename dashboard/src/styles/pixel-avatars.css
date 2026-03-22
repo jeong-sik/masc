@@ -76,7 +76,7 @@
 }
 
 .pixel-avatar.signal-ring--archived {
-  box-shadow: 0 0 0 2px rgba(138, 163, 211, 0.3);
+  box-shadow: 0 0 0 2px var(--border-slate-30);
 }
 
 /* ── Phase 2: Blocker pulse ring ───────────── */

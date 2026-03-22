@@ -242,11 +242,11 @@ button.monitor-row {
   }
 
   &.ok {
-    border-color: rgba(74, 222, 128, 0.18);
+    border-color: var(--ok-18);
   }
 
   &.warn {
-    border-color: rgba(251, 191, 36, 0.28);
+    border-color: var(--warn-28);
   }
 
   &.bad {
@@ -329,20 +329,20 @@ button.monitor-alert.bad,
   border-radius: 999px;
 }
 .status-badge.active { background: var(--ok-soft); color: var(--ok); }
-.status-badge.busy { background: rgba(251,191,36,0.15); color: var(--warn); }
+.status-badge.busy { background: var(--warn-15); color: var(--warn); }
 .status-badge.listening { background: rgba(56,189,248,0.15); color: #38bdf8; }
 .status-badge.idle { background: rgba(136,136,136,0.15); color: var(--text-dim); }
 .status-badge.offline { background: rgba(85,85,85,0.15); color: #555; }
 .status-badge.todo { background: rgba(136,136,136,0.15); color: var(--text-dim); }
 .status-badge.in-progress, .status-badge.in_progress {
-  background: rgba(251,191,36,0.15); color: var(--warn);
+  background: var(--warn-15); color: var(--warn);
 }
 .status-badge.done, .status-badge.completed {
   background: var(--ok-soft); color: var(--ok);
 }
-.status-badge.running { background: rgba(251,191,36,0.15); color: var(--warn); }
+.status-badge.running { background: var(--warn-15); color: var(--warn); }
 .status-badge.interrupted { background: rgba(56,189,248,0.15); color: #38bdf8; }
-.status-badge.stopped { background: rgba(148,163,184,0.15); color: var(--text-slate); }
+.status-badge.stopped { background: var(--slate-gray-15); color: var(--text-slate); }
 .status-badge.error { background: rgba(251,113,133,0.15); color: #fb7185; }
 
 /* ── Card (generic wrapper) ────────────────────────────────── */

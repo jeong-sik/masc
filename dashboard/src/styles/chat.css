@@ -112,7 +112,7 @@
 .chat-role-chip.user {
   border-color: rgba(71, 184, 255, 0.32);
   color: #c9ebff;
-  background: rgba(71, 184, 255, 0.14);
+  background: var(--accent-14);
 }
 
 .chat-role-chip.assistant {

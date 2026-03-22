@@ -59,7 +59,7 @@
 .mission-stat-detail,
 .mission-crew-event small,
 .mission-timeline-row small {
-  color: rgba(255,255,255,0.68);
+  color: var(--white-68);
   line-height: 1.45;
 }
 .mission-list-stack,
@@ -112,7 +112,7 @@
 
 .proof-summary-block.bad {
   border-color: var(--bad-soft);
-  background: rgba(248,113,113,0.08);
+  background: var(--bad-8);
 }
 
 .proof-summary-block strong,
@@ -133,7 +133,7 @@
 }
 
 .proof-kv-grid > span {
-  color: rgba(255,255,255,0.56);
+  color: var(--white-56);
   font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -160,7 +160,7 @@
 
 .mission-section-head p {
   margin: 0;
-  color: rgba(255,255,255,0.68);
+  color: var(--white-68);
   line-height: 1.5;
 }
 
@@ -210,7 +210,7 @@
 
 .mission-briefing-gap p {
   margin: 0;
-  color: rgba(255,255,255,0.78);
+  color: var(--white-78);
   line-height: 1.45;
 }
 
@@ -224,7 +224,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: rgba(255,255,255,0.78);
+  color: var(--white-78);
 }
 
 .mission-lane-stack,
@@ -245,7 +245,7 @@
 .mission-crew-card.is-selected,
 .mission-activity-card.is-selected {
   box-shadow: 0 0 0 1px rgba(71,184,255,0.45);
-  background: linear-gradient(180deg, rgba(71,184,255,0.14), var(--white-4));
+  background: linear-gradient(180deg, var(--accent-14), var(--white-4));
 }
 
 .mission-card-select {
@@ -400,7 +400,7 @@
   cursor: pointer;
 }
 
-.mission-activity-card.ok { border-color: rgba(74,222,128,0.2); }
+.mission-activity-card.ok { border-color: var(--ok-20); }
 .mission-activity-card.warn { border-color: var(--warn-soft); }
 .mission-activity-card.bad { border-color: var(--bad-soft); }
 
@@ -420,7 +420,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  color: rgba(255,255,255,0.68);
+  color: var(--white-68);
   font-size: var(--fs-sm);
   line-height: 1.45;
 }

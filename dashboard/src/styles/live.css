@@ -39,8 +39,8 @@
 
 .pulse-selected {
   border-color: rgba(96,165,250,0.6);
-  background: rgba(96,165,250,0.08);
-  box-shadow: 0 0 8px rgba(96,165,250,0.15);
+  background: var(--blue-400-8);
+  box-shadow: 0 0 8px var(--blue-400-15);
 }
 
 .pulse-name {
@@ -156,7 +156,7 @@
   letter-spacing: 0.03em;
 }
 
-.activity-kind-chip.live-event-broadcast { background: rgba(96,165,250,0.15); color: var(--accent); }
+.activity-kind-chip.live-event-broadcast { background: var(--blue-400-15); color: var(--accent); }
 .activity-kind-chip.live-event-task { background: var(--ok-soft); color: var(--ok); }
 .activity-kind-chip.live-event-keeper { background: rgba(168,85,247,0.15); color: #a855f7; }
 .activity-kind-chip.live-event-system { background: var(--white-6); color: var(--white-50); }
@@ -239,7 +239,7 @@
 
 .focus-pressure-calm {
   background: var(--white-5);
-  color: rgba(255,255,255,0.45);
+  color: var(--white-45);
 }
 
 .focus-pressure-normal {

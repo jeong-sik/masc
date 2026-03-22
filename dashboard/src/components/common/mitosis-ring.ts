@@ -24,7 +24,7 @@ export function MitosisRing({ ratio, size = 40, stroke = 4 }: { ratio?: number; 
           stroke-dashoffset="${dashoffset}" 
         />
       </svg>
-      <span class="absolute text-[0.65rem] font-bold ${colorClass}">${Math.round(ratio * 100)}%</span>
+      <span class="absolute text-[10px] font-bold ${colorClass}">${Math.round(ratio * 100)}%</span>
     </div>
   `
 }

@@ -18,8 +18,8 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
       <div class="grid gap-2.5">
         <div class="flex justify-between gap-3 items-start flex-wrap">
           <div>
-            <div class="text-[color:var(--text-strong)] text-xl font-semibold capitalize">${loop.profile}</div>
-            <div class="text-[color:var(--text-muted)] text-[11px] mt-0.5 font-mono">${loop.loop_id}</div>
+            <div class="text-[var(--text-strong)] text-xl font-semibold capitalize">${loop.profile}</div>
+            <div class="text-[var(--text-muted)] text-[11px] mt-0.5 font-mono">${loop.loop_id}</div>
           </div>
           <div class="flex gap-1.5 flex-wrap">
             <${StatusBadge} status=${loop.status} />
@@ -36,24 +36,24 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
           <span>Elapsed ${formatElapsedCompact(loop.elapsed_seconds)}</span>
         </div>
 
-        <div class="text-[color:var(--text-body)] text-sm leading-[1.5]">${loop.target || '명시된 목표가 없습니다'}</div>
+        <div class="text-[var(--text-body)] text-sm leading-[1.5]">${loop.target || '명시된 목표가 없습니다'}</div>
         ${(loop.stop_reason || loop.error_message)
           ? html`
-              <div class="text-[color:var(--text-muted)] text-[13px] leading-[1.5]">
+              <div class="text-[var(--text-muted)] text-[13px] leading-[1.5]">
                 ${loop.error_message ?? loop.stop_reason}
               </div>
             `
           : null}
-        <div class="text-[color:var(--text-muted)] text-[13px] leading-[1.5]">
+        <div class="text-[var(--text-muted)] text-[13px] leading-[1.5]">
           ${loop.strict_mode ? '엄격 근거 모드' : '레거시'} · ${loop.worker_engine ?? '엔진 정보 없음'} · ${latestToolSummary}
         </div>
         ${latest
           ? html`
-              <div class="text-[color:var(--text-muted)] text-[13px] leading-[1.5]">
+              <div class="text-[var(--text-muted)] text-[13px] leading-[1.5]">
                 최근 반복 #${latest.iteration}: ${latest.changes || latest.next_suggestion || '서술 정보 없음'}
               </div>
             `
-          : html`<div class="text-[color:var(--text-muted)] text-[13px] leading-[1.5]">반복 이력이 아직 없습니다</div>`}
+          : html`<div class="text-[var(--text-muted)] text-[13px] leading-[1.5]">반복 이력이 아직 없습니다</div>`}
       </div>
     </div>
   `

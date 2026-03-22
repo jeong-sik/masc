@@ -94,26 +94,26 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="absolute top-[calc(100%+10px)] left-0 min-w-[280px] py-3 px-3.5 border border-solid border-[var(--card-border)] rounded-[var(--radius-md)] bg-[rgba(10,18,34,0.96)] shadow-[0_18px_34px_rgba(0,0,0,0.34)] grid gap-2">
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
+            <div class="absolute top-[calc(100%+10px)] left-0 min-w-[280px] py-3 px-3.5 border border-solid border-[var(--card-border)] rounded-xl bg-[rgba(10,18,34,0.96)] shadow-[0_18px_34px_rgba(0,0,0,0.34)] grid gap-2">
+              <div class="flex justify-between gap-3 text-xs text-[var(--text-muted)]">
                 <span>릴리즈</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
+                <strong class="text-[var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[var(--text-muted)]">
                 <span>커밋</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${build?.commit ?? 'git 미감지 (dev)'}</strong>
+                <strong class="text-[var(--text-strong)] text-right">${build?.commit ?? 'git 미감지 (dev)'}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[var(--text-muted)]">
                 <span>서버 시작</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
+                <strong class="text-[var(--text-strong)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[var(--text-muted)]">
                 <span>업타임</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : '알 수 없음'}</strong>
+                <strong class="text-[var(--text-strong)] text-right">${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : '알 수 없음'}</strong>
               </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
+              <div class="flex justify-between gap-3 text-xs text-[var(--text-muted)]">
                 <span>쉘 스냅샷</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
+                <strong class="text-[var(--text-strong)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
               </div>
             </div>
           `
@@ -232,7 +232,7 @@ export function DashboardMain() {
 
   return html`
     ${roomTruthInitializing.value ? html`
-      <div class="text-center py-[6px] px-4 bg-[rgba(230,167,0,0.12)] border-b border-solid border-b-[rgba(230,167,0,0.3)] text-[#e6a700] text-[0.8rem] shrink-0">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
+      <div class="text-center py-[6px] px-4 bg-[rgba(230,167,0,0.12)] border-b border-solid border-b-[rgba(230,167,0,0.3)] text-[#e6a700] text-[13px] shrink-0">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
     ` : null}
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <${TabContent} />

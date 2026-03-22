@@ -136,9 +136,9 @@ export function MonitorStat({
   caption?: string
 }) {
   return html`
-    <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
+    <div class="border border-[var(--card-border)] rounded-xl bg-[var(--card)] py-[15px] px-3.5">
       <div>${label}</div>
-      <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums" style=${color ? `color:${color}` : ''}>${value}</div>
+      <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums" style=${color ? `color:${color}` : ''}>${value}</div>
       ${caption ? html`<div class="monitor-stat-caption">${caption}</div>` : null}
     </div>
   `

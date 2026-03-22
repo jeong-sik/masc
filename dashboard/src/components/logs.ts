@@ -93,7 +93,7 @@ export function LogViewer() {
           </select>
         </div>
 
-        <div class="flex gap-3 items-center text-[0.75rem] text-[color:var(--text-muted)]">
+        <div class="flex gap-3 items-center text-xs text-[var(--text-muted)]">
           <span class="tabular-nums">${(logTotal.value ?? 0).toLocaleString()}건</span>
           <label class="flex items-center gap-1 cursor-pointer">
             <input
@@ -118,20 +118,20 @@ export function LogViewer() {
         <table class="w-full text-xs border-collapse">
           <thead class="sticky top-0 bg-[var(--card)] z-[1] text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
             <tr>
-              <th class="w-44 whitespace-nowrap text-[color:var(--text-muted)]">timestamp</th>
+              <th class="w-44 whitespace-nowrap text-[var(--text-muted)]">timestamp</th>
               <th class="w-14 whitespace-nowrap font-semibold">level</th>
-              <th class="w-32 whitespace-nowrap text-[color:var(--accent)]">module</th>
+              <th class="w-32 whitespace-nowrap text-[var(--accent)]">module</th>
               <th class="break-words">message</th>
             </tr>
           </thead>
           <tbody>
             ${logEntries.value.map(entry => html`
               <tr key=${entry.seq} class="hover:bg-[var(--white-3)] ${entry.level === 'ERROR' ? 'bg-[rgba(224,80,80,0.06)]' : entry.level === 'WARN' ? 'bg-[rgba(230,167,0,0.04)]' : ''}">
-                <td class="w-44 whitespace-nowrap text-[color:var(--text-muted)]">${entry.ts.replace('T', ' ').replace('Z', '')}</td>
+                <td class="w-44 whitespace-nowrap text-[var(--text-muted)]">${entry.ts.replace('T', ' ').replace('Z', '')}</td>
                 <td class="w-14 whitespace-nowrap font-semibold" style="color: ${LEVEL_COLORS[entry.level] ?? 'inherit'}">
                   ${entry.level}
                 </td>
-                <td class="w-32 whitespace-nowrap text-[color:var(--accent)]">${entry.module}</td>
+                <td class="w-32 whitespace-nowrap text-[var(--accent)]">${entry.module}</td>
                 <td class="break-words">${entry.message}</td>
               </tr>
             `)}

@@ -88,29 +88,29 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
   const s = data.stats
   return html`
     <div class="stats-grid grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
-      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
+      <div class="border border-[var(--card-border)] rounded-xl bg-[var(--card)] py-[15px] px-3.5">
         <div>노드</div>
-        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.node_count}</div>
+        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.node_count}</div>
       </div>
-      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
+      <div class="border border-[var(--card-border)] rounded-xl bg-[var(--card)] py-[15px] px-3.5">
         <div>엣지</div>
-        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.edge_count}</div>
+        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.edge_count}</div>
       </div>
-      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
+      <div class="border border-[var(--card-border)] rounded-xl bg-[var(--card)] py-[15px] px-3.5">
         <div>에이전트</div>
-        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.agent_count}</div>
+        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.agent_count}</div>
       </div>
-      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
+      <div class="border border-[var(--card-border)] rounded-xl bg-[var(--card)] py-[15px] px-3.5">
         <div>활성</div>
-        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums text-[var(--ok)]">${s.active_agents}</div>
+        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums text-[var(--ok)]">${s.active_agents}</div>
       </div>
-      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
+      <div class="border border-[var(--card-border)] rounded-xl bg-[var(--card)] py-[15px] px-3.5">
         <div>작업</div>
-        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.task_count}</div>
+        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.task_count}</div>
       </div>
-      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
+      <div class="border border-[var(--card-border)] rounded-xl bg-[var(--card)] py-[15px] px-3.5">
         <div>이벤트</div>
-        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.event_count}</div>
+        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.event_count}</div>
       </div>
     </div>
   `
@@ -174,7 +174,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
               </div>
             </div>
             <span class="text-sm font-semibold text-text-slate-light min-w-[32px] text-right">${node.weight}</span>
-            <span class="text-[11px] py-0.5 px-[7px] rounded-md ${node.status === 'offline' || node.status === 'retired' ? 'text-[color:var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[color:var(--ok)] bg-[var(--ok-10)]'}">${node.status}</span>
+            <span class="text-[11px] py-0.5 px-[7px] rounded-md ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--ok)] bg-[var(--ok-10)]'}">${node.status}</span>
           </div>
         `
       })}

@@ -176,9 +176,9 @@ export function GraphView({ data }: GraphViewProps) {
     <div ref=${containerRef} class="relative w-full overflow-hidden bg-[#0f1117] my-3 rounded-xl">
       <canvas ref=${canvasRef} class="block w-full cursor-crosshair" />
       ${hoveredNode ? html`
-        <div class="absolute bottom-3 left-3 flex items-center gap-2.5 py-2 px-3.5 rounded-[10px] bg-[rgba(15,23,42,0.92)] border border-[var(--slate-gray-20)] text-[13px] text-[color:var(--text-slate-light)] pointer-events-none">
-          <strong class="text-sm text-[color:var(--text-near-white)]">${hoveredNode.label}</strong>
-          <span class="py-0.5 px-[7px] bg-[var(--slate-gray-15)] text-[11px] text-[color:var(--text-slate)] rounded-md">${hoveredNode.kind}</span>
+        <div class="absolute bottom-3 left-3 flex items-center gap-2.5 py-2 px-3.5 rounded-[10px] bg-[rgba(15,23,42,0.92)] border border-[var(--slate-gray-20)] text-[13px] text-[var(--text-slate-light)] pointer-events-none">
+          <strong class="text-sm text-[var(--text-near-white)]">${hoveredNode.label}</strong>
+          <span class="py-0.5 px-[7px] bg-[var(--slate-gray-15)] text-[11px] text-[var(--text-slate)] rounded-md">${hoveredNode.kind}</span>
           <span>weight ${hoveredNode.weight}</span>
           <span>status ${hoveredNode.status}</span>
         </div>

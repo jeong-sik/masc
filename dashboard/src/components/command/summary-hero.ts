@@ -36,7 +36,7 @@ export function CommandWorkflowBanner() {
       </div>
       <div class="text-[rgba(255,255,255,0.84)] leading-normal">${context.summary}</div>
       ${context.payload_preview
-        ? html`<div class="p-[10px_12px] border border-[var(--white-8)] bg-[var(--white-5)] text-[color:var(--text-strong)] leading-[1.45] rounded-xl">${context.payload_preview}</div>`
+        ? html`<div class="p-[10px_12px] border border-[var(--white-8)] bg-[var(--white-5)] text-[var(--text-strong)] leading-[1.45] rounded-xl">${context.payload_preview}</div>`
         : null}
     </section>
   `
@@ -51,13 +51,13 @@ export function CommandEntryStrip() {
     <section class="grid grid-cols-2 gap-3">
       <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5">
         <span class="text-[rgba(148,163,184,0.92)] text-[11px] uppercase tracking-[0.08em]">현재 표면</span>
-        <strong class="text-[color:var(--text-near-white)] text-lg leading-[1.2] break-words">${guide.title}</strong>
-        <p class="m-0 text-[color:var(--frost-72)] leading-normal">${guide.description}</p>
+        <strong class="text-[var(--text-near-white)] text-lg leading-[1.2] break-words">${guide.title}</strong>
+        <p class="m-0 text-[var(--frost-72)] leading-normal">${guide.description}</p>
       </article>
       <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5">
         <span class="text-[rgba(148,163,184,0.92)] text-[11px] uppercase tracking-[0.08em]">다음 추천</span>
-        <strong class="text-[color:var(--text-near-white)] text-lg leading-[1.2] break-words">${recommendation.tool}</strong>
-        <p class="m-0 text-[color:var(--frost-72)] leading-normal">${recommendation.reason}</p>
+        <strong class="text-[var(--text-near-white)] text-lg leading-[1.2] break-words">${recommendation.tool}</strong>
+        <p class="m-0 text-[var(--frost-72)] leading-normal">${recommendation.reason}</p>
       </article>
     </section>
   `

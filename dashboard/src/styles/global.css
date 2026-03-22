@@ -352,9 +352,6 @@ a:hover {
 }
 
 @utility cmd-readiness-row {
-  &.warn { border-color: var(--warn-soft); }
-  &.ok { border-color: var(--ok-22); }
-  &.bad { border-color: var(--bad-soft); }
   & p { margin: 8px 0 0; color: var(--white-82); line-height: 1.5; }
 }
 
@@ -400,9 +397,8 @@ a:hover {
 @utility cmd-presence-card {
   background: linear-gradient(180deg, var(--white-5), var(--white-3h));
   border-color: rgba(148,163,184,0.18);
-  &.ok { border-color: var(--ok-24); display: grid; gap: 10px; }
-  &.warn { border-color: rgba(251,191,36,0.22); display: grid; gap: 10px; }
-  &.bad { border-color: rgba(248,113,113,0.26); display: grid; gap: 10px; }
+  display: grid;
+  gap: 10px;
 }
 
 @utility cmd-feed-card {
@@ -410,9 +406,6 @@ a:hover {
   border-color: rgba(148,163,184,0.18);
   display: grid;
   gap: 10px;
-  &.ok { border-color: var(--ok-24); }
-  &.warn { border-color: rgba(251,191,36,0.22); }
-  &.bad { border-color: rgba(248,113,113,0.26); }
 }
 
 @utility cmd-warroom-guidance {
@@ -570,78 +563,31 @@ a:hover {
 }
 
 @keyframes fadeSlide {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.55;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 @media (max-width: 1200px) {
-
-  .dashboard-layout {
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-
+  .dashboard-layout { grid-template-columns: 1fr; gap: 14px; }
   .dashboard-rail {
-    position: static;
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-    max-height: none;
-    overflow-y: visible;
-    padding-right: 0;
+    position: static; display: grid; grid-template-columns: 1fr;
+    gap: 10px; max-height: none; overflow-y: visible; padding-right: 0;
   }
-
-  .rail-tab-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  .rail-tab-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-
 @media (max-width: 880px) {
-
-  :root {
-    --header-h: 86px;
-  }
-
-  .stats-grid {
-    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
-  }
-  .rail-tab-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
+  :root { --header-h: 86px; }
+  .stats-grid { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
+  .rail-tab-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-
 @media (max-width: 768px) {
-
-  .dashboard-rail {
-    grid-template-columns: 1fr;
-  }
-  .rail-inline-actions {
-    grid-template-columns: 1fr;
-  }
-
-  .rail-tab-list {
-    grid-template-columns: 1fr;
-  }
-
+  .dashboard-rail { grid-template-columns: 1fr; }
+  .rail-inline-actions { grid-template-columns: 1fr; }
+  .rail-tab-list { grid-template-columns: 1fr; }
 }
 
 /* prefers-reduced-motion handled by Tailwind motion-reduce: */
@@ -650,36 +596,12 @@ a:hover {
 /* connection-status/status-dot/event-count/pill/ctx-fill → Tailwind inline */
 
 /* status-dot-inline (dynamic status classes used by StatusBadge) */
-.status-dot-inline.in_progress,
-.status-dot-inline.running {
-  background: var(--warn);
-}
-
-.status-dot-inline.interrupted,
-.status-dot-inline.listening {
-  background: #38bdf8;
-}
-
-.status-dot-inline.inactive {
-  background: #5f7199;
-}
-
-.status-dot-inline.active {
-  background: var(--ok);
-}
-
-.status-dot-inline.busy,
-.status-dot-inline.stopped {
-  background: var(--text-slate);
-}
-
-.status-dot-inline.error {
-  background: #fb7185;
-}
-
-.status-dot-inline.offline {
-  background: #5f7199;
-}
+.status-dot-inline.in_progress, .status-dot-inline.running { background: var(--warn); }
+.status-dot-inline.interrupted, .status-dot-inline.listening { background: #38bdf8; }
+.status-dot-inline.inactive, .status-dot-inline.offline { background: #5f7199; }
+.status-dot-inline.active { background: var(--ok); }
+.status-dot-inline.busy, .status-dot-inline.stopped { background: var(--text-slate); }
+.status-dot-inline.error { background: #fb7185; }
 
 /* ── Animations (merged from animations.css) ── */
 /* ── Pixel avatar animations ──────────────────────────── */
@@ -722,5 +644,56 @@ a:hover {
   0%, 100% { border-color: var(--warn-28); }
   50% { border-color: rgba(251, 191, 36, 0.50); }
 }
+
+/* ── Component keyframes (consolidated) ──────────────────── */
+@keyframes blocker-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.7); }
+}
+@keyframes orchestraFlow { to { stroke-dashoffset: -40; } }
+@keyframes orchestraPulse {
+  0%, 100% { transform: scale(1); opacity: 0.92; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+@keyframes chatWarnPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
+  50% { box-shadow: 0 0 8px 2px var(--ok-12); }
+}
+@keyframes activityFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes keeper-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@keyframes pulse-ring {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+@keyframes pipeline-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); }
+  50% { box-shadow: 0 0 6px 2px rgba(96, 165, 250, 0.35); }
+}
+@keyframes pipeline-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+@keyframes keeperPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--ok-40); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(74,222,128,0); }
+}
+
+/* State tone utilities */
+.tone-border-ok { border-color: var(--ok-24); }
+.tone-border-warn { border-color: rgba(251,191,36,0.22); }
+.tone-border-bad { border-color: rgba(248,113,113,0.26); }
+.tone-bg-ok { background: var(--ok-soft); color: var(--ok); }
+.tone-bg-warn { background: rgba(251,191,36,0.16); color: var(--warn); }
+.tone-bg-bad { background: rgba(248,113,113,0.16); color: var(--bad-light); }
 
 /* monitor-row/pill state-offline, agents-workbench → Tailwind inline */

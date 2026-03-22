@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { displayStatus, relativeTime, sessionStatusTone, toneClass } from './helpers'
+import { displayStatus, relativeTime, sessionStatusTone, toneClass, toneBorder } from './helpers'
 import { truncate } from '../../lib/truncate'
 
 type WarRoomWorkerView = {
@@ -104,7 +104,7 @@ export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
 
 export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
   return html`
-    <article class="cmd-card rounded-xl p-3 cmd-presence-card ${item.tone}">
+    <article class="cmd-card rounded-xl p-3 cmd-presence-card ${toneBorder(item.tone)}">
       <div class="cmd-card rounded-xl-head">
         <div>
           <strong>${item.name}</strong>
@@ -127,7 +127,7 @@ export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
 
 export function WarRoomFeedCard({ item }: { item: WarRoomFeedItem }) {
   return html`
-    <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3.5 cmd-feed-card rounded-xl ${item.tone}">
+    <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3.5 cmd-feed-card rounded-xl ${toneBorder(item.tone)}">
       <div class="min-w-0 [overflow-wrap:anywhere] break-words">
         <div class="flex justify-between items-start">
           <strong>${item.title}</strong>

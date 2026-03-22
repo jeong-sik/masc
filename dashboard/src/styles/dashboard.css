@@ -151,12 +151,6 @@
   stroke: var(--bad); color: var(--bad);
   animation: pulse-ring 2s infinite;
 }
-@keyframes pulse-ring {
-  0% { opacity: 1; }
-  50% { opacity: 0.6; }
-  100% { opacity: 1; }
-}
-
 /* ── Agent card hover ── */
 .agent-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);

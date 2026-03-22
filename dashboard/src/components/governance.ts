@@ -3,6 +3,7 @@ import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { EmptyState } from './common/empty-state'
+import { FilterChips } from './common/filter-chips'
 import { governanceToneClass } from '../lib/tone'
 import type { GovernanceFilter } from './governance-utils'
 import {
@@ -117,31 +118,17 @@ function GovernanceToolbar() {
             ${governanceLoading.value ? '새로고침 중...' : '새로고침'}
           </button>
         </div>
-        <div class="flex flex-wrap gap-1.5">
-          ${(
-            [
-              ['open', '진행 중'],
-              ['pending_ruling', '판정 대기'],
-              ['needs_human_gate', '승인 대기'],
-              ['executed', '집행 완료'],
-              ['blocked', '보류/종결'],
-            ] as Array<[GovernanceFilter, string]>
-          ).map(([key, label]) => html`
-            <button
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all cursor-pointer
-                ${governanceFilter.value === key
-                  ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)]'
-                  : 'bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
-                }"
-              onClick=${async () => {
-                governanceFilter.value = key
-                await refreshGovernance()
-              }}
-            >
-              ${label}
-            </button>
-          `)}
-        </div>
+        <${FilterChips}
+          chips=${[
+            { key: 'open', label: '진행 중' },
+            { key: 'pending_ruling', label: '판정 대기' },
+            { key: 'needs_human_gate', label: '승인 대기' },
+            { key: 'executed', label: '집행 완료' },
+            { key: 'blocked', label: '보류/종결' },
+          ]}
+          active=${governanceFilter}
+          onChange=${() => { void refreshGovernance() }}
+        />
         ${governanceError.value ? html`<div class="mt-2 p-2.5 rounded-lg border border-[rgba(239,68,68,0.35)] bg-[var(--bad-8)] text-[#f7b6b6] text-[12px]">${governanceError.value}</div>` : null}
       </div>
     <//>

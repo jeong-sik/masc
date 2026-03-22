@@ -3,6 +3,7 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { refreshTrpg, trpgLoading, trpgRoom, trpgState } from '../store'
 import { EmptyState } from './common/empty-state'
+import { StatGrid } from './common/stat-tile'
 
 /** When true the TRPG backend returned 410 Gone (module archived). */
 const trpgArchived = signal(false)
@@ -48,23 +49,11 @@ export function Trpg() {
   }
 
   return html`
-    <div class="monitor-summary-grid">
-      <div class="monitor-summary-card rounded-xl">
-        <div class="monitor-summary-label">ROOM</div>
-        <div class="monitor-summary-value">${trpgRoom.value || state.session?.room || '-'}</div>
-      </div>
-      <div class="monitor-summary-card rounded-xl">
-        <div class="monitor-summary-label">SESSION</div>
-        <div class="monitor-summary-value">${state.session?.status ?? 'active'}</div>
-      </div>
-      <div class="monitor-summary-card rounded-xl">
-        <div class="monitor-summary-label">PARTY</div>
-        <div class="monitor-summary-value">${state.party.length}</div>
-      </div>
-      <div class="monitor-summary-card rounded-xl">
-        <div class="monitor-summary-label">EVENTS</div>
-        <div class="monitor-summary-value">${state.story_log.length}</div>
-      </div>
-    </div>
+    <${StatGrid} cols=${4} items=${[
+      { label: 'ROOM', value: trpgRoom.value || state.session?.room || '-' },
+      { label: 'SESSION', value: state.session?.status ?? 'active' },
+      { label: 'PARTY', value: state.party.length },
+      { label: 'EVENTS', value: state.story_log.length },
+    ]} />
   `
 }

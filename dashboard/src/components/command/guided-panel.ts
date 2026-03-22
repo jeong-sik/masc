@@ -266,7 +266,7 @@ function GuidedPanel() {
                       <div class="command-step-list compact">
                         ${path.steps.slice(0, 4).map(step => html`
                           <div class="command-step-row">
-                            <span class="command-step-tool">${step.tool}</span>
+                            <span class="font-mono text-[#67e8f9] text-[length:var(--fs-sm)]">${step.tool}</span>
                             <span>${step.title}</span>
                           </div>
                         `)}

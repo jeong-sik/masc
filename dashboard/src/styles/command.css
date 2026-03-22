@@ -42,8 +42,7 @@
 }
 
 .panel-actions,
-.command-surface-tabs,
-.command-card-grid {
+.command-surface-tabs {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
@@ -315,12 +314,6 @@
   align-items: baseline;
 }
 
-.command-step-tool {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #67e8f9;
-  font-size: var(--fs-sm);
-}
-
 .command-doc-links {
   display: flex;
   flex-wrap: wrap;
@@ -556,12 +549,10 @@
 .command-card,
 .command-alert,
 .command-trace-row,
-.command-card-head,
 .command-tree-head,
 .command-trace-head,
 .command-tree-title-row,
-.command-alert-meta,
-.command-card-head {
+.command-alert-meta {
   justify-content: space-between;
   align-items: flex-start;
 }
@@ -586,25 +577,6 @@
   margin: 10px 0 0;
   color: var(--white-78);
   line-height: 1.5;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.command-card-grid {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px 12px;
-  margin-top: 12px;
-  color: var(--white-82);
-}
-
-.command-card-foot {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--white-8);
-  color: #67e8f9;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: var(--fs-sm);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -752,7 +724,6 @@
   word-break: break-word;
 }
 
-.command-card-grid span,
 .command-guide-card p,
 .command-readiness-row p,
 .command-doc-links .command-tag,

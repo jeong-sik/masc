@@ -87,6 +87,7 @@ type module_tag =
   | Mod_notifications | Mod_inline
   | Mod_autoresearch
   | Mod_model_catalog
+  | Mod_shard
 
 val register_module_tag : schemas:Types.tool_schema list -> tag:module_tag -> unit
 (** Register tool names from a schema list with a module tag. *)

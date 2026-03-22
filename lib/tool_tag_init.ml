@@ -164,6 +164,11 @@ let register_all () =
     "masc_keeper_tool_catalog";
   ];
 
+  (* ── Mod_shard: Tool_shard ────────────────────────────────────── *)
+  reg Mod_shard [
+    "masc_tool_grant"; "masc_tool_revoke"; "masc_tool_list";
+  ];
+
   (* ── Schema-gap fills for modules with partial schema exports ── *)
   reg Mod_room [
     "masc_workflow_guide"; "masc_check";

@@ -3,6 +3,7 @@ open Alcotest
 module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
+module KAR = Masc_mcp.Keeper_agent_run
 (* Keeper_autonomy module removed; autonomy_level is now a plain string *)
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
@@ -333,6 +334,49 @@ let test_metrics_mixed_response () =
        with Not_found -> false
      in found)
 
+let test_normalize_response_text_passthrough () =
+  match KAR.normalize_response_text ~text:"All good." ~tool_names:[] with
+  | Ok text -> check string "keeps text" "All good." text
+  | Error e -> fail ("unexpected error: " ^ e)
+
+let test_normalize_response_text_tool_only_synthesizes () =
+  match KAR.normalize_response_text
+          ~text:""
+          ~tool_names:["keeper_board_post"; "keeper_board_comment"]
+  with
+  | Ok text ->
+      check bool "mentions no textual reply" true
+        (String.length text > 0
+         && String.contains text 'T');
+      check bool "mentions first tool" true
+        (let found =
+           try
+             ignore
+               (Str.search_forward
+                  (Str.regexp_string "keeper_board_post")
+                  text 0);
+             true
+           with Not_found -> false
+         in
+         found)
+  | Error e -> fail ("unexpected error: " ^ e)
+
+let test_normalize_response_text_empty_without_tools_errors () =
+  match KAR.normalize_response_text ~text:"" ~tool_names:[] with
+  | Ok text -> fail ("expected error, got: " ^ text)
+  | Error e ->
+      check bool "error mentions textual reply" true
+        (let found =
+           try
+             ignore
+               (Str.search_forward
+                  (Str.regexp_string "no textual reply")
+                  e 0);
+             true
+           with Not_found -> false
+         in
+         found)
+
 (* ---------- Test runner ---------- *)
 
 let () =
@@ -379,5 +423,11 @@ let () =
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
           test_case "mixed response" `Quick test_metrics_mixed_response;
+          test_case "normalize passthrough" `Quick
+            test_normalize_response_text_passthrough;
+          test_case "normalize tool only synthesizes" `Quick
+            test_normalize_response_text_tool_only_synthesizes;
+          test_case "normalize empty without tools errors" `Quick
+            test_normalize_response_text_empty_without_tools_errors;
         ] );
     ]

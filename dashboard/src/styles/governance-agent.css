@@ -28,12 +28,12 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
-}
 
-.agent-detail-header h2 {
-  color: var(--text-strong);
-  font-size: 20px;
-  margin: 0;
+  & h2 {
+    color: var(--text-strong);
+    font-size: 20px;
+    margin: 0;
+  }
 }
 
 .agent-detail-sub {
@@ -404,6 +404,10 @@
   border-radius: 8px;
   background: rgba(10, 22, 40, 0.8);
   border: 1px solid rgba(200, 168, 78, 0.15);
+
+  & .control-input {
+    flex: 1;
+  }
 }
 
 .ff-profile__mention-label {
@@ -411,10 +415,6 @@
   font-weight: 600;
   color: var(--ff-gold);
   white-space: nowrap;
-}
-
-.ff-profile__mention .control-input {
-  flex: 1;
 }
 
 @media (max-width: 768px) {
@@ -444,10 +444,10 @@
   padding: 6px 8px;
   border-radius: 4px;
   transition: background 0.15s;
-}
 
-.ff-relation-row:hover {
-  background: rgba(255, 215, 0, 0.08);
+  &:hover {
+    background: rgba(255, 215, 0, 0.08);
+  }
 }
 
 .ff-relation-name {
@@ -495,4 +495,3 @@
   font-size: var(--fs-xs);
   border: 1px solid rgba(255, 215, 0, 0.15);
 }
-

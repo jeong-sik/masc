@@ -50,13 +50,13 @@
   border-radius: 8px;
   padding: 10px 14px;
   margin: 8px 0;
-}
-.think-block summary {
-  cursor: pointer;
-  color: var(--purple);
-  font-size: var(--fs-sm);
-}
 
+  & summary {
+    cursor: pointer;
+    color: var(--purple);
+    font-size: var(--fs-sm);
+  }
+}
 /* ── SPA Refresh: class alignment + app shell tuning ─────── */
 .main-tab-bar {
   margin: 0;
@@ -72,17 +72,17 @@
   color: #99aed8;
   background: rgba(255, 255, 255, 0.02);
   font-weight: 500;
-}
 
-.main-tab-btn:hover {
-  color: #d6e5ff;
-  border-color: rgba(138, 163, 211, 0.35);
-}
+  &:hover {
+    color: #d6e5ff;
+    border-color: rgba(138, 163, 211, 0.35);
+  }
 
-.main-tab-btn.active {
-  color: #c9ebff;
-  border-color: rgba(71, 184, 255, 0.5);
-  background: var(--accent-soft);
+  &.active {
+    color: #c9ebff;
+    border-color: rgba(71, 184, 255, 0.5);
+    background: var(--accent-soft);
+  }
 }
 
 .card {
@@ -116,12 +116,13 @@
 button.agent,
 button.agent-card {
   cursor: pointer;
+
+  &:hover {
+    background: var(--white-8);
+  }
 }
 
 button.agent:hover,
-button.agent-card:hover {
-  background: var(--white-8);
-}
 /* Agents */
 .room-truth-strip {
   display: grid;
@@ -154,19 +155,19 @@ button.agent-card:hover {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
 
-.room-truth-card strong {
-  color: #edf4ff;
-  font-size: var(--fs-lg);
-  line-height: 1.35;
-}
+  & strong {
+    color: #edf4ff;
+    font-size: var(--fs-lg);
+    line-height: 1.35;
+  }
 
-.room-truth-card p {
-  margin: 0;
-  color: #96add7;
-  font-size: var(--fs-sm);
-  line-height: 1.5;
+  & p {
+    margin: 0;
+    color: #96add7;
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+  }
 }
 
 .room-truth-label {
@@ -181,7 +182,6 @@ button.agent-card:hover {
   flex-wrap: wrap;
   gap: 8px;
 }
-
 
 .agent-card .agent-task {
   margin-top: 10px;
@@ -229,7 +229,6 @@ button.agent-card:hover {
   gap: 10px;
 }
 
-
 button.monitor-alert,
 button.monitor-row {
   width: 100%;
@@ -241,30 +240,30 @@ button.monitor-row {
   border-radius: 12px;
   cursor: pointer;
   transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    border-color: rgba(138, 163, 211, 0.35);
+    background: var(--white-6);
+  }
+
+  &.ok {
+    border-color: rgba(74, 222, 128, 0.18);
+  }
+
+  &.warn {
+    border-color: rgba(251, 191, 36, 0.28);
+  }
+
+  &.bad {
+    border-color: rgba(248, 113, 113, 0.34);
+  }
 }
 
 button.monitor-alert:hover,
-button.monitor-row:hover {
-  transform: translateY(-1px);
-  border-color: rgba(138, 163, 211, 0.35);
-  background: var(--white-6);
-}
-
 button.monitor-alert.ok,
-button.monitor-row.ok {
-  border-color: rgba(74, 222, 128, 0.18);
-}
-
 button.monitor-alert.warn,
-button.monitor-row.warn {
-  border-color: rgba(251, 191, 36, 0.28);
-}
-
 button.monitor-alert.bad,
-button.monitor-row.bad {
-  border-color: rgba(248, 113, 113, 0.34);
-}
-
 .monitor-alert {
   display: flex;
   align-items: center;
@@ -272,7 +271,6 @@ button.monitor-row.bad {
   gap: 14px;
   padding: 12px 14px;
 }
-
 
 .monitor-row {
   padding: 14px;
@@ -381,9 +379,10 @@ button.monitor-row.bad {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 15px;
-}
-.card-title-row .card-title {
-  margin-bottom: 0;
+
+  & .card-title {
+    margin-bottom: 0;
+  }
 }
 .semantic-tag-row {
   display: flex;
@@ -392,4 +391,3 @@ button.monitor-row.bad {
   margin-bottom: 12px;
 }
 .semantic-tag,
-

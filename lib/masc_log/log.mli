@@ -53,6 +53,7 @@ module Ring : sig
     ?limit:int ->
     ?min_level:int ->
     ?module_filter:string ->
+    ?order:[< `Newest_first | `Oldest_first > `Newest_first ] ->
     unit ->
     entry list
 

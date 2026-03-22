@@ -97,11 +97,14 @@ let handle_keeper_status ctx args : tool_result =
          in
 
          let models_resolved = `List (List.map (fun (s : Model_spec.model_spec) ->
+           let pricing = Llm_provider.Pricing.pricing_for_model s.model_id in
            `Assoc [
-             ("provider", `String (Model_spec.string_of_provider s.provider));
+             ("provider", `String s.model_id);
              ("model_id", `String s.model_id);
              ("max_context", `Int s.max_context);
              ("api_key_env", match s.api_key_env with None -> `Null | Some k -> `String k);
+             ("cost_per_million_input", `Float pricing.input_per_million);
+             ("cost_per_million_output", `Float pricing.output_per_million);
            ]
          ) specs) in
 

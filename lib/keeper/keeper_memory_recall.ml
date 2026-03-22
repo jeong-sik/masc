@@ -5,9 +5,9 @@ open Keeper_types
 include Keeper_memory_bank
 
 let cost_usd_of_usage (usage : Agent_sdk.Types.api_usage) (model : Model_spec.model_spec) : float =
-  let input_cost = float_of_int usage.input_tokens *. model.cost_per_1k_input /. 1000.0 in
-  let output_cost = float_of_int usage.output_tokens *. model.cost_per_1k_output /. 1000.0 in
-  input_cost +. output_cost
+  let pricing = Llm_provider.Pricing.pricing_for_model model.model_id in
+  Llm_provider.Pricing.estimate_cost ~pricing
+    ~input_tokens:usage.input_tokens ~output_tokens:usage.output_tokens ()
 
 let model_spec_for_used (specs : Model_spec.model_spec list) (model_used : string) :
   Model_spec.model_spec option =

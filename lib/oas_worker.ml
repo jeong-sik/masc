@@ -401,9 +401,12 @@ let run_named
   (* Use first available model as primary for Builder *)
   let primary_spec = match resolve_cascade_specs ~cascade_name with
     | spec :: _ -> spec
-    | [] -> { Model_spec.provider = Model_spec.Glm_cloud; model_id = "auto";
-              max_context = 8192; api_url = ""; api_key_env = None;
-              cost_per_1k_input = 0.0; cost_per_1k_output = 0.0 }
+    | [] ->
+      let pricing = Llm_provider.Pricing.pricing_for_model "auto" in
+      { Model_spec.provider = Model_spec.Glm_cloud; model_id = "auto";
+        max_context = 8192; api_url = ""; api_key_env = None;
+        cost_per_1k_input = pricing.input_per_million /. 1000.0;
+        cost_per_1k_output = pricing.output_per_million /. 1000.0 }
   in
   let config =
     config_for_model ~name ~model_spec:primary_spec ~system_prompt ~tools

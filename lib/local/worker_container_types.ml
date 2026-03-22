@@ -579,13 +579,9 @@ let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) 
 
 let estimate_cost_usd (model : Model_spec.model_spec)
     (usage : Agent_sdk.Types.api_usage) : float option =
-  let input_cost =
-    (float_of_int usage.input_tokens /. 1000.0) *. model.cost_per_1k_input
-  in
-  let output_cost =
-    (float_of_int usage.output_tokens /. 1000.0) *. model.cost_per_1k_output
-  in
-  Some (input_cost +. output_cost)
+  let pricing = Llm_provider.Pricing.pricing_for_model model.model_id in
+  Some (Llm_provider.Pricing.estimate_cost ~pricing
+    ~input_tokens:usage.input_tokens ~output_tokens:usage.output_tokens ())
 
 let local_worker_max_tokens () =
   match Sys.getenv_opt "MASC_LOCAL_WORKER_MAX_TOKENS" with

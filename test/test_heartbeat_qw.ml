@@ -1,7 +1,6 @@
 (** Quick-win tests for Heartbeat module.
     Covers: generate_id, start, stop, list, get, stop_by_agent. *)
 
-open Masc_mcp
 
 let () =
   Eio_main.run @@ fun _env ->

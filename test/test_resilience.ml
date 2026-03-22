@@ -1,7 +1,6 @@
 (** Resilience Module Tests — Time and Zombie pure function coverage *)
 
 open Alcotest
-open Masc_mcp
 
 (* ================================================================
    Time.parse_iso8601_opt

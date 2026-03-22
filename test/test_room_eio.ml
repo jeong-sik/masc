@@ -3,7 +3,6 @@
 (* Initialize RNG before any crypto operations *)
 let () = Mirage_crypto_rng_unix.use_default ()
 
-open Masc_mcp
 
 (** Recursive directory cleanup *)
 let rec rm_rf path =

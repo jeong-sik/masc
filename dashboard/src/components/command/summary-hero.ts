@@ -107,7 +107,7 @@ function SignalRail({
   tone: string
 }) {
   return html`
-    <article class="p-3.5 rounded-[14px] bg-[var(--white-3h)] border border-[var(--white-8)] grid gap-3 cmd-signal-rail ${toneClass(tone)}">
+    <article class="p-4 rounded-[14px] bg-[var(--white-3h)] border border-[var(--white-8)] grid gap-3 cmd-signal-rail ${toneClass(tone)}">
       <div class="flex items-baseline justify-between gap-3">
         <span>${label}</span>
         <strong>${value}</strong>

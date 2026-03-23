@@ -54,7 +54,7 @@ export function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutio
   const hasTerminal = terminalItems.length > 0
 
   return html`
-    <div class="mb-3.5">
+    <div class="mb-4">
       <h2 class="monitor-headline">개입이 필요한 실행</h2>
       <p class="monitor-subheadline">진행 중인 세션과 작전 중 막힌 항목을 보여줍니다.${hasTerminal ? ' 종료된 항목은 하단에 접혀 있습니다.' : ''}</p>
     </div>

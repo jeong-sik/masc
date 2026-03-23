@@ -107,7 +107,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
         ${s.member_names?.length ? html`<span>${s.member_names.length}명</span>` : null}
       </div>
       ${hasBlocker ? html`
-        <div class="text-[11px] text-bad-light mt-2.5 pl-5 truncate bg-bad/10 py-1 px-2 rounded-md">${s.blocker_summary}</div>
+        <div class="text-[11px] text-bad-light mt-3 pl-5 truncate bg-bad/10 py-1 px-2 rounded-md">${s.blocker_summary}</div>
       ` : null}
     </div>
   `

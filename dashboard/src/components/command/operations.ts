@@ -114,7 +114,7 @@ function ChainOperationListItem(
   const chain = overlay.operation.chain
   const runtime = overlay.runtime
   return html`
-    <button class="w-full text-left text-inherit font-[inherit] cursor-pointer bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-chain-item ${selected ? 'selected' : ''}" onClick=${onSelect}>
+    <button class="w-full text-left text-inherit font-[inherit] cursor-pointer bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-chain-item ${selected ? 'selected' : ''}" onClick=${onSelect}>
       <div class="cmd-card rounded-xl-head">
         <div>
           <strong>${overlay.operation.objective}</strong>
@@ -335,7 +335,7 @@ export function ChainsSurface() {
         <div class="pb-2 border-b border-[var(--card-border)] mb-3">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Chains</h3>
         </div>
-        <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${chainStatusTone(summary?.connection.status)}">
+        <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${chainStatusTone(summary?.connection.status)}">
           <div class="flex justify-between gap-3 items-start">
             <strong>native chain 연결</strong>
             <span class="cmd-chip rounded-full ${chainStatusTone(summary?.connection.status)}">${summary?.connection.status ?? 'disconnected'}</span>
@@ -416,7 +416,7 @@ export function ChainsSurface() {
 
               ${selectedOverlay.mermaid
                 ? html`
-                    <div class="mt-3.5 p-3.5 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
+                    <div class="mt-3.5 p-4 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
                       <div class="flex justify-between gap-3 items-start">
                         <strong>Mermaid 그래프</strong>
                         <span class="cmd-chip rounded-full">${selectedOverlay.operation.chain?.chain_id ?? 'graph'}</span>
@@ -426,7 +426,7 @@ export function ChainsSurface() {
                   `
                 : html`<${EmptyState} message="기록된 Mermaid 그래프가 아직 없습니다." compact />`}
 
-              <div class="mt-3.5 p-3.5 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
+              <div class="mt-3.5 p-4 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
                 <div class="flex justify-between gap-3 items-start">
                   <strong>실행 상세</strong>
                   <span class="cmd-chip rounded-full ${run?.success === false ? 'bad' : 'ok'}">

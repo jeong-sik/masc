@@ -32,7 +32,7 @@ export function WorkerSupportRow({
   const effectiveStatus = row.state === 'offline' ? 'offline' : (row.status ?? 'unknown')
 
   return html`
-    <button class="monitor-row rounded-xl p-3.5 ${row.tone} state-${row.state} ${row.state === 'offline' ? 'opacity-35 border-[rgba(85,85,85,0.15)] bg-[rgba(0,0,0,0.08)] hover:opacity-55' : ''}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
+    <button class="monitor-row rounded-xl p-4 ${row.tone} state-${row.state} ${row.state === 'offline' ? 'opacity-35 border-[rgba(85,85,85,0.15)] bg-[rgba(0,0,0,0.08)] hover:opacity-55' : ''}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
       <div class="monitor-row rounded-xl-header">
         <span class="agent-emoji ${row.state === 'offline' ? 'grayscale' : ''}">${row.emoji ?? ''}</span>
         <div class="min-w-0">
@@ -48,7 +48,7 @@ export function WorkerSupportRow({
           : null}
       </div>
 
-      <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]">
+      <div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[length:var(--fs-sm)]">
         ${row.last_signal_at ? html`<span>신호 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 신호 없음</span>`}
         <span>${signalTruthLabel(row.signal_truth)} · ${evidenceSourceLabel(row.evidence_source)}</span>
         ${typeof row.last_signal_age_sec === 'number' ? html`<span>${row.last_signal_age_sec}s ago</span>` : null}

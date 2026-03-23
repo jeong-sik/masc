@@ -332,7 +332,7 @@ export function AgentProfile({ name }: { name: string }) {
         </div>
       ` : null}
 
-      <div class="grid grid-cols-2 gap-3.5 mb-3.5">
+      <div class="grid grid-cols-2 gap-4 mb-4">
         ${!isKeeper ? html`
         <${Card} title="태스크 (${owned.length})" class="ff-card rounded-xl">
           ${owned.length === 0

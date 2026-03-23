@@ -72,7 +72,7 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
   const source = node.unit.source ?? 'unknown'
   const connectionLabel = activeOps > 0 ? `${activeOps}개 작전 연결` : '실행 연결 없음'
   return html`
-    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-tree-node depth-${Math.min(depth, 3)} ${depth <= 2 ? 'border-[rgba(248,113,113,0.3)]' : ''}">
+    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-tree-node depth-${Math.min(depth, 3)} ${depth <= 2 ? 'border-[rgba(248,113,113,0.3)]' : ''}">
       <div class="flex justify-between items-start">
         <div>
           <div class="flex justify-between items-start flex-wrap gap-2">
@@ -126,7 +126,7 @@ function AlertCard({ alert }: { alert: CommandPlaneAlert }) {
 
 export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
   return html`
-    <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3.5">
+    <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-4">
       <div class="min-w-0 [overflow-wrap:anywhere] break-words">
         <div class="flex justify-between items-start">
           <strong>${event.event_type}</strong>
@@ -158,7 +158,7 @@ export function TopologySurface() {
       </div>
       ${snapshot
         ? html`
-            <div class="mb-3.5 p-3.5 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
+            <div class="mb-4 p-4 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
               <div class="flex justify-between items-start flex-wrap gap-2">
                 <span class="cmd-chip rounded-full ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
                 <span class="cmd-chip rounded-full">관리 유닛 ${managedUnits}</span>

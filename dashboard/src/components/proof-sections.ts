@@ -40,7 +40,7 @@ export function SelectionCard({
     && summary?.historical_verdict === 'proven'
     && summary?.live_verdict !== 'proven'
   return html`
-    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${selectionTone(selection)}">
+    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${selectionTone(selection)}">
       <div class="command-guide-head">
         <strong>${selectionLabel(selection)}</strong>
         <span class="cmd-chip rounded-full ${selectionTone(selection)}">${selection.mode ?? 'none'}</span>

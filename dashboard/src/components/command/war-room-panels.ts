@@ -92,7 +92,7 @@ export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
         <span>최근 신호</span><span>${worker.heartbeat}</span>
         <span>근거</span><span>${worker.detail}</span>
       </div>
-      <div class="cmd-tag rounded-full-row mt-2.5">
+      <div class="cmd-tag rounded-full-row mt-3">
         ${worker.markers.map(marker => html`<span class="cmd-tag rounded-full">${warRoomMarkerLabel(marker)}</span>`)}
       </div>
       ${worker.note
@@ -127,7 +127,7 @@ export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
 
 export function WarRoomFeedCard({ item }: { item: WarRoomFeedItem }) {
   return html`
-    <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3.5 cmd-feed-card rounded-xl ${toneBorder(item.tone)}">
+    <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-4 cmd-feed-card rounded-xl ${toneBorder(item.tone)}">
       <div class="min-w-0 [overflow-wrap:anywhere] break-words">
         <div class="flex justify-between items-start">
           <strong>${item.title}</strong>

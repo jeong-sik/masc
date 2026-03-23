@@ -29,8 +29,8 @@ export function Tools() {
 
   return html`
     <div>
-      <${Card} title="시스템 도구 목록" class="section mb-3.5">
-        <div class="mb-3.5">
+      <${Card} title="시스템 도구 목록" class="section mb-4">
+        <div class="mb-4">
           <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">시스템 도구 목록</h2>
           <p class="text-[12px] text-[var(--text-muted)] leading-relaxed">
             ${showFullInventory.value
@@ -55,7 +55,7 @@ export function Tools() {
         }
       <//>
 
-      <${Card} title="도구 사용 현황" class="section mb-3.5">
+      <${Card} title="도구 사용 현황" class="section mb-4">
         ${usage
           ? html`
               <div class="text-[12px] text-[var(--text-muted)] mb-2">
@@ -66,7 +66,7 @@ export function Tools() {
         <${ToolMetrics} />
       <//>
       ${data?.generated_at
-        ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[12px]">
+        ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[12px]">
             <span>생성 시각: ${data.generated_at}</span>
             <span>metrics 기준: 최근 1시간</span>
           </div>`

@@ -134,7 +134,7 @@ export function SwarmLivePanels() {
               ${swarm.provider.timeline.length > 0
                 ? html`<div class="flex flex-col gap-3">
                     ${swarm.provider.timeline.slice(-12).map(sample => html`
-                      <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3.5">
+                      <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-4">
                         <div class="min-w-0 [overflow-wrap:anywhere] break-words">
                           <div class="flex justify-between items-start">
                             <strong>${sample.active_slots} active</strong>
@@ -168,7 +168,7 @@ export function SwarmLivePanels() {
         ${swarm && swarm.recent_messages.length > 0
           ? html`<div class="flex flex-col gap-3">
               ${swarm.recent_messages.map(message => html`
-                <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3.5">
+                <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-4">
                   <div class="min-w-0 [overflow-wrap:anywhere] break-words">
                     <div class="flex justify-between items-start">
                       <strong>${message.from}</strong>

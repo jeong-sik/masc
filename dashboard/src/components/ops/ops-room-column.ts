@@ -97,7 +97,7 @@ export function OpsRoomColumn() {
                 </div>
                 <div class="mt-1.5 whitespace-pre-wrap break-words">${item.reason}</div>
                 ${item.suggested_payload ? html`
-                  <div class="flex justify-between items-center gap-3 mt-2.5 max-[880px]:flex-col max-[880px]:items-start">
+                  <div class="flex justify-between items-center gap-3 mt-3 max-[880px]:flex-col max-[880px]:items-start">
                     <button class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item); openRoomControlDisclosure() }} disabled=${operatorActionBusy.value}>
                       폼에 채우기
                     </button>
@@ -144,7 +144,7 @@ export function OpsRoomColumn() {
                   <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
                 </div>
                 ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[length:var(--fs-xs)] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
-                <div class="flex justify-between items-center gap-3 mt-2.5 max-[880px]:flex-col max-[880px]:items-start">
+                <div class="flex justify-between items-center gap-3 mt-3 max-[880px]:flex-col max-[880px]:items-start">
                   <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
                     실행
                   </button>

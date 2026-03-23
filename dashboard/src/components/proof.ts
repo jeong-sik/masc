@@ -124,7 +124,7 @@ export function Proof() {
       </div>
 
       ${proofError.value
-        ? html`<div class="p-3.5 rounded-xl border border-[var(--bad-30)] bg-[var(--bad-8)] text-[13px] text-[#f7b6b6]">${proofError.value}</div>`
+        ? html`<div class="p-4 rounded-xl border border-[var(--bad-30)] bg-[var(--bad-8)] text-[13px] text-[#f7b6b6]">${proofError.value}</div>`
         : null}
 
       <${SelectionCard} selection=${selection} summary=${summary ?? null} />
@@ -152,42 +152,42 @@ export function Proof() {
       <details class="mb-1">
         <summary class="cursor-pointer text-[13px] text-[var(--text-muted)] py-1.5 hover:text-[var(--text-body)] transition-colors">상세 지표 (${8}개)</summary>
         <div class="grid grid-cols-[repeat(auto-fit,minmax(155px,1fr))] gap-3 mt-3">
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${verdictTone(liveVerdict)}">
+          <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${verdictTone(liveVerdict)}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">Live 판정</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${liveVerdict}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">${verdictBasisLabel(verdictBasis)} 기준</small>
           </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${verdictTone(historicalVerdict ?? 'insufficient')}">
+          <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${verdictTone(historicalVerdict ?? 'insufficient')}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">Historical</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${historicalVerdict ?? 'none'}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">persisted proof 문서 기준</small>
           </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${unansweredActorCount > 0 ? 'warn' : 'ok'}">
+          <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${unansweredActorCount > 0 ? 'warn' : 'ok'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">무응답</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${unansweredActorCount}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">${unansweredActorCount > 0 ? '호출됐지만 응답 없음' : '없음'}</small>
           </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${interactionCount > 0 ? 'ok' : 'warn'}">
+          <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${interactionCount > 0 ? 'ok' : 'warn'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">직접 상호작용</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${interactionCount}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">참여자 간 직접 연결</small>
           </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${traceCount > 0 ? 'ok' : 'warn'}">
+          <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${traceCount > 0 ? 'ok' : 'warn'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">CP 트레이스</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${traceCount}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">관리형 backing</small>
           </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${validatedWorkerRunCount > 0 ? 'ok' : 'warn'}">
+          <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${validatedWorkerRunCount > 0 ? 'ok' : 'warn'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">OAS 워커 근거</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${validatedWorkerRunCount}/${Math.max(rawTraceRunCount, workerRunEvidence.length)}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">검증됨 / 수집됨</small>
           </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${(missingArtifacts === 0 && artifacts.length > 0) ? 'ok' : 'warn'}">
+          <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${(missingArtifacts === 0 && artifacts.length > 0) ? 'ok' : 'warn'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">산출물</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${presentArtifacts}/${artifacts.length}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">${missingArtifacts > 0 ? `${missingArtifacts}개 누락` : '전부 존재함'}</small>
           </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${plannedActorCount > actorCount ? 'warn' : 'ok'}">
+          <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${plannedActorCount > actorCount ? 'warn' : 'ok'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">계획된 참여자</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${plannedActorCount}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">${mentionedActorCount > 0 ? `${mentionedActorCount}명 호출됨` : '호출 기록 없음'}</small>

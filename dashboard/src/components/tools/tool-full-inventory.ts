@@ -109,7 +109,7 @@ export function FullInventoryView({
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-2 mb-3.5">
+      <div class="flex flex-wrap gap-2 mb-4">
         ${(Object.keys(SURFACE_LABELS) as SurfaceFilter[]).map(key => html`
           <button
             class=${`px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer ${surfaceFilter.value === key ? 'border-[var(--accent)]/40 text-[var(--accent)] bg-[var(--accent-8)]' : 'border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] text-[var(--text-body)]'}`}

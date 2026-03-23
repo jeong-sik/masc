@@ -41,8 +41,8 @@ export function GuardrailPane({
   const ruling = detail?.ruling
   const order = detail?.execution_order
   return html`
-    <div class="flex flex-col gap-3.5">
-      <${Card} title="판정 / 집행" class="section mb-3.5">
+    <div class="flex flex-col gap-4">
+      <${Card} title="판정 / 집행" class="section mb-4">
         ${!item || !detail
           ? html`<${EmptyState} message="사건을 고르면 판정과 집행 경로가 보입니다." compact />`
           : html`
@@ -81,7 +81,7 @@ export function GuardrailPane({
                 : null}
             `}
     <//>
-      <${Card} title="심의 입력" class="section mb-3.5">
+      <${Card} title="심의 입력" class="section mb-4">
         ${!item
           ? html`<${EmptyState} message="사건을 선택한 뒤 의견을 추가하세요." compact />`
           : html`

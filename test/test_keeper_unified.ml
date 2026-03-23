@@ -246,7 +246,7 @@ let test_unified_turn_runtime_defaults () =
       (KC.keeper_unified_temperature ());
     check int "unified max_tokens default" 2048
       (KC.keeper_unified_max_tokens ());
-    check int "unified max_turns default" 5
+    check int "unified max_turns default" 10
       (KC.keeper_unified_max_turns ()))))
 
 (* ---------- Metrics observation tests ---------- *)

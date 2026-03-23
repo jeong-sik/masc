@@ -190,10 +190,19 @@ let cleanup_pubsub_limit_q =
      DELETE FROM masc_pubsub WHERE id IN (SELECT id FROM ranked WHERE rn > $1) RETURNING 1\
    ) SELECT COUNT(*)::int FROM deleted"
 
-(* Helper to convert Caqti_error to our error type — logs every PG failure *)
+(* Helper to convert Caqti_error to our error type.
+   Rate-limits connection failure logs to avoid flooding stderr
+   when the PG pool is exhausted (e.g. Supabase MaxClientsInSessionMode). *)
+let _pg_last_error_log = Atomic.make 0.0
+
 let caqti_error_to_masc err =
   let msg = Caqti_error.show err in
-  Log.Backend.error "[PG] %s" msg;
+  let now = Unix.gettimeofday () in
+  let last = Atomic.get _pg_last_error_log in
+  if now -. last > 60.0 then begin
+    Atomic.set _pg_last_error_log now;
+    Log.Backend.error "[PG] %s" msg
+  end;
   OperationFailed msg
 
 (* WARNING: create requires an Eio.Switch context.
@@ -313,7 +322,11 @@ let exists t ~key =
   | Ok (Some _) -> true
   | Ok None -> false
   | Error err ->
-    Log.Backend.error "[PG:exists] %s" (Caqti_error.show err);
+    let now = Unix.gettimeofday () in
+    if now -. Atomic.get _pg_last_error_log > 60.0 then begin
+      Atomic.set _pg_last_error_log now;
+      Log.Backend.error "[PG:exists] %s" (Caqti_error.show err)
+    end;
     false
 
 let list_keys t ~prefix =

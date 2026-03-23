@@ -329,7 +329,14 @@ let handle_comment_add args =
   let author = get_string args "author" "anonymous" in
   let parent_id = get_string_opt args "parent_id" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
-
+  if String.trim post_id = "" then
+    (false, "post_id is required")
+  else if String.trim content = "" then
+    (false, "Content must not be empty")
+  else if String.length content > Board.Limits.max_content_length then
+    (false, Printf.sprintf "Content exceeds max length (%d > %d chars)"
+       (String.length content) Board.Limits.max_content_length)
+  else
   match Board_dispatch.add_comment ~post_id ~author ~content ?parent_id ~ttl_hours () with
   | Ok comment ->
       let json = Board.comment_to_yojson comment in

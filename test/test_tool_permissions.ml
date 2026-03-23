@@ -12,18 +12,35 @@ let setup () =
 (* --- requires_admin tests --- *)
 
 let test_admin_tools_classified () =
+  (* Capability-gated tools *)
   Alcotest.(check bool) "tool_admin_update is admin"
     true (Tool_permissions.requires_admin "masc_tool_admin_update");
   Alcotest.(check bool) "auth_create_token is admin"
     true (Tool_permissions.requires_admin "masc_auth_create_token");
-  Alcotest.(check bool) "operator_action is not admin"
-    false (Tool_permissions.requires_admin "masc_operator_action");
-  Alcotest.(check bool) "tool_admin_snapshot is not admin"
-    false (Tool_permissions.requires_admin "masc_tool_admin_snapshot");
+  (* Operator/session tools — now also runtime-gated (defense-in-depth) *)
+  Alcotest.(check bool) "operator_action is admin"
+    true (Tool_permissions.requires_admin "masc_operator_action");
+  Alcotest.(check bool) "tool_admin_snapshot is admin"
+    true (Tool_permissions.requires_admin "masc_tool_admin_snapshot");
+  Alcotest.(check bool) "operator_confirm is admin"
+    true (Tool_permissions.requires_admin "masc_operator_confirm");
+  Alcotest.(check bool) "team_session_stop is admin"
+    true (Tool_permissions.requires_admin "masc_team_session_stop");
+  Alcotest.(check bool) "team_session_finalize is admin"
+    true (Tool_permissions.requires_admin "masc_team_session_finalize");
+  Alcotest.(check bool) "operator_snapshot is admin"
+    true (Tool_permissions.requires_admin "masc_operator_snapshot");
+  (* Non-admin tools remain non-admin *)
   Alcotest.(check bool) "status is not admin"
     false (Tool_permissions.requires_admin "masc_status");
   Alcotest.(check bool) "heartbeat is not admin"
     false (Tool_permissions.requires_admin "masc_heartbeat")
+
+module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
+
+let test_admin_list_is_ssot () =
+  Alcotest.(check (list string)) "surface delegates to permissions"
+    Tool_permissions.admin_tools Agent_tool_surfaces.admin_tool_names
 
 (* --- check tests --- *)
 
@@ -104,6 +121,7 @@ let () =
   Alcotest.run "Tool_permissions" [
     "classification", [
       Alcotest.test_case "admin tools" `Quick test_admin_tools_classified;
+      Alcotest.test_case "admin list SSOT" `Quick test_admin_list_is_ssot;
     ];
     "check", [
       Alcotest.test_case "allows non-admin" `Quick test_check_allows_non_admin;

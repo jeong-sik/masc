@@ -259,7 +259,7 @@ let get_chain_id_for_preset = function
   | "coverage" -> Some "walph-coverage"
   | "refactor" -> Some "walph-refactor"
   | "docs" -> Some "walph-docs"
-  | "review" -> Some "pr-review-pipeline"  (* PR self-review *)
+  | "review" -> Some "pr-review-pipeline"  (* PR self-review + clean-context structural pass *)
   | "drain" -> None  (* No chain for simple drain *)
   | "figma" -> Some "walph-figma"
   | _ -> None

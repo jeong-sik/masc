@@ -42,6 +42,7 @@
         test_keeper_unified
         test_keeper_toml
         test_keeper_bash_safety
+        test_worktree_live_context
 )
  (modules test_room test_types test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
@@ -65,6 +66,7 @@
           test_keeper_unified
           test_keeper_toml
           test_keeper_bash_safety
+          test_worktree_live_context
   )
  (libraries masc_mcp agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))
@@ -173,6 +175,11 @@
  (name test_local_review_script)
  (modules test_local_review_script)
  (libraries alcotest unix yojson))
+
+(test
+ (name test_chain_presets)
+ (modules test_chain_presets)
+ (libraries masc_mcp alcotest yojson str))
 
 (test
  (name test_ci_run_tests_script)

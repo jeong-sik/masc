@@ -335,7 +335,8 @@ build_chunks() {
 build_prompt() {
   local chunk_path="$1"
   cat <<EOF
-Review this git diff against ${BASE_REF}...${HEAD_REF}. Focus only on bugs, regressions, stale compatibility assumptions, and missing tests.
+Review this git diff against ${BASE_REF}...${HEAD_REF} with fresh context only. Do not assume tickets, design intent, or prior discussion.
+Focus only on bugs, regressions, stale compatibility assumptions, structural contract violations, and missing tests.
 Return only \`No findings.\` or a flat list of findings with file paths and concise reasoning.
 
 $(cat "$chunk_path")
@@ -352,7 +353,7 @@ run_reviewer() {
   request_json="$(
     jq -n \
       --arg model "$MODEL" \
-      --arg system_prompt "You are a strict senior code reviewer. Review the patch for bugs, regressions, stale compatibility assumptions, and missing tests. Return only \`No findings.\` or a flat list of findings with file paths and concise reasoning." \
+      --arg system_prompt "You are a strict fresh-context code reviewer. Review the patch for bugs, regressions, stale compatibility assumptions, structural contract violations, and missing tests. Return only \`No findings.\` or a flat list of findings with file paths and concise reasoning." \
       --arg user_prompt "$prompt" \
       --argjson max_tokens "$MAX_TOKENS" \
       --argjson temperature "$TEMPERATURE" \

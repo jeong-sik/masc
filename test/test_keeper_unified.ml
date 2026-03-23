@@ -17,6 +17,7 @@ let base_observation : WO.world_observation =
     idle_seconds = 0;
     active_goals = [];
     continuity_summary = "";
+    worktree_change_summary = None;
     context_ratio = 0.0;
     economic_pressure = AE.Normal;
     unclaimed_task_count = 0;
@@ -178,6 +179,36 @@ let test_prompt_includes_triage_triggers () =
   check bool "has triage section" true
     (let found =
        try ignore (Str.search_forward (Str.regexp_string "Triage Triggers") user 0); true
+       with Not_found -> false
+     in found)
+
+let test_prompt_includes_worktree_delta () =
+  let obs =
+    { base_observation with
+      worktree_change_summary =
+        Some
+          "<git_status_change>\nWorking tree changed since last keeper turn (1 files):\n M lib/example.ml\n</git_status_change>"
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  check bool "has worktree section" true
+    (let found =
+       try
+         ignore
+           (Str.search_forward
+              (Str.regexp_string "Live Worktree Delta")
+              user 0);
+         true
+       with Not_found -> false
+     in found);
+  check bool "has git status block" true
+    (let found =
+       try
+         ignore
+           (Str.search_forward
+              (Str.regexp_string "<git_status_change>")
+              user 0);
+         true
        with Not_found -> false
      in found)
 
@@ -369,6 +400,7 @@ let () =
           test_case "frugal economy" `Quick test_prompt_frugal_economy;
           test_case "hustle economy" `Quick test_prompt_hustle_economy;
           test_case "includes triage triggers" `Quick test_prompt_includes_triage_triggers;
+          test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta;
           test_case "skips skip triage" `Quick test_prompt_skips_skip_triage;
           test_case "room state section" `Quick test_prompt_room_state_section;
         ] );

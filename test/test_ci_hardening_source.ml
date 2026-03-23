@@ -27,8 +27,12 @@ let file_contains_pattern file_rel pattern =
 let test_ci_sync_and_asset_contracts () =
   check bool "pr sync script added" true
     (file_contains_pattern "scripts/check-pr-sync.sh" "workflow payload head");
+  check bool "pr sync script falls back to pull ref" true
+    (file_contains_pattern "scripts/check-pr-sync.sh" "refs/pull/${pr_number}/head");
   check bool "ci workflow verifies pr sync" true
     (file_contains_pattern ".github/workflows/ci.yml" "Verify PR sync");
+  check bool "ci workflow passes pr number to sync check" true
+    (file_contains_pattern ".github/workflows/ci.yml" "--pr-number \"$PR_NUMBER\"");
   check bool "pr hygiene no longer checks dashboard assets (gitignored)" true
     (not (file_contains_pattern "scripts/check-pr-hygiene.sh" "dashboard source or Vite config changed but assets/dashboard was not updated"))
 

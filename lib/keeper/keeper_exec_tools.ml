@@ -363,22 +363,33 @@ let execute_keeper_tool_call
       in
       if cmd = "" then
         Yojson.Safe.to_string (`Assoc [ ("error", `String "cmd_required") ])
-      else
-        let root = project_root_of_config config in
-        let shell_cmd =
-          Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) cmd
-        in
-        let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec
-            [ "/bin/zsh"; "-lc"; shell_cmd ]
-        in
-        Yojson.Safe.to_string
-          (`Assoc
-            [
-              ("ok", `Bool (st = Unix.WEXITED 0));
-              ("status", process_status_to_json st);
-              ("output", `String (truncate_tool_output out));
+      else begin
+        match Worker_dev_tools.validate_command cmd with
+        | Error reason ->
+          Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd;
+          Yojson.Safe.to_string
+            (`Assoc [
+              ("ok", `Bool false);
+              ("error", `String "command_blocked");
+              ("reason", `String reason);
             ])
+        | Ok () ->
+          let root = project_root_of_config config in
+          let shell_cmd =
+            Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) cmd
+          in
+          let st, out =
+            Process_eio.run_argv_with_status ~timeout_sec
+              [ "/bin/zsh"; "-lc"; shell_cmd ]
+          in
+          Yojson.Safe.to_string
+            (`Assoc
+              [
+                ("ok", `Bool (st = Unix.WEXITED 0));
+                ("status", process_status_to_json st);
+                ("output", `String (truncate_tool_output out));
+              ])
+      end
   | "keeper_shell_readonly" ->
       let op =
         Safe_ops.json_string ~default:"" "op" args

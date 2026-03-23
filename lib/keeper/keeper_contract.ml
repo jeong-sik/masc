@@ -20,7 +20,6 @@ type room_scope =
   | All
 
 type trigger_mode =
-  | Legacy
   | Explicit_only
 
 let policy_mode_of_string = function
@@ -91,18 +90,13 @@ let room_scope_to_string = function
 
 let trigger_mode_of_string = function
   | "explicit_only" -> Explicit_only
-  | _ -> Legacy
+  | _ -> Explicit_only
 
 let parse_trigger_mode = function
-  | "legacy" -> Some Legacy
   | "explicit_only" -> Some Explicit_only
   | _ -> None
 
 let trigger_mode_to_string = function
-  | Legacy -> "legacy"
   | Explicit_only -> "explicit_only"
 
-let trigger_mode_is_explicit_only = function
-  | Explicit_only -> true
-  | Legacy -> false
-
+let trigger_mode_is_explicit_only _ = true

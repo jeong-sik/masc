@@ -94,23 +94,23 @@ let test_triage_multiple_triggers () =
 
 (* ---------- Action type tests ---------- *)
 
-let test_action_to_legacy_string_noop () =
-  check string "noop legacy" "noop"
-    (D.deliberation_action_to_legacy_string (D.Noop "test"))
+let test_action_to_policy_label_noop () =
+  check string "noop policy label" "noop"
+    (D.deliberation_action_to_policy_label (D.Noop "test"))
 
-let test_action_to_legacy_string_reply () =
-  check string "reply legacy" "reply_in_room"
-    (D.deliberation_action_to_legacy_string
+let test_action_to_policy_label_reply () =
+  check string "reply policy label" "reply_in_room"
+    (D.deliberation_action_to_policy_label
        (D.ReplyInRoom { room_id = "r1"; content = "hello" }))
 
-let test_action_to_legacy_string_board_post () =
-  check string "board_post legacy" "board_post"
-    (D.deliberation_action_to_legacy_string
+let test_action_to_policy_label_board_post () =
+  check string "board_post policy label" "board_post"
+    (D.deliberation_action_to_policy_label
        (D.BoardPost { content = "test"; hearth = None }))
 
-let test_action_to_legacy_string_task_claim () =
-  check string "task_claim legacy" "task_claim"
-    (D.deliberation_action_to_legacy_string
+let test_action_to_policy_label_task_claim () =
+  check string "task_claim policy label" "task_claim"
+    (D.deliberation_action_to_policy_label
        (D.TaskClaim { task_id = "t-1"; reason = "needed" }))
 
 let test_action_to_json_roundtrip () =
@@ -785,14 +785,14 @@ let () =
         ] );
       ( "actions",
         [
-          test_case "noop to legacy string" `Quick
-            test_action_to_legacy_string_noop;
-          test_case "reply to legacy string" `Quick
-            test_action_to_legacy_string_reply;
-          test_case "board_post to legacy string" `Quick
-            test_action_to_legacy_string_board_post;
-          test_case "task_claim to legacy string" `Quick
-            test_action_to_legacy_string_task_claim;
+          test_case "noop to policy label" `Quick
+            test_action_to_policy_label_noop;
+          test_case "reply to policy label" `Quick
+            test_action_to_policy_label_reply;
+          test_case "board_post to policy label" `Quick
+            test_action_to_policy_label_board_post;
+          test_case "task_claim to policy label" `Quick
+            test_action_to_policy_label_task_claim;
           test_case "action to json roundtrip" `Quick
             test_action_to_json_roundtrip;
           test_case "noop to json preserves reason" `Quick

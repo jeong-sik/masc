@@ -166,10 +166,7 @@ let keeper_error_hint ~agent_status ~meta =
     let reason = String.trim meta.last_proactive_reason in
     if reason = "" then None else Some reason
   in
-  let drift_reason =
-    let reason = String.trim meta.last_drift_reason in
-    if reason = "" then None else Some reason
-  in
+  let drift_reason = None in
   let looks_error_like text =
     List.exists (string_contains_ci text)
       [

@@ -36,12 +36,11 @@ let find_jsonl_row_by_action_id rows action_id =
 let resolved_keeper_args_to_json
     ~name ~persona_name ~persona_profile_path ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~soul_profile ~will ~needs ~desires ~models ~allowed_models
-    ~active_model ~policy_mode ~policy_action_budget ~policy_reward_model_path
-    ~policy_voice_enabled ~policy_shell_mode ~initiative_enabled ~initiative_scope
-    ~initiative_idle_sec ~initiative_cooldown_sec ~initiative_context_mode
-    ~initiative_post_ttl_hours ~room_scope ~scope_kind ~trigger_mode ~mention_targets
-    ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled ~verify
-    ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec ~context_budget =
+    ~active_model ~policy_mode
+    ~policy_voice_enabled ~policy_shell_mode
+    ~room_scope ~scope_kind ~trigger_mode ~mention_targets
+    ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
+    ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
   `Assoc
     [
       ("name", `String name);
@@ -60,16 +59,8 @@ let resolved_keeper_args_to_json
       ("allowed_models", string_list_to_json allowed_models);
       ("active_model", `String active_model);
       ("policy_mode", `String policy_mode);
-      ("policy_action_budget", `String policy_action_budget);
-      ("policy_reward_model_path", `String policy_reward_model_path);
       ("policy_voice_enabled", `Bool policy_voice_enabled);
       ("policy_shell_mode", `String policy_shell_mode);
-      ("initiative_enabled", `Bool initiative_enabled);
-      ("initiative_scope", `String initiative_scope);
-      ("initiative_idle_sec", `Int initiative_idle_sec);
-      ("initiative_cooldown_sec", `Int initiative_cooldown_sec);
-      ("initiative_context_mode", `String initiative_context_mode);
-      ("initiative_post_ttl_hours", `Int initiative_post_ttl_hours);
       ("room_scope", `String room_scope);
       ("scope_kind", `String scope_kind);
       ("trigger_mode", `String trigger_mode);
@@ -77,11 +68,9 @@ let resolved_keeper_args_to_json
       ("presence_keepalive", `Bool presence_keepalive);
       ("presence_keepalive_sec", `Int presence_keepalive_sec);
       ("proactive_enabled", `Bool proactive_enabled);
-      ("verify", `Bool verify);
       ("auto_handoff", `Bool auto_handoff);
       ("handoff_threshold", `Float handoff_threshold);
       ("handoff_cooldown_sec", `Int handoff_cooldown_sec);
-      ("context_budget", `Float context_budget);
     ]
 
 let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
@@ -97,13 +86,6 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
     Safe_ops.json_string ~default:"heuristic" "policy_mode" json
     |> canonical_policy_mode
   in
-  let policy_action_budget =
-    Safe_ops.json_string ~default:"conversation" "policy_action_budget" json
-    |> canonical_policy_action_budget
-  in
-  let policy_reward_model_path =
-    Safe_ops.json_string ~default:"" "policy_reward_model_path" json |> String.trim
-  in
   let policy_voice_enabled =
     Safe_ops.json_bool ~default:false "policy_voice_enabled" json
   in
@@ -111,7 +93,7 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
     Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json
     |> canonical_policy_shell_mode
   in
-  let initiative_enabled =
+  let _initiative_enabled =
     Safe_ops.json_bool ~default:false "initiative_enabled" json
   in
   let mention_targets = Safe_ops.json_string_list "mention_targets" json in
@@ -120,21 +102,10 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   if models = [] then errors := "models is required" :: !errors;
   if active_model <> "" && not (List.mem active_model (allowed_models @ models)) then
     errors := "active_model must be included in models or allowed_models" :: !errors;
-  if policy_mode = "learned_offline_v1" && policy_reward_model_path = "" then
-    errors := "policy_reward_model_path is required for learned_offline_v1" :: !errors;
-  if policy_mode = "heuristic" && policy_action_budget <> "conversation" then
-    errors := "policy_action_budget=board requires learned_offline_v1" :: !errors;
   if policy_voice_enabled && policy_mode <> "learned_offline_v1" then
     errors := "policy_voice_enabled=true requires learned_offline_v1" :: !errors;
   if policy_shell_mode = "readonly" && policy_mode <> "learned_offline_v1" then
     errors := "policy_shell_mode=readonly requires learned_offline_v1" :: !errors;
-  if
-    initiative_enabled
-    && (policy_mode <> "learned_offline_v1" || policy_action_budget <> "board")
-  then
-    errors
-      := "initiative_enabled=true requires learned_offline_v1 with policy_action_budget=board"
-         :: !errors;
   if
     (Safe_ops.json_string ~default:"legacy" "trigger_mode" json
      |> Keeper_contract.trigger_mode_of_string
@@ -244,19 +215,6 @@ let resolved_keeper_args_from_persona args :
               |> Option.value ~default:"heuristic"
               |> canonical_policy_mode
             in
-            let policy_action_budget =
-              first_some
-                (get_string_opt args "policy_action_budget")
-                defaults.policy_action_budget
-              |> Option.value ~default:"conversation"
-              |> canonical_policy_action_budget
-            in
-            let policy_reward_model_path =
-              first_some
-                (get_string_opt args "policy_reward_model_path")
-                defaults.policy_reward_model_path
-              |> Option.value ~default:""
-            in
             let policy_voice_enabled =
               first_some
                 (get_bool_opt args "policy_voice_enabled")
@@ -269,47 +227,6 @@ let resolved_keeper_args_from_persona args :
                 defaults.policy_shell_mode
               |> Option.value ~default:"disabled"
               |> canonical_policy_shell_mode
-            in
-            let initiative_enabled =
-              first_some
-                (get_bool_opt args "initiative_enabled")
-                defaults.initiative_enabled
-              |> Option.value ~default:false
-            in
-            let initiative_scope =
-              first_some
-                (get_string_opt args "initiative_scope")
-                defaults.initiative_scope
-              |> Option.value ~default:"board_only"
-              |> canonical_initiative_scope
-            in
-            let initiative_idle_sec =
-              first_some
-                (Safe_ops.json_int_opt "initiative_idle_sec" args)
-                defaults.initiative_idle_sec
-              |> Option.value ~default:3600
-              |> normalize_initiative_idle_sec
-            in
-            let initiative_cooldown_sec =
-              first_some
-                (Safe_ops.json_int_opt "initiative_cooldown_sec" args)
-                defaults.initiative_cooldown_sec
-              |> Option.value ~default:3600
-              |> normalize_initiative_cooldown_sec
-            in
-            let initiative_context_mode =
-              first_some
-                (get_string_opt args "initiative_context_mode")
-                defaults.initiative_context_mode
-              |> Option.value ~default:"board_snapshot"
-              |> canonical_initiative_context_mode
-            in
-            let initiative_post_ttl_hours =
-              first_some
-                (Safe_ops.json_int_opt "initiative_post_ttl_hours" args)
-                defaults.initiative_post_ttl_hours
-              |> Option.value ~default:24
-              |> normalize_initiative_post_ttl_hours
             in
             let room_scope =
               get_string_opt args "room_scope"
@@ -359,7 +276,6 @@ let resolved_keeper_args_from_persona args :
                      (if trigger_mode = "explicit_only" then false
                       else default_proactive_enabled)
             in
-            let verify = get_bool args "verify" false in
             let auto_handoff = get_bool args "auto_handoff" true in
             let handoff_threshold =
               Safe_ops.json_float_opt "handoff_threshold" args
@@ -369,10 +285,6 @@ let resolved_keeper_args_from_persona args :
               Safe_ops.json_int_opt "handoff_cooldown_sec" args
               |> Option.value ~default:300
             in
-            let context_budget =
-              Safe_ops.json_float_opt "context_budget" args
-              |> Option.value ~default:0.6
-            in
             let resolved =
               resolved_keeper_args_to_json
                 ~name
@@ -381,13 +293,11 @@ let resolved_keeper_args_from_persona args :
                 ~goal ~short_goal ~mid_goal ~long_goal
                 ~instructions ~soul_profile ~will ~needs ~desires
                 ~models:base_models ~allowed_models ~active_model
-                ~policy_mode ~policy_action_budget ~policy_reward_model_path
-                ~policy_voice_enabled ~policy_shell_mode ~initiative_enabled
-                ~initiative_scope ~initiative_idle_sec ~initiative_cooldown_sec
-                ~initiative_context_mode ~initiative_post_ttl_hours
+                ~policy_mode
+                ~policy_voice_enabled ~policy_shell_mode
                 ~room_scope ~scope_kind ~trigger_mode ~mention_targets
                 ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
-                ~verify ~auto_handoff ~handoff_threshold
-                ~handoff_cooldown_sec ~context_budget
+                ~auto_handoff ~handoff_threshold
+                ~handoff_cooldown_sec
             in
             Ok (persona, resolved)

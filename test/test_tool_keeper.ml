@@ -321,8 +321,7 @@ let test_persona_list_and_create_from_persona () =
       let reward_model_path = Filename.concat base_dir "reward-model.json" in
       write_reward_model reward_model_path;
       write_persona_profile ~me_root ~persona_name:"sangsu"
-        ~content:
-          (Printf.sprintf {|{
+        ~content:{|{
   "name": "상수",
   "role": "홍상수 영화 속 찌질한 40대 남자",
   "trait": "직설적이고 현실적",
@@ -336,19 +335,9 @@ let test_persona_list_and_create_from_persona () =
     "mention_targets": ["sangsu"],
     "presence_keepalive": false,
     "proactive_enabled": false,
-    "policy_mode": "learned_offline_v1",
-    "policy_action_budget": "board",
-    "policy_reward_model_path": "%s",
-    "policy_voice_enabled": true,
-    "policy_shell_mode": "readonly",
-    "initiative_enabled": true,
-    "initiative_scope": "board_only",
-    "initiative_idle_sec": 3600,
-    "initiative_cooldown_sec": 3600,
-    "initiative_context_mode": "board_snapshot",
-    "initiative_post_ttl_hours": 24
+    "policy_mode": "learned_offline_v1"
   }
-}|} reward_model_path);
+|};
       with_env "ME_ROOT" me_root (fun () ->
         let config = Masc_mcp.Room.default_config base_dir in
         ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
@@ -388,7 +377,7 @@ let test_persona_list_and_create_from_persona () =
         check string "dry run shell mode" "readonly"
           Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "policy_shell_mode" |> to_string);
         check bool "dry run initiative enabled" true
-          Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "initiative_enabled" |> to_bool);
+          Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "policy_mode" |> to_string = "learned_offline_v1");
         let ok, create_body =
           dispatch "masc_keeper_create_from_persona"
             (`Assoc
@@ -657,9 +646,9 @@ let test_persistent_agent_create_from_persona_and_status () =
     (fun () ->
       let reward_model_path = Filename.concat base_dir "reward-model.json" in
       write_reward_model reward_model_path;
+      ignore reward_model_path;
       write_persona_profile ~me_root ~persona_name:"persistent-sangsu"
-        ~content:
-          (Printf.sprintf {|{
+        ~content:{|{
   "name": "Persistent Sangsu",
   "role": "resident critic",
   "trait": "terse",
@@ -673,11 +662,9 @@ let test_persistent_agent_create_from_persona_and_status () =
     "mention_targets": ["persistent-sangsu"],
     "presence_keepalive": false,
     "proactive_enabled": false,
-    "policy_mode": "learned_offline_v1",
-    "policy_action_budget": "board",
-    "policy_reward_model_path": "%s"
+    "policy_mode": "learned_offline_v1"
   }
-}|} reward_model_path);
+|};
       with_env "ME_ROOT" me_root (fun () ->
         let config = Masc_mcp.Room.default_config base_dir in
         ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));

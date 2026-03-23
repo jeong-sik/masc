@@ -451,22 +451,14 @@ let handle_keeper_status ctx args : tool_result =
                else `String m.last_proactive_preview);
            ]);
            ("drift", `Assoc [
-             ("enabled", `Bool m.drift_enabled);
-             ("min_turn_gap", `Int m.drift_min_turn_gap);
-             ("count_total", `Int m.drift_count_total);
-             ("last_turn", `Int m.last_drift_turn);
-             ("last_reason",
-               if String.trim m.last_drift_reason = ""
-               then `Null
-               else `String m.last_drift_reason);
+             ("enabled", `Bool false);
+             ("min_turn_gap", `Int 0);
+             ("count_total", `Int 0);
+             ("last_turn", `Int 0);
+             ("last_reason", `Null);
            ]);
            ("policy", `Assoc [
              ("mode", `String m.policy_mode);
-             ("action_budget", `String m.policy_action_budget);
-             ("reward_model_path",
-               if String.trim m.policy_reward_model_path = ""
-               then `Null
-               else `String m.policy_reward_model_path);
              ("voice_enabled", `Bool m.policy_voice_enabled);
              ("shell_mode", `String m.policy_shell_mode);
              ("allowed_paths", string_list_to_json m.allowed_paths);
@@ -475,14 +467,14 @@ let handle_keeper_status ctx args : tool_result =
              ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
            ]);
            ("initiative", `Assoc [
-             ("enabled", `Bool m.initiative_enabled);
-             ("scope", `String m.initiative_scope);
-             ("idle_sec", `Int m.initiative_idle_sec);
-             ("cooldown_sec", `Int m.initiative_cooldown_sec);
-             ("context_mode", `String m.initiative_context_mode);
-             ("post_ttl_hours", `Int m.initiative_post_ttl_hours);
+             ("enabled", `Bool false);
+             ("scope", `String "board_only");
+             ("idle_sec", `Int 3600);
+             ("cooldown_sec", `Int 3600);
+             ("context_mode", `String "board_snapshot");
+             ("post_ttl_hours", `Int 24);
            ]);
-           ("auto_team_session_enabled", `Bool m.auto_team_session_enabled);
+           ("auto_team_session_enabled", `Bool false);
            ("active_team_session_id",
              match m.active_team_session_id with
              | Some session_id -> `String session_id

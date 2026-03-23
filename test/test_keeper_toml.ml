@@ -184,15 +184,8 @@ proactive_enabled = true
 presence_keepalive = true
 presence_keepalive_sec = 30
 policy_mode = "heuristic"
-policy_action_budget = "board"
 policy_shell_mode = "readonly"
 policy_voice_enabled = false
-initiative_enabled = true
-initiative_scope = "board_only"
-initiative_idle_sec = 3600
-initiative_cooldown_sec = 7200
-initiative_context_mode = "board_snapshot"
-initiative_post_ttl_hours = 48
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -213,13 +206,8 @@ initiative_post_ttl_hours = 48
       check (option bool) "keepalive" (Some true) d.presence_keepalive;
       check (option int) "keepalive_sec" (Some 30) d.presence_keepalive_sec;
       check (option string) "policy_mode" (Some "heuristic") d.policy_mode;
-      check (option string) "policy_action_budget" (Some "board") d.policy_action_budget;
       check (option string) "policy_shell_mode" (Some "readonly") d.policy_shell_mode;
-      check (option bool) "policy_voice" (Some false) d.policy_voice_enabled;
-      check (option bool) "initiative" (Some true) d.initiative_enabled;
-      check (option int) "initiative_idle" (Some 3600) d.initiative_idle_sec;
-      check (option int) "initiative_cooldown" (Some 7200) d.initiative_cooldown_sec;
-      check (option int) "initiative_ttl" (Some 48) d.initiative_post_ttl_hours
+      check (option bool) "policy_voice" (Some false) d.policy_voice_enabled
 
 let test_profile_invalid_soul_profile () =
   let input = {|

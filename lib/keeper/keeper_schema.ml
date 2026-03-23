@@ -57,32 +57,6 @@ let resident_schemas : tool_schema list = [
           ("type", `String "string");
           ("enum", `List [`String "heuristic"; `String "learned_offline_v1"]);
         ]);
-        ("policy_action_budget", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "conversation"; `String "board"]);
-        ]);
-        ("policy_reward_model_path", `Assoc [("type", `String "string")]);
-        ("policy_voice_enabled", `Assoc [("type", `String "boolean")]);
-        ("policy_shell_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "disabled"; `String "readonly"]);
-        ]);
-        ("allowed_paths", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-        ("initiative_enabled", `Assoc [("type", `String "boolean")]);
-        ("initiative_scope", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "board_only"]);
-        ]);
-        ("initiative_idle_sec", `Assoc [("type", `String "integer")]);
-        ("initiative_cooldown_sec", `Assoc [("type", `String "integer")]);
-        ("initiative_context_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "board_snapshot"]);
-        ]);
-        ("initiative_post_ttl_hours", `Assoc [("type", `String "integer")]);
         ("room_scope", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "current"; `String "all"]);
@@ -102,11 +76,9 @@ let resident_schemas : tool_schema list = [
         ("presence_keepalive", `Assoc [("type", `String "boolean")]);
         ("presence_keepalive_sec", `Assoc [("type", `String "integer")]);
         ("proactive_enabled", `Assoc [("type", `String "boolean")]);
-        ("verify", `Assoc [("type", `String "boolean")]);
         ("auto_handoff", `Assoc [("type", `String "boolean")]);
         ("handoff_threshold", `Assoc [("type", `String "number")]);
         ("handoff_cooldown_sec", `Assoc [("type", `String "integer")]);
-        ("context_budget", `Assoc [("type", `String "number")]);
       ]);
       ("required", `List [`String "persona_name"]);
     ];
@@ -177,59 +149,6 @@ let resident_schemas : tool_schema list = [
           ("enum", `List [`String "heuristic"; `String "learned_offline_v1"; `String "explicit_event_v1"]);
           ("description", `String "Behavior selection mode persisted on the keeper. explicit_event_v1 disables heuristic routing and uses explicit lifecycle/timer events only.");
         ]);
-        ("policy_action_budget", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "conversation"; `String "board"]);
-          ("description", `String "Maximum autonomous action surface. board is only valid with learned_offline_v1.");
-        ]);
-        ("policy_reward_model_path", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Offline reward-model JSON path for learned_offline_v1.");
-        ]);
-        ("policy_voice_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, keeper-safe voice speak output is allowed.");
-        ]);
-        ("policy_shell_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "disabled"; `String "readonly"]);
-          ("description", `String "Keeper shell wrapper mode. readonly adds a structured read-only shell tool without enabling raw bash.");
-        ]);
-        ("allowed_paths", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Relative path prefixes the keeper may access via fs_read/shell_readonly. Empty means unrestricted within project root.");
-        ]);
-        ("initiative_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, the keeper may run initiative ticks on keepalive and choose noop vs board_post.");
-        ]);
-        ("initiative_scope", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "board_only"]);
-          ("description", `String "Initiative action surface. v1 only supports board_only.");
-        ]);
-        ("initiative_idle_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum idle seconds before initiative is allowed (default/min: 3600).");
-        ]);
-        ("initiative_cooldown_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum seconds between initiative actions (default/min: 3600).");
-        ]);
-        ("initiative_context_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "board_snapshot"]);
-          ("description", `String "Structured initiative context source. v1 only supports board_snapshot.");
-        ]);
-        ("initiative_post_ttl_hours", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "TTL for initiative-created internal board posts (default: 24).");
-        ]);
-        ("auto_team_session_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, explicit masc_keeper_msg calls may start or reuse a projected Team Session instead of returning only a conversational reply.");
-        ]);
         ("scope_kind", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "local"; `String "global"]);
@@ -250,10 +169,6 @@ let resident_schemas : tool_schema list = [
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Exact direct-mention tokens that can wake the keeper in room traffic (for example ['sangsu']).");
         ]);
-        ("verify", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Enable verifier model feedback (default: false for keeper).");
-        ]);
         ("presence_keepalive", `Assoc [
           ("type", `String "boolean");
           ("description", `String "If true, periodically refresh Room.heartbeat for the keeper agent (default: true).");
@@ -273,14 +188,6 @@ let resident_schemas : tool_schema list = [
         ("proactive_cooldown_sec", `Assoc [
           ("type", `String "integer");
           ("description", `String "Minimum seconds between proactive check-ins (default: 1800).");
-        ]);
-        ("drift_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, keeper self-model (will/needs/desires) can drift from conversation signals (default: true).");
-        ]);
-        ("drift_min_turn_gap", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum keeper turns between automatic drift updates (default: 6).");
         ]);
         ("compaction_profile", `Assoc [
           ("type", `String "string");
@@ -313,10 +220,6 @@ let resident_schemas : tool_schema list = [
         ("handoff_cooldown_sec", `Assoc [
           ("type", `String "integer");
           ("description", `String "Minimum seconds between handoffs (default: 300).");
-        ]);
-        ("context_budget", `Assoc [
-          ("type", `String "number");
-          ("description", `String "How much compressed context to transfer to successor (0.0-1.0, default: 0.6).");
         ]);
         ("voice_enabled", `Assoc [
           ("type", `String "boolean");
@@ -441,14 +344,6 @@ let resident_schemas : tool_schema list = [
           ("type", `String "string");
           ("description", `String "Optional: set keeper desires (욕구) when creating keeper inline");
         ]);
-        ("drift_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: enable/disable self-model drift when creating keeper inline");
-        ]);
-        ("drift_min_turn_gap", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Optional: min turn gap for drift updates when creating keeper inline");
-        ]);
         ("models", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -505,14 +400,6 @@ let resident_schemas : tool_schema list = [
         ("new_desires", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: replace keeper desires (persisted)");
-        ]);
-        ("new_drift_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: replace drift enabled flag (persisted)");
-        ]);
-        ("new_drift_min_turn_gap", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Optional: replace drift min turn gap (persisted)");
         ]);
       ]);
       ("required", `List [`String "name"; `String "message"]);

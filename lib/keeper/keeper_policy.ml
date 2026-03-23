@@ -44,7 +44,7 @@ let handle_keeper_policy_set ctx args : tool_result =
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
     | Ok (Some meta) ->
         let effective_reward_model_path_raw =
-          if reward_model_path <> "" then reward_model_path else meta.policy_reward_model_path
+          reward_model_path
         in
         let effective_reward_model_path =
           if effective_reward_model_path_raw <> ""
@@ -62,9 +62,6 @@ let handle_keeper_policy_set ctx args : tool_result =
                 {
                   meta with
                   policy_mode = Keeper_contract.policy_mode_to_string policy_mode;
-                  policy_action_budget =
-                    Keeper_contract.policy_action_budget_to_string action_budget;
-                  policy_reward_model_path = reward_model.path;
                   updated_at = now_iso ();
                 }
               in
@@ -77,8 +74,8 @@ let handle_keeper_policy_set ctx args : tool_result =
                          [
                            ("name", `String updated.name);
                            ("policy_mode", `String updated.policy_mode);
-                           ("action_budget", `String updated.policy_action_budget);
-                           ("reward_model_path", `String updated.policy_reward_model_path);
+                           ("action_budget", `String (Keeper_contract.policy_action_budget_to_string action_budget));
+                           ("reward_model_path", `String reward_model.path);
                            ("reward_model_version", `String reward_model.version);
                          ]) ))
         else
@@ -86,9 +83,6 @@ let handle_keeper_policy_set ctx args : tool_result =
             {
               meta with
               policy_mode = Keeper_contract.policy_mode_to_string policy_mode;
-              policy_action_budget =
-                Keeper_contract.policy_action_budget_to_string action_budget;
-              policy_reward_model_path = effective_reward_model_path;
               updated_at = now_iso ();
             }
           in
@@ -101,11 +95,11 @@ let handle_keeper_policy_set ctx args : tool_result =
                     [
                       ("name", `String updated.name);
                       ("policy_mode", `String updated.policy_mode);
-                      ("action_budget", `String updated.policy_action_budget);
+                      ("action_budget", `String (Keeper_contract.policy_action_budget_to_string action_budget));
                       ("reward_model_path",
-                        if String.trim updated.policy_reward_model_path = ""
+                        if String.trim effective_reward_model_path = ""
                         then `Null
-                        else `String updated.policy_reward_model_path);
+                        else `String effective_reward_model_path);
                     ]) )
 
 let handle_keeper_feedback_record ctx args : tool_result =
@@ -273,8 +267,8 @@ let handle_keeper_eval_replay ctx args : tool_result =
     match read_meta ctx.config name with
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
-    | Ok (Some meta) -> (
-        match load_keeper_reward_model meta.policy_reward_model_path with
+    | Ok (Some _meta) -> (
+        match load_keeper_reward_model "" with
         | Error e -> (false, "❌ " ^ e)
         | Ok reward_model ->
             let rows =

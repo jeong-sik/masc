@@ -303,8 +303,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "keeper_policy");
           (match Keeper_types.read_meta ctx.config "admin-keeper" with
           | Ok (Some meta) ->
-              assert (meta.autonomy_level = "l4_autonomous" || meta.autonomy_level = "L4_Autonomous");
-              assert (meta.policy_action_budget = "board")
+              assert (meta.autonomy_level = "l4_autonomous" || meta.autonomy_level = "L4_Autonomous")
           | _ -> failwith "expected updated keeper meta")
       | None -> failwith "dispatch returned None")
   | Some (false, err) -> failwith err

@@ -56,8 +56,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     let inline_will = parse_self_model_opt args "will" in
     let inline_needs = parse_self_model_opt args "needs" in
     let inline_desires = parse_self_model_opt args "desires" in
-    let inline_drift_enabled_opt = get_bool_opt args "drift_enabled" in
-    let inline_drift_min_turn_gap_opt = Safe_ops.json_int_opt "drift_min_turn_gap" args in
     let inline_soul_profile_res = parse_soul_profile_opt args "soul_profile" in
     let new_soul_profile_res = parse_soul_profile_opt args "new_soul_profile" in
     let new_short_goal = parse_goal_horizon_opt args "new_short_goal" in
@@ -66,8 +64,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     let new_will = parse_self_model_opt args "new_will" in
     let new_needs = parse_self_model_opt args "new_needs" in
     let new_desires = parse_self_model_opt args "new_desires" in
-    let new_drift_enabled_opt = get_bool_opt args "new_drift_enabled" in
-    let new_drift_min_turn_gap_opt = Safe_ops.json_int_opt "new_drift_min_turn_gap" args in
     let inline_models = get_string_list args "models" in
     let require_existing = get_bool args "require_existing" false in
     match inline_soul_profile_res, new_soul_profile_res with
@@ -77,7 +73,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       ~ctx ~name ~require_existing ~profile_defaults
       ~inline_goal ~inline_short_goal ~inline_mid_goal ~inline_long_goal
       ~inline_instructions ~inline_will ~inline_needs ~inline_desires
-      ~inline_drift_enabled_opt ~inline_drift_min_turn_gap_opt
       ~inline_soul_profile ~inline_models
     with
     | Error e -> (false, "❌ " ^ e)
@@ -86,7 +81,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
         apply_settings_update
           ~args ~meta0 ~new_short_goal ~new_mid_goal ~new_long_goal
           ~new_soul_profile ~new_will ~new_needs ~new_desires
-          ~new_drift_enabled_opt ~new_drift_min_turn_gap_opt
           ~config:ctx.config
       in
       start_keepalive ctx meta;

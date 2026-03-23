@@ -195,6 +195,7 @@ let ensure_keeper_exists
       mid_goal;
       long_goal;
       soul_profile;
+      cascade_name = "keeper_unified";
       will;
       needs;
       desires;
@@ -293,10 +294,11 @@ let ensure_keeper_exists
     } in
     let base_dir = session_base_dir ctx.config in
     mkdir_p base_dir;
-    (match ensure_api_keys_for_labels meta.models with
+    let cascade_models = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
+    (match ensure_api_keys_for_labels cascade_models with
      | Error e -> Error e
      | Ok () ->
-       let primary_max_context = Oas_model_resolve.resolve_primary_max_context meta.models in
+       let primary_max_context = Oas_model_resolve.resolve_primary_max_context cascade_models in
        let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
        let persona_extended =
          Keeper_types_profile.load_persona_extended name

@@ -17,6 +17,7 @@ type keeper_meta = {
   mid_goal: string;
   long_goal: string;
   soul_profile: string;
+  cascade_name: string;
   will: string;
   needs: string;
   desires: string;
@@ -120,6 +121,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("mid_goal", `String m.mid_goal);
       ("long_goal", `String m.long_goal);
       ("soul_profile", `String m.soul_profile);
+      ("cascade_name", `String m.cascade_name);
       ("will", `String m.will);
       ("needs", `String m.needs);
       ("desires", `String m.desires);
@@ -248,7 +250,14 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       |> normalize_self_model_text
     in
     let instructions = Safe_ops.json_string ~default:"" "instructions" json in
-    let models = Safe_ops.json_string_list "models" json in
+    let cascade_name =
+      Safe_ops.json_string ~default:"keeper_unified" "cascade_name" json
+    in
+    let models_raw = Safe_ops.json_string_list "models" json in
+    let models =
+      if models_raw <> [] then models_raw
+      else Oas_model_resolve.models_of_cascade_name cascade_name
+    in
     let allowed_models_raw = Safe_ops.json_string_list "allowed_models" json in
     let allowed_models =
       let base = if allowed_models_raw <> [] then allowed_models_raw else models in
@@ -477,6 +486,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           mid_goal;
           long_goal;
           soul_profile;
+          cascade_name;
           will;
           needs;
           desires;

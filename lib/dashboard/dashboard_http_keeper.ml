@@ -62,7 +62,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           let primary_model =
             match m.models with
             | model :: _ -> model
-            | [] -> ""
+            | [] ->
+              (match Oas_model_resolve.models_of_cascade_name m.cascade_name with
+               | model :: _ -> model
+               | [] -> "")
           in
           let primary_model_norm = normalize_model_name primary_model in
           let last_compaction_saved_tokens =
@@ -141,7 +144,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                     ("max_context", `Int 0);
                   ])
               | _ -> None
-            ) m.models)
+            ) (let ms = m.models in
+               if ms <> [] then ms
+               else Oas_model_resolve.models_of_cascade_name m.cascade_name))
           in
 
           (* In compact mode (used by execution surface), skip heavy memory bank I/O.
@@ -230,13 +235,18 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
                 ]
             | None ->
-                (let cfgs = Llm_provider.Cascade_config.parse_model_strings m.models in
+                (let effective_models =
+                   let ms = m.models in
+                   if ms <> [] then ms
+                   else Oas_model_resolve.models_of_cascade_name m.cascade_name
+                 in
+                 let cfgs = Llm_provider.Cascade_config.parse_model_strings effective_models in
                  match cfgs with
-                 | [] when m.models <> [] ->
+                 | [] when effective_models <> [] ->
                      `Assoc [("has_checkpoint", `Bool false)]
                  | _ ->
                      let primary_max_context =
-                       (match Llm_provider.Cascade_config.parse_model_strings m.models with c :: _ -> c.Llm_provider.Provider_config.max_tokens | [] -> 128_000)
+                       (match cfgs with c :: _ -> c.Llm_provider.Provider_config.max_tokens | [] -> 128_000)
                      in
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =

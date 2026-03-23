@@ -310,6 +310,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            mid_goal;
            long_goal;
            soul_profile;
+           cascade_name = "keeper_unified";
            will;
            needs;
            desires;

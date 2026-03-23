@@ -338,11 +338,6 @@ let swarm_health_section now (_config : Room_utils.config) (json : Yojson.Safe.t
   in
   { title = "Swarm Health"; content; empty_msg = "(no swarm activity)" }
 
-(* Legacy wrapper for backward compatibility *)
-let swarm_section now (config : Room_utils.config) : section =
-  let json = swarm_json config in
-  swarm_health_section now config json
-
 let room_overview_section (snapshots : room_snapshot list) : section =
   let content =
     List.map (fun snapshot ->

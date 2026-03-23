@@ -36,13 +36,16 @@ let git_exit ~cwd args =
     constructing from a relative [.worktrees/...] segment. *)
 let extract_worktree_path ~base_path msg =
   (* Try absolute path from "Path: /..." *)
-  let abs_re = Str.regexp {|Path: \(/[^ \n]+\)|} in
+  (* Note: use regular strings so \n is actual newline, not literal \+n.
+     Raw strings {|...|} pass \n as two chars which Str treats as
+     literal backslash and 'n' inside character classes. *)
+  let abs_re = Str.regexp "Path: \\(/[^ \t\n\r]+\\)" in
   try
     let _ = Str.search_forward abs_re msg 0 in
     Some (Str.matched_group 1 msg)
   with Not_found ->
     (* Fallback: relative path *)
-    let rel_re = Str.regexp {|\.worktrees/[^ \n]+|} in
+    let rel_re = Str.regexp "\\.worktrees/[^ \t\n\r]+" in
     try
       let _ = Str.search_forward rel_re msg 0 in
       let rel = Str.matched_string msg in
@@ -52,7 +55,7 @@ let extract_worktree_path ~base_path msg =
 (** Extract branch name from success message.
     Format: "Branch: agent/task-NNN" *)
 let extract_branch_name msg =
-  let re = Str.regexp {|Branch: \([^ \n]+\)|} in
+  let re = Str.regexp "Branch: \\([^ \t\n\r]+\\)" in
   try
     let _ = Str.search_forward re msg 0 in
     Some (Str.matched_group 1 msg)

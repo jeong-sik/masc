@@ -162,6 +162,7 @@ let tool_category tool_name =
   | "masc_tasks" | "masc_claim_next"
   | "masc_update_priority" | "masc_transition"
   | "masc_task_history"
+  | "masc_fire_task"
   | "masc_status" | "masc_workflow_guide" | "masc_check"
   | "masc_room_strategy_get" | "masc_room_strategy_set"
   (* Mode management - always available via is_tool_enabled bypass *)
@@ -302,7 +303,7 @@ let tool_category tool_name =
   | "masc_auth_enable" | "masc_auth_disable" | "masc_auth_status"
   | "masc_auth_create_token" | "masc_auth_refresh" | "masc_auth_revoke"
   | "masc_auth_list" | "masc_tool_admin_update"
-  | "masc_audit_query" | "masc_audit_stats"
+  | "masc_audit_query" | "masc_audit_stats" | "masc_audit_trail"
   | "masc_governance_set" | "masc_governance_report"
   | "masc_tool_grant" | "masc_tool_revoke" | "masc_tool_list" -> Auth
 
@@ -375,6 +376,11 @@ let tool_category tool_name =
   | "masc_mdal_start" | "masc_mdal_iterate"
   | "masc_mdal_status" | "masc_mdal_stop"
   | "masc_mdal_swarm_start" | "masc_mdal_swarm_status"
+  (* Autoresearch *)
+  | "masc_autoresearch_start" | "masc_autoresearch_swarm_start"
+  | "masc_autoresearch_status" | "masc_autoresearch_stop"
+  | "masc_autoresearch_inject" | "masc_autoresearch_cycle"
+  | "masc_autoresearch_record_finding" | "masc_autoresearch_search_findings"
   (* Handover *)
   | "masc_handover_create" | "masc_handover_get"
   | "masc_handover_list" | "masc_handover_claim"

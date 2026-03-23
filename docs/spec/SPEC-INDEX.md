@@ -1,0 +1,114 @@
+# MASC Specification Index
+
+> Supersedes: `docs/SPEC.md`, `docs/MERGED-ARCHITECTURE-SSOT.md`
+> Status: Draft
+> Last Updated: 2026-03-23
+
+MASC (Multi-Agent Streaming Coordination)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 AI 에이전트(Claude, Gemini, Codex, 로컬 LLM 등)가 동일 코드베이스에서 동시에 작업할 때 발생하는 조율 문제를 해결한다. Room 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper 자율 에이전트, Command Plane 오케스트레이션을 제공하며, MCP JSON-RPC 프로토콜을 통해 모든 주요 AI IDE/CLI와 통합된다.
+
+## Vital Statistics
+
+| 항목 | 값 |
+|------|-----|
+| Version | 2.138.0 |
+| Language | OCaml 5.x (Eio-native, effect-based concurrency) |
+| LOC (lib, .ml + .mli) | ~194K |
+| LOC (test) | ~97K |
+| Modules (.ml, lib/) | 616 |
+| Sub-libraries | 12 (masc_types, masc_core, masc_log, masc_backend, masc_room, masc_process, masc_eio_context, council, dated_jsonl, time_compat, fs_compat, event_bridge) |
+| MCP Tool modules (tool_*.ml) | 125 |
+| .mli interfaces | 144 |
+| Test files | 318 |
+| Executables | 5 (main_eio, main_stdio_eio, masc_cost, masc_tui, mitosis_cli) |
+
+## Layer Diagram
+
+```mermaid
+graph TB
+    L6["Layer 6: Integration<br/>OAS bridge, autoresearch, research loop"]
+    L5["Layer 5: Surface<br/>dashboard, operator, TUI, web"]
+    L4["Layer 4: Protocol<br/>MCP server, HTTP transport, gRPC, SSE"]
+    L3["Layer 3: Engine<br/>chain, keeper, swarm, team_session, command_plane"]
+    L2["Layer 2: Domain<br/>room, council, board"]
+    L1["Layer 1: Storage<br/>backend, dated_jsonl, memory"]
+    L0["Layer 0: Primitives<br/>types, core, log, time_compat, fs_compat"]
+
+    L6 --> L5
+    L5 --> L4
+    L4 --> L3
+    L3 --> L2
+    L2 --> L1
+    L1 --> L0
+```
+
+## Specification Files
+
+| File | Title | Description | Status |
+|------|-------|-------------|--------|
+| `00-glossary.md` | Glossary | 용어 정의, 약어 목록 | Draft |
+| `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
+| `02-types-and-invariants.md` | Types and Invariants | 핵심 타입 정의, 상태 전이, 불변식 | Draft |
+| `03-room.md` | Room Subsystem | Room 생명주기, session 관리, agent join/leave | Draft |
+| `04-chain-engine.md` | Chain Engine | Multi-step chain DSL, execution, snapshot | Draft |
+| `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
+| `06-command-plane.md` | Command Plane v2 | Units, operations, search fabric, detachments, policy, orchestra | Draft |
+| `07-team-session.md` | Team Session | Supervised collaboration, OAS swarm bridge, worker dispatch, proof | Draft |
+| `09-server.md` | MCP Server | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
+| `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
+| `11-board.md` | Board System | Posts, comments, votes, PG/JSONL backend | Draft |
+| `12-memory-systems.md` | Memory Systems | Memory bank, institution, procedural, context budget, OAS Memory bridge | Draft |
+| `13-oas-integration.md` | OAS Integration | OAS Agent SDK bridge, cascade config, verifier, event bus, boundary rules | Draft |
+| `14-council.md` | Council | 의사결정 합의, voting, deliberation | Draft |
+| `15-external-integrations.md` | External Integrations | Neo4j, Supabase, GraphQL, Langfuse | Draft |
+| `A-error-catalog.md` | Error Catalog | 에러 코드 목록, 원인, 복구 방법 | Draft |
+| `B-migration-targets.md` | Migration Targets | OAS 이관 대상 모듈, deprecation 일정 | Draft |
+
+## Conventions
+
+### Document Structure
+
+각 spec 파일은 아래 섹션을 따른다:
+1. Problem Statement
+2. Non-Goals
+3. Module Inventory (table)
+4. Key Types (OCaml signatures)
+5. State Machines (Mermaid)
+6. Invariants (INV-{SUBSYSTEM}-NNN)
+7. Failure Modes
+8. Dependencies (upstream/downstream)
+9. Open Questions
+
+### Invariant Naming
+
+`INV-{SUBSYSTEM}-{NNN}` 형식을 사용한다.
+
+| Prefix | Subsystem |
+|--------|-----------|
+| `INV-ROOM` | Room lifecycle |
+| `INV-TASK` | Task state machine |
+| `INV-KPR` | Keeper engine |
+| `INV-CHAIN` | Chain execution |
+| `INV-CP` | Command Plane |
+| `INV-SRV` | Server/transport |
+| `INV-DASH` | Dashboard |
+| `INV-BRD` | Board |
+| `INV-CSC` | Cascade |
+| `INV-MEM` | Memory |
+| `INV-OAS` | OAS Integration |
+
+### Cross-Reference Format
+
+- Spec 간: `[Section Title](./NN-filename.md#section-anchor)`
+- 코드: `lib/module_name.ml:L123`
+- Invariant: `INV-ROOM-001`
+- 외부 문서: `docs/DOCUMENT-NAME.md`
+
+### Supersession
+
+이 spec suite가 최종 진실 원본(SSOT)이다.
+
+| 이전 문서 | 상태 |
+|----------|------|
+| `docs/SPEC.md` | Historical snapshot. 이 suite로 대체. |
+| `docs/MERGED-ARCHITECTURE-SSOT.md` | Layer map과 canonical paths는 `01-system-overview.md`로 이관. |
+| `docs/GLOSSARY.md` | `00-glossary.md`로 통합. |

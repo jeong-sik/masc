@@ -1,5 +1,7 @@
 # Merged Architecture SSOT
 
+> **SUPERSEDED-BY**: `docs/spec/SPEC-INDEX.md` + `docs/spec/01-system-overview.md` (v2.138.0, 2026-03-23)
+
 이 문서는 현재 `main`에 실제로 merged된 `masc-mcp` 구조를 한 번에 보는
 아키텍처 SSOT다.
 

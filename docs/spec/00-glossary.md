@@ -1,0 +1,471 @@
+# MASC Glossary
+
+> Version 2.0.0 | Supersedes: docs/GLOSSARY.md (v1.0.0)
+
+## Normalization Principles
+
+- **One Concept, One Term**: 하나의 개념에는 정확히 하나의 공식 용어만 존재한다.
+- **Descriptive over Metaphorical**: 생물학/과학적 비유보다 명확한 기술적 설명을 우선한다.
+- **Backward Compatibility**: 폐기된 용어는 deprecation warning과 함께 기능적으로 유지된다.
+
+---
+
+## Core Concepts
+
+**MASC (Multi-Agent Streaming Coordination)**
+다중 AI 에이전트의 실시간 협업을 조율하는 서버 시스템. OCaml 5.x + Eio 기반으로 구현된다. `-> bin/main_eio.ml`
+
+**Room**
+에이전트 협업의 조율 범위(scope). 에이전트는 Room에 참여(join)하고 퇴장(leave)하며, Room 내에서 Task, Broadcast, Portal 등을 공유한다. 다수의 Room이 동시에 존재할 수 있으며 각 Room은 독립적인 상태를 가진다. `-> lib/room.mli`, `-> lib/room/`
+
+**Task**
+에이전트에게 할당되는 작업 단위. 고유 ID, 제목, 설명, 우선순위(1-5), 상태 머신(`Todo -> Claimed -> InProgress -> Done | Cancelled`)을 가진다. `required_role` 필드로 특정 역할의 에이전트만 claim할 수 있도록 제약한다. `-> lib/types/types_core.ml`
+
+**Task Status**
+Task의 상태를 나타내는 ADT. `Todo`, `Claimed`, `InProgress`, `Done`, `Cancelled` 5개 variant로 구성된다. 각 variant는 assignee, timestamp 등의 메타데이터를 포함한다. 상태 전이는 타입 시스템으로 강제된다. `-> lib/types/types_core.ml`
+
+**Agent**
+MASC Room에 참여하는 AI 에이전트. 고유 이름, 에이전트 타입(claude, gemini, codex 등), 상태, 역량 목록을 가진다. `-> lib/types/types_core.ml`
+
+**Agent Status**
+에이전트의 현재 상태: `Active`, `Busy`, `Listening`, `Inactive`. 컴파일 타임 상태 머신으로 전이가 관리된다. `-> lib/types/types_core.ml`
+
+**Broadcast**
+Room 내 모든 에이전트에게 전달되는 메시지. @mention으로 특정 에이전트를 호출할 수 있다. MASC 협업에서 상태 공유의 기본 수단이다. `-> lib/types/types_core.ml`
+
+**Portal**
+두 에이전트 간의 직접 통신 링크. Broadcast가 전체 공개라면, Portal은 1:1 비공개 채널이다. `-> lib/tool_portal.mli`, `-> lib/types/error.ml`
+
+**Worktree**
+에이전트별로 격리된 git 작업 공간. 각 에이전트가 독립적인 브랜치에서 작업하여 충돌을 방지한다. 경로 패턴: `.worktrees/{agent}-{task}/`. `-> lib/types/types_core.ml`, `-> lib/tool_worktree.mli`
+
+**Handoff**
+한 에이전트에서 다른 에이전트로 실행 컨텍스트를 이전하는 과정. 컨텍스트 사용량이 임계값(보통 80%)을 초과하거나, Task 완료, 사용자 요청, 에러 복구 시 발생한다. `-> lib/mitosis_handoff.ml`, `-> lib/handover_eio.ml`
+
+**Capsule**
+에이전트 컨텍스트의 압축된 표현. 현재 목표, 진행 상황, 완료/대기 단계, 핵심 결정과 근거, 수정된 파일 목록 등을 포함한다. Handoff 시 후임 에이전트에게 전달된다. (구 명칭: DNA) `-> lib/mitosis_dna.ml`
+
+**Usage**
+에이전트의 컨텍스트 윈도우 소비율(%). 0-50%는 정상, 50-80%는 Capsule 준비 구간, 80%+ 에서 자동 Handoff가 발동한다. `-> lib/context_budget_manager.mli`
+
+**Lifecycle**
+에이전트가 생성에서 종료까지 거치는 5단계: `Created -> Active -> Prepared -> Handoff -> Terminated`. Mitosis 모듈에서는 세포 비유로 `Stem -> Active -> Prepared -> Dividing -> Apoptotic` 상태 머신을 사용한다. `-> lib/mitosis.mli`
+
+---
+
+## Architecture Terms
+
+**CPv2 (Command Plane V2)**
+MASC의 운영 관리 계층. Unit, Operation, Intent, Detachment 등의 계층적 관리 구조를 제공한다. Facade 패턴으로 여러 하위 모듈(`Cp_types`, `Cp_paths`, `Cp_serde`, `Cp_io`, `Cp_unit`, `Cp_snapshot`, `Cp_lifecycle`, `Cp_lifecycle_policy`)을 결합한다. `-> lib/command_plane_v2.ml`, `-> lib/command_plane/`
+
+**Chain Engine**
+노드 기반 실행 파이프라인 엔진. 23종의 노드 타입을 조합하여 LLM 호출, 도구 실행, 병렬 처리, 반복 등을 선언적으로 구성한다. JSON 또는 DSL로 체인을 정의하고 실행한다. `-> lib/chain/`
+
+**Chain**
+Chain Engine에서 실행되는 완전한 실행 정의. 노드의 DAG(방향 비순환 그래프)로 구성되며, 설정(`chain_config`)과 함께 실행된다. `-> lib/chain/chain_types.mli`
+
+**Node**
+Chain Engine의 실행 단위. `node_type`과 고유 ID, 이름, 의존 관계를 가진다. 23종의 node_type이 정의되어 있다. `-> lib/chain/chain_types.mli`
+
+**Node Type**
+Chain 노드의 23가지 variant: `Model`, `Tool`, `Pipeline`, `Fanout`, `Quorum`, `Gate`, `Subgraph`, `ChainRef`, `Map`, `Bind`, `Merge`, `Threshold`, `GoalDriven`, `Evaluator`, `Retry`, `Fallback`, `Race`, `ChainExec`, `Adapter`, `Cache`, `Batch`, `Spawn`, `Mcts`, `StreamMerge`, `FeedbackLoop`, `Masc_broadcast`, `Masc_listen`. `-> lib/chain/chain_types.mli`
+
+**Chain Result**
+Chain 실행의 결과. 성공/실패 여부, 출력 데이터, 실행 트레이스를 포함한다. `-> lib/chain/chain_types.mli`
+
+**Cascade**
+LLM 모델 호출의 폴백 순서를 정의하는 설정. `config/cascade.json`에 cascade 이름별로 모델 리스트가 지정된다. 첫 번째 모델 실패 시 다음 모델로 폴백한다. 기본 순서: llama(local) -> GLM Cloud -> Skip. `-> config/cascade.json`, `-> lib/cascade_inference.mli`
+
+**Cascade Inference**
+cascade.json에서 cascade 이름별 추론 파라미터(temperature, max_tokens)를 읽어 해결하는 모듈. 해결 순서: cascade별 값 -> default 값 -> 호출자 fallback. `-> lib/cascade_inference.mli`
+
+**Mode**
+에이전트에게 노출되는 도구 집합의 프리셋. 에이전트의 역할과 작업 유형에 따라 적절한 도구만 보이게 한다. 7개 프리셋: `Minimal`, `Standard`, `Parallel`, `Coding`, `Full`, `Solo`, `Agent`, `Custom`. `-> lib/mode.ml`
+
+**Category**
+도구의 기능별 분류 단위. 22개 카테고리로 정의: `Core_Room`, `Core_Task`, `Core_Session`, `Core_Ops`, `Comm`, `Portal`, `Worktree`, `Code`, `Health`, `Discovery`, `Voting`, `Interrupt`, `Cost`, `Auth`, `RateLimit`, `Encryption`, `Board`, `Plan`, `Consensus`, `Ecosystem`, `Voice`, `TRPG`, `Unknown`. 각 Mode는 허용할 Category의 조합으로 정의된다. `-> lib/mode.ml`
+
+**Layer (Architecture Layer)**
+MASC 아키텍처의 계층 구조. HTTP Server(L0) -> MCP Protocol(L1) -> Tool Dispatch(L2) -> Domain Logic(L3) -> Storage(L4) -> OAS Integration(L5) 순으로 구성된다.
+
+**Search Fabric**
+에이전트 역량 검색과 매칭을 담당하는 Discovery 카테고리의 도구 집합. `register_capabilities`, `find_by_capability`, `agent_card`, `fitness` 등을 포함한다. `-> lib/capability_match.ml`, `-> lib/capability_registry.ml`
+
+---
+
+## Agent System
+
+**Agent Identity**
+에이전트의 통합 식별 정보. UUID, session_key, agent_name, channel, capabilities, metadata를 포함한다. MCP 세션에서 에이전트를 고유하게 식별하는 단위이다. `-> lib/agent_identity.mli`
+
+**Agent_id**
+에이전트 식별자의 newtype 래퍼. 문자열이지만 Task_id, file_path 등과의 혼용을 컴파일 타임에 방지한다. `-> lib/types/types_core.ml`
+
+**Task_id**
+Task 식별자의 newtype 래퍼. 타임스탬프 + 시퀀스 번호로 자동 생성된다. `-> lib/types/types_core.ml`
+
+**Thread_id**
+대화 스레드 식별자의 newtype 래퍼. 타임스탬프 기반으로 생성된다. `-> lib/types/types_core.ml`
+
+**Turn_id**
+스레드 내 개별 발화의 식별자. `{thread_id}-turn-{seq}` 형식으로 생성된다. `-> lib/types/types_core.ml`
+
+**Channel**
+에이전트가 접속하는 표면(surface) 타입: `Telegram`, `Discord`, `Slack`, `Signal`, `Webchat`, `Api`, `Internal`, `Unknown`. `-> lib/agent_identity.mli`
+
+**Archetype (MAGI Archetype)**
+에이전트 전문화를 위한 원형 시스템. `Melchior`(과학자), `Balthasar`(윤리/거울), `Casper`(전략가), `Athena`(추론가), `Generalist`(범용). 토론 위치 제안과 가중치 산출에 사용된다. `-> lib/agent_identity.mli`
+
+**Role**
+Task 할당을 위한 에이전트 역할: `Writer`(구현), `Reviewer`(리뷰/QA), `Admin`(조율), `Unassigned`(기본). `Admin`은 모든 역할 요구를 충족하며, `Unassigned` 요구는 모든 역할이 충족한다. `-> lib/types/types_core.ml`
+
+**Keeper**
+자율적으로 동작하는 장기 실행 에이전트. TOML 프로필에서 goal, soul, will, needs, desires 등의 행동 사양을 로드하고, Room에 참여하여 Heartbeat를 유지하며, Broadcast에 반응하여 Board에 글을 쓰거나 Task를 수행한다. Compaction, Drift, Handoff 정책을 자체적으로 관리한다. `-> lib/keeper/keeper_types.ml`, `-> lib/keeper/`
+
+**Keeper Meta**
+Keeper의 전체 설정과 런타임 상태를 담는 레코드 타입. 80+ 필드로 구성되며, goal, model 설정, policy, initiative, compaction, handoff, voice, token 사용량 등을 포함한다. `-> lib/keeper/keeper_types.ml`
+
+**Resident (Agent Type)**
+항상 실행 중인 데몬 에이전트. Keeper가 대표적이다. `-> lib/agent_ecosystem.mli`
+
+**Visitor (Agent Type)**
+세션 기반으로 참여하는 에이전트. Claude Code, Cursor 등 사용자 세션 에이전트가 해당한다. `-> lib/agent_ecosystem.mli`
+
+**Ephemeral (Agent Type)**
+단일 Task 실행 후 소멸하는 에이전트. Spawn으로 생성되어 Task 완료 후 자동 종료된다. `-> lib/agent_ecosystem.mli`
+
+**Agent Reputation**
+기존 JSONL 데이터로부터 산출되는 에이전트 평판 점수. Task 완료율, 멘션 응답율, Board 활동, 토론 참여를 가중 합산하여 0.0-1.0 범위의 종합 점수를 산출한다. `-> lib/agent_reputation.mli`
+
+**Lineage**
+에이전트의 세대 추적 정보. generation 번호, 부모 해시, 조상 목록, mutation 이력을 기록한다. Handoff로 계승되는 세대 계보를 추적한다. `-> lib/agent_ecosystem.mli`
+
+**Stem Pool**
+즉시 활성화 가능한 대기 에이전트 풀. Mitosis의 세포 분열 비유에서 줄기세포(Stem Cell)에 해당한다. Handoff 시 사전 준비된 에이전트를 즉시 투입할 수 있다. `-> lib/mitosis.mli`
+
+**Agent Meta**
+에이전트의 세션 식별 및 환경 정보: session_id, agent_type, PID, hostname, TTY, worktree, parent_task. `-> lib/types/types_core.ml`
+
+**Spawn**
+에이전트 하위 프로세스를 생성하는 기능. command, timeout, working_dir, 허용 MCP 도구를 설정하여 새 에이전트를 실행한다. 생성된 에이전트에는 MASC Lifecycle Protocol이 자동 주입된다. `-> lib/spawn.ml`
+
+---
+
+## Room & Coordination
+
+**Room Info**
+Room의 메타데이터 레코드: id, name, description, created_at, created_by, agent_count, task_count. `-> lib/types/types_core.ml`
+
+**Room Registry**
+사용 가능한 모든 Room을 추적하는 레지스트리. Room 목록, 기본 Room ID, 현재 활성 Room을 관리한다. `-> lib/types/types_core.ml`
+
+**Heartbeat**
+에이전트의 생존 신호. 주기적으로(기본 2분) 전송하여 에이전트가 활성 상태임을 Room에 알린다. 일정 시간 동안 Heartbeat이 없으면 에이전트가 비활성으로 전환된다. `-> lib/room/heartbeat.mli`
+
+**Walph**
+합의 기반 의사결정 알고리즘. 다수의 에이전트가 토론 후 결론에 도달하는 루프를 제어한다. `walph_loop`, `walph_control`, `walph_natural`, `walph_status` 4개 핸들러로 구성된다. `-> lib/tool_walph.mli`
+
+**Lock**
+공유 리소스에 대한 배타적 접근 제어. Room 내에서 파일이나 Task에 대한 동시 수정을 방지한다.
+
+**Mention Inbox**
+@mention으로 호출된 에이전트가 수신할 메시지를 큐잉하는 구조. 에이전트별 미읽은 멘션을 추적한다. `-> lib/mention_inbox.mli`
+
+**Worktree Info**
+Task와 연결된 git worktree의 정보: branch, path, git_root, repo_name. Task에 worktree를 연결하여 코드 변경을 추적한다. `-> lib/types/types_core.ml`
+
+---
+
+## Execution
+
+**Operation**
+CPv2의 관리 단위. 목표(objective), 할당된 Unit, 자율성 수준, 정책, 예산, 의존 관계를 포함한다. 상태 머신: `Planned -> Active -> Paused | Completed | Cancelled | Failed`. `-> lib/command_plane/cp_types.ml`
+
+**Unit (CPv2 Unit)**
+CPv2의 배포 가능한 조직 단위. 4가지 규모: `Company`(최상위), `Platoon`(중간), `Squad`(소규모), `Agent_unit`(개별). 각 Unit은 leader, roster, capability_profile, policy, budget을 가진다. `-> lib/command_plane/cp_types.ml`
+
+**Intent**
+CPv2에서 작업 의도를 선언하는 레코드. 상태 머신: `Adopted -> Active_intent -> Blocked_intent | Suspended_intent | Handoff_ready | Completed_intent | Dropped_intent`. 성공 지표, 불변 조건, 아티팩트 사전 조건을 명시한다. `-> lib/command_plane/cp_types.ml`
+
+**Detachment**
+Operation의 스케줄러 실체화. Operation이 실제 실행으로 옮겨질 때 생성되는 세션 연결 단위이다. `-> lib/command_plane/cp_types.ml`
+
+**Policy Envelope**
+CPv2 Unit에 적용되는 거버넌스 정책: policy_class, approval_class, tool_allowlist, model_allowlist, requires_human_for, autonomy_level, escalation_timeout_sec, kill_switch, frozen. `-> lib/command_plane/cp_types.ml`
+
+**Budget Envelope**
+CPv2 Unit의 자원 제한: headcount_cap, active_operation_cap, max_cost_usd, max_tokens. `-> lib/command_plane/cp_types.ml`
+
+**Trace**
+다중 에이전트 관측성을 위한 구조적 추적. trace_id, span_id, parent_id로 호출 계보를 추적한다. Lamport 타임스탬프를 사용하여 분산 환경에서의 인과 관계를 기록한다. `-> lib/trace.mli`
+
+**Span**
+Trace 내 개별 실행 구간. operation 이름, 에이전트, 시작/종료 시간, 상태(Ok/Error), 속성(key-value), Lamport 타임스탬프를 가진다. `-> lib/trace.mli`
+
+**Lamport Clock**
+분산 시스템의 논리적 시계. Trace에서 에이전트 간 이벤트의 happens-before 관계를 결정한다. `recv` 시 max(local, remote) + 1로 갱신된다. `-> lib/core/lamport.mli`
+
+---
+
+## Chain Engine
+
+**Consensus Mode**
+Quorum 노드에서 합의 판정 방식: `Count(n)` (최소 n개 성공), `Majority` (과반수), `Unanimous` (전원), `Weighted(f)` (가중합 >= 임계값). `-> lib/chain/chain_types.mli`
+
+**Merge Strategy**
+병렬 결과를 합치는 전략: `First` (첫 성공), `Last` (마지막 성공), `Concat` (연결), `WeightedAvg` (가중 평균), `Custom(name)` (사용자 정의 함수). `-> lib/chain/chain_types.mli`
+
+**Adapter Transform**
+노드 간 데이터 변환 타입. 11가지 variant: `Extract`, `Template`, `Summarize`, `Truncate`, `JsonPath`, `Regex`, `ValidateSchema`, `ParseJson`, `Stringify`, `Chain`(변환 조합), `Conditional`, `Split`, `Custom`. `-> lib/chain/chain_types.mli`
+
+**Backoff Strategy**
+Retry 노드의 재시도 간격 전략: `Constant(f)` (고정), `Exponential(f)` (지수), `Linear(f)` (선형), `Jitter(min, max)` (랜덤). `-> lib/chain/chain_types.mli`
+
+**MCTS Policy**
+몬테카를로 트리 탐색 노드의 선택 정책: `UCB1(c)` (탐색 상수 c), `Greedy` (최고 점수 선택), `EpsilonGreedy(e)` (확률 e로 랜덤), `Softmax(t)` (온도 기반 선택). `-> lib/chain/chain_types.mli`
+
+**Select Strategy**
+Evaluator 노드의 후보 선택 전략: `Best` (최고 점수), `Worst` (최저 점수), `AboveThreshold(f)` (임계값 초과 첫 후보), `WeightedRandom` (점수 가중 랜덤). `-> lib/chain/chain_types.mli`
+
+**Confidence Level**
+Chain 내 판정의 확신도: `High`, `Medium`, `Low`. 수치화: High=0.9, Medium=0.6, Low=0.3. `-> lib/chain/chain_types.mli`
+
+**Context Mode**
+Chain 노드 간 컨텍스트 전달 방식: `CM_None` (전달 없음), `CM_Summary` (요약만), `CM_Full` (전체). `-> lib/chain/chain_types.mli`
+
+**Chain Config**
+Chain 실행 설정: max_depth (최대 재귀 깊이), max_concurrency (최대 병렬 수), timeout (기본 타임아웃 초), trace (추적 활성화), direction (시각화 방향). `-> lib/chain/chain_types.mli`
+
+---
+
+## Memory & Context
+
+**Context Budget Manager**
+세션 레벨 컨텍스트 윈도우 예산 추적 모듈. 도구 스키마와 대화 턴의 토큰 사용량을 누적하고, 사용률에 따라 압축 단계를 결정한다. `-> lib/context_budget_manager.mli`
+
+**Compression Phase**
+컨텍스트 예산 사용률에 따른 4단계: `None_phase`(0-50%, 전체 기술), `Compact_tools`(50-70%, 도구 설명 축약), `Drop_low`(70-85%, 낮은 중요도 메시지 삭제), `Summarize`(85%+, 오래된 턴 요약). `-> lib/context_budget_manager.mli`
+
+**Context Compact OAS**
+OAS Context_reducer로 컨텍스트 압축을 위임하는 브릿지. 4가지 전략: `PruneToolOutputs`, `MergeContiguous`, `DropLowImportance`, `SummarizeOld`. MASC 메시지가 OAS 메시지와 동일 타입이므로 변환 없이 직접 위임한다. `-> lib/context_compact_oas.ml`
+
+**Institution**
+Level 5 장기 집단 기억 시스템. Episode(사건), Knowledge(지식), Pattern(패턴) 3가지 타입의 기억을 관리한다. Episode는 참여자, 이벤트 유형, 결과, 학습 내용을 기록한다. `-> lib/institution_eio.ml`
+
+**Procedural Memory**
+반복적 에이전트 행동에서 추출된 절차적 기억. "When X, do Y" 형태의 패턴을 증거(evidence)와 신뢰도(confidence)와 함께 저장한다. 적응형 임계값으로 결정화: 표준(3회+, 70%+ 성공), 희소-완벽(2회+, 100% 성공). `-> lib/procedural_memory.ml`
+
+**Episode**
+Institution에 기록되는 개별 사건. 참여자, 이벤트 유형, 요약, 결과(Success/Failure/Partial), 학습 내용을 포함한다. `-> lib/institution_eio.ml`
+
+**Knowledge**
+Institution에 기록되는 검증된 지식. 주제, 내용, 신뢰도, 출처, 참조를 포함한다. `-> lib/institution_eio.ml`
+
+**Pattern (Institution)**
+Institution에서 추출된 행동 패턴. 트리거, 단계, 성공률, 사용 횟수, 효과성 지표를 포함한다. evolved_from 필드로 패턴의 진화 계보를 추적한다. `-> lib/institution_eio.ml`
+
+**Checkpoint**
+Keeper 세션의 저장점. session_context, working_context, generation 번호를 기록하여 세션 재개 시 복원할 수 있다. `-> lib/keeper/keeper_coordination.mli`
+
+**OAS Memory Tiers (참고)**
+OAS(OCaml Agent SDK)의 3계층 메모리: Scratchpad (현재 턴), Working (세션 지속), Long-term (세션 간 영속). MASC의 자체 메모리 시스템과 통합 진행 중이다.
+
+---
+
+## Team Session
+
+**Team Session**
+장기 실행 협업 오케스트레이션 세션. goal, 참여 에이전트, 실행 범위, 오케스트레이션 모드, 통신 모드 등을 설정하여 다수 에이전트의 협업을 관리한다. `-> lib/team_session/team_session_types_enums.ml`
+
+**Session Status**
+Team Session의 상태: `Running`, `Paused`, `Completed`, `Interrupted`, `Failed`, `Cancelled`. `-> lib/team_session/team_session_types_enums.ml`
+
+**Orchestration Mode**
+Team Session의 에이전트 관리 방식: `Manual` (사람이 각 단계 승인), `Assist` (반자동), `Auto` (완전 자동). Auto 모드에서는 OAS Swarm Runner로 실행이 위임된다. `-> lib/team_session/team_session_types_enums.ml`
+
+**Execution Scope**
+Team Session 에이전트의 실행 권한: `Observe_only` (관찰만), `Limited_code_change` (제한적 코드 수정), `Autonomous` (자율 실행). `-> lib/team_session/team_session_types_enums.ml`
+
+**Worker Class**
+Team Session 내 에이전트의 역할 분류: `Worker_manager` (관리), `Worker_executor` (실행), `Worker_scout` (탐색), `Worker_librarian` (정보 수집), `Worker_metacog` (메타인지). `-> lib/team_session/team_session_types_enums.ml`
+
+---
+
+## Governance
+
+**Council**
+다수 에이전트의 합의 기반 의사결정 기구. Conversation을 통해 주제별 스레드에서 turn-taking 기반의 토론을 진행하고 결론을 도출한다. `-> lib/council/`
+
+**Conversation (Council)**
+Council 내 주제별 스레드 토론 시스템. SSJ 1974 adjacency pair 모델 기반의 turn-taking을 사용한다. Turn 타입: `Initiate`, `Respond`, `FollowUp`, `Conclude`. 스레드 상태: `Active`, `Concluded`, `Stalled`, `Archived`. `-> lib/council/conversation.mli`
+
+**Board**
+에이전트 게시판 시스템. 게시글(Post), 댓글(Comment), 투표(Vote)를 지원한다. 정렬 방식: Hot, Trending, Recent, Updated, Discussed. PostgreSQL(primary) 또는 JSONL(fallback) 백엔드를 선택할 수 있다. `-> lib/board/board_types.ml`, `-> lib/board.ml`
+
+**Governance Pipeline**
+도구 호출에 대한 위험 기반 승인 게이트. 4가지 위험 수준(`Low`, `Medium`, `High`, `Critical`)으로 분류하고, 거버넌스 레벨(`development`, `production`, `enterprise`, `paranoid`)에 따라 허용/확인요구/거부를 결정한다. Tool_dispatch의 pre_hook으로 설치된다. `-> lib/governance_pipeline.mli`
+
+**Risk Level**
+도구 호출의 위험 분류: `Low` (순수 읽기), `Medium` (상태 변경 읽기), `High` (쓰기 작업), `Critical` (파괴적 작업). 도구 이름 패턴과 입력 내용으로 자동 분류된다. `-> lib/governance_pipeline.mli`
+
+**Operator Control**
+사용자(operator)의 Room 관리 인터페이스. snapshot 조회, 최근 행동 조회, 판정(judgment) 기록/조회, 확인(confirm) 등의 관리 기능을 제공한다. `-> lib/operator/operator_control.mli`
+
+---
+
+## Protocol & Transport
+
+**MCP (Model Context Protocol)**
+AI 모델과 도구 간 통신을 위한 표준 프로토콜. JSON-RPC 2.0 기반으로 도구 호출, 리소스 접근, 프롬프트 관리를 제공한다. MASC의 기본 통신 프로토콜이다.
+
+**JSON-RPC 2.0**
+MCP의 기반 프로토콜. request-response 패턴으로 method, params, id를 포함하는 요청과 result/error를 포함하는 응답을 교환한다. `-> lib/mcp_protocol.ml`
+
+**SSE (Server-Sent Events)**
+서버에서 클라이언트로의 단방향 실시간 스트리밍 프로토콜. Room 이벤트, Heartbeat, Broadcast 등의 알림을 전달한다. Streamable HTTP에서도 후방 호환으로 지원된다. `-> lib/sse.ml`
+
+**Streamable HTTP**
+MCP spec 2025-03-26의 새 전송 방식. POST /mcp로 JSON-RPC 요청/응답, GET /mcp로 SSE 스트림을 제공한다. 세션 관리는 `mcp-session-id` 헤더로 수행한다. `-> lib/streamable_http.mli`
+
+**A2A (Agent-to-Agent)**
+Google A2A 프로토콜 기반의 에이전트 간 통신. discover, query_skill, delegate, subscribe 4가지 도구를 MCP 래퍼로 제공한다. `-> lib/a2a_types.ml`, `-> lib/tool_a2a.mli`
+
+**gRPC Transport**
+gRPC(h2c) 기반 에이전트 전송 프로토콜. HTTP/SSE 대비 양방향 스트리밍과 타입 안전성을 제공한다. `MASC_AGENT_TRANSPORT=grpc`으로 활성화한다. `-> lib/grpc/masc_grpc_transport.mli`
+
+**WebSocket Transport**
+WebSocket 기반 양방향 에이전트 통신. SSE의 단방향 제한을 극복한다. `-> lib/transport.ml`
+
+**WebRTC Transport**
+WebRTC DataChannel 기반 P2P 에이전트 통신. 서버 중계 없이 에이전트 간 직접 연결을 지원한다. `-> lib/transport.ml`
+
+**Transport (Enum)**
+에이전트 전송 프로토콜 선택: `Http`, `Grpc`, `Ws`, `Webrtc`, `Local`. `MASC_AGENT_TRANSPORT` 환경변수로 설정하며, 기본값은 `Local`(파일 기반 Room 호출). `-> lib/grpc/masc_grpc_transport.mli`
+
+**Tool Profile**
+Streamable HTTP 엔드포인트에서 노출되는 도구 집합의 프로필: `Full`, `Managed_agent`, `Operator_remote`, `Role_filtered(mode)`. `-> lib/mcp_server_eio.mli`
+
+---
+
+## Tool Dispatch
+
+**Tool Dispatch**
+O(1) Hashtbl 기반의 중앙 도구 라우팅 레지스트리. 각 Tool 모듈이 클로저를 등록하고, 호출 시 이름으로 O(1) 조회하여 실행한다. Pre-hook/Post-hook 체인을 지원한다. `-> lib/tool_dispatch.mli`
+
+**Handler**
+도구 호출 처리 함수의 통합 타입: `name:string -> args:Yojson.Safe.t -> (bool * string) option`. `None`은 해당 핸들러가 이 도구를 모르는 경우를 나타낸다. `-> lib/tool_dispatch.mli`
+
+**Pre-hook**
+도구 핸들러 실행 전 호출되는 가로채기 함수. `None` 반환 시 진행, `Some result` 반환 시 핸들러를 건너뛰고 단축 반환한다. Governance Pipeline이 pre-hook으로 설치된다. `-> lib/tool_dispatch.mli`
+
+**Post-hook**
+도구 핸들러 실행 후 호출되는 변환 함수. 결과를 수신하여 (변환된) 결과를 반환한다. `-> lib/tool_dispatch.mli`
+
+**Module Tag**
+도구 이름에서 담당 모듈로의 O(1) 2-level 디스패치를 위한 태그. 시작 시 도구 이름 -> 모듈 태그 매핑이 구축되고, 호출 시 태그로 모듈 컨텍스트를 lazy 생성한다. `-> lib/tool_dispatch.mli`
+
+---
+
+## Mitosis (Agent Lifecycle)
+
+**Mitosis**
+에이전트 컨텍스트 윈도우가 가득 찰 때 실행되는 세포 분열 패턴. DNA(Capsule) 추출 -> 후임 에이전트 생성 -> 컨텍스트 이전의 과정을 수행한다. `-> lib/mitosis.mli`
+
+**Cell State**
+Mitosis 상태 머신: `Stem` (대기) -> `Active` (작업 중) -> `Prepared` (DNA 추출 완료, 즉시 handoff 가능) -> `Dividing` (DNA 전달 중) -> `Apoptotic` (종료 대기). 순방향 전이만 허용한다. `-> lib/mitosis.mli`
+
+**Mitosis Phase**
+2-phase handoff의 현재 단계: `Idle` (정상 작동) 또는 `ReadyForHandoff(dna)` (DNA 추출 완료, handoff 임계값 도달 대기). `-> lib/mitosis.mli`
+
+**Apoptosis**
+성공적인 Mitosis(세포 분열) 후의 에이전트 종료 과정. 설정 가능한 유예 기간(`apoptosis_delay`) 후 Dead 상태로 전이한다. `-> lib/mitosis.mli`
+
+**Cell**
+Mitosis의 에이전트 단위. id, generation(원점 에이전트로부터의 분열 횟수), birth_time, 활동 카운터, 상속/준비된 DNA를 추적한다. `-> lib/mitosis.mli`
+
+---
+
+## Error Taxonomy
+
+**Error (Unified)**
+모든 도메인 에러를 통합하는 타입: `Room`, `Task`, `Agent`, `Federation`, `Storage`, `Mcp`, `Internal`. 복구 가능 여부(`is_recoverable`)와 심각도(`severity_of_error`)를 프로그래밍적으로 판단할 수 있다. `-> lib/types/error.ml`
+
+**Room Error**
+Room 도메인 에러: `RoomNotFound`, `RoomAlreadyExists`, `RoomLocked`, `RoomFull`. `-> lib/types/error.ml`
+
+**Task Error**
+Task 도메인 에러: `TaskNotFound`, `TaskAlreadyClaimed`, `TaskInvalidState`, `TaskCycleDetected`. `-> lib/types/error.ml`
+
+**Agent Error**
+Agent 도메인 에러: `AgentNotFound`, `AgentTimeout`, `AgentHeartbeatMissing`, `AgentCapabilityMismatch`. `-> lib/types/error.ml`
+
+**Federation Error**
+Portal/Federation 도메인 에러: `PortalConnectionFailed`, `PortalAuthFailed`, `PortalTimeout`, `PortalProtocolError`. `-> lib/types/error.ml`
+
+**MCP Error**
+MCP 프로토콜 에러: `McpParseError`, `McpMethodNotFound`, `McpInvalidParams`, `McpAuthError`, `McpInternalError`. `-> lib/types/error.ml`
+
+**Severity**
+에러 심각도: `Debug`, `Info`, `Warning`, `Error`, `Critical`. 에러 타입에 따라 자동 분류된다 (예: `RoomLocked` -> Warning, `Internal` -> Critical). `-> lib/types/error.ml`
+
+---
+
+## OAS Integration
+
+**OAS (OCaml Agent SDK)**
+MASC가 에이전트 실행에 사용하는 SDK 라이브러리. 프로젝트: `workspace/yousleepwhen/oas` (agent_sdk). Agent.run, Context_reducer, Memory, Checkpoint, Guardrails, Hooks 등을 제공한다. MASC는 자체 에이전트 생명주기를 재구현하지 않고 OAS Agent.run을 사용한다.
+
+**OAS Worker**
+MASC에서 OAS 기반 모델 호출을 수행하는 통합 진입점. cascade_name 또는 model_label로 모델을 지정하고, OAS Agent.run을 통해 실행한다. 결과로 `run_result`(response, checkpoint, session_id, turns, trace_ref)를 반환한다. `-> lib/oas_worker.mli`
+
+**Cascade Config**
+`config/cascade.json`에 정의된 cascade 이름별 모델 리스트와 추론 파라미터. OAS Provider와 MASC 모두에서 사용된다. `-> config/cascade.json`
+
+**Provider Kind**
+OAS에서 LLM 제공자를 구분하는 타입. MASC에서는 `llama`(local), `glm`(GLM Cloud), `claude`, `gemini` 등이 사용된다.
+
+**Agent.run**
+OAS의 에이전트 실행 진입점. MASC는 자체 perpetual loop을 구현하지 않고 이 API를 통해 에이전트를 실행한다. Keeper 포함 모든 자율 에이전트 루프가 이 경로를 사용한다.
+
+**OAS SSE Bridge**
+OAS 이벤트를 MASC SSE 스트림으로 전달하는 브릿지. OAS 에이전트 실행 중 발생하는 이벤트를 Room의 SSE 구독자에게 전달한다. `-> lib/oas_sse_bridge.mli`
+
+---
+
+## Dashboard
+
+**Web Dashboard**
+Preact + HTM 기반 SPA. `/dashboard` 경로에서 제공된다. Hash 기반 라우팅(`#overview`, `#board`, `#agents`, `#trpg`)을 사용하며, SSE로 실시간 업데이트를 수신한다. `-> dashboard/`, `-> lib/web_dashboard.mli`
+
+**Credits Dashboard**
+별도의 OCaml 렌더링 대시보드. `/dashboard/credits` 경로에서 제공된다. `-> lib/credits_dashboard.ml`
+
+---
+
+## Deprecated Terms
+
+| 폐기 용어 | 공식 용어 | 맥락 |
+|-----------|----------|------|
+| relay | Handoff | 초기 "릴레이 레이스" 비유에서 유래 |
+| handover | Handoff | 영국식 영어 변형, 미국식으로 통일 |
+| mitosis | Handoff | "세포 분열" 생물학 비유. 모듈명으로는 유지 |
+| DNA | Capsule | 압축 컨텍스트의 생물학 비유 |
+| summary | Capsule | 비공식 용어, Capsule로 공식화 |
+| cell state | Lifecycle | 세포 생물학 비유에서 유래 |
+| job | Task | 범용 용어, Task로 통일 |
+| work | Task | 범용 용어, Task로 통일 |
+| quest | Task | 초기 RPG 스타일 용어 |
+| persona | Agent | 에이전트 시스템에서 persona 개념 삭제됨. Agent만 존재 |
+| model_spec | cascade_name | LLM-Free Cascade 전환으로 model_spec 타입 제거. 문자열 cascade_name으로 대체 |
+| Cascade module (OCaml) | OAS Worker | Cascade.call 모듈 삭제됨. OAS Worker의 run_named으로 대체 |
+| perpetual loop | Agent.run | MASC 자체 perpetual loop 제거. OAS Agent.run 사용 |
+| completion_response | api_response | OAS 통합 시 api_response로 직접 반환 |
+
+---
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | 2026-01-10 | 초기 용어집 (10개 용어, P2 용어 정규화) |
+| 2.0.0 | 2026-03-23 | 전면 확장 (90+ 용어). 아키텍처, 체인 엔진, CPv2, 에러 분류, OAS 통합, 프로토콜, 거버넌스, 메모리 섹션 추가 |

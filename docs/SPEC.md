@@ -1,6 +1,6 @@
 # MASC-MCP Full Specification
 
-> Warning
+> **SUPERSEDED-BY**: `docs/spec/SPEC-INDEX.md` (v2.138.0, 2026-03-23)
 > This file is no longer the current architecture SSOT.
 > Treat it as a historical broad specification snapshot.
 > For current merged truth, start from:

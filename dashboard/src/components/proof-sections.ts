@@ -93,7 +93,7 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
       <div class="flex justify-between gap-3 items-start">
         <div>
           <strong>${item.worker_name ?? item.worker_run_id}</strong>
-          <div class="flex flex-wrap gap-3 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+          <div class="flex flex-wrap gap-3 text-[var(--text-body)] text-[13px] leading-[1.45]">
             <span>${item.worker_run_id}</span>
             <span>${item.ts_iso ? relativeTime(item.ts_iso) : '기록 없음'}</span>
           </div>
@@ -161,7 +161,7 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
       <div class="flex justify-between gap-3 items-start">
         <div>
           <strong>${item.actor}</strong>
-          <div class="flex flex-wrap gap-3 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+          <div class="flex flex-wrap gap-3 text-[var(--text-body)] text-[13px] leading-[1.45]">
             <span>${item.role ?? '참여자'}</span>
             <span>${lastSeen ? relativeTime(lastSeen) : '기록 없음'}</span>
           </div>

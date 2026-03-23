@@ -2,6 +2,8 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
+import { LoadingState } from './common/feedback-state'
+import { CountBadge } from './common/badge'
 import { navigate } from '../router'
 import {
   missionError,
@@ -36,7 +38,7 @@ import { ProvenanceStrip } from './common/provenance-strip'
 export function Mission() {
   const mission = missionSnapshot.value
   if (missionLoading.value && !mission) {
-    return html`<div class="loading-state loading-pulse">상황판 스냅샷 불러오는 중...</div>`
+    return html`<${LoadingState}>상황판 스냅샷 불러오는 중...<//>`
   }
   if (missionError.value && !mission) {
     return html`<${EmptyState} message=${missionError.value} compact />`
@@ -197,7 +199,7 @@ export function Mission() {
       <details open id="mission-keepers" class="rounded-lg border border-[var(--card-border)] overflow-hidden">
         <summary class="mission-collapsible-summary flex items-center gap-2 px-4 py-3 cursor-pointer text-sm font-medium text-[var(--text-strong)]">
           키퍼 연속성
-          <span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-8)] text-[var(--text-muted)] tabular-nums">${keeperRows.length}</span>
+          <${CountBadge}>${keeperRows.length}<//>
           ${keeperStatusWarnings > 0 ? html`<span class="text-[10px] px-1.5 py-px rounded bg-[var(--warn-12)] text-[var(--warn)] tabular-nums">${keeperStatusWarnings} 주의</span>` : null}
         </summary>
         <div class="p-4 pt-0">
@@ -221,7 +223,7 @@ export function Mission() {
       <details open id="mission-output" class="rounded-lg border border-[var(--card-border)] overflow-hidden">
         <summary class="mission-collapsible-summary flex items-center gap-2 px-4 py-3 cursor-pointer text-sm font-medium text-[var(--text-strong)]">
           최근 활동
-          <span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-8)] text-[var(--text-muted)] tabular-nums">${focusSessionOutputs.length + keeperOutputRows.length}</span>
+          <${CountBadge}>${focusSessionOutputs.length + keeperOutputRows.length}<//>
         </summary>
         <div class="p-4 pt-0">
           <div class="mb-3">
@@ -276,7 +278,7 @@ export function Mission() {
         <details class="rounded-lg border border-[var(--card-border)] overflow-hidden">
           <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer text-xs text-[var(--text-muted)]">
             내부 신호
-            <span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-8)] text-[var(--text-muted)] tabular-nums">${internalSignals.length}</span>
+            <${CountBadge}>${internalSignals.length}<//>
           </summary>
           <div class="flex flex-col gap-3 p-4 pt-0">
             ${internalSignals.map(item => html`<${InternalSignalCard} key=${item.id} item=${item} />`)}

@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { EmptyState } from './common/empty-state'
+import { LoadingState } from './common/feedback-state'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { governanceToneClass } from '../lib/tone'
@@ -89,7 +90,7 @@ export function GovernanceFreshnessStrip() {
   const itemCount = data.items?.length ?? 0
   const activityCount = data.activity?.length ?? 0
   return html`
-    <div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[length:var(--fs-sm)]" style="margin-top:4px;margin-bottom:8px">
+    <div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[13px]" style="margin-top:4px;margin-bottom:8px">
       <span>데이터 범위: 진행 중 ${itemCount}건</span>
       <span>최근 활동: ${activityCount}건</span>
       ${data.generated_at ? html`<span>생성 시각: ${data.generated_at}</span>` : null}
@@ -105,7 +106,7 @@ export function RuntimeParamsPanel() {
   return html`
     <${Card} title="Runtime Parameters" class="section mb-4">
       ${runtimeLoading.value
-        ? html`<div class="loading-state loading-pulse">파라미터 로딩 중...</div>`
+        ? html`<${LoadingState}>파라미터 로딩 중...<//>`
         : html`
             <div class="governance-params-surfaces">
               ${surfaces.map((surface: RuntimeParamsSurface) => {
@@ -115,7 +116,7 @@ export function RuntimeParamsPanel() {
                     <div class="governance-surface-head">
                       <strong>${surface.id}</strong>
                       <span class="governance-chip rounded-full ${surface.risk === 'high' ? 'warn' : ''}">${surface.risk}</span>
-                      <span class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">${surface.description}</span>
+                      <span class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[11px]">${surface.description}</span>
                     </div>
                     <div class="governance-params-table">
                       ${surfaceParams.map(param => html`
@@ -127,7 +128,7 @@ export function RuntimeParamsPanel() {
                               ? html`<span class="governance-chip rounded-full warn" style="margin-left:4px">override</span>`
                               : null}
                           </span>
-                          <span class="governance-param-default mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">
+                          <span class="governance-param-default mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[11px]">
                             기본: ${formatParamValue(param.default)}
                           </span>
                         </div>

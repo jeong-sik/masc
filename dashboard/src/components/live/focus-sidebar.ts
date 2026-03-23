@@ -33,7 +33,7 @@ export function FocusSidebar() {
       </div>
       <div class="grid gap-1.5 content-start overflow-y-auto max-h-[560px] pr-1">
         ${list.length === 0
-          ? html`<div class="py-6 text-center text-[color:var(--white-25)] text-[0.8rem]">No active agents</div>`
+          ? html`<div class="py-6 text-center text-[var(--white-25)] text-[13px]">No active agents</div>`
           : list.map(agent => html`
             <div
               key=${agent.name}
@@ -51,12 +51,12 @@ export function FocusSidebar() {
                 </span>
               </div>
               ${agent.currentTask
-                ? html`<div class="text-[0.75rem] text-[color:var(--white-55)] py-[3px] px-2 bg-[var(--white-3)] border border-[var(--white-5)] whitespace-nowrap overflow-hidden text-ellipsis rounded-md">${agent.currentTask}</div>`
+                ? html`<div class="text-[0.75rem] text-[var(--white-55)] py-[3px] px-2 bg-[var(--white-3)] border border-[var(--white-5)] whitespace-nowrap overflow-hidden text-ellipsis rounded-md">${agent.currentTask}</div>`
                 : null}
               <div class="focus-agent-footer">
                 ${agent.lastActivityText
-                  ? html`<span class="text-[0.72rem] text-[color:var(--white-40)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0">${agent.lastActivityText}</span>`
-                  : html`<span class="text-[0.72rem] text-[color:var(--white-40)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 italic text-[rgba(255,255,255,0.25)]">No recent activity</span>`}
+                  ? html`<span class="text-[11px] text-[var(--white-40)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0">${agent.lastActivityText}</span>`
+                  : html`<span class="text-[11px] text-[var(--white-40)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 italic text-[rgba(255,255,255,0.25)]">No recent activity</span>`}
                 ${agent.lastActivityAt
                   ? html`<${TimeAgo} timestamp=${agent.lastActivityAt} />`
                   : null}

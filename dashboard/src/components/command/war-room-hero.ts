@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from '../common/button'
 import { CmdStatCard } from './cmd-stat-card'
 import type {
   CommandPlaneChainOverlay,
@@ -93,7 +94,7 @@ export function WarRoomHeroStrip({
     <section class="sticky top-0 z-[3] flex flex-col gap-4 p-[18px] rounded-[18px] border border-[var(--white-8)] backdrop-blur-[18px] cmd-warroom-strip ${toneClass(stickyTone)} ${wallboard ? 'wallboard' : ''}">
       <div class="flex justify-between gap-4 items-start flex-wrap">
         <div>
-          <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">${wallboard ? 'War Room Wallboard' : '실시간 워룸'}</span>
+          <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[11px] tracking-[0.08em] uppercase">${wallboard ? 'War Room Wallboard' : '실시간 워룸'}</span>
           <strong>${heroTitle}</strong>
           <div class="cmd-card rounded-xl-sub">
             ${swarmHasEvidence ? (swarm?.operation?.operation_id ?? '작전 정보 없음') : '세션 기준값'}
@@ -103,20 +104,20 @@ export function WarRoomHeroStrip({
           </div>
           <div class="mt-3 text-[rgba(226,232,240,0.86)] leading-[1.55] max-w-[82ch]">${heroSummary}</div>
           ${activeSummary?.summary
-            ? html`<div class="grid gap-1 mt-3 py-3 px-3 rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.84)] text-[length:var(--fs-sm)] leading-snug cmd-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
+            ? html`<div class="grid gap-1 mt-3 py-3 px-3 rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.84)] text-[13px] leading-snug cmd-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
                 <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
                 <span>${activeSummary.summary}</span>
               </div>`
             : null}
         </div>
         <div class="flex gap-3 flex-wrap items-start justify-end">
-          <button class="control-btn rounded-lg ghost" onClick=${onRefresh}>새로고침</button>
+          <${ActionButton} variant="ghost" onClick=${onRefresh}>새로고침<//>
           ${wallboard
             ? html`
-                <button class="control-btn rounded-lg ghost" onClick=${onToggleFullscreen}>
+                <${ActionButton} variant="ghost" onClick=${onToggleFullscreen}>
                   ${fullscreenActive ? '전체 화면 해제' : '전체 화면'}
                 </button>
-                <button class="control-btn rounded-lg ghost" onClick=${standardView}>
+                <${ActionButton} variant="ghost" onClick=${standardView}>
                   표준 보기
                 </button>
               `

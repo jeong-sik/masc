@@ -129,7 +129,7 @@ export function Execution() {
       >
         ${allClear
           ? html`
-              <div class="text-center border border-dashed border-[var(--ok-30)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" data-testid="execution.all-clear">
+              <div class="text-center border border-dashed border-[var(--ok-30)] rounded-[10px] py-[22px] px-4 text-[var(--text-muted)]" data-testid="execution.all-clear">
                 정상 운영 중. 주의가 필요한 항목이 없습니다.
               </div>
             `

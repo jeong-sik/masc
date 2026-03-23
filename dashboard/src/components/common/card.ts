@@ -1,9 +1,75 @@
-// Generic card wrapper — consistent card styling
-// Card system: p-4, bg-[var(--card)], border border-[var(--card-border)], rounded-xl
+// SurfaceCard — reusable card container with Tailwind variants
+// Replaces 40+ inline `p-4 rounded-xl border border-[var(--card-border)]` patterns
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
+import { SectionHeader } from './section-header'
 
+// ── Exported class constants for non-component usage ──
+export const CARD_BASE = 'rounded-xl border border-[var(--card-border)]'
+export const CARD_STANDARD = `${CARD_BASE} p-4 bg-[var(--card)]`
+export const CARD_LIGHT = `${CARD_BASE} p-4 bg-[var(--white-3)]`
+export const CARD_COMPACT = `${CARD_BASE} p-3.5 bg-[var(--card)]`
+
+type CardVariant = 'standard' | 'light' | 'compact'
+
+const VARIANT_CLASSES: Record<CardVariant, string> = {
+  standard: CARD_STANDARD,
+  light: CARD_LIGHT,
+  compact: CARD_COMPACT,
+}
+
+interface SurfaceCardProps {
+  variant?: CardVariant
+  class?: string
+  /** Tone class: 'ok' | 'warn' | 'bad' */
+  tone?: string
+  testId?: string
+  children: ComponentChildren
+}
+
+export function SurfaceCard({
+  variant = 'standard',
+  class: cx,
+  tone,
+  testId,
+  children,
+}: SurfaceCardProps) {
+  const cls = [VARIANT_CLASSES[variant], tone, cx].filter(Boolean).join(' ')
+  return html`<div class=${cls} data-testid=${testId}>${children}</div>`
+}
+
+// ── Section card with label header ──
+interface SectionCardProps {
+  label: string
+  class?: string
+  variant?: CardVariant
+  children: ComponentChildren
+}
+
+export function SectionCard({
+  label,
+  class: cx,
+  variant = 'light',
+  children,
+}: SectionCardProps) {
+  return html`
+    <${SurfaceCard} variant=${variant} class="flex flex-col gap-2 ${cx ?? ''}">
+      <${SectionHeader}>${label}<//>
+      ${children}
+    <//>
+  `
+}
+
+// ── Clickable card (adds hover + cursor) ──
+interface ClickableCardProps {
+  variant?: CardVariant
+  class?: string
+  onClick?: () => void
+  children: ComponentChildren
+}
+
+// ── Legacy Card (backward compat — accepts title prop) ──
 interface CardProps {
   title?: ComponentChildren
   class?: string
@@ -11,17 +77,27 @@ interface CardProps {
   children: ComponentChildren
 }
 
-export function Card({ title, class: className, testId, children }: CardProps) {
-  return html`
-    <div class="card ${className ?? ''}" data-testid=${testId}>
-      ${title
-        ? html`
-            <div class="card-title-row">
-              <div class="card-title">${title}</div>
-            </div>
-          `
-        : null}
-      ${children}
-    </div>
-  `
+export function Card({ title, class: cx, testId, children }: CardProps) {
+  if (title) {
+    return html`
+      <${SectionCard} label=${title} class=${cx ?? ''} variant="standard">
+        ${children}
+      <//>
+    `
+  }
+  return html`<${SurfaceCard} class=${cx} testId=${testId}>${children}<//>`
+}
+
+export function ClickableCard({
+  variant = 'standard',
+  class: cx,
+  onClick,
+  children,
+}: ClickableCardProps) {
+  const cls = [
+    VARIANT_CLASSES[variant],
+    'cursor-pointer transition-colors hover:border-[var(--accent-20)]',
+    cx,
+  ].filter(Boolean).join(' ')
+  return html`<div class=${cls} onClick=${onClick}>${children}</div>`
 }

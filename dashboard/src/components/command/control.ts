@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { CARD_STANDARD } from '../common/card'
 import { EmptyState } from '../common/empty-state'
 import type {
   CommandPlaneCapacityRow,
@@ -108,7 +109,7 @@ export function ControlSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
+      <section class="${CARD_STANDARD} min-h-[240px]">
         <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)] mb-3">승인 대기</h3>
         ${snapshot && snapshot.decisions.decisions.length > 0
           ? html`<div class="flex flex-col gap-3">
@@ -117,7 +118,7 @@ export function ControlSurface() {
           : html`<${EmptyState} message="지금 승인 대기 항목은 없습니다." compact />`}
       </section>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
+      <section class="${CARD_STANDARD} min-h-[240px]">
         <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)] mb-3">유닛 제어</h3>
         ${snapshot && snapshot.capacity.capacity.length > 0
           ? html`<div class="flex flex-col gap-3">

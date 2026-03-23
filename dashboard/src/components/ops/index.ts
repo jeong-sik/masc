@@ -1,6 +1,7 @@
 // 개입 표면 — 헤더, 우선순위 카드, 열 구성
 
 import { html } from 'htm/preact'
+import { CARD_STANDARD } from '../common/card'
 import { useEffect } from 'preact/hooks'
 import { refreshRoomTruth } from '../../room-truth-store'
 import { RoomTruthStrip } from '../common/room-truth-strip'
@@ -157,7 +158,7 @@ export function Ops() {
 
   return html`
     <section class="flex flex-col gap-4">
-      <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex justify-between items-start gap-4 max-[880px]:flex-col">
+      <div class="${CARD_STANDARD} flex justify-between items-start gap-4 max-[880px]:flex-col">
         <div>
           <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">개입</h2>
           <p class="text-[13px] text-[var(--text-muted)] max-w-[62ch] leading-relaxed">
@@ -249,7 +250,7 @@ export function Ops() {
         }
         if (actions.length === 0) return null
         return html`
-          <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+          <section class="${CARD_STANDARD}">
             <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-3">지금 할 수 있는 것</h3>
             <div class="flex flex-col gap-2">
               ${actions.slice(0, 3).map(action => html`
@@ -263,7 +264,7 @@ export function Ops() {
         `
       })()}
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+      <section class="${CARD_STANDARD}">
         <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">개입 우선순위</h2>
         <p class="text-[12px] text-[var(--text-muted)] mb-4">지금 가장 먼저 손댈 대상이 방인지, 세션인지, 키퍼인지 먼저 좁힙니다.</p>
         <div class="ops-priority-grid grid grid-cols-4 gap-3 max-[1200px]:grid-cols-2 max-[880px]:grid-cols-1">

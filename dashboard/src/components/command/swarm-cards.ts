@@ -84,8 +84,8 @@ export function SwarmWorkerGrid({ total }: { total: number }) {
   return html`
     <div class="swarm-worker-grid flex flex-wrap gap-[3px] items-center">
       ${dots.map(() => html`<span class="w-2 h-2 rounded-full bg-[rgba(134,160,207,0.7)]"></span>`)}
-      ${overflow > 0 ? html`<span class="text-[0.72rem] text-[color:var(--text-dim,var(--white-50))] ml-1">+${overflow}</span>` : null}
-      <span class="text-[0.72rem] text-[color:var(--text-dim,var(--white-50))] ml-1">(워커 ${total})</span>
+      ${overflow > 0 ? html`<span class="text-[11px] text-[var(--text-dim,var(--white-50))] ml-1">+${overflow}</span>` : null}
+      <span class="text-[11px] text-[var(--text-dim,var(--white-50))] ml-1">(워커 ${total})</span>
     </div>
   `
 }
@@ -97,10 +97,10 @@ export function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEven
   return html`
     <div class="flex items-start gap-2 relative py-1 text-[0.82rem]">
       <span class="swarm-event-dot ${toneClass(event.tone)}"></span>
-      <span class="shrink-0 w-12 text-[0.72rem] text-[color:var(--text-dim,var(--white-45))]">${timeStr}</span>
+      <span class="shrink-0 w-12 text-[11px] text-[var(--text-dim,var(--white-45))]">${timeStr}</span>
       <div class="min-w-0 flex-1">
         <strong>${event.title}</strong>
-        <span class="text-[0.72rem] opacity-60 ml-1.5">${event.kind}</span>
+        <span class="text-[11px] opacity-60 ml-1.5">${event.kind}</span>
         ${event.detail ? html`<div class="cmd-card rounded-xl-sub">${event.detail}</div>` : null}
       </div>
     </div>

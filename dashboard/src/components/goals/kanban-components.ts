@@ -29,7 +29,7 @@ export function KanbanCard({ task }: { task: Task }) {
       </div>
       ${hasDescription ? html`
         <div
-          class="text-[length:var(--fs-sm)] text-[var(--text-dim)] cursor-pointer transition-colors duration-150 hover:text-[var(--text-body)]"
+          class="text-[13px] text-[var(--text-dim)] cursor-pointer transition-colors duration-150 hover:text-[var(--text-body)]"
           onClick=${() => toggleTaskExpand(task.id)}
         >
           ${isExpanded ? task.description : truncate(task.description ?? '', 80)}
@@ -37,7 +37,7 @@ export function KanbanCard({ task }: { task: Task }) {
       ` : null}
       <div class="kanban-card rounded-xl-meta">
         ${task.created_at ? html`<${TimeAgo} timestamp=${task.created_at} />` : html`<span>-</span>`}
-        ${task.assignee ? html`<span class="inline-flex items-center bg-[rgba(0,240,255,0.1)] text-[color:var(--accent)] px-2 py-1 gap-1 font-semibold before:content-['@'] rounded-lg">${task.assignee}</span>` : null}
+        ${task.assignee ? html`<span class="inline-flex items-center bg-[rgba(0,240,255,0.1)] text-[var(--accent)] px-2 py-1 gap-1 font-semibold before:content-['@'] rounded-lg">${task.assignee}</span>` : null}
       </div>
     </div>
   `
@@ -55,7 +55,7 @@ export function TaskBacklog() {
         <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
           <div class="kanban-header todo">
             <span>할 일</span>
-            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${todo.length}</span>
+            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[13px] font-bold">${todo.length}</span>
           </div>
           ${sortedTodo.length === 0
             ? html`<${EmptyState} message="대기 중인 태스크가 없습니다" compact />`
@@ -64,7 +64,7 @@ export function TaskBacklog() {
         <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
           <div class="kanban-header inprogress">
             <span>진행 중</span>
-            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${inProgress.length}</span>
+            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[13px] font-bold">${inProgress.length}</span>
           </div>
           ${sortedInProgress.length === 0
             ? html`<${EmptyState} message="진행 중인 태스크가 없습니다" compact />`
@@ -73,7 +73,7 @@ export function TaskBacklog() {
         <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
           <div class="kanban-header done">
             <span>완료</span>
-            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${done.length}</span>
+            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[13px] font-bold">${done.length}</span>
           </div>
           ${sortedDone.length === 0
             ? html`<${EmptyState} message="완료된 태스크가 없습니다" compact />`

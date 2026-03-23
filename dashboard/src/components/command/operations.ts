@@ -1,4 +1,6 @@
 import { html } from 'htm/preact'
+import { ActionButton } from '../common/button'
+import { CARD_STANDARD } from '../common/card'
 import { EmptyState } from '../common/empty-state'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type {
@@ -199,8 +201,8 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
         ? html`<div class="cmd-card rounded-xl-foot">체크포인트 ${op.checkpoint_ref}</div>`
         : null}
       <div class="flex gap-3 flex-wrap mt-3">
-        <button
-          class="control-btn rounded-lg ghost"
+        <${ActionButton}
+          variant="ghost"
           onClick=${() => {
             setCommandPlaneSurface('swarm')
             navigate('operations', {
@@ -211,11 +213,11 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
           }}
         >
           스웜 실시간 보기
-        </button>
+        <//>
         ${chain
           ? html`
-              <button
-                class="control-btn rounded-lg ghost"
+              <${ActionButton}
+                variant="ghost"
                 onClick=${() => {
                   focusCommandPlaneChainOperation(op.operation_id)
                   setCommandPlaneSurface('chains')
@@ -223,24 +225,24 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
                 }}
               >
                 체인 열기
-              </button>
+              <//>
             `
           : null}
         ${op.source === 'managed' && op.status === 'active'
           ? html`
-              <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(pauseKey)} onClick=${() => fire(() => pauseCommandPlaneOperation(op.operation_id))}>
+              <${ActionButton} variant="ghost" disabled=${actionDisabled(pauseKey)} onClick=${() => fire(() => pauseCommandPlaneOperation(op.operation_id))}>
                 ${actionDisabled(pauseKey) ? '일시정지 중…' : '일시정지'}
-              </button>
-              <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(recallKey)} onClick=${() => fire(() => recallCommandPlaneOperation(op.operation_id))}>
+              <//>
+              <${ActionButton} variant="ghost" disabled=${actionDisabled(recallKey)} onClick=${() => fire(() => recallCommandPlaneOperation(op.operation_id))}>
                 ${actionDisabled(recallKey) ? '회수 중…' : '회수'}
-              </button>
+              <//>
             `
           : null}
         ${op.source === 'managed' && op.status === 'paused'
           ? html`
-              <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(resumeKey)} onClick=${() => fire(() => resumeCommandPlaneOperation(op.operation_id))}>
+              <${ActionButton} variant="ghost" disabled=${actionDisabled(resumeKey)} onClick=${() => fire(() => resumeCommandPlaneOperation(op.operation_id))}>
                 ${actionDisabled(resumeKey) ? '재개 중…' : '재개'}
-              </button>
+              <//>
             `
           : null}
       </div>
@@ -285,7 +287,7 @@ export function OperationsSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
+      <section class="${CARD_STANDARD} min-h-[240px]">
         <div class="pb-2 border-b border-[var(--card-border)] mb-3">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">작전</h3>
         </div>
@@ -295,7 +297,7 @@ export function OperationsSurface() {
             </div>`
           : html`<${EmptyState} message="관리형 또는 투영된 작전이 없습니다." compact />`}
       </section>
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
+      <section class="${CARD_STANDARD} min-h-[240px]">
         <div class="pb-2 border-b border-[var(--card-border)] mb-3">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">분견대</h3>
         </div>
@@ -331,7 +333,7 @@ export function ChainsSurface() {
 
   return html`
     <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
+      <section class="${CARD_STANDARD} min-h-[240px]">
         <div class="pb-2 border-b border-[var(--card-border)] mb-3">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Chains</h3>
         </div>
@@ -385,7 +387,7 @@ export function ChainsSurface() {
         </div>
       </section>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
+      <section class="${CARD_STANDARD} min-h-[240px]">
         <div class="pb-2 border-b border-[var(--card-border)] mb-3">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">체인 상세</h3>
         </div>

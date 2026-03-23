@@ -267,7 +267,7 @@ function GuidedPanel() {
                       <div class="flex flex-col gap-1.5 mt-3">
                         ${path.steps.slice(0, 4).map(step => html`
                           <div class="flex gap-3 flex-wrap items-baseline">
-                            <span class="font-mono text-[#67e8f9] text-[length:var(--fs-sm)]">${step.tool}</span>
+                            <span class="font-mono text-[#67e8f9] text-[13px]">${step.tool}</span>
                             <span>${step.title}</span>
                           </div>
                         `)}

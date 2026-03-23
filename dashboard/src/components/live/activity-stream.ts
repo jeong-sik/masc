@@ -26,7 +26,7 @@ function FilterBar() {
       ${FILTER_OPTIONS.map(opt => html`
         <button
           key=${opt.kind}
-          class="px-2 py-0.5 text-[length:var(--fs-xs)] rounded-md border cursor-pointer transition-all duration-150 ${active.has(opt.kind)
+          class="px-2 py-0.5 text-[11px] rounded-md border cursor-pointer transition-all duration-150 ${active.has(opt.kind)
             ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
             : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'}"
           onClick=${() => toggleLiveFilter(opt.kind)}
@@ -50,7 +50,7 @@ export function ActivityStream() {
       <${FilterBar} />
       <div class="activity-stream-list">
         ${entries.length === 0
-          ? html`<div class="py-6 text-center text-[color:var(--white-25)] text-[0.8rem]">필터에 맞는 이벤트 없음</div>`
+          ? html`<div class="py-6 text-center text-[var(--white-25)] text-[13px]">필터에 맞는 이벤트 없음</div>`
           : entries.map((entry, i) => html`
             <div
               key=${`${entry.timestamp}-${i}`}
@@ -58,10 +58,10 @@ export function ActivityStream() {
             >
               <div class="activity-item-head">
                 <span class="activity-kind-chip rounded ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
-                <span class="text-[0.75rem] text-[color:var(--white-60)] font-medium">${entry.agent}</span>
-                <span class="text-[0.7rem] text-[color:var(--white-30)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
+                <span class="text-[0.75rem] text-[var(--white-60)] font-medium">${entry.agent}</span>
+                <span class="text-[0.7rem] text-[var(--white-30)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
               </div>
-              <div class="text-[0.8rem] text-[color:var(--white-70)] leading-[1.4] break-words">${entry.text}</div>
+              <div class="text-[13px] text-[var(--white-70)] leading-[1.4] break-words">${entry.text}</div>
             </div>
           `)}
       </div>

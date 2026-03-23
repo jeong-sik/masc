@@ -1,7 +1,9 @@
 // Ops — Room column: broadcast, pause/resume, task inject, recommended actions, pending confirmations, room feed
 
 import { html } from 'htm/preact'
+import { CARD_STANDARD } from '../common/card'
 import { useRef } from 'preact/hooks'
+import { LoadingState } from '../common/feedback-state'
 import {
   operatorActionBusy,
   operatorDigestLoading,
@@ -65,7 +67,7 @@ export function OpsRoomColumn() {
 
   return html`
     <div class="flex flex-col gap-4 min-w-0">
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+      <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">추천 개입</h3>
         </div>
@@ -85,7 +87,7 @@ export function OpsRoomColumn() {
           </div>
         </article>
         ${operatorDigestLoading.value && !roomDigest ? html`
-          <div class="loading-state loading-pulse">개입 추천을 불러오는 중입니다...</div>
+          <${LoadingState}>개입 추천을 불러오는 중입니다...<//>
         ` : activeRecommendedActions.length > 0 ? html`
           <div class="flex flex-col gap-2">
             ${activeRecommendedActions.map(item => html`
@@ -111,7 +113,7 @@ export function OpsRoomColumn() {
         `}
       </section>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-pending-section">
+      <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-pending-section">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">승인 대기</h3>
         </div>
@@ -143,7 +145,7 @@ export function OpsRoomColumn() {
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                   <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
                 </div>
-                ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[length:var(--fs-xs)] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
+                ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[11px] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
                 <div class="flex justify-between items-center gap-3 mt-3 max-[880px]:flex-col max-[880px]:items-start">
                   <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
                     실행
@@ -165,7 +167,7 @@ export function OpsRoomColumn() {
         `}
       </section>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel">
+      <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Room 상태</h3>
         </div>
@@ -279,7 +281,7 @@ export function OpsRoomColumn() {
         </details>
       </section>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+      <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">최근 Room 메시지</h3>
         </div>

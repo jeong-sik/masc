@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
+import { LoadingState } from './common/feedback-state'
 import { StatCell } from './common/stat-cell'
 import { TagBadge } from './common/tag-badge'
 import { ListItem } from './common/list-item'
@@ -45,7 +46,7 @@ export function SessionBriefCard({
               <div class="mission-status-dot ${liveStateClass(brief.status, brief.health)} ${dotStateBg(liveStateClass(brief.status, brief.health))}"></div>
               <strong>${brief.goal}</strong>
             </div>
-            <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)] mt-1">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
+            <div class="text-[var(--text-muted)] text-[13px] mt-1">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           </div>
           <span class="cmd-chip rounded-full ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
         </div>
@@ -115,7 +116,7 @@ export function SessionDetailCard({
   if (loading && !detail) {
     return html`
       <${Card} title="세션 상세" class="mission-list-card rounded-xl">
-        <div class="loading-state loading-pulse">세션 상세 불러오는 중...</div>
+        <${LoadingState}>세션 상세 불러오는 중...<//>
       <//>
     `
   }
@@ -137,7 +138,7 @@ export function SessionDetailCard({
     <${Card} title="세션 상세" class="mission-list-card rounded-xl">
       <div class="grid gap-1.5 mb-4">
         <h3 class="m-0 text-[var(--text-strong)] text-lg">${session.goal}</h3>
-        <p class="m-0 text-[rgba(255,255,255,0.68)] leading-normal">${session.session_id}${session.room ? ` · ${session.room}` : ''}</p>
+        <p class="m-0 text-[var(--text-body)] leading-normal">${session.session_id}${session.room ? ` · ${session.room}` : ''}</p>
       </div>
 
       ${error ? html`<div class="grid gap-1.5">${error}</div>` : null}

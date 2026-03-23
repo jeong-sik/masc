@@ -684,36 +684,11 @@ let test_masc_team_session_step_spawn_batch_schema () =
             (List.mem_assoc "spawn_batch" props)
       | None -> Alcotest.fail "masc_team_session_step missing properties"
 
-let test_masc_persona_list_schema () =
-  match find_tool "masc_persona_list" with
-  | None -> Alcotest.fail "masc_persona_list not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has detailed" true (List.mem_assoc "detailed" props)
-      | None -> Alcotest.fail "masc_persona_list missing properties"
+(* test_masc_persona_list_schema and test_masc_keeper_create_from_persona_schema
+   removed: persona concept deleted (CLAUDE.md), schema fields
+   policy_voice_enabled/policy_shell_mode/initiative_* removed in #2607. *)
 
-let test_masc_keeper_create_from_persona_schema () =
-  match find_tool "masc_keeper_create_from_persona" with
-  | None -> Alcotest.fail "masc_keeper_create_from_persona not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has persona_name" true
-            (List.mem_assoc "persona_name" props);
-          Alcotest.(check bool) "has dry_run" true
-            (List.mem_assoc "dry_run" props);
-          Alcotest.(check bool) "has policy_mode" true
-            (List.mem_assoc "policy_mode" props);
-          Alcotest.(check bool) "has policy_voice_enabled" true
-            (List.mem_assoc "policy_voice_enabled" props);
-          Alcotest.(check bool) "has policy_shell_mode" true
-            (List.mem_assoc "policy_shell_mode" props);
-          Alcotest.(check bool) "has presence_keepalive" true
-            (List.mem_assoc "presence_keepalive" props)
-      | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
-
-let test_masc_keeper_up_initiative_schema () =
+let test_masc_keeper_up_schema () =
   match find_tool "masc_keeper_up" with
   | None -> Alcotest.fail "masc_keeper_up not found"
   | Some schema ->
@@ -721,10 +696,10 @@ let test_masc_keeper_up_initiative_schema () =
       | Some props ->
           Alcotest.(check bool) "has policy_mode" true
             (List.mem_assoc "policy_mode" props);
-          Alcotest.(check bool) "has policy_voice_enabled" true
-            (List.mem_assoc "policy_voice_enabled" props);
-          Alcotest.(check bool) "has policy_shell_mode" true
-            (List.mem_assoc "policy_shell_mode" props)
+          Alcotest.(check bool) "has scope_kind" true
+            (List.mem_assoc "scope_kind" props);
+          Alcotest.(check bool) "has presence_keepalive" true
+            (List.mem_assoc "presence_keepalive" props)
       | None -> Alcotest.fail "masc_keeper_up missing properties"
 
 let test_masc_keeper_policy_set_schema () =
@@ -1180,11 +1155,8 @@ let () =
       Alcotest.test_case "mitosis_status" `Quick test_masc_mitosis_status_schema;
       Alcotest.test_case "mitosis_divide" `Quick test_masc_mitosis_divide_schema;
       Alcotest.test_case "spawn" `Quick test_masc_spawn_schema;
-      Alcotest.test_case "persona-list" `Quick test_masc_persona_list_schema;
-      Alcotest.test_case "keeper-create-from-persona" `Quick
-        test_masc_keeper_create_from_persona_schema;
-      Alcotest.test_case "keeper-up-initiative" `Quick
-        test_masc_keeper_up_initiative_schema;
+      Alcotest.test_case "keeper-up" `Quick
+        test_masc_keeper_up_schema;
       Alcotest.test_case "keeper-policy-set" `Quick
         test_masc_keeper_policy_set_schema;
       Alcotest.test_case "keeper-feedback-record" `Quick

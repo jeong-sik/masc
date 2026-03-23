@@ -244,11 +244,18 @@ let test_path_absolute_outside_root () =
        with Not_found -> false))
 
 let test_path_traversal_attack () =
-  let dir = make_path_test_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    let config = Room.default_config dir in
+  (* Use a deep nested dir so ../../ reliably escapes root on any CI *)
+  let base = make_path_test_dir () in
+  let deep = Filename.concat (Filename.concat base "a") "b" in
+  (try Unix.mkdir (Filename.concat base "a") 0o755
+   with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  (try Unix.mkdir deep 0o755
+   with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir base) (fun () ->
+    let config = Room.default_config deep in
+    (* ../../../../etc/passwd should escape any reasonable root *)
     let result = Keeper_alerting_path.resolve_keeper_target_path
-      ~config ~allowed_paths:[] ~raw_path:"../../etc/passwd" in
+      ~config ~allowed_paths:[] ~raw_path:"../../../../etc/passwd" in
     check bool "traversal attack rejected" true (Result.is_error result))
 
 let test_path_allowed_paths_filter () =

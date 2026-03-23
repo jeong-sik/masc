@@ -394,7 +394,6 @@ let command_plane_help_http_json () =
                         [
                           ("assigned_unit_id", `String "squad-research-normalize");
                           ("objective", `String "Normalize and verify latest AI research items");
-                          ("autonomy_level", `String "L4_Autonomous");
                           ("policy_class", `String "guarded");
                         ]);
                    ])

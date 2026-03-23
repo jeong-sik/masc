@@ -1,70 +1,10 @@
 // Keeper detail sub-components — KPIs, charts, field dictionary,
-// autonomy meter, and traits.
+// TRPG stats, equipment, relationships, traits
 // Redesigned: individual KPI cards, clean table, proper spacing.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { TimeAgo } from './common/time-ago'
-import type { Keeper, KeeperMetricPoint, AutonomyLevel } from '../types'
-
-// ── Autonomy helpers ─────────────────────────────────────
-
-const AUTONOMY_LEVELS: { level: AutonomyLevel; label: string; hint: string; color: string }[] = [
-  { level: 'L1_Reactive', label: 'L1 Reactive', hint: 'Responds only when explicitly asked', color: '#6b7280' },
-  { level: 'L2_Suggestive', label: 'L2 Suggestive', hint: 'Offers suggestions but waits for approval', color: '#3b82f6' },
-  { level: 'L3_Guided', label: 'L3 Guided', hint: 'Acts within pre-approved boundaries', color: '#f59e0b' },
-  { level: 'L4_Autonomous', label: 'L4 Autonomous', hint: 'Self-directed with periodic check-ins', color: '#f97316' },
-  { level: 'L5_Independent', label: 'L5 Independent', hint: 'Fully self-directed, reports results only', color: '#ef4444' },
-]
-
-function autonomyIndex(level: AutonomyLevel | undefined): number {
-  if (!level) return 0
-  const idx = AUTONOMY_LEVELS.findIndex(a => a.level === level)
-  return idx >= 0 ? idx : 0
-}
-
-export function AutonomyMeter({ keeper }: { keeper: Keeper }) {
-  const idx = autonomyIndex(keeper.autonomy_level)
-  const info = AUTONOMY_LEVELS[idx] ?? AUTONOMY_LEVELS[0]
-  if (!info) return null
-  const pct = ((idx + 1) / AUTONOMY_LEVELS.length) * 100
-
-  return html`
-    <div class="flex flex-col gap-2">
-      <div>
-        <div class="flex justify-between items-center mb-1.5">
-          <span class="text-[13px] font-semibold" style="color:${info.color};">${info.label}</span>
-          <span class="text-[11px] text-[var(--text-muted)]">${idx + 1} / ${AUTONOMY_LEVELS.length}</span>
-        </div>
-        <div class="text-[11px] text-[var(--text-muted)] mb-1.5 leading-snug">${info.hint}</div>
-        <div class="w-full h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden">
-          <div class="h-full rounded-full transition-all duration-300" style="width:${pct}%; background:${info.color};"></div>
-        </div>
-        <div class="flex justify-between mt-1.5">
-          ${AUTONOMY_LEVELS.map((a, i) => html`
-            <span class="size-2 rounded-full inline-block transition-colors" style="background:${i <= idx ? a.color : 'var(--white-10)'};"></span>
-          `)}
-        </div>
-      </div>
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Autonomous actions</span>
-        <span class="text-xs font-medium text-[var(--text-strong)]">${keeper.autonomous_action_count ?? 0}</span>
-      </div>
-      ${keeper.last_autonomous_action_at
-        ? html`<div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-            <span class="text-xs text-[var(--text-muted)]">Last autonomous action</span>
-            <span class="text-xs font-medium text-[var(--text-strong)]"><${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>
-          </div>`
-        : null}
-      ${keeper.active_goal_ids && keeper.active_goal_ids.length > 0
-        ? html`<div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-            <span class="text-xs text-[var(--text-muted)]">Active goals</span>
-            <span class="text-xs font-medium text-[var(--text-strong)]">${keeper.active_goal_ids.length}</span>
-          </div>`
-        : null}
-    </div>
-  `
-}
+import type { Keeper, KeeperMetricPoint, TrpgCharacterStats } from '../types'
 
 // ── Utility functions ────────────────────────────────────
 
@@ -250,20 +190,20 @@ const fieldSearch = signal('')
 export function FieldDictionary({ keeper }: { keeper: Keeper }) {
   const filter = fieldSearch.value.toLowerCase()
 
-  const fields: { title: string; value: string }[] = [
-    { title: 'Name', value: keeper.name },
-    { title: 'Emoji', value: keeper.emoji ?? '-' },
-    { title: 'Korean Name', value: keeper.koreanName ?? '-' },
-    { title: 'Model', value: keeper.model ?? '-' },
-    { title: 'Status', value: keeper.status },
-    { title: 'Core Value', value: keeper.primaryValue ?? '-' },
-    { title: 'Activity Level', value: String(keeper.activityLevel ?? '-') },
-    { title: 'Generation', value: String(keeper.generation ?? '-') },
-    { title: 'Total Turns', value: String(keeper.turn_count ?? '-') },
-    { title: 'Context Usage', value: keeper.context_ratio != null ? `${Math.round(keeper.context_ratio * 100)}%` : '-' },
-    { title: 'Last Heartbeat', value: keeper.last_heartbeat ?? '-' },
-    { title: 'Traits', value: keeper.traits?.join(', ') || '-' },
-    { title: 'Interests', value: keeper.interests?.join(', ') || '-' },
+  const fields: { title: string; key: string; value: string }[] = [
+    { title: 'Name', key: 'name', value: keeper.name },
+    { title: 'Emoji', key: 'emoji', value: keeper.emoji ?? '-' },
+    { title: 'Korean', key: 'koreanName', value: keeper.koreanName ?? '-' },
+    { title: 'Model', key: 'model', value: keeper.model ?? '-' },
+    { title: 'Status', key: 'status', value: keeper.status },
+    { title: 'Primary', key: 'primaryValue', value: keeper.primaryValue ?? '-' },
+    { title: 'Activity', key: 'activityLevel', value: String(keeper.activityLevel ?? '-') },
+    { title: 'Gen', key: 'generation', value: String(keeper.generation ?? '-') },
+    { title: 'Turns', key: 'turn_count', value: String(keeper.turn_count ?? '-') },
+    { title: 'Context', key: 'context_ratio', value: keeper.context_ratio != null ? `${Math.round(keeper.context_ratio * 100)}%` : '-' },
+    { title: 'Heartbeat', key: 'last_heartbeat', value: keeper.last_heartbeat ?? '-' },
+    { title: 'Traits', key: 'traits', value: keeper.traits?.join(', ') || '-' },
+    { title: 'Interests', key: 'interests', value: keeper.interests?.join(', ') || '-' },
   ]
 
   // Extra fields from keeper object
@@ -289,7 +229,7 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
   if (keeper.context?.has_checkpoint != null) extras.push({ title: 'Has Checkpoint', value: keeper.context.has_checkpoint ? 'Yes' : 'No' })
 
   const filtered = filter
-    ? fields.filter(f => f.title.toLowerCase().includes(filter) || f.value.toLowerCase().includes(filter))
+    ? fields.filter(f => f.title.toLowerCase().includes(filter) || f.key.includes(filter) || f.value.toLowerCase().includes(filter))
     : fields
 
   return html`
@@ -303,8 +243,9 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
       />
       <div class="flex flex-col">
         ${filtered.map((f, i) => html`
-          <div class="grid grid-cols-[120px_1fr] gap-2 py-2 px-2 text-xs rounded-md ${i % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
+          <div class="grid grid-cols-[100px_80px_1fr] gap-2 py-2 px-2 text-xs rounded-md ${i % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
             <span class="font-semibold text-[var(--text-body)] truncate">${f.title}</span>
+            <span class="font-mono text-[var(--cyan)] text-[11px] truncate">${f.key}</span>
             <span class="text-right text-[var(--text-body)] truncate">${f.value}</span>
           </div>
         `)}
@@ -319,7 +260,86 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
   `
 }
 
-// ── Traits ────────────────────────────────────────────────
+// ── TRPG, Equipment, Relationships, Traits ───────────────
+
+export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
+  const hpPct = stats.max_hp > 0 ? Math.round((stats.hp / stats.max_hp) * 100) : 0
+  const mpPct = stats.max_mp > 0 ? Math.round((stats.mp / stats.max_mp) * 100) : 0
+
+  return html`
+    <div>
+      <div class="flex gap-3 mb-3">
+        <div class="flex-1">
+          <div class="flex justify-between text-[11px] text-[var(--text-muted)] mb-1">
+            <span>HP</span>
+            <span>${stats.hp}/${stats.max_hp}</span>
+          </div>
+          <div class="h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all" style="width:${hpPct}%; background:${hpPct > 50 ? '#4ade80' : hpPct > 25 ? '#fbbf24' : '#ef4444'};" />
+          </div>
+        </div>
+        <div class="flex-1">
+          <div class="flex justify-between text-[11px] text-[var(--text-muted)] mb-1">
+            <span>MP</span>
+            <span>${stats.mp}/${stats.max_mp}</span>
+          </div>
+          <div class="h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
+            <div class="h-full rounded-full" style="width:${mpPct}%; background:#818cf8;" />
+          </div>
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-2">
+        ${[
+          { label: 'STR', value: stats.strength },
+          { label: 'DEX', value: stats.dexterity },
+          { label: 'CON', value: stats.constitution },
+          { label: 'INT', value: stats.intelligence },
+          { label: 'WIS', value: stats.wisdom },
+          { label: 'CHA', value: stats.charisma },
+        ].map(s => html`
+          <div class="text-center py-2 px-1.5 bg-[var(--white-3)] rounded-lg border border-[var(--card-border)]">
+            <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">${s.label}</div>
+            <div class="text-lg font-bold text-[var(--text-strong)] mt-0.5">${s.value}</div>
+          </div>
+        `)}
+      </div>
+      <div class="mt-3 text-xs text-[var(--text-muted)]">
+        Level ${stats.level} -- XP ${stats.xp}
+      </div>
+    </div>
+  `
+}
+
+export function EquipmentList({ items }: { items: string[] }) {
+  if (items.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">No equipment</div>`
+
+  return html`
+    <div class="flex flex-col gap-1.5">
+      ${items.map((item, i) => html`
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <span class="text-xs text-[var(--text-body)]">${item}</span>
+          <span class="text-[10px] text-[var(--cyan)] font-mono">#${i + 1}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
+export function RelationshipList({ rels }: { rels: Record<string, string> }) {
+  const entries = Object.entries(rels)
+  if (entries.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">No relationships</div>`
+
+  return html`
+    <div class="max-h-[220px] overflow-y-auto flex flex-col gap-1.5">
+      ${entries.map(([name, relation]) => html`
+        <div class="flex items-center gap-2 py-2 px-3 bg-[var(--white-3)] rounded-lg">
+          <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[11px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${name}</span>
+          <span class="text-[11px] text-[var(--text-muted)] font-mono">${relation}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
 
 export function TraitsList({ traits, label }: { traits: string[]; label: string }) {
   if (traits.length === 0) return null

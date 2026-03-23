@@ -218,7 +218,6 @@ let ensure_keeper_exists
       last_proactive_preview = "";
       last_continuity_update_ts = now_ts;
       continuity_summary = "";
-      autonomy_level = "default";
       active_goal_ids = [];
       last_autonomous_action_at = "";
       autonomous_action_count = 0;

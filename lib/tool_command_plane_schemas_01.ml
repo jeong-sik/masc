@@ -135,7 +135,6 @@ After masc_unit_define; follow with masc_dispatch_tick to materialize detachment
             ("assigned_unit_id", string_prop "Target unit id.");
             ("objective", string_prop "Operation objective.");
             ("intent_id", string_prop "Optional parent intent id.");
-            ("autonomy_level", string_prop "Autonomy level such as L3_Guided or L4_Autonomous.");
             ("policy_class", string_prop "Policy class name.");
             ("budget_class", string_prop "Budget class name.");
             ("workload_template", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_team"; `String "research_team"; `String "ops_governance_team" ]); ("description", `String "Optional high-level team template. Defaults: coding_team -> coding_task/decompose, research_team -> research_pipeline/normalize, ops_governance_team -> research_pipeline/audit. If workload_profile is also provided, it must match the template family.") ]);

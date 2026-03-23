@@ -29,7 +29,6 @@ let make_operation ?(status = Cp_cleanup.Active) ?(updated_at = "2026-01-01T00:0
       objective = "test objective";
       intent_id = None;
       assigned_unit_id;
-      autonomy_level = "L4_Autonomous";
       policy_class = "strict";
       budget_class = "standard";
       workload_template = None;

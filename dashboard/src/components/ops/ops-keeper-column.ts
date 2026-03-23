@@ -129,7 +129,6 @@ export function OpsKeeperColumn() {
           <div class="flex flex-col gap-2">
             <div class="text-[13px] font-semibold text-[var(--text-strong)]">${selectedKeeper.name}</div>
             <div class="text-[11px] text-[var(--text-muted)] flex flex-wrap gap-2">
-              <span>자율성: ${selectedKeeper.autonomy_level ?? '확인 없음'}</span>
               <span>세대: ${selectedKeeper.generation ?? 0}</span>
               <span>활성 목표: ${selectedKeeper.active_goal_ids?.length ?? 0}</span>
               ${typeof selectedKeeper.turn_count === 'number' ? html`<span>턴: ${selectedKeeper.turn_count}</span>` : null}

@@ -434,7 +434,6 @@ export interface OperatorKeeperSnapshot {
   resident_registered?: boolean
   agent_name?: string
   status?: string
-  autonomy_level?: string
   context_ratio?: number
   generation?: number
   active_goal_ids?: string[]

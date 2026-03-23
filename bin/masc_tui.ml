@@ -126,7 +126,6 @@ type keeper = {
   k_scope_kind: string;
   k_room_scope: string;
   k_trigger_mode: string;
-  k_autonomy_level: string;
   k_context_budget: int;
   k_handoff_threshold: float;
   k_drift_enabled: bool;
@@ -669,7 +668,6 @@ let render_keeper_detail (state : state) =
     add_row "Generation:" (string_of_int k.k_generation);
     add_row "Scope:" (Printf.sprintf "%s / %s" k.k_scope_kind k.k_room_scope);
     add_row "Trigger Mode:" k.k_trigger_mode;
-    add_row "Autonomy Level:" (if k.k_autonomy_level = "" then "(default)" else k.k_autonomy_level);
     add_row "Verify:" (bool_indicator k.k_verify);
     add_empty ();
 
@@ -1035,7 +1033,6 @@ let load_keepers (base_path : string) : keeper list =
              k_scope_kind = str "scope_kind" "local";
              k_room_scope = str "room_scope" "current";
              k_trigger_mode = str "trigger_mode" "legacy";
-             k_autonomy_level = str "autonomy_level" "";
              k_context_budget = int_ "context_budget" 0;
              k_handoff_threshold = float_ "handoff_threshold" 0.85;
              k_drift_enabled = bool_ "drift_enabled" false;

@@ -106,11 +106,3 @@ let trigger_mode_is_explicit_only = function
   | Explicit_only -> true
   | Legacy -> false
 
-(** Parse autonomy_level is now a no-op: returns the string as-is for backward compat. *)
-let parse_autonomy_level (raw : string) : string option =
-  let s = String.lowercase_ascii (String.trim raw) in
-  if s = "" then None else Some s
-
-(** Store autonomy_level as lowercase string for backward compat. *)
-let autonomy_level_to_storage_string (level : string) : string =
-  String.lowercase_ascii (String.trim level)

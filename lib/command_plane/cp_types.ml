@@ -14,7 +14,6 @@ type policy_envelope = {
   tool_allowlist : string list;
   model_allowlist : string list;
   requires_human_for : string list;
-  autonomy_level : string;
   escalation_timeout_sec : int;
   kill_switch : bool;
   frozen : bool;
@@ -69,7 +68,6 @@ type operation_record = {
   objective : string;
   intent_id : string option;
   assigned_unit_id : string;
-  autonomy_level : string;
   policy_class : string;
   budget_class : string;
   workload_template : string option;

@@ -43,7 +43,6 @@ import type {
 } from '../types'
 import { AgentRuntimeStrip } from './agent-monitor/runtime-strip'
 import { AgentLiveTimeline } from './agent-monitor/live-timeline'
-import { AutonomyMeter } from './keeper-detail-panels'
 import { KeeperChatPanel } from './keeper-chat-panel'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
@@ -197,7 +196,6 @@ function CharacterPlate({ name }: { name: string }) {
   const ctxRatio = keeper?.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
   const generation = keeper?.generation
-  const autonomy = keeper?.autonomy_level
   const model = agent?.model ?? keeper?.model ?? null
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   const signalTruth = brief?.signal_truth
@@ -240,7 +238,6 @@ function CharacterPlate({ name }: { name: string }) {
         <div class="flex items-center gap-1.5 flex-wrap">
           <${StatusBadge} status=${headerStatus} />
           ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-[11px] text-[var(--text-muted)] bg-[var(--accent-8)] border border-[rgba(71,184,255,0.15)] px-[5px] py-px rounded">${model}</span>` : null}
-          ${autonomy ? html`<span class="text-[11px] text-[var(--ff-gold)] bg-[var(--ff-gold-10)] border border-[var(--ff-gold-20)] px-[5px] py-px rounded">${autonomy}</span>` : null}
           ${signalTruth ? html`<span class="ff-plate__signal rounded ff-plate__signal--${signalTruth}">${signalTruth}</span>` : null}
         </div>
 
@@ -327,12 +324,6 @@ export function AgentProfile({ name }: { name: string }) {
       <${CharacterPlate} name=${name} />
 
       <${AgentRuntimeStrip} name=${name} />
-
-      ${isKeeper && keeper ? html`
-        <div class="ff-profile__keeper-panels">
-          <${AutonomyMeter} keeper=${keeper} />
-        </div>
-      ` : null}
 
       <div class="grid grid-cols-2 gap-4 mb-4">
         ${!isKeeper ? html`

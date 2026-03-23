@@ -4,7 +4,6 @@ module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
 module KAR = Masc_mcp.Keeper_agent_run
-(* Keeper_autonomy module removed; autonomy_level is now a plain string *)
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
@@ -17,7 +16,6 @@ let base_observation : WO.world_observation =
     pending_board_events = [];
     idle_seconds = 0;
     active_goals = [];
-    autonomy_level = "l1_reactive";
     continuity_summary = "";
     context_ratio = 0.0;
     economic_pressure = AE.Normal;
@@ -52,17 +50,6 @@ let test_observation_with_goals () =
     }
   in
   check int "goal count" 3 (List.length obs.active_goals)
-
-let test_observation_autonomy_levels () =
-  let levels = [
-    "l1_reactive"; "l2_suggestive"; "l3_guided";
-    "l4_autonomous"; "l5_independent"
-  ] in
-  List.iter
-    (fun level ->
-      let obs = { base_observation with autonomy_level = level } in
-      check bool "observation created" true (obs.idle_seconds >= 0))
-    levels
 
 let test_observation_economic_modes () =
   let modes = [AE.Normal; AE.Frugal; AE.Hustle] in
@@ -218,15 +205,6 @@ let test_prompt_room_state_section () =
        with Not_found -> false
      in found)
 
-let test_prompt_autonomy_description () =
-  let obs = { base_observation with autonomy_level = "l3_guided" } in
-  let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
-  check bool "has L3 description" true
-    (let found =
-       try ignore (Str.search_forward (Str.regexp_string "L3 Guided") sys 0); true
-       with Not_found -> false
-     in found)
-
 (* ---------- Config tests ---------- *)
 
 let with_env name value f =
@@ -377,7 +355,6 @@ let () =
           test_case "defaults" `Quick test_observation_defaults;
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "with goals" `Quick test_observation_with_goals;
-          test_case "autonomy levels" `Quick test_observation_autonomy_levels;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );
       ( "unified_prompt",
@@ -394,7 +371,6 @@ let () =
           test_case "includes triage triggers" `Quick test_prompt_includes_triage_triggers;
           test_case "skips skip triage" `Quick test_prompt_skips_skip_triage;
           test_case "room state section" `Quick test_prompt_room_state_section;
-          test_case "autonomy description" `Quick test_prompt_autonomy_description;
         ] );
       ( "config",
         [

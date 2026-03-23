@@ -145,7 +145,6 @@ let test_start_attached_operation_session () =
       objective = "Run attached coding team";
       intent_id = None;
       assigned_unit_id = "squad-main";
-      autonomy_level = "L4_Autonomous";
       policy_class = "guarded";
       budget_class = "standard";
       workload_template = Some "coding_team";

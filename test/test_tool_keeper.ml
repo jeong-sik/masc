@@ -751,11 +751,10 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
             ])
       in
       check bool "persistent up ok" true ok;
-      let ok, autonomy_body =
+      let ok, _autonomy_body =
         dispatch "masc_keeper_autonomy" (`Assoc [ ("name", `String "resident-demo") ])
       in
-      check bool "resident autonomy ok" true ok;
-      check bool "autonomy body non-empty" true (String.length autonomy_body > 0);
+      check bool "resident autonomy removed" false ok;
       let ok, _ =
         dispatch "masc_keeper_autonomy"
           (`Assoc
@@ -764,7 +763,7 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
               ("level", `String "L1_Reactive");
             ])
       in
-      check bool "resident autonomy set ok" true ok;
+      check bool "resident autonomy set removed" false ok;
       let ok, goals_body =
         dispatch "masc_keeper_goals" (`Assoc [ ("name", `String "resident-demo") ])
       in

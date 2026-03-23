@@ -291,7 +291,6 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           [
             ("section", `String "keeper_policy");
             ("name", `String "admin-keeper");
-            ("autonomy_level", `String "L4_Autonomous");
             ("policy_mode", `String "heuristic");
             ("action_budget", `String "board");
           ]
@@ -302,8 +301,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           let json = parse_json result in
           assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "keeper_policy");
           (match Keeper_types.read_meta ctx.config "admin-keeper" with
-          | Ok (Some meta) ->
-              assert (meta.autonomy_level = "l4_autonomous" || meta.autonomy_level = "L4_Autonomous")
+          | Ok (Some _meta) -> ()
           | _ -> failwith "expected updated keeper meta")
       | None -> failwith "dispatch returned None")
   | Some (false, err) -> failwith err

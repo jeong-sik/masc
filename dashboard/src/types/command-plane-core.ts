@@ -6,7 +6,6 @@ export interface CommandPlanePolicyEnvelope {
   tool_allowlist?: string[]
   model_allowlist?: string[]
   requires_human_for?: string[]
-  autonomy_level?: string
   escalation_timeout_sec?: number
   kill_switch?: boolean
   frozen?: boolean
@@ -87,7 +86,6 @@ export interface CommandPlaneOperationRecord {
   operation_id: string
   objective: string
   assigned_unit_id: string
-  autonomy_level?: string
   policy_class?: string
   budget_class?: string
   detachment_session_id?: string | null

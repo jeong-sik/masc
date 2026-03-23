@@ -233,7 +233,6 @@ let keepers_json ?keeper_names config =
                   ( "next_model_hint",
                     string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta)
                   );
-                  ("autonomy_level", `String meta.autonomy_level);
                   ( "active_goal_ids",
                     `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
                   );
@@ -304,7 +303,6 @@ let persistent_agents_json ?keeper_names config =
                   ("last_model_used", `String meta.last_model_used);
                   ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                   ("next_model_hint", string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta));
-                  ("autonomy_level", `String meta.autonomy_level);
                   ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
                   ("last_autonomous_action_at",
                     if String.trim meta.last_autonomous_action_at = "" then `Null else `String meta.last_autonomous_action_at);

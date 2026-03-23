@@ -734,7 +734,7 @@ let test_parse_multi_step_invalid_substep_fails () =
   | Error _ -> () (* expected: reply with empty content fails *)
   | Ok _ -> fail "expected Error for invalid substep in multi_step"
 
-(* ---------- multi_step is always included (autonomy_level dispatch removed) ---------- *)
+(* ---------- multi_step is always included ---------- *)
 
 let test_prompt_always_includes_multi_step () =
   let prompt =
@@ -746,20 +746,6 @@ let test_prompt_always_includes_multi_step () =
       base_obs
   in
   check bool "prompt contains multi_step" true
-    (try ignore (Str.search_forward (Str.regexp_string "multi_step") prompt 0); true
-     with Not_found -> false)
-
-let test_prompt_with_autonomy_includes_multi_step () =
-  let prompt =
-    D.build_deliberation_prompt
-      ~autonomy_level:"L1_Reactive"
-      ~keeper_name:"reactive-keeper"
-      ~soul_profile:"observer"
-      ~goal:"React only"
-      ~triggers:[ D.DirectMention ]
-      base_obs
-  in
-  check bool "prompt with L1 still contains multi_step" true
     (try ignore (Str.search_forward (Str.regexp_string "multi_step") prompt 0); true
      with Not_found -> false)
 
@@ -871,8 +857,6 @@ let () =
             test_prompt_contains_action_list;
           test_case "prompt always includes multi_step" `Quick
             test_prompt_always_includes_multi_step;
-          test_case "prompt with autonomy_level includes multi_step" `Quick
-            test_prompt_with_autonomy_includes_multi_step;
         ] );
       ( "parse_deliberation_response",
         [

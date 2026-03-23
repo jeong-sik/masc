@@ -117,7 +117,7 @@ let keeper_default_gate_config () : Eval_gate.gate_config =
     ];
   }
 
-let keeper_tool_policy_json _autonomy_level =
+let keeper_tool_policy_json () =
   let gate = keeper_default_gate_config () in
   `Assoc
     [
@@ -142,7 +142,7 @@ let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
     | _ -> "unknown"
   in
   let policy_json =
-    match keeper_tool_policy_json meta.autonomy_level with
+    match keeper_tool_policy_json () with
     | `Assoc fields -> fields
     | _ -> []
   in
@@ -152,7 +152,6 @@ let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
        ("runtime_class", `String runtime_class);
        ("agent_name", `String meta.agent_name);
        ("status", `String status);
-       ("autonomy_level", `String meta.autonomy_level);
        ("policy_mode", `String meta.policy_mode);
        ("action_budget", `String "conversation");
        ("reward_model_path", `Null);
@@ -336,7 +335,6 @@ let apply_keeper_policy_update config ~runtime_class args =
   let name = get_string args "name" "" |> String.trim in
   let policy_mode_opt = get_string_opt args "policy_mode" |> Option.map String.trim in
   let action_budget_opt = get_string_opt args "action_budget" |> Option.map String.trim in
-  let autonomy_level_opt = get_string_opt args "autonomy_level" |> Option.map String.trim in
   let reward_model_path_opt = get_string_opt args "reward_model_path" |> Option.map String.trim in
   let membership_ok =
     match runtime_class with
@@ -370,17 +368,9 @@ let apply_keeper_policy_update config ~runtime_class args =
               | Some budget -> Ok budget
               | None -> Error (Printf.sprintf "invalid action_budget: %s" raw))
         in
-        let autonomy_level =
-          match autonomy_level_opt with
-          | None -> Ok meta.autonomy_level
-          | Some raw ->
-              let s = String.lowercase_ascii (String.trim raw) in
-              if s = "" then Error "autonomy_level cannot be empty"
-              else Ok s
-        in
-        (match policy_mode, action_budget, autonomy_level with
-        | Error err, _, _ | _, Error err, _ | _, _, Error err -> Error err
-        | Ok policy_mode, Ok action_budget, Ok autonomy_level ->
+        (match policy_mode, action_budget with
+        | Error err, _ | _, Error err -> Error err
+        | Ok policy_mode, Ok action_budget ->
             let reward_model_path_raw =
               match reward_model_path_opt with
               | Some value -> value
@@ -408,8 +398,6 @@ let apply_keeper_policy_update config ~runtime_class args =
                   {
                     meta with
                     policy_mode = Keeper_contract.policy_mode_to_string policy_mode;
-                    (* policy_action_budget and policy_reward_model_path removed *)
-                    autonomy_level;
                     updated_at = Types.now_iso ();
                   }
                 in
@@ -417,7 +405,7 @@ let apply_keeper_policy_update config ~runtime_class args =
                 | Error err -> Error err
                 | Ok () ->
                     let policy_json =
-                      match keeper_tool_policy_json updated.autonomy_level with
+                      match keeper_tool_policy_json () with
                       | `Assoc fields -> fields
                       | _ -> []
                     in
@@ -429,7 +417,6 @@ let apply_keeper_policy_update config ~runtime_class args =
                            ("name", `String updated.name);
                            ("policy_mode", `String updated.policy_mode);
                            ("action_budget", `String (Keeper_contract.policy_action_budget_to_string action_budget));
-                           ("autonomy_level", `String updated.autonomy_level);
                            ("reward_model_path", json_string_option (Some effective_reward_path));
                            ("reward_model_version", json_string_option reward_model_version);
                          ]

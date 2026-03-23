@@ -398,42 +398,6 @@ let handle_keeper_eval_replay ctx args : tool_result =
             in
             (true, Yojson.Safe.pretty_to_string json))
 
-let handle_keeper_autonomy ctx args : tool_result =
-  let name = get_string args "name" "" in
-  if not (validate_name name) then
-    (false, "invalid keeper name")
-  else
-    match read_meta ctx.config name with
-    | Error e -> (false, "read error: " ^ e)
-    | Ok None -> (false, Printf.sprintf "keeper not found: %s" name)
-    | Ok (Some m) ->
-      let level_opt = get_string_opt args "level" in
-      (match level_opt with
-       | None ->
-         (* GET mode: return current autonomy info *)
-         let info = Printf.sprintf
-           "Keeper: %s\nAutonomy Level: %s\nActive Goals: [%s]\nAutonomous Actions: %d\nLast Autonomous Action: %s"
-           m.name
-           m.autonomy_level
-           (String.concat ", " m.active_goal_ids)
-           m.autonomous_action_count
-           (if m.last_autonomous_action_at = "" then "never" else m.last_autonomous_action_at)
-         in
-         (true, info)
-       | Some level_str ->
-         (* SET mode: store as plain string (no level validation) *)
-         let canonical = String.lowercase_ascii (String.trim level_str) in
-         if canonical = "" then
-           (false, "autonomy level cannot be empty")
-         else
-           let updated =
-             { m with autonomy_level = canonical }
-           in
-           (match write_meta ctx.config updated with
-           | Error e -> (false, "write error: " ^ e)
-           | Ok () ->
-               (true, Printf.sprintf "Keeper %s autonomy level updated to %s" name canonical)))
-
 let handle_keeper_goals ctx args : tool_result =
   let name = get_string args "name" "" in
   if not (validate_name name) then

@@ -186,10 +186,11 @@ let test_source_main_keeper_bootstrap () =
    eliminating Unix fd close/unlock paths and their logging. *)
 
 let test_source_model_token_parse () =
-  check bool "model_spec.ml keeps model parsing source"
+  (* model_spec.ml was retired; model parsing migrated to oas_model_resolve.ml *)
+  check bool "oas_model_resolve.ml has model label parsing"
     true (any_file_contains_pattern
-      [ "lib/model_spec.ml" ]
-      {|model_spec_of_string|})
+      [ "lib/oas_model_resolve.ml" ]
+      {|provider_name_of_label|})
 
 let test_source_keeper_proactive () =
   check bool "keeper sources have proactive emission logging"
@@ -253,7 +254,7 @@ let () =
       test_case "MA-H1: keeper bootstrap logging present"
         `Quick test_source_main_keeper_bootstrap;
       (* MA-H2a/H2b removed: Eio-native migration PR #2260 eliminated fd paths *)
-      test_case "MA-H3: model spec parse source present"
+      test_case "MA-H3: model label parse source present"
         `Quick test_source_model_token_parse;
       test_case "MA-H4: keeper proactive logging present"
         `Quick test_source_keeper_proactive;

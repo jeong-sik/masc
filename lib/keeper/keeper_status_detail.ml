@@ -485,7 +485,7 @@ let handle_keeper_status ctx args : tool_result =
              ("context_mode", `String "board_snapshot");
              ("post_ttl_hours", `Int 24);
            ]);
-           ("auto_team_session_enabled", `Bool false);
+           ("auto_team_session_enabled", `Bool (auto_team_session_enabled m));
            ("active_team_session_id",
              match m.active_team_session_id with
              | Some session_id -> `String session_id

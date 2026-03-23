@@ -14,6 +14,8 @@ module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Tool_shard = Masc_mcp.Tool_shard
 module Tool_permissions = Masc_mcp.Tool_permissions
 module Keeper_types = Masc_mcp.Keeper_types
+module Tool_research = Masc_mcp.Tool_research
+module Tool_code_write = Masc_mcp.Tool_code_write
 
 (* ============================================================
    Helper: create keeper_meta via meta_of_json (canonical pattern)
@@ -48,15 +50,17 @@ let make_meta
 let has_keeper_prefix name =
   String.length name >= 7 && String.sub name 0 7 = "keeper_"
 
-let has_prefix prefix name =
-  String.length name >= String.length prefix &&
-  String.sub name 0 (String.length prefix) = prefix
-
-let is_research_shard_tool name =
-  has_prefix "masc_autoresearch_" name || has_prefix "masc_research_" name
-
-let is_coding_tool name =
-  has_prefix "masc_code_" name
+(** Non-keeper_ tool names legitimately granted to keepers.
+    Derived from actual module exports — no prefix guessing. *)
+let known_non_keeper_tool_names : string list =
+  List.concat [
+    Tool_shard.autoresearch_keeper_tools
+    |> List.map (fun (t : Types.tool_schema) -> t.name);
+    Tool_research.schemas
+    |> List.map (fun (t : Types.tool_schema) -> t.name);
+    Tool_code_write.tool_names;
+  ]
+  |> List.sort_uniq String.compare
 
 (* ============================================================
    Invariant 1: Non-research keepers only get keeper_* tools
@@ -88,9 +92,9 @@ let test_research_extra_tools_are_research_only () =
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected = List.filter (fun n ->
-    not (is_research_shard_tool n) && not (is_coding_tool n)) non_keeper in
+    not (List.mem n known_non_keeper_tool_names)) non_keeper in
   Alcotest.(check (list string))
-    "research+coding keeper only adds research/coding tools" [] unexpected
+    "non-keeper tools come from known sources" [] unexpected
 
 let test_write_done_returns_empty () =
   let meta = make_meta ~policy_mode:"Learned_offline_v1"
@@ -159,7 +163,7 @@ let test_research_admin_overlap_documented () =
      This test documents the overlap rather than preventing it. *)
   List.iter (fun name ->
     Alcotest.(check bool) (name ^ " is a research tool") true
-      (is_research_shard_tool name)
+      (List.mem name known_non_keeper_tool_names)
   ) overlap
 
 (* ============================================================

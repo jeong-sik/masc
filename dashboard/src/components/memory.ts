@@ -22,7 +22,15 @@ import {
   createPost,
 } from '../api'
 import { navigate, navigateToPost, route } from '../router'
+import { findKeeper } from './execution/shared'
+import { openKeeperDetail } from './keeper-detail'
 import type { BoardComment, BoardPost, BoardSortMode } from '../types'
+
+function openAuthorDetail(name: string) {
+  const keeper = findKeeper(name)
+  if (keeper) openKeeperDetail(keeper)
+  else navigate('status', { section: 'agents', agent: name })
+}
 
 const SORT_MODES: { id: BoardSortMode; label: string }[] = [
   { id: 'recent', label: '최신순' },
@@ -393,7 +401,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="text-[12px] text-[var(--text-muted)]">${authorAvatar(post.author)}</span>
           <a
             class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
-            onClick=${(e: Event) => { e.stopPropagation(); navigate('status', { section: 'agents', agent: post.author }) }}
+            onClick=${(e: Event) => { e.stopPropagation(); openAuthorDetail(post.author) }}
           >${post.author}</a>
           <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
           ${isUpdated(post) ? html`<span class="text-[10px] text-[var(--text-muted)] opacity-50">(수정됨)</span>` : null}
@@ -431,7 +439,7 @@ function CommentItem({ comment }: { comment: BoardComment }) {
     <div class="board-comment rounded-lg p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)]">
       <div class="flex items-center gap-2 mb-1.5">
         <span class="text-[12px]">${authorAvatar(comment.author)}</span>
-        <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('status', { section: 'agents', agent: comment.author })}>${comment.author}</a>
+        <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => openAuthorDetail(comment.author)}>${comment.author}</a>
         <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
       </div>
       <div class="comment-text text-[13px] text-[var(--text-body)] leading-[1.55]">${comment.content}</div>

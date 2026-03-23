@@ -214,13 +214,8 @@
   /* Overlay z-index: fallback values in each component (keeper:3020 agent:3030 trpg:3040 toast:3070 tooltip:3080) */
 }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+/* box-sizing/margin/padding reset removed — Tailwind v4 preflight handles this.
+   Unlayered CSS overrides @layer utilities, breaking p-*, m-*, gap-* etc. */
 
 html,
 body {

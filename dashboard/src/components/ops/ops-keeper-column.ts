@@ -9,7 +9,7 @@ import {
   operatorActionLog,
   operatorSnapshot,
 } from '../../operator-store'
-import type { Keeper, OperatorKeeperSnapshot } from '../../types'
+import type { Keeper, OperatorActionDescriptor, OperatorKeeperSnapshot } from '../../types'
 import {
   actionTypeLabel,
   displayStatus,
@@ -31,10 +31,9 @@ function openOpsKeeperDetail(opsKeeper: OperatorKeeperSnapshot): void {
     name: opsKeeper.name,
     agent_name: opsKeeper.agent_name ?? opsKeeper.name,
     status: opsKeeper.status ?? 'unknown',
-    context_ratio: opsKeeper.context_ratio ?? null,
-    model: opsKeeper.model ?? null,
-    goal: opsKeeper.goal ?? null,
-  } as Keeper
+    context_ratio: opsKeeper.context_ratio,
+    model: opsKeeper.model,
+  }
   openKeeperDetail(keeper)
 }
 
@@ -154,13 +153,13 @@ export function OpsKeeperColumn() {
         ${availableActions.length
           ? html`<div class="flex flex-col gap-2">
               ${['room', 'keeper', 'team_session'].map(targetType => {
-                const group = availableActions.filter((a: any) => a.target_type === targetType)
+                const group = availableActions.filter((a: OperatorActionDescriptor) => a.target_type === targetType)
                 if (group.length === 0) return null
                 return html`
                   <div key=${targetType}>
                     <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">${targetTypeLabel(targetType)}</div>
                     <div class="flex flex-wrap gap-1">
-                      ${group.map((action: any) => html`
+                      ${group.map((action: OperatorActionDescriptor) => html`
                         <span key=${action.action_type}
                           title=${action.description ?? ''}
                           class="text-[12px] px-2 py-0.5 rounded cursor-default ${action.confirm_required ? 'bg-[var(--warn-12)] border border-[var(--warn-28)] text-[var(--warn)]' : 'bg-[var(--accent-8)] border border-[var(--accent-12)] text-[var(--accent)]'}">

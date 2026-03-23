@@ -29,8 +29,8 @@ export function Worktrees() {
         } catch {
           setWorktrees([{ id: 'raw', branch: 'Unknown', path: resText }])
         }
-      } catch (err: any) {
-        setError(err.message || 'Failed to load worktrees')
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to load worktrees')
       } finally {
         setLoading(false)
       }

@@ -296,16 +296,21 @@ let create_session ~session_id ~base_dir =
   ensure_dir session_dir;
   { session_id; session_dir; checkpoints = [] }
 
-let persist_message session msg =
+let persist_message ?source session msg =
   let msg = Inference_utils.sanitize_message_utf8 msg in
   let path = Filename.concat session.session_dir "history.jsonl" in
   let now_ts = Time_compat.now () in
   let payload =
     match message_to_json msg with
     | `Assoc fields ->
+      let fields =
+        match source with
+        | Some source when String.trim source <> "" ->
+            ("source", `String source) :: fields
+        | _ -> fields
+      in
       `Assoc (("timestamp", `Float now_ts) :: ("ts_unix", `Float now_ts) :: fields)
     | j -> j
   in
   let line = Yojson.Safe.to_string payload ^ "\n" in
   Fs_compat.append_file path line
-

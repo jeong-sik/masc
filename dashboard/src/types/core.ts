@@ -228,6 +228,15 @@ export interface KeeperDiagnostic {
 
 export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
 
+export type KeeperConversationSource =
+  | 'direct_user'
+  | 'direct_assistant'
+  | 'world_state_prompt'
+  | 'internal_assistant'
+  | 'tool_result'
+  | 'system'
+  | 'unknown'
+
 export type KeeperConversationDelivery =
   | 'history'
   | 'sending'
@@ -265,6 +274,7 @@ export type KeeperConversationStreamState =
 export interface KeeperConversationEntry {
   id: string
   role: KeeperConversationRole
+  source: KeeperConversationSource
   label: string
   text: string
   rawText?: string | null

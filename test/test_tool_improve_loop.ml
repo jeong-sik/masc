@@ -118,6 +118,45 @@ let test_state_roundtrip () =
       check string "repo" "jeong-sik/masc-mcp" loaded.repo;
       check string "keeper" "masc-improver" loaded.keeper_name)
 
+let test_idle_tick_resets_failure_counters () =
+  with_temp_dir "masc-improve-loop-idle" (fun dir ->
+      let ctx = make_ctx dir in
+      let started =
+        { (Tool_improve_loop.default_state ()) with
+          enabled = true;
+          status = Tool_improve_loop.Running;
+          repo = "jeong-sik/masc-mcp";
+          last_failure = Some "previous failure";
+          consecutive_failures = 2;
+        }
+      in
+      Tool_improve_loop.save_state ctx.config started;
+      let fake_driver =
+        {
+          Tool_improve_loop.list_prs = (fun ~repo:_ -> Ok []);
+          list_issues = (fun ~repo:_ -> Ok []);
+          run_command =
+            (fun _argv ->
+              { Tool_improve_loop.exit_code = 0; stdout = ""; stderr = "" });
+          now = (fun () -> 222.0);
+        }
+      in
+      let ok, body =
+        Tool_improve_loop.tick_with_driver fake_driver ctx
+          (`Assoc [ ("execute", `Bool false) ])
+      in
+      check bool "idle tick ok" true ok;
+      let json = Yojson.Safe.from_string body in
+      let failure_count =
+        json |> Yojson.Safe.Util.member "consecutive_failures"
+        |> Yojson.Safe.Util.to_int
+      in
+      check int "failure count reset" 0 failure_count;
+      let last_failure =
+        json |> Yojson.Safe.Util.member "last_failure"
+      in
+      check bool "last failure cleared" true (last_failure = `Null))
+
 let test_merge_command_requires_all_gates () =
   let state =
     { (Tool_improve_loop.default_state ()) with
@@ -267,6 +306,8 @@ let () =
           test_case "failure pause after three" `Quick
             test_failure_counter_pauses_after_three;
           test_case "state roundtrip" `Quick test_state_roundtrip;
+          test_case "idle tick resets failure counters" `Quick
+            test_idle_tick_resets_failure_counters;
         ] );
       ( "actions",
         [

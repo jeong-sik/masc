@@ -1101,11 +1101,8 @@ let tick_with_driver (driver : driver) (ctx : _ context) args : result =
         | None ->
             let updated =
               {
-                state with
+                (mark_success state ~now ~phase:"idle" "queue_empty") with
                 current_candidate = None;
-                current_phase = Some "idle";
-                last_success = Some "queue_empty";
-                updated_at = now;
               }
             in
             save_state ctx.config updated;

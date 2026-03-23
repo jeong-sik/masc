@@ -8,9 +8,9 @@ let schemas : Types.tool_schema list = [
   {
     name = "masc_research_start";
     description = "Start an automated code improvement research loop. \
-Uses local LLM (Qwen3.5-35B via llama-server) to propose small code improvements, \
-tests them in isolated git worktrees, and keeps changes that pass all tests. \
-Results logged to research_results.tsv.";
+Uses OAS cascade to route LLM calls (local or cloud providers). \
+Proposes small code improvements, tests them in isolated git worktrees, \
+and keeps changes that pass all tests. Results logged to research_results.tsv.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -24,11 +24,7 @@ Results logged to research_results.tsv.";
         ]);
         ("cascade_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "LLM model name (default: llama)");
-        ]);
-        ("llm_url", `Assoc [
-          ("type", `String "string");
-          ("description", `String "OpenAI-compatible LLM endpoint URL (default: env RESEARCH_LLM_URL or http://127.0.0.1:8085/v1/chat/completions)");
+          ("description", `String "OAS cascade profile name (default: research)");
         ]);
       ]);
       ("required", `List []);
@@ -48,6 +44,9 @@ Returns the contents of research_results.tsv with experiment outcomes.";
 type context = {
   base_path : string;
   agent_name : string option;
+  sw : Eio.Switch.t;
+  net : Eio_context.eio_net;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
 }
 
 let dispatch (ctx : context) ~name ~args : (bool * string) option =
@@ -63,10 +62,7 @@ let dispatch (ctx : context) ~name ~args : (bool * string) option =
     in
     let cascade_name =
       Yojson.Safe.Util.(member "cascade_name" args |> to_string_option)
-      |> Option.value ~default:"llama"
-    in
-    let llm_url =
-      Yojson.Safe.Util.(member "llm_url" args |> to_string_option)
+      |> Option.value ~default:"research"
     in
     let config = Research_config.default
       ~repo:(Research_config.default_repo_config ~path:repo_path ())
@@ -77,11 +73,7 @@ let dispatch (ctx : context) ~name ~args : (bool * string) option =
       cascade_name;
       results_file = Printf.sprintf "%s/research_results.tsv" repo_path;
     } in
-    let config = match llm_url with
-      | Some url -> { config with llm_url = url }
-      | None -> config
-    in
-    let results = Research_loop.run ~config in
+    let results = Research_loop.run ~sw:ctx.sw ~net:ctx.net ~clock:ctx.clock ~config in
     let kept = List.filter (fun (e : Research_loop.experiment_entry) ->
       e.metric.status = Research_metric.Keep) results in
     let summary = Printf.sprintf

@@ -16,11 +16,10 @@ type t = {
   max_iterations : int;
   time_budget_per_experiment_sec : float;
   results_file : string;
-  cascade_name : string;       (** model name for LLM calls *)
-  llm_url : string;            (** OpenAI-compatible endpoint URL *)
-  llm_api_key : string;        (** API key (empty = no auth header) *)
-  llm_timeout_sec : float;     (** per-request timeout *)
-  llm_max_tokens : int;        (** max tokens per LLM response (reasoning + output) *)
+  cascade_name : string;       (** OAS cascade profile name (e.g. "research", "llama") *)
+  cascade_defaults : string list;  (** fallback model labels when no cascade config file *)
+  timeout_sec : int;           (** per-request timeout (seconds) *)
+  max_tokens : int;            (** max tokens per LLM response *)
   system_prompt : string;
 }
 
@@ -39,15 +38,10 @@ let default ?(repo = default_repo_config ()) () : t =
     max_iterations = 20;
     time_budget_per_experiment_sec = 600.0;
     results_file = "research_results.tsv";
-    cascade_name = "llama";
-    llm_url = (match Sys.getenv_opt "RESEARCH_LLM_URL" with
-      | Some u -> u
-      | None -> "http://127.0.0.1:8085/v1/chat/completions");
-    llm_api_key = (match Sys.getenv_opt "RESEARCH_LLM_API_KEY" with
-      | Some k -> k
-      | None -> "");
-    llm_timeout_sec = 120.0;
-    llm_max_tokens = 8192;
+    cascade_name = "research";
+    cascade_defaults = ["llama:auto"; "glm:auto"];
+    timeout_sec = 120;
+    max_tokens = 8192;
     system_prompt =
       "You are a code improvement researcher for an OCaml codebase (MASC MCP server). \
        Propose ONE focused, small change per experiment. Prioritize: \

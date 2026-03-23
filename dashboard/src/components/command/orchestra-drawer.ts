@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { ActionButton } from '../common/button'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import type {
   CommandPlaneOrchestraEdge,
   CommandPlaneOrchestraNode,
@@ -372,7 +373,7 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
       <aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card rounded-xl ${toneClass(signalNode.tone)}">
         <div class="card rounded-xl-title-row">
           <div class="card rounded-xl-title">${signalNode.label}</div>
-          <span class="cmd-chip rounded-full ${toneClass(signalNode.tone)}">${orchestraNodeKindLabel(signalNode.kind)}</span>
+          <${StatusChip} label=${orchestraNodeKindLabel(signalNode.kind)} tone=${toneClass(signalNode.tone)} />
         </div>
         <p>${signalNode.detail ?? '세부 설명이 없습니다.'}</p>
         ${signalNode.suggested_surface
@@ -397,7 +398,7 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
     <aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card rounded-xl ${toneClass(node.tone)}">
       <div class="card rounded-xl-title-row">
         <div class="card rounded-xl-title">${node.label}</div>
-        <span class="cmd-chip rounded-full ${toneClass(node.tone)}">${orchestraNodeKindLabel(node.kind)}</span>
+        <${StatusChip} label=${orchestraNodeKindLabel(node.kind)} tone=${toneClass(node.tone)} />
       </div>
       ${node.subtitle ? html`<p class="cmd-card rounded-xl-sub">${node.subtitle}</p>` : null}
       <div class="orchestra-fact-list flex flex-col gap-2">
@@ -410,7 +411,7 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
       </div>
       ${relatedSignals.length > 0 ? html`
         <div class="cmd-tag rounded-full-row">
-          ${relatedSignals.map(signalNode => html`<span class="cmd-chip rounded-full ${toneClass(signalNode.tone)}">${signalNode.label}</span>`)}
+          ${relatedSignals.map(signalNode => html`<${StatusChip} label=${signalNode.label} tone=${toneClass(signalNode.tone)} />`)}
         </div>
       ` : null}
       <div class="cmd-card rounded-xl-sub">연결 ${relatedEdges.length}개 · 근거 ${node.provenance}</div>

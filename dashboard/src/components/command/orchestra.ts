@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { ActionButton } from '../common/button'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import { groupByKey } from '../common/collection'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type {
@@ -356,7 +357,7 @@ export function OrchestraSurface() {
           >
             축소
           <//>
-          <span class="cmd-chip rounded-full">${Math.round(camera.zoom * 100)}%</span>
+          <${StatusChip} label=${`${Math.round(camera.zoom * 100)}%`} />
         </div>
         <div class="orchestra-toolbar-group">
           <button
@@ -377,7 +378,7 @@ export function OrchestraSurface() {
           >
             집약
           </button>
-          <span class="cmd-chip rounded-full">${densityLabel(density)}</span>
+          <${StatusChip} label=${densityLabel(density)} />
         </div>
       </div>
 
@@ -422,13 +423,11 @@ export function OrchestraSurface() {
             </g>
           </svg>
           <div class="absolute left-3.5 right-3.5 bottom-3 flex flex-wrap gap-2 pointer-events-none">
-            <span class="cmd-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">세션 ${orchestra.summary?.session_count ?? 0}</span>
-            <span class="cmd-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">워커 ${orchestra.summary?.worker_count ?? 0}</span>
-            <span class="cmd-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">키퍼 ${orchestra.summary?.keeper_count ?? 0}</span>
-            <span class="cmd-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)] ${toneClass(orchestra.signals.some(signalNode => signalNode.tone === 'bad') ? 'bad' : orchestra.signals.length > 0 ? 'warn' : 'ok')}">
-              신호 ${orchestra.summary?.signal_count ?? orchestra.signals.length}
-            </span>
-            <span class="cmd-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">갱신 ${relativeTime(orchestra.generated_at)}</span>
+            <${StatusChip} label=${`세션 ${orchestra.summary?.session_count ?? 0}`} class="pointer-events-auto bg-[rgba(15,23,42,0.8)]" />
+            <${StatusChip} label=${`워커 ${orchestra.summary?.worker_count ?? 0}`} class="pointer-events-auto bg-[rgba(15,23,42,0.8)]" />
+            <${StatusChip} label=${`키퍼 ${orchestra.summary?.keeper_count ?? 0}`} class="pointer-events-auto bg-[rgba(15,23,42,0.8)]" />
+            <${StatusChip} label=${`신호 ${orchestra.summary?.signal_count ?? orchestra.signals.length}`} tone=${toneClass(orchestra.signals.some(signalNode => signalNode.tone === 'bad') ? 'bad' : orchestra.signals.length > 0 ? 'warn' : 'ok')} class="pointer-events-auto bg-[rgba(15,23,42,0.8)]" />
+            <${StatusChip} label=${`갱신 ${relativeTime(orchestra.generated_at)}`} class="pointer-events-auto bg-[rgba(15,23,42,0.8)]" />
           </div>
         </div>
 

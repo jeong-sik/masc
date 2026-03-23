@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import type {
   CommandPlaneChainOverlay,
   CommandPlaneSwarmBlocker,
@@ -94,7 +95,7 @@ export function WarRoomBodyGrid({
                   <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card">
                     <div class="flex justify-between gap-3 items-start">
                       <strong>${selectedSession.session_id}</strong>
-                      <span class="cmd-chip rounded-full ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
+                      <${StatusChip} label=${displayStatus(selectedSession.status)} tone=${toneClass(sessionStatusTone(selectedSession.status))} />
                     </div>
                     <p>스웜 실시간 증거는 아직 약합니다. 이 카드는 세션 요약과 워커 기록을 기준으로 유지합니다.</p>
                     <div class="cmd-card rounded-xl-grid">
@@ -187,7 +188,7 @@ export function WarRoomBodyGrid({
                   <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card warn">
                     <div class="flex justify-between gap-3 items-start">
                       <strong>승인 대기</strong>
-                      <span class="cmd-chip rounded-full warn">${pendingApprovals}</span>
+                      <${StatusChip} label=${String(pendingApprovals)} tone="warn" />
                     </div>
                     <p>엄격 액션이 묶여 있습니다. 실제 승인 처리는 제어 표면에서 합니다.</p>
                   </article>
@@ -198,7 +199,7 @@ export function WarRoomBodyGrid({
                   <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card warn">
                     <div class="flex justify-between gap-3 items-start">
                       <strong>확인 대기</strong>
-                      <span class="cmd-chip rounded-full warn">${pendingConfirmHidden > 0 ? `${pendingConfirmVisible}/${pendingConfirmTotal}` : pendingConfirmTotal}</span>
+                      <${StatusChip} label=${String(pendingConfirmHidden > 0 ? `${pendingConfirmVisible}/${pendingConfirmTotal}` : pendingConfirmTotal)} tone="warn" />
                     </div>
                     <p>
                       운영자 미리보기가 사람 확인을 기다리고 있습니다.
@@ -218,7 +219,7 @@ export function WarRoomBodyGrid({
                         <strong>${activeLane.label}</strong>
                         <div class="cmd-card rounded-xl-sub">${activeLane.kind} · ${activeLane.phase}</div>
                       </div>
-                      <span class="cmd-chip rounded-full ${toneClass(sessionStatusTone(activeLane.motion_state))}">${displayStatus(activeLane.motion_state)}</span>
+                      <${StatusChip} label=${displayStatus(activeLane.motion_state)} tone=${toneClass(sessionStatusTone(activeLane.motion_state))} />
                     </div>
                     <div class="cmd-card rounded-xl-grid">
                       <span>현재 단계</span><span>${activeLane.current_step}</span>
@@ -237,7 +238,7 @@ export function WarRoomBodyGrid({
                         <strong>${swarm.detachment.detachment_id}</strong>
                         <div class="cmd-card rounded-xl-sub">${swarm.detachment.assigned_unit_id}</div>
                       </div>
-                      <span class="cmd-chip rounded-full ${toneClass(sessionStatusTone(swarm.detachment.status))}">${displayStatus(swarm.detachment.status ?? 'active')}</span>
+                      <${StatusChip} label=${displayStatus(swarm.detachment.status ?? 'active')} tone=${toneClass(sessionStatusTone(swarm.detachment.status))} />
                     </div>
                     <div class="cmd-card rounded-xl-grid">
                       <span>리더</span><span>${swarm.detachment.leader_id ?? '미지정'}</span>
@@ -255,7 +256,7 @@ export function WarRoomBodyGrid({
                           <strong>${selectedSession.session_id}</strong>
                           <div class="cmd-card rounded-xl-sub">현재 세션 기준</div>
                         </div>
-                        <span class="cmd-chip rounded-full ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
+                        <${StatusChip} label=${displayStatus(selectedSession.status)} tone=${toneClass(sessionStatusTone(selectedSession.status))} />
                       </div>
                       <div class="cmd-card rounded-xl-grid">
                         <span>진행률</span><span>${selectedSession.progress_pct != null ? `${selectedSession.progress_pct}%` : '정보 없음'}</span>

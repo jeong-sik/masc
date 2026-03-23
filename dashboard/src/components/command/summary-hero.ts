@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { StatusChip } from '../common/status-chip'
 import { CmdStatCard } from './cmd-stat-card'
 import {
   commandPlaneChainSummary,
@@ -31,9 +32,9 @@ export function CommandWorkflowBanner() {
     <section class="rounded-xl border border-[rgba(34,211,238,0.26)] bg-[linear-gradient(180deg,rgba(34,211,238,0.1),var(--white-3))] p-4 grid gap-3">
       <div class="flex gap-3 flex-wrap items-center">
         <strong>${context.source_label}</strong>
-        <span class="cmd-chip rounded-full">${workflowActionLabel(context.action_type)}</span>
-        <span class="cmd-chip rounded-full">${workflowTargetLabel(context)}</span>
-        <span class="cmd-chip rounded-full">${workflowCommandSurfaceLabel(route.value.params.surface ?? 'warroom')}</span>
+        <${StatusChip} label=${workflowActionLabel(context.action_type)} />
+        <${StatusChip} label=${workflowTargetLabel(context)} />
+        <${StatusChip} label=${workflowCommandSurfaceLabel(route.value.params.surface ?? 'warroom')} />
       </div>
       <div class="text-[rgba(255,255,255,0.84)] leading-normal">${context.summary}</div>
       ${context.payload_preview
@@ -160,10 +161,10 @@ export function SummaryHero() {
         <h3>${headline}</h3>
         <p>${subcopy}</p>
         <div class="flex flex-wrap gap-2">
-        <span class="cmd-chip rounded-full ${toneClass(activeOps > 0 ? 'ok' : 'warn')}">활성 작전 ${activeOps}</span>
-          <span class="cmd-chip rounded-full ${toneClass(movingLanes > 0 ? 'ok' : activeLanes > 0 ? 'warn' : 'warn')}">이동 레인 ${movingLanes}/${Math.max(activeLanes, movingLanes)}</span>
-          <span class="cmd-chip rounded-full ${toneClass(badAlerts > 0 ? 'bad' : warnAlerts > 0 ? 'warn' : 'ok')}">치명 알림 ${badAlerts}</span>
-          <span class="cmd-chip rounded-full ${toneClass(pendingApprovals > 0 ? 'warn' : 'ok')}">승인 대기 ${pendingApprovals}</span>
+        <${StatusChip} label=${`활성 작전 ${activeOps}`} tone=${toneClass(activeOps > 0 ? 'ok' : 'warn')} />
+          <${StatusChip} label=${`이동 레인 ${movingLanes}/${Math.max(activeLanes, movingLanes)}`} tone=${toneClass(movingLanes > 0 ? 'ok' : activeLanes > 0 ? 'warn' : 'warn')} />
+          <${StatusChip} label=${`치명 알림 ${badAlerts}`} tone=${toneClass(badAlerts > 0 ? 'bad' : warnAlerts > 0 ? 'warn' : 'ok')} />
+          <${StatusChip} label=${`승인 대기 ${pendingApprovals}`} tone=${toneClass(pendingApprovals > 0 ? 'warn' : 'ok')} />
         </div>
       </div>
 

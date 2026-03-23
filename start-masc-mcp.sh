@@ -423,6 +423,18 @@ if [ "$EIO_MODE" = "true" ]; then
     fi
 fi
 
+# Port guard: abort if another process already holds the port.
+if [ "$HTTP_MODE" = "true" ]; then
+    existing_pid=$(lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null | head -1)
+    if [ -n "$existing_pid" ]; then
+        existing_cmd=$(ps -p "$existing_pid" -o comm= 2>/dev/null || echo "unknown")
+        echo "Error: port $PORT already in use by PID $existing_pid ($existing_cmd)." >&2
+        echo "  Kill it first:  kill $existing_pid" >&2
+        echo "  Or use another port:  MASC_MCP_PORT=8936 $0" >&2
+        exit 1
+    fi
+fi
+
 # Eio server has different CLI format and is HTTP-only
 if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2

@@ -19,33 +19,35 @@ export function Operations() {
   const section = currentSection()
 
   return html`
-    <div class="tab-unified grid gap-4">
-      <div class="tab-pill-bar">
+    <div class="flex flex-col gap-6">
+      <div class="flex gap-1.5 p-1.5 bg-card/40 backdrop-blur-md border border-card-border rounded-xl w-fit shadow-sm shadow-black/10">
         <button
-          class="tab-pill-btn ${section === 'intervene' ? 'active' : ''}"
+          class="px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200 cursor-pointer border border-transparent ${section === 'intervene' ? 'bg-accent/10 text-accent border-accent/20 shadow-sm' : 'bg-transparent text-text-muted hover:bg-white/5 hover:text-text-body'}"
           onClick=${() => navigate('operations', { section: 'intervene' })}
         >
-          개입
+          시스템 개입
         </button>
         <button
-          class="tab-pill-btn ${section === 'command' ? 'active' : ''}"
+          class="px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200 cursor-pointer border border-transparent ${section === 'command' ? 'bg-accent/10 text-accent border-accent/20 shadow-sm' : 'bg-transparent text-text-muted hover:bg-white/5 hover:text-text-body'}"
           onClick=${() => navigate('operations', { section: 'command' })}
         >
-          지휘
+          지휘 센터
         </button>
         <button
-          class="tab-pill-btn ${section === 'tools' ? 'active' : ''}"
+          class="px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200 cursor-pointer border border-transparent ${section === 'tools' ? 'bg-accent/10 text-accent border-accent/20 shadow-sm' : 'bg-transparent text-text-muted hover:bg-white/5 hover:text-text-body'}"
           onClick=${() => navigate('operations', { section: 'tools' })}
         >
-          도구
+          도구 및 레지스트리
         </button>
       </div>
 
-      ${section === 'tools'
-        ? html`<${Tools} />`
-        : section === 'command'
-          ? html`<${Command} />`
-          : html`<${Ops} />`}
+      <div class="transition-opacity duration-300">
+        ${section === 'tools'
+          ? html`<${Tools} />`
+          : section === 'command'
+            ? html`<${Command} />`
+            : html`<${Ops} />`}
+      </div>
     </div>
   `
 }

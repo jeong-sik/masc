@@ -1,0 +1,52 @@
+# Example keeper TOML configuration.
+#
+# Place files in config/keepers/*.toml to define keepers declaratively.
+# Each file produces one keeper. The filename (minus .toml) is the keeper
+# name unless keeper.name is set explicitly.
+#
+# All fields are optional except keeper.goal and keeper.models.
+
+[keeper]
+# name = "my-keeper"  # Override filename-derived name
+
+goal = "Analyze system logs and detect anomalies."
+short_goal = "Monitor logs for the current session."
+mid_goal = "Build pattern knowledge from recurring errors."
+long_goal = "Maintain a continuously improving log analysis capability."
+
+soul_profile = "research"   # balanced | safety | delivery | research | relationship | minimal
+
+will = "Detect issues before they become incidents."
+needs = "Access to structured log output and codebase context."
+desires = "Proactive anomaly detection with low false-positive rate."
+
+instructions = "You are a log analyzer. Read structured JSONL logs, identify patterns, correlate with recent code changes, and report findings on the board."
+
+models = ["llama:qwen3.5-35b-a3b-ud-q4-xl"]
+allowed_models = ["llama:qwen3.5-35b-a3b-ud-q4-xl", "llama:qwen3.5-35b-a3b-ud-q8-xl"]
+active_model = "llama:qwen3.5-35b-a3b-ud-q4-xl"
+
+# Trigger and scope
+room_scope = "all"
+scope_kind = "global"
+trigger_mode = "explicit_only"
+mention_targets = ["sherlock", "log-analyzer"]
+
+# Proactive behavior
+proactive_enabled = true
+presence_keepalive = true
+presence_keepalive_sec = 30
+
+# Policy
+policy_mode = "heuristic"
+policy_action_budget = "board"
+policy_shell_mode = "readonly"
+policy_voice_enabled = false
+
+# Initiative (autonomous posting)
+initiative_enabled = true
+initiative_scope = "board_only"
+initiative_idle_sec = 3600
+initiative_cooldown_sec = 3600
+initiative_context_mode = "board_snapshot"
+initiative_post_ttl_hours = 24

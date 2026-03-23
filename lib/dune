@@ -459,6 +459,7 @@
    keeper_verifier
    keeper_schema
    keeper_config
+   keeper_toml_loader
    keeper_contract
    keeper_deliberation
    keeper_types_profile

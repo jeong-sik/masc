@@ -38,8 +38,10 @@ let ensure_auth_dirs config =
     The agent who enables auth is always granted full permission. *)
 let write_initial_admin config agent_name =
   ensure_auth_dirs config;
-  Out_channel.with_open_text (initial_admin_file config) (fun oc ->
-    output_string oc (String.trim agent_name))
+  let file = initial_admin_file config in
+  Out_channel.with_open_text file (fun oc ->
+    output_string oc (String.trim agent_name));
+  Unix.chmod file 0o600
 
 (** Read the initial admin agent name, if set. *)
 let read_initial_admin config : string option =

@@ -367,15 +367,15 @@ let test_keeper_shell_tool_policy_gates () =
       ~policy_mode:"model_deliberation" ()
   in
   check_keeper_shell_tool_presence "heuristic" heuristic
-    ~expect_bash:true ~expect_shell_readonly:true;
+    ~expect_bash:false ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "learned disabled" learned_disabled
     ~expect_bash:false ~expect_shell_readonly:false;
   check_keeper_shell_tool_presence "learned readonly" learned_readonly
     ~expect_bash:false ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "explicit event" explicit_event
-    ~expect_bash:true ~expect_shell_readonly:true;
+    ~expect_bash:false ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "model deliberation" deliberation
-    ~expect_bash:true ~expect_shell_readonly:true
+    ~expect_bash:false ~expect_shell_readonly:true
 
 let test_keeper_shell_readonly_enforces_allowed_paths () =
   Eio_main.run @@ fun _env ->
@@ -477,7 +477,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
           ~input:
             (`Assoc
               [
-                ("cmd", `String "exit 7");
+                ("cmd", `String "git rev-parse --verify refs/heads/__definitely_missing__");
                 ("timeout_sec", `Float 5.0);
               ])
         |> parse_json_exn

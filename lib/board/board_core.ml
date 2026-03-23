@@ -332,7 +332,7 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
     ("author", `String (Agent_id.to_string p.author));
     ("title", `String p.title);
     ("body", `String p.body);
-    ("post_kind", `String (post_kind_to_string (classify_post_kind p)));
+    ("post_kind", `String (post_kind_to_string p.post_kind));
     ("content", `String p.content);
     ("visibility", `String (visibility_to_string p.visibility));
     ("created_at", `Float p.created_at);

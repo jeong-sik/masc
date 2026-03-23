@@ -6,8 +6,6 @@ module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Masc_mcp.Tool_result
 
 let explicit_claim_tool = "masc_claim_next"
-let managed_claim_tool = "masc_claim_task"
-let generic_transition_tool = "masc_transition"
 
 (* ── Helpers ────────────────────────────────────────────────── *)
 
@@ -113,9 +111,9 @@ let test_risk_medium_claim_next () =
   Alcotest.(check string) "claim_next is medium"
     "medium" (Gp.risk_level_to_string risk)
 
-let test_risk_medium_claim_task () =
-  let risk = Gp.assess_risk ~tool_name:managed_claim_tool ~input:`Null in
-  Alcotest.(check string) "claim_task is medium"
+let test_risk_medium_transition () =
+  let risk = Gp.assess_risk ~tool_name:"masc_transition" ~input:`Null in
+  Alcotest.(check string) "transition is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_join () =
@@ -161,11 +159,6 @@ let test_risk_low_list () =
 let test_risk_low_query () =
   let risk = Gp.assess_risk ~tool_name:"masc_query_agents" ~input:`Null in
   Alcotest.(check string) "query is low"
-    "low" (Gp.risk_level_to_string risk)
-
-let test_risk_low_transition () =
-  let risk = Gp.assess_risk ~tool_name:generic_transition_tool ~input:`Null in
-  Alcotest.(check string) "generic transition is low"
     "low" (Gp.risk_level_to_string risk)
 
 let test_risk_low_unknown () =
@@ -397,7 +390,7 @@ let test_blocked_response_structure () =
   let tmpdir = make_tmpdir () in
   let config = Room.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
-  let result = hook ~name:explicit_claim_tool ~args:`Null in
+  let result = hook ~name:"masc_transition" ~args:`Null in
   (match result with
    | Some r ->
        let module U = Yojson.Safe.Util in
@@ -410,8 +403,25 @@ let test_blocked_response_structure () =
        let _tool = data |> U.member "tool_name" |> U.to_string in
        Alcotest.(check string) "governance_level" "paranoid" _gov;
        Alcotest.(check string) "risk_level" "medium" _risk;
-       Alcotest.(check string) "tool_name" explicit_claim_tool _tool
+       Alcotest.(check string) "tool_name" "masc_transition" _tool
    | None -> Alcotest.fail "paranoid should block medium");
+  cleanup_tmpdir tmpdir
+
+let test_blocked_response_structure_claim_next () =
+  Eio_main.run @@ fun _env ->
+  let tmpdir = make_tmpdir () in
+  let config = Room.default_config tmpdir in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
+  let result = hook ~name:explicit_claim_tool ~args:`Null in
+  (match result with
+   | Some r ->
+       let module U = Yojson.Safe.Util in
+       let data = r.Tool_result.data in
+       let _risk = data |> U.member "risk_level" |> U.to_string in
+       let _tool = data |> U.member "tool_name" |> U.to_string in
+       Alcotest.(check string) "risk_level" "medium" _risk;
+       Alcotest.(check string) "tool_name" explicit_claim_tool _tool
+   | None -> Alcotest.fail "paranoid should block claim_next");
   cleanup_tmpdir tmpdir
 
 (* ── Unknown governance level defaults to development ──────── *)
@@ -451,14 +461,13 @@ let () =
       Alcotest.test_case "high: send" `Quick test_risk_high_send;
       Alcotest.test_case "high: spawn" `Quick test_risk_high_spawn;
       Alcotest.test_case "medium: claim_next" `Quick test_risk_medium_claim_next;
-      Alcotest.test_case "medium: claim_task" `Quick test_risk_medium_claim_task;
+      Alcotest.test_case "medium: transition" `Quick test_risk_medium_transition;
       Alcotest.test_case "medium: join" `Quick test_risk_medium_join;
       Alcotest.test_case "medium: leave" `Quick test_risk_medium_leave;
       Alcotest.test_case "medium: start" `Quick test_risk_medium_start;
       Alcotest.test_case "medium: stop" `Quick test_risk_medium_stop;
       Alcotest.test_case "medium: pause" `Quick test_risk_medium_pause;
       Alcotest.test_case "medium: resume" `Quick test_risk_medium_resume;
-      Alcotest.test_case "low: transition" `Quick test_risk_low_transition;
       Alcotest.test_case "low: status" `Quick test_risk_low_status;
       Alcotest.test_case "low: list" `Quick test_risk_low_list;
       Alcotest.test_case "low: query" `Quick test_risk_low_query;
@@ -516,5 +525,7 @@ let () =
         test_hook_paranoid_blocks_medium;
       Alcotest.test_case "blocked response structure" `Quick
         test_blocked_response_structure;
+      Alcotest.test_case "blocked response structure: claim_next" `Quick
+        test_blocked_response_structure_claim_next;
     ];
   ]

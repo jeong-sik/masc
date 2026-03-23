@@ -46,12 +46,10 @@ let risk_overrides : (string * risk_level) list = [
   ("masc_a2a_query_skill", Low);       (* "skill" contains "kill" substring *)
   ("masc_keeper_tool_catalog", Low);   (* "catalog" is read-only *)
   ("masc_model_catalog", Low);         (* read-only *)
+  (* Canonical task lifecycle entrypoint after masc_claim removal. *)
+  ("masc_transition", Medium);
   ("masc_keeper_dataset_export", Medium);  (* export, not delete *)
   ("masc_persistent_agent_dataset_export", Medium);
-  (* Claim surfaces: pre-hook only sees tool names, not transition action args. *)
-  ("masc_claim_next", Medium);
-  ("masc_claim_task", Medium);
-  ("masc_transition", Low);
 ]
 
 let critical_patterns =

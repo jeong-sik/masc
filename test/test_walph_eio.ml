@@ -291,7 +291,6 @@ let test_eio_error_cutoff () =
   in
   let result =
     Room_walph_eio.walph_loop config
-      ~net:(Eio.Stdenv.net env)
       ~clock:(Eio.Stdenv.clock env)
       ~agent_name:"error-agent"
       ~preset:"coverage"

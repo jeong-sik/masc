@@ -278,7 +278,7 @@ let get_chain_id_for_preset = function
     @param max_iterations Maximum iterations before forced stop
     @param target Target file/directory for preset
     @return Status string with loop results *)
-let walph_loop config ~net:_net ~clock ~agent_name
+let walph_loop config ~clock ~agent_name
     ?(preset="drain") ?(max_iterations=10) ?target
     ?(max_consecutive_errors=5) ?(error_backoff_sec=2)
     ?(default_model="explicit-model-required")

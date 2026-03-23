@@ -426,7 +426,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     let result = f () in
     let elapsed = Time_compat.now () -. t_start in
     if elapsed > 0.5 then
-      Log.Dashboard.warn "[snapshot_json] %s: %.0fms" label (elapsed *. 1000.0);
+      Log.Dashboard.info "[snapshot_json] %s: %.0fms" label (elapsed *. 1000.0);
     result
   in
   let config = ctx.config in
@@ -562,7 +562,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   in
   let elapsed_total = Time_compat.now () -. t0 in
   if elapsed_total > 1.0 then
-    Log.Dashboard.warn "[snapshot_json] total: %.0fms (sessions=%d keepers=%d)"
+    Log.Dashboard.info "[snapshot_json] total: %.0fms (sessions=%d keepers=%d)"
       (elapsed_total *. 1000.0)
       (List.length tracked_sessions) (List.length keeper_names);
   _snapshot_cache := Some (cache_key, result, now);

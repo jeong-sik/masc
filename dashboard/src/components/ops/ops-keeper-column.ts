@@ -3,7 +3,6 @@
 import { html } from 'htm/preact'
 import { CARD_STANDARD } from '../common/card'
 import { showToast } from '../common/toast'
-import { KeeperConversationPanel } from '../keeper-shared'
 import { openKeeperDetail } from '../keeper-detail'
 import { findKeeper } from '../execution/shared'
 import {
@@ -119,31 +118,6 @@ export function OpsKeeperColumn() {
                 </article>
               `)}
         </div>
-      </section>
-
-      <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-lane-panel">
-        <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">선택한 Keeper 액션</h3>
-        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
-
-        ${selectedKeeper ? html`
-          <div class="flex flex-col gap-2">
-            <div class="text-[13px] font-semibold text-[var(--text-strong)]">${selectedKeeper.name}</div>
-            <div class="text-[11px] text-[var(--text-muted)] flex flex-wrap gap-2">
-              <span>세대: ${selectedKeeper.generation ?? 0}</span>
-              <span>활성 목표: ${selectedKeeper.active_goal_ids?.length ?? 0}</span>
-              ${typeof selectedKeeper.turn_count === 'number' ? html`<span>턴: ${selectedKeeper.turn_count}</span>` : null}
-              ${selectedKeeper.last_model_used ? html`<span>모델: ${selectedKeeper.last_model_used}</span>` : null}
-            </div>
-            ${keeperPriorityTone(selectedKeeper) !== 'ok'
-              ? html`<div class="text-[12px] text-[var(--text-muted)] leading-[1.45] mt-1">현재 점검 이유: ${keeperPrioritySummary(selectedKeeper)}</div>`
-              : null}
-            ${selectedKeeper.goal ? html`<div class="whitespace-normal mt-1.5 py-1 px-1.5 bg-[var(--white-3)] rounded text-[11px] text-[var(--text-muted)]">${selectedKeeper.goal}</div>` : null}
-          </div>
-          <${KeeperConversationPanel}
-            keeperName=${selectedKeeper.name}
-            placeholder="구조화된 probe, 방향 수정, 재지시 내용을 적으세요"
-          />
-        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">먼저 keeper를 하나 고르세요.</div>`}
       </section>
 
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0">

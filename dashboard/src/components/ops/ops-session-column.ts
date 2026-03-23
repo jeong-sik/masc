@@ -139,6 +139,19 @@ export function OpsSessionColumn() {
     </button>
   `
 
+  if (sessions.length === 0) {
+    return html`
+      <div class="flex flex-col gap-4 min-w-0">
+        <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-lane-panel">
+          <div class="pb-2 border-b border-[var(--card-border)] mb-1">
+            <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Session 개입</h3>
+          </div>
+          <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">활성 team session이 없습니다. keeper가 독립 운영 중입니다.</div>
+        </section>
+      </div>
+    `
+  }
+
   return html`
     <div class="flex flex-col gap-4 min-w-0">
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-lane-panel">

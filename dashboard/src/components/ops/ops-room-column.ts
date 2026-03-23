@@ -97,7 +97,7 @@ export function OpsRoomColumn() {
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                   <span>${deliveryModeLabel(item.confirm_required)}</span>
                 </div>
-                <div class="mt-1.5 whitespace-pre-wrap break-words">${item.reason}</div>
+                <div class="mt-1.5 whitespace-pre-wrap break-words max-h-[200px] overflow-auto">${item.reason}</div>
                 ${item.suggested_payload ? html`
                   <div class="flex justify-between items-center gap-3 mt-3 max-[880px]:flex-col max-[880px]:items-start">
                     <button class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item); openRoomControlDisclosure() }} disabled=${operatorActionBusy.value}>
@@ -125,21 +125,21 @@ export function OpsRoomColumn() {
         ${confirmRequiredActions.length > 0 ? html`
           <div class="flex flex-col gap-2">
             ${confirmRequiredActions.map(item => html`
-              <article key=${`${item.action_type}:${item.target_type}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
+              <article key=${`${item.action_type}:${item.target_type}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)] min-w-0 flex-shrink-0">
                 <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}</span>
                   <span>${deliveryModeLabel(item.confirm_required)}</span>
                 </div>
-                <div class="mt-1.5 whitespace-pre-wrap break-words">${item.description ?? '설명 확인 필요'}</div>
+                <div class="mt-1.5 whitespace-pre-wrap break-words max-h-[200px] overflow-auto">${item.description ?? '설명 확인 필요'}</div>
               </article>
             `)}
           </div>
         ` : null}
         ${pendingConfirms.length > 0 ? html`
-          <div class="flex items-center justify-between gap-3 text-[var(--fs-sm)] text-[var(--text-muted)]">
+          <div class="flex flex-col gap-3 max-h-[400px] overflow-y-auto min-w-0 text-[var(--fs-sm)] text-[var(--text-muted)]">
             ${pendingConfirms.map(item => html`
-              <article key=${item.confirm_token} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
+              <article key=${item.confirm_token} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)] min-w-0 flex-shrink-0">
                 <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
@@ -287,14 +287,14 @@ export function OpsRoomColumn() {
         </div>
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
         ${roomFeed.length > 0 ? html`
-          <div class="flex items-center justify-between gap-3 text-[var(--fs-sm)] text-[var(--text-muted)]">
+          <div class="flex flex-col gap-3 max-h-[400px] overflow-y-auto min-w-0 text-[var(--fs-sm)] text-[var(--text-muted)]">
             ${roomFeed.map(message => html`
-              <article key=${message.seq ?? message.id ?? message.timestamp} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
+              <article key=${message.seq ?? message.id ?? message.timestamp} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)] min-w-0 flex-shrink-0">
                 <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${message.from}</strong>
                   <span>${message.timestamp}</span>
                 </div>
-                <div class="mt-1.5 whitespace-pre-wrap break-words">${formatMessageContent(message.content)}</div>
+                <div class="mt-1.5 whitespace-pre-wrap break-words max-h-[200px] overflow-auto">${formatMessageContent(message.content)}</div>
               </article>
             `)}
           </div>

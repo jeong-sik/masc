@@ -20,25 +20,8 @@ let bool_query_param request key ~default =
 
 let clamp ~min_v ~max_v v = max min_v (min max_v v)
 
-let take n lst =
-  let rec loop acc remaining xs =
-    if remaining <= 0 then List.rev acc
-    else
-      match xs with
-      | [] -> List.rev acc
-      | x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n lst
-
-let drop n lst =
-  let rec loop remaining xs =
-    if remaining <= 0 then xs
-    else
-      match xs with
-      | [] -> []
-      | _ :: rest -> loop (remaining - 1) rest
-  in
-  loop n lst
+let take = List.take
+let drop = List.drop
 
 let iso8601_of_unix ts =
   let tm = Unix.gmtime ts in

@@ -6,11 +6,11 @@
   --color-bg-0: #0b1220;
   --color-bg-1: #111a2e;
   --color-bg-2: #16213c;
-  --color-card: rgba(19, 29, 51, 0.82);
+  --color-card: rgba(16, 24, 42, 0.92);
   --color-card-border: rgba(138, 163, 211, 0.2);
   --color-text-strong: #eaf1ff;
   --color-text-body: #c0d2f2;
-  --color-text-muted: #86a0cf;
+  --color-text-muted: #a8bfdf;
   --color-accent: #47b8ff;
   --color-accent-soft: rgba(71, 184, 255, 0.16);
   --color-ok: #4ade80;
@@ -38,15 +38,15 @@
   --radius-md: 12px;
   --radius-sm: 10px;
 
-  --font-size-2xs: 10px;
-  --font-size-xs: 11px;
-  --font-size-sm: 12px;
-  --font-size-base: 13px;
-  --font-size-md: 14px;
-  --font-size-lg: 15px;
+  --font-size-2xs: 11px;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-md: 15px;
+  --font-size-lg: 16px;
 
-  --color-text-dim: #888;
-  --color-text-slate: #94a3b8;
+  --color-text-dim: #a0a8b4;
+  --color-text-slate: #b0bfd4;
   --color-text-slate-light: #cbd5e1;
   --color-cyan: #22d3ee;
   --color-purple: #a78bfa;
@@ -54,11 +54,11 @@
 
 :root {
   --bg-0: #0b1220;
-  --card: rgba(19, 29, 51, 0.82);
+  --card: rgba(16, 24, 42, 0.92);
   --card-border: rgba(138, 163, 211, 0.2);
   --text-strong: #eaf1ff;
   --text-body: #c0d2f2;
-  --text-muted: #86a0cf;
+  --text-muted: #a8bfdf;
   --accent: #47b8ff;
   --accent-soft: rgba(71, 184, 255, 0.16);
   --ok: #4ade80;
@@ -190,16 +190,16 @@
   --panel-dark-60: rgba(15, 23, 42, 0.6);
 
   /* Font-size scale */
-  --fs-2xs: 10px;
-  --fs-xs: 11px;
-  --fs-sm: 12px;
-  --fs-base: 13px;
-  --fs-md: 14px;
-  --fs-lg: 15px;
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 16px;
 
   /* Extended text scale */
-  --text-dim: #888;
-  --text-slate: #94a3b8;
+  --text-dim: #a0a8b4;
+  --text-slate: #b0bfd4;
   --text-slate-light: #cbd5e1;
 
   /* Extended palette */
@@ -237,27 +237,13 @@ body {
   color: var(--text-body);
   line-height: 1.5;
   background:
-    radial-gradient(circle at 12% 12%, rgba(71, 184, 255, 0.18), transparent 26%),
-    radial-gradient(circle at 88% 14%, rgba(74, 222, 128, 0.12), transparent 20%),
-    radial-gradient(circle at 50% 100%, rgba(168, 85, 247, 0.1), transparent 28%),
+    radial-gradient(circle at 88% 14%, rgba(74, 222, 128, 0.10), transparent 20%),
     linear-gradient(180deg, #06101d 0%, #0b1220 48%, #070d18 100%);
   background-attachment: fixed;
   position: relative;
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(rgba(255,255,255,0.024) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.024) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: radial-gradient(circle at center, black, transparent 88%);
-  opacity: 0.28;
-  z-index: 0;
-}
+/* Grid overlay removed for readability */
 
 #app {
   position: relative;
@@ -347,7 +333,7 @@ a:hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 10px;
+  padding: 4px 12px;
   border-radius: 9999px;
   font-size: var(--fs-xs);
   font-weight: 500;
@@ -356,14 +342,14 @@ a:hover {
   white-space: nowrap;
   background: var(--white-6);
   color: var(--text-muted);
-  &.active { background: var(--ok-soft); color: var(--ok); }
+  &.active { background: var(--ok-22); color: var(--ok); }
   &.busy { background: var(--warn-15); color: var(--warn); }
   &.listening { background: rgba(56,189,248,0.15); color: #38bdf8; }
-  &.idle { background: rgba(136,136,136,0.15); color: var(--text-dim); }
-  &.offline { background: rgba(85,85,85,0.15); color: #555; }
-  &.todo { background: rgba(136,136,136,0.15); color: var(--text-dim); }
+  &.idle { background: rgba(136,136,136,0.22); color: #b8c0cc; }
+  &.offline { background: rgba(85,85,85,0.22); color: #7a8494; }
+  &.todo { background: rgba(136,136,136,0.22); color: #b8c0cc; }
   &.in-progress, &.in_progress { background: var(--warn-15); color: var(--warn); }
-  &.done, &.completed { background: var(--ok-soft); color: var(--ok); }
+  &.done, &.completed { background: var(--ok-22); color: var(--ok); }
   &.running { background: var(--warn-15); color: var(--warn); }
   &.interrupted { background: rgba(56,189,248,0.15); color: #38bdf8; }
   &.stopped { background: var(--slate-gray-15); color: var(--text-slate); }
@@ -476,7 +462,7 @@ a:hover {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 7px 16px;
+  padding: 8px 16px;
   border: 1px solid rgba(71, 184, 255, 0.32);
   border-radius: 8px;
   background: rgba(71, 184, 255, 0.14);

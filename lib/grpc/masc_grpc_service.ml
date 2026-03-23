@@ -3,7 +3,7 @@
     Implements the MascCoordination gRPC service using grpc-direct.
     All handlers delegate to the Room module for actual coordination logic.
 
-    Wire format: JSON over gRPC framing (no protobuf codegen dependency).
+    Wire format: protobuf binary via ocaml-protoc-plugin.
     See proto/masc_coordination.proto for the canonical API contract. *)
 
 module T = Masc_grpc_types

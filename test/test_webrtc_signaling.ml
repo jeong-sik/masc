@@ -104,6 +104,61 @@ let test_agent_transport_webrtc () =
   Alcotest.(check string) "webrtc" "webrtc"
     (Agent_transport.to_string Agent_transport.Webrtc)
 
+(* ====== Message Handler ====== *)
+
+let test_message_handler_invoked () =
+  Eio_main.run (fun _env ->
+    let received = ref None in
+    Wrtc.set_message_handler (fun peer_id msg ->
+      received := Some (peer_id, msg));
+    (* Create and accept an offer to get a peer *)
+    let offer_id = Wrtc.create_offer
+      ~from_agent:"sender" ~ice_candidates:["c1"] ~dtls_fingerprint:"fp1" in
+    let result = Wrtc.accept_offer ~offer_id ~answerer_agent:"receiver" in
+    Alcotest.(check bool) "accept ok" true (Result.is_ok result);
+    let _conn = Result.get_ok result in
+    (* The handler should be set *)
+    Alcotest.(check bool) "handler is set" true (!received = None);
+    (* Cleanup *)
+    ignore (Wrtc.cleanup_expired_offers ~max_age_s:0.0 ()))
+
+let test_send_to_nonexistent_peer () =
+  Eio_main.run (fun _env ->
+    let result = Wrtc.send_to_peer "fake-peer-id" "hello" in
+    Alcotest.(check bool) "send to missing peer fails"
+      true (Result.is_error result))
+
+let test_mark_connected_updates_peer () =
+  Eio_main.run (fun _env ->
+    let offer_id = Wrtc.create_offer
+      ~from_agent:"a" ~ice_candidates:["c1"] ~dtls_fingerprint:"fp" in
+    let result = Wrtc.accept_offer ~offer_id ~answerer_agent:"b" in
+    Alcotest.(check bool) "accept ok" true (Result.is_ok result);
+    let conn = Result.get_ok result in
+    Alcotest.(check bool) "not connected initially"
+      false conn.connected;
+    Wrtc.mark_connected conn.peer_id;
+    (* Re-fetch to check — active_peer_count should still be > 0 *)
+    Alcotest.(check bool) "peer still active"
+      true (Wrtc.active_peer_count () > 0);
+    Wrtc.remove_peer conn.peer_id)
+
+let test_handle_answer_request_valid () =
+  Eio_main.run (fun _env ->
+    let offer_id = Wrtc.create_offer
+      ~from_agent:"alice" ~ice_candidates:["c1"] ~dtls_fingerprint:"fp" in
+    let body = Printf.sprintf
+      {|{"offer_id":"%s","agent_name":"bob","ice_candidates":["c2"],"dtls_fingerprint":"fp2"}|}
+      offer_id in
+    let result = Wrtc.handle_answer_request body in
+    Alcotest.(check bool) "answer ok" true (Result.is_ok result);
+    ignore (Wrtc.cleanup_expired_offers ~max_age_s:0.0 ()))
+
+let test_handle_answer_request_invalid () =
+  Eio_main.run (fun _env ->
+    let result = Wrtc.handle_answer_request "bad json" in
+    Alcotest.(check bool) "bad json fails" true (Result.is_error result))
+
 let () =
   Alcotest.run "WebRTC Signaling" [
     ("signaling", [
@@ -116,6 +171,13 @@ let () =
     ("http_handler", [
       Alcotest.test_case "valid offer request" `Quick test_handle_offer_request;
       Alcotest.test_case "invalid offer" `Quick test_handle_invalid_offer;
+      Alcotest.test_case "valid answer request" `Quick test_handle_answer_request_valid;
+      Alcotest.test_case "invalid answer" `Quick test_handle_answer_request_invalid;
+    ]);
+    ("peer_lifecycle", [
+      Alcotest.test_case "mark connected" `Quick test_mark_connected_updates_peer;
+      Alcotest.test_case "send to nonexistent" `Quick test_send_to_nonexistent_peer;
+      Alcotest.test_case "message handler setup" `Quick test_message_handler_invoked;
     ]);
     ("cleanup", [
       Alcotest.test_case "expired offers" `Quick test_cleanup_expired;

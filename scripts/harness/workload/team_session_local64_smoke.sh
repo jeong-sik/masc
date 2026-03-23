@@ -51,7 +51,7 @@ jsonrpc_call() {
   local method="$2"
   local params="$3"
   local raw
-  raw="$(curl -sS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
+  raw="$(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H "mcp-session-id: $MCP_SESSION_ID" \

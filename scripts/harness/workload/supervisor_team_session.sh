@@ -75,7 +75,7 @@ jsonrpc_call() {
   local body_file
   body_file="$(mktemp "${TMPDIR:-/tmp}/masc-jsonrpc-body.XXXXXX.json")"
   printf '{"jsonrpc":"2.0","id":%s,"method":"%s","params":%s}' "$id" "$method" "$params" >"$body_file"
-  local cmd=(curl -sS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$url" \
+  local cmd=(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$url" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H "Mcp-Session-Id: $session_id" \
@@ -278,7 +278,7 @@ parse_nickname_from_text() {
 wait_for_health() {
   local deadline=$(( $(date +%s) + 20 ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+    if curl -fsS --http2-prior-knowledge "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

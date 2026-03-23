@@ -60,7 +60,7 @@ jsonrpc_call() {
   local max_attempts=4
   local raw=""
   while [ "$attempts" -lt "$max_attempts" ]; do
-    if raw="$(curl -sS -m "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
+    if raw="$(curl -sS --http2-prior-knowledge -m "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
       -H 'Content-Type: application/json' \
       -H 'Accept: application/json, text/event-stream' \
       -H "mcp-session-id: $MCP_SESSION_ID" \

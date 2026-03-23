@@ -22,7 +22,7 @@ curl_post_mcp() {
   local output=""
   while [ "$attempt" -le "$CURL_RETRY_COUNT" ]; do
     if [ -n "$MCP_SESSION_ID" ]; then
-      output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
+      output="$(curl -sS --http2-prior-knowledge -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
         -H 'Content-Type: application/json' \
         -H 'Accept: application/json, text/event-stream' \
         -H "mcp-session-id: $MCP_SESSION_ID" \
@@ -30,7 +30,7 @@ curl_post_mcp() {
           printf "%s" "$output"
           return 0
         }
-    elif output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
+    elif output="$(curl -sS --http2-prior-knowledge -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
       -H 'Content-Type: application/json' \
       -H 'Accept: application/json, text/event-stream' \
       -d "$body" 2>/dev/null)"; then

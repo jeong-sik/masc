@@ -21,7 +21,7 @@ call_tool() {
   local max_attempts=4
   raw=""
   while [ "$attempts" -lt "$max_attempts" ]; do
-    if raw="$(curl -sS -m 25 -X POST "$MCP_URL" \
+    if raw="$(curl -sS --http2-prior-knowledge -m 25 -X POST "$MCP_URL" \
       -H 'Content-Type: application/json' \
       -H 'Accept: application/json, text/event-stream' \
       -H "mcp-session-id: $MCP_SESSION_ID" \

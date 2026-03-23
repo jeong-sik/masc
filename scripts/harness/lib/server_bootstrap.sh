@@ -71,7 +71,7 @@ harness_wait_for_health() {
   local timeout_sec="${2:-20}"
   local deadline=$(( $(date +%s) + timeout_sec ))
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
-    if curl -fsS "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+    if curl -fsS --http2-prior-knowledge "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

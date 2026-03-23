@@ -70,14 +70,21 @@ let validate_model_label (label : string) : (string, string) result =
          "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
          provider_prefix)
 
+(** Validate model label syntax: must be "provider:model" with non-empty parts.
+    Unlike [Cascade_config.parse_model_string], does not check runtime availability
+    (API key presence) because MDAL delegates actual model calls to its worker runner. *)
+let validate_model_label_syntax (raw : string) : (string, string) result =
+  match String.index_opt raw ':' with
+  | None -> Error (sprintf "Model label must be provider:model, got: %s" raw)
+  | Some idx ->
+    if idx = 0 || idx >= String.length raw - 1 then
+      Error (sprintf "Model label has empty provider or model: %s" raw)
+    else validate_model_label raw
+
 (** Resolve agent name + optional worker_model to a validated model label string. *)
 let resolve_model_label ~(agent : string) ~(worker_model : string option) :
     (string, string) result =
-  let parse_worker_model raw =
-    match Llm_provider.Cascade_config.parse_model_string raw with
-    | None -> Error (sprintf "Cannot parse model label: %s" raw)
-    | Some _cfg -> validate_model_label raw
-  in
+  let parse_worker_model raw = validate_model_label_syntax raw in
   match worker_model with
   | Some raw when String.trim raw <> "" -> parse_worker_model (String.trim raw)
   | _ ->
@@ -145,10 +152,11 @@ let run ~(sw : Eio.Switch.t) ~(config : Room.config) (state : Mdal.loop_state)
         in
         raise (Invalid_argument message)
   in
-  (* Validate the label parses as a known provider:model *)
-  (match Llm_provider.Cascade_config.parse_model_string model_label with
-   | Some _ -> ()
-   | None -> raise (Invalid_argument (sprintf "Cannot parse model: %s" model_label)));
+  (* Validate the label is a known provider:model syntax.
+     Runtime availability (API key) is checked by the worker at call time. *)
+  (match validate_model_label_syntax model_label with
+   | Ok _ -> ()
+   | Error msg -> raise (Invalid_argument msg));
   let prompt =
     Mdal.render_worker_prompt state.profile state.history current_metric
   in

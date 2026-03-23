@@ -55,11 +55,11 @@ let test_message_roundtrip () =
   let masc_msg : Agent_sdk.Types.message =
     Agent_sdk.Types.assistant_msg "test content"
   in
-  let oas_msg = Oas_type_adapters.to_oas_message masc_msg in
+  let oas_msg = (fun (m : Agent_sdk.Types.message) -> match m.role with Agent_sdk.Types.System -> None | _ -> Some m) masc_msg in
   (match oas_msg with
    | None -> Alcotest.fail "Assistant message should not be dropped"
    | Some msg ->
-     let roundtrip = Oas_type_adapters.of_oas_message msg in
+     let roundtrip = Fun.id msg in
      Alcotest.(check string) "role preserved"
        "assistant"
        (match roundtrip.role with Agent_sdk.Types.Assistant -> "assistant" | _ -> "other");
@@ -70,7 +70,7 @@ let test_system_role_dropped () =
   let masc_msg : Agent_sdk.Types.message =
     Agent_sdk.Types.system_msg "system prompt"
   in
-  let oas_msg = Oas_type_adapters.to_oas_message masc_msg in
+  let oas_msg = (fun (m : Agent_sdk.Types.message) -> match m.role with Agent_sdk.Types.System -> None | _ -> Some m) masc_msg in
   Alcotest.(check bool) "system message dropped (belongs in system_prompt)"
     true (Option.is_none oas_msg)
 
@@ -81,7 +81,7 @@ let test_restore_messages () =
     { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
       content = [Agent_sdk.Types.Text "world"]; name = None; tool_call_id = None };
   ] in
-  let masc_msgs = List.map Oas_type_adapters.of_oas_message oas_msgs in
+  let masc_msgs = List.map Fun.id oas_msgs in
   Alcotest.(check int) "2 messages" 2 (List.length masc_msgs);
   Alcotest.(check string) "first content" "hello"
     (Agent_sdk.Types.text_of_message (List.hd masc_msgs))

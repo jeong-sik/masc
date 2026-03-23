@@ -466,36 +466,18 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
   | Error e, _ | _, Error e -> Error e
 
 (** Convert a model label to an OAS Provider.config.
-    Falls back to OpenAICompat for unrecognized labels. *)
+    Uses OAS Provider.config_of_provider_config directly.
+    Falls back to glm for unrecognized labels. *)
 let oas_provider_of_label (label : string) : Oas.Provider.config =
-  match Oas_type_adapters.to_oas_provider_of_label label with
-  | Some config -> config
+  match Llm_provider.Cascade_config.parse_model_string label with
+  | Some pc -> Oas.Provider.config_of_provider_config pc
   | None ->
-    (* Fallback: parse label to extract api_url, model_id etc. *)
-    match Llm_provider.Cascade_config.parse_model_string label with
-    | Some pc ->
-      (* pc already is Provider_config.t *)
-      { Oas.Provider.provider =
-          Oas.Provider.OpenAICompat
-            {
-              base_url = pc.base_url;
-              auth_header = None;
-              path = "/v1/chat/completions";
-              static_token = None;
-            };
-        model_id = pc.model_id;
-        api_key_env = if pc.api_key <> "" then pc.api_key else "DUMMY_KEY";
-      }
-    | None ->
-      (* Last resort: treat label as model_id with glm defaults *)
-      { Oas.Provider.provider =
-          Oas.Provider.OpenAICompat
-            { base_url = "https://open.bigmodel.cn/api/paas/v4";
-              auth_header = None;
-              path = "/chat/completions";
-              static_token = None };
-        model_id = label;
-        api_key_env = "DUMMY_KEY" }
+    Oas.Provider.config_of_provider_config
+      (Llm_provider.Provider_config.make
+         ~kind:Llm_provider.Provider_config.Glm
+         ~model_id:label
+         ~base_url:"https://open.bigmodel.cn/api/paas/v4"
+         ~request_path:"/chat/completions" ())
 
 (** Resolve provider from a model label string.
     Returns the provider config and model_id on success. *)

@@ -40,7 +40,7 @@ wait_for_mcp_ready() {
   local timeout_sec="${MCP_READY_TIMEOUT_SEC:-20}"
   local deadline=$(( $(date +%s) + timeout_sec ))
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
-    if curl -fsS --max-time 2 "$BASE_URL/health" >/dev/null 2>&1; then
+    if curl -fsS --http2-prior-knowledge --max-time 2 "$BASE_URL/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

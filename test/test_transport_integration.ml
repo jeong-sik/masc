@@ -260,7 +260,7 @@ let () =
         test_ws_external_subscriber_receives_broadcast;
     ]);
     ("webrtc_signaling", [
-      Alcotest.test_case "full offer/answer/cleanup flow" `Quick
+      Alcotest.test_case "full offer/answer/cleanup flow" `Slow
         test_webrtc_full_signaling_flow;
     ]);
     ("auto_cleanup", [

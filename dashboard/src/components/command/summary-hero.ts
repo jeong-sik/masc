@@ -107,8 +107,8 @@ function SignalRail({
   tone: string
 }) {
   return html`
-    <article class="p-3.5 rounded-[14px] bg-[var(--white-3h)] border border-[var(--white-8)] grid gap-2.5 cmd-signal-rail ${toneClass(tone)}">
-      <div class="flex items-baseline justify-between gap-2.5">
+    <article class="p-3.5 rounded-[14px] bg-[var(--white-3h)] border border-[var(--white-8)] grid gap-3 cmd-signal-rail ${toneClass(tone)}">
+      <div class="flex items-baseline justify-between gap-3">
         <span>${label}</span>
         <strong>${value}</strong>
       </div>
@@ -155,7 +155,7 @@ export function SummaryHero() {
 
   return html`
     <section class="relative overflow-hidden border border-[rgba(103,232,249,0.16)] rounded-[18px] p-[18px] mb-4 shadow-[inset_0_1px_0_var(--white-4)] cmd-hero grid grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)] gap-[18px] items-center">
-      <div class="relative z-[1] grid gap-2.5">
+      <div class="relative z-[1] grid gap-3">
         <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">현재 지휘 상태</span>
         <h3>${headline}</h3>
         <p>${subcopy}</p>

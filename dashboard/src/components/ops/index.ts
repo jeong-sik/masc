@@ -164,7 +164,7 @@ export function Ops() {
             방, 세션, 키퍼를 나눠 보고 바로 개입합니다.
           </p>
         </div>
-        <div class="flex items-end gap-2.5 flex-wrap max-[880px]:w-full">
+        <div class="flex items-end gap-3 flex-wrap max-[880px]:w-full">
           <label class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.06em] font-medium" for="ops-actor">개입 ID</label>
           <input
             id="ops-actor"
@@ -266,7 +266,7 @@ export function Ops() {
       <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
         <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">개입 우선순위</h2>
         <p class="text-[12px] text-[var(--text-muted)] mb-3.5">지금 가장 먼저 손댈 대상이 방인지, 세션인지, 키퍼인지 먼저 좁힙니다.</p>
-        <div class="ops-priority-grid grid grid-cols-4 gap-2.5 max-[1200px]:grid-cols-2 max-[880px]:grid-cols-1">
+        <div class="ops-priority-grid grid grid-cols-4 gap-3 max-[1200px]:grid-cols-2 max-[880px]:grid-cols-1">
           ${priorityCards.map(card => html`
             <div key=${card.key} class="ops-priority-card p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-1.5 ${card.tone}">
               <span class="text-[var(--text-muted)] text-[11px] uppercase tracking-[0.06em] font-medium">${card.label}</span>

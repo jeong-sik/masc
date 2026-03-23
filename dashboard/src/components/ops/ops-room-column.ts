@@ -135,7 +135,7 @@ export function OpsRoomColumn() {
           </div>
         ` : null}
         ${pendingConfirms.length > 0 ? html`
-          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
+          <div class="flex items-center justify-between gap-3 text-[var(--fs-sm)] text-[var(--text-muted)]">
             ${pendingConfirms.map(item => html`
               <article key=${item.confirm_token} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
                 <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
@@ -171,7 +171,7 @@ export function OpsRoomColumn() {
         </div>
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">평소에는 추천 개입만 보면 됩니다. room 전체를 건드릴 때만 아래 고급 제어를 여세요.</p>
 
-        <div class="grid grid-cols-2 gap-2.5 max-[880px]:grid-cols-1">
+        <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
           <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
             <span>Room</span>
             <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
@@ -285,7 +285,7 @@ export function OpsRoomColumn() {
         </div>
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
         ${roomFeed.length > 0 ? html`
-          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
+          <div class="flex items-center justify-between gap-3 text-[var(--fs-sm)] text-[var(--text-muted)]">
             ${roomFeed.map(message => html`
               <article key=${message.seq ?? message.id ?? message.timestamp} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
                 <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">

@@ -161,7 +161,7 @@ export function Execution() {
          
           testId="execution.worker-support"
         >
-          <div class="flex flex-col gap-2.5">
+          <div class="flex flex-col gap-3">
             ${workerSupportRows.length === 0
               ? html`<${EmptyState} message="참여 에이전트가 없습니다." compact />`
               : workerSupportRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.worker-card" />`)}
@@ -174,7 +174,7 @@ export function Execution() {
          
           testId="execution.continuity"
         >
-          <div class="flex flex-col gap-2.5">
+          <div class="flex flex-col gap-3">
             ${continuityRows.length === 0
               ? html`<${EmptyState} message="연속성 경고 없음" compact />`
               : continuityRows.map(row => html`<${ContinuityRow} key=${row.name} row=${row} />`)}
@@ -187,7 +187,7 @@ export function Execution() {
          
           testId="execution.offline-workers"
         >
-          <div class="flex flex-col gap-2.5">
+          <div class="flex flex-col gap-3">
             ${offlineRows.length === 0
               ? html`<${EmptyState} message="오프라인 에이전트 없음" compact />`
               : offlineRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.offline-worker-card" />`)}

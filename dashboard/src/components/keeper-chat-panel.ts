@@ -115,7 +115,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
         ` : null}
       </div>
 
-      <div class="keeper-chat__messages flex-1 min-h-[200px] max-h-[400px] overflow-y-auto py-3 px-3.5 flex flex-col gap-2.5" ref=${scrollRef}>
+      <div class="keeper-chat__messages flex-1 min-h-[200px] max-h-[400px] overflow-y-auto py-3 px-3.5 flex flex-col gap-3" ref=${scrollRef}>
         ${messages.length === 0 && !isStreaming ? html`
           <div class="text-[var(--white-20)] text-[var(--fs-base)] text-center py-10">keeper에게 메시지를 보내세요</div>
         ` : null}

@@ -120,7 +120,7 @@ function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
     return html`<${EmptyState} message="최근 실행 이벤트가 없습니다." compact />`
   }
   return html`
-    <div class="flex flex-col gap-2.5">
+    <div class="flex flex-col gap-3">
       ${events.map(event => {
         const actor = eventActor(event)
         return html`

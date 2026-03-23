@@ -88,12 +88,12 @@ export function DecisionDetail() {
                   <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[#c8daf7] text-[length:var(--fs-sm)]"><strong>${orderStatusLabel(detail.execution_order?.status)}</strong></span>
                 </div>
               </div>
-              <div class="flex flex-col gap-2.5">
+              <div class="flex flex-col gap-3">
                 ${petitions.length === 0
                   ? html`<${EmptyState} message="기록된 청원이 없습니다." compact />`
                   : petitions.map(petition => html`<${PetitionEntry} key=${petition.id} petition=${petition} />`)}
               </div>
-              <div class="flex flex-col gap-2.5">
+              <div class="flex flex-col gap-3">
                 ${briefs.length === 0
                   ? html`<${EmptyState} message="심의 의견이 아직 없습니다." compact />`
                   : briefs.map(brief => html`<${BriefEntry} key=${brief.id} brief=${brief} />`)}

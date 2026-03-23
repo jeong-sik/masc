@@ -201,7 +201,7 @@ export function Proof() {
             <h3 class="text-[14px] font-semibold text-[var(--text-strong)]">핵심 증명</h3>
             <p class="text-[12px] text-[var(--text-muted)] leading-relaxed">결론, 왜 아직 부족한지, 다음에 무엇을 남겨야 하는지만 먼저 봅니다.</p>
           </div>
-          <div class="grid gap-2.5">
+          <div class="grid gap-3">
             ${reasonLines.map((line, idx) => html`
               <article class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] ${idx === 1 && verdict !== 'proven' ? verdictTone(verdict) : ''}">
                 <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${idx === 0 ? '지금 결론' : idx === 1 ? '왜 이렇게 판정됐나' : '다음 보강 포인트'}</strong>

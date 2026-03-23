@@ -70,17 +70,17 @@ function TierDistribution({ dist }: { dist: Record<string, number> }) {
   const fullOnlyPct = total > 0 ? ((fullOnly / total) * 100).toFixed(1) : '0'
   return html`
     <div class="flex flex-col gap-2">
-      <div class="flex items-center gap-2.5">
+      <div class="flex items-center gap-3">
         <span class="inline-block min-w-[72px] px-2 py-0.5 text-[length:var(--fs-xs)] font-semibold text-center rounded badge-essential">필수</span>
         <span class="text-[color:var(--text-strong)] text-[length:var(--fs-md)] font-semibold min-w-9 text-right">${essential}</span>
         <span class="text-[color:var(--text-muted)] text-[length:var(--fs-sm)] min-w-12 text-right">${essentialPct}%</span>
       </div>
-      <div class="flex items-center gap-2.5">
+      <div class="flex items-center gap-3">
         <span class="inline-block min-w-[72px] px-2 py-0.5 text-[length:var(--fs-xs)] font-semibold text-center rounded badge-standard">표준</span>
         <span class="text-[color:var(--text-strong)] text-[length:var(--fs-md)] font-semibold min-w-9 text-right">${standardOnly}</span>
         <span class="text-[color:var(--text-muted)] text-[length:var(--fs-sm)] min-w-12 text-right">${standardPct}%</span>
       </div>
-      <div class="flex items-center gap-2.5">
+      <div class="flex items-center gap-3">
         <span class="inline-block min-w-[72px] px-2 py-0.5 text-[length:var(--fs-xs)] font-semibold text-center rounded badge-full">전체 전용</span>
         <span class="text-[color:var(--text-strong)] text-[length:var(--fs-md)] font-semibold min-w-9 text-right">${fullOnly}</span>
         <span class="text-[color:var(--text-muted)] text-[length:var(--fs-sm)] min-w-12 text-right">${fullOnlyPct}%</span>
@@ -116,7 +116,7 @@ export function ToolMetrics() {
       ${error ? html`<div class="px-2.5 py-3 bg-[var(--bad-12)] border border-[rgba(239,68,68,0.34)] text-[#fecaca] text-[length:var(--fs-base)] rounded-lg">${error}</div>` : null}
 
       ${data ? html`
-        <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-2.5 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
+        <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-3 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
           <div class="tool-metrics-stat">
             <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.total_calls}</span>
             <span class="stat-label">총 호출 수</span>

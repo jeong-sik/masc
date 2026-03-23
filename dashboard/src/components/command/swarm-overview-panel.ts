@@ -59,7 +59,7 @@ export function SwarmOverviewPanel() {
 
               <div class="cmd-card rounded-xl-stack">
                 <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card highlight ${focusKey === 'recommendation' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
-                  <div class="flex justify-between gap-2.5 items-start">
+                  <div class="flex justify-between gap-3 items-start">
                     <strong>${recommendation?.label ?? '운영자 상태 확인'}</strong>
                     <span class="cmd-chip rounded-full">${recommendation?.lane_id ?? '전체'}</span>
                   </div>
@@ -70,7 +70,7 @@ export function SwarmOverviewPanel() {
                 <${SwarmProofPanel} proof=${proof} />
 
                 <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${gaps.length > 0 ? 'warn' : 'ok'} ${focusKey === 'gaps' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
-                  <div class="flex justify-between gap-2.5 items-start">
+                  <div class="flex justify-between gap-3 items-start">
                     <strong>핵심 공백</strong>
                     <span class="cmd-chip rounded-full ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
                   </div>
@@ -80,7 +80,7 @@ export function SwarmOverviewPanel() {
                 </div>
 
                 <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card">
-                  <div class="flex justify-between gap-2.5 items-start">
+                  <div class="flex justify-between gap-3 items-start">
                     <strong>이동 타임라인</strong>
                     <span class="cmd-chip rounded-full">${timeline.length}</span>
                   </div>

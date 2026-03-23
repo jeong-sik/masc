@@ -67,7 +67,7 @@ export function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecu
       <h2 class="monitor-headline">영향받는 세션</h2>
       <p class="monitor-subheadline">대기열에서 고른 실행이 어떤 세션 목표와 실행 막힘을 갖는지 요약합니다.</p>
     </div>
-    <div class="flex flex-col gap-2.5">
+    <div class="flex flex-col gap-3">
       ${hasActive
         ? activeSessions.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)
         : html`<${EmptyState} message=${hasTerminal ? '진행 중인 세션이 없습니다.' : '선택된 실행과 연결된 세션이 없습니다.'} compact />`}
@@ -76,7 +76,7 @@ export function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecu
       ? html`
           <details class="mt-1" data-testid="execution.sessions-terminal">
             <summary class="runtime-summary">종료된 세션 ${terminalSessions.length}건</summary>
-            <div class="flex flex-col gap-2.5">
+            <div class="flex flex-col gap-3">
               ${terminalSessions.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)}
             </div>
           </details>

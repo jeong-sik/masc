@@ -61,7 +61,7 @@ export function OpsKeeperColumn() {
               class="ops-entity-card p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] text-inherit text-left cursor-pointer w-full ${selectedKeeper?.name === keeper.name ? 'active' : ''}"
               onClick=${() => { selectedKeeperName.value = keeper.name }}
             >
-              <div class="flex justify-between items-center gap-2.5 max-[880px]:flex-col max-[880px]:items-start">
+              <div class="flex justify-between items-center gap-3 max-[880px]:flex-col max-[880px]:items-start">
                 <strong class="text-[13px] font-semibold">${keeper.name}</strong>
                 <div class="flex items-center gap-2 ml-auto">
                   <span class="inline-flex items-center gap-1.5 text-[11px]">
@@ -102,7 +102,7 @@ export function OpsKeeperColumn() {
             ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">분리된 persistent agent는 없습니다.</div>`
             : persistentAgents.map(agent => html`
                 <article key=${agent.name} class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-                  <div class="flex justify-between items-center gap-2.5 max-[880px]:flex-col max-[880px]:items-start">
+                  <div class="flex justify-between items-center gap-3 max-[880px]:flex-col max-[880px]:items-start">
                     <strong class="text-[13px] font-semibold">${agent.name}</strong>
                     <span class="inline-flex items-center gap-1.5 text-[11px]">
                       <span class="w-2 h-2 rounded-full ${agent.status === 'offline' ? 'bg-[var(--text-muted)]' : 'bg-[var(--warn)]'}"></span>

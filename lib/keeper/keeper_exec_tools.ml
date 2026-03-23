@@ -384,7 +384,7 @@ let execute_keeper_tool_call
           in
           let st, out =
             Process_eio.run_argv_with_status ~timeout_sec
-              [ "/bin/zsh"; "-lc"; shell_cmd ]
+              [ "/bin/bash"; "-lc"; shell_cmd ]
           in
           Yojson.Safe.to_string
             (`Assoc

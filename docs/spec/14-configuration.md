@@ -231,7 +231,7 @@ Level4는 `Normalized.t` (0.0-1.0 범위 보장) 추상 타입을 제공한다. 
 | Category | 설명 | 대표 도구 |
 |----------|------|----------|
 | `Core_Room` | Room 진입/퇴장 | `masc_join`, `masc_leave`, `masc_rooms_list` |
-| `Core_Task` | Task 생명주기 | `masc_add_task`, `masc_claim`, `masc_transition` |
+| `Core_Task` | Task 생명주기 | `masc_add_task`, `masc_claim_next`, `masc_transition` |
 | `Core_Session` | Team session | `masc_team_session_start/step/finalize` |
 | `Core_Ops` | 고급 운영 | `masc_run_init`, `masc_operator_snapshot`, dispatch, policy |
 | `Comm` | 커뮤니케이션 | `masc_broadcast`, `masc_messages`, `masc_lock` |

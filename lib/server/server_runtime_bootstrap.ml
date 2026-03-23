@@ -687,10 +687,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       bootstrap_server_state state;
       (* Install governance pipeline pre_hook before any tool calls are served.
-         Reads MASC_GOVERNANCE_LEVEL env var; defaults to "development". *)
+         Defaults to "production": Critical-risk tools (delete/reset/kill/destroy)
+         require operator confirmation. Set MASC_GOVERNANCE_LEVEL=development
+         to disable for local testing. *)
       (let governance_level =
          Sys.getenv_opt "MASC_GOVERNANCE_LEVEL"
-         |> Option.value ~default:"development"
+         |> Option.value ~default:"production"
          |> String.lowercase_ascii
        in
        Governance_pipeline.install ~config:state.room_config ~governance_level);

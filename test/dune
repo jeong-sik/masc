@@ -857,6 +857,18 @@
  (modules test_tool_permissions)
  (libraries masc_mcp alcotest yojson))
 
+; Keeper-Agent Tool Isolation — structural namespace separation
+(test
+ (name test_keeper_agent_isolation)
+ (modules test_keeper_agent_isolation)
+ (libraries masc_mcp alcotest yojson))
+
+; Tool Permissions Exhaustive — all admin tools denied by default
+(test
+ (name test_tool_permissions_exhaustive)
+ (modules test_tool_permissions_exhaustive)
+ (libraries masc_mcp alcotest str yojson))
+
 ; SSE External Subscriber — gRPC/external hooks into SSE broadcast
 (test
  (name test_sse_external_sub)

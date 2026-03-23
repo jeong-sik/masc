@@ -91,20 +91,15 @@ export function agentJournalEntries(agentName: string | null): JournalEntry[] {
 
 // --- Actions ---
 
+// Keeper redirect — set by agent-detail.ts to avoid circular imports.
+let _keeperRedirect: ((agentName: string) => boolean) | null = null
+
+export function setKeeperRedirect(fn: (agentName: string) => boolean): void {
+  _keeperRedirect = fn
+}
+
 export function openAgentDetail(agentName: string): void {
-  // If the agent has a linked keeper, open the richer keeper detail overlay instead
-  const keeper = keeperForAgent(agentName)
-  if (keeper) {
-    // Lazy import to avoid circular dependency
-    import('./keeper-detail').then(mod => {
-      mod.openKeeperDetail(keeper)
-    }).catch(() => {
-      // Fallback to agent detail if import fails
-      selectedAgentName.value = agentName
-      void refreshAgentDetail()
-    })
-    return
-  }
+  if (_keeperRedirect && _keeperRedirect(agentName)) return
   selectedAgentName.value = agentName
   void refreshAgentDetail()
 }

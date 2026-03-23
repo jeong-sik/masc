@@ -27,12 +27,24 @@ import {
   closeAgentDetail,
   refreshAgentDetail,
   submitMention,
+  setKeeperRedirect,
   type TaskHistoryRow,
 } from './agent-detail-state'
+import { openKeeperDetail } from './keeper-detail'
 import type { Task } from '../types'
 
 // Re-export public API for external consumers
 export { selectedAgentName, openAgentDetail, closeAgentDetail } from './agent-detail-state'
+
+// Wire keeper redirect: keeper-linked agents open the keeper detail overlay
+setKeeperRedirect((agentName: string) => {
+  const keeper = keeperForAgent(agentName)
+  if (keeper) {
+    openKeeperDetail(keeper)
+    return true
+  }
+  return false
+})
 
 function TaskSummary({ task }: { task: Task }) {
   return html`

@@ -429,7 +429,10 @@ let default_shard_names : string list = [
   "base";
   "board";
   "filesystem";
-  "shell";
+  (* "shell" removed from defaults — opt-in via masc_tool_grant.
+     keeper_bash and keeper_github require explicit shell shard grant.
+     Defense-in-depth: even with shell shard, keeper_bash validates
+     commands against Worker_dev_tools.dev_allowed_commands allowlist. *)
   "weather";
   "voice";
   "library";

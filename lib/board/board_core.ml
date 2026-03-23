@@ -5,9 +5,8 @@ include Board_types
 
 (** Flush interval in seconds - configurable via MASC_BOARD_FLUSH_INTERVAL_SEC env var *)
 let flush_interval_sec =
-  match Sys.getenv_opt "MASC_BOARD_FLUSH_INTERVAL_SEC" with
-  | Some s -> (try float_of_string s with Failure _ -> 30.0)
-  | None -> 30.0
+  try float_of_string (Sys.getenv_opt "MASC_BOARD_FLUSH_INTERVAL_SEC" |> Option.value ~default:"30")
+  with Failure _ -> 30.0
 
 let create_store () = {
   posts = Hashtbl.create 1024;

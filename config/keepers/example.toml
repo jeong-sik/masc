@@ -29,7 +29,7 @@ active_model = "llama:qwen3.5-35b-a3b-ud-q4-xl"
 # Trigger and scope
 room_scope = "all"
 scope_kind = "global"
-trigger_mode = "explicit_only"
+trigger_mode = "legacy"             # "legacy" enables proactive behavior
 mention_targets = ["sherlock", "log-analyzer"]
 
 # Proactive behavior
@@ -37,16 +37,12 @@ proactive_enabled = true
 presence_keepalive = true
 presence_keepalive_sec = 30
 
-# Policy
-policy_mode = "heuristic"
+# Policy (policy_mode defaults to "heuristic", rarely needs override)
 policy_action_budget = "board"
 policy_shell_mode = "readonly"
-policy_voice_enabled = false
 
 # Initiative (autonomous posting)
 initiative_enabled = true
 initiative_scope = "board_only"
 initiative_idle_sec = 3600
 initiative_cooldown_sec = 3600
-initiative_context_mode = "board_snapshot"
-initiative_post_ttl_hours = 24

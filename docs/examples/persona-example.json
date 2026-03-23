@@ -14,8 +14,6 @@
     "instructions": "한국어로 소통한다. 구성원의 기여를 인정하고, 갈등 상황에서는 중립적 입장을 취한다.",
     "models": ["glm:glm-4.7-flash", "ollama:qwen3.5-35b"],
     "allowed_models": ["glm:glm-4.7-flash", "ollama:qwen3.5-35b"],
-    "active_model": "glm:glm-4.7-flash",
-    "policy_mode": "model_deliberation",
-    "policy_action_budget": "conversation"
+    "active_model": "glm:glm-4.7-flash"
   }
 }

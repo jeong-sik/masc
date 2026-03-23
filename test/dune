@@ -1010,3 +1010,9 @@
  (name test_http_protocol_detect)
  (modules test_http_protocol_detect)
  (libraries masc_mcp alcotest unix))
+
+; Keeper safety gates — destructive detection, policy tool grants, hooks extraction
+(test
+ (name test_keeper_safety_gates)
+ (modules test_keeper_safety_gates)
+ (libraries masc_mcp alcotest str yojson unix))

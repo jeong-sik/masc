@@ -70,7 +70,7 @@ let maybe_append_keeper_fallback_models (models : string list) =
 let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
   Oas_model_resolve.ensure_api_keys_for_labels labels
 
-(** Legacy single-file metrics path (for fallback reads). *)
+(** Single-file metrics path kept for fallback reads. *)
 let keeper_metrics_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".metrics.jsonl")
 

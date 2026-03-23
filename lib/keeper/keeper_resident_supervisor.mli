@@ -32,7 +32,7 @@ val init : bus:Agent_sdk.Event_bus.t -> unit
 val supervise_keepalive :
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
 (** Start a keeper heartbeat loop inside a supervised fiber.
-    Registers in both the legacy keepalive registry (backward compat)
+    Registers in both the keepalive registry
     and the supervisor registry (Promise-based liveness tracking).
     On fiber termination, resolves the Promise and publishes
     resident-lifecycle events via Event_bus. *)

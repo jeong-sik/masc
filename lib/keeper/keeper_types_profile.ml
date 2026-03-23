@@ -159,7 +159,7 @@ let canonical_scope_kind = function
 
 let canonical_trigger_mode = function
   | "explicit_only" -> "explicit_only"
-  | _ -> "legacy"
+  | _ -> "explicit_only"
 
 let canonical_policy_mode = function
   | "learned_offline_v1" -> "learned_offline_v1"
@@ -343,7 +343,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            |> Option.map canonical_policy_shell_mode;
          room_scope = str "room_scope";
          scope_kind = str "scope_kind";
-         trigger_mode = str "trigger_mode";
+         trigger_mode =
+           str "trigger_mode"
+           |> Option.map canonical_trigger_mode;
          mention_targets = strs "mention_targets";
          presence_keepalive = bool_ "presence_keepalive";
          presence_keepalive_sec = int_ "presence_keepalive_sec";
@@ -447,7 +449,9 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   |> Option.map canonical_policy_shell_mode;
                 room_scope = Safe_ops.json_string_opt "room_scope" keeper_json;
                 scope_kind = Safe_ops.json_string_opt "scope_kind" keeper_json;
-                trigger_mode = Safe_ops.json_string_opt "trigger_mode" keeper_json;
+                trigger_mode =
+                  Safe_ops.json_string_opt "trigger_mode" keeper_json
+                  |> Option.map canonical_trigger_mode;
                 mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
                 presence_keepalive = Safe_ops.json_bool_opt "presence_keepalive" keeper_json;
                 presence_keepalive_sec = Safe_ops.json_int_opt "presence_keepalive_sec" keeper_json;
@@ -535,4 +539,3 @@ let session_base_dir (config : Room.config) =
 
 let keeper_agent_name name =
   Printf.sprintf "keeper-%s-agent" name
-

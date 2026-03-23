@@ -29,7 +29,7 @@ active_model = "llama:qwen3.5-35b-a3b-ud-q4-xl"
 # Trigger and scope
 room_scope = "all"
 scope_kind = "global"
-trigger_mode = "legacy"             # "legacy" enables proactive behavior
+trigger_mode = "explicit_only"      # only explicit direct mentions wake the keeper
 mention_targets = ["sherlock", "log-analyzer"]
 
 # Proactive behavior

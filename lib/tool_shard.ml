@@ -156,6 +156,11 @@ let shell_tools : Types.tool_schema list = [
       ("required", `List [`String "op"]);
     ];
   };
+]
+
+(** Coding tools — arbitrary shell and github access.
+    NOT in default shards. Only granted when policy_shell_mode = "coding". *)
+let coding_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
     description = "Run a shell command from project root. Use for build/test/check commands.";
@@ -374,7 +379,14 @@ let shard_shell : shard = {
   name = "shell";
   tools = shell_tools;
   removable = true;
-  description = "Shell access: bash, github";
+  description = "Read-only shell: pwd, ls, cat, rg, git_status";
+}
+
+let shard_coding : shard = {
+  name = "coding";
+  tools = coding_tools;
+  removable = true;
+  description = "Coding tools: bash, github (requires policy_shell_mode=coding)";
 }
 
 let shard_weather : shard = {
@@ -451,6 +463,7 @@ let all_shards : (string, shard) Hashtbl.t =
     shard_board;
     shard_filesystem;
     shard_shell;
+    shard_coding;
     shard_weather;
     shard_voice;
     shard_library;

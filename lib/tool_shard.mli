@@ -95,5 +95,12 @@ val autoresearch_keeper_tools : Types.tool_schema list
 val shard_autoresearch : shard
 (** Autoresearch shard: start, cycle, status, inject, stop. *)
 
+val coding_tools : Types.tool_schema list
+(** Coding shard tools (keeper_bash, keeper_github).
+    Not in default shards — only granted when policy_shell_mode = "coding". *)
+
+val shard_coding : shard
+(** Coding shard: bash, github (requires policy_shell_mode=coding). *)
+
 val keeper_model_tools : Types.tool_schema list
-(** Full tool set (all 11 tools) — backward compatible with existing code. *)
+(** Default tool set from default shards — excludes coding tools. *)

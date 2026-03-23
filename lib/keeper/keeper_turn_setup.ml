@@ -127,7 +127,7 @@ let ensure_keeper_exists
       |> canonical_scope_kind
     in
     let trigger_mode =
-      profile_defaults.trigger_mode |> Option.value ~default:"legacy"
+      profile_defaults.trigger_mode |> Option.value ~default:"explicit_only"
       |> canonical_trigger_mode
     in
     let mention_targets =
@@ -336,4 +336,3 @@ let apply_settings_update
         | Error e -> Log.Keeper.warn "write_meta failed (settings): %s" e)
      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn ~label:"write_meta (settings) failed" exn);
     updated
-

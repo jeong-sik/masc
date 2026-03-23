@@ -103,7 +103,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     |> first_some
          (if String.trim old.trigger_mode <> "" then Some old.trigger_mode else None)
     |> first_some p.profile_defaults.trigger_mode
-    |> Option.value ~default:"legacy"
+    |> Option.value ~default:"explicit_only"
     |> canonical_trigger_mode
   in
   let mention_targets =
@@ -199,16 +199,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
         p.presence_keepalive_sec_opt;
     proactive_enabled =
       Option.value
-        ~default:
-          (Option.value
-             ~default:
-               (if
-                  trigger_mode
-                  |> Keeper_contract.trigger_mode_of_string
-                  |> Keeper_contract.trigger_mode_is_explicit_only
-                then false
-                else old.proactive_enabled)
-             p.profile_defaults.proactive_enabled)
+        ~default:old.proactive_enabled
         p.proactive_enabled_opt;
     proactive_idle_sec =
       Option.value ~default:old.proactive_idle_sec p.proactive_idle_sec_opt

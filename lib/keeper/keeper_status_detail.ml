@@ -468,12 +468,16 @@ let handle_keeper_status ctx args : tool_result =
              ("voice_enabled", `Bool m.policy_voice_enabled);
              ("shell_mode", `String m.policy_shell_mode);
              ("allowed_paths", string_list_to_json m.allowed_paths);
-             ("allowed_tools", string_list_to_json allowed_tools);
-             ("available_internal_tools", string_list_to_json all_internal_tools);
-             ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
+           ("allowed_tools", string_list_to_json allowed_tools);
+            ("available_internal_tools", string_list_to_json all_internal_tools);
+            ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
            ]);
            ("initiative", initiative_surface_json defaults_snapshot.defaults);
            ("auto_team_session", auto_team_session_surface_json ());
+           ("auto_team_session_enabled", `Bool (auto_team_session_enabled m));
+           ("initiative", initiative_surface_json defaults_snapshot.defaults);
+           ("auto_team_session", auto_team_session_surface_json ());
+           ("auto_team_session_enabled", `Bool (auto_team_session_enabled m));
            ("active_team_session_id",
              match m.active_team_session_id with
              | Some session_id -> `String session_id
@@ -523,7 +527,7 @@ let handle_keeper_status ctx args : tool_result =
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path ctx.config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
-             ("metrics_legacy", `String metrics_path);
+             ("metrics_single_file", `String metrics_path);
              ("memory_bank", `String memory_bank_path);
              ("policy", `String (keeper_policy_log_path ctx.config m.name));
              ("feedback", `String (keeper_feedback_log_path ctx.config m.name));

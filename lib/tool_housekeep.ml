@@ -19,7 +19,7 @@ let classify_path path =
   let base = Filename.basename path in
   let dir = Filename.basename (Filename.dirname path) in
   if Filename.check_suffix base ".json" && dir = "perpetual-keepers" then "keeper_meta"
-  else if Filename.check_suffix base ".metrics.jsonl" then "keeper_metrics_legacy"
+  else if Filename.check_suffix base ".metrics.jsonl" then "keeper_metrics_single_file"
   else if Filename.check_suffix base ".memory.jsonl" then "keeper_memory"
   else if Filename.check_suffix base ".policy.jsonl" then "keeper_policy"
   else if Filename.check_suffix base ".feedback.jsonl" then "keeper_feedback"

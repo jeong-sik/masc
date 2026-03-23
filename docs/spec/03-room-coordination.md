@@ -567,7 +567,6 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 |------|------|
 | `masc_add_task` | 태스크 추가 (title, priority 1-5, description) |
 | `masc_batch_add_tasks` | 복수 태스크 일괄 추가 |
-| `masc_claim` | 태스크 할당 (role 검사 포함) |
 | `masc_claim_next` | 최고 우선순위 미할당 태스크 자동 할당 |
 | `masc_transition` | 통합 상태 전이 (claim, start, done, cancel, release) |
 | `masc_update_priority` | 태스크 우선순위 변경 |

@@ -138,7 +138,7 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
       crash_log = ref [];
     } in
     Hashtbl.replace supervised_registry meta.name entry;
-    (* Backward compat: register in legacy keepalive registry *)
+    (* Register in the shared keepalive registry *)
     let wakeup = ref false in
     Keeper_keepalive.register_keepalive meta.name
       { Keeper_keepalive.stop; wakeup; started_at = now; grpc_close = None };

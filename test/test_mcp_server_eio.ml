@@ -915,7 +915,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
 
-let test_handle_request_tools_call_deprecated_claim_alias () =
+let test_handle_request_tools_call_transition_claim_requires_action () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
@@ -957,10 +957,8 @@ let test_handle_request_tools_call_deprecated_claim_alias () =
     Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
   in
   let response_text = Yojson.Safe.to_string response in
-  Alcotest.(check bool) "deprecated claim still callable" true
-    (contains_substring response_text "task-001");
-  Alcotest.(check bool) "deprecated claim guidance omits plan_set_task" false
-    (List.mem "masc_plan_set_task" (workflow_next_step_names response));
+  Alcotest.(check bool) "missing action rejected" true
+    (contains_substring response_text "action is required");
   cleanup_dir base_path
 
 let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
@@ -1099,12 +1097,15 @@ let test_handle_request_tools_list_include_deprecated_claim_alias_metadata () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   let tools = tools_from_response response in
   let transition_tool = find_tool_exn tools "masc_transition" in
-  Alcotest.(check string) "claim lifecycle" "deprecated"
+  Alcotest.(check string) "transition lifecycle remains active" "active"
     (tool_string_field transition_tool "lifecycle");
-  Alcotest.(check string) "claim canonicalName" "masc_transition"
-    (tool_string_field transition_tool "canonicalName");
-  Alcotest.(check string) "claim replacement" "masc_transition(action=claim)"
-    (tool_string_field transition_tool "replacement");
+  (match transition_tool with
+   | `Assoc fields ->
+       Alcotest.(check bool) "transition omits canonical alias metadata" false
+         (List.mem_assoc "canonicalName" fields);
+       Alcotest.(check bool) "transition omits replacement alias metadata" false
+         (List.mem_assoc "replacement" fields)
+   | _ -> Alcotest.fail "tool is not an object");
   cleanup_dir base_path
 
 let test_handle_request_tools_list_hides_team_session_turn_by_default () =
@@ -2470,8 +2471,8 @@ let eio_tests = [
     test_handle_request_tools_call_transition_claim_guidance;
   "handle tools/call transition done guidance", `Quick,
     test_handle_request_tools_call_transition_done_guidance;
-  "handle tools/call deprecated claim alias", `Quick,
-    test_handle_request_tools_call_deprecated_claim_alias;
+  "handle tools/call transition claim requires action", `Quick,
+    test_handle_request_tools_call_transition_claim_requires_action;
   "handle tools/call cache get structured content", `Quick,
     test_handle_request_tools_call_cache_get_structured_content;
   "handle tools/call board post structured content", `Quick,

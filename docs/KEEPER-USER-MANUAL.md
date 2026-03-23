@@ -207,7 +207,7 @@ spawn 시 인자로 직접 설정하는 필드.
 | `instructions` | string | `""` | 커스텀 시스템 프롬프트 | `masc_keeper_up`의 `instructions` 인자 |
 | `presence_keepalive` | bool | `true` | keepalive fiber 활성화 여부 | `masc_keeper_up`의 `presence_keepalive` 인자 |
 | `presence_keepalive_sec` | int | `30` | heartbeat 주기 (초) | `masc_keeper_up`의 `presence_keepalive_sec` 인자 |
-| `proactive_enabled` | bool | trigger_mode 의존 | 자발적 메시지 생성 활성화 | `masc_keeper_up`의 `proactive_enabled` 인자 |
+| `proactive_enabled` | bool | 기본 `false` | 자발적 메시지 생성 활성화 | `masc_keeper_up`의 `proactive_enabled` 인자 |
 | `auto_handoff` | bool | `true` | context 초과 시 자동 handoff | `masc_keeper_up`의 `auto_handoff` 인자 |
 | `handoff_threshold` | float | `0.85` | handoff 트리거 context_ratio | `masc_keeper_up`의 `handoff_threshold` 인자 |
 | `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |

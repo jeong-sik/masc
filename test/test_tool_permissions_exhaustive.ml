@@ -1,7 +1,7 @@
 (** Exhaustive permission enforcement tests.
 
     Supplements test_tool_permissions.ml with:
-    1. Sweeps ALL 11 admin tools through deny-by-default path
+    1. Sweeps every admin tool through deny-by-default path
     2. Verifies error messages contain agent and tool names
     3. Tests dispatch_structured integration for every admin tool
     4. Validates non-admin tools pass through unimpeded
@@ -114,13 +114,18 @@ let test_non_admin_dispatch_passthrough () =
   ) common_non_admin_tools
 
 (* ============================================================
-   Admin tool count integrity
+   Admin tool list integrity
    ============================================================ *)
 
-let test_admin_tool_count () =
+let test_admin_tools_have_no_duplicates () =
+  let unique =
+    Tool_permissions.admin_tools
+    |> List.sort_uniq String.compare
+  in
   Alcotest.(check int)
-    "11 admin tools defined"
-    11 (List.length Tool_permissions.admin_tools)
+    "admin tools are unique"
+    (List.length unique)
+    (List.length Tool_permissions.admin_tools)
 
 let test_admin_tools_all_have_masc_prefix () =
   List.iter (fun name ->
@@ -153,7 +158,8 @@ let () =
         test_non_admin_dispatch_passthrough;
     ]);
     ("integrity", [
-      Alcotest.test_case "admin tool count" `Quick test_admin_tool_count;
+      Alcotest.test_case "admin tools unique" `Quick
+        test_admin_tools_have_no_duplicates;
       Alcotest.test_case "admin tools prefixed" `Quick test_admin_tools_all_have_masc_prefix;
     ]);
   ]

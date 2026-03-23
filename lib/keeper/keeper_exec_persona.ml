@@ -107,7 +107,7 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   if policy_shell_mode = "readonly" && policy_mode <> "learned_offline_v1" then
     errors := "policy_shell_mode=readonly requires learned_offline_v1" :: !errors;
   if
-    (Safe_ops.json_string ~default:"legacy" "trigger_mode" json
+    (Safe_ops.json_string ~default:"explicit_only" "trigger_mode" json
      |> Keeper_contract.trigger_mode_of_string
      |> Keeper_contract.trigger_mode_is_explicit_only)
     && mention_targets = []
@@ -244,7 +244,7 @@ let resolved_keeper_args_from_persona args :
             let trigger_mode =
               get_string_opt args "trigger_mode"
               |> first_some defaults.trigger_mode
-              |> Option.value ~default:"legacy"
+              |> Option.value ~default:"explicit_only"
               |> canonical_trigger_mode
             in
             let mention_targets =

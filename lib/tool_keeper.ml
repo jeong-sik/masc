@@ -111,7 +111,7 @@ let handle_resident_keeper_up ctx args : tool_result =
 
 let handle_resident_keeper_status ctx args : tool_result =
   let name = get_string args "name" "" in
-  if validate_name name then maybe_promote_live_legacy_keeper ctx.config name;
+  if validate_name name then maybe_promote_live_persistent_keeper ctx.config name;
   match read_resident_keeper ctx.config name with
   | Error e -> (false, "❌ " ^ e)
   | Ok None -> (false, Printf.sprintf "resident keeper not found: %s" name)
@@ -152,7 +152,7 @@ let inject_goal_from_message args =
 
 let handle_resident_keeper_msg ctx args : tool_result =
   let name = get_string args "name" "" in
-  if validate_name name then maybe_promote_live_legacy_keeper ctx.config name;
+  if validate_name name then maybe_promote_live_persistent_keeper ctx.config name;
   let ensure_result =
     match read_resident_keeper ctx.config name with
     | Ok (Some _) -> Ok ()
@@ -186,7 +186,7 @@ let handle_resident_keeper_msg ctx args : tool_result =
 
 let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
   let name = get_string args "name" "" in
-  if validate_name name then maybe_promote_live_legacy_keeper ctx.config name;
+  if validate_name name then maybe_promote_live_persistent_keeper ctx.config name;
   let ensure_result =
     match read_resident_keeper ctx.config name with
     | Ok (Some _) -> Ok ()

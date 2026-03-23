@@ -1,6 +1,5 @@
-// Ops helpers — signals, types, utilities, action dispatch
+// Ops helpers — shared view helpers built on top of the canonical ops state.
 
-import { signal } from '@preact/signals'
 import { showToast } from '../common/toast'
 import { prettyJson, displayStatus, statusLabel } from '../../lib/status-label'
 import type {
@@ -17,41 +16,46 @@ import {
   operatorSnapshot,
 } from '../../operator-store'
 import type { DashboardWorkflowContext } from '../../workflow-context'
+import {
+  actorName,
+  broadcastMessage,
+  pauseReason,
+  taskTitle,
+  taskDescription,
+  taskPriority,
+  selectedSessionId,
+  teamTurnKind,
+  teamMessage,
+  teamTaskTitle,
+  teamTaskDescription,
+  teamTaskPriority,
+  teamSpawnBatchJson,
+  teamStopReason,
+  selectedKeeperName,
+  keeperMessage,
+  hydratedWorkflowId,
+  persistActorName,
+} from './ops-state'
 
-const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
-
-function initialActorName(): string {
-  const params = new URLSearchParams(window.location.search)
-  return (
-    params.get('agent')?.trim()
-    || params.get('agent_name')?.trim()
-    || localStorage.getItem(AGENT_NAME_KEY)?.trim()
-    || 'dashboard'
-  )
-}
-
-export const actorName = signal(initialActorName())
-export const broadcastMessage = signal('')
-export const pauseReason = signal('운영 점검')
-export const taskTitle = signal('')
-export const taskDescription = signal('')
-export const taskPriority = signal('2')
-export const selectedSessionId = signal('')
-export const teamTurnKind = signal<'note' | 'broadcast' | 'task' | 'worker_spawn_batch'>('note')
-export const teamMessage = signal('')
-export const teamTaskTitle = signal('')
-export const teamTaskDescription = signal('')
-export const teamTaskPriority = signal('2')
-export const teamSpawnBatchJson = signal('')
-export const teamStopReason = signal('운영자 중지 요청')
-export const selectedKeeperName = signal('')
-export const keeperMessage = signal('')
-export const hydratedWorkflowId = signal<string | null>(null)
-
-export function persistActorName(value: string): void {
-  const trimmed = value.trim() || 'dashboard'
-  actorName.value = trimmed
-  localStorage.setItem(AGENT_NAME_KEY, trimmed)
+export {
+  actorName,
+  broadcastMessage,
+  pauseReason,
+  taskTitle,
+  taskDescription,
+  taskPriority,
+  selectedSessionId,
+  teamTurnKind,
+  teamMessage,
+  teamTaskTitle,
+  teamTaskDescription,
+  teamTaskPriority,
+  teamSpawnBatchJson,
+  teamStopReason,
+  selectedKeeperName,
+  keeperMessage,
+  hydratedWorkflowId,
+  persistActorName,
 }
 
 export { prettyJson, displayStatus }

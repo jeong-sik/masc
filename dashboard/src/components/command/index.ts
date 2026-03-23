@@ -90,11 +90,7 @@ function SurfaceBody() {
 
 export function Command() {
   useEffect(() => {
-    void refreshCommandPlaneCurrentSurface()
-    void refreshCommandPlaneChainSummary()
     void refreshCommandPlaneHelp()
-    void refreshCommandPlaneSwarm()
-    void refreshCommandPlaneOrchestra()
   }, [])
 
   useEffect(() => {
@@ -118,10 +114,10 @@ export function Command() {
       focusCommandPlaneChainOperation(requestedOperation)
     }
     if (requestedSurface === 'swarm' || requestedSurface === 'orchestra' || commandPlaneSurface.value === 'orchestra') {
-      void refreshCommandPlaneSwarm()
+      void refreshCommandPlaneSwarm(undefined, undefined, { force: true })
     }
     if (requestedSurface === 'orchestra' || commandPlaneSurface.value === 'orchestra') {
-      void refreshCommandPlaneOrchestra()
+      void refreshCommandPlaneOrchestra(undefined, undefined, { force: true })
     }
   }, [
     route.value.tab,
@@ -143,13 +139,13 @@ export function Command() {
       if (refreshTimer) return
       refreshTimer = window.setTimeout(() => {
         refreshTimer = null
-        void refreshCommandPlaneCurrentSurface()
-        void refreshCommandPlaneChainSummary()
+        void refreshCommandPlaneCurrentSurface({ force: true })
+        void refreshCommandPlaneChainSummary({ force: true })
         if (commandPlaneSurface.value === 'swarm' || commandPlaneSurface.value === 'orchestra') {
-          void refreshCommandPlaneSwarm()
+          void refreshCommandPlaneSwarm(undefined, undefined, { force: true })
         }
         if (commandPlaneSurface.value === 'orchestra') {
-          void refreshCommandPlaneOrchestra()
+          void refreshCommandPlaneOrchestra(undefined, undefined, { force: true })
         }
       }, 250)
     }
@@ -212,10 +208,10 @@ export function Command() {
           <button type="button"
             class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
             onClick=${() => {
-              void refreshRoomTruth()
-              void refreshCommandPlaneCurrentSurface()
-              void refreshCommandPlaneChainSummary()
-              void refreshCommandPlaneSwarm()
+              void refreshRoomTruth({ force: true })
+              void refreshCommandPlaneCurrentSurface({ force: true })
+              void refreshCommandPlaneChainSummary({ force: true })
+              void refreshCommandPlaneSwarm(undefined, undefined, { force: true })
             }}
             disabled=${commandPlaneLoading.value}
           >

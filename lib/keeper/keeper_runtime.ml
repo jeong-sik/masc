@@ -5,7 +5,7 @@ open Keeper_types
 open Keeper_keepalive
 open Keeper_exec_status
 
-let maybe_promote_live_legacy_keeper config name =
+let maybe_promote_live_persistent_keeper config name =
   match read_meta config name with
   | Error _ | Ok None -> ()
   | Ok (Some meta) ->
@@ -66,7 +66,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
         |> List.filter (fun f -> Filename.check_suffix f ".json")
         |> List.iter (fun f ->
                let name = Filename.remove_extension f in
-               if validate_name name then maybe_promote_live_legacy_keeper ctx.config name)
+               if validate_name name then maybe_promote_live_persistent_keeper ctx.config name)
     | Error _ -> ());
     let now_ts = Time_compat.now () in
     let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in

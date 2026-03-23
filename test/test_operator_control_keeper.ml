@@ -298,9 +298,13 @@ let test_keeper_msg_auto_team_session_bridge () =
   (* This test triggers a real LLM cascade call (keeper_msg -> run_turn).
      In CI there is no LLM server, so the cascade hangs until timeout.
      Skip when CI=true or ALCOTEST_QUICK_TESTS=1 to prevent the build
-     from timing out.  See: #1936 *)
+     from timing out. The quick-suite harness also exports
+     CI_TEST_TIMEOUT_SEC, which is more reliable than ALCOTEST_QUICK_TESTS
+     under dune test in CI. See: #1936 *)
   if Sys.getenv_opt "CI" = Some "true"
      || Sys.getenv_opt "ALCOTEST_QUICK_TESTS" = Some "1" then
+    Alcotest.skip ()
+  else if Sys.getenv_opt "CI_TEST_TIMEOUT_SEC" <> None then
     Alcotest.skip ()
   else
   Eio_main.run @@ fun env ->
@@ -385,7 +389,6 @@ let test_keeper_msg_auto_team_session_bridge () =
         | Ok None -> Alcotest.fail "keeper meta missing after keeper_msg"
         | Error err -> Alcotest.fail ("meta read failed: " ^ err)
       in
-      (* auto_team_session is a live bridge now and should surface as wired. *)
       Alcotest.(check (option string)) "linked session id"
         (Some session_id) meta.active_team_session_id;
       Alcotest.(check int) "start count" 1 meta.team_session_start_count_total;
@@ -406,8 +409,13 @@ let test_keeper_msg_auto_team_session_bridge () =
       let status_json = parse_json_exn status_body in
       Alcotest.(check string) "status exposes auto team session wiring" "wired"
         Yojson.Safe.Util.(status_json |> member "auto_team_session" |> member "status" |> to_string);
+      Alcotest.(check bool) "status exposes auto team session enabled" true
+        Yojson.Safe.Util.(status_json |> member "auto_team_session_enabled" |> to_bool);
       Alcotest.(check string) "status exposes running bridge" "running"
         Yojson.Safe.Util.(status_json |> member "team_session_state" |> to_string);
+      Alcotest.(check bool) "status exposes bridge enabled" true
+        Yojson.Safe.Util.(
+          status_json |> member "team_session_bridge" |> member "enabled" |> to_bool);
       let events = Team_session_store.read_recent_events config session_id ~max_count:10 in
       let note_events =
         List.filter

@@ -275,64 +275,58 @@ let run_cmd host port base_path =
   (* Initialize thread-safe token store for cancellation support *)
   Masc_mcp.Cancellation.TokenStore.init ();
 
-  (* Graceful shutdown setup *)
-  let switch_ref = ref None in
-  let shutdown_initiated = ref false in
-  let force_exit_timer_started = ref false in
-  let initiate_shutdown signal_name =
-    if not !shutdown_initiated then begin
-      shutdown_initiated := true;
-      Log.Server.info "[MASC] Received %s, shutting down gracefully..." signal_name;
-
-      (* Start force-exit timer: if shutdown doesn't complete in 5s, force exit *)
-      if not !force_exit_timer_started then begin
-        force_exit_timer_started := true;
-        ignore (Thread.create (fun () ->
-          Unix.sleepf 5.0;
-          Log.Server.error "[MASC] Graceful shutdown timed out after 5s, forcing exit.";
-          exit 1
-        ) ())
-      end;
-
-      (* Broadcast shutdown notification to all SSE clients *)
-      let shutdown_data = Printf.sprintf
-        {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
-        signal_name
-      in
-      Sse.broadcast (Yojson.Safe.from_string shutdown_data);
-      Log.Server.info "[MASC] Sent shutdown notification to %d SSE clients" (Sse.client_count ());
-
-      (* Give clients 200ms to receive the notification *)
-      Unix.sleepf 0.2;
-
-      (* Run all shutdown hooks (cancel orchestrator, close SSE, etc.) *)
-      Masc_mcp.Shutdown_hooks.run_all ();
-
-      (* Flush dirty board data to prevent data loss *)
-      (try Board_dispatch.flush ()
-       with _ -> Log.Server.warn "[Shutdown] Board flush skipped (not initialized)");
-
-      (* Also close local SSE connections tracked in main_eio *)
-      close_all_sse_connections ();
-
-      (* Give connections 200ms to complete close handshake *)
-      Unix.sleepf 0.2;
-
-      match !switch_ref with
-      | Some sw -> Eio.Switch.fail sw Shutdown
-      | None -> ()
-    end
+  (* Signal handlers stay side-effect free. The Eio watcher fiber performs
+     all shutdown work inside the event loop. *)
+  let pending_shutdown_signal = Atomic.make None in
+  let request_shutdown signal_name =
+    if Option.is_none (Atomic.get pending_shutdown_signal) then
+      Atomic.set pending_shutdown_signal (Some signal_name)
   in
-  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGTERM"));
-  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGINT"));
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> request_shutdown "SIGTERM"));
+  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> request_shutdown "SIGINT"));
 
   let max_bind_retries = 5 in
   let rec try_start attempt =
     (try
       Eio.Switch.run @@ fun sw ->
-      switch_ref := Some sw;
       Masc_mcp.Dashboard_cache.set_sw sw;
-      run_server ~sw ~env ~host ~port ~base_path
+      let clock = Eio.Stdenv.clock env in
+      let rec await_shutdown_signal () =
+        match Atomic.exchange pending_shutdown_signal None with
+        | None ->
+            Eio.Time.sleep clock 0.05;
+            await_shutdown_signal ()
+        | Some signal_name ->
+            Log.Server.info
+              "[MASC] Received %s, shutting down gracefully..."
+              signal_name;
+            Eio.Fiber.fork_daemon ~sw (fun () ->
+                Eio.Time.sleep clock 5.0;
+                Log.Server.error
+                  "[MASC] Graceful shutdown timed out after 5s, forcing exit.";
+                exit 1);
+            let shutdown_data =
+              Printf.sprintf
+                {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
+                signal_name
+            in
+            Sse.broadcast (Yojson.Safe.from_string shutdown_data);
+            Log.Server.info
+              "[MASC] Sent shutdown notification to %d SSE clients"
+              (Sse.client_count ());
+            Eio.Time.sleep clock 0.2;
+            Masc_mcp.Shutdown_hooks.run_all ();
+            (try Board_dispatch.flush ()
+             with _ ->
+               Log.Server.warn
+                 "[Shutdown] Board flush skipped (not initialized)");
+            close_all_sse_connections ();
+            Eio.Time.sleep clock 0.2;
+            raise Shutdown
+      in
+      Eio.Fiber.first
+        (fun () -> run_server ~sw ~env ~host ~port ~base_path)
+        await_shutdown_signal
     with
     | Shutdown ->
         Log.Server.info "MASC MCP: Shutdown complete."

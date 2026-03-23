@@ -20,6 +20,7 @@ type t = {
   llm_url : string;            (** OpenAI-compatible endpoint URL *)
   llm_api_key : string;        (** API key (empty = no auth header) *)
   llm_timeout_sec : float;     (** per-request timeout *)
+  llm_max_tokens : int;        (** max tokens per LLM response (reasoning + output) *)
   system_prompt : string;
 }
 
@@ -46,6 +47,7 @@ let default ?(repo = default_repo_config ()) () : t =
       | Some k -> k
       | None -> "");
     llm_timeout_sec = 120.0;
+    llm_max_tokens = 8192;
     system_prompt =
       "You are a code improvement researcher for an OCaml codebase (MASC MCP server). \
        Propose ONE focused, small change per experiment. Prioritize: \

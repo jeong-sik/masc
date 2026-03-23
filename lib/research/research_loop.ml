@@ -182,7 +182,7 @@ let generate_hypothesis ~(config : Research_config.t)
       `Assoc [("role", `String "user"); ("content", `String user_msg)];
     ]);
     ("temperature", `Float 0.7);
-    ("max_tokens", `Int 4096);
+    ("max_tokens", `Int config.llm_max_tokens);
   ] in
   let body = Yojson.Safe.to_string payload in
   let url = config.llm_url in

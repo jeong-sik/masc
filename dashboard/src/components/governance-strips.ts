@@ -36,17 +36,17 @@ export function ActivityRail() {
         ${grouped.size === 0
           ? html`<${EmptyState} message="거버넌스 활동이 아직 없습니다." compact />`
           : Array.from(grouped.entries()).map(([, group]) => html`
-              <div class="governance-case-group rounded-lg">
+              <div class="p-3 rounded-xl border border-card-border bg-card/40">
                 <div class="flex items-center justify-between mb-2 gap-2">
-                  <span class="governance-case-topic">${group.topic}</span>
+                  <span class="text-[13px] font-semibold text-text-strong truncate">${group.topic}</span>
                   <${LifecycleProgress} events=${group.events} />
                 </div>
-                <div class="governance-case-events">
+                <div class="flex flex-col gap-1.5">
                   ${group.events.map((event: GovernanceTimelineEvent) => html`
-                    <div class="governance-activity-row">
+                    <div class="flex items-center gap-2 text-xs">
                       <span class="governance-badge rounded-full ${governanceToneClass(event.kind)}">${activityKindLabel(event.kind)}</span>
-                      <span class="governance-event-summary">${event.summary || ''}</span>
-                      ${event.created_at ? html`<span class="governance-event-time"><${TimeAgo} timestamp=${event.created_at} /></span>` : null}
+                      <span class="text-text-muted truncate flex-1">${event.summary || ''}</span>
+                      ${event.created_at ? html`<span class="text-text-dim text-[11px] shrink-0"><${TimeAgo} timestamp=${event.created_at} /></span>` : null}
                     </div>
                   `)}
                 </div>
@@ -74,10 +74,12 @@ function LifecycleProgress({ events }: { events: GovernanceTimelineEvent[] }) {
       ${LIFECYCLE_STEPS.map((label, index) => {
         const done = reached.has(index)
         const current = index === maxStep
-        const cls = done ? (current ? 'lifecycle-current' : 'lifecycle-done') : 'lifecycle-pending'
+        const color = done
+          ? (current ? 'text-accent font-bold' : 'text-ok')
+          : 'text-text-dim'
         return html`
-          ${index > 0 ? html`<span class="lifecycle-arrow ${done ? 'done' : ''}">-></span>` : null}
-          <span class="lifecycle-step ${cls}">${label}</span>
+          ${index > 0 ? html`<span class="text-[10px] ${done ? 'text-ok' : 'text-text-dim'}">${'\u2192'}</span>` : null}
+          <span class="text-[10px] px-1 ${color}">${label}</span>
         `
       })}
     </div>
@@ -108,28 +110,25 @@ export function RuntimeParamsPanel() {
       ${runtimeLoading.value
         ? html`<${LoadingState}>파라미터 로딩 중...<//>`
         : html`
-            <div class="governance-params-surfaces">
+            <div class="flex flex-col gap-4">
               ${surfaces.map((surface: RuntimeParamsSurface) => {
                 const surfaceParams = params.filter(p => surface.param_keys.includes(p.key))
                 return html`
-                  <div class="governance-surface-group">
-                    <div class="governance-surface-head">
-                      <strong>${surface.id}</strong>
+                  <div class="p-3 rounded-xl border border-card-border bg-card/40">
+                    <div class="flex items-center gap-2 mb-2">
+                      <strong class="text-[13px] text-text-strong">${surface.id}</strong>
                       <span class="governance-chip rounded-full ${surface.risk === 'high' ? 'warn' : ''}">${surface.risk}</span>
-                      <span class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[11px]">${surface.description}</span>
                     </div>
-                    <div class="governance-params-table">
+                    <div class="text-[11px] text-text-muted mb-3">${surface.description}</div>
+                    <div class="flex flex-col gap-1.5">
                       ${surfaceParams.map(param => html`
-                        <div class="governance-param-row ${param.has_override ? 'overridden' : ''}">
-                          <span class="governance-param-key">${param.key}</span>
-                          <span class="governance-param-value">
+                        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-white/3 ${param.has_override ? 'border border-warn/20' : ''}">
+                          <span class="text-xs font-mono text-text-muted">${param.key}</span>
+                          <span class="text-xs font-medium text-text-strong">
                             ${formatParamValue(param.current)}
                             ${param.has_override
-                              ? html`<span class="governance-chip rounded-full warn" style="margin-left:4px">override</span>`
+                              ? html`<span class="ml-1.5 text-[10px] text-warn font-bold">override</span>`
                               : null}
-                          </span>
-                          <span class="governance-param-default mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[11px]">
-                            기본: ${formatParamValue(param.default)}
                           </span>
                         </div>
                       `)}

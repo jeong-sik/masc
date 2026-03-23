@@ -24,14 +24,14 @@ import { ActivityRail } from './governance-strips'
 
 export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['petitions'][number] }) {
   return html`
-    <div class="governance-ledger-row">
+    <div class="flex flex-col gap-1.5 py-3 px-4 rounded-xl border border-card-border bg-card/40">
       <div class="flex flex-wrap items-center gap-2 text-[#9ab3de] text-[11px]">
         <span class="governance-badge rounded-full text-[#b7cbee]">청원</span>
         <strong>${petition.created_by || petition.origin || 'system'}</strong>
         ${petition.created_at ? html`<span><${TimeAgo} timestamp=${petition.created_at} /></span>` : html``}
       </div>
       <div class="mt-2 text-[#d7e7ff] leading-[1.5] break-words">${petition.title}</div>
-      <div class="governance-chip rounded-full-row">
+      <div class="flex flex-wrap gap-1.5 mt-2">
         ${petition.source_refs.map(ref => html`<span class="governance-chip rounded-full">${ref}</span>`)}
       </div>
     </div>
@@ -40,14 +40,14 @@ export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['pe
 
 export function BriefEntry({ brief }: { brief: GovernanceCaseBrief }) {
   return html`
-    <div class="governance-ledger-row">
+    <div class="flex flex-col gap-1.5 py-3 px-4 rounded-xl border border-card-border bg-card/40">
       <div class="flex flex-wrap items-center gap-2 text-[#9ab3de] text-[11px]">
         <span class="governance-badge rounded-full ${governanceToneClass(brief.stance)}">${stanceLabel(brief.stance)}</span>
         <strong>${brief.author}</strong>
         ${brief.created_at ? html`<span><${TimeAgo} timestamp=${brief.created_at} /></span>` : html``}
       </div>
       <div class="mt-2 text-[#d7e7ff] leading-[1.5] break-words">${brief.summary}</div>
-      <div class="governance-chip rounded-full-row">
+      <div class="flex flex-wrap gap-1.5 mt-2">
         ${brief.evidence_refs.map(ref => html`<span class="governance-chip rounded-full">${ref}</span>`)}
       </div>
     </div>
@@ -64,7 +64,6 @@ export function DecisionDetail() {
     <${Card}
       title=${item ? '사건 상세' : '거버넌스 상세'}
       class="section mb-4"
-     
     >
       ${detailLoading.value
         ? html`<${LoadingState}>거버넌스 상세 불러오는 중...<//>`

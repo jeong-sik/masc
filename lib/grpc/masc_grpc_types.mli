@@ -1,7 +1,7 @@
 (** MASC gRPC Coordination Types.
 
-    Wire format: JSON-encoded strings over gRPC framing.
-    See proto/masc_coordination.proto for the canonical API contract.
+    Wire format: protobuf binary over gRPC framing.
+    Types are generated from proto/masc_coordination.proto via ocaml-protoc-plugin.
 
     Each message provides [to_bytes] and [of_bytes] for both server
     (request decode + response encode) and client (request encode +
@@ -37,9 +37,6 @@ module JoinRequest : sig
   val of_bytes : string -> t
   val to_bytes : t -> string
 end
-
-val agent_info_to_json : agent_info -> Yojson.Safe.t
-val agent_info_of_json : Yojson.Safe.t -> agent_info
 
 module JoinResponse : sig
   type t = {
@@ -169,9 +166,6 @@ module BroadcastResponse : sig
 end
 
 (** {1 Status} *)
-
-val task_info_to_json : task_info -> Yojson.Safe.t
-val task_info_of_json : Yojson.Safe.t -> task_info
 
 module StatusResponse : sig
   type t = {

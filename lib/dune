@@ -718,6 +718,8 @@
    cstruct
    digestif
    ocaml-protoc-plugin
+   ;; Protobuf-generated types from proto/masc_coordination.proto
+   masc_proto
    ;; grpc grpc-lwt - disabled (h2 version conflict with httpun-eio)
    ;; grpc-direct (native Eio gRPC from lib/grpc-direct)
    grpc-direct

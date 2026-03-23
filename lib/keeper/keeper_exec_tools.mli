@@ -7,6 +7,10 @@ val keeper_allowed_tool_names : ?write_done:bool -> keeper_meta -> string list
 val keeper_allowed_model_tools :
   ?write_done:bool -> keeper_meta -> Types.tool_schema list
 
+(** Inject masc_* schemas for keeper profile-based tool filtering.
+    Must be called once during server initialization. *)
+val inject_masc_schemas : Types.tool_schema list -> unit
+
 val execute_keeper_tool_call :
   config:Room.config ->
   meta:keeper_meta ->

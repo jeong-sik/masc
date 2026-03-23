@@ -64,6 +64,48 @@ let is_research_profile (meta : keeper_meta) =
 
 let keeper_coding_tool_names = Tool_code_write.tool_names
 
+(** masc_* tool bridge — expose MCP tools to keeper by profile.
+    Schema list is injected at server init to avoid cyclic dependency on Tools.
+    Categories blocked: Core_Ops, Auth, RateLimit, Encryption, Cost,
+    Interrupt, TRPG, Unknown. *)
+
+let masc_schemas_ref : Types.tool_schema list ref = ref []
+
+let inject_masc_schemas (schemas : Types.tool_schema list) =
+  masc_schemas_ref := schemas
+
+let keeper_masc_base_categories =
+  [ Mode.Core_Room; Core_Task; Comm; Board; Health ]
+
+let keeper_masc_allowed_categories (meta : keeper_meta) : Mode.category list =
+  let cats = ref keeper_masc_base_categories in
+  if meta.policy_voice_enabled then cats := Mode.Voice :: !cats;
+  let shell = canonical_policy_shell_mode meta.policy_shell_mode in
+  (if shell = "readonly" || shell = "coding" then
+     cats := Mode.Code :: Mode.Worktree :: !cats);
+  (if shell = "coding" then cats := Mode.Plan :: !cats);
+  (if meta.soul_profile = "research" then
+     cats := Mode.Ecosystem :: Mode.Discovery :: Mode.Consensus :: !cats);
+  List.sort_uniq compare !cats
+
+let keeper_masc_tool_names (meta : keeper_meta) : string list =
+  let cats = keeper_masc_allowed_categories meta in
+  !masc_schemas_ref
+  |> List.filter_map (fun (schema : Types.tool_schema) ->
+       let cat = Mode.tool_category schema.name in
+       if List.mem cat cats
+          && String.starts_with ~prefix:"masc_" schema.name then
+         Some schema.name
+       else None)
+
+let keeper_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
+  let cats = keeper_masc_allowed_categories meta in
+  !masc_schemas_ref
+  |> List.filter (fun (schema : Types.tool_schema) ->
+       let cat = Mode.tool_category schema.name in
+       List.mem cat cats
+       && String.starts_with ~prefix:"masc_" schema.name)
+
 let dedupe_tool_names names =
   dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)
 
@@ -92,7 +134,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
         keeper_coding_shard_tool_names @ keeper_coding_tool_names @ with_research
       else with_research
     in
-    dedupe_tool_names (keeper_board_tool_names @ with_coding)
+    dedupe_tool_names (keeper_masc_tool_names meta @ keeper_board_tool_names @ with_coding)
   else
     let base_names = keeper_model_tools |> List.map (fun tool -> tool.Types.name) in
     let with_research =
@@ -100,9 +142,12 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
         keeper_research_loop_tool_names @ keeper_autoresearch_tool_names @ base_names
       else base_names
     in
-    if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
-      dedupe_tool_names (keeper_coding_shard_tool_names @ keeper_coding_tool_names @ with_research)
-    else with_research
+    let with_coding =
+      if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
+        keeper_coding_shard_tool_names @ keeper_coding_tool_names @ with_research
+      else with_research
+    in
+    dedupe_tool_names (keeper_masc_tool_names meta @ with_coding)
 
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     Types.tool_schema list =
@@ -116,12 +161,13 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
         base @ Tool_research.schemas @ Tool_shard.autoresearch_keeper_tools
       else base
     in
-    let all_tools =
+    let with_coding =
       if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
         with_research @ Tool_shard.coding_tools @ Tool_code_write.schemas
       else with_research
     in
-    all_tools
+    let with_masc = with_coding @ keeper_masc_tool_schemas meta in
+    with_masc
     |> List.filter (fun tool -> List.mem tool.Types.name allowed)
 
 let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
@@ -766,6 +812,18 @@ let execute_keeper_tool_call
           Yojson.Safe.to_string
             (`Assoc [ ("error", `String "unknown_autoresearch_tool");
                       ("tool", `String name) ]))
+  | name when String.starts_with ~prefix:"masc_" name ->
+      (* Bridge to main MCP tool dispatch registry.
+         Handlers are closures that already capture their runtime context
+         (sw, clock, net, etc.) from server initialization. *)
+      (match Tool_dispatch.dispatch ~name ~args with
+       | Some (true, msg) -> msg
+       | Some (false, msg) ->
+           Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+       | None ->
+           Yojson.Safe.to_string
+             (`Assoc [ ("error", `String "unregistered_masc_tool");
+                        ("tool", `String name) ]))
   | other ->
       Yojson.Safe.to_string
         (`Assoc [ ("error", `String "unknown_tool"); ("tool", `String other) ])

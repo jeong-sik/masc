@@ -13,25 +13,37 @@ module Web_dashboard = Masc_mcp.Web_dashboard
 (* Under `dune test`, the working directory differs from the project root,
    so assets_root() can't find assets/dashboard/index.html.
    Resolve it from the executable path: _build/default/test/foo.exe → 3 dirs up. *)
+let has_repo_root root =
+  let web_index = Filename.concat (Filename.concat root "web") "index.html" in
+  Sys.file_exists web_index
+
+let rec ascend_repo_root dir =
+  if has_repo_root dir then Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else ascend_repo_root parent
+
+let executable_repo_root () =
+  let d = Filename.dirname Sys.executable_name in
+  let d = Filename.dirname d in
+  let d = Filename.dirname d in
+  ascend_repo_root (Filename.dirname d)
+
+let project_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_repo_root root -> root
+  | _ ->
+      (match ascend_repo_root (Sys.getcwd ()) with
+       | Some root -> root
+       | None ->
+           (match executable_repo_root () with
+            | Some root -> root
+            | None -> Sys.getcwd ()))
+
 let () =
   if Sys.getenv_opt "MASC_ASSETS_ROOT" = None then
-    let candidates =
-      [ Sys.getenv_opt "DUNE_SOURCEROOT"
-      ; (let d = Filename.dirname Sys.executable_name in
-         let d = Filename.dirname d in
-         let d = Filename.dirname d in
-         Some (Filename.dirname d))
-      ]
-    in
-    List.iter
-      (fun c ->
-        match c with
-        | Some p ->
-            let assets = Filename.concat p "assets" in
-            if Sys.file_exists assets && Sys.getenv_opt "MASC_ASSETS_ROOT" = None
-            then Unix.putenv "MASC_ASSETS_ROOT" assets
-        | None -> ())
-      candidates
+    let assets = Filename.concat (project_root ()) "assets" in
+    if Sys.file_exists assets then Unix.putenv "MASC_ASSETS_ROOT" assets
 
 let contains_substr sub s =
   try
@@ -44,15 +56,6 @@ let contains_re re s =
     let _ = Str.search_forward (Str.regexp re) s 0 in
     true
   with Not_found -> false
-
-let project_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None ->
-      let d = Filename.dirname Sys.executable_name in
-      let d = Filename.dirname d in
-      let d = Filename.dirname d in
-      Filename.dirname d
 
 (* ============================================================
    html Tests — Vite SPA index.html

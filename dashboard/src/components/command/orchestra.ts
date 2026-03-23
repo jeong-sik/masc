@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from '../common/button'
 import { EmptyState } from '../common/empty-state'
 import { groupByKey } from '../common/collection'
 import { useEffect, useRef, useState } from 'preact/hooks'
@@ -339,22 +340,22 @@ export function OrchestraSurface() {
 
       <div class="orchestra-toolbar">
         <div class="orchestra-toolbar-group">
-          <button class="control-btn rounded-lg ghost" onClick=${applyFit}>맞춤 보기</button>
-          <button class="control-btn rounded-lg ghost" onClick=${resetView}>초기화</button>
+          <${ActionButton} variant="ghost" onClick=${applyFit}>맞춤 보기<//>
+          <${ActionButton} variant="ghost" onClick=${resetView}>초기화<//>
         </div>
         <div class="orchestra-toolbar-group">
-          <button
-            class="control-btn rounded-lg ghost"
+          <${ActionButton}
+            variant="ghost"
             onClick=${() => zoomAround(viewport.width / 2, viewport.height / 2, 1.12)}
           >
             확대
-          </button>
-          <button
-            class="control-btn rounded-lg ghost"
+          <//>
+          <${ActionButton}
+            variant="ghost"
             onClick=${() => zoomAround(viewport.width / 2, viewport.height / 2, 0.9)}
           >
             축소
-          </button>
+          <//>
           <span class="cmd-chip rounded-full">${Math.round(camera.zoom * 100)}%</span>
         </div>
         <div class="orchestra-toolbar-group">

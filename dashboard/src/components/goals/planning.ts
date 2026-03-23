@@ -2,6 +2,8 @@
 
 import { html } from 'htm/preact'
 import { EmptyState } from '../common/empty-state'
+import { LoadingState } from '../common/feedback-state'
+import { CARD_STANDARD } from '../common/card'
 import {
   goals,
   goalsLoading,
@@ -37,23 +39,23 @@ export function Planning() {
 
       <!-- Task-based stats grid -->
       <div class="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3 mb-4">
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <div class="flex flex-col gap-2 ${CARD_STANDARD}">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">전체 태스크</span>
           <span class="text-[28px] font-bold text-[var(--text-strong)] leading-none tabular-nums">${totalTasks}</span>
         </div>
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <div class="flex flex-col gap-2 ${CARD_STANDARD}">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">할 일</span>
           <span class="text-[28px] font-bold leading-none tabular-nums text-[#e0e0e0]">${todo.length}</span>
         </div>
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <div class="flex flex-col gap-2 ${CARD_STANDARD}">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">진행 중</span>
           <span class="text-[28px] font-bold leading-none tabular-nums text-[var(--warn)]">${inProgress.length}</span>
         </div>
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <div class="flex flex-col gap-2 ${CARD_STANDARD}">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">완료</span>
           <span class="text-[28px] font-bold leading-none tabular-nums text-[var(--ok)]">${done.length}</span>
         </div>
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <div class="flex flex-col gap-2 ${CARD_STANDARD}">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">높은 우선순위</span>
           <span class="text-[28px] font-bold leading-none tabular-nums" style="color:${highPriority > 0 ? '#f87171' : '#888'}">${highPriority}</span>
         </div>
@@ -87,7 +89,7 @@ export function Planning() {
             <${GoalsSummary} />
             <${FilterBar} />
             ${goalsLoading.value && goals.value.length === 0
-              ? html`<div class="loading-state loading-pulse">목표 불러오는 중...</div>`
+              ? html`<${LoadingState}>목표 불러오는 중...<//>`
               : filteredGoals.value.length === 0
                 ? html`<${EmptyState} message="현재 필터에 맞는 목표가 없습니다" compact />`
                 : html`
@@ -109,7 +111,7 @@ export function Planning() {
         </summary>
         <div>
           ${mdalLoading.value && loops.length === 0
-            ? html`<div class="loading-state loading-pulse">MDAL 루프 불러오는 중...</div>`
+            ? html`<${LoadingState}>MDAL 루프 불러오는 중...<//>`
             : loops.length === 0 && (mdalState === 'error' || lastMdalError.value)
               ? html`<${EmptyState} message="MDAL 스냅샷을 불러오지 못했습니다${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. 백엔드 상태를 확인하세요." />`
               : loops.length === 0

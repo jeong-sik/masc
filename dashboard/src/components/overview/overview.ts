@@ -2,6 +2,7 @@
 // "What's happening right now?" — answer in 1 second, no scroll.
 
 import { html } from 'htm/preact'
+import { CountBadge } from '../common/badge'
 import { missionSnapshot } from '../../mission-store'
 import { topActiveAgents } from '../../observatory-store'
 import { journal } from '../../sse'
@@ -72,7 +73,7 @@ function HomeSectionHeader({
     <div class="flex items-center justify-between mb-3">
       <div class="flex items-center gap-2">
         <span class="text-xs font-semibold text-[var(--text-strong)] uppercase tracking-wider">${label}</span>
-        ${count != null ? html`<span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-8)] text-[var(--text-muted)] font-medium tabular-nums">${count}</span>` : null}
+        ${count != null ? html`<${CountBadge}>${count}<//>` : null}
       </div>
       ${linkLabel && onLink
         ? html`<button class="text-[10px] text-[var(--accent)] cursor-pointer bg-transparent border-0 p-0 hover:underline" onClick=${onLink}>${linkLabel}</button>`

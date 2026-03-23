@@ -2,10 +2,12 @@ import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
+import { KpiCard } from './common/stat-row'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
 import { EmptyState } from './common/empty-state'
+import { LoadingState } from './common/feedback-state'
 import { stripStateBlocks } from '../keeper-message'
 import {
   boardPosts,
@@ -324,26 +326,11 @@ function MemorySummary() {
   const visibleCount = grouped.human.length + grouped.operations.length
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 mb-4">
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">보이는 글</span>
-        <strong class="text-xl font-semibold text-[var(--text-strong)] tabular-nums">${visibleCount}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">정렬</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${sortLabel}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">잡음 필터</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 숨김` : '분리된 레인 표시'}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">시스템 글 정책</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 레인 표시'}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">최근 갱신</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : '아직 불러오지 않음'}</strong>
-      </div>
+      <${KpiCard} label="보이는 글" value=${visibleCount} />
+      <${KpiCard} label="정렬" value=${sortLabel} />
+      <${KpiCard} label="잡음 필터" value=${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 숨김` : '분리된 레인 표시'} />
+      <${KpiCard} label="시스템 글 정책" value=${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 레인 표시'} />
+      <${KpiCard} label="최근 갱신" value=${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : '아직 불러오지 않음'} />
     </div>
   `
 }
@@ -579,7 +566,7 @@ function PostDetail({ post }: { post: BoardPost }) {
       <div class="mt-4">
         <${Card} title="댓글">
           ${detailLoading.value
-            ? html`<div class="loading-state loading-pulse">댓글 불러오는 중...</div>`
+            ? html`<${LoadingState}>댓글 불러오는 중...<//>`
             : html`<${CommentThread} comments=${detailComments.value} />`}
           <${CommentForm} postId=${post.id} />
         <//>
@@ -614,7 +601,7 @@ export function Memory() {
               onClick=${() => navigate('work', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
-              ? html`<div class="loading-state loading-pulse">글 불러오는 중...</div>`
+              ? html`<${LoadingState}>글 불러오는 중...<//>`
               : html`<${EmptyState} message="글을 찾지 못했습니다" compact />`}
           </div>
         `
@@ -628,7 +615,7 @@ export function Memory() {
         <${NewPostForm} />
       </div>
       ${boardLoading.value
-        ? html`<div class="loading-state loading-pulse">메모리 피드 불러오는 중...</div>`
+        ? html`<${LoadingState}>메모리 피드 불러오는 중...<//>`
         : posts.length === 0
           ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
           : html`

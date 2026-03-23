@@ -37,7 +37,7 @@ export function CommandWorkflowBanner() {
       </div>
       <div class="text-[rgba(255,255,255,0.84)] leading-normal">${context.summary}</div>
       ${context.payload_preview
-        ? html`<div class="py-3 px-3 border border-[var(--white-8)] bg-[var(--white-5)] text-[color:var(--text-strong)] leading-snug rounded-xl">${context.payload_preview}</div>`
+        ? html`<div class="py-3 px-3 border border-[var(--white-8)] bg-[var(--white-5)] text-[var(--text-strong)] leading-snug rounded-xl">${context.payload_preview}</div>`
         : null}
     </section>
   `
@@ -51,14 +51,14 @@ export function CommandEntryStrip() {
   return html`
     <section class="grid grid-cols-2 gap-3">
       <article class="p-4 rounded-xl border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-2">
-        <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-[0.08em]">현재 표면</span>
-        <strong class="text-[color:var(--text-near-white)] text-lg leading-[1.2] break-words">${guide.title}</strong>
-        <p class="m-0 text-[color:var(--frost-72)] leading-normal">${guide.description}</p>
+        <span class="text-[rgba(148,163,184,0.92)] text-[11px] uppercase tracking-[0.08em]">현재 표면</span>
+        <strong class="text-[var(--text-near-white)] text-lg leading-[1.2] break-words">${guide.title}</strong>
+        <p class="m-0 text-[var(--frost-72)] leading-normal">${guide.description}</p>
       </article>
       <article class="p-4 rounded-xl border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-2">
-        <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-[0.08em]">다음 추천</span>
-        <strong class="text-[color:var(--text-near-white)] text-lg leading-[1.2] break-words">${recommendation.tool}</strong>
-        <p class="m-0 text-[color:var(--frost-72)] leading-normal">${recommendation.reason}</p>
+        <span class="text-[rgba(148,163,184,0.92)] text-[11px] uppercase tracking-[0.08em]">다음 추천</span>
+        <strong class="text-[var(--text-near-white)] text-lg leading-[1.2] break-words">${recommendation.tool}</strong>
+        <p class="m-0 text-[var(--frost-72)] leading-normal">${recommendation.reason}</p>
       </article>
     </section>
   `
@@ -156,7 +156,7 @@ export function SummaryHero() {
   return html`
     <section class="relative overflow-hidden border border-[rgba(103,232,249,0.16)] rounded-[18px] p-[18px] mb-4 shadow-[inset_0_1px_0_var(--white-4)] cmd-hero grid grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)] gap-[18px] items-center">
       <div class="relative z-[1] grid gap-3">
-        <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">현재 지휘 상태</span>
+        <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[11px] tracking-[0.08em] uppercase">현재 지휘 상태</span>
         <h3>${headline}</h3>
         <p>${subcopy}</p>
         <div class="flex flex-wrap gap-2">

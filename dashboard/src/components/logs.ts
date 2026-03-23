@@ -91,7 +91,7 @@ export function LogViewer() {
           </select>
         </div>
 
-        <div class="logs-actions flex gap-3 items-center text-[0.75rem] text-[color:var(--text-muted)]">
+        <div class="logs-actions flex gap-3 items-center text-[0.75rem] text-[var(--text-muted)]">
           <span class="tabular-nums">${(logTotal.value ?? 0).toLocaleString()}건</span>
           <label class="logs-auto-label flex items-center gap-1 cursor-pointer">
             <input
@@ -109,27 +109,27 @@ export function LogViewer() {
       </div>
 
       ${logError.value ? html`
-        <div class="p-2 bg-[rgba(224,80,80,0.15)] border border-solid border-[#e05050] text-[#e05050] text-[0.8rem] rounded">${logError.value}</div>
+        <div class="p-2 bg-[rgba(224,80,80,0.15)] border border-solid border-[#e05050] text-[#e05050] text-[13px] rounded">${logError.value}</div>
       ` : null}
 
       <div class="logs-table-wrap rounded">
         <table class="logs-table">
           <thead>
             <tr>
-              <th class="logs-col-ts w-44 whitespace-nowrap text-[color:var(--text-muted)]">timestamp</th>
+              <th class="logs-col-ts w-44 whitespace-nowrap text-[var(--text-muted)]">timestamp</th>
               <th class="logs-col-level w-14 whitespace-nowrap font-semibold">level</th>
-              <th class="logs-col-module w-32 whitespace-nowrap text-[color:var(--accent)]">module</th>
+              <th class="logs-col-module w-32 whitespace-nowrap text-[var(--accent)]">module</th>
               <th class="break-words">message</th>
             </tr>
           </thead>
           <tbody>
             ${logEntries.value.map(entry => html`
               <tr key=${entry.seq} class="logs-row ${entry.level === 'ERROR' ? 'bg-[rgba(224,80,80,0.06)]' : entry.level === 'WARN' ? 'bg-[rgba(230,167,0,0.04)]' : ''}">
-                <td class="logs-col-ts w-44 whitespace-nowrap text-[color:var(--text-muted)]">${entry.ts.replace('T', ' ').replace('Z', '')}</td>
+                <td class="logs-col-ts w-44 whitespace-nowrap text-[var(--text-muted)]">${entry.ts.replace('T', ' ').replace('Z', '')}</td>
                 <td class="logs-col-level w-14 whitespace-nowrap font-semibold" style="color: ${LEVEL_COLORS[entry.level] ?? 'inherit'}">
                   ${entry.level}
                 </td>
-                <td class="logs-col-module w-32 whitespace-nowrap text-[color:var(--accent)]">${entry.module}</td>
+                <td class="logs-col-module w-32 whitespace-nowrap text-[var(--accent)]">${entry.module}</td>
                 <td class="break-words">${entry.message}</td>
               </tr>
             `)}

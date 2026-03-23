@@ -7,6 +7,8 @@ import { useEffect, useRef } from 'preact/hooks'
 import { streamKeeperMessage, type KeeperChatStreamEvent } from '../api/keeper'
 import { asString, isRecord } from './common/normalize'
 import { showToast } from './common/toast'
+import { ActionButton } from './common/button'
+import { TextInput } from './common/input'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -111,7 +113,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
       <div class="keeper-chat__header flex items-center justify-between py-2.5 px-3.5">
         <span class="keeper-chat__title">@${name} 대화</span>
         ${isStreaming ? html`
-          <button class="control-btn rounded-lg ghost keeper-chat__cancel" onClick=${cancelStream}>중단</button>
+          <${ActionButton} variant="ghost" class="keeper-chat__cancel" onClick=${cancelStream}>중단<//>
         ` : null}
       </div>
 
@@ -143,22 +145,21 @@ export function KeeperChatPanel({ name }: { name: string }) {
       ${chatError.value ? html`<div class="keeper-chat__error">${chatError.value}</div>` : null}
 
       <div class="keeper-chat__input-row flex gap-2 py-2.5 px-3.5">
-        <input
-          class="control-input rounded-lg flex-1"
-          type="text"
+        <${TextInput}
+          class="flex-1"
           placeholder="메시지 입력..."
           value=${chatInput.value}
           onInput=${(e: Event) => { chatInput.value = (e.target as HTMLInputElement).value }}
           onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) void sendChat(name) }}
           disabled=${isStreaming}
         />
-        <button
-          class="control-btn rounded-lg shrink-0"
+        <${ActionButton}
+          class="shrink-0"
           onClick=${() => { void sendChat(name) }}
           disabled=${isStreaming || chatInput.value.trim() === ''}
         >
           ${isStreaming ? '...' : '전송'}
-        </button>
+        <//>
       </div>
     </div>
   `

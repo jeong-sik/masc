@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { CountBadge } from './common/badge'
 import { navigate, route } from '../router'
 import { agents, keepers } from '../store'
 import { missionKeeperBriefs } from '../mission-signals'
@@ -85,7 +86,7 @@ export function AgentsUnified() {
             }}
           >
             ${c.label}
-            ${chipCount(c.id) != null ? html`<span class="text-[10px] px-1 py-px rounded bg-[var(--white-8)] tabular-nums">${chipCount(c.id)}</span>` : null}
+            ${chipCount(c.id) != null ? html`<${CountBadge}>${chipCount(c.id)}<//>` : null}
           </button>
         `)}
       </div>

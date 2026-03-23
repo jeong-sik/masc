@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { EmptyState } from './common/empty-state'
+import { LoadingState } from './common/feedback-state'
 import { useEffect, useState } from 'preact/hooks'
 import { callMcpTool } from '../api/mcp'
 
@@ -38,7 +39,7 @@ export function Worktrees() {
   }, [])
 
   if (loading) {
-    return html`<div class="loading-state loading-pulse">워크트리 목록을 불러오는 중...</div>`
+    return html`<${LoadingState}>워크트리 목록을 불러오는 중...<//>`
   }
 
   if (error) {

@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from '../common/button'
 import type {
   CommandPlaneRunResolutionRecommendation,
   CommandPlaneRunResolutionState,
@@ -46,8 +47,8 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
         <div class="flex items-center gap-2 min-w-0">
           <span class="swarm-motion-dot inline-block rounded-full shrink-0 w-2.5 h-2.5 ${lane.motion_state}"></span>
           <div>
-            <span class="block mb-1 text-[rgba(125,211,252,0.78)] text-[length:var(--fs-2xs)] tracking-[0.1em] uppercase">${lane.kind} · ${lane.source_of_truth}</span>
-            <strong class="text-[color:var(--text-near-white)] text-[16px] leading-[1.25]">${lane.label}</strong>
+            <span class="block mb-1 text-[rgba(125,211,252,0.78)] text-[10px] tracking-[0.1em] uppercase">${lane.kind} · ${lane.source_of_truth}</span>
+            <strong class="text-[var(--text-near-white)] text-[16px] leading-[1.25]">${lane.label}</strong>
           </div>
         </div>
         <div class="cmd-tag rounded-full-row">
@@ -56,37 +57,37 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
           <span class="cmd-chip rounded-full">${relativeTime(lane.last_movement_at)}</span>
         </div>
       </div>
-      <p class="mt-3 mb-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.movement_reason}</p>
+      <p class="mt-3 mb-0 text-[var(--frost-72)] leading-[1.5]">${lane.movement_reason}</p>
       <div class="swarm-lane-track rounded-full">
         <span class="${toneClass(tone)}" style=${`width:${progressPercent}%`}></span>
       </div>
       <div class="flex flex-col gap-1.5 mt-2 text-[0.82rem]">
-        <div class="flex items-center gap-1.5 text-[color:var(--text-dim,var(--white-55))]">
-          <span class="shrink-0 w-14 text-[0.72rem] uppercase tracking-[0.04em] opacity-60">Step</span>
+        <div class="flex items-center gap-1.5 text-[var(--text-dim,var(--white-55))]">
+          <span class="shrink-0 w-14 text-[11px] uppercase tracking-[0.04em] opacity-60">Step</span>
           <span>${lane.current_step}</span>
         </div>
         ${totalWorkers > 0
           ? html`
-              <div class="flex items-center gap-1.5 text-[color:var(--text-dim,var(--white-55))]">
-                <span class="shrink-0 w-14 text-[0.72rem] uppercase tracking-[0.04em] opacity-60">워커</span>
+              <div class="flex items-center gap-1.5 text-[var(--text-dim,var(--white-55))]">
+                <span class="shrink-0 w-14 text-[11px] uppercase tracking-[0.04em] opacity-60">워커</span>
                 <${SwarmWorkerGrid} total=${totalWorkers} />
               </div>
             `
           : null}
         ${totalOps > 0
           ? html`
-              <div class="flex items-center gap-1.5 text-[color:var(--text-dim,var(--white-55))]">
-                <span class="shrink-0 w-14 text-[0.72rem] uppercase tracking-[0.04em] opacity-60">흐름</span>
+              <div class="flex items-center gap-1.5 text-[var(--text-dim,var(--white-55))]">
+                <span class="shrink-0 w-14 text-[11px] uppercase tracking-[0.04em] opacity-60">흐름</span>
                 <div class="flex-1 h-1 rounded-sm overflow-hidden bg-[var(--white-8)]">
                   <div class="h-full rounded-sm bg-[var(--ok)] transition-[width] duration-300 ease-in-out" style="width: ${totalOps > 0 ? Math.round((ops / totalOps) * 100) : 0}%; background: var(--${tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'ok'})"></div>
                 </div>
-                <span class="text-[0.72rem] text-[color:var(--text-dim,var(--white-50))] ml-1">작전 ${ops} · 실행체 ${dets}</span>
+                <span class="text-[11px] text-[var(--text-dim,var(--white-50))] ml-1">작전 ${ops} · 실행체 ${dets}</span>
               </div>
             `
           : null}
       </div>
       ${lane.blockers.length > 0
-        ? html`<div class="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.25)] py-1.5 px-2.5 text-[0.78rem] text-[color:var(--bad)] mt-1 rounded-md">막힘: ${lane.blockers.join(' · ')}</div>`
+        ? html`<div class="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.25)] py-1.5 px-2.5 text-[0.78rem] text-[var(--bad)] mt-1 rounded-md">막힘: ${lane.blockers.join(' · ')}</div>`
         : null}
       ${lane.hard_flags.length > 0
         ? html`
@@ -115,14 +116,14 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
               <span class="cmd-chip rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
               <span class="cmd-chip rounded-full">${lane.phase}</span>
             </div>
-            <strong class="text-[color:var(--text-near-white)] text-[length:var(--fs-lg)] leading-[1.3]">${lane.label}</strong>
-            <p class="m-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.current_step}</p>
+            <strong class="text-[var(--text-near-white)] text-lg leading-[1.3]">${lane.label}</strong>
+            <p class="m-0 text-[var(--frost-72)] leading-[1.5]">${lane.current_step}</p>
             <div class="flex gap-2 flex-wrap">
               ${[`워커 ${workers}`, `작전 ${operations}`, `실행체 ${detachments}`].map(t => html`
-                <span class="inline-flex items-center py-1 px-2 bg-[var(--white-6)] text-[rgba(191,219,254,0.9)] text-[length:var(--fs-xs)]">${t}</span>
+                <span class="inline-flex items-center py-1 px-2 bg-[var(--white-6)] text-[rgba(191,219,254,0.9)] text-[11px]">${t}</span>
               `)}
             </div>
-            <small class="m-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.movement_reason}</small>
+            <small class="m-0 text-[var(--frost-72)] leading-[1.5]">${lane.movement_reason}</small>
           </article>
         `
       })}
@@ -154,7 +155,7 @@ export function SwarmHealthBar({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
           <div class="swarm-health-seg ${s.key}" style="flex: ${s.count}"></div>
         `)}
       </div>
-      <div class="flex gap-4 text-[0.75rem] text-[color:var(--text-dim,var(--white-50))] mt-1.5">
+      <div class="flex gap-4 text-[0.75rem] text-[var(--text-dim,var(--white-50))] mt-1.5">
         ${segments.filter(s => s.count > 0).map(s => html`
           <span class="flex items-center gap-1">
             <span class="w-2 h-2 rounded-sm inline-block" style="background: ${s.color}"></span>
@@ -266,10 +267,10 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
                 <strong>확인 대기</strong>
                 <span class="cmd-chip rounded-full warn">${pendingConfirm.confirm_token}</span>
               </div>
-              ${pendingConfirm.preview ? html`<pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[length:var(--fs-sm)] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${previewText(pendingConfirm.preview)}</pre>` : null}
+              ${pendingConfirm.preview ? html`<pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[13px] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${previewText(pendingConfirm.preview)}</pre>` : null}
               <div class="flex gap-3 flex-wrap mt-3">
-                <button class="control-btn rounded-lg" onClick=${() => { void confirmPending('confirm') }} disabled=${operatorActionBusy.value}>확인 실행</button>
-                <button class="control-btn rounded-lg ghost" onClick=${() => { void confirmPending('deny') }} disabled=${operatorActionBusy.value}>취소</button>
+                <${ActionButton} onClick=${() => { void confirmPending('confirm') }} disabled=${operatorActionBusy.value}>확인 실행<//>
+                <${ActionButton} variant="ghost" onClick=${() => { void confirmPending('deny') }} disabled=${operatorActionBusy.value}>취소<//>
               </div>
             </div>
           `

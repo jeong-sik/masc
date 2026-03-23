@@ -44,11 +44,11 @@ export function WorkerSupportRow({
         </div>
         <${StatusBadge} status=${effectiveStatus} />
         ${row.state !== 'offline' || effectiveStatus !== 'offline'
-          ? html`<span class="monitor-pill ${row.tone} state-${row.state} inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em] ${row.state === 'offline' ? 'bg-[rgba(85,85,85,0.2)] text-[var(--text-dim)] line-through' : ''}">${agentStateLabel(row.state)}</span>`
+          ? html`<span class="monitor-pill ${row.tone} state-${row.state} inline-flex items-center rounded-full px-2 py-[3px] text-[11px] uppercase tracking-[0.06em] ${row.state === 'offline' ? 'bg-[rgba(85,85,85,0.2)] text-[var(--text-dim)] line-through' : ''}">${agentStateLabel(row.state)}</span>`
           : null}
       </div>
 
-      <div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[length:var(--fs-sm)]">
+      <div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[13px]">
         ${row.last_signal_at ? html`<span>신호 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 신호 없음</span>`}
         <span>${signalTruthLabel(row.signal_truth)} · ${evidenceSourceLabel(row.evidence_source)}</span>
         ${typeof row.last_signal_age_sec === 'number' ? html`<span>${row.last_signal_age_sec}s ago</span>` : null}

@@ -47,7 +47,7 @@ export function AttentionCard({
         <div class="flex justify-between gap-3 items-start flex-wrap">
           <div>
             <strong>${item.summary}</strong>
-            <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)] mt-1">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</div>
+            <div class="text-[var(--text-muted)] text-[13px] mt-1">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</div>
           </div>
           <span class="cmd-chip rounded-full ${toneClass(action?.severity ?? item.severity)}">${action ? actionModeLabel(action) : item.severity}</span>
         </div>

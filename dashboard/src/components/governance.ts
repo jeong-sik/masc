@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
+import { KpiCard } from './common/stat-row'
 import { TimeAgo } from './common/time-ago'
 import { EmptyState } from './common/empty-state'
 import { FilterChips } from './common/filter-chips'
@@ -57,26 +58,11 @@ function GovernanceSummaryStrip() {
       ${data?.generated_at ? html`<span>${data.generated_at}</span>` : null}
     </div>
     <div class="grid grid-cols-[repeat(auto-fit,minmax(155px,1fr))] gap-3 mb-4">
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">열린 케이스</span>
-        <strong class="text-lg font-semibold text-[var(--text-strong)] tabular-nums">${summary?.cases_open ?? itemCount}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">판정 대기</span>
-        <strong class="text-lg font-semibold text-[var(--text-strong)] tabular-nums">${summary?.pending_ruling ?? 0}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">자동집행 준비</span>
-        <strong class="text-lg font-semibold text-[var(--text-strong)] tabular-nums">${summary?.ready_auto_execute ?? 0}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">관리자 승인 대기</span>
-        <strong class="text-lg font-semibold text-[var(--text-strong)] tabular-nums">${summary?.needs_human_gate ?? 0}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">집행 완료</span>
-        <strong class="text-lg font-semibold text-[var(--text-strong)] tabular-nums">${summary?.executed ?? 0}</strong>
-      </div>
+      <${KpiCard} label="열린 케이스" value=${summary?.cases_open ?? itemCount} />
+      <${KpiCard} label="판정 대기" value=${summary?.pending_ruling ?? 0} />
+      <${KpiCard} label="자동집행 준비" value=${summary?.ready_auto_execute ?? 0} />
+      <${KpiCard} label="관리자 승인 대기" value=${summary?.needs_human_gate ?? 0} />
+      <${KpiCard} label="집행 완료" value=${summary?.executed ?? 0} />
     </div>
   `
 }

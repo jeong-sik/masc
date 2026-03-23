@@ -2,6 +2,7 @@
 
 import { signal } from '@preact/signals'
 import { html } from 'htm/preact'
+import { CARD_STANDARD } from '../common/card'
 import {
   fetchAutoresearchStatus,
   injectAutoresearchHypothesis,
@@ -140,7 +141,7 @@ export function OpsSessionColumn() {
 
   return html`
     <div class="flex flex-col gap-4 min-w-0">
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel">
+      <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Session 개입</h3>
         </div>
@@ -169,7 +170,7 @@ export function OpsSessionColumn() {
         ` : null}
       </section>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+      <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">선택한 Session 요약</h3>
         </div>
@@ -230,7 +231,7 @@ export function OpsSessionColumn() {
         `}
       </section>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel">
+      <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">선택한 Session 액션</h3>
         </div>
@@ -291,7 +292,7 @@ export function OpsSessionColumn() {
                 : null}
             ` : null}
             ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
-              <pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[length:var(--fs-xs)] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
+              <pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[11px] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
             ` : null}
           </div>
         ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">먼저 세션을 하나 고르세요.</div>`}

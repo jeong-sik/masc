@@ -17,7 +17,7 @@ export function LabSurface() {
   const section = currentSection()
 
   return html`
-    <div class="tab-unified grid gap-[var(--space-md,16px)]">
+    <div class="tab-unified grid gap-4">
       <div class="tab-pill-bar">
         <button
           class="tab-pill-btn ${section === 'overview' ? 'active' : ''}"

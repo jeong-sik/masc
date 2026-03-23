@@ -1,4 +1,5 @@
 // 실행 표면 — 공용 유틸리티, 시그널, 라벨 함수
+import { ActionButton } from '../common/button'
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -135,9 +136,9 @@ export function MonitorStat({
   caption?: string
 }) {
   return html`
-    <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
+    <div class="border border-[var(--card-border)] rounded-xl bg-[var(--card)] py-[15px] px-3.5">
       <div class="stat-label">${label}</div>
-      <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums" style=${color ? `color:${color}` : ''}>${value}</div>
+      <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums" style=${color ? `color:${color}` : ''}>${value}</div>
       ${caption ? html`<div class="monitor-stat-caption">${caption}</div>` : null}
     </div>
   `
@@ -154,8 +155,8 @@ export function HandoffButtons({
     <div class="control-row">
       ${intervene
         ? html`
-            <button
-              class="control-btn rounded-lg ghost"
+            <${ActionButton}
+              variant="ghost"
               data-testid="execution.handoff-intervene"
               onClick=${(event: Event) => {
                 event.stopPropagation()
@@ -163,13 +164,13 @@ export function HandoffButtons({
               }}
             >
               ${intervene.label}
-            </button>
+            <//>
           `
         : null}
       ${command
         ? html`
-            <button
-              class="control-btn rounded-lg ghost"
+            <${ActionButton}
+              variant="ghost"
               data-testid="execution.handoff-command"
               onClick=${(event: Event) => {
                 event.stopPropagation()
@@ -177,7 +178,7 @@ export function HandoffButtons({
               }}
             >
               ${command.label}
-            </button>
+            <//>
           `
         : null}
     </div>

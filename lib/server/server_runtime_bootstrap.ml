@@ -455,6 +455,103 @@ let serve ~sw ~clock ~socket ~request_handler =
   in
   accept_loop 0.05
 
+(** {1 Protocol Auto-Detection}
+
+    When MASC_USE_H2=1, the server accepts both HTTP/2 (h2c with prior
+    knowledge) and HTTP/1.1 on the same port.  Each accepted connection
+    is peeked via Unix MSG_PEEK to inspect the first bytes without
+    consuming them from the kernel buffer.
+
+    HTTP/2 connection preface (RFC 7540 §3.5) starts with
+    "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" — 24 bytes.  Matching the
+    first 14 bytes ("PRI * HTTP/2.0") is sufficient. *)
+
+let h2_preface_prefix = "PRI * HTTP/2.0"
+let h2_preface_len = String.length h2_preface_prefix
+
+let detect_h2 (flow : _ Eio.Net.stream_socket) =
+  try
+    match Eio_unix.Resource.fd_opt flow with
+    | None -> false
+    | Some fd ->
+      Eio_unix.Fd.use_exn "h2-detect" fd (fun unix_fd ->
+        let buf = Bytes.create h2_preface_len in
+        let n = Unix.recv unix_fd buf 0 h2_preface_len [Unix.MSG_PEEK] in
+        n >= h2_preface_len
+        && Bytes.sub_string buf 0 h2_preface_len = h2_preface_prefix)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _exn -> false
+
+let serve_auto ~sw ~clock ~socket ~request_handler
+    ~h2_request_handler ~h2_error_handler =
+  let is_cancelled exn =
+    match exn with
+    | Eio.Cancel.Cancelled _ -> true
+    | _ -> false
+  in
+  Log.Server.info "HTTP auto-detect mode: h2c + HTTP/1.1 on same port";
+  let h2_count = Atomic.make 0 in
+  let h1_count = Atomic.make 0 in
+  let rec accept_loop backoff_s =
+    try
+      let flow, client_addr = Eio.Net.accept ~sw socket in
+      Eio.Fiber.fork ~sw (fun () ->
+          Eio.Switch.run (fun conn_sw ->
+              Eio.Switch.on_release conn_sw (fun () ->
+                  try Eio.Flow.close flow
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn -> Log.Misc.warn "[auto] flow close: %s"
+                    (Printexc.to_string exn));
+              try
+                if detect_h2 flow then begin
+                  ignore (Atomic.fetch_and_add h2_count 1);
+                  H2_eio.Server.create_connection_handler ~sw:conn_sw
+                    ~request_handler:h2_request_handler
+                    ~error_handler:h2_error_handler
+                    client_addr flow
+                end else begin
+                  ignore (Atomic.fetch_and_add h1_count 1);
+                  let conn_handler =
+                    Httpun_eio.Server.create_connection_handler ~sw:conn_sw
+                      ~request_handler:(fun ca -> request_handler ca)
+                      ~error_handler:(fun _ca ?request:_ error respond ->
+                        let msg = match error with
+                          | `Exn exn -> Printexc.to_string exn
+                          | `Bad_request -> "Bad request"
+                          | `Bad_gateway -> "Bad gateway"
+                          | `Internal_server_error -> "Internal server error"
+                        in
+                        let body = respond (Httpun.Headers.of_list
+                          [("content-type", "text/plain")]) in
+                        Httpun.Body.Writer.write_string body msg;
+                        Httpun.Body.Writer.close body)
+                  in
+                  conn_handler client_addr flow
+                end
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Misc.error "[auto] Connection error: %s"
+                  (Printexc.to_string exn)));
+      accept_loop 0.05
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      if is_cancelled exn then
+        Log.Server.info "[auto] stats: h2=%d h1=%d"
+          (Atomic.get h2_count) (Atomic.get h1_count)
+      else begin
+        Log.Misc.error "[auto] Accept error: %s" (Printexc.to_string exn);
+        (try Eio.Time.sleep clock backoff_s
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn -> Log.Misc.warn "[auto] backoff: %s"
+           (Printexc.to_string exn));
+        accept_loop (Float.min 2.0 (backoff_s *. 1.5))
+      end
+  in
+  accept_loop 0.05
+
 let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
   let is_cancelled exn =
     match exn with
@@ -593,6 +690,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
 
   (* 3. Start serving — /health responds before init completes *)
   if use_h2 then
-    serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler
+    serve_auto ~sw ~clock ~socket ~request_handler
+      ~h2_request_handler ~h2_error_handler
   else
     serve ~sw ~clock ~socket ~request_handler

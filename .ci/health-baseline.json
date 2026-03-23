@@ -1,15 +1,15 @@
 {
   "version": 1,
   "counts": {
-    "lib_failwith": 22,
-    "lib_list_hd": 16,
-    "lib_list_tl": 4,
+    "lib_failwith": 19,
+    "lib_list_hd": 4,
+    "lib_list_tl": 2,
     "lib_option_get": 0,
     "lib_obj_magic": 0,
-    "test_failwith": 275,
-    "test_list_hd": 172,
+    "test_failwith": 239,
+    "test_list_hd": 163,
     "test_list_tl": 0,
-    "test_option_get": 33,
+    "test_option_get": 49,
     "test_obj_magic": 1
   }
 }

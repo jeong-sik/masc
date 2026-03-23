@@ -48,6 +48,10 @@ let risk_overrides : (string * risk_level) list = [
   ("masc_model_catalog", Low);         (* read-only *)
   ("masc_keeper_dataset_export", Medium);  (* export, not delete *)
   ("masc_persistent_agent_dataset_export", Medium);
+  (* Claim surfaces: pre-hook only sees tool names, not transition action args. *)
+  ("masc_claim_next", Medium);
+  ("masc_claim_task", Medium);
+  ("masc_transition", Low);
 ]
 
 let critical_patterns =

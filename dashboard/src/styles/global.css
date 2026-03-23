@@ -1333,41 +1333,6 @@ tbody tr:hover {
   }
 }
 
-@utility health-beacon {
-  &.ok .health-beacon__dot {
-    background: var(--agent-working, var(--agent-working));
-    box-shadow: 0 0 8px rgba(122, 224, 154, 0.6);
-    animation: pulse 2s ease-in-out infinite;
-  }
-  &.warn .health-beacon__dot {
-    background: var(--agent-busy, var(--agent-busy));
-    box-shadow: 0 0 8px rgba(240, 192, 96, 0.5);
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-  &.bad .health-beacon__dot {
-    background: var(--bad, var(--bad));
-    box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
-    animation: pulse 1s ease-in-out infinite;
-  }
-  &.ok { color: var(--agent-working, var(--agent-working)); }
-  &.warn { color: var(--agent-busy, var(--agent-busy)); }
-  &.bad { color: var(--bad, var(--bad)); }
-}
-
-@utility hot-session-lane--human {
-  border-color: rgba(96, 165, 250, 0.16);
-  background: linear-gradient(180deg, var(--blue-400-8), var(--ff-navy-44));
-}
-
-@utility hot-session-lane--system {
-  border-color: rgba(34, 197, 94, 0.16);
-  background: linear-gradient(180deg, rgba(34, 197, 94, 0.08), var(--ff-navy-44));
-}
-
-@utility hot-session-card {
-  transition: border-color 0.15s;
-  &:hover { border-color: var(--accent); }
-}
 
 @utility hot-session-card__context {
   display: -webkit-box;

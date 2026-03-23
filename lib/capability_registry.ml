@@ -64,15 +64,18 @@ let max_risk left right =
   if risk_rank left >= risk_rank right then left else right
 
 let unique_preserve_order items =
-  let rec loop seen rev_items = function
+  let seen = Hashtbl.create (List.length items) in
+  let rec loop rev_items = function
     | [] -> List.rev rev_items
     | x :: xs ->
-        if List.mem x seen then
-          loop seen rev_items xs
-        else
-          loop (x :: seen) (x :: rev_items) xs
+        if Hashtbl.mem seen x then
+          loop rev_items xs
+        else begin
+          Hashtbl.add seen x ();
+          loop (x :: rev_items) xs
+        end
   in
-  loop [] [] items
+  loop [] items
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
   let seen = Hashtbl.create (List.length schemas) in

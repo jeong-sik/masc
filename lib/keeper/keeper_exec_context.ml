@@ -42,30 +42,113 @@ let log_keeper_exn ~label exn =
   in
   Log.Keeper.info "%s%s: %s" tag label (Printexc.to_string exn)
 
+let checkpoint_sidecar_json ?(generation = 0) (ctx : working_context) :
+    Yojson.Safe.t =
+  `Assoc
+    [
+      ("kind", `String "keeper_working_context_v1");
+      ("max_tokens", `Int ctx.max_tokens);
+      ("generation", `Int generation);
+    ]
+
+let sidecar_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
+  let open Yojson.Safe.Util in
+  match cp.working_context with
+  | Some (`Assoc _ as sidecar) ->
+      sidecar |> member "max_tokens" |> to_int_option |> Option.value ~default:fallback
+  | _ -> fallback
+
+let context_of_oas_checkpoint
+    (cp : Agent_sdk.Checkpoint.t)
+    ~(primary_model_max_tokens : int) : working_context =
+  let system_prompt = Option.value ~default:"" cp.system_prompt in
+  let max_tokens =
+    sidecar_max_tokens cp ~fallback:primary_model_max_tokens
+  in
+  let token_count = count_tokens system_prompt cp.messages in
+  sync_oas_context
+    {
+      system_prompt;
+      messages = cp.messages;
+      token_count;
+      max_tokens;
+      importance_scores = [];
+      oas_context = Agent_sdk.Context.copy cp.context;
+    }
+
+let checkpoint_model_of_meta (meta : keeper_meta) =
+  let candidates =
+    [ meta.last_model_used; meta.active_model; meta.cascade_name ]
+    @ meta.models
+  in
+  List.find_opt (fun value -> String.trim value <> "") candidates
+  |> Option.value ~default:"keeper_unified"
+
+let save_oas_checkpoint
+    ~(session : session_context)
+    ~(agent_name : string)
+    ~(model : string)
+    ~(ctx : working_context)
+    ~(generation : int)
+  : Agent_sdk.Checkpoint.t =
+  let state =
+    {
+      Agent_sdk.Types.config =
+        {
+          Agent_sdk.Types.default_config with
+          name = agent_name;
+          model;
+          system_prompt = Some ctx.system_prompt;
+          max_total_tokens = Some ctx.max_tokens;
+        };
+      messages = ctx.messages;
+      turn_count = 0;
+      usage = Agent_sdk.Types.empty_usage;
+    }
+  in
+  let checkpoint =
+    Agent_sdk.Agent_checkpoint.build_checkpoint
+      ~session_id:session.session_id
+      ~working_context:(checkpoint_sidecar_json ~generation ctx)
+      ~state
+      ~tools:Agent_sdk.Tool_set.empty
+      ~context:(Agent_sdk.Context.copy ctx.oas_context)
+      ~mcp_clients:[]
+      ()
+  in
+  Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint;
+  checkpoint
+
 let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
-  let latest_ckpt =
-    try load_latest_checkpoint session
-    with ex ->
-      Log.Keeper.error "keeper:%s checkpoint load failed: %s"
-        trace_id
-        (Printexc.to_string ex);
-      None
-  in
-  match latest_ckpt with
-  | None -> (session, None)
-  | Some ckpt ->
-      (try
-         let ctx =
-           restore_checkpoint ckpt
-             ~max_tokens:primary_model_max_tokens
-         in
-         (session, Some ctx)
-       with ex ->
-         Log.Keeper.error "keeper:%s checkpoint restore failed: %s"
-           trace_id
-           (Printexc.to_string ex);
-         (session, None))
+  match
+    Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
+      ~session_id:trace_id
+  with
+  | Some checkpoint ->
+      ( session,
+        Some
+          (context_of_oas_checkpoint checkpoint ~primary_model_max_tokens) )
+  | None ->
+      let latest_ckpt =
+        try load_latest_checkpoint session
+        with ex ->
+          Log.Keeper.error "keeper:%s checkpoint load failed: %s" trace_id
+            (Printexc.to_string ex);
+          None
+      in
+      match latest_ckpt with
+      | None -> (session, None)
+      | Some ckpt ->
+          (try
+             let ctx =
+               restore_checkpoint ckpt ~max_tokens:primary_model_max_tokens
+             in
+             (session, Some ctx)
+           with ex ->
+             Log.Keeper.error "keeper:%s checkpoint restore failed: %s"
+               trace_id (Printexc.to_string ex);
+             (session, None))
 
 let save_checkpoint session (ctx : working_context) ~generation =
   let ckpt = create_checkpoint ctx ~generation in
@@ -618,4 +701,3 @@ let memory_check_default_json () : Yojson.Safe.t =
     ("deterministic_fallback_applied", `Bool false);
     ("recall_fallback_applied", `Bool false);
   ]
-

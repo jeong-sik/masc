@@ -341,8 +341,19 @@ let test_petition_submit_creates_case () =
     let json = parse_json body in
     let case_id = json |> field "case_id" |> Yojson.Safe.Util.to_string in
     Alcotest.(check bool) "case_id non-empty" true (String.length case_id > 0);
-    let collab_id = json |> field "collaboration_id" |> Yojson.Safe.Util.to_string in
-    Alcotest.(check bool) "collaboration_id non-empty" true (String.length collab_id > 0);
+    Alcotest.(check bool) "collaboration_id null" true
+      (json |> field "collaboration_id" = `Null);
+    Alcotest.(check bool) "phase null" true
+      (json |> field "phase" = `Null);
+    (match Council.Governance_v2.get_case_bundle base_path case_id with
+     | Ok bundle ->
+         let source_refs =
+           bundle.Council.Governance_v2.case_
+             .Council.Governance_v2.source_refs
+         in
+         Alcotest.(check (list string)) "source_refs empty" []
+           source_refs
+     | Error err -> Alcotest.fail ("get_case_bundle failed: " ^ err));
     Alcotest.(check bool) "merged field present" true
       (Yojson.Safe.Util.member "merged" json <> `Null)
   | None -> Alcotest.fail "dispatch returned None"
@@ -430,6 +441,92 @@ let test_governance_status_after_petition () =
   | None -> Alcotest.fail "dispatch returned None"
 
 (* ================================================================ *)
+(* Keeper checkpoint boundary tests                                  *)
+(* ================================================================ *)
+
+let make_keeper_meta ?(name = "keeper-checkpoint-test")
+    ?(trace_id = "trace-keeper-checkpoint") () =
+  match
+    Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String name);
+          ("agent_name", `String name);
+          ("trace_id", `String trace_id);
+          ("active_model", `String "llama:auto");
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
+
+let test_keeper_checkpoint_prefers_oas_checkpoint () =
+  let base_dir = temp_dir "keeper_oas_checkpoint" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let trace_id = "trace-oas-preferred" in
+      let session =
+        Keeper_exec_context.create_session ~session_id:trace_id ~base_dir
+      in
+      let legacy_ctx =
+        Keeper_exec_context.create ~system_prompt:"legacy system" ~max_tokens:2048
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "legacy")
+      in
+      ignore (Keeper_exec_context.save_checkpoint session legacy_ctx ~generation:1);
+      let oas_ctx =
+        Keeper_exec_context.create ~system_prompt:"oas system" ~max_tokens:4096
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "oas")
+      in
+      let meta = make_keeper_meta ~trace_id () in
+      ignore
+        (Keeper_exec_context.save_oas_checkpoint ~session
+           ~agent_name:meta.agent_name
+           ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
+           ~ctx:oas_ctx ~generation:7);
+      let (_session, loaded_opt) =
+        Keeper_exec_context.load_context_from_checkpoint ~trace_id
+          ~primary_model_max_tokens:1024 ~base_dir
+      in
+      match loaded_opt with
+      | Some loaded ->
+          Alcotest.(check string) "system prompt from OAS checkpoint"
+            "oas system" loaded.system_prompt;
+          Alcotest.(check int) "max_tokens from OAS sidecar" 4096
+            loaded.max_tokens;
+          Alcotest.(check string) "loaded OAS message" "oas"
+            (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
+      | None -> Alcotest.fail "expected checkpoint context")
+
+let test_keeper_checkpoint_legacy_fallback () =
+  let base_dir = temp_dir "keeper_legacy_checkpoint" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let trace_id = "trace-legacy-fallback" in
+      let session =
+        Keeper_exec_context.create_session ~session_id:trace_id ~base_dir
+      in
+      let legacy_ctx =
+        Keeper_exec_context.create ~system_prompt:"legacy only" ~max_tokens:2048
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "legacy-only")
+      in
+      ignore (Keeper_exec_context.save_checkpoint session legacy_ctx ~generation:2);
+      let (_session, loaded_opt) =
+        Keeper_exec_context.load_context_from_checkpoint ~trace_id
+          ~primary_model_max_tokens:1024 ~base_dir
+      in
+      match loaded_opt with
+      | Some loaded ->
+          Alcotest.(check string) "legacy prompt restored" "legacy only"
+            loaded.system_prompt;
+          Alcotest.(check string) "legacy message restored" "legacy-only"
+            (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
+      | None -> Alcotest.fail "expected legacy fallback context")
+
+(* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
 
@@ -482,7 +579,7 @@ let () =
         test_mitosis_dispatch_unknown;
     ];
     "tool_council_oas", [
-      Alcotest.test_case "petition creates case with collaboration_id" `Quick
+      Alcotest.test_case "petition creates case without decorative collaboration" `Quick
         test_petition_submit_creates_case;
       Alcotest.test_case "petition empty title error" `Quick
         test_petition_submit_empty_title_err;
@@ -496,5 +593,11 @@ let () =
         test_council_dispatch_unknown;
       Alcotest.test_case "governance status after petition" `Quick
         test_governance_status_after_petition;
+    ];
+    "keeper_checkpoint_boundary", [
+      Alcotest.test_case "prefers OAS checkpoint over legacy" `Quick
+        test_keeper_checkpoint_prefers_oas_checkpoint;
+      Alcotest.test_case "legacy fallback still works" `Quick
+        test_keeper_checkpoint_legacy_fallback;
     ];
   ]

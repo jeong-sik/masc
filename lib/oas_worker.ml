@@ -39,6 +39,7 @@ type config = {
   raw_trace : Oas.Raw_trace.t option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
+  working_context : Yojson.Safe.t option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -59,6 +60,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     raw_trace = None;
     transport = Masc_grpc_transport.from_env ();
     allowed_paths = [];
+    working_context = None;
   }
 
 (* ================================================================ *)
@@ -231,13 +233,20 @@ let run
     in
     let checkpoint = match config.checkpoint_dir with
       | Some dir ->
-        let ckpt = Oas.Agent.checkpoint ~session_id agent in
+        let ckpt =
+          Oas.Agent.checkpoint ~session_id ?working_context:config.working_context
+            agent
+        in
         (try persist_checkpoint ~dir ~session_id ckpt
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "oas_worker: Checkpoint save failed: %s"
              (Printexc.to_string exn));
         Some ckpt
-      | None -> None
+      | None ->
+        Option.map
+          (fun working_context ->
+            Oas.Agent.checkpoint ~session_id ~working_context agent)
+          config.working_context
     in
     Option.iter (fun bus ->
       let status = match result with Ok _ -> "completed" | Error _ -> "failed" in
@@ -414,6 +423,7 @@ let run_named
     ?agent_ref
     ?transport
     ?(allowed_paths = [])
+    ?working_context
     ()
   : (run_result, string) result =
   match require_eio () with
@@ -453,6 +463,7 @@ let run_named
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
       transport = transport_resolved;
       allowed_paths;
+      working_context;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in

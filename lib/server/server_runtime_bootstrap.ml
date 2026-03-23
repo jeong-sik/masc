@@ -574,6 +574,7 @@ let serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler
   Log.Server.info "HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port";
   let h2_count = Atomic.make 0 in
   let h1_count = Atomic.make 0 in
+  let stats_logged = Atomic.make false in
   let rec accept_loop backoff_s =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
@@ -629,13 +630,16 @@ let serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler
       accept_loop 0.05
     with
     | Eio.Cancel.Cancelled _ as e ->
-      Log.Server.info "[auto] stats: h2=%d h1=%d"
-        (Atomic.get h2_count) (Atomic.get h1_count);
+      if Atomic.compare_and_set stats_logged false true then
+        Log.Server.info "[auto] stats: h2=%d h1=%d"
+          (Atomic.get h2_count) (Atomic.get h1_count);
       raise e
     | exn ->
-      if is_cancelled exn then
-        Log.Server.info "[auto] stats: h2=%d h1=%d"
-          (Atomic.get h2_count) (Atomic.get h1_count)
+      if is_cancelled exn then begin
+        if Atomic.compare_and_set stats_logged false true then
+          Log.Server.info "[auto] stats: h2=%d h1=%d"
+            (Atomic.get h2_count) (Atomic.get h1_count)
+      end
       else begin
         Log.Misc.error "[auto] Accept error: %s" (Printexc.to_string exn);
         (try Eio.Time.sleep clock backoff_s

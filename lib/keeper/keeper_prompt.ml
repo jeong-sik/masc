@@ -348,10 +348,13 @@ let proactive_retry_instruction attempt ~(reason : string) =
       "Retry policy: previous attempts failed (%s). You MUST output one decisive check-in now, materially different from the last preview."
       reason
 
-let proactive_temperature attempt =
-  if attempt <= 1 then Keeper_config.keeper_proactive_temperature_low ()
-  else if attempt = 2 then Keeper_config.keeper_proactive_temperature_mid ()
-  else Keeper_config.keeper_proactive_temperature_high ()
+let proactive_temperature ~cascade_name attempt =
+  let fallback () =
+    if attempt <= 1 then Keeper_config.keeper_proactive_temperature_low ()
+    else if attempt = 2 then Keeper_config.keeper_proactive_temperature_mid ()
+    else Keeper_config.keeper_proactive_temperature_high ()
+  in
+  Cascade_inference.resolve_temperature ~cascade_name ~fallback
 
 let strip_state_blocks_text (s : string) : string =
   let start_marker = "[STATE]" in

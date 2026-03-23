@@ -62,6 +62,7 @@ graph TB
 | `15-external-integrations.md` | External Integrations | Neo4j, Supabase, GraphQL, Langfuse | Draft |
 | `A-error-catalog.md` | Error Catalog | 에러 코드 목록, 원인, 복구 방법 | Draft |
 | `B-migration-targets.md` | Migration Targets | OAS 이관 대상 모듈, deprecation 일정 | Draft |
+| `C-implementation-status.md` | Implementation Status | 12 서브시스템 구현 수준 체크 (IMPL/CODE/STUB/MISS) | Draft |
 
 ## Conventions
 

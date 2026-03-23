@@ -181,9 +181,6 @@ let spawned_agent_prefixed_tools : string list =
 let mdal_auditable_tool_names : string list =
   Agent_tool_surfaces.mdal_auditable_tool_names
 
-let lodge_worker_base_tool_names ?(allow_post = false) ?(extra = []) () =
-  Agent_tool_surfaces.lodge_worker_base_tool_names ~allow_post ~extra ()
-
 let local_worker_public_tool_names : string list =
   Agent_tool_surfaces.local_worker_public_tool_names
 

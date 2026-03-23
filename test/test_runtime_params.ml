@@ -179,8 +179,6 @@ let () =
     let has key =
       List.exists (fun (k, _, _, _) -> k = key) entries
     in
-    Alcotest.(check bool) "lodge.tick_interval_seconds registered"
-      true (has "lodge.tick_interval_seconds");
     Alcotest.(check bool) "inference.default_model registered"
       true (has "inference.default_model");
     (* Validate surfaces *)
@@ -194,10 +192,6 @@ let () =
   in
 
   let test_governance_registry_validation () =
-    (* Lodge tick interval should reject < 60 *)
-    (match Runtime_params.set Governance_registry.lodge_tick_interval 10.0 with
-     | Error _ -> ()
-     | Ok () -> Alcotest.fail "should reject tick_interval < 60");
     (* Default inference model should reject empty string *)
     (match Runtime_params.set Governance_registry.inference_default_model "" with
      | Error _ -> ()

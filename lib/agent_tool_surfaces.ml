@@ -120,22 +120,6 @@ let mdal_auditable_tool_names : string list =
     "masc_spawn";
   ]
 
-let lodge_worker_base_tool_names ?(allow_post = false) ?(extra = []) () =
-  let base =
-    [
-      "masc_board_get";
-      "masc_board_list";
-      "masc_board_search";
-      "masc_board_comment";
-      "masc_board_vote";
-      "lodge_search";
-      "lodge_profile";
-      "lodge_research";
-    ]
-  in
-  let names = if allow_post then "masc_board_post" :: base else base in
-  unique_preserve_order (names @ extra)
-
 let local_worker_public_tool_names : string list =
   unique_preserve_order
     ([

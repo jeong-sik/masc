@@ -134,6 +134,11 @@
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
+ (name test_dashboard_autoresearch)
+ (modules test_dashboard_autoresearch)
+ (libraries masc_mcp alcotest yojson unix))
+
+(test
  (name test_dashboard_tools)
  (modules test_dashboard_tools)
  (libraries masc_mcp alcotest eio eio_main yojson unix))

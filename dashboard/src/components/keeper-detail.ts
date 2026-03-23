@@ -64,7 +64,7 @@ async function runSocialSweep(): Promise<void> {
       payload: {},
     })
     invalidateDashboardCache()
-    await refreshDashboard()
+    await refreshDashboard({ force: true })
     showToast('Social sweep finished', 'success')
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to run social sweep'

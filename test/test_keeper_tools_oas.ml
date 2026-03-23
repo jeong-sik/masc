@@ -1,5 +1,6 @@
 (** Tests for Keeper_tools_oas — OAS Tool.t wrapping of keeper tools. *)
 
+open Agent_sdk
 open Alcotest
 open Masc_mcp
 
@@ -69,6 +70,156 @@ let test_tool_count_matches_allowed () =
       check bool "all tools are in allowed list" true
         (List.for_all (fun name -> List.mem name allowed) tool_names))
 
+let find_tool name tools =
+  List.find (fun (tool : Tool.t) -> String.equal tool.schema.name name) tools
+
+let string_contains ~sub text =
+  let text_len = String.length text in
+  let sub_len = String.length sub in
+  let rec loop idx =
+    if idx + sub_len > text_len then false
+    else if String.sub text idx sub_len = sub then true
+    else loop (idx + 1)
+  in
+  sub_len = 0 || loop 0
+
+let is_guardrail_message message =
+  string_contains
+    ~sub:"failed 3 times in a row with the same arguments"
+    message
+
+let test_error_json_is_returned_as_tool_error () =
+  let meta = make_test_meta () in
+  let ctx_ref = ref (make_test_ctx ()) in
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test_keeper_tools_error_%d" (Random.int 100000)) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.readdir dir |> Array.iter (fun f ->
+        Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir with _ -> ()))
+    (fun () ->
+      let config = Room.default_config dir in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
+      let tool = find_tool "keeper_fs_read" tools in
+      match Tool.execute tool
+              (`Assoc [("path", `String "missing-file-for-keeper-tools-oas.txt")])
+      with
+      | Error { Agent_sdk.Types.message; _ } ->
+          let json = Yojson.Safe.from_string message in
+          check bool "error field preserved" true
+            (Option.is_some (Safe_ops.json_string_opt "error" json));
+          check bool "path field preserved" true
+            (Option.is_some (Safe_ops.json_string_opt "path" json))
+      | Ok _ -> fail "missing file should be surfaced as tool error")
+
+let test_repeated_error_results_are_blocked () =
+  let meta = make_test_meta () in
+  let ctx_ref = ref (make_test_ctx ()) in
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test_keeper_tools_guard_%d" (Random.int 100000)) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.readdir dir |> Array.iter (fun f ->
+        Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir with _ -> ()))
+    (fun () ->
+      let config = Room.default_config dir in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
+      let tool = find_tool "keeper_fs_read" tools in
+      let args =
+        `Assoc [("path", `String "missing-file-for-keeper-tools-oas.txt")]
+      in
+      for _ = 1 to Keeper_tools_oas.max_consecutive_failures do
+        match Tool.execute tool args with
+        | Error _ -> ()
+        | Ok _ -> fail "missing file should be counted as a failure"
+      done;
+      match Tool.execute tool args with
+      | Error { Agent_sdk.Types.message; _ } ->
+          check bool "guardrail blocks repeated failures" true
+            (is_guardrail_message message)
+      | Ok _ -> fail "guardrail should block the repeated failure")
+
+let test_failure_count_resets_after_success () =
+  let meta = make_test_meta () in
+  let ctx_ref = ref (make_test_ctx ()) in
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test_keeper_tools_reset_%d" (Random.int 100000)) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      let reset_path = Filename.concat dir "reset-after-success.txt" in
+      (try Sys.remove reset_path with _ -> ());
+      (try Sys.readdir dir |> Array.iter (fun f ->
+        Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir with _ -> ()))
+    (fun () ->
+      let config = Room.default_config dir in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
+      let tool = find_tool "keeper_fs_read" tools in
+      let path = "reset-after-success.txt" in
+      let args = `Assoc [("path", `String path)] in
+      for _ = 1 to Keeper_tools_oas.max_consecutive_failures - 1 do
+        match Tool.execute tool args with
+        | Error _ -> ()
+        | Ok _ -> fail "missing file should fail before reset"
+      done;
+      let abs_path = Filename.concat dir path in
+      Out_channel.with_open_text abs_path
+        (fun oc -> Out_channel.output_string oc "ok");
+      (match Tool.execute tool args with
+       | Ok _ -> ()
+       | Error _ -> fail "existing file should reset failure count");
+      Sys.remove abs_path;
+      for _ = 1 to Keeper_tools_oas.max_consecutive_failures do
+        match Tool.execute tool args with
+        | Error { Agent_sdk.Types.message; _ } when is_guardrail_message message ->
+            fail "failure count should have reset after success"
+        | Error _ -> ()
+        | Ok _ -> fail "missing file should fail after removing reset file"
+      done;
+      match Tool.execute tool args with
+      | Error { Agent_sdk.Types.message; _ } ->
+          check bool "guardrail triggers only after fresh streak" true
+            (is_guardrail_message message)
+      | Ok _ -> fail "guardrail should eventually re-trigger after reset")
+
+let test_failure_tracking_is_independent_per_args () =
+  let meta = make_test_meta () in
+  let ctx_ref = ref (make_test_ctx ()) in
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test_keeper_tools_independent_%d" (Random.int 100000)) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.readdir dir |> Array.iter (fun f ->
+        Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir with _ -> ()))
+    (fun () ->
+      let config = Room.default_config dir in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
+      let tool = find_tool "keeper_fs_read" tools in
+      let args_a = `Assoc [("path", `String "missing-a.txt")] in
+      let args_b = `Assoc [("path", `String "missing-b.txt")] in
+      for _ = 1 to Keeper_tools_oas.max_consecutive_failures do
+        match Tool.execute tool args_a with
+        | Error _ -> ()
+        | Ok _ -> fail "first path should fail before guardrail"
+      done;
+      (match Tool.execute tool args_b with
+       | Error { Agent_sdk.Types.message; _ } ->
+           check bool "different args are not blocked by prior failures" false
+             (is_guardrail_message message)
+       | Ok _ -> fail "second path should still fail normally");
+      match Tool.execute tool args_a with
+      | Error { Agent_sdk.Types.message; _ } ->
+          check bool "original args are blocked" true
+            (is_guardrail_message message)
+      | Ok _ -> fail "guardrail should block original failing args")
+
 let make_research_meta () : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String "test-researcher");
@@ -99,7 +250,7 @@ let test_non_research_keeper_no_autoresearch () =
 let test_research_model_tools_include_autoresearch () =
   let meta = make_research_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_model_tools meta in
-  let has_cycle = List.exists (fun (t : Types.tool_schema) ->
+  let has_cycle = List.exists (fun (t : Types_core.tool_schema) ->
     t.name = "masc_autoresearch_cycle") tools in
   check bool "model tools have cycle" true has_cycle
 
@@ -178,6 +329,10 @@ let () =
       test_case "returns nonempty" `Quick test_make_tools_returns_nonempty;
       test_case "valid schemas" `Quick test_tools_have_valid_schemas;
       test_case "count matches allowed" `Quick test_tool_count_matches_allowed;
+      test_case "error json becomes tool error" `Quick test_error_json_is_returned_as_tool_error;
+      test_case "repeated errors are blocked" `Quick test_repeated_error_results_are_blocked;
+      test_case "failure count resets after success" `Quick test_failure_count_resets_after_success;
+      test_case "failure tracking is independent per args" `Quick test_failure_tracking_is_independent_per_args;
     ];
     "research_profile", [
       test_case "has autoresearch tools" `Quick test_research_keeper_has_autoresearch_tools;

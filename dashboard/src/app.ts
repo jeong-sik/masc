@@ -8,7 +8,7 @@ import { route, initRouter } from './router'
 import { connectSSE, disconnectSSE } from './sse'
 import { refreshRoomTruth } from './room-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
-import { refreshForTab } from './tab-refresh'
+import { refreshForRoute } from './tab-refresh'
 import { refreshMissionSnapshot } from './mission-store'
 import {
   BuildIdentityBadge,
@@ -58,7 +58,7 @@ export function App() {
     // Cancel any pending SSE-triggered refreshes from the previous tab
     // to prevent stale fetch results arriving after navigation (C-4/M-12).
     cancelPendingSSERefreshes()
-    refreshForTab(route.value.tab)
+    refreshForRoute(route.value)
   }, [route.value.tab, route.value.params.section, route.value.params.surface, route.value.params.q])
 
   const currentTab = route.value.tab

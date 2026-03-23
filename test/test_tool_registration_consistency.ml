@@ -140,11 +140,12 @@ let test_docs_do_not_reintroduce_ghost_claim_surface () =
          let contents = read_file (doc_path name) in
          if contains_substring contents "masc_task_list" then
            Alcotest.failf "doc %s reintroduces ghost tool masc_task_list" name;
-	         if (not (List.mem name allowed_claim_docs))
-	         then
-	           Alcotest.failf
-	             "doc %s reintroduces normative masc_claim usage outside compatibility docs"
-	             name)
+         if contains_token contents "masc_claim"
+            && not (List.mem name allowed_claim_docs)
+         then
+           Alcotest.failf
+             "doc %s reintroduces normative masc_claim usage outside compatibility docs"
+             name)
 
 let test_front_door_surfaces_do_not_reintroduce_claim_alias () =
   let paths =
@@ -159,7 +160,7 @@ let test_front_door_surfaces_do_not_reintroduce_claim_alias () =
   List.iter
     (fun relative ->
       let contents = read_file (repo_path relative) in
-      if contains_token contents "masc_transition" then
+      if contains_token contents "masc_claim" then
         Alcotest.failf
           "front-door surface %s reintroduces deprecated masc_claim alias"
           relative)

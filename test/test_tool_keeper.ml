@@ -477,7 +477,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
           ~input:
             (`Assoc
               [
-                ("cmd", `String "python3 -c 'raise SystemExit(7)'");
+                ("cmd", `String "git rev-parse --verify refs/heads/__definitely_missing__");
                 ("timeout_sec", `Float 5.0);
               ])
         |> parse_json_exn

@@ -229,7 +229,7 @@ export function deriveKeeperDiagnostic(
 
 // --- Thread state management ---
 
-function normalizeHistoryEntry(raw: unknown, index: number): KeeperConversationEntry | null {
+function normalizeHistoryEntry(raw: unknown, index: number, keeperName?: string): KeeperConversationEntry | null {
   if (!isRecord(raw)) return null
   const role = normalizeRole(raw.role)
   const rawText = asString(raw.content) ?? asString(raw.preview)
@@ -237,10 +237,11 @@ function normalizeHistoryEntry(raw: unknown, index: number): KeeperConversationE
   const text = formatKeeperVisibleReply(rawText)
   if (!text) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
+  const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   return {
     id: `${role}-${timestamp ?? 'entry'}-${index}`,
     role,
-    label: roleLabel(role),
+    label,
     text,
     rawText,
     timestamp,
@@ -254,7 +255,7 @@ function normalizeStatusDetail(name: string, text: string, rawStatus: unknown): 
   const parsed = isRecord(rawStatus) ? rawStatus : null
   const history = Array.isArray(parsed?.history_tail)
     ? parsed.history_tail
-      .map((entry, index) => normalizeHistoryEntry(entry, index))
+      .map((entry, index) => normalizeHistoryEntry(entry, index, name))
       .filter((entry): entry is KeeperConversationEntry => entry !== null)
     : []
   return {

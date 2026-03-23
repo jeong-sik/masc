@@ -3,6 +3,19 @@
 
 ## [Unreleased]
 
+## [2.138.0] - 2026-03-23
+
+### Added
+- **Dashboard glassmorphism overhaul** — modern glassmorphism UI across 8 tabs (#2494-#2502)
+- **Keeper detail overlay** — improved keeper detail design (#2501)
+
+### Fixed
+- **CI test suite** — decouple MDAL model validation from runtime API key (#2474), sandbox regex/mode/source guard (#2477), custom:model@url availability (#2480)
+- **HTTP/1.1 transport** — restore as default (#2503)
+
+### Changed
+- **OAS v0.87.0 delegation** — delegate provider_config_to_oas entirely (#2466)
+
 ## [2.124.0] - 2026-03-21
 
 ### Added

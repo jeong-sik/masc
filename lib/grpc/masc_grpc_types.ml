@@ -17,13 +17,13 @@ let encode to_proto msg =
   Ocaml_protoc_plugin.Writer.contents (to_proto msg)
 
 (** Deserialize a protobuf message from a binary string.
-    Raises [Failure] on parse error for backward compatibility. *)
+    Raises [Invalid_argument] on parse error. *)
 let decode from_proto bytes =
   let reader = Ocaml_protoc_plugin.Reader.create bytes in
   match from_proto reader with
   | Ok v -> v
   | Error e ->
-    failwith (Printf.sprintf "protobuf decode error: %s"
+    invalid_arg (Printf.sprintf "protobuf decode error: %s"
       (Ocaml_protoc_plugin.Result.show_error e))
 
 (** {1 Shared Types} *)

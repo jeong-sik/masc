@@ -5,6 +5,7 @@ import type {
   Keeper,
   KeeperConversationEntry,
   KeeperConversationRole,
+  KeeperConversationSource,
   KeeperConversationStreamState,
   KeeperConversationDelivery,
   KeeperDiagnostic,
@@ -48,7 +49,7 @@ function normalizeRole(value: unknown): KeeperConversationRole {
 function roleLabel(role: KeeperConversationRole): string {
   switch (role) {
     case 'user':
-      return 'User'
+      return '사용자'
     case 'assistant':
       return 'Keeper'
     case 'system':
@@ -58,6 +59,50 @@ function roleLabel(role: KeeperConversationRole): string {
     default:
       return 'Event'
   }
+}
+
+function looksLikeWorldStatePrompt(text: string): boolean {
+  const trimmed = text.trim()
+  return trimmed.startsWith('## Current World State')
+    || (trimmed.includes('### Room State') && trimmed.includes('### Context'))
+}
+
+function normalizeConversationSource(
+  value: unknown,
+  role: KeeperConversationRole,
+  rawText: string,
+  previousSource: KeeperConversationSource | null,
+): KeeperConversationSource {
+  const source = asString(value)?.trim()
+  if (
+    source === 'direct_user'
+    || source === 'direct_assistant'
+    || source === 'world_state_prompt'
+    || source === 'internal_assistant'
+    || source === 'tool_result'
+    || source === 'system'
+    || source === 'unknown'
+  ) {
+    return source
+  }
+
+  if (role === 'tool') return 'tool_result'
+  if (role === 'system') return 'system'
+  if (role === 'user') {
+    return looksLikeWorldStatePrompt(rawText) ? 'world_state_prompt' : 'direct_user'
+  }
+  if (role === 'assistant') {
+    return previousSource === 'world_state_prompt' ? 'internal_assistant' : 'direct_assistant'
+  }
+  return 'unknown'
+}
+
+export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry): boolean {
+  if (entry.role !== 'user' && entry.role !== 'assistant') return false
+  return entry.source !== 'world_state_prompt'
+    && entry.source !== 'internal_assistant'
+    && entry.source !== 'tool_result'
+    && entry.source !== 'system'
 }
 
 // --- Diagnostic helpers ---
@@ -229,11 +274,17 @@ export function deriveKeeperDiagnostic(
 
 // --- Thread state management ---
 
-function normalizeHistoryEntry(raw: unknown, index: number, keeperName?: string): KeeperConversationEntry | null {
+function normalizeHistoryEntry(
+  raw: unknown,
+  index: number,
+  keeperName?: string,
+  previousSource: KeeperConversationSource | null = null,
+): KeeperConversationEntry | null {
   if (!isRecord(raw)) return null
   const role = normalizeRole(raw.role)
   const rawText = asString(raw.content) ?? asString(raw.preview)
   if (!rawText) return null
+  const source = normalizeConversationSource(raw.source, role, rawText, previousSource)
   const text = formatKeeperVisibleReply(rawText)
   if (!text) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
@@ -241,6 +292,7 @@ function normalizeHistoryEntry(raw: unknown, index: number, keeperName?: string)
   return {
     id: `${role}-${timestamp ?? 'entry'}-${index}`,
     role,
+    source,
     label,
     text,
     rawText,
@@ -251,12 +303,19 @@ function normalizeHistoryEntry(raw: unknown, index: number, keeperName?: string)
   }
 }
 
-function normalizeStatusDetail(name: string, text: string, rawStatus: unknown): KeeperStatusDetail {
+export function normalizeStatusDetail(name: string, text: string, rawStatus: unknown): KeeperStatusDetail {
   const parsed = isRecord(rawStatus) ? rawStatus : null
   const history = Array.isArray(parsed?.history_tail)
-    ? parsed.history_tail
-      .map((entry, index) => normalizeHistoryEntry(entry, index, name))
-      .filter((entry): entry is KeeperConversationEntry => entry !== null)
+    ? (() => {
+        let previousSource: KeeperConversationSource | null = null
+        return parsed.history_tail
+          .map((entry, index) => {
+            const normalized = normalizeHistoryEntry(entry, index, name, previousSource)
+            previousSource = normalized?.source ?? previousSource
+            return normalized
+          })
+          .filter((entry): entry is KeeperConversationEntry => entry !== null)
+      })()
     : []
   return {
     name,
@@ -326,7 +385,7 @@ function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
 ): boolean {
-  if (left.role !== right.role || left.text !== right.text) return false
+  if (left.role !== right.role || left.source !== right.source || left.text !== right.text) return false
   if (left.timestamp && right.timestamp) return left.timestamp === right.timestamp
   return true
 }
@@ -368,8 +427,6 @@ export function updateDiagnostic(name: string, patch: Partial<KeeperDiagnostic>)
     },
   })
 }
-
-export { normalizeStatusDetail }
 
 // --- Stream controller management ---
 

@@ -870,9 +870,9 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         ];
       write_jsonl_lines history_path
         [
-          {|{"role":"user","content":"Can you summarize the plan?","ts_unix":10.0}|};
-          {|{"role":"assistant","content":"thinking","ts_unix":20.0}|};
-          {|{"role":"assistant","content":"All done.","ts_unix":30.0}|};
+          {|{"role":"user","source":"direct_user","content":"Can you summarize the plan?","ts_unix":10.0}|};
+          {|{"role":"assistant","source":"internal_assistant","content":"thinking","ts_unix":20.0}|};
+          {|{"role":"assistant","source":"direct_assistant","content":"All done.","ts_unix":30.0}|};
         ];
       write_jsonl_lines memory_bank_path
         [
@@ -900,6 +900,12 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         Yojson.Safe.Util.(json |> member "history_fragment_count" |> to_int);
       check int "history filtered count" 1
         Yojson.Safe.Util.(json |> member "history_fragment_filtered_count" |> to_int);
+      check string "history direct source preserved" "direct_user"
+        Yojson.Safe.Util.(json |> member "history_tail" |> index 0 |> member "source" |> to_string);
+      check string "history direct kind inferred from source" "direct_conversation"
+        Yojson.Safe.Util.(json |> member "history_tail" |> index 0 |> member "kind" |> to_string);
+      check string "history assistant source preserved" "direct_assistant"
+        Yojson.Safe.Util.(json |> member "history_tail" |> index 1 |> member "source" |> to_string);
       check int "memory note count" 2
         Yojson.Safe.Util.(json |> member "memory_bank" |> member "total_notes" |> to_int);
       check int "compaction history count" 1

@@ -233,6 +233,10 @@ let handle_keeper_status ctx args : tool_result =
                        j |> member "content" |> to_string_option
                        |> Option.value ~default:""
                      in
+                     let source =
+                       j |> member "source" |> to_string_option
+                       |> Option.value ~default:"unknown"
+                     in
                      let ts_unix =
                        let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
                        if ts0 > 0.0 then ts0
@@ -244,12 +248,18 @@ let handle_keeper_status ctx args : tool_result =
                      in
                      let role_lc = String.lowercase_ascii role in
                      let entry_kind =
-                       match role_lc with
+                       match source, role_lc with
+                       | "direct_user", _ | "direct_assistant", _ ->
+                           "direct_conversation"
+                       | "world_state_prompt", _ -> "internal_prompt"
+                       | "internal_assistant", _ -> "internal_reply"
+                       | _, _ ->
+                           (match role_lc with
                        | "assistant" -> "self_talk"
                        | "user" -> "input"
                        | "tool" -> "tool_result"
                        | "system" -> "system"
-                       | _ -> "other"
+                       | _ -> "other")
                      in
                      let is_fragment =
                        role_lc = "assistant"
@@ -264,6 +274,7 @@ let handle_keeper_status ctx args : tool_result =
                      let item =
                        `Assoc [
                          ("role", `String role);
+                         ("source", `String source);
                          ("kind", `String entry_kind);
                          ("is_fragment", `Bool is_fragment);
                          ("ts_unix", `Float ts_unix);

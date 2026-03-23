@@ -119,6 +119,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~max_context:primary_max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
               ~generation ~max_turns
+              ~history_user_source:"world_state_prompt"
+              ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
               ~max_cost_usd
               ())

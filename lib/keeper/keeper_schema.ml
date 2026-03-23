@@ -67,6 +67,10 @@ let resident_schemas : tool_schema list = [
           ("type", `String "string");
           ("enum", `List [`String "disabled"; `String "readonly"]);
         ]);
+        ("allowed_paths", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
         ("initiative_enabled", `Assoc [("type", `String "boolean")]);
         ("initiative_scope", `Assoc [
           ("type", `String "string");
@@ -190,6 +194,11 @@ let resident_schemas : tool_schema list = [
           ("type", `String "string");
           ("enum", `List [`String "disabled"; `String "readonly"]);
           ("description", `String "Keeper shell wrapper mode. readonly adds a structured read-only shell tool without enabling raw bash.");
+        ]);
+        ("allowed_paths", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Relative path prefixes the keeper may access via fs_read/shell_readonly. Empty means unrestricted within project root.");
         ]);
         ("initiative_enabled", `Assoc [
           ("type", `String "boolean");

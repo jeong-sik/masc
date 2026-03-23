@@ -29,6 +29,7 @@ type keeper_meta = {
   policy_reward_model_path: string;
   policy_voice_enabled: bool;
   policy_shell_mode: string;
+  allowed_paths: string list;
   initiative_enabled: bool;
   initiative_scope: string;
   initiative_idle_sec: int;
@@ -132,6 +133,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("policy_reward_model_path", `String m.policy_reward_model_path);
       ("policy_voice_enabled", `Bool m.policy_voice_enabled);
       ("policy_shell_mode", `String m.policy_shell_mode);
+      ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
       ("initiative_enabled", `Bool m.initiative_enabled);
       ("initiative_scope", `String m.initiative_scope);
       ("initiative_idle_sec", `Int m.initiative_idle_sec);
@@ -273,6 +275,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json
       |> canonical_policy_shell_mode
     in
+    let allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
     let initiative_enabled =
       Safe_ops.json_bool ~default:false "initiative_enabled" json
     in
@@ -489,6 +492,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           policy_reward_model_path;
           policy_voice_enabled;
           policy_shell_mode;
+          allowed_paths;
           initiative_enabled;
           initiative_scope;
           initiative_idle_sec;

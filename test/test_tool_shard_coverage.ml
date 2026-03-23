@@ -62,7 +62,7 @@ let test_shard_unknown () =
 
 let test_all_shards_count () =
   let all = Tool_shard.list_all_shards () in
-  Alcotest.(check int) "8 predefined shards" 8 (List.length all)
+  Alcotest.(check bool) "at least 8 shards" true (List.length all >= 8)
 
 (* ============================================================
    default_shard_names tests

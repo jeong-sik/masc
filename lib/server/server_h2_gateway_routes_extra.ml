@@ -156,14 +156,35 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
         (match read_file file_path with
          | Ok body ->
              let ct = asset_content_type filename in
-             let headers = H2.Headers.of_list [
+             let is_compressible =
+               Filename.check_suffix filename ".js"
+               || Filename.check_suffix filename ".css"
+               || Filename.check_suffix filename ".svg"
+             in
+             let accepts_zstd =
+               Http_server_eio.Compression.accepts_zstd httpun_request
+             in
+             let final_body, encoding_headers =
+               if is_compressible && accepts_zstd then
+                 let (compressed, did_compress) =
+                   Http_server_eio.Compression.compress_zstd ~level:3 body
+                 in
+                 if did_compress then
+                   (compressed, [("content-encoding", "zstd"); ("vary", "Accept-Encoding")])
+                 else
+                   (body, [])
+               else
+                 (body, [])
+             in
+             let base_headers = [
                ("content-type", ct);
-               ("content-length", string_of_int (String.length body));
+               ("content-length", string_of_int (String.length final_body));
                ("cache-control", "public, max-age=31536000, immutable");
              ] in
+             let headers = H2.Headers.of_list (base_headers @ encoding_headers) in
              let response = H2.Response.create ~headers `OK in
              let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-             H2.Body.Writer.write_string writer body;
+             H2.Body.Writer.write_string writer final_body;
              H2.Body.Writer.close writer
          | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true

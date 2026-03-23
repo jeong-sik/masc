@@ -264,11 +264,38 @@ let serve_dashboard_index request reqd =
         "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>"
         reqd
 
-let serve_dashboard_static name _request reqd =
+let is_compressible_asset name =
+  Filename.check_suffix name ".js"
+  || Filename.check_suffix name ".css"
+  || Filename.check_suffix name ".svg"
+  || Filename.check_suffix name ".html"
+  || Filename.check_suffix name ".json"
+  || Filename.check_suffix name ".map"
+
+let serve_dashboard_static name request reqd =
   let path = Filename.concat (dashboard_asset_root ()) name in
   match read_file path with
   | Ok body ->
-      Http.Response.bytes ~content_type:(asset_content_type name) body reqd
+      let content_type = asset_content_type name in
+      (* Vite hashed assets are immutable; index.html is not *)
+      let cache_control =
+        if Filename.check_suffix name ".html" then
+          dashboard_index_cache_control
+        else
+          "public, max-age=31536000, immutable"
+      in
+      let final_body, encoding_headers =
+        if is_compressible_asset name && Http.Compression.accepts_zstd request then
+          let (compressed, did_compress) = Http.Compression.compress_zstd ~level:3 body in
+          if did_compress then
+            (compressed, [("content-encoding", "zstd"); ("vary", "Accept-Encoding")])
+          else
+            (body, [])
+        else
+          (body, [])
+      in
+      let headers = ("cache-control", cache_control) :: encoding_headers in
+      Http.Response.bytes ~headers ~content_type final_body reqd
   | Error _ ->
       Http.Response.not_found reqd
 

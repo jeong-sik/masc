@@ -46,7 +46,6 @@ let execution_smoke_fixture_json () =
             ("tempo_interval_s", `Float 300.0);
             ("paused", `Bool false);
             ("version", `String Version.version);
-            ("social_runtime", `String "fixture");
           ] );
       ( "execution_queue",
         `List
@@ -492,22 +491,5 @@ let execution_smoke_fixture_json () =
                 ("updated_at", `String generated_at);
                 ("created_at", `String generated_at);
               ];
-          ] );
-      (* Social fields retained in fixture for test compatibility.
-         Social Runtime module was removed (#2084) but fixture tests still
-         assert on these fields. *)
-      ( "social_tick",
-        `Assoc
-          [
-            ("checked", `Int 3);
-            ("passed", `Int 3);
-            ("failed", `Int 0);
-          ] );
-      ( "social_checkins",
-        `List
-          [
-            `Assoc [ ("agent", `String "local-alpha"); ("status", `String "ok") ];
-            `Assoc [ ("agent", `String "local-beta"); ("status", `String "ok") ];
-            `Assoc [ ("agent", `String "local-gamma"); ("status", `String "ok") ];
           ] );
     ]

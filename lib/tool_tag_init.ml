@@ -30,7 +30,6 @@ let register_all () =
     "masc_board_vote"; "masc_board_stats";
     "masc_board_search"; "masc_board_comment_vote";
     "masc_board_profile"; "masc_board_hearths"; "masc_board_migrate";
-    (* lodge tools removed -- Lodge heartbeat deprecated (#1596) *)
     (* conversations *)
     "masc_convo_start"; "masc_convo_reply"; "masc_convo_conclude";
     "masc_convo_get"; "masc_convo_list";

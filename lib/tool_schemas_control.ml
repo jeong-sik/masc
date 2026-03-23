@@ -69,7 +69,7 @@ Pair with masc_switch_mode to change modes.";
   {
     name = "masc_tool_enable";
     description = "Enable specific tools or entire categories without switching to Full mode. \
-Use when you need a tool not in the current mode preset (e.g., masc_perpetual_start in Standard mode). \
+Use when you need a tool not in the current mode preset (e.g., masc_keeper_status in Standard mode). \
 Pass tool= for individual, tools= for multiple, or category= for bulk (ecosystem, discovery, code, board, etc.). \
 Pair with masc_tool_disable to revert, or masc_switch_mode for wholesale changes.";
     input_schema = `Assoc [
@@ -77,7 +77,7 @@ Pair with masc_tool_disable to revert, or masc_switch_mode for wholesale changes
       ("properties", `Assoc [
         ("tool", `Assoc [
           ("type", `String "string");
-          ("description", `String "Single tool name to enable (e.g. masc_perpetual_start)");
+          ("description", `String "Single tool name to enable (e.g. masc_keeper_status)");
         ]);
         ("tools", `Assoc [
           ("type", `String "array");

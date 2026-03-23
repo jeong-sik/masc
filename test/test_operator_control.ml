@@ -64,7 +64,6 @@ let () =
             .test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn;
           Alcotest.test_case "snapshot exposes keeper and social actions" `Quick
             Test_operator_control_keeper.test_snapshot_exposes_keeper_and_social_actions;
-          (* Lodge heartbeat test removed — deprecated #1596 *)
           Alcotest.test_case "keeper status exposes summary and recoverable"
             `Quick
             Test_operator_control_keeper
@@ -73,7 +72,6 @@ let () =
             Test_operator_control_keeper.test_snapshot_keeper_tool_audit_fallback;
           Alcotest.test_case "keeper msg auto team session bridge" `Quick
             Test_operator_control_keeper.test_keeper_msg_auto_team_session_bridge;
-          (* Lodge tick test removed — deprecated #1596 *)
           Alcotest.test_case "expired confirmation rejected" `Quick
             Test_operator_control_swarm.test_confirm_rejects_expired_token;
           Alcotest.test_case "swarm run continue removed from operator actions" `Quick

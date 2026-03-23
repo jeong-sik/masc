@@ -42,10 +42,9 @@ let raw_schemas : tool_schema list =
 
 let all_schemas : tool_schema list = raw_schemas
 
-(** All schemas including Perpetual Agent Runtime tools *)
-let all_schemas_with_perpetual =
+(** All schemas including config-dependent module schemas *)
+let all_schemas_extended =
   all_schemas
-  (* Config-dependent module schemas (cycle-safe: these files don't depend on Config) *)
   @ Tool_schemas_control.schemas
   @ Tool_schemas_a2a.schemas
   @ Tool_schemas_misc.schemas
@@ -57,4 +56,4 @@ let all_schemas_with_perpetual =
 
 (** Get tool by name *)
 let find_tool name =
-  List.find_opt (fun s -> s.name = name) all_schemas_with_perpetual
+  List.find_opt (fun s -> s.name = name) all_schemas_extended

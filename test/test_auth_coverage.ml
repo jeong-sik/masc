@@ -475,8 +475,6 @@ let test_permission_for_tool_keeper_eval_replay () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
-(* gardener permission tests removed — Gardener deleted (#1834) *)
-
 let test_permission_for_tool_unknown () =
   match Auth.permission_for_tool "unknown_tool_xyz" with
   | None -> ()
@@ -592,7 +590,6 @@ let () =
         test_permission_for_tool_keeper_action_explain;
       test_case "keeper_eval_replay" `Quick
         test_permission_for_tool_keeper_eval_replay;
-      (* gardener permission tests removed — Gardener deleted (#1834) *)
       test_case "unknown" `Quick test_permission_for_tool_unknown;
       test_case "empty" `Quick test_permission_for_tool_empty;
     ];

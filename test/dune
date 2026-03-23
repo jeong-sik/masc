@@ -231,8 +231,6 @@
  (modules test_oas_adapters)
  (libraries masc_mcp agent_sdk alcotest yojson))
 
-; Subsystem OAS integration test removed (#1834 — Gardener/Guardian/Sentinel deleted)
-
 ; OAS Worker tests (streaming bridge, cascade config, mitosis, council)
 (test
  (name test_oas_worker)
@@ -305,9 +303,6 @@
  (modules test_thompson_sampling)
  (libraries masc_mcp alcotest eio eio_main str yojson))
 
-; Gardener/Guardian/Sentinel test stanzas removed (#1834)
-; Autonomy Adjuster tests removed (autonomy_level system moved to OAS)
-
 ; Safe_ops module tests (safe exception handling)
 (test
  (name test_safe_ops)
@@ -362,7 +357,6 @@
  (modules test_room_messages_raw)
  (libraries masc_mcp alcotest unix))
 
-; TRPG tests moved to sublibrary (#1668)
 
 (test
  (name test_tool_goals)
@@ -438,7 +432,6 @@
  (modules test_local_runtime_pool)
  (libraries masc_mcp alcotest unix))
 
-; TRPG tests moved to sublibrary (#1668)
 
 (test
  (name test_tool_keeper)
@@ -693,7 +686,6 @@
  (libraries alcotest yojson unix)
  (deps ../bin/main_eio.exe))
 
-; TRPG tests moved to sublibrary (#1668)
 
 ; Operator MCP endpoint-level supervision tests
 (test
@@ -765,7 +757,6 @@
  (modules test_tool_compact)
  (libraries masc_mcp fs_compat alcotest str yojson))
 
-; TRPG tests moved to sublibrary (#1668)
 
 ; ============================================================
 ; Keeper Agent Harness tests (trajectory + eval gates + scenarios)

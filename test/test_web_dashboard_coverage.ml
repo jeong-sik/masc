@@ -55,6 +55,7 @@ let project_root () =
       Filename.dirname d
 
 
+
 (* ============================================================
    html Tests — Vite SPA index.html
    When assets/dashboard/ is not built (e.g. CI without npm run build),

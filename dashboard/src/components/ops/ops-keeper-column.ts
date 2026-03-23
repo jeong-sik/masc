@@ -47,8 +47,8 @@ export function OpsKeeperColumn() {
   return html`
     <div class="flex flex-col gap-4 min-w-0">
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-lane-panel ops-keeper-section">
-        <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">Keeper 개입</h3>
-        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">장기 실행 중인 keeper를 고르고 바로 probe나 방향 수정 메시지를 보냅니다.</p>
+        <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">Keeper 목록</h3>
+        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">keeper를 선택하면 아래에서 메시지를 보내거나 상세 정보를 볼 수 있습니다.</p>
 
         <div class="flex flex-col gap-2">
           ${keepers.length === 0 ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">지금 보이는 keeper가 없습니다.</div>` : keepers.map(keeper => html`
@@ -68,11 +68,10 @@ export function OpsKeeperColumn() {
                     <span class="w-2 h-2 rounded-full ${keeper.status === 'offline' ? 'bg-[var(--text-muted)]' : keeper.status === 'active' || keeper.status === 'running' ? 'bg-[var(--ok)]' : 'bg-[var(--warn)]'}"></span>
                     ${displayStatus(keeper.status)}
                   </span>
-                  <span
-                    class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer transition-colors"
-                    title="키퍼 상세 보기"
+                  <button
+                    class="text-[11px] py-0.5 px-2 rounded-md border border-[rgba(71,184,255,0.25)] bg-[rgba(71,184,255,0.08)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.18)] cursor-pointer transition-colors"
                     onClick=${(e: Event) => { e.stopPropagation(); openOpsKeeperDetail(keeper) }}
-                  >상세</span>
+                  >상세 보기</button>
                 </div>
               </div>
               <div class="text-[11px] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis flex gap-2">

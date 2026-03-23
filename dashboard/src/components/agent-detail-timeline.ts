@@ -44,7 +44,7 @@ export function AgentTimelineSection() {
         </div>
       ` : null}
       ${events.length === 0
-        ? html`<${EmptyState} message="타임라인 이벤트 없음" compact />`
+        ? html`<${EmptyState} message="이 에이전트의 작업 기록(태스크 수임/완료, 브로드캐스트 등)이 아직 없습니다." compact />`
         : html`
             <div class="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">
               ${events.map((evt: AgentTimelineEvent, idx: number) => {

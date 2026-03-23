@@ -289,6 +289,12 @@ let get_pg_pool ~sw ~env =
       match Caqti_eio_unix.connect_pool ~sw ~pool_config uri ~stdenv:env with
       | Ok pool ->
         pg_pool_ref := Some pool;
+        (* Register shutdown hook to drain PG connections.
+           Without this, force-exit leaves TCP connections as zombies
+           and Supabase session pooler hits MaxClientsInSessionMode. *)
+        at_exit (fun () ->
+          try Caqti_eio.Pool.drain pool
+          with _ -> ());
         Ok pool
       | Error e -> Error (Caqti_error.show e)
 

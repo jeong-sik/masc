@@ -255,6 +255,9 @@ let create_eio ~sw ~env (cfg : config) : (t, error) result =
                Error (caqti_error_to_masc err)
            | Ok () ->
                Log.Backend.info "[PG] connected and schema ready";
+               at_exit (fun () ->
+                 try Caqti_eio.Pool.drain pool
+                 with _ -> ());
                Ok { pool; namespace = cfg.cluster_name; clock = env#clock; _sw = sw })
 
 (** Lightweight pool creation for use in a different Eio domain.

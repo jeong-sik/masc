@@ -174,6 +174,9 @@ let () =
      registrations so it fills gaps without overwriting correct mappings. *)
   Tool_tag_init.register_all ();
   mark_tag_registry_initialized ();
+  (* Inject masc_* schemas into keeper bridge for profile-based filtering.
+     Must happen after all schemas are assembled. *)
+  Keeper_exec_tools.inject_masc_schemas Tools.all_schemas_extended;
   Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ())
 
 (** {1 execute_tool_eio -- included from Mcp_server_eio_execute} *)

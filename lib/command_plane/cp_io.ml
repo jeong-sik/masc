@@ -127,6 +127,53 @@ let write_intents config intents =
         ("intents", `List (List.map intent_to_json intents));
       ])
 
+let read_jsonl_tail_lines path ~max_lines =
+  if max_lines <= 0 || not (Fs_compat.file_exists path) then
+    []
+  else
+    let ic = open_in_bin path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let file_len = in_channel_length ic in
+      if file_len = 0 then []
+      else
+        let chunk_size = 8192 in
+        let target_newlines = max_lines * 3 in
+        let chunks = ref [] in
+        let total_newlines = ref 0 in
+        let pos = ref file_len in
+        while !pos > 0 && !total_newlines <= target_newlines do
+          let read_start = max 0 (!pos - chunk_size) in
+          let read_len = !pos - read_start in
+          seek_in ic read_start;
+          let chunk = Bytes.create read_len in
+          really_input ic chunk 0 read_len;
+          chunks := chunk :: !chunks;
+          for i = 0 to read_len - 1 do
+            if Bytes.get chunk i = '\n' then incr total_newlines
+          done;
+          pos := read_start
+        done;
+        let total_bytes =
+          List.fold_left (fun acc chunk -> acc + Bytes.length chunk) 0 !chunks
+        in
+        let combined = Bytes.create total_bytes in
+        let _ =
+          List.fold_left
+            (fun offset chunk ->
+              let len = Bytes.length chunk in
+              Bytes.blit chunk 0 combined offset len;
+              offset + len)
+            0 !chunks
+        in
+        let all_lines =
+          Bytes.to_string combined
+          |> String.split_on_char '\n'
+          |> List.filter (fun line -> String.trim line <> "")
+        in
+        let total = List.length all_lines in
+        if total <= max_lines then all_lines
+        else List.filteri (fun i _ -> i >= total - max_lines) all_lines)
+
 let read_events config =
   ensure_dirs config;
   if not (Room_utils.path_exists config (events_path config)) then
@@ -141,6 +188,17 @@ let read_events config =
              match Safe_ops.parse_json_safe ~context:"command_plane_v2.events" trimmed with
              | Ok json -> event_of_json json
              | Error _ -> None)
+
+let read_recent_events config ~limit =
+  ensure_dirs config;
+  if not (Room_utils.path_exists config (events_path config)) then
+    []
+  else
+    read_jsonl_tail_lines (events_path config) ~max_lines:limit
+    |> List.filter_map (fun line ->
+           match Safe_ops.parse_json_safe ~context:"command_plane_v2.events" line with
+           | Ok json -> event_of_json json
+           | Error _ -> None)
 
 let append_event config (event : event_record) =
   ensure_dirs config;

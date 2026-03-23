@@ -62,8 +62,7 @@ let extract_task_id text =
   in
   seek 0
 
-let first_some left right =
-  match left with Some _ -> left | None -> right
+let first_some = Dashboard_utils.first_some
 
 let supported_execution_action_types =
   [

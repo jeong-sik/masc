@@ -135,10 +135,7 @@ let dedupe_keep_order items =
         true))
     items
 
-let first_some a b =
-  match a with
-  | Some _ -> a
-  | None -> b
+let first_some = Dashboard_utils.first_some
 
 let resolve_allowed_models ~explicit_allowed_models ~seed_allowed_models ~models =
   if explicit_allowed_models <> [] then

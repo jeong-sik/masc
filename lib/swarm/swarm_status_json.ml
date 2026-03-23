@@ -132,10 +132,7 @@ let get_detail_string json key =
       | _ -> None)
   | _ -> None
 
-let first_some left right =
-  match left with
-  | Some _ -> left
-  | None -> right
+let first_some = Dashboard_utils.first_some
 
 let parse_timestamp timestamp =
   Option.bind timestamp Command_plane_v2.parse_iso_timestamp

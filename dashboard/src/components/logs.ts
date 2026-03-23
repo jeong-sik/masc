@@ -47,7 +47,7 @@ export function LogViewer() {
 
   return html`
     <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
-      <section class="rounded-[26px] border border-[rgba(138,163,211,0.16)] bg-[linear-gradient(135deg,rgba(9,22,42,0.95),rgba(7,13,24,0.92))] px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <section class="rounded-xl border border-[rgba(138,163,211,0.16)] bg-[linear-gradient(135deg,rgba(9,22,42,0.95),rgba(7,13,24,0.92))] px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="min-w-0 max-w-[760px]">
             <div class="text-[10px] font-semibold uppercase tracking-[0.22em] text-[rgba(154,217,255,0.72)]">Observer</div>
@@ -57,7 +57,7 @@ export function LogViewer() {
             </p>
           </div>
 
-          <div class="grid min-w-[240px] gap-2 rounded-[20px] border border-[rgba(255,255,255,0.07)] bg-[rgba(255,255,255,0.04)] p-3">
+          <div class="grid min-w-[240px] gap-2 rounded-lg border border-[rgba(255,255,255,0.07)] bg-[rgba(255,255,255,0.04)] p-3">
             <div class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
               <span>현재 필터</span>
               <strong class="text-[var(--text-strong)]">${levelFilter.value}+</strong>
@@ -74,11 +74,11 @@ export function LogViewer() {
         </div>
       </section>
 
-      <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[26px] border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]">
+      <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]">
         <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
           <select
-            class="logs-select rounded-[14px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
+            class="logs-select rounded-md border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
             value=${levelFilter.value}
             onChange=${(e: Event) => {
               levelFilter.value = (e.target as HTMLSelectElement).value
@@ -92,7 +92,7 @@ export function LogViewer() {
           </select>
 
           <input
-            class="logs-module-input min-w-[220px] rounded-[14px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
+            class="logs-module-input min-w-[220px] rounded-md border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
             type="text"
             placeholder="module filter"
             value=${moduleFilter.value}
@@ -105,7 +105,7 @@ export function LogViewer() {
           />
 
           <select
-            class="logs-select rounded-[14px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
+            class="logs-select rounded-md border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
             value=${String(logLimit.value)}
             onChange=${(e: Event) => {
               logLimit.value = parseInt((e.target as HTMLSelectElement).value, 10)
@@ -129,7 +129,7 @@ export function LogViewer() {
             />
             자동
           </label>
-          <button class="logs-refresh-btn rounded-[14px] border border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.12)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]" onClick=${() => { void loadLogs() }}
+          <button class="logs-refresh-btn rounded-md border border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.12)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]" onClick=${() => { void loadLogs() }}
             disabled=${logLoading.value}>
             ${logLoading.value ? '...' : '새로고침'}
           </button>
@@ -137,7 +137,7 @@ export function LogViewer() {
         </div>
 
         ${logError.value ? html`
-          <div class="mx-4 mt-4 rounded-[18px] border border-solid border-[#e05050] bg-[rgba(224,80,80,0.12)] px-4 py-3 text-[12px] text-[#ffb3b3]">${logError.value}</div>
+          <div class="mx-4 mt-4 rounded-md border border-solid border-[#e05050] bg-[rgba(224,80,80,0.12)] px-4 py-3 text-[12px] text-[#ffb3b3]">${logError.value}</div>
         ` : null}
 
         <div class="logs-table-wrap min-h-0 flex-1 overflow-auto px-3 pb-3">

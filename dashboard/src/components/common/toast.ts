@@ -24,9 +24,9 @@ const BORDER_COLOR: Record<ToastType, string> = {
 }
 
 const ICON: Record<ToastType, string> = {
-  success: '✓',
-  warning: '⚠',
-  error: '✕',
+  success: '\u2713',
+  warning: '\u26A0',
+  error: '\u2715',
 }
 
 const ICON_COLOR: Record<ToastType, string> = {
@@ -52,15 +52,19 @@ export function ToastContainer() {
   if (items.length === 0) return null
 
   return html`
-    <div class="fixed top-5 right-5 z-[var(--z-overlay-toast,3070)] flex flex-col gap-3">
+    <div class="fixed top-5 right-5 z-[var(--z-overlay-toast,3070)] flex flex-col gap-2">
       ${items.map(t => html`
         <div
           key=${t.id}
-          class="flex items-center gap-3 py-2.5 px-3.5 min-w-[240px] max-w-[380px] rounded-lg border-l-[3px] border-l-solid border border-solid border-[var(--card-border)] bg-[rgba(10,18,34,0.95)] shadow-[0_8px_24px_rgba(0,0,0,0.35),0_2px_8px_rgba(0,0,0,0.2)] backdrop-blur-sm cursor-pointer transition-opacity duration-200 hover:opacity-90 animate-[slideInRight_0.25s_ease-out] ${BORDER_COLOR[t.type]}"
-          onClick=${() => dismissToast(t.id)}
+          class="flex items-center gap-2.5 py-2 px-3 min-w-[220px] max-w-[360px] rounded-md border-l-[3px] border-l-solid border border-solid border-[var(--card-border)] bg-[rgba(10,18,34,0.96)] shadow-lg animate-[slideInRight_0.2s_ease-out] ${BORDER_COLOR[t.type]}"
         >
-          <span class="text-sm shrink-0 ${ICON_COLOR[t.type]}">${ICON[t.type]}</span>
-          <span class="text-[12px] text-[var(--text-body)] leading-[1.4]">${t.message}</span>
+          <span class="text-xs shrink-0 ${ICON_COLOR[t.type]}">${ICON[t.type]}</span>
+          <span class="flex-1 text-[12px] text-[var(--text-body)] leading-[1.4]">${t.message}</span>
+          <button
+            class="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer text-[11px] p-0.5 transition-colors duration-150"
+            onClick=${(e: Event) => { e.stopPropagation(); dismissToast(t.id) }}
+            title="닫기"
+          >\u2715</button>
         </div>
       `)}
     </div>

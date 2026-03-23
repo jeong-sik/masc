@@ -23,7 +23,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
   const build = serverStatus.value?.build
 
   return html`
-    <section class="grid gap-3 rounded-[22px] border border-[rgba(255,255,255,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.02))] p-3">
+    <section class="grid gap-2.5 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.02))] p-3">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">Room Pulse</div>
@@ -39,26 +39,26 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
 
       ${build
         ? html`
-            <div class="rounded-[18px] border border-[rgba(71,184,255,0.14)] bg-[rgba(71,184,255,0.08)] px-3 py-2 text-[10px] text-[rgba(191,231,255,0.78)]">
+            <div class="rounded-md border border-[rgba(71,184,255,0.14)] bg-[rgba(71,184,255,0.08)] px-3 py-2 text-[10px] text-[rgba(191,231,255,0.78)]">
               build v${build.release_version} · ${shortCommit(build.commit)}
             </div>
           `
         : null}
 
       <div class="grid grid-cols-2 gap-2 text-[11px]">
-        <div class="rounded-[16px] border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
+        <div class="rounded-md border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
           <div class="text-[10px] text-[var(--text-muted)]">에이전트</div>
           <strong class="mt-1 block text-[18px] font-semibold tabular-nums text-[var(--accent)]">${agents.value.length}</strong>
         </div>
-        <div class="rounded-[16px] border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
+        <div class="rounded-md border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
           <div class="text-[10px] text-[var(--text-muted)]">키퍼</div>
           <strong class="mt-1 block text-[18px] font-semibold tabular-nums text-[var(--ok)]">${keepers.value.length}</strong>
         </div>
-        <div class="rounded-[16px] border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
+        <div class="rounded-md border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
           <div class="text-[10px] text-[var(--text-muted)]">태스크</div>
           <strong class="mt-1 block text-[18px] font-semibold tabular-nums text-[var(--warn)]">${tasks.value.length}</strong>
         </div>
-        <div class="rounded-[16px] border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
+        <div class="rounded-md border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
           <div class="text-[10px] text-[var(--text-muted)]">이벤트</div>
           <strong class="mt-1 block text-[18px] font-semibold tabular-nums text-[var(--text-strong)]">${eventCount.value}</strong>
         </div>
@@ -66,7 +66,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
 
       <div class="grid grid-cols-2 gap-2">
         <button
-          class="w-full rounded-[16px] border border-solid border-[rgba(71,184,255,0.26)] bg-[rgba(71,184,255,0.14)] px-3 py-2 text-[11px] font-medium text-[#dff3ff] cursor-pointer transition-colors duration-150 hover:bg-[rgba(71,184,255,0.2)]"
+          class="w-full rounded-md border border-solid border-[rgba(71,184,255,0.26)] bg-[rgba(71,184,255,0.14)] px-3 py-2 text-[11px] font-medium text-[#dff3ff] cursor-pointer transition-colors duration-150 hover:bg-[rgba(71,184,255,0.2)]"
           onClick=${() => {
             refreshDashboard()
             refreshForTab(currentTab)
@@ -75,7 +75,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
           Room sync
         </button>
         <button
-          class="w-full rounded-[16px] border border-solid border-[var(--card-border)] px-3 py-2 bg-[rgba(255,255,255,0.04)] text-[var(--text-body)] text-[11px] font-medium cursor-pointer transition-colors duration-150 hover:bg-[rgba(255,255,255,0.08)]"
+          class="w-full rounded-md border border-solid border-[var(--card-border)] px-3 py-2 bg-[rgba(255,255,255,0.04)] text-[var(--text-body)] text-[11px] font-medium cursor-pointer transition-colors duration-150 hover:bg-[rgba(255,255,255,0.08)]"
           onClick=${() => navigate('operations', { section: 'intervene' })}
         >
           운영 패널

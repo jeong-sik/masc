@@ -34,9 +34,9 @@
   /* Tone variants */
   --bad-light: #f87171;
   --warn-bright: #f97316;
-  --radius-lg: 16px;
-  --radius-md: 12px;
-  --radius-sm: 10px;
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
 
   --font-size-2xs: 11px;
   --font-size-xs: 12px;
@@ -64,9 +64,9 @@
   --ok: #4ade80;
   --warn: #fbbf24;
   --bad: #ef4444;
-  --radius-lg: 16px;
-  --radius-md: 12px;
-  --radius-sm: 10px;
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
   --header-h: 94px;
 
   /* Agent status (soft tones) */

@@ -238,11 +238,11 @@ export function Overview() {
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
 
-      <div class="p-6 rounded-3xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">
+      <div class="p-6 rounded-xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">
         <${HotSessions} />
       </div>
 
-      <div class="p-6 rounded-3xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">
+      <div class="p-6 rounded-xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">
         <${AgentPulse} />
       </div>
 
@@ -250,7 +250,7 @@ export function Overview() {
         <${OasPipeline} />
       </div>
 
-      <div class="p-6 rounded-3xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">
+      <div class="p-6 rounded-xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">
         <${HomeSectionHeader} label="최근 활동" />
         <${NarrativeTimeline} entries=${journal} maxItems=${8} />
       </div>

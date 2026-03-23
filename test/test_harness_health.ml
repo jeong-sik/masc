@@ -32,7 +32,6 @@ let test_score_zero_when_empty () =
 let test_score_improves_with_hooks () =
   setup ();
   (* Install hooks and generate some data *)
-  Masc_mcp.Tool_trace_hooks.install ();
   Masc_mcp.Tool_metrics.install ();
   D.register ~tool_name:"__health_test"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "ok"));

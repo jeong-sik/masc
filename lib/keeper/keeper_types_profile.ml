@@ -193,6 +193,12 @@ let canonical_policy_shell_mode = function
   | "sandboxed" -> "sandboxed"
   | _ -> "disabled"
 
+(** Derive autonomy level from canonical policy_shell_mode.
+    Single source of truth for the Layer1→Layer2 mapping. *)
+let autonomy_level_of_shell_mode = function
+  | "readonly" | "sandboxed" -> "l3_guided"
+  | _ -> "l1_reactive"
+
 let canonical_initiative_scope = function
   | "board_only" -> "board_only"
   | _ -> "board_only"

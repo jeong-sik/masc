@@ -31,9 +31,7 @@
    cache_eio
    cascade_inference
    env_config
-   capability_match
    cancellation
-   checkpoint_types
    command_plane_v2
    command_plane_orchestra
    cp_types
@@ -51,7 +49,6 @@
    cp_lifecycle_intents
    cp_lifecycle_policy
    config
-   context_budget_manager
    context_router
    dashboard
    dashboard_labels
@@ -124,7 +121,6 @@
    server_mcp_transport_http_session
    server_mcp_transport_http_headers
    server_mcp_transport_http_sse
-   server_mcp_transport_http_mcp_handlers
    server_mcp_transport_ws
    server_webrtc_transport
    web_dashboard
@@ -208,7 +204,6 @@
    memory_pg
    memory_jsonl
    memory_oas_bridge
-   reflection
    relation_materializer
    prometheus
    rate_limit
@@ -238,7 +233,6 @@
    verification
    trace
    mitosis
-   mitosis_continuity
    mitosis_defaults
    mitosis_dna
    mitosis_metrics
@@ -258,7 +252,6 @@
    orchestrator
    planning_eio
    post_verifier
-   post_verifier_model
    provider_adapter
    progress
    pulse
@@ -290,7 +283,6 @@
    session
    shutdown_hooks
    spawn
-   spawn_registry
    sse
    streamable_http
    subsystem_health
@@ -304,7 +296,6 @@
    swarm_status_lanes
    swarm_status_build
    swarm_checkpoint
-   swarm_eio
    telemetry_eio
    tempo
    tools
@@ -396,7 +387,6 @@
    tool_result
    tool_dispatch
    tool_tag_init
-   tool_trace_hooks
    tool_permissions
    sse_room_filter
    tool_metrics
@@ -437,7 +427,6 @@
    masc_grpc_server
    masc_grpc_client
    masc_grpc_transport
-   udp_socket_eio
    shutdown
    supervisor
    keeper_chat_ag_ui
@@ -455,8 +444,7 @@
    trajectory
    eval_gate
    eval_harness
-   ;; Keeper verifier + contract
-   keeper_verifier
+   ;; Keeper contract
    keeper_schema
    keeper_config
    keeper_toml_loader
@@ -492,8 +480,6 @@
    keeper_prompt
    keeper_coordination
    keeper_execution
-   keeper_learning
-   keeper_feedback_tool
    keeper_keepalive
    keeper_resident_supervisor
    keeper_runtime
@@ -565,7 +551,6 @@
 (private_modules
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
- mitosis_continuity
  mitosis_dna
  mitosis_helpers
  mitosis_spawn
@@ -621,7 +606,6 @@
  server_mcp_transport_http_session
  server_mcp_transport_http_headers
  server_mcp_transport_http_sse
- server_mcp_transport_http_mcp_handlers
  server_command_plane_http_support
  server_command_plane_http_stream
  server_command_plane_http_mutations

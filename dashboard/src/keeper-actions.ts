@@ -62,7 +62,7 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
       include_history_tail: true,
       include_compaction_history: false,
       tail_turns: 5,
-      tail_messages: 10,
+      tail_messages: 50,
     })
     let parsed: unknown = null
     try {
@@ -77,6 +77,33 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
     const message = err instanceof Error ? err.message : `Failed to inspect ${keeperName}`
     setRecordValue(keeperActionErrors, keeperName, message)
     return null
+  } finally {
+    setRecordValue(keeperHydrating, keeperName, false)
+  }
+}
+
+export async function loadFullKeeperHistory(name: string): Promise<void> {
+  const keeperName = name.trim()
+  if (!keeperName) return
+  setRecordValue(keeperHydrating, keeperName, true)
+  try {
+    const text = await callMcpTool('masc_keeper_status', {
+      name: keeperName,
+      fast: true,
+      include_context: false,
+      include_metrics_overview: false,
+      include_memory_bank: false,
+      include_history_tail: true,
+      include_compaction_history: false,
+      tail_turns: 0,
+      tail_messages: 200,
+    })
+    let parsed: unknown = null
+    try { parsed = JSON.parse(text) } catch { parsed = null }
+    const detail = normalizeStatusDetail(keeperName, text, parsed)
+    setStatusDetail(keeperName, detail)
+  } catch {
+    // ignore — best effort
   } finally {
     setRecordValue(keeperHydrating, keeperName, false)
   }

@@ -4,6 +4,7 @@ import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
   hydrateKeeperStatus,
+  loadFullKeeperHistory,
   keeperActionErrors,
   keeperHydrating,
   keeperProbing,
@@ -191,13 +192,20 @@ export function KeeperConversationPanel({
     writeKeeperChatMetadataVisible(showMetadata)
   }, [showMetadata])
 
+  const [historyExpanded, setHistoryExpanded] = useState(false)
   const rawThread = keeperThreads.value[keeperName] ?? []
   // Filter out system/tool messages -- only show user and assistant conversation
   const thread = rawThread.filter(
     entry => entry.role === 'user' || entry.role === 'assistant',
   )
   const sending = keeperSending.value[keeperName] ?? false
+  const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
+
+  const expandHistory = async () => {
+    setHistoryExpanded(true)
+    await loadFullKeeperHistory(keeperName)
+  }
 
   const submit = async () => {
     const prompt = draft.trim()
@@ -223,6 +231,16 @@ export function KeeperConversationPanel({
           ${showMetadata ? 'Hide metadata' : 'Show metadata'}
         </button>
       </div>
+      ${!historyExpanded && thread.length >= 10 ? html`
+        <button
+          type="button"
+          class="py-1.5 px-4 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer self-center"
+          disabled=${hydrating}
+          onClick=${() => { void expandHistory() }}
+        >
+          ${hydrating ? 'Loading...' : `Load full history (showing ${thread.length})`}
+        </button>
+      ` : null}
       <${ChatTranscript}
         entries=${thread}
         emptyText="No direct conversation history yet."

@@ -34,33 +34,15 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
           | _ -> ""))
   with Yojson.Safe.Util.Type_error _ -> ""
 
-(** Tools allowed at each autonomy level for the unified turn path.
-    Returns None if no filtering should be applied (AllowAll). *)
-let allowed_tools_for_autonomy_level
-    (level : string) : string list option =
-  let base_safe = [
-    "keeper_board_get"; "keeper_board_post"; "keeper_board_comment";
-    "keeper_board_vote"; "keeper_board_list";
-    "keeper_read"; "keeper_fs_read";
-    "keeper_memory_search";
-    "keeper_time_now"; "keeper_context_status";
-    "extend_turns";
-    "keeper_voice_speak"; "keeper_voice_agent";
-  ] in
-  (* L3 adds read-only shell + code navigation — keepers can inspect
-     the codebase, run tests, and search without modifying files. *)
-  let l3_tools = [
-    "keeper_shell_readonly";
-    "keeper_code_read"; "keeper_code_search"; "keeper_code_symbols";
-    "keeper_github";
-  ] in
-  match String.lowercase_ascii (String.trim level) with
-  | "l3_guided" -> Some (l3_tools @ base_safe)
-  | "l4_autonomous" -> Some ("keeper_bash" :: "keeper_fs_edit" :: "keeper_edit" :: l3_tools @ base_safe)
-  | "l5_independent" -> None  (* AllowAll *)
-  | _ -> Some base_safe  (* L1/L2 and unknown: safe tools only *)
-
 (** Build OAS hooks for a keeper agent.
+
+    Tool availability is determined at keeper creation time by
+    [keeper_exec_tools] based on policy_shell_mode. No secondary
+    autonomy-level filtering — industry standard is binary tool grants.
+
+    Safety gates:
+    1. Cost budget — reject when accumulated cost exceeds limit
+    2. Destructive pattern detection — reject dangerous bash/edit commands
 
     @param config Room configuration
     @param meta_ref Mutable ref to keeper metadata
@@ -69,8 +51,7 @@ let allowed_tools_for_autonomy_level
     @param generation Current generation counter
     @param max_cost_usd Optional cost budget (rejects tool calls above limit)
     @param destructive_check Enable destructive pattern detection (default true)
-    @param on_tool_executed Optional callback after each tool execution
-    @param autonomy_filter Optional autonomy level for tool visibility gating *)
+    @param on_tool_executed Optional callback after each tool execution *)
 let make_hooks
     ~(config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
@@ -81,17 +62,11 @@ let make_hooks
     ?(destructive_check : bool = true)
     ?(on_tool_executed : string -> Yojson.Safe.t -> string -> unit =
         fun _ _ _ -> ())
-    ?(autonomy_filter : string option)
     ()
   : Agent_sdk.Hooks.hooks =
   ignore config;
   let board_write_tools =
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
-  in
-  let autonomy_allowed =
-    match autonomy_filter with
-    | None -> None
-    | Some level -> allowed_tools_for_autonomy_level level
   in
   { Agent_sdk.Hooks.empty with
 
@@ -136,19 +111,7 @@ let make_hooks
              (!meta_ref).name accumulated_cost_usd limit tool_name;
            Agent_sdk.Hooks.Skip
          | _ ->
-           (* Safety gate 2: Autonomy-level tool visibility *)
-           let autonomy_blocked =
-             match autonomy_allowed with
-             | None -> false  (* AllowAll *)
-             | Some allowed -> not (List.mem tool_name allowed)
-           in
-           if autonomy_blocked then (
-             Log.Keeper.warn "keeper:%s autonomy gate: %s not in allowed set (level=%s), skipping"
-               (!meta_ref).name tool_name
-               (match autonomy_filter with Some l -> l | None -> "none");
-             Agent_sdk.Hooks.Skip)
-           else
-           (* Safety gate 3: Destructive pattern detection *)
+           (* Safety gate 2: Destructive pattern detection *)
            if destructive_check && List.mem tool_name destructive_check_tools then
              let cmd = extract_command_from_input input in
              match Eval_gate.detect_destructive cmd with

@@ -227,28 +227,6 @@ let test_prompt_autonomy_description () =
        with Not_found -> false
      in found)
 
-(* ---------- Hooks: autonomy tool filter tests ---------- *)
-
-let test_hooks_allowed_tools_l1 () =
-  let allowed = HK.allowed_tools_for_autonomy_level "l1_reactive" in
-  match allowed with
-  | None -> fail "L1 should have an allow list"
-  | Some tools ->
-      check bool "keeper_board_get allowed" true (List.mem "keeper_board_get" tools);
-      check bool "keeper_bash NOT allowed" true (not (List.mem "keeper_bash" tools))
-
-let test_hooks_allowed_tools_l4 () =
-  let allowed = HK.allowed_tools_for_autonomy_level "l4_autonomous" in
-  match allowed with
-  | None -> fail "L4 should have an allow list"
-  | Some tools ->
-      check bool "keeper_bash allowed for L4" true (List.mem "keeper_bash" tools);
-      check bool "keeper_board_get allowed" true (List.mem "keeper_board_get" tools)
-
-let test_hooks_allowed_tools_l5 () =
-  let allowed = HK.allowed_tools_for_autonomy_level "l5_independent" in
-  check bool "L5 returns None (AllowAll)" true (allowed = None)
-
 (* ---------- Config tests ---------- *)
 
 let with_env name value f =
@@ -417,12 +395,6 @@ let () =
           test_case "skips skip triage" `Quick test_prompt_skips_skip_triage;
           test_case "room state section" `Quick test_prompt_room_state_section;
           test_case "autonomy description" `Quick test_prompt_autonomy_description;
-        ] );
-      ( "hooks_autonomy_filter",
-        [
-          test_case "L1 allowed tools" `Quick test_hooks_allowed_tools_l1;
-          test_case "L4 allowed tools" `Quick test_hooks_allowed_tools_l4;
-          test_case "L5 allow all" `Quick test_hooks_allowed_tools_l5;
         ] );
       ( "config",
         [

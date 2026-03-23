@@ -121,7 +121,6 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~generation ~max_turns
               ~temperature ~max_tokens
               ~max_cost_usd
-              ~autonomy_filter:observation.autonomy_level
               ())
       in
       match run_result with

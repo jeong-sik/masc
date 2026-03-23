@@ -81,12 +81,6 @@ let contains_token haystack needle =
   in
   n_len = 0 || loop 0
 
-let contains_standalone_claim_alias contents =
-  contains_substring contents "`masc_claim`"
-  || contains_substring contents "\"masc_claim\""
-  || contains_substring contents "(masc_claim)"
-  || contains_substring contents " masc_claim "
-
 let read_file path =
   let ic = open_in path in
   Fun.protect
@@ -123,7 +117,7 @@ let test_docs_do_not_reintroduce_ghost_claim_surface () =
          let contents = read_file (doc_path name) in
          if contains_substring contents "masc_task_list" then
            Alcotest.failf "doc %s reintroduces ghost tool masc_task_list" name;
-         if contains_standalone_claim_alias contents
+         if contains_token contents "masc_claim"
             && not (List.mem name allowed_claim_docs)
          then
            Alcotest.failf
@@ -143,7 +137,7 @@ let test_front_door_surfaces_do_not_reintroduce_claim_alias () =
   List.iter
     (fun relative ->
       let contents = read_file (repo_path relative) in
-      if contains_standalone_claim_alias contents then
+      if contains_token contents "masc_claim" then
         Alcotest.failf
           "front-door surface %s reintroduces deprecated masc_claim alias"
           relative)

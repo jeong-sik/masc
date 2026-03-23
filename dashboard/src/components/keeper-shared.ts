@@ -17,6 +17,7 @@ import {
   recoverKeeperRuntime,
   sendKeeperThreadMessage,
 } from '../keeper-runtime'
+import { isVisibleDirectConversationEntry } from '../keeper-state'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
 
@@ -25,10 +26,10 @@ const KEEPER_CHAT_METADATA_VISIBLE_KEY = 'masc_keeper_chat_metadata_visible'
 function readKeeperChatMetadataVisible(): boolean {
   try {
     const stored = localStorage.getItem(KEEPER_CHAT_METADATA_VISIBLE_KEY)
-    // Default to visible (true) when no preference is stored
-    return stored === null ? true : stored === 'true'
+    // Default to hidden so the direct lane reads like chat first.
+    return stored === null ? false : stored === 'true'
   } catch {
-    return true
+    return false
   }
 }
 
@@ -102,6 +103,22 @@ function formatEligible(seconds?: number | null): string | null {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null
   if (seconds < 60) return `${Math.round(seconds)}s`
   return `${Math.ceil(seconds / 60)}m`
+}
+
+function conversationStateLabel(sending: boolean, hydrating: boolean): string {
+  if (sending) return 'live reply'
+  if (hydrating) return 'syncing history'
+  return 'ready'
+}
+
+function conversationStateClass(sending: boolean, hydrating: boolean): string {
+  if (sending) {
+    return 'border-[rgba(76,181,137,0.26)] bg-[rgba(76,181,137,0.12)] text-[#b9f1d1]'
+  }
+  if (hydrating) {
+    return 'border-[rgba(71,184,255,0.26)] bg-[rgba(71,184,255,0.12)] text-[#bfe8ff]'
+  }
+  return 'border-[rgba(148,163,184,0.18)] bg-[rgba(148,163,184,0.08)] text-[var(--text-body)]'
 }
 
 function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnostic | null {
@@ -196,10 +213,10 @@ export function KeeperConversationPanel({
 
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const rawThread = keeperThreads.value[keeperName] ?? []
-  // Filter out system/tool messages -- only show user and assistant conversation
-  const thread = rawThread.filter(
-    entry => entry.role === 'user' || entry.role === 'assistant',
-  )
+  const thread = rawThread.filter(isVisibleDirectConversationEntry)
+  const hiddenHistoryCount = rawThread.filter(
+    entry => entry.delivery === 'history' && !isVisibleDirectConversationEntry(entry),
+  ).length
   const sending = keeperSending.value[keeperName] ?? false
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
@@ -224,40 +241,74 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="flex justify-end">
-        <button type="button"
-          type="button"
-          class="py-1 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer"
-          onClick=${() => { setShowMetadata(!showMetadata) }}
-        >
-          ${showMetadata ? 'Hide metadata' : 'Show metadata'}
-        </button>
+      <div class="overflow-hidden rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
+          <div class="min-w-[220px] flex-1">
+            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Direct Chat</div>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <div class="text-[15px] font-semibold text-[var(--text-strong)]">@${keeperName}</div>
+              <span class=${`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
+                ${conversationStateLabel(sending, hydrating)}
+              </span>
+            </div>
+            <div class="mt-1 text-[13px] leading-[1.65] text-[var(--text-secondary)]">
+              Keeper 상세 안에서 직접 주고받은 대화만 보여줍니다. 내부 프롬프트와 tool chatter는 자동으로 숨깁니다.
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+              onClick=${() => { setShowMetadata(!showMetadata) }}
+            >
+              ${showMetadata ? 'Hide metadata' : 'Show metadata'}
+            </button>
+            ${!historyExpanded && rawThread.length >= 10
+              ? html`
+                  <button
+                    type="button"
+                    class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+                    disabled=${hydrating}
+                    onClick=${() => { void expandHistory() }}
+                  >
+                    ${hydrating ? 'Loading...' : `Load full history (${thread.length} direct shown)`}
+                  </button>
+                `
+              : null}
+          </div>
+        </div>
+
+        <div class="px-4 py-4">
+          <${ChatTranscript}
+            entries=${thread}
+            emptyText="No direct conversation yet. Internal keeper prompts and tool chatter are hidden."
+            showMetadata=${showMetadata}
+            variant="messenger"
+          />
+        </div>
+
+        ${hiddenHistoryCount > 0
+          ? html`
+              <div class="mx-4 mb-4 rounded-[16px] border border-[rgba(245,158,11,0.16)] bg-[rgba(245,158,11,0.06)] px-3 py-2 text-[11px] leading-[1.55] text-[#f4d79e]">
+                ${hiddenHistoryCount} internal history entries are hidden from this transcript to keep the conversation readable.
+              </div>
+            `
+          : null}
+
+        <div class="border-t border-[rgba(148,163,184,0.12)] bg-[rgba(255,255,255,0.03)] px-4 py-4">
+          <${ChatComposer}
+            draft=${draft}
+            placeholder=${placeholder}
+            disabled=${!keeperName}
+            streaming=${sending}
+            streamStartedAt=${keeperStreamStartedAt.value[keeperName] ?? null}
+            onDraftChange=${setDraft}
+            onSend=${() => { void submit() }}
+            onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+          />
+        </div>
       </div>
-      ${!historyExpanded && thread.length >= 10 ? html`
-        <button type="button"
-          type="button"
-          class="py-1.5 px-4 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer self-center"
-          disabled=${hydrating}
-          onClick=${() => { void expandHistory() }}
-        >
-          ${hydrating ? 'Loading...' : `Load full history (showing ${thread.length})`}
-        </button>
-      ` : null}
-      <${ChatTranscript}
-        entries=${thread}
-        emptyText="No direct conversation history yet."
-        showMetadata=${showMetadata}
-      />
-      <${ChatComposer}
-        draft=${draft}
-        placeholder=${placeholder}
-        disabled=${!keeperName}
-        streaming=${sending}
-        streamStartedAt=${keeperStreamStartedAt.value[keeperName] ?? null}
-        onDraftChange=${setDraft}
-        onSend=${() => { void submit() }}
-        onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
-      />
+
       ${error ? html`<div class="text-xs text-[#ffb4b4] leading-relaxed">${error}</div>` : null}
     </div>
   `

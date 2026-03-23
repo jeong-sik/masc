@@ -72,6 +72,13 @@ function findKeeper(name: string): Keeper | null {
   ) ?? null
 }
 
+export function keeperChatTargetName(
+  fallbackName: string,
+  keeper: Pick<Keeper, 'name'> | null,
+): string {
+  return keeper?.name ?? fallbackName
+}
+
 function missionBrief(name: string): DashboardMissionAgentBrief | null {
   const mission = missionSnapshot.value
   if (!mission) return null
@@ -308,6 +315,7 @@ export function AgentProfile({ name }: { name: string }) {
   const lines = roomActivity.value
   const timeline = agentTimeline.value
   const keeper = findKeeper(name)
+  const keeperChatName = keeperChatTargetName(name, keeper)
   const isKeeper = keeper != null
 
   return html`
@@ -416,7 +424,7 @@ export function AgentProfile({ name }: { name: string }) {
       </div>
 
       ${isKeeper ? html`
-        <${KeeperChatPanel} name=${name} />
+        <${KeeperChatPanel} name=${keeperChatName} />
       ` : html`
         <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[rgba(10,22,40,0.8)] border border-[var(--ff-gold-15)] rounded-lg">
           <span class="text-[13px] font-semibold text-[var(--ff-gold)] whitespace-nowrap">@${name}</span>

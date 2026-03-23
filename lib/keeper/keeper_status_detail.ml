@@ -5,7 +5,6 @@ open Tool_args
 open Keeper_types
 open Keeper_memory
 open Keeper_alerting
-open Keeper_exec_persona
 open Keeper_exec_tools
 open Keeper_keepalive
 open Keeper_execution
@@ -233,6 +232,10 @@ let handle_keeper_status ctx args : tool_result =
                        j |> member "content" |> to_string_option
                        |> Option.value ~default:""
                      in
+                     let source =
+                       j |> member "source" |> to_string_option
+                       |> Option.value ~default:"unknown"
+                     in
                      let ts_unix =
                        let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
                        if ts0 > 0.0 then ts0
@@ -244,12 +247,18 @@ let handle_keeper_status ctx args : tool_result =
                      in
                      let role_lc = String.lowercase_ascii role in
                      let entry_kind =
-                       match role_lc with
+                       match source, role_lc with
+                       | "direct_user", _ | "direct_assistant", _ ->
+                           "direct_conversation"
+                       | "world_state_prompt", _ -> "internal_prompt"
+                       | "internal_assistant", _ -> "internal_reply"
+                       | _, _ ->
+                           (match role_lc with
                        | "assistant" -> "self_talk"
                        | "user" -> "input"
                        | "tool" -> "tool_result"
                        | "system" -> "system"
-                       | _ -> "other"
+                       | _ -> "other")
                      in
                      let is_fragment =
                        role_lc = "assistant"
@@ -264,6 +273,7 @@ let handle_keeper_status ctx args : tool_result =
                      let item =
                        `Assoc [
                          ("role", `String role);
+                         ("source", `String source);
                          ("kind", `String entry_kind);
                          ("is_fragment", `Bool is_fragment);
                          ("ts_unix", `Float ts_unix);
@@ -303,6 +313,7 @@ let handle_keeper_status ctx args : tool_result =
                 ~keepalive_started_at:(keeper_keepalive_started_at m.name)
                 ~now_ts
          in
+         let defaults_snapshot = keeper_default_source_snapshot m.name in
 
          let compaction_history_tail =
            if not include_compaction_history then
@@ -416,6 +427,7 @@ let handle_keeper_status ctx args : tool_result =
              ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
              ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
            ]);
+           ("paused", `Bool m.paused);
            ("keepalive_running", `Bool keepalive_running);
            ("agent", agent_status);
            ("diagnostic", diagnostic);
@@ -450,31 +462,22 @@ let handle_keeper_status ctx args : tool_result =
                then `Null
                else `String m.last_proactive_preview);
            ]);
-           ("drift", `Assoc [
-             ("enabled", `Bool false);
-             ("min_turn_gap", `Int 0);
-             ("count_total", `Int 0);
-             ("last_turn", `Int 0);
-             ("last_reason", `Null);
-           ]);
+           ("drift", drift_surface_json ());
            ("policy", `Assoc [
              ("mode", `String m.policy_mode);
              ("voice_enabled", `Bool m.policy_voice_enabled);
              ("shell_mode", `String m.policy_shell_mode);
              ("allowed_paths", string_list_to_json m.allowed_paths);
-             ("allowed_tools", string_list_to_json allowed_tools);
-             ("available_internal_tools", string_list_to_json all_internal_tools);
-             ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
+           ("allowed_tools", string_list_to_json allowed_tools);
+            ("available_internal_tools", string_list_to_json all_internal_tools);
+            ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
            ]);
-           ("initiative", `Assoc [
-             ("enabled", `Bool false);
-             ("scope", `String "board_only");
-             ("idle_sec", `Int 3600);
-             ("cooldown_sec", `Int 3600);
-             ("context_mode", `String "board_snapshot");
-             ("post_ttl_hours", `Int 24);
-           ]);
-           ("auto_team_session_enabled", `Bool false);
+           ("initiative", initiative_surface_json defaults_snapshot.defaults);
+           ("auto_team_session", auto_team_session_surface_json ());
+           ("auto_team_session_enabled", `Bool (auto_team_session_enabled m));
+           ("initiative", initiative_surface_json defaults_snapshot.defaults);
+           ("auto_team_session", auto_team_session_surface_json ());
+           ("auto_team_session_enabled", `Bool (auto_team_session_enabled m));
            ("active_team_session_id",
              match m.active_team_session_id with
              | Some session_id -> `String session_id
@@ -501,10 +504,13 @@ let handle_keeper_status ctx args : tool_result =
              ("include_history_tail", `Bool include_history_tail);
              ("include_compaction_history", `Bool include_compaction_history);
            ]);
-	           ("models_resolved", models_resolved);
-	           ("context", ctx_stats);
-	           ("skill_route", match last_skill_route with Some v -> v | None -> `Null);
-	           ("metrics_overview", metrics_summary_to_json metrics_overview);
+           ("models_resolved", models_resolved);
+           ("runtime", runtime_surface_json ctx.config m);
+           ("coordination", coordination_surface_json m);
+           ("sources", source_provenance_json ctx.config m);
+           ("context", ctx_stats);
+           ("skill_route", match last_skill_route with Some v -> v | None -> `Null);
+           ("metrics_overview", metrics_summary_to_json metrics_overview);
 	           ("memory_bank", memory_summary_to_json memory_bank_summary);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);
@@ -521,7 +527,7 @@ let handle_keeper_status ctx args : tool_result =
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path ctx.config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
-             ("metrics_legacy", `String metrics_path);
+             ("metrics_single_file", `String metrics_path);
              ("memory_bank", `String memory_bank_path);
              ("policy", `String (keeper_policy_log_path ctx.config m.name));
              ("feedback", `String (keeper_feedback_log_path ctx.config m.name));

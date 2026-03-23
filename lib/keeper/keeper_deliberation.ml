@@ -66,9 +66,8 @@ let rec deliberation_action_to_string = function
       ^ String.concat "," (List.map deliberation_action_to_string actions)
       ^ "]"
 
-(** Backward-compatible: map typed action to the legacy string labels
-    used by policy logging and reward models. *)
-let deliberation_action_to_legacy_string = function
+(** Map typed action to stable policy labels used by policy logging and reward models. *)
+let deliberation_action_to_policy_label = function
   | Noop _ -> "noop"
   | ReplyInRoom _ -> "reply_in_room"
   | BoardPost _ -> "board_post"

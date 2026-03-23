@@ -36,8 +36,8 @@ type deliberation_action =
 
 val deliberation_action_to_string : deliberation_action -> string
 
-(** Map typed action to legacy string labels for policy logging. *)
-val deliberation_action_to_legacy_string : deliberation_action -> string
+(** Map typed action to stable policy labels for policy logging. *)
+val deliberation_action_to_policy_label : deliberation_action -> string
 
 val deliberation_action_to_json : deliberation_action -> Yojson.Safe.t
 

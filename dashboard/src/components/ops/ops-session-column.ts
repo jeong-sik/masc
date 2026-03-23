@@ -71,9 +71,9 @@ export function OpsSessionColumn() {
       : sessionDigest?.recommended_actions ?? []
 
   const refreshSelectedSession = async () => {
-    await refreshOperatorSnapshot()
+    await refreshOperatorSnapshot({ force: true })
     if (selectedSession?.session_id) {
-      await refreshOperatorSessionDigest(selectedSession.session_id)
+      await refreshOperatorSessionDigest(selectedSession.session_id, { force: true })
     }
   }
 

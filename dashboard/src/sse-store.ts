@@ -101,7 +101,7 @@ const PREFIX_ROUTES: Array<{ prefix: string; target: RefreshTarget }> = [
 ]
 
 const REFRESH_FNS: Record<RefreshTarget, () => void> = {
-  execution: refreshExecution,
+  execution: () => { void refreshExecution({ force: true }) },
   board:     refreshBoard,
   mdal:      refreshMdal,
   operator:  () => _refreshOperatorFn?.(),
@@ -144,7 +144,7 @@ function handleDashboardRefresh(): void {
   invalidateDashboardCache()
   if (!_fetchDebounce) {
     _fetchDebounce = setTimeout(() => {
-      refreshDashboard()
+      void refreshDashboard({ force: true })
       _refreshCommandPlaneFn?.()
       _refreshOperatorFn?.()
       _fetchDebounce = null
@@ -179,8 +179,8 @@ async function hydrateAfterReconnect(): Promise<void> {
   try {
     await Promise.all([
       refreshRoomTruth({ force: true }),
-      refreshDashboard(),
-      refreshExecution(),
+      refreshDashboard({ force: true }),
+      refreshExecution({ force: true }),
       refreshBoard(),
     ])
     _refreshCommandPlaneFn?.()
@@ -190,8 +190,8 @@ async function hydrateAfterReconnect(): Promise<void> {
     // First attempt failed (server may still be warming up) — retry once.
     setTimeout(() => {
       void refreshRoomTruth({ force: true })
-      refreshDashboard()
-      refreshExecution()
+      void refreshDashboard({ force: true })
+      void refreshExecution({ force: true })
       _refreshOperatorFn?.()
     }, 3000)
   }
@@ -276,7 +276,7 @@ export function startPeriodicRefresh(): void {
     if (!connected.value) {
       invalidateDashboardCache()
     }
-    refreshDashboard()
+    void refreshDashboard()
     _refreshMissionFn?.()
   }, PERIODIC_REFRESH_MS)
 }

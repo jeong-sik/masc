@@ -477,7 +477,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
           ~input:
             (`Assoc
               [
-                ("cmd", `String "grep keeper-ok missing-file");
+                ("cmd", `String "git rev-parse --verify refs/heads/__definitely_missing__");
                 ("timeout_sec", `Float 5.0);
               ])
         |> parse_json_exn
@@ -870,9 +870,9 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         ];
       write_jsonl_lines history_path
         [
-          {|{"role":"user","content":"Can you summarize the plan?","ts_unix":10.0}|};
-          {|{"role":"assistant","content":"thinking","ts_unix":20.0}|};
-          {|{"role":"assistant","content":"All done.","ts_unix":30.0}|};
+          {|{"role":"user","source":"direct_user","content":"Can you summarize the plan?","ts_unix":10.0}|};
+          {|{"role":"assistant","source":"internal_assistant","content":"thinking","ts_unix":20.0}|};
+          {|{"role":"assistant","source":"direct_assistant","content":"All done.","ts_unix":30.0}|};
         ];
       write_jsonl_lines memory_bank_path
         [
@@ -900,6 +900,12 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         Yojson.Safe.Util.(json |> member "history_fragment_count" |> to_int);
       check int "history filtered count" 1
         Yojson.Safe.Util.(json |> member "history_fragment_filtered_count" |> to_int);
+      check string "history direct source preserved" "direct_user"
+        Yojson.Safe.Util.(json |> member "history_tail" |> index 0 |> member "source" |> to_string);
+      check string "history direct kind inferred from source" "direct_conversation"
+        Yojson.Safe.Util.(json |> member "history_tail" |> index 0 |> member "kind" |> to_string);
+      check string "history assistant source preserved" "direct_assistant"
+        Yojson.Safe.Util.(json |> member "history_tail" |> index 1 |> member "source" |> to_string);
       check int "memory note count" 2
         Yojson.Safe.Util.(json |> member "memory_bank" |> member "total_notes" |> to_int);
       check int "compaction history count" 1
@@ -1172,6 +1178,150 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
       check string "resident voice channel" expected_channel
         Yojson.Safe.Util.(resident_json |> member "voice_channel" |> to_string))
 
+let test_keeper_up_update_preserves_proactive_when_omitted () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "buddy";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let create_args =
+        `Assoc
+          [
+            ("name", `String "buddy");
+            ("goal", `String "Stay focused");
+            ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+            ("presence_keepalive", `Bool false);
+            ("proactive_enabled", `Bool true);
+          ]
+      in
+      let create_parsed =
+        match Masc_mcp.Keeper_turn_up_args.parse keeper_ctx create_args with
+        | Ok parsed -> parsed
+        | Error (_, msg) -> fail ("failed to parse create args: " ^ msg)
+      in
+      let ok, _ =
+        Masc_mcp.Keeper_turn_up_create.create_keeper keeper_ctx create_parsed
+      in
+      check bool "initial keeper create ok" true ok;
+      let old_meta =
+        match Masc_mcp.Keeper_types.read_meta config "buddy" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after initial create"
+        | Error e -> fail e
+      in
+      check string "initial trigger mode" "explicit_only" old_meta.trigger_mode;
+      check bool "initial proactive" true old_meta.proactive_enabled;
+      let parsed0 =
+        match
+          Masc_mcp.Keeper_turn_up_args.parse keeper_ctx
+            (`Assoc
+              [
+                ("name", `String "buddy");
+                ("goal", `String "Updated buddy goal");
+              ])
+        with
+        | Ok parsed -> parsed
+        | Error (_, msg) -> fail ("failed to parse update args: " ^ msg)
+      in
+      let parsed =
+        {
+          parsed0 with
+          profile_defaults =
+            {
+              parsed0.profile_defaults with
+              proactive_enabled = Some false;
+            };
+        }
+      in
+      let ok, _ =
+        Masc_mcp.Keeper_turn_up_update.update_keeper keeper_ctx parsed old_meta
+      in
+      check bool "update keeper ok" true ok;
+      let updated_meta =
+        match Masc_mcp.Keeper_types.read_meta config "buddy" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after update"
+        | Error e -> fail e
+      in
+      check string "trigger mode preserved" "explicit_only" updated_meta.trigger_mode;
+      check bool "proactive preserved when omitted" true updated_meta.proactive_enabled)
+
+let test_write_meta_syncs_registered_resident_seed () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "buddy";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "buddy");
+              ("goal", `String "Stay resident");
+              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool true);
+            ])
+      in
+      check bool "resident keeper up ok" true ok;
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "buddy" with
+        | Ok (Some value) -> value
+        | Ok None -> fail "missing keeper meta after resident keeper up"
+        | Error e -> fail e
+      in
+      let updated_meta =
+        {
+          meta with
+          proactive_enabled = false;
+          voice_enabled = false;
+          voice_channel = "text_only";
+          voice_agent_id = "";
+          updated_at = Masc_mcp.Keeper_types.now_iso ();
+        }
+      in
+      (match Masc_mcp.Keeper_types.write_meta config updated_meta with
+       | Ok () -> ()
+       | Error e -> fail ("write_meta failed: " ^ e));
+      let resident_path =
+        Filename.concat base_dir ".masc/resident-keepers/buddy.json"
+      in
+      check bool "resident spec exists" true (Sys.file_exists resident_path);
+      let resident_json = Yojson.Safe.from_file resident_path in
+      check bool "resident voice disabled sync" false
+        Yojson.Safe.Util.(resident_json |> member "voice_enabled" |> to_bool);
+      check string "resident voice channel sync" "text_only"
+        Yojson.Safe.Util.(resident_json |> member "voice_channel" |> to_string);
+      check string "resident voice agent id sync" ""
+        Yojson.Safe.Util.(resident_json |> member "voice_agent_id" |> to_string);
+      check bool "seed proactive sync" false
+        Yojson.Safe.Util.(
+          resident_json |> member "seed_meta" |> member "proactive_enabled" |> to_bool);
+      check string "seed trigger mode sync" "explicit_only"
+        Yojson.Safe.Util.(
+          resident_json |> member "seed_meta" |> member "trigger_mode" |> to_string))
+
 let test_keeper_policy_set_accepts_explicit_event_v1 () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1333,6 +1483,10 @@ let () =
            test_keeper_policy_set_rejects_invalid_mode;
          test_case "sangsu defaults explicit voice policy" `Quick
            test_keeper_up_defaults_sangsu_to_explicit_voice_policy;
+         test_case "keeper up update preserves proactive when omitted" `Quick
+           test_keeper_up_update_preserves_proactive_when_omitted;
+         test_case "write_meta syncs registered resident seed" `Quick
+           test_write_meta_syncs_registered_resident_seed;
          test_case "policy set accepts explicit_event_v1" `Quick
            test_keeper_policy_set_accepts_explicit_event_v1;
          test_case "resident bootstrap marks stale explicit keeper" `Quick

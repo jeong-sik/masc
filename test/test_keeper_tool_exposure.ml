@@ -113,6 +113,8 @@ let test_disabled_shell_no_shell_tool () =
 
 (* ============================================================
    5. Shell mode (coding)
+      canonical_policy_shell_mode now maps "coding" -> "coding",
+      so coding tools are included for keepers in learned mode.
    ============================================================ *)
 
 let test_coding_shell_adds_coding_tools () =
@@ -122,6 +124,14 @@ let test_coding_shell_adds_coding_tools () =
   let coding_names = Tool_code_write.tool_names in
   let has_any_coding = List.exists (fun n -> has_tool n tools) coding_names in
   check bool "coding tools present" true has_any_coding
+
+let test_disabled_shell_no_coding_tools () =
+  let meta = make_meta ~policy_shell_mode:"disabled"
+    ~policy_mode:"learned_offline_v1" () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let coding_names = Tool_code_write.tool_names in
+  let has_any_coding = List.exists (fun n -> has_tool n tools) coding_names in
+  check bool "no coding tools when disabled" false has_any_coding
 
 (* ============================================================
    6. Research profile
@@ -153,6 +163,14 @@ let test_learned_mode_has_read_tools () =
   check bool "has keeper_read" true (has_tool "keeper_read" tools);
   check bool "has keeper_fs_read" true (has_tool "keeper_fs_read" tools);
   check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools)
+
+let test_learned_mode_has_keeper_coordination_tools () =
+  let meta = make_meta ~policy_mode:"learned_offline_v1" () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "has keeper_tasks_list" true
+    (has_tool "keeper_tasks_list" tools);
+  check bool "has keeper_broadcast" true
+    (has_tool "keeper_broadcast" tools)
 
 let test_normal_mode_uses_shard_tools () =
   let meta = make_meta ~policy_mode:"" () in
@@ -323,7 +341,8 @@ let () =
       test_case "disabled no shell" `Quick test_disabled_shell_no_shell_tool;
     ]);
     ("shell_coding", [
-      test_case "coding adds coding tools" `Quick test_coding_shell_adds_coding_tools;
+      test_case "coding adds tools" `Quick test_coding_shell_adds_coding_tools;
+      test_case "disabled no coding" `Quick test_disabled_shell_no_coding_tools;
     ]);
     ("research_profile", [
       test_case "adds autoresearch" `Quick test_research_adds_autoresearch;
@@ -332,6 +351,8 @@ let () =
     ("learned_mode", [
       test_case "has board tools" `Quick test_learned_mode_has_board_tools;
       test_case "has read tools" `Quick test_learned_mode_has_read_tools;
+      test_case "has keeper coordination tools" `Quick
+        test_learned_mode_has_keeper_coordination_tools;
       test_case "normal mode uses shards" `Quick test_normal_mode_uses_shard_tools;
     ]);
     ("combined_profiles", [

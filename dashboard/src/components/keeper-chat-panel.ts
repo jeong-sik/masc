@@ -3,12 +3,12 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import { streamKeeperMessage, type KeeperChatStreamEvent } from '../api/keeper'
 import { asString, isRecord } from './common/normalize'
 import { showToast } from './common/toast'
-import { ActionButton } from './common/button'
-import { TextInput } from './common/input'
+import { ChatComposer, ChatTranscript } from './chat/primitives'
+import type { KeeperConversationEntry } from '../types'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -23,6 +23,26 @@ const streamBuffer = signal('')
 const chatError = signal('')
 
 let activeAbort: AbortController | null = null
+
+function toConversationEntry(
+  keeperName: string,
+  msg: ChatMessage,
+  index: number,
+): KeeperConversationEntry {
+  const source = msg.role === 'user' ? 'direct_user' : 'direct_assistant'
+  return {
+    id: `${msg.role}-${msg.timestamp}-${index}`,
+    role: msg.role,
+    source,
+    label: msg.role === 'user' ? '사용자' : keeperName,
+    text: msg.content,
+    rawText: msg.content,
+    timestamp: new Date(msg.timestamp).toISOString(),
+    delivery: 'delivered',
+    streamState: null,
+    details: null,
+  }
+}
 
 export function isKeeperTextContentEvent(event: KeeperChatStreamEvent): boolean {
   return event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'TEXT_DELTA'
@@ -97,69 +117,77 @@ async function sendChat(keeperName: string): Promise<void> {
 }
 
 export function KeeperChatPanel({ name }: { name: string }) {
-  const scrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    cancelStream()
+    chatMessages.value = []
+    chatInput.value = ''
+    streamBuffer.value = ''
+    chatError.value = ''
+  }, [name])
+
   const messages = chatMessages.value
   const buffer = streamBuffer.value
   const isStreaming = streaming.value
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [messages.length, buffer])
+  const entries = messages.map((msg, index) => toConversationEntry(name, msg, index))
+  const transcriptEntries =
+    isStreaming && buffer
+      ? [
+          ...entries,
+          {
+            id: `assistant-stream-${name}`,
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: name,
+            text: buffer,
+            rawText: buffer,
+            timestamp: new Date().toISOString(),
+            delivery: 'streaming',
+            streamState: 'streaming',
+            details: null,
+          } satisfies KeeperConversationEntry,
+        ]
+      : entries
 
   return html`
-    <div class="keeper-chat">
-      <div class="keeper-chat__header flex items-center justify-between py-2.5 px-3.5">
-        <span class="keeper-chat__title">@${name} 대화</span>
-        ${isStreaming ? html`
-          <${ActionButton} variant="ghost" class="keeper-chat__cancel" onClick=${cancelStream}>중단<//>
-        ` : null}
+    <div class="overflow-hidden rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(11,18,34,0.95),rgba(6,11,22,0.92))] shadow-[0_24px_56px_rgba(0,0,0,0.24)]">
+      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
+        <div class="min-w-[220px] flex-1">
+          <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Direct Chat</div>
+          <div class="mt-2 text-[15px] font-semibold text-[var(--text-strong)]">@${name}</div>
+          <div class="mt-1 text-[13px] leading-[1.65] text-[var(--text-secondary)]">
+            Live direct conversation with this keeper. Streaming responses stay in the same transcript lane.
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.2)] bg-[rgba(71,184,255,0.08)] px-2.5 py-1 text-[11px] font-medium text-[#bfe8ff]">
+            ${entries.length} messages
+          </span>
+        </div>
       </div>
 
-      <div class="keeper-chat__messages flex-1 min-h-[200px] max-h-[400px] overflow-y-auto py-3 px-3.5 flex flex-col gap-3" ref=${scrollRef}>
-        ${messages.length === 0 && !isStreaming ? html`
-          <div class="text-[var(--white-20)] text-[var(--fs-base)] text-center py-10">keeper에게 메시지를 보내세요</div>
-        ` : null}
-
-        ${messages.map((msg, idx) => html`
-          <div key=${idx} class="keeper-chat__msg flex flex-col gap-[3px] max-w-[85%] keeper-chat__msg--${msg.role} ${msg.role === 'user' ? 'self-end' : 'self-start'}">
-            <span class="keeper-chat__role text-[var(--fs-2xs)] text-[var(--white-35)] uppercase tracking-[0.5px]">${msg.role === 'user' ? 'You' : name}</span>
-            <div class="keeper-chat__text rounded-lg">${msg.content}</div>
-          </div>
-        `)}
-
-        ${isStreaming && buffer ? html`
-          <div class="keeper-chat__msg flex flex-col gap-[3px] max-w-[85%] keeper-chat__msg--assistant keeper-chat__msg--streaming self-start">
-            <span class="keeper-chat__role text-[var(--fs-2xs)] text-[var(--white-35)] uppercase tracking-[0.5px]">${name}</span>
-            <div class="keeper-chat__text rounded-lg">${buffer}<span class="keeper-chat__cursor">|</span></div>
-          </div>
-        ` : isStreaming ? html`
-          <div class="keeper-chat__msg flex flex-col gap-[3px] max-w-[85%] keeper-chat__msg--assistant keeper-chat__msg--streaming self-start">
-            <span class="keeper-chat__role text-[var(--fs-2xs)] text-[var(--white-35)] uppercase tracking-[0.5px]">${name}</span>
-            <div class="keeper-chat__text rounded-lg keeper-chat__text--thinking">thinking...</div>
-          </div>
-        ` : null}
-      </div>
-
-      ${chatError.value ? html`<div class="keeper-chat__error">${chatError.value}</div>` : null}
-
-      <div class="keeper-chat__input-row flex gap-2 py-2.5 px-3.5">
-        <${TextInput}
-          class="flex-1"
-          placeholder="메시지 입력..."
-          value=${chatInput.value}
-          onInput=${(e: Event) => { chatInput.value = (e.target as HTMLInputElement).value }}
-          onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) void sendChat(name) }}
-          disabled=${isStreaming}
+      <div class="px-4 py-4">
+        <${ChatTranscript}
+          entries=${transcriptEntries}
+          emptyText="Send a direct prompt to start the keeper conversation."
+          showMetadata=${false}
         />
-        <${ActionButton}
-          class="shrink-0"
-          onClick=${() => { void sendChat(name) }}
-          disabled=${isStreaming || chatInput.value.trim() === ''}
-        >
-          ${isStreaming ? '...' : '전송'}
-        <//>
+      </div>
+
+      ${chatError.value
+        ? html`<div class="mx-4 mb-4 rounded-[18px] border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.24)] px-3 py-2.5 text-[12px] leading-[1.6] text-[#ffb4b4]">${chatError.value}</div>`
+        : null}
+
+      <div class="border-t border-[rgba(148,163,184,0.12)] bg-[rgba(255,255,255,0.03)] px-4 py-4">
+        <${ChatComposer}
+          draft=${chatInput.value}
+          placeholder="메시지 입력..."
+          disabled=${false}
+          streaming=${isStreaming}
+          streamStartedAt=${null}
+          onDraftChange=${(value: string) => { chatInput.value = value }}
+          onSend=${() => { void sendChat(name) }}
+          onAbort=${cancelStream}
+        />
       </div>
     </div>
   `

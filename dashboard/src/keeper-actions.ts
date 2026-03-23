@@ -36,7 +36,7 @@ import { abortKeeperThreadMessage, applyKeeperStreamEvent } from './keeper-strea
 async function refreshDashboardState(): Promise<void> {
   invalidateDashboardCache()
   try {
-    await refreshDashboard()
+    await refreshDashboard({ force: true })
   } catch (err) {
     console.warn('[keeper-runtime] dashboard refresh failed', err)
   }
@@ -119,6 +119,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
   appendThreadEntry(keeperName, {
     id: localId,
     role: 'user',
+    source: 'direct_user',
     label: 'You',
     text: message,
     timestamp: new Date().toISOString(),
@@ -129,6 +130,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
   appendThreadEntry(keeperName, {
     id: assistantId,
     role: 'assistant',
+    source: 'direct_assistant',
     label: keeperName,
     text: '',
     rawText: '',

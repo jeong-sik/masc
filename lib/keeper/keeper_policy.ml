@@ -321,7 +321,7 @@ let handle_keeper_eval_replay ctx args : tool_result =
                              Safe_ops.json_string ~default:"current" "room_scope" observation
                              |> Keeper_contract.room_scope_of_string;
                            trigger_mode =
-                             Safe_ops.json_string ~default:"legacy" "trigger_mode" observation
+                             Safe_ops.json_string ~default:"explicit_only" "trigger_mode" observation
                              |> Keeper_contract.trigger_mode_of_string;
                            last_turn_ago_s =
                              Safe_ops.json_float ~default:0.0 "last_turn_ago_s" observation;

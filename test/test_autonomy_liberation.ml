@@ -148,8 +148,8 @@ let test_start_discussion_action () =
   in
   let s = Keeper_deliberation.deliberation_action_to_string action in
   Alcotest.(check bool) "contains topic" true (contains_s s "architecture");
-  let legacy = Keeper_deliberation.deliberation_action_to_legacy_string action in
-  Alcotest.(check string) "legacy label" "start_discussion" legacy
+  let policy_label = Keeper_deliberation.deliberation_action_to_policy_label action in
+  Alcotest.(check string) "policy label" "start_discussion" policy_label
 
 let test_share_finding_action () =
   let action =

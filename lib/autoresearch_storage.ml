@@ -73,17 +73,49 @@ let load_json_file path =
       Some (Yojson.Safe.from_string content)
     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
 
+let decode_json_file ~path ~kind decode =
+  match load_json_file path with
+  | None -> None
+  | Some json ->
+      (try Some (decode json)
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Autoresearch.warn "%s decode failed for %s: %s"
+             kind path (Printexc.to_string exn);
+           None)
+
 let load_swarm_link_by_loop ~base_path loop_id =
-  load_json_file (loop_link_file ~base_path loop_id)
-  |> Option.map Autoresearch_serde.swarm_link_of_yojson
+  let path = loop_link_file ~base_path loop_id in
+  decode_json_file ~path ~kind:"swarm link"
+    Autoresearch_serde.swarm_link_of_yojson
 
 let load_swarm_link_by_session ~base_path session_id =
-  load_json_file (session_link_file ~base_path session_id)
-  |> Option.map Autoresearch_serde.swarm_link_of_yojson
+  let path = session_link_file ~base_path session_id in
+  decode_json_file ~path ~kind:"swarm link"
+    Autoresearch_serde.swarm_link_of_yojson
 
 let load_state ~base_path loop_id =
-  load_json_file (state_file ~base_path loop_id)
-  |> Option.map Autoresearch_serde.state_of_yojson
+  let path = state_file ~base_path loop_id in
+  match load_json_file path with
+  | None -> None
+  | Some json ->
+      (try
+         match json with
+         | `Assoc fields
+           when List.mem_assoc "llm_model" fields
+                && not (List.mem_assoc "model_model" fields) ->
+             Log.Autoresearch.error
+               "unsupported legacy autoresearch state schema for %s: found llm_model; expected model_model"
+               path;
+             None
+         | _ -> Some (Autoresearch_serde.state_of_yojson json)
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Autoresearch.error "%s decode failed for %s: %s"
+             "autoresearch state" path (Printexc.to_string exn);
+           None)
 
 let latest_cycle_record ~base_path loop_id =
   let path = results_file ~base_path loop_id in

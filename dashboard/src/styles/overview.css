@@ -1,6 +1,0 @@
-/* MASC Dashboard — Overview (Home) surface styles */
-
-/* ── Health beacon pulse animation ──────────────── */
-.health-beacon__dot {
-  animation: pulse 2s ease-in-out infinite;
-}

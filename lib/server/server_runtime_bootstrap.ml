@@ -461,7 +461,7 @@ let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
     | Eio.Cancel.Cancelled _ -> true
     | _ -> false
   in
-  Log.Server.info "HTTP/2 h2c mode activated (MASC_USE_H2=1)";
+  Log.Server.info "HTTP/2 h2c mode (default, disable with MASC_USE_H2=0)";
   let rec accept_loop backoff_s =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
@@ -517,8 +517,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   let h2_error_handler = make_h2_error_handler () in
   let use_h2 =
     match Sys.getenv_opt "MASC_USE_H2" with
-    | Some "1" | Some "true" -> true
-    | _ -> false
+    | Some "0" | Some "false" -> false
+    | _ -> true
   in
   let socket = listen_socket ~sw ~net config in
 

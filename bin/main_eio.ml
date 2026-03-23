@@ -153,7 +153,32 @@ let make_extended_handler routes =
             | _ -> false
           in
           if ws_enabled then begin
-            match Masc_mcp.Server_mcp_transport_ws.upgrade_connection reqd with
+            let on_message ws_session_id body_str =
+              match (!Masc_mcp.Server_auth.server_state,
+                     Eio_context.get_switch_opt (),
+                     Eio_context.get_clock_opt ()) with
+              | Some state, Some sw, Some clock ->
+                Eio.Fiber.fork ~sw (fun () ->
+                  try
+                    let response_json =
+                      Mcp_eio.handle_request ~clock ~sw
+                        ~mcp_session_id:ws_session_id
+                        state body_str
+                    in
+                    let response_str = Yojson.Safe.to_string response_json in
+                    if response_str <> "null" then
+                      ignore (Masc_mcp.Server_mcp_transport_ws.send_to_session
+                        ws_session_id response_str)
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn ->
+                    Log.Server.warn "WS dispatch error %s: %s"
+                      ws_session_id (Printexc.to_string exn))
+              | _ ->
+                Log.Server.warn "WS: server not ready for dispatch"
+            in
+            match Masc_mcp.Server_mcp_transport_ws.upgrade_connection
+              ~on_message reqd with
             | Ok () -> ()
             | Error msg ->
               let body = Printf.sprintf {|{"error":"ws_upgrade_failed","message":"%s"}|} msg in

@@ -681,8 +681,16 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
       start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
       (* gRPC coordination transport (opt-in via MASC_GRPC_ENABLED=1) *)
-      let tool_dispatcher _tool_name _args_json =
-        Error "gRPC tool dispatch not yet wired to MCP dispatcher"
+      let tool_dispatcher tool_name args_json =
+        let arguments =
+          try Yojson.Safe.from_string args_json
+          with _ -> `Assoc []
+        in
+        let (success, result_str) =
+          Mcp_server_eio_execute.execute_tool_eio ~sw ~clock state
+            ~name:tool_name ~arguments
+        in
+        if success then Ok result_str else Error result_str
       in
       Masc_grpc_server.start ~sw ~env ~room_config:state.room_config
         ~tool_dispatcher

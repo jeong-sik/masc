@@ -5,7 +5,7 @@
  (modules main_eio)
  (public_name masc-mcp)
  (package masc_mcp)
- (libraries masc_mcp council cmdliner eio eio_main h2 h2-eio httpun-eio gluten-eio caqti-eio dune-build-info))
+ (libraries masc_mcp masc_eio_context council cmdliner eio eio_main h2 h2-eio httpun-eio gluten-eio caqti-eio dune-build-info))
 
 (executable
  (name main_stdio_eio)

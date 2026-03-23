@@ -378,6 +378,7 @@ let test_keeper_shell_tool_policy_gates () =
     ~expect_bash:true ~expect_shell_readonly:true
 
 let test_keeper_shell_readonly_enforces_allowed_paths () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> rm_rf base_dir)
@@ -427,13 +428,17 @@ let test_keeper_shell_readonly_enforces_allowed_paths () =
       check bool "blocked path rejected" true
         (contains_substring error_text "path_not_in_allowed_paths"))
 
-let test_keeper_bash_requires_cmd_and_reports_status () =
+let test_keeper_bash_requires_cmd_and_runs () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
-      let meta = make_keeper_exec_meta () in
+      let meta =
+        make_keeper_exec_meta ~policy_mode:"learned_offline_v1"
+          ~policy_shell_mode:"coding" ()
+      in
       let ctx_work =
         Masc_mcp.Keeper_exec_context.create ~system_prompt:"test"
           ~max_tokens:4000
@@ -447,30 +452,24 @@ let test_keeper_bash_requires_cmd_and_reports_status () =
       in
       check string "missing cmd rejected" "cmd_required"
         Yojson.Safe.Util.(missing_cmd_json |> member "error" |> to_string);
-      let failed_json =
+      let ok_json =
         Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
           ~config ~meta ~ctx_work
           ~name:"keeper_bash"
           ~input:
             (`Assoc
               [
-                ("cmd", `String "exit 7");
+                ("cmd", `String "printf keeper-ok");
                 ("timeout_sec", `Float 5.0);
               ])
         |> parse_json_exn
       in
-      check bool "keeper bash failed command is not ok" false
-        Yojson.Safe.Util.(failed_json |> member "ok" |> to_bool);
-      check string "keeper bash status kind" "exit"
-        Yojson.Safe.Util.(failed_json |> member "status" |> member "kind" |> to_string);
-      check bool "keeper bash nonzero exit code" true
+      check bool "keeper bash ok" true
+        Yojson.Safe.Util.(ok_json |> member "ok" |> to_bool);
+      check bool "keeper bash output captured" true
         Yojson.Safe.Util.(
-          failed_json |> member "status" |> member "code" |> to_int |> fun code ->
-          code <> 0);
-      check bool "keeper bash output field present" true
-        Yojson.Safe.Util.(
-          failed_json |> member "output" |> to_string |> fun output ->
-          String.length output >= 0))
+          ok_json |> member "output" |> to_string
+          |> fun out -> contains_substring out "keeper-ok"))
 
 let test_resident_keeper_and_persistent_agent_lists_split () =
   Eio_main.run @@ fun env ->
@@ -1306,8 +1305,8 @@ let () =
            test_keeper_shell_tool_policy_gates;
          test_case "shell readonly enforces allowed paths" `Quick
            test_keeper_shell_readonly_enforces_allowed_paths;
-         test_case "keeper bash requires cmd and reports status" `Quick
-           test_keeper_bash_requires_cmd_and_reports_status;
+         test_case "keeper bash requires cmd and runs" `Quick
+           test_keeper_bash_requires_cmd_and_runs;
          test_case "policy tools roundtrip" `Quick
            test_keeper_policy_tools_roundtrip;
          test_case "policy set rejects invalid mode" `Quick

@@ -30,6 +30,12 @@ let next_model_hint_of_meta (m : keeper_meta) : string option =
       | current :: _ -> Some current
       | [] -> None)
 
+let string_of_fiber_health = function
+  | Fiber_alive -> "alive"
+  | Fiber_zombie -> "zombie"
+  | Fiber_dead -> "dead"
+  | Fiber_unknown -> "unknown"
+
 let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Safe.t =
   let agent_file =
     Filename.concat (Room.agents_dir config) (Room.safe_filename agent_name ^ ".json")

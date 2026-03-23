@@ -2,6 +2,7 @@ open Keeper_types
 
 val active_model_of_meta : keeper_meta -> string
 val next_model_hint_of_meta : keeper_meta -> string option
+val string_of_fiber_health : fiber_health -> string
 val parse_agent_status : Room.config -> agent_name:string -> Yojson.Safe.t
 val keeper_reply_snapshot_of_history :
   Yojson.Safe.t list -> Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t

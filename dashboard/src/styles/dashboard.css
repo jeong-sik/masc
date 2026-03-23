@@ -50,13 +50,6 @@
   }
 }
 
-/* ── Board post (content-visibility) ── */
-.board-post {
-  border-color: var(--card-border);
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
-}
-
 /* ── Control Dock ── */
 .control-input:focus,
 .control-textarea:focus {
@@ -93,36 +86,6 @@
   opacity: 0.85;
 }
 
-/* ── Tab pill bar (GCP-style segmented control) ── */
-.tab-pill-bar {
-  display: flex;
-  gap: 4px;
-  background: var(--white-3);
-  padding: 4px;
-  border-radius: 10px;
-}
-.tab-pill-btn {
-  padding: 6px 14px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  border: none;
-  background: transparent;
-  white-space: nowrap;
-}
-.tab-pill-btn:hover {
-  color: var(--text-body);
-  background: var(--white-6);
-}
-.tab-pill-btn.active {
-  color: var(--accent);
-  background: var(--accent-soft);
-  cursor: default;
-}
-
 /* ── Empty state (standardized) ── */
 .empty-state {
   display: flex;
@@ -141,14 +104,6 @@
   font-size: var(--fs-sm);
   color: var(--text-muted);
 }
-@keyframes loadingPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-.loading-pulse {
-  animation: loadingPulse 1.5s ease-in-out infinite;
-}
-
 /* ── Responsive (layout) ── */
 @media (max-width: 880px) {
   .control-row { grid-template-columns: 1fr; }
@@ -213,22 +168,3 @@
   box-shadow: 0 4px 12px rgba(0, 240, 255, 0.1);
 }
 
-/* ── Logs (table styling, sticky, monospace) ── */
-.logs-table thead {
-  position: sticky;
-  top: 0;
-  background: var(--card);
-  z-index: 1;
-}
-
-.logs-module-input::placeholder {
-  color: var(--text-muted);
-}
-
-.logs-refresh-btn:hover {
-  border-color: var(--accent);
-}
-
-.logs-row:hover {
-  background: var(--white-3);
-}

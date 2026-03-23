@@ -1,6 +1,6 @@
-/* mission.css — migrated to Tailwind utilities in components (461 -> 24 lines).
+/* mission.css — migrated to Tailwind utilities in components.
  * Remaining mission-* interactive/state rules live in dashboard.css:
- *   .mission-collapsible-*, .mission-jump-*, .mission-status-dot,
+ *   .mission-collapsible-*, .mission-status-dot,
  *   .mission-state-*, .is-selected modifiers.
  * Tone border utilities (.ok/.warn/.bad) live in global.css.
  */
@@ -10,12 +10,6 @@
 .mission-crew-card.is-selected {
   box-shadow: 0 0 0 1px rgba(71,184,255,0.45);
   background: linear-gradient(180deg, var(--accent-14), var(--white-4));
-}
-
-/* proof-* rules still referenced by proof-sections components */
-.proof-timeline-row .semantic-tag-row {
-  margin-top: 6px;
-  margin-bottom: 0;
 }
 
 .proof-artifact-row .command-meta-line span {

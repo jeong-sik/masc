@@ -95,44 +95,25 @@ let load_swarm_link_by_session ~base_path session_id =
   decode_json_file ~path ~kind:"swarm link"
     Autoresearch_serde.swarm_link_of_yojson
 
-let canonicalize_state_json ~model_model = function
-  | `Assoc fields ->
-      let fields =
-        ("model_model", `String model_model)
-        :: List.filter
-             (fun (key, _) -> key <> "model_model" && key <> "llm_model")
-             fields
-      in
-      `Assoc fields
-  | json -> json
-
 let load_state ~base_path loop_id =
   let path = state_file ~base_path loop_id in
   match load_json_file path with
   | None -> None
   | Some json ->
       (try
-         let decoded = Autoresearch_serde.state_decode_of_yojson json in
-         if decoded.used_legacy_model_key then (
-           let canonical_json =
-             canonicalize_state_json ~model_model:decoded.summary.model_model json
-           in
-           try
-             Fs_compat.save_file path (Yojson.Safe.pretty_to_string canonical_json);
-             Log.Autoresearch.info
-               "migrated legacy autoresearch state schema for %s"
-               path
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-               Log.Autoresearch.warn
-                 "failed to rewrite migrated autoresearch state for %s: %s"
-                 path (Printexc.to_string exn));
-         Some decoded.summary
+         match json with
+         | `Assoc fields
+           when List.mem_assoc "llm_model" fields
+                && not (List.mem_assoc "model_model" fields) ->
+             Log.Autoresearch.error
+               "unsupported legacy autoresearch state schema for %s: found llm_model; expected model_model"
+               path;
+             None
+         | _ -> Some (Autoresearch_serde.state_of_yojson json)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-           Log.Autoresearch.warn "%s decode failed for %s: %s"
+           Log.Autoresearch.error "%s decode failed for %s: %s"
              "autoresearch state" path (Printexc.to_string exn);
            None)
 

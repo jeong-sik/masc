@@ -112,6 +112,14 @@ let board_tools : Types.tool_schema list = [
   };
 ]
 
+let select_named_schemas (names : string list) (schemas : Types.tool_schema list) :
+    Types.tool_schema list =
+  names
+  |> List.filter_map (fun name ->
+         List.find_opt
+           (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+           schemas)
+
 let filesystem_tools : Types.tool_schema list = [
   {
     name = "keeper_fs_read";
@@ -123,19 +131,6 @@ let filesystem_tools : Types.tool_schema list = [
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes to return (default: 20000)")]);
       ]);
       ("required", `List [`String "path"]);
-    ];
-  };
-  {
-    name = "keeper_fs_edit";
-    description = "Write/append a file under current project root. Use for concrete code changes.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
-        ("content", `Assoc [("type", `String "string"); ("description", `String "New file content or append payload")]);
-        ("mode", `Assoc [("type", `String "string"); ("description", `String "overwrite (default) or append")]);
-      ]);
-      ("required", `List [`String "path"; `String "content"]);
     ];
   };
 ]
@@ -158,9 +153,7 @@ let shell_tools : Types.tool_schema list = [
   };
 ]
 
-(** Coding tools — arbitrary shell and github access.
-    NOT in default shards. Only granted when policy_shell_mode = "coding". *)
-let coding_tools : Types.tool_schema list = [
+let coding_keeper_bridge_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
     description = "Run a shell command from project root. Use for build/test/check commands.";
@@ -175,17 +168,30 @@ let coding_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_github";
-    description = "Run gh CLI commands from project root. Use for PR/review/comment operations.";
+    description = "Run gh CLI commands from project root. Use for issue/PR/review/comment operations.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand string, e.g. 'pr view 123 --comments'")]);
+        ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand string, e.g. 'issue create --title ...'")]);
         ("args", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Optional argv list for gh (without leading gh)")]);
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
       ]);
     ];
   };
 ]
+
+let coding_workspace_tool_names : string list =
+  [ "masc_worktree_create"; "masc_worktree_list"; "masc_code_search";
+    "masc_code_symbols"; "masc_code_read" ]
+
+let coding_workspace_tools : Types.tool_schema list =
+  select_named_schemas coding_workspace_tool_names
+    (Tool_schemas_worktree.schemas @ Tool_code.schemas)
+
+(** Coding tools — shell/github bridges plus worktree-first code workflow.
+    NOT in default shards. Only granted when policy_shell_mode = "coding". *)
+let coding_tools : Types.tool_schema list =
+  coding_keeper_bridge_tools @ coding_workspace_tools
 
 let voice_tools : Types.tool_schema list = [
   {
@@ -372,7 +378,7 @@ let shard_filesystem : shard = {
   name = "filesystem";
   tools = filesystem_tools;
   removable = true;
-  description = "File I/O: read, edit";
+  description = "File I/O: read only";
 }
 
 let shard_shell : shard = {
@@ -386,7 +392,9 @@ let shard_coding : shard = {
   name = "coding";
   tools = coding_tools;
   removable = true;
-  description = "Coding tools: bash, github (requires policy_shell_mode=coding)";
+  description =
+    "Coding tools: github/shell bridge + worktree/code inspection \
+     (requires policy_shell_mode=coding)";
 }
 
 let shard_weather : shard = {
@@ -410,11 +418,34 @@ let shard_library : shard = {
   description = "Knowledge library: search, read documents";
 }
 
+let governance_keeper_tool_names : string list =
+  [
+    "masc_cases";
+    "masc_case_status";
+    "masc_ruling_status";
+    "masc_governance_status";
+    "masc_governance_feed";
+    "masc_case_brief_submit";
+    "masc_petition_submit";
+  ]
+
+let governance_tools : Types.tool_schema list =
+  select_named_schemas governance_keeper_tool_names
+    Tool_council_internal_schemas.schemas
+
 let shard_taskboard : shard = {
   name = "taskboard";
   tools = taskboard_tools;
   removable = true;
   description = "Task board management: list, audit, force-release, force-done, broadcast";
+}
+
+let shard_governance : shard = {
+  name = "governance";
+  tools = governance_tools;
+  removable = true;
+  description =
+    "Governance workflow: cases, briefs, petitions, rulings, feed, status";
 }
 
 (** Autoresearch tools: filtered subset for keeper use (excludes swarm_start). *)
@@ -430,22 +461,19 @@ let shard_autoresearch : shard = {
   description = "Autonomous experiment loop: start, cycle, status, inject, stop";
 }
 
-
-
 let agent_shards : (string, string list) Hashtbl.t = Hashtbl.create 32
 
-
-
-(** Default shards for a new keeper (full access) *)
+(** Default shards for a new keeper.
+    Keep the default surface focused on coordination/governance. Voice,
+    weather, and coding are opt-in. *)
 let default_shard_names : string list = [
   "base";
   "board";
   "filesystem";
   "shell";
-  "weather";
-  "voice";
   "library";
   "taskboard";
+  "governance";
 ]
 
 let get_agent_shards (agent_name : string) : string list =
@@ -468,6 +496,7 @@ let all_shards : (string, shard) Hashtbl.t =
     shard_voice;
     shard_library;
     shard_taskboard;
+    shard_governance;
     shard_autoresearch;
   ];
   tbl
@@ -516,7 +545,7 @@ let list_all_shards () : (string * bool * int) list =
     (name, shard.removable, List.length shard.tools) :: acc
   ) all_shards []
 
-(** Full tool set (all 11 tools) — backward compatible *)
+(** Default keeper tool set from [default_shard_names]. *)
 let keeper_model_tools : Types.tool_schema list =
   tools_of_shards default_shard_names
 
@@ -526,7 +555,7 @@ let schemas : Types.tool_schema list = [
   {
     name = "masc_tool_grant";
     description = "Grant a tool shard to an agent. \
-Shards: base (core), board, filesystem, shell, weather, voice, taskboard.";
+Shards: base (core), board, filesystem, shell, governance, weather, voice, taskboard, coding, autoresearch.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -536,7 +565,7 @@ Shards: base (core), board, filesystem, shell, weather, voice, taskboard.";
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to grant: base, board, filesystem, shell, weather, voice, taskboard");
+          ("description", `String "Shard to grant: base, board, filesystem, shell, governance, weather, voice, taskboard, coding, autoresearch");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);
@@ -555,7 +584,7 @@ Cannot revoke 'base' shard (always present).";
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to revoke (must be removable). One of: board, filesystem, shell, weather, voice, taskboard");
+          ("description", `String "Shard to revoke (must be removable). One of: board, filesystem, shell, governance, weather, voice, taskboard, coding, autoresearch");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);

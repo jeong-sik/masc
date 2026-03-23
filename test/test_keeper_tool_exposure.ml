@@ -62,12 +62,18 @@ let test_default_has_base_tools () =
   check bool "has keeper_context_status" true (has_tool "keeper_context_status" tools)
 
 let test_default_has_no_voice () =
-  (* Non-learned default mode uses shard-based tools which may include
-     voice if voice shard is in defaults. Check learned mode instead. *)
-  let meta = make_meta ~policy_voice_enabled:false
-    ~policy_mode:"learned_offline_v1" () in
+  let meta = make_meta ~policy_voice_enabled:false () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no voice tools in learned mode" false (has_tool "keeper_voice_speak" tools)
+  check bool "no voice tools in default mode" false
+    (has_tool "keeper_voice_speak" tools)
+
+let test_default_has_governance_tools () =
+  let meta = make_meta () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "has governance status" true
+    (has_tool "masc_governance_status" tools);
+  check bool "has case brief submit" true
+    (has_tool "masc_case_brief_submit" tools)
 
 let test_default_has_no_research () =
   let meta = make_meta ~soul_profile:"default" () in
@@ -123,7 +129,11 @@ let test_coding_shell_adds_coding_tools () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let coding_names = Tool_code_write.tool_names in
   let has_any_coding = List.exists (fun n -> has_tool n tools) coding_names in
-  check bool "coding tools present" true has_any_coding
+  check bool "coding tools present" true has_any_coding;
+  check bool "has worktree create" true
+    (has_tool "masc_worktree_create" tools);
+  check bool "has code search" true
+    (has_tool "masc_code_search" tools)
 
 let test_disabled_shell_no_coding_tools () =
   let meta = make_meta ~policy_shell_mode:"disabled"
@@ -169,8 +179,18 @@ let test_learned_mode_has_keeper_coordination_tools () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_tasks_list" true
     (has_tool "keeper_tasks_list" tools);
+  check bool "has keeper_task_claim" true
+    (has_tool "keeper_task_claim" tools);
   check bool "has keeper_broadcast" true
     (has_tool "keeper_broadcast" tools)
+
+let test_learned_mode_has_governance_tools () =
+  let meta = make_meta ~policy_mode:"learned_offline_v1" () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "has governance status" true
+    (has_tool "masc_governance_status" tools);
+  check bool "has petition submit" true
+    (has_tool "masc_petition_submit" tools)
 
 let test_normal_mode_uses_shard_tools () =
   let meta = make_meta ~policy_mode:"" () in
@@ -330,6 +350,7 @@ let () =
     ("default_profile", [
       test_case "has base tools" `Quick test_default_has_base_tools;
       test_case "no voice tools" `Quick test_default_has_no_voice;
+      test_case "has governance tools" `Quick test_default_has_governance_tools;
       test_case "no research tools" `Quick test_default_has_no_research;
     ]);
     ("voice_profile", [
@@ -353,6 +374,8 @@ let () =
       test_case "has read tools" `Quick test_learned_mode_has_read_tools;
       test_case "has keeper coordination tools" `Quick
         test_learned_mode_has_keeper_coordination_tools;
+      test_case "has governance tools" `Quick
+        test_learned_mode_has_governance_tools;
       test_case "normal mode uses shards" `Quick test_normal_mode_uses_shard_tools;
     ]);
     ("combined_profiles", [

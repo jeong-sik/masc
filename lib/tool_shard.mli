@@ -19,10 +19,13 @@ val shard_board : shard
 (** MASC Board: post, list, comment. *)
 
 val shard_filesystem : shard
-(** File I/O: read, edit. *)
+(** File I/O: read-only inspection. *)
 
 val shard_shell : shard
-(** Shell access: bash, github. *)
+(** Structured read-only shell access. *)
+
+val shard_governance : shard
+(** Governance workflow: cases, briefs, petitions, status/feed. *)
 
 val shard_weather : shard
 (** Weather queries. *)
@@ -38,7 +41,8 @@ val all_shards : (string, shard) Hashtbl.t
 (** {1 Tool Composition} *)
 
 val default_shard_names : string list
-(** Default shards for a new keeper: base, board, filesystem, shell, weather. *)
+(** Default shards for a new keeper: base, board, filesystem, shell,
+    library, taskboard, governance. *)
 
 val tools_of_shards : string list -> Types.tool_schema list
 (** Combine tools from multiple shard names. *)
@@ -80,6 +84,9 @@ val base_tools : Types.tool_schema list
 val board_tools : Types.tool_schema list
 (** Board tools: board_post, board_list, board_comment, board_vote. *)
 
+val governance_tools : Types.tool_schema list
+(** Governance tools exposed to keepers by default. *)
+
 (** {1 MCP Interface} *)
 
 val schemas : Types.tool_schema list
@@ -96,11 +103,12 @@ val shard_autoresearch : shard
 (** Autoresearch shard: start, cycle, status, inject, stop. *)
 
 val coding_tools : Types.tool_schema list
-(** Coding shard tools (keeper_bash, keeper_github).
+(** Coding shard tools (keeper_github/keeper_bash + worktree/code inspection).
     Not in default shards — only granted when policy_shell_mode = "coding". *)
 
 val shard_coding : shard
-(** Coding shard: bash, github (requires policy_shell_mode=coding). *)
+(** Coding shard: github/shell bridge + worktree/code inspection
+    (requires policy_shell_mode=coding). *)
 
 val keeper_model_tools : Types.tool_schema list
 (** Default tool set from default shards — excludes coding tools. *)

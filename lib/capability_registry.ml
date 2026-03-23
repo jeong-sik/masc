@@ -191,7 +191,8 @@ let privileged_public_tool_names : string list =
   [ "masc_spawn"; "masc_worktree_create"; "masc_worktree_remove" ]
 
 let privileged_keeper_tool_names : string list =
-  [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit"; "keeper_github" ]
+  [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit"; "keeper_github";
+    "masc_worktree_create" ]
 
 let keeper_backend_tool_name = function
   | "keeper_board_get" -> "masc_board_get"
@@ -417,7 +418,12 @@ let keeper_wrapped_server_tools : string list =
   [ "masc_board_post"; "masc_board_comment"; "masc_board_list";
     "masc_voice_speak"; "masc_voice_agent"; "masc_voice_sessions";
     "masc_voice_session_start"; "masc_voice_session_end";
-    "masc_tasks"; "masc_broadcast" ]
+    "masc_tasks"; "masc_broadcast";
+    "masc_worktree_create"; "masc_worktree_list";
+    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
+    "masc_cases"; "masc_case_status"; "masc_ruling_status";
+    "masc_governance_status"; "masc_governance_feed";
+    "masc_case_brief_submit"; "masc_petition_submit" ]
 
 let keeper_wrapped_internal_tools : string list =
   keeper_all_tool_names

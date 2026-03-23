@@ -347,6 +347,22 @@ let test_petition_submit_creates_case () =
       (Yojson.Safe.Util.member "merged" json <> `Null)
   | None -> Alcotest.fail "dispatch returned None"
 
+let test_petition_submit_accepts_subject_type () =
+  with_council_base @@ fun base_path ->
+  let ctx = make_council_ctx ~base_path in
+  let args = `Assoc [
+    ("title", `String "Schema-aligned petition");
+    ("subject_type", `String "policy");
+    ("risk_class", `String "low");
+  ] in
+  match Tool_council_oas.dispatch ctx ~name:"masc_petition_submit" ~args with
+  | Some (ok, body) ->
+    Alcotest.(check bool) "petition ok" true ok;
+    let json = parse_json body in
+    let case_id = json |> field "case_id" |> Yojson.Safe.Util.to_string in
+    Alcotest.(check bool) "case_id non-empty" true (String.length case_id > 0)
+  | None -> Alcotest.fail "dispatch returned None"
+
 let test_petition_submit_empty_title_err () =
   with_council_base @@ fun base_path ->
   let ctx = make_council_ctx ~base_path in
@@ -429,6 +445,40 @@ let test_governance_status_after_petition () =
       (json |> field "open_cases" |> Yojson.Safe.Util.to_int >= 1)
   | None -> Alcotest.fail "dispatch returned None"
 
+let test_case_brief_submit_accepts_evidence_refs_array () =
+  with_council_base @@ fun base_path ->
+  let ctx = make_council_ctx ~base_path in
+  let petition_args = `Assoc [
+    ("title", `String "Brief evidence case");
+    ("subject_type", `String "task");
+    ("risk_class", `String "low");
+  ] in
+  let case_id =
+    match Tool_council_oas.dispatch ctx ~name:"masc_petition_submit"
+            ~args:petition_args with
+    | Some (true, body) ->
+      parse_json body |> field "case_id" |> Yojson.Safe.Util.to_string
+    | Some (false, body) ->
+      Alcotest.failf "petition failed: %s" body
+    | None -> Alcotest.fail "petition dispatch returned None"
+  in
+  let brief_args = `Assoc [
+    ("case_id", `String case_id);
+    ("stance", `String "support");
+    ("summary", `String "Ship it");
+    ("evidence_refs", `List [ `String "trace:abc"; `String "doc:123" ]);
+  ] in
+  match Tool_council_oas.dispatch ctx ~name:"masc_case_brief_submit"
+          ~args:brief_args with
+  | Some (ok, body) ->
+    Alcotest.(check bool) "brief ok" true ok;
+    let json = parse_json body in
+    Alcotest.(check string) "case_id preserved" case_id
+      (json |> field "case_id" |> Yojson.Safe.Util.to_string);
+    Alcotest.(check string) "stance preserved" "support"
+      (json |> field "stance" |> Yojson.Safe.Util.to_string)
+  | None -> Alcotest.fail "dispatch returned None"
+
 (* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
@@ -484,6 +534,8 @@ let () =
     "tool_council_oas", [
       Alcotest.test_case "petition creates case with collaboration_id" `Quick
         test_petition_submit_creates_case;
+      Alcotest.test_case "petition accepts subject_type" `Quick
+        test_petition_submit_accepts_subject_type;
       Alcotest.test_case "petition empty title error" `Quick
         test_petition_submit_empty_title_err;
       Alcotest.test_case "cases list empty" `Quick
@@ -496,5 +548,7 @@ let () =
         test_council_dispatch_unknown;
       Alcotest.test_case "governance status after petition" `Quick
         test_governance_status_after_petition;
+      Alcotest.test_case "case brief accepts evidence_refs array" `Quick
+        test_case_brief_submit_accepts_evidence_refs_array;
     ];
   ]

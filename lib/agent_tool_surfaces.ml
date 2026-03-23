@@ -623,16 +623,9 @@ let local_worker_tool_schemas ?names () :
   | None -> Ok all_schemas
   | Some values -> resolve_named_schemas all_schemas values
 
-(** Admin tool names that should be excluded from autonomous agents. *)
-let admin_tool_names : string list =
-  [
-    "masc_tool_admin_snapshot";
-    "masc_operator_snapshot";
-    "masc_operator_action";
-    "masc_operator_confirm";
-    "masc_team_session_stop";
-    "masc_team_session_finalize";
-  ]
+(** Admin tool names that should be excluded from autonomous agents.
+    Delegates to Tool_permissions.admin_tools (SSOT). *)
+let admin_tool_names : string list = Tool_permissions.admin_tools
 
 (** Coordination tool names for coordinators and fleet leaders. *)
 let coordination_tool_names : string list =

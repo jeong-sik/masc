@@ -48,7 +48,7 @@ type proactive_generation_result = {
 
 val proactive_retry_instruction : int -> reason:string -> string
 
-val proactive_temperature : int -> float
+val proactive_temperature : cascade_name:string -> int -> float
 
 val strip_state_blocks_text : string -> string
 

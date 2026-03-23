@@ -128,4 +128,4 @@ val proactive_prompt_for_keeper :
 val proactive_retry_instruction : int -> reason:string -> string
 
 (** Get temperature for proactive attempt. *)
-val proactive_temperature : int -> float
+val proactive_temperature : cascade_name:string -> int -> float

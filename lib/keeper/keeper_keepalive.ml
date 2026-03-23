@@ -10,6 +10,9 @@ open Keeper_execution
 
 type keepalive_entry = {
   stop : bool ref;
+  wakeup : bool ref;
+    (** When set, [interruptible_sleep] exits early so the keeper
+        processes a pending mention or board event immediately. *)
   started_at : float;
   grpc_close : (unit -> unit) option;
     (** Close the gRPC heartbeat stream when stopping. *)
@@ -47,11 +50,12 @@ let register_keepalive name entry =
 let unregister_keepalive name =
   Hashtbl.remove keepalives name
 
-(** Sleep in short chunks so [stop_keepalive] takes effect within ~2 s
-    instead of waiting for the full 30-300 s interval. *)
-let interruptible_sleep ~clock ~stop duration =
+(** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
+    effect within ~2 s instead of waiting for the full 30-300 s interval. *)
+let interruptible_sleep ~clock ~stop ~wakeup duration =
   let rec wait remaining =
     if !stop then ()
+    else if !wakeup then (wakeup := false)
     else if remaining <= 0.0 then ()
     else begin
       let chunk = Float.min 2.0 remaining in
@@ -61,8 +65,21 @@ let interruptible_sleep ~clock ~stop duration =
   in
   wait duration
 
+(** Wake up a specific keeper immediately, causing it to skip the rest of
+    its sleep and run the next heartbeat cycle. Used by broadcast notification
+    when a @mention targets a running keeper. *)
+let wakeup_keeper name =
+  match Hashtbl.find_opt keepalives name with
+  | Some entry -> entry.wakeup := true
+  | None -> ()
+
+(** Wake up all running keepers — used when a broadcast mentions @@all
+    or when a system-wide event requires immediate attention. *)
+let wakeup_all_keepers () =
+  Hashtbl.iter (fun _name entry -> entry.wakeup := true) keepalives
+
 let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
-    (m : keeper_meta) (stop : bool ref) : unit =
+    (m : keeper_meta) (stop : bool ref) ~(wakeup : bool ref) : unit =
   let keepalive_started_ts = Time_compat.now () in
   let snapshot_interval_sec =
     match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_SEC" with
@@ -310,6 +327,21 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                     meta_current.name current_agent_count;
                   changed
                 in
+                (* Board activity enrichment *)
+                let board_new_post_count, board_mention_count =
+                  (try
+                     let _events, new_count, mention_count =
+                       Keeper_world_observation.collect_board_events
+                         ~meta:meta_current
+                     in
+                     (new_count, mention_count)
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
+                     Log.Keeper.warn "keepalive: board count query failed: %s"
+                       (Printexc.to_string exn);
+                     (0, 0))
+                in
                 let obs =
                   { obs with
                     active_goal_count = List.length meta_current.active_goal_ids;
@@ -325,6 +357,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                     failed_task_count = failed_count;
                     active_agent_count = current_agent_count;
                     agent_count_changed;
+                    board_new_post_count;
+                    board_mention_count;
                   }
                 in
                 let triage_result = Keeper_deliberation.triage obs in
@@ -378,7 +412,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                 (max 30 (min 300 meta_after_proactive.presence_keepalive_sec))
             in
             let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
-            interruptible_sleep ~clock:ctx.clock ~stop (base +. jitter);
+            interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
             if !stop then ()
             else loop ())
   in
@@ -416,7 +450,8 @@ let run_grpc_heartbeat_fiber ~sw ~stop
            placeholder that logs transport selection. *)
         Log.Keeper.info "grpc heartbeat tick: agent=%s session=%s"
           agent_name session_id;
-        interruptible_sleep ~clock ~stop interval_sec;
+        let no_wakeup = ref false in
+        interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec;
         if not !stop then loop ())
     in
     loop ());
@@ -429,6 +464,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
   else if not (keeper_spawn_slots_available ()) then ()
   else (
     let stop = ref false in
+    let wakeup = ref false in
     (* Start optional gRPC heartbeat fiber *)
     let grpc_close =
       match Masc_grpc_transport.from_env (), !grpc_client_ref with
@@ -450,7 +486,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
       | _ -> None
     in
     Hashtbl.replace keepalives m.name
-      { stop; started_at = Time_compat.now (); grpc_close };
+      { stop; wakeup; started_at = Time_compat.now (); grpc_close };
     (try
        if not (Room_utils.is_initialized ctx.config) then
          let (_init_msg : string) = Room.init ctx.config ~agent_name:None in ()
@@ -470,7 +506,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
        Log.Keeper.error "room presence bootstrap failed: %s"
          (Printexc.to_string exn));
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
-        run_heartbeat_loop ~proactive_warmup_sec ctx m stop))
+        run_heartbeat_loop ~proactive_warmup_sec ctx m stop ~wakeup))
 
 let stop_keepalive name =
   match Hashtbl.find_opt keepalives name with

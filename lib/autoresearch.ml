@@ -87,6 +87,8 @@ let load_swarm_link_by_loop = Autoresearch_storage.load_swarm_link_by_loop
 let load_swarm_link_by_session = Autoresearch_storage.load_swarm_link_by_session
 let load_state = Autoresearch_storage.load_state
 let latest_cycle_record = Autoresearch_storage.latest_cycle_record
+let load_cycle_history = Autoresearch_storage.load_cycle_history
+let scan_persisted_loop_ids = Autoresearch_storage.scan_persisted_loop_ids
 
 (* ================================================================ *)
 (* Re-exports: Metric                                                *)

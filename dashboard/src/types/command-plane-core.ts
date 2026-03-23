@@ -325,13 +325,8 @@ export interface CommandPlaneTracesResponse {
 }
 
 export type CommandPlaneSurface =
-  | 'warroom'
-  | 'summary'
   | 'orchestra'
   | 'swarm'
   | 'operations'
-  | 'topology'
-  | 'alerts'
-  | 'trace'
   | 'chains'
   | 'control'

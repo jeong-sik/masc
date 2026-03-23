@@ -19,7 +19,6 @@ import type {
   CommandPlaneSwarmResponse,
   CommandPlaneSurface,
 } from './types'
-import { refreshOperatorSnapshot } from './operator-store'
 import { registerCommandPlaneRefresh } from './sse-store'
 import {
   normalizeSnapshot,
@@ -42,7 +41,7 @@ export const commandPlaneError = signal<string | null>(null)
 export const commandPlaneDetailError = signal<string | null>(null)
 export const commandPlaneActionBusy = signal<string | null>(null)
 export const commandPlaneActionError = signal<string | null>(null)
-export const commandPlaneSurface = signal<CommandPlaneSurface>('warroom')
+export const commandPlaneSurface = signal<CommandPlaneSurface>('operations')
 export const commandPlaneHelp = signal<CommandPlaneHelpResponse | null>(null)
 export const commandPlaneHelpLoading = signal(false)
 export const commandPlaneHelpError = signal<string | null>(null)
@@ -62,7 +61,7 @@ export const commandPlaneChainFocusOperationId = signal<string | null>(null)
 let activeChainRunRequestId: string | null = null
 
 function surfaceNeedsDetail(surface: CommandPlaneSurface): boolean {
-  return surface !== 'summary' && surface !== 'swarm' && surface !== 'warroom' && surface !== 'orchestra'
+  return surface !== 'swarm' && surface !== 'orchestra'
 }
 
 function currentLocationParams(): URLSearchParams {
@@ -317,7 +316,6 @@ registerCommandPlaneRefresh(() => {
   void refreshCommandPlaneChainSummary()
   if (
     commandPlaneSurface.value === 'swarm'
-    || commandPlaneSurface.value === 'warroom'
     || commandPlaneSurface.value === 'orchestra'
     || commandPlaneSwarm.value !== null
   ) {
@@ -325,8 +323,5 @@ registerCommandPlaneRefresh(() => {
   }
   if (commandPlaneSurface.value === 'orchestra' || commandPlaneOrchestra.value !== null) {
     void refreshCommandPlaneOrchestra()
-  }
-  if (commandPlaneSurface.value === 'warroom') {
-    void refreshOperatorSnapshot()
   }
 })

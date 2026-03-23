@@ -2,6 +2,7 @@ open Keeper_types
 
 type keepalive_entry = {
   stop : bool ref;
+  wakeup : bool ref;
   started_at : float;
   grpc_close : (unit -> unit) option;
 }
@@ -26,10 +27,19 @@ val register_keepalive : string -> keepalive_entry -> unit
 (** Remove a keepalive entry from the internal registry. *)
 val unregister_keepalive : string -> unit
 
+(** Wake up a specific keeper immediately. Used by broadcast notification
+    when a @mention targets a running keeper. *)
+val wakeup_keeper : string -> unit
+
+(** Wake up all running keepers. Used for @@all broadcast mentions
+    or system-wide events. *)
+val wakeup_all_keepers : unit -> unit
+
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :
-  proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool ref -> unit
+  proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool ref ->
+  wakeup:bool ref -> unit
 
 val start_keepalive :
   ?proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit

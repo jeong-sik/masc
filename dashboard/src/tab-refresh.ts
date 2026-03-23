@@ -72,16 +72,12 @@ export function refreshForTab(tab: string) {
       refreshCommandPlaneChainSummary()
       if (
         commandPlaneSurface.value === 'swarm'
-        || commandPlaneSurface.value === 'warroom'
         || commandPlaneSurface.value === 'orchestra'
       ) {
         refreshCommandPlaneSwarm()
       }
       if (commandPlaneSurface.value === 'orchestra') {
         refreshCommandPlaneOrchestra()
-      }
-      if (commandPlaneSurface.value === 'warroom') {
-        refreshOperatorSnapshot()
       }
     } else if (section === 'tools') {
       void refreshToolsSurface()

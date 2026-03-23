@@ -18,7 +18,6 @@ import {
   setCommandPlaneSurface,
 } from '../../command-store'
 import { refreshRoomTruth } from '../../room-truth-store'
-import { refreshOperatorSnapshot } from '../../operator-store'
 import { navigate, route } from '../../router'
 import { RoomTruthStrip } from '../common/room-truth-strip'
 import {
@@ -35,13 +34,10 @@ import {
   isCommandSurface,
   surfaceRouteParams,
 } from './helpers'
-import { CommandEntryStrip, CommandWorkflowBanner } from './summary-hero'
-import { DetailLoadingState, SummarySurface } from './guided-panel'
+import { DetailLoadingState } from './guided-panel'
 import { OrchestraSurface } from './orchestra'
-import { WarRoomSurface } from './war-room'
 import { SwarmSurface } from './swarm'
 import { ChainsSurface, OperationsSurface } from './operations'
-import { AlertsSurface, TopologySurface, TraceSurface } from './topology'
 import { ControlSurface } from './control'
 
 function SurfaceTabs() {
@@ -71,13 +67,7 @@ function SurfaceTabs() {
   `
 }
 
-function SurfaceBody({ wallboard = false }: { wallboard?: boolean }) {
-  if (commandPlaneSurface.value === 'warroom') {
-    return html`<${WarRoomSurface} wallboard=${wallboard} />`
-  }
-  if (commandPlaneSurface.value === 'summary') {
-    return html`<${SummarySurface} />`
-  }
+function SurfaceBody() {
   if (commandPlaneSurface.value === 'orchestra') {
     return html`<${OrchestraSurface} />`
   }
@@ -90,12 +80,6 @@ function SurfaceBody({ wallboard = false }: { wallboard?: boolean }) {
   switch (commandPlaneSurface.value) {
     case 'chains':
       return html`<${ChainsSurface} />`
-    case 'topology':
-      return html`<${TopologySurface} />`
-    case 'alerts':
-      return html`<${AlertsSurface} />`
-    case 'trace':
-      return html`<${TraceSurface} />`
     case 'control':
       return html`<${ControlSurface} />`
     case 'operations':
@@ -105,10 +89,6 @@ function SurfaceBody({ wallboard = false }: { wallboard?: boolean }) {
 }
 
 export function Command() {
-  const wallboardMode =
-    commandPlaneSurface.value === 'warroom'
-    && route.value.params.presentation === 'wallboard'
-
   useEffect(() => {
     void refreshCommandPlaneCurrentSurface()
     void refreshCommandPlaneChainSummary()
@@ -132,19 +112,16 @@ export function Command() {
       }
     }
     else if (!requestedSurface) {
-      setCommandPlaneSurface('warroom')
+      setCommandPlaneSurface('operations')
     }
     if (requestedOperation) {
       focusCommandPlaneChainOperation(requestedOperation)
     }
-    if (requestedSurface === 'swarm' || requestedSurface === 'warroom' || requestedSurface === 'orchestra' || commandPlaneSurface.value === 'warroom' || commandPlaneSurface.value === 'orchestra') {
+    if (requestedSurface === 'swarm' || requestedSurface === 'orchestra' || commandPlaneSurface.value === 'orchestra') {
       void refreshCommandPlaneSwarm()
     }
     if (requestedSurface === 'orchestra' || commandPlaneSurface.value === 'orchestra') {
       void refreshCommandPlaneOrchestra()
-    }
-    if (requestedSurface === 'warroom' || commandPlaneSurface.value === 'warroom') {
-      void refreshOperatorSnapshot()
     }
   }, [
     route.value.tab,
@@ -168,14 +145,11 @@ export function Command() {
         refreshTimer = null
         void refreshCommandPlaneCurrentSurface()
         void refreshCommandPlaneChainSummary()
-        if (commandPlaneSurface.value === 'swarm' || commandPlaneSurface.value === 'warroom' || commandPlaneSurface.value === 'orchestra') {
+        if (commandPlaneSurface.value === 'swarm' || commandPlaneSurface.value === 'orchestra') {
           void refreshCommandPlaneSwarm()
         }
         if (commandPlaneSurface.value === 'orchestra') {
           void refreshCommandPlaneOrchestra()
-        }
-        if (commandPlaneSurface.value === 'warroom') {
-          void refreshOperatorSnapshot()
         }
       }, 250)
     }
@@ -205,14 +179,11 @@ export function Command() {
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'hidden') return
       const surface = commandPlaneSurface.value
-      if (surface !== 'swarm' && surface !== 'warroom' && surface !== 'orchestra') return
+      if (surface !== 'swarm' && surface !== 'orchestra') return
       void refreshCommandPlaneCurrentSurface()
       void refreshCommandPlaneSwarm()
       if (surface === 'orchestra') {
         void refreshCommandPlaneOrchestra()
-      }
-      if (surface === 'warroom') {
-        void refreshOperatorSnapshot()
       }
     }, 30000)
 
@@ -222,50 +193,36 @@ export function Command() {
   }, [])
 
   return html`
-    <section class="flex flex-col gap-[18px] ${wallboardMode ? 'p-4 rounded-[18px] cmd-plane-view wallboard' : ''}">
-      ${wallboardMode ? null : html`
-        <div class="${CARD_STANDARD} flex justify-between gap-4 items-start max-[880px]:flex-col">
-          <div>
-            <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">지휘면</h2>
-            <p class="text-[13px] text-[var(--text-muted)] leading-relaxed max-w-[62ch]">기본 진입은 라이브 워룸입니다. 실제 run, worker, message, trace를 먼저 보고 필요할 때만 detail surface로 내려갑니다.</p>
-          </div>
-          <div class="flex gap-3 flex-wrap">
-            <button
-              class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
-              onClick=${() => {
-                void fire(() => runCommandPlaneDispatchTick())
-              }}
-              disabled=${actionDisabled('dispatch:tick')}
-            >
-              ${actionDisabled('dispatch:tick') ? '정리 중...' : 'Tick 실행'}
-            </button>
-            <button
-              class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
-              onClick=${() => {
-                void refreshRoomTruth()
-                void refreshCommandPlaneCurrentSurface()
-                void refreshCommandPlaneChainSummary()
-                void refreshCommandPlaneSwarm()
-                if (commandPlaneSurface.value === 'warroom') {
-                  void refreshOperatorSnapshot()
-                }
-              }}
-              disabled=${commandPlaneLoading.value}
-            >
-              ${commandPlaneLoading.value ? '새로고침 중...' : '새로고침'}
-            </button>
-            <button
-              class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
-              onClick=${() => {
-                setCommandPlaneSurface('warroom')
-                navigate('operations', { ...surfaceRouteParams('warroom'), presentation: 'wallboard' })
-              }}
-            >
-              Wallboard
-            </button>
-          </div>
+    <section class="flex flex-col gap-[18px]">
+      <div class="${CARD_STANDARD} flex justify-between gap-4 items-start max-[880px]:flex-col">
+        <div>
+          <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">지휘면</h2>
+          <p class="text-[13px] text-[var(--text-muted)] leading-relaxed max-w-[62ch]">작전, 오케스트라, 스웜, 체인, 제어 표면을 선택해 실제 MCP 도구 기반 현황을 확인합니다.</p>
         </div>
-      `}
+        <div class="flex gap-3 flex-wrap">
+          <button
+            class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
+            onClick=${() => {
+              void fire(() => runCommandPlaneDispatchTick())
+            }}
+            disabled=${actionDisabled('dispatch:tick')}
+          >
+            ${actionDisabled('dispatch:tick') ? '정리 중...' : 'Tick 실행'}
+          </button>
+          <button
+            class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
+            onClick=${() => {
+              void refreshRoomTruth()
+              void refreshCommandPlaneCurrentSurface()
+              void refreshCommandPlaneChainSummary()
+              void refreshCommandPlaneSwarm()
+            }}
+            disabled=${commandPlaneLoading.value}
+          >
+            ${commandPlaneLoading.value ? '새로고침 중...' : '새로고침'}
+          </button>
+        </div>
+      </div>
 
       ${commandPlaneError.value
         ? html`<${EmptyState} message=${commandPlaneError.value} compact />`
@@ -273,11 +230,9 @@ export function Command() {
       ${commandPlaneActionError.value
         ? html`<${EmptyState} message=${commandPlaneActionError.value} compact />`
         : null}
-      ${wallboardMode ? null : html`<${RoomTruthStrip} />`}
-      ${wallboardMode ? null : html`<${CommandWorkflowBanner} />`}
-      ${wallboardMode || commandPlaneSurface.value === 'warroom' ? null : html`<${CommandEntryStrip} />`}
-      ${wallboardMode ? null : html`<${SurfaceTabs} />`}
-      <${SurfaceBody} wallboard=${wallboardMode} />
+      <${RoomTruthStrip} />
+      <${SurfaceTabs} />
+      <${SurfaceBody} />
     </section>
   `
 }

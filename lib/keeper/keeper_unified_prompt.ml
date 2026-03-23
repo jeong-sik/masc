@@ -115,6 +115,15 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     Buffer.add_string ubuf
       (Printf.sprintf "- Active agents: %d\n" observation.active_agent_count);
     Buffer.add_string ubuf "\n");
+  (* Board activity *)
+  if observation.pending_board_events <> [] then (
+    Buffer.add_string ubuf
+      (Printf.sprintf "### Board Activity (%d new)\n"
+         (List.length observation.pending_board_events));
+    List.iter
+      (fun event -> Buffer.add_string ubuf (Printf.sprintf "- %s\n" event))
+      observation.pending_board_events;
+    Buffer.add_string ubuf "\n");
   (* Context health *)
   Buffer.add_string ubuf
     (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"

@@ -5,6 +5,7 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { Trpg } from './trpg'
 import { Tools } from './tools'
+import { Autoresearch } from './autoresearch'
 import { AgentAvatar } from './overview/agent-avatar'
 
 function AvatarGallery() {
@@ -54,6 +55,12 @@ export function Lab() {
     <div>
       ${section === 'tools' ? html`
         <${Tools} />
+      ` : null}
+
+      ${section === 'autoresearch' ? html`
+        <${Card} title="오토리서치" class="section mb-4">
+          <${Autoresearch} />
+        <//>
       ` : null}
 
       ${section === 'avatars' ? html`

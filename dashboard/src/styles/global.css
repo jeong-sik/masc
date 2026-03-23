@@ -691,56 +691,12 @@ tbody tr:hover {
   }
 }
 
-@utility cmd-warroom-strip {
-  background:
-    radial-gradient(circle at top left, var(--cyan-16), transparent 32%),
-    linear-gradient(135deg, rgba(7,10,18,0.94), rgba(12,18,30,0.94));
-  &.warn { border-color: rgba(251,191,36,0.32); }
-  &.wallboard { padding: 22px; border-radius: 22px; }
-}
-
-@utility cmd-warroom-strip-head {
-  & strong {
-    display: block;
-    font-size: 24px;
-    line-height: 1.15;
-  }
-}
-
-@utility cmd-warroom-grid {
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(320px, 0.9fr);
-  &.wallboard {
-    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.12fr) minmax(320px, 0.9fr);
-  }
-}
-
 @utility cmd-orch-card {
   background: linear-gradient(180deg, var(--white-5), var(--white-3h));
   border-color: rgba(148,163,184,0.18);
   &.ok { border-color: var(--ok-24); }
   &.warn { border-color: rgba(251,191,36,0.22); }
   &.bad { border-color: rgba(248,113,113,0.26); }
-}
-
-@utility cmd-presence-card {
-  background: linear-gradient(180deg, var(--white-5), var(--white-3h));
-  border-color: rgba(148,163,184,0.18);
-  display: grid;
-  gap: 10px;
-}
-
-@utility cmd-feed-card {
-  background: linear-gradient(180deg, var(--white-5), var(--white-3h));
-  border-color: rgba(148,163,184,0.18);
-  display: grid;
-  gap: 10px;
-}
-
-@utility cmd-warroom-guidance {
-  & strong { color: rgba(255,255,255,0.96); }
-  &.ok { border-color: var(--ok-35); background: var(--ok-8); }
-  &.warn { border-color: var(--warn-30); background: rgba(251,191,36,0.08); }
-  &.bad { border-color: var(--bad-30); background: var(--bad-8); }
 }
 
 @utility cmd-alert {
@@ -883,20 +839,15 @@ tbody tr:hover {
 /* ── Command responsive breakpoints ───────────────────────── */
 
 @media (max-width: 1450px) {
-  .cmd-warroom-grid,
-  .cmd-warroom-grid.wallboard,
   .cmd-hero-summary {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 1100px) {
-  .cmd-warroom-grid,
-  .cmd-warroom-grid.wallboard,
   .cmd-hero-summary {
     grid-template-columns: minmax(0, 1fr);
   }
-  .cmd-warroom-strip { position: static; }
 }
 
 @keyframes fadeSlide {

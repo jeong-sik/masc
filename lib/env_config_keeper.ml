@@ -1,11 +1,6 @@
 open Env_config_core
 
 module Endpoints = struct
-  (** @deprecated MODEL-MCP server URL - no longer used.
-      Use {!Oas_worker.run_named} or {!Oas_worker.run_model_by_label} instead. *)
-  let model_mcp_url =
-    get_string ~default:"" "MODEL_MCP_URL"  (* Default empty - not used *)
-
   let masc_host_result () =
     match Uri.host (Uri.of_string (masc_http_base_url ())) with
     | Some host -> Ok host
@@ -56,8 +51,7 @@ module KeeperBootstrap = struct
   let max_scan =
     get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
 
-  (** Backward compatibility: legacy field for call sites not yet migrated
-      from pre-dynamic-sharding versions. Keep alias for max_scan. *)
+  (** Maximum concurrently active keepers. Guards keeper creation and bootstrap. *)
   let max_active_keepers =
     get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
 end

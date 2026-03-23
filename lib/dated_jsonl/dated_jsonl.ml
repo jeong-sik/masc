@@ -86,6 +86,55 @@ let load_lines path =
       |> List.filter (fun l -> String.trim l <> "")
     with Sys_error _ -> []
 
+(** Read the last [n] non-empty lines from a file without loading the entire
+    file into memory.  Reads backwards in 8 KB chunks from the end. *)
+let load_tail_lines path ~max_lines =
+  if max_lines <= 0 || not (Fs_compat.file_exists path) then []
+  else
+    try
+      let ic = open_in_bin path in
+      let file_len = in_channel_length ic in
+      if file_len = 0 then (close_in_noerr ic; [])
+      else
+        let chunk_size = 8192 in
+        let buf = Buffer.create (min file_len (chunk_size * 4)) in
+        let pos = ref file_len in
+        let found_enough = ref false in
+        (* Read backwards in chunks, counting newlines *)
+        while !pos > 0 && not !found_enough do
+          let read_start = max 0 (!pos - chunk_size) in
+          let read_len = !pos - read_start in
+          seek_in ic read_start;
+          let chunk = Bytes.create read_len in
+          really_input ic chunk 0 read_len;
+          (* Prepend chunk to buffer *)
+          let old_contents = Buffer.contents buf in
+          Buffer.clear buf;
+          Buffer.add_bytes buf chunk;
+          Buffer.add_string buf old_contents;
+          pos := read_start;
+          (* Count newlines to check if we have enough *)
+          let newline_count = ref 0 in
+          let s = Buffer.contents buf in
+          for i = 0 to String.length s - 1 do
+            if s.[i] = '\n' then incr newline_count
+          done;
+          (* Need max_lines + 1 newlines to have max_lines complete lines *)
+          if !newline_count > max_lines then found_enough := true
+        done;
+        close_in_noerr ic;
+        let all_lines =
+          Buffer.contents buf
+          |> String.split_on_char '\n'
+          |> List.filter (fun l -> String.trim l <> "")
+        in
+        let total = List.length all_lines in
+        if total <= max_lines then all_lines
+        else
+          (* Take only the last max_lines *)
+          List.filteri (fun i _ -> i >= total - max_lines) all_lines
+    with Sys_error _ | End_of_file -> []
+
 (* ── Public API ───────────────────────────────────────── *)
 
 let append t json =
@@ -107,8 +156,8 @@ let read_recent t n =
          List.iter (fun d ->
            if !count >= n then raise_notrace Done;
            let path = Filename.concat month_path d in
-           let lines = load_lines path in
-           (* Lines are chronological in file; take from the end *)
+           let remaining = n - !count in
+           let lines = load_tail_lines path ~max_lines:remaining in
            let rev_lines = List.rev lines in
            List.iter (fun line ->
              if !count < n then begin
@@ -122,8 +171,6 @@ let read_recent t n =
          ) days
        ) months
      with Done -> ());
-    (* collected is already chronological:
-       we scan newest-first and prepend, so oldest ends up at the head *)
     !collected
   end
 
@@ -141,7 +188,8 @@ let read_recent_lines t n =
          List.iter (fun d ->
            if !count >= n then raise_notrace Done;
            let path = Filename.concat month_path d in
-           let lines = load_lines path in
+           let remaining = n - !count in
+           let lines = load_tail_lines path ~max_lines:remaining in
            let rev_lines = List.rev lines in
            List.iter (fun line ->
              if !count < n then begin

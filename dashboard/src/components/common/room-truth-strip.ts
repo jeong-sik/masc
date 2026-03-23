@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { StatusChip } from './status-chip'
 import { roomTruth, roomTruthError, roomTruthLoading } from '../../room-truth-store'
 import { toneClass } from '../../lib/tone'
 
@@ -31,9 +32,7 @@ export function RoomTruthStrip() {
         <span class="room-truth-label">세션</span>
         <strong>활성 ${execution?.active_sessions ?? 0} · 막힘 ${blocked}</strong>
         <div class="flex flex-wrap gap-2">
-          <span class="cmd-chip rounded-full ${toneClass(blocked > 0 ? 'warn' : 'ok')}">
-            우선 ${execution?.priority_items ?? 0}
-          </span>
+          <${StatusChip} label=${`우선 ${execution?.priority_items ?? 0}`} tone=${toneClass(blocked > 0 ? 'warn' : 'ok')} />
         </div>
       </article>
     </section>

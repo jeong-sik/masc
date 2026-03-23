@@ -753,7 +753,23 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         if success then Ok result_str else Error result_str
       in
       Masc_grpc_server.start ~sw ~env ~room_config:state.room_config
-        ~tool_dispatcher
+        ~tool_dispatcher;
+      (* Standalone WebSocket transport (opt-in via MASC_WS_ENABLED=1) *)
+      Server_ws_standalone.start ~sw ~env
+        ~on_message:(fun ws_session_id body_str ->
+          Eio.Fiber.fork ~sw (fun () ->
+            try
+              let response_json =
+                Mcp_eio.handle_request ~clock ~sw
+                  ~mcp_session_id:ws_session_id state body_str
+              in
+              let response_str = Yojson.Safe.to_string response_json in
+              if response_str <> "null" then
+                ignore (Server_mcp_transport_ws.send_to_session ws_session_id response_str)
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn)))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

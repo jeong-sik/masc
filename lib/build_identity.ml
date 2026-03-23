@@ -75,16 +75,18 @@ let resolve_commit ~env_value ~probe =
 let started_at_unix = Unix.gettimeofday ()
 let started_at_iso = iso8601_of_unix started_at_unix
 
+(** Commit hash — eagerly resolved at startup.
+    Not using [Eio.Lazy] because this is called from tests without Eio context.
+    Env var check + git probe are fast and side-effect-free. *)
 let commit =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    resolve_commit
-      ~env_value:(Sys.getenv_opt "MASC_BUILD_GIT_COMMIT")
-      ~probe:probe_git_commit)
+  resolve_commit
+    ~env_value:(Sys.getenv_opt "MASC_BUILD_GIT_COMMIT")
+    ~probe:probe_git_commit
 
 let current () =
   {
     release_version = Version.version;
-    commit = Eio.Lazy.force commit;
+    commit;
     started_at = started_at_iso;
     uptime_seconds = max 0 (int_of_float (Unix.gettimeofday () -. started_at_unix));
   }

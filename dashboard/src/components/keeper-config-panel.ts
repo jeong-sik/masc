@@ -368,7 +368,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${'' /* --- Execution (read-only) --- */}
       <${SectionHeader} title="Execution" />
       <${ConfigRow} label="Active model" value=${c.execution.active_model || '--'} />
-      <${ConfigRow} label="Policy mode" value=${c.execution.policy_mode || '--'} />
       <${ConfigRow} label="Shell mode" value=${c.execution.policy_shell_mode || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">Verify</span>

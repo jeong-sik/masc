@@ -92,6 +92,19 @@ export function agentJournalEntries(agentName: string | null): JournalEntry[] {
 // --- Actions ---
 
 export function openAgentDetail(agentName: string): void {
+  // If the agent has a linked keeper, open the richer keeper detail overlay instead
+  const keeper = keeperForAgent(agentName)
+  if (keeper) {
+    // Lazy import to avoid circular dependency
+    import('./keeper-detail').then(mod => {
+      mod.openKeeperDetail(keeper)
+    }).catch(() => {
+      // Fallback to agent detail if import fails
+      selectedAgentName.value = agentName
+      void refreshAgentDetail()
+    })
+    return
+  }
   selectedAgentName.value = agentName
   void refreshAgentDetail()
 }

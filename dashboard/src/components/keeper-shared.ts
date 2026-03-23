@@ -24,9 +24,11 @@ const KEEPER_CHAT_METADATA_VISIBLE_KEY = 'masc_keeper_chat_metadata_visible'
 
 function readKeeperChatMetadataVisible(): boolean {
   try {
-    return localStorage.getItem(KEEPER_CHAT_METADATA_VISIBLE_KEY) === 'true'
+    const stored = localStorage.getItem(KEEPER_CHAT_METADATA_VISIBLE_KEY)
+    // Default to visible (true) when no preference is stored
+    return stored === null ? true : stored === 'true'
   } catch {
-    return false
+    return true
   }
 }
 

@@ -300,6 +300,26 @@ let taskboard_tools : Types.tool_schema list = [
       ("required", `List [`String "message"]);
     ];
   };
+  {
+    name = "keeper_task_claim";
+    description = "Claim the next unclaimed task from the backlog that matches your capabilities. Returns the claimed task details or empty if none available.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    name = "keeper_task_done";
+    description = "Mark a claimed task as done with a result summary.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to complete")]);
+        ("result", `Assoc [("type", `String "string"); ("description", `String "Summary of what was accomplished")]);
+      ]);
+      ("required", `List [`String "task_id"]);
+    ];
+  };
 ]
 
 (** Predefined shards *)
@@ -380,6 +400,7 @@ let default_shard_names : string list = [
   "shell";
   "weather";
   "voice";
+  "taskboard";
 ]
 
 let get_agent_shards (agent_name : string) : string list =

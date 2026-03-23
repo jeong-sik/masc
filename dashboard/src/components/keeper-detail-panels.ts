@@ -9,12 +9,12 @@ import type { Keeper, KeeperMetricPoint, TrpgCharacterStats, AutonomyLevel } fro
 
 // ── Autonomy helpers ─────────────────────────────────────
 
-const AUTONOMY_LEVELS: { level: AutonomyLevel; label: string; color: string }[] = [
-  { level: 'L1_Reactive', label: 'L1 Reactive', color: '#6b7280' },
-  { level: 'L2_Suggestive', label: 'L2 Suggestive', color: '#3b82f6' },
-  { level: 'L3_Guided', label: 'L3 Guided', color: '#f59e0b' },
-  { level: 'L4_Autonomous', label: 'L4 Autonomous', color: '#f97316' },
-  { level: 'L5_Independent', label: 'L5 Independent', color: '#ef4444' },
+const AUTONOMY_LEVELS: { level: AutonomyLevel; label: string; hint: string; color: string }[] = [
+  { level: 'L1_Reactive', label: 'L1 Reactive', hint: 'Responds only when explicitly asked', color: '#6b7280' },
+  { level: 'L2_Suggestive', label: 'L2 Suggestive', hint: 'Offers suggestions but waits for approval', color: '#3b82f6' },
+  { level: 'L3_Guided', label: 'L3 Guided', hint: 'Acts within pre-approved boundaries', color: '#f59e0b' },
+  { level: 'L4_Autonomous', label: 'L4 Autonomous', hint: 'Self-directed with periodic check-ins', color: '#f97316' },
+  { level: 'L5_Independent', label: 'L5 Independent', hint: 'Fully self-directed, reports results only', color: '#ef4444' },
 ]
 
 function autonomyIndex(level: AutonomyLevel | undefined): number {
@@ -36,6 +36,7 @@ export function AutonomyMeter({ keeper }: { keeper: Keeper }) {
           <span class="text-[13px] font-semibold" style="color:${info.color};">${info.label}</span>
           <span class="text-[11px] text-[var(--text-muted)]">${idx + 1} / ${AUTONOMY_LEVELS.length}</span>
         </div>
+        <div class="text-[11px] text-[var(--text-muted)] mb-1.5 leading-snug">${info.hint}</div>
         <div class="w-full h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden">
           <div class="h-full rounded-full transition-all duration-300" style="width:${pct}%; background:${info.color};"></div>
         </div>
@@ -249,20 +250,20 @@ const fieldSearch = signal('')
 export function FieldDictionary({ keeper }: { keeper: Keeper }) {
   const filter = fieldSearch.value.toLowerCase()
 
-  const fields: { title: string; key: string; value: string }[] = [
-    { title: 'Name', key: 'name', value: keeper.name },
-    { title: 'Emoji', key: 'emoji', value: keeper.emoji ?? '-' },
-    { title: 'Korean', key: 'koreanName', value: keeper.koreanName ?? '-' },
-    { title: 'Model', key: 'model', value: keeper.model ?? '-' },
-    { title: 'Status', key: 'status', value: keeper.status },
-    { title: 'Primary', key: 'primaryValue', value: keeper.primaryValue ?? '-' },
-    { title: 'Activity', key: 'activityLevel', value: String(keeper.activityLevel ?? '-') },
-    { title: 'Gen', key: 'generation', value: String(keeper.generation ?? '-') },
-    { title: 'Turns', key: 'turn_count', value: String(keeper.turn_count ?? '-') },
-    { title: 'Context', key: 'context_ratio', value: keeper.context_ratio != null ? `${Math.round(keeper.context_ratio * 100)}%` : '-' },
-    { title: 'Heartbeat', key: 'last_heartbeat', value: keeper.last_heartbeat ?? '-' },
-    { title: 'Traits', key: 'traits', value: keeper.traits?.join(', ') || '-' },
-    { title: 'Interests', key: 'interests', value: keeper.interests?.join(', ') || '-' },
+  const fields: { title: string; value: string }[] = [
+    { title: 'Name', value: keeper.name },
+    { title: 'Emoji', value: keeper.emoji ?? '-' },
+    { title: 'Korean Name', value: keeper.koreanName ?? '-' },
+    { title: 'Model', value: keeper.model ?? '-' },
+    { title: 'Status', value: keeper.status },
+    { title: 'Core Value', value: keeper.primaryValue ?? '-' },
+    { title: 'Activity Level', value: String(keeper.activityLevel ?? '-') },
+    { title: 'Generation', value: String(keeper.generation ?? '-') },
+    { title: 'Total Turns', value: String(keeper.turn_count ?? '-') },
+    { title: 'Context Usage', value: keeper.context_ratio != null ? `${Math.round(keeper.context_ratio * 100)}%` : '-' },
+    { title: 'Last Heartbeat', value: keeper.last_heartbeat ?? '-' },
+    { title: 'Traits', value: keeper.traits?.join(', ') || '-' },
+    { title: 'Interests', value: keeper.interests?.join(', ') || '-' },
   ]
 
   // Extra fields from keeper object
@@ -288,7 +289,7 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
   if (keeper.context?.has_checkpoint != null) extras.push({ title: 'Has Checkpoint', value: keeper.context.has_checkpoint ? 'Yes' : 'No' })
 
   const filtered = filter
-    ? fields.filter(f => f.title.toLowerCase().includes(filter) || f.key.includes(filter) || f.value.toLowerCase().includes(filter))
+    ? fields.filter(f => f.title.toLowerCase().includes(filter) || f.value.toLowerCase().includes(filter))
     : fields
 
   return html`
@@ -302,9 +303,8 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
       />
       <div class="flex flex-col">
         ${filtered.map((f, i) => html`
-          <div class="grid grid-cols-[100px_80px_1fr] gap-2 py-2 px-2 text-xs rounded-md ${i % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
+          <div class="grid grid-cols-[120px_1fr] gap-2 py-2 px-2 text-xs rounded-md ${i % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
             <span class="font-semibold text-[var(--text-body)] truncate">${f.title}</span>
-            <span class="font-mono text-[var(--cyan)] text-[11px] truncate">${f.key}</span>
             <span class="text-right text-[var(--text-body)] truncate">${f.value}</span>
           </div>
         `)}

@@ -575,7 +575,7 @@ let serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler
                   in
                   conn_handler client_addr flow
                 | Error msg ->
-                  Log.Misc.warn "[auto] protocol detect failed: %s" msg
+                  Log.Misc.debug "[auto] protocol detect skipped: %s" msg
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->

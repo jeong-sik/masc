@@ -43,20 +43,8 @@
 .ops-stat.ok { border-color: var(--ok-35); }
 .ops-stat.warn { border-color: rgba(251, 191, 36, 0.35); }
 
-.ops-control-summary::-webkit-details-marker,
-.ops-archive-summary::-webkit-details-marker {
+.ops-control-summary::-webkit-details-marker {
   display: none;
-}
-
-.ops-archive-summary::before {
-  content: '\25B8';
-  display: inline-block;
-  margin-right: 6px;
-  transition: transform 120ms ease;
-}
-
-.ops-archive-panel[open] .ops-archive-summary::before {
-  transform: rotate(90deg);
 }
 
 .ops-guidance-card.ok {
@@ -81,34 +69,14 @@
 }
 
 @media (max-width: 1200px) {
-  .command-entry-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .ops-workbench {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 880px) {
-  .command-entry-strip {
-    grid-template-columns: 1fr;
-  }
   .ops-actor-input {
     min-width: 0;
     flex: 1;
-  }
-  .planning-header,
-  .board-toolbar,
-  .post-title-row {
-    flex-direction: column;
-  }
-  .board-toolbar-actions {
-    width: 100%;
-  }
-  .board-toolbar-actions .control-btn {
-    flex: 1;
-  }
-  .vote-column {
-    min-width: 42px;
   }
 }

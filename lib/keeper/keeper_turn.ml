@@ -83,7 +83,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           ~new_soul_profile ~new_will ~new_needs ~new_desires
           ~config:ctx.config
       in
-      start_keepalive ctx meta;
+      (* start_keepalive is deferred AFTER run_turn completes.
+         Starting it here causes the heartbeat fiber to immediately grab LLM
+         slots, starving the synchronous run_turn call (Issue #2610). *)
       match maybe_handle_auto_team_session ctx meta message with
       | Error err -> (false, "❌ " ^ err)
       | Ok (Some result, _) -> result
@@ -203,12 +205,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                  (Trajectory.Failed e))
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
+              start_keepalive ctx meta;
               (false, Printf.sprintf "❌ Agent.run failed: %s" e)
             | Ok result ->
               (try ignore (Trajectory.finalize trajectory_acc
                  Trajectory.Completed)
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
+              start_keepalive ctx meta;
               let reply_json = `Assoc [
                 ("reply", `String result.response_text);
                 ("model", `String result.model_used);

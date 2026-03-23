@@ -274,7 +274,7 @@ let permission_for_tool = function
       Some CanReadState
   | "masc_autoresearch_status" -> Some CanReadState
   | "masc_add_task" -> Some CanAddTask
-  | "masc_claim" | "masc_claim_next" -> Some CanClaimTask
+  | "masc_claim_next" -> Some CanClaimTask
   | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" ->
       Some CanCompleteTask
   | "masc_keeper_action_explain"

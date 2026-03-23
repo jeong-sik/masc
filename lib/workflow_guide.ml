@@ -378,7 +378,7 @@ let next_steps ~tool_name ~success =
   | "masc_set_room" -> after_set_room ~success
   | "masc_join" -> after_join ~success
   | "masc_status" -> after_status ~success
-  | "masc_claim" | "masc_claim_next" -> after_claim_auto_bound ~success
+  | "masc_claim_next" -> after_claim_auto_bound ~success
   | "masc_add_task" | "masc_batch_add_tasks" -> after_add_task ~success
   | "masc_plan_set_task" | "masc_set_current_task" -> after_plan_set_task ~success
   | "masc_heartbeat" -> after_heartbeat ~success
@@ -443,7 +443,7 @@ let workflow_context ~tool_name =
   let before = match tool_name with
     | "masc_join" -> [ "masc_set_room" ]
     | "masc_status" -> [ "masc_set_room"; "masc_join" ]
-    | "masc_claim" | "masc_claim_next" ->
+    | "masc_claim_next" ->
         [ "masc_join"; "masc_status" ]
     | "masc_plan_set_task" | "masc_set_current_task" ->
         [ "masc_transition" ]

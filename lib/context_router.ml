@@ -68,7 +68,7 @@ let conversational_patterns = [
 
 (** Task command patterns — operate on existing state, no search *)
 let command_patterns = [
-  "masc_claim"; "masc_done"; "masc_join"; "masc_leave";
+  "masc_done"; "masc_join"; "masc_leave";
   "masc_broadcast"; "masc_lock"; "masc_unlock"; "masc_vote";
   "masc_add_task"; "masc_cancel"; "masc_transition";
   "claim "; "done "; "cancel "; "broadcast ";

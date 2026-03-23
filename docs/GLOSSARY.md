@@ -1,8 +1,10 @@
 # MASC Glossary
 
+> **SUPERSEDED-BY**: `docs/spec/00-glossary.md` (v2.0.0, 2026-03-23)
+
 **Version**: 1.0.0
 **Date**: 2026-01-10
-**Status**: Official
+**Status**: Superseded
 
 ## Introduction
 

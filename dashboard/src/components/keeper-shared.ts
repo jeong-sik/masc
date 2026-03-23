@@ -26,10 +26,10 @@ const KEEPER_CHAT_METADATA_VISIBLE_KEY = 'masc_keeper_chat_metadata_visible'
 function readKeeperChatMetadataVisible(): boolean {
   try {
     const stored = localStorage.getItem(KEEPER_CHAT_METADATA_VISIBLE_KEY)
-    // Default to visible (true) when no preference is stored
-    return stored === null ? true : stored === 'true'
+    // Default to hidden so the direct lane reads like chat first.
+    return stored === null ? false : stored === 'true'
   } catch {
-    return true
+    return false
   }
 }
 
@@ -241,16 +241,21 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="rounded-[22px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(12,20,38,0.96),rgba(8,13,24,0.9))] px-4 py-4 shadow-[0_18px_48px_rgba(0,0,0,0.22)]">
-        <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="overflow-hidden rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
           <div class="min-w-[220px] flex-1">
-            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Conversation Lane</div>
-            <div class="mt-2 text-[16px] font-semibold text-[var(--text-strong)]">Direct messages only</div>
+            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Direct Chat</div>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <div class="text-[15px] font-semibold text-[var(--text-strong)]">@${keeperName}</div>
+              <span class=${`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
+                ${conversationStateLabel(sending, hydrating)}
+              </span>
+            </div>
             <div class="mt-1 text-[13px] leading-[1.65] text-[var(--text-secondary)]">
-              This panel is for explicit operator-to-keeper conversation. Internal world-state prompts, tool chatter, and keeper self-deliberation are hidden on purpose.
+              Keeper 상세 안에서 직접 주고받은 대화만 보여줍니다. 내부 프롬프트와 tool chatter는 자동으로 숨깁니다.
             </div>
           </div>
-          <div class="flex flex-wrap items-center gap-2 text-[11px]">
+          <div class="flex flex-wrap items-center gap-2">
             <button
               type="button"
               class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
@@ -258,48 +263,6 @@ export function KeeperConversationPanel({
             >
               ${showMetadata ? 'Hide metadata' : 'Show metadata'}
             </button>
-          </div>
-        </div>
-
-        <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <div class="rounded-[18px] border border-[rgba(71,184,255,0.18)] bg-[rgba(71,184,255,0.08)] px-3 py-3">
-            <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9ad9ff]">Visible thread</div>
-            <div class="mt-1 text-[22px] font-semibold text-[var(--text-strong)]">${thread.length}</div>
-            <div class="mt-1 text-[12px] leading-[1.55] text-[var(--text-secondary)]">Direct user prompts and keeper replies currently shown.</div>
-          </div>
-          <div class="rounded-[18px] border border-[rgba(245,158,11,0.2)] bg-[rgba(245,158,11,0.08)] px-3 py-3">
-            <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#f5d089]">Hidden internal</div>
-            <div class="mt-1 text-[22px] font-semibold text-[var(--text-strong)]">${hiddenHistoryCount}</div>
-            <div class="mt-1 text-[12px] leading-[1.55] text-[var(--text-secondary)]">System prompts and internal reasoning omitted from the conversation lane.</div>
-          </div>
-          <div class="rounded-[18px] border border-[rgba(148,163,184,0.14)] bg-[rgba(255,255,255,0.04)] px-3 py-3">
-            <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Lane state</div>
-            <div class="mt-2">
-              <span class=${`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
-                ${conversationStateLabel(sending, hydrating)}
-              </span>
-            </div>
-            <div class="mt-2 text-[12px] leading-[1.55] text-[var(--text-secondary)]">
-              ${sending
-                ? 'A keeper reply is currently streaming.'
-                : hydrating
-                  ? 'History is being refreshed from keeper status.'
-                  : 'Direct message lane is ready for a new prompt.'}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="overflow-hidden rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.94),rgba(5,10,20,0.9))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
-        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
-          <div class="min-w-[220px] flex-1">
-            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Transcript</div>
-            <div class="mt-2 text-[15px] font-semibold text-[var(--text-strong)]">@${keeperName}</div>
-            <div class="mt-1 text-[13px] leading-[1.65] text-[var(--text-secondary)]">
-              Recent direct exchange with the keeper, separated from internal control prompts.
-            </div>
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
             ${!historyExpanded && rawThread.length >= 10
               ? html`
                   <button
@@ -320,13 +283,14 @@ export function KeeperConversationPanel({
             entries=${thread}
             emptyText="No direct conversation yet. Internal keeper prompts and tool chatter are hidden."
             showMetadata=${showMetadata}
+            variant="messenger"
           />
         </div>
 
         ${hiddenHistoryCount > 0
           ? html`
-              <div class="mx-4 mb-4 rounded-[18px] border border-[rgba(245,158,11,0.18)] bg-[rgba(245,158,11,0.08)] px-3 py-2.5 text-[12px] leading-[1.6] text-[#f4d79e]">
-                ${hiddenHistoryCount} internal history entries are hidden from this transcript to keep the conversation readable. Raw status and metadata still retain those traces for debugging.
+              <div class="mx-4 mb-4 rounded-[16px] border border-[rgba(245,158,11,0.16)] bg-[rgba(245,158,11,0.06)] px-3 py-2 text-[11px] leading-[1.55] text-[#f4d79e]">
+                ${hiddenHistoryCount} internal history entries are hidden from this transcript to keep the conversation readable.
               </div>
             `
           : null}

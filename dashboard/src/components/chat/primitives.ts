@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
 import type { KeeperConversationDetails, KeeperConversationEntry } from '../../types'
 
+export type ChatTranscriptVariant = 'default' | 'messenger'
+
 function timeLabel(timestamp?: string | null): string | null {
   if (!timestamp) return null
   const value = new Date(timestamp)
@@ -32,6 +34,11 @@ function bubbleTone(entry: KeeperConversationEntry): string {
   if (entry.role === 'user') return 'user'
   if (entry.role === 'assistant') return 'assistant'
   return 'system'
+}
+
+function showDeliveryBadge(entry: KeeperConversationEntry, variant: ChatTranscriptVariant): boolean {
+  if (variant !== 'messenger') return true
+  return entry.delivery !== 'history' && entry.delivery !== 'delivered'
 }
 
 function avatarLabel(entry: KeeperConversationEntry): string {
@@ -98,16 +105,22 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
 export function ChatMessageBubble({
   entry,
   showMetadata = true,
+  variant = 'default',
 }: {
   entry: KeeperConversationEntry
   showMetadata?: boolean
+  variant?: ChatTranscriptVariant
 }) {
   const [expanded, setExpanded] = useState(false)
   const [rawExpanded, setRawExpanded] = useState(false)
+  const tone = bubbleTone(entry)
+  const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
   const canExpand = showMetadata && !!entry.details
   const overview = entry.details ? overviewRows(entry.details) : []
   const state = stateRows(entry.details?.stateBlock)
+  const delivery = deliveryLabel(entry)
+  const timestamp = timeLabel(entry.timestamp)
 
   useEffect(() => {
     if (!showMetadata) {
@@ -118,43 +131,82 @@ export function ChatMessageBubble({
 
   return html`
     <article
-      class=${`chat-bubble ${bubbleTone(entry)} flex w-full max-w-[90%] flex-col gap-3 rounded-[20px] border px-4 py-3 backdrop-blur-sm`}
+      class=${`chat-bubble ${tone} flex w-full flex-col border backdrop-blur-sm ${
+        isMessenger
+          ? 'max-w-[82%] gap-2.5 rounded-[24px] px-4 py-3.5'
+          : 'max-w-[90%] gap-3 rounded-[20px] px-4 py-3'
+      }`}
+      data-chat-variant=${variant}
     >
-      <div class="flex items-start justify-between gap-3">
-        <div class="flex min-w-0 flex-1 items-start gap-3">
+      <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
+        <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
-            class=${`chat-avatar ${bubbleTone(entry)} flex size-10 shrink-0 items-center justify-center rounded-2xl border text-[11px] font-semibold uppercase tracking-[0.08em]`}
+            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center border text-[11px] font-semibold uppercase tracking-[0.08em] ${
+              isMessenger ? 'size-8 rounded-[18px]' : 'size-10 rounded-2xl'
+            }`}
           >
             ${avatarMonogram(entry)}
           </div>
           <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-1.5">
-              <span
-                class=${`chat-role-chip ${bubbleTone(entry)} inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]`}
-              >
-                ${entry.label}
-              </span>
-              <span class="inline-flex items-center rounded-full border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]">
-                ${deliveryLabel(entry)}
-              </span>
-              ${entry.timestamp
-                ? html`
-                    <span class="inline-flex items-center rounded-full border border-[rgba(148,163,184,0.16)] bg-[rgba(148,163,184,0.08)] px-2.5 py-1 text-[10px] font-medium tabular-nums text-[var(--text-muted)]">
-                      ${timeLabel(entry.timestamp)}
+            ${isMessenger
+              ? html`
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span class="truncate text-[12px] font-semibold text-[var(--text-strong)]">
+                      ${avatarLabel(entry)}
                     </span>
-                  `
-                : null}
-            </div>
-            <div class="mt-2 truncate text-[13px] font-semibold text-[var(--text-strong)]">
-              ${avatarLabel(entry)}
-            </div>
+                    ${timestamp
+                      ? html`<span class="text-[11px] tabular-nums text-[var(--text-muted)]">${timestamp}</span>`
+                      : null}
+                    ${showDeliveryBadge(entry, variant)
+                      ? html`
+                          <span
+                            class="inline-flex items-center rounded-full border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]"
+                            data-chat-delivery=${delivery}
+                          >
+                            ${delivery}
+                          </span>
+                        `
+                      : null}
+                  </div>
+                `
+              : html`
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span
+                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]`}
+                    >
+                      ${entry.label}
+                    </span>
+                    ${showDeliveryBadge(entry, variant)
+                      ? html`
+                          <span
+                            class="inline-flex items-center rounded-full border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
+                            data-chat-delivery=${delivery}
+                          >
+                            ${delivery}
+                          </span>
+                        `
+                      : null}
+                    ${timestamp
+                      ? html`
+                          <span class="inline-flex items-center rounded-full border border-[rgba(148,163,184,0.16)] bg-[rgba(148,163,184,0.08)] px-2.5 py-1 text-[10px] font-medium tabular-nums text-[var(--text-muted)]">
+                            ${timestamp}
+                          </span>
+                        `
+                      : null}
+                  </div>
+                  <div class="mt-2 truncate text-[13px] font-semibold text-[var(--text-strong)]">
+                    ${avatarLabel(entry)}
+                  </div>
+                `}
           </div>
         </div>
         ${canExpand
           ? html`
               <button
                 type="button"
-                class="rounded-full border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--text-body)]"
+                class=${`border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--text-body)] ${
+                  isMessenger ? 'rounded-xl px-2.5 py-1' : 'rounded-full px-3 py-1'
+                }`}
                 onClick=${() => { setExpanded(!expanded) }}
               >
                 ${expanded ? '상세 숨기기' : '상세 보기'}
@@ -164,7 +216,7 @@ export function ChatMessageBubble({
       </div>
 
       ${showMetadata && detailItems.length > 0
-        ? html`<div class="flex flex-wrap gap-1.5">
+        ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
             ${detailItems.map(item => html`
               <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.16)] bg-[rgba(71,184,255,0.08)] px-2.5 py-1 text-[10px] font-medium text-[#bfe8ff]">
                 ${item}
@@ -252,10 +304,12 @@ export function ChatTranscript({
   entries,
   emptyText,
   showMetadata,
+  variant = 'default',
 }: {
   entries: KeeperConversationEntry[]
   emptyText: string
   showMetadata?: boolean
+  variant?: ChatTranscriptVariant
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const lastSignature = entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}`).join('|')
@@ -268,7 +322,12 @@ export function ChatTranscript({
 
   return html`
     <div
-      class="chat-transcript flex min-h-[300px] max-h-[520px] flex-col gap-3 overflow-y-auto rounded-[22px] border border-[rgba(148,163,184,0.14)] px-3 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+      class=${`chat-transcript flex min-h-[300px] max-h-[520px] flex-col overflow-y-auto border border-[rgba(148,163,184,0.14)] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] ${
+        variant === 'messenger'
+          ? 'gap-4 rounded-[26px] px-4 py-5 sm:px-5'
+          : 'gap-3 rounded-[22px] px-3 py-4'
+      }`}
+      data-chat-variant=${variant}
       ref=${scrollerRef}
     >
       ${entries.length === 0
@@ -278,7 +337,7 @@ export function ChatTranscript({
               <div class="mt-3 max-w-[34rem] text-[13px] leading-[1.7] text-[var(--text-secondary)]">${emptyText}</div>
             </div>
           `
-        : entries.map(entry => html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} />`)}
+        : entries.map(entry => html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} />`)}
     </div>
   `
 }

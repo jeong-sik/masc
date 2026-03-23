@@ -205,6 +205,9 @@ let make_path_test_dir () =
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "keeper_path_test_%d" (Random.int 100000)) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  (* Create .git dir so find_git_root stops here instead of finding CI repo root *)
+  let git_dir = Filename.concat dir ".git" in
+  (try Unix.mkdir git_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let sub = Filename.concat dir "lib" in
   (try Unix.mkdir sub 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let sub2 = Filename.concat dir "src" in

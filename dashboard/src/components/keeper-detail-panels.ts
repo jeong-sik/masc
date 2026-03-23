@@ -77,11 +77,27 @@ export function formatTokens(n: number | undefined): string {
 
 // ── KPI Card ─────────────────────────────────────────────
 
-function KpiCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+type KpiTone = 'default' | 'ok' | 'warn' | 'bad'
+
+const KPI_TONE: Record<KpiTone, string> = {
+  default: 'border-[var(--card-border)] bg-[var(--white-3)]',
+  ok: 'border-[rgba(74,222,128,0.2)] bg-[rgba(74,222,128,0.06)]',
+  warn: 'border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.06)]',
+  bad: 'border-[rgba(239,68,68,0.2)] bg-[rgba(239,68,68,0.06)]',
+}
+
+const KPI_VALUE_TONE: Record<KpiTone, string> = {
+  default: 'text-[var(--text-strong)]',
+  ok: 'text-[#4ade80]',
+  warn: 'text-[#fbbf24]',
+  bad: 'text-[#ef4444]',
+}
+
+function KpiCard({ label, value, hint, tone = 'default' }: { label: string; value: string | number; hint?: string; tone?: KpiTone }) {
   return html`
-    <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1">
+    <div class="p-4 rounded-xl border ${KPI_TONE[tone]} flex flex-col gap-1 transition-colors">
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${label}</div>
-      <div class="text-2xl font-bold text-[var(--text-strong)] tabular-nums leading-tight">${value}</div>
+      <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-tight">${value}</div>
       ${hint ? html`<div class="text-[11px] text-[var(--text-muted)] leading-snug">${hint}</div>` : null}
     </div>
   `
@@ -97,7 +113,12 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
       ? `$${lastPt.cost_usd.toFixed(4)}`
       : null
 
-  const contextHint = keeper.context_ratio != null && keeper.context_ratio > 0.8 ? 'Approaching limit' : undefined
+  const ctxPct = keeper.context_ratio != null ? Math.round(keeper.context_ratio * 100) : null
+  const ctxTone: KpiTone = ctxPct == null ? 'default' : ctxPct > 85 ? 'bad' : ctxPct > 70 ? 'warn' : ctxPct > 0 ? 'ok' : 'default'
+  const ctxHint = ctxPct != null && ctxPct > 80 ? 'Approaching limit' : undefined
+
+  const actLevel = typeof keeper.activityLevel === 'number' ? keeper.activityLevel : null
+  const actTone: KpiTone = actLevel == null ? 'default' : actLevel >= 4 ? 'ok' : actLevel >= 2 ? 'warn' : 'default'
 
   return html`
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
@@ -113,13 +134,15 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
       />
       <${KpiCard}
         label="Context"
-        value=${keeper.context_ratio != null ? `${Math.round(keeper.context_ratio * 100)}%` : '-'}
-        hint=${contextHint}
+        value=${ctxPct != null ? `${ctxPct}%` : '-'}
+        hint=${ctxHint}
+        tone=${ctxTone}
       />
       <${KpiCard}
         label="Activity"
         value=${keeper.activityLevel ?? '-'}
         hint="Level 0-5"
+        tone=${actTone}
       />
       <${KpiCard}
         label="Tokens"
@@ -216,7 +239,7 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
   if (keeper.active_model) extras.push({ title: 'Active Model', value: keeper.active_model, mono: true })
   if (keeper.next_model_hint) extras.push({ title: 'Next Model Hint', value: keeper.next_model_hint, mono: true })
   if (keeper.skill_primary) extras.push({ title: 'Skill (Primary)', value: keeper.skill_primary })
-  if (keeper.skill_secondary) extras.push({ title: 'Skill (Secondary)', value: keeper.skill_secondary })
+  if (keeper.skill_secondary?.length) extras.push({ title: 'Skill (Secondary)', value: keeper.skill_secondary.join(', ') })
   if (keeper.skill_reason) extras.push({ title: 'Skill Reason', value: keeper.skill_reason })
   if (keeper.context_source) extras.push({ title: 'Context Source', value: keeper.context_source })
   if (keeper.context_tokens != null) extras.push({ title: 'Context Tokens', value: formatTokens(keeper.context_tokens) })

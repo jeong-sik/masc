@@ -110,8 +110,8 @@ function KeeperStatusPill({ status }: { status: string }) {
 
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   return html`
-    <div class="mt-6 border-t border-[var(--border-slate-12)] pt-6">
-      <h3 class="m-0 mb-4 text-[15px] font-semibold text-[var(--text-strong)]">Direct Comms</h3>
+    <div class="border-t border-[var(--border-slate-12)] pt-5">
+      <h3 class="m-0 mb-3 text-[13px] font-semibold text-[var(--text-strong)] uppercase tracking-[0.06em]">Direct Comms</h3>
 
       <div class="flex flex-col gap-4">
         <div class="w-full">
@@ -121,8 +121,8 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
           />
         </div>
 
-        <details class="keeper-comms-diagnostics group">
-          <summary class="keeper-comms-diagnostics-toggle cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)]">Runtime diagnostics</summary>
+        <details class="group">
+          <summary class="cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors">Runtime diagnostics</summary>
           <div class="flex flex-col gap-3 px-4 pb-4 pt-2">
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}
@@ -167,31 +167,34 @@ export function KeeperDetailOverlay() {
         }
       }}
     >
-      <div class="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-bg-1/95 backdrop-blur-2xl rounded-3xl border border-card-border p-8 shadow-2xl shadow-black/50 ring-1 ring-white/5 custom-scrollbar">
+      <div class="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded-2xl border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
 
-        ${'' /* ── Header ── */}
-        <div class="flex items-start justify-between mb-8 pb-6 border-b border-card-border/50">
-          <div class="flex items-center gap-5">
-            <div class="size-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-4xl shadow-inner">${keeper.emoji}</div>
-            <div class="flex flex-col gap-1">
-              <div class="flex items-center gap-3">
-                <h2 class="m-0 text-2xl font-bold text-text-strong tracking-tight">${keeper.name}</h2>
+        ${'' /* ── Sticky Header ── */}
+        <div class="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-md rounded-t-2xl">
+          <div class="flex items-center gap-4">
+            <div class="size-12 rounded-xl bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
+            <div class="flex flex-col gap-0.5">
+              <div class="flex items-center gap-2.5">
+                <h2 class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
                 <${KeeperStatusPill} status=${keeper.status} />
                 ${keeper.model ? html`
-                  <span class="inline-flex items-center py-1 px-3 rounded-lg text-[11px] font-semibold bg-accent/10 text-accent border border-accent/20 shadow-sm">${keeper.model}</span>
+                  <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-mono bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.2)]">${keeper.model}</span>
                 ` : null}
               </div>
-              ${keeper.koreanName ? html`<div class="text-[14px] font-medium text-text-dim mt-1">${keeper.koreanName}</div>` : null}
+              ${keeper.koreanName ? html`<span class="text-xs text-[var(--text-muted)]">${keeper.koreanName}</span>` : null}
             </div>
           </div>
           <button
             onClick=${() => closeKeeperDetail()}
-            class="flex items-center justify-center size-10 rounded-xl border border-transparent bg-white/5 text-text-muted hover:text-text-strong hover:bg-white/10 hover:border-white/10 transition-all duration-200 cursor-pointer shadow-sm"
+            class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm"
             aria-label="Close"
           >
-            <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
           </button>
         </div>
+
+        ${'' /* ── Body ── */}
+        <div class="p-6 flex flex-col gap-6">
 
         ${'' /* ── Pipeline stage indicator ── */}
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
@@ -206,7 +209,7 @@ export function KeeperDetailOverlay() {
         <${KeeperCommsPanel} keeper=${keeper} />
 
         ${'' /* ── Detail sections grid ── */}
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
           <${SectionCard} title="Field Dictionary">
             <${FieldDictionary} keeper=${keeper} />
@@ -305,6 +308,7 @@ export function KeeperDetailOverlay() {
                 : html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">No recent memory note</div>`}
             </div>
           <//>
+        </div>
         </div>
       </div>
     </div>

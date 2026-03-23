@@ -4,6 +4,7 @@ import { agents } from '../store'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { Trpg } from './trpg'
+import { Tools } from './tools'
 import { AgentAvatar } from './overview/agent-avatar'
 
 function AvatarGallery() {
@@ -47,17 +48,12 @@ function AvatarGallery() {
 }
 
 export function Lab() {
-  const section = route.value.params.section ?? 'overview'
+  const section = route.value.params.section ?? 'tools'
 
   return html`
     <div>
-      ${section === 'overview' ? html`
-        <${Card} title="실험 개요" class="section mb-4">
-          <div class="mb-4">
-            <h2 class="monitor-headline">실험 기능은 운영면 밖에 분리해 둡니다</h2>
-            <p class="monitor-subheadline">TRPG와 시각 실험은 별도 표면에 두고, 운영과 작업 화면은 해석 경로를 단순하게 유지합니다.</p>
-          </div>
-        <//>
+      ${section === 'tools' ? html`
+        <${Tools} />
       ` : null}
 
       ${section === 'avatars' ? html`

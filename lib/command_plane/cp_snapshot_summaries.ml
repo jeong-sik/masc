@@ -569,8 +569,7 @@ let recent_operator_trace_events config ?trace_id limit =
   if not (Room_utils.path_exists config (operator_action_log_path config)) then
     []
   else
-    Fs_compat.load_file (operator_action_log_path config)
-    |> String.split_on_char '\n'
+    read_jsonl_tail_lines (operator_action_log_path config) ~max_lines:limit
     |> List.filter_map (fun line ->
            let trimmed = String.trim line in
            if trimmed = "" then None
@@ -642,7 +641,7 @@ let recent_swarm_trace_events config limit =
 
 let list_traces_json config ?operation_id ?(limit = 25) () =
   let events =
-    read_events config
+    read_recent_events config ~limit:(max limit 50)
     |> List.filter (fun (event : event_record) ->
            match operation_id with
            | None -> true
@@ -701,4 +700,3 @@ let list_traces_json config ?operation_id ?(limit = 25) () =
       ("generated_at", `String (Types.now_iso ()));
       ("events", `List merged);
     ]
-

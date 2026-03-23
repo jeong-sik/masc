@@ -275,7 +275,7 @@ let append_keeper_auto_team_session_note (ctx : _ context) (meta : keeper_meta)
 let maybe_handle_auto_team_session (ctx : _ context) (meta : keeper_meta)
     (message : string) :
     ((tool_result option * keeper_meta), string) result =
-  if true then
+  if not (Keeper_status_bridge.auto_team_session_enabled meta) then
     Ok (None, meta)
   else
     let linked_meta, running_session = running_session_for_keeper ctx.config meta in
@@ -299,4 +299,3 @@ let maybe_handle_auto_team_session (ctx : _ context) (meta : keeper_meta)
                 ?spawn_error ()
             in
             Ok (Some (true, Yojson.Safe.pretty_to_string json), updated_meta))
-

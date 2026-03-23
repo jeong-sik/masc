@@ -318,7 +318,7 @@ let compute_judgments
   match
     Oas_worker.run_named_with_masc_tools ~cascade_name:"governance_judge"
       ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
-      ~temperature:0.2 ~max_tokens:4096 ()
+      ()
   with
   | Error message -> Error message
   | Ok result -> (

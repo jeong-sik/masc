@@ -241,7 +241,6 @@
    mitosis_continuity
    mitosis_defaults
    mitosis_dna
-   mitosis_handoff
    mitosis_metrics
    mode
    operator_approval
@@ -369,7 +368,6 @@
    workflow_guide
    tool_control
    tool_verification
-   tool_misc_snapshots
    tool_misc
    tool_agent_timeline
    tool_local_runtime
@@ -452,7 +450,6 @@
   voice_session_manager
   voice_stream
    version
-   void
    ;; webrtc_bindings/common/datachannel removed — in ocaml-webrtc
    ;; Keeper Agent Harness (trajectory + eval gates + scenarios)
    trajectory
@@ -570,7 +567,6 @@
  dashboard_http_keeper_detail
  mitosis_continuity
  mitosis_dna
- mitosis_handoff
  mitosis_helpers
  mitosis_spawn
  tool_mitosis_utils
@@ -718,8 +714,6 @@
   tool_local_runtime_verify
   tool_local_runtime_bench
   tool_local_runtime_status
-  ;; tool_misc split
-  tool_misc_snapshots
   ;; tool_inline_dispatch sub-modules
   tool_inline_dispatch_types
   tool_inline_dispatch_room

@@ -110,7 +110,7 @@ let test_notification_body_relaxes_accept () =
     | _ -> false)
 
 let test_request_json_only_accepted () =
-  (* JSON-only Accept is now Legacy_accepted per MCP Streamable HTTP spec (2025-03-26) *)
+  (* JSON-only Accept no longer qualifies as streamable MCP and should be rejected. *)
   let module Transport = Masc_mcp.Server_mcp_transport_http in
   let headers = Httpun.Headers.of_list [("accept", "application/json")] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
@@ -118,13 +118,13 @@ let test_request_json_only_accepted () =
     {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}|}
   in
   let mode = Transport.classify_mcp_accept_for_body request body in
-  check bool "json-only accept is legacy_accepted" true
+  check bool "json-only accept is rejected" true
     (match mode with
-    | Masc_mcp.Mcp_protocol.Http_negotiation.Legacy_accepted -> true
+    | Masc_mcp.Mcp_protocol.Http_negotiation.Rejected -> true
     | _ -> false)
 
 let test_initialize_json_only_accepted () =
-  (* JSON-only Accept is now Legacy_accepted per MCP Streamable HTTP spec (2025-03-26) *)
+  (* Initialize with JSON-only Accept is also rejected under the stricter transport rule. *)
   let module Transport = Masc_mcp.Server_mcp_transport_http in
   let headers = Httpun.Headers.of_list [("accept", "application/json")] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
@@ -132,9 +132,9 @@ let test_initialize_json_only_accepted () =
     {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}|}
   in
   let mode = Transport.classify_mcp_accept_for_body request body in
-  check bool "initialize with json-only is legacy_accepted" true
+  check bool "initialize with json-only is rejected" true
     (match mode with
-    | Masc_mcp.Mcp_protocol.Http_negotiation.Legacy_accepted -> true
+    | Masc_mcp.Mcp_protocol.Http_negotiation.Rejected -> true
     | _ -> false)
 
 let test_no_accept_header_rejected () =
@@ -179,8 +179,8 @@ let () =
       ]);
       ("body_aware_accept", [
         test_case "notification relaxes accept" `Quick test_notification_body_relaxes_accept;
-        test_case "json-only accept is legacy_accepted" `Quick test_request_json_only_accepted;
-        test_case "initialize json-only is legacy_accepted" `Quick test_initialize_json_only_accepted;
+        test_case "json-only accept is rejected" `Quick test_request_json_only_accepted;
+        test_case "initialize json-only is rejected" `Quick test_initialize_json_only_accepted;
         test_case "no accept header rejected" `Quick test_no_accept_header_rejected;
         test_case "initialize disables sse" `Quick test_initialize_never_uses_sse;
       ]);

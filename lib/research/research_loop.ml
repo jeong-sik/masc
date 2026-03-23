@@ -147,6 +147,15 @@ let parse_hypothesis (response : string) : hypothesis option =
     }
   with _ -> None
 
+(** Detect no-op hypotheses that would not change any code. *)
+let is_noop_hypothesis (h : hypothesis) : bool =
+  (* old_text == new_text → search-replace with no change *)
+  (h.old_text <> "" && h.old_text = h.new_text)
+  (* both patch and old_text empty → nothing to apply *)
+  || (h.patch = "" && h.old_text = "")
+  (* target_file empty *)
+  || h.target_file = ""
+
 (** Format experiment history for context. *)
 let history_context (history : experiment_entry list) : string =
   if history = [] then ""
@@ -335,6 +344,10 @@ let run_experiment ~sw ~net ~clock ~(config : Research_config.t)
     Log.Server.warn "research: no hypothesis generated, skipping";
     None
   | Some hypothesis ->
+    if is_noop_hypothesis hypothesis then begin
+      Log.Server.warn "research: no-op hypothesis detected (old_text=new_text or empty), skipping";
+      None
+    end else begin
     Log.Server.info "research: hypothesis — %s (target: %s)"
       hypothesis.description hypothesis.target_file;
 
@@ -407,6 +420,7 @@ let run_experiment ~sw ~net ~clock ~(config : Research_config.t)
        (* 7. Log *)
        log_result ~results_file:config.results_file ~entry;
        Some entry)
+    end
 
 (** Run the full research loop for N iterations. *)
 let run ~sw ~net ~clock ~(config : Research_config.t) : experiment_entry list =

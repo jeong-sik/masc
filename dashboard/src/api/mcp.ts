@@ -10,7 +10,7 @@ let initPromise: Promise<void> | null = null
 function mcpHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    Accept: 'application/json',
+    Accept: 'application/json, text/event-stream',
     ...(extra ?? {}),
   }
   if (mcpSessionId) {
@@ -43,7 +43,7 @@ async function ensureSession(): Promise<void> {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Accept: 'application/json',
+          Accept: 'application/json, text/event-stream',
         },
         body: JSON.stringify({
           jsonrpc: '2.0',

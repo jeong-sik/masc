@@ -12,9 +12,11 @@
 
 (** Transport kind. *)
 type t =
-  | Http   (** HTTP/SSE to MASC server. *)
-  | Grpc   (** gRPC (h2c) to MASC gRPC coordination port. *)
-  | Local  (** Direct Room filesystem calls (in-process). *)
+  | Http    (** HTTP/SSE to MASC server. *)
+  | Grpc    (** gRPC (h2c) to MASC gRPC coordination port. *)
+  | Ws      (** WebSocket to MASC server. *)
+  | Webrtc  (** WebRTC DataChannel for P2P agent communication. *)
+  | Local   (** Direct Room filesystem calls (in-process). *)
 
 (** Resolve transport from env var [MASC_AGENT_TRANSPORT].
     Returns [Local] when unset or unrecognized. *)

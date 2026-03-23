@@ -906,6 +906,24 @@
  (modules test_sse_external_sub)
  (libraries masc_mcp alcotest eio eio_main str yojson))
 
+; WebSocket Transport — session registry and SHA1 tests
+(test
+ (name test_ws_transport)
+ (modules test_ws_transport)
+ (libraries masc_mcp alcotest eio eio_main digestif yojson))
+
+; WebRTC Signaling — offer/answer flow, peer registry, cleanup
+(test
+ (name test_webrtc_signaling)
+ (modules test_webrtc_signaling)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; Transport Integration — cross-layer event flow verification
+(test
+ (name test_transport_integration)
+ (modules test_transport_integration)
+ (libraries masc_mcp alcotest eio eio_main grpc-direct str yojson))
+
 ; SSE Room Filter — room-based event isolation (Harness Sprint 3)
 (test
  (name test_sse_room_filter)

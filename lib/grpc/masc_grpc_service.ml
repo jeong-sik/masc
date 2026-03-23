@@ -340,13 +340,32 @@ let handle_subscribe
   (* Hook into SSE broadcast mechanism for real-time event push.
      External subscriber receives formatted SSE event strings on every
      Sse.broadcast/broadcast_to call, converts them to gRPC Event messages,
-     and pushes into the gRPC response stream. *)
+     and pushes into the gRPC response stream.
+
+     IMPORTANT: The callback runs synchronously inside broadcast_impl,
+     so it MUST NOT block. We use Grpc_eio.Stream.length to check
+     capacity before adding. If the stream is full or closed, the event
+     is dropped and the subscriber auto-unregisters. *)
   let sub_id = Printf.sprintf "grpc-subscribe-%s-%Ld"
     req.agent_name (now_ms ()) in
   let seq_counter = Atomic.make (Int64.to_int req.since_seq + 1) in
   let stream_closed = Atomic.make false in
-  Sse.subscribe_external ~id:sub_id ~callback:(fun sse_event ->
-    if Atomic.get stream_closed then ()
+  let max_buffer = 48 in (* stream capacity is 64; leave headroom *)
+  Sse.subscribe_external ~id:sub_id
+    ~is_alive:(fun () ->
+      not (Atomic.get stream_closed) && not (Grpc_eio.Stream.is_closed stream))
+    ~callback:(fun sse_event ->
+    if Atomic.get stream_closed || Grpc_eio.Stream.is_closed stream then begin
+      (* Stream already gone — auto-cleanup *)
+      if not (Atomic.get stream_closed) then begin
+        Atomic.set stream_closed true;
+        Sse.unsubscribe_external sub_id;
+        Log.Misc.info "gRPC subscriber %s auto-cleaned (stream closed)" sub_id
+      end
+    end else if Grpc_eio.Stream.length stream >= max_buffer then
+      (* Stream buffer near-full — drop event to avoid blocking broadcast *)
+      Log.Misc.warn "gRPC subscriber %s: buffer full (%d), dropping event"
+        sub_id (Grpc_eio.Stream.length stream)
     else begin
       let seq = Int64.of_int (Atomic.fetch_and_add seq_counter 1) in
       let event = T.Event.{
@@ -358,18 +377,21 @@ let handle_subscribe
       } in
       try Grpc_eio.Stream.add stream (T.Event.to_bytes event)
       with
-      | Eio.Cancel.Cancelled _ ->
+      | Eio.Cancel.Cancelled _ as e ->
         Atomic.set stream_closed true;
-        Sse.unsubscribe_external sub_id
-      | _exn ->
+        Sse.unsubscribe_external sub_id;
+        raise e
+      | exn ->
         Atomic.set stream_closed true;
-        Sse.unsubscribe_external sub_id
+        Sse.unsubscribe_external sub_id;
+        Log.Misc.warn "gRPC subscriber %s failed: %s" sub_id
+          (Printexc.to_string exn)
     end
-  );
+  ) ();
   (* Stream stays open; will be closed when the gRPC connection drops
-     or the server shuts down. The Grpc_eio runtime calls Stream.close
-     when the client disconnects, which is fine -- the subscriber callback
-     guards against writing to a closed stream via [stream_closed]. *)
+     or the server shuts down. The callback auto-detects closed streams
+     via Grpc_eio.Stream.is_closed and self-unsubscribes.
+     The is_alive check also triggers auto-removal during broadcast. *)
   stream
 
 (** {1 Service Construction} *)

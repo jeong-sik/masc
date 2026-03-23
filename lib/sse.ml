@@ -259,6 +259,9 @@ let client_matches_target target (client : client) =
 type external_subscriber = {
   sub_id: string;
   callback: string -> unit;
+  is_alive: unit -> bool;
+  (** Returns false if the subscriber should be removed.
+      Called before each broadcast delivery. *)
 }
 
 let external_subscribers : (string, external_subscriber) Hashtbl.t = Hashtbl.create 8
@@ -273,10 +276,16 @@ let with_ext_sub_ro f =
   with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
 (** Register an external subscriber that receives formatted SSE events
-    on every broadcast.  The [callback] must not block (use best-effort). *)
-let subscribe_external ~id ~callback =
+    on every broadcast.  The [callback] must not block (use best-effort).
+
+    [is_alive] is called before each delivery; returning [false] triggers
+    automatic unsubscription, preventing resource leaks when the consumer
+    disconnects without an explicit [unsubscribe_external] call. *)
+let subscribe_external ~id ~callback ?(is_alive = fun () -> true) () =
   with_ext_sub_rw (fun () ->
-    Hashtbl.replace external_subscribers id { sub_id = id; callback })
+    if Hashtbl.mem external_subscribers id then
+      Log.Misc.warn "External subscriber %s replaced (duplicate ID)" id;
+    Hashtbl.replace external_subscribers id { sub_id = id; callback; is_alive })
 
 (** Remove a previously registered external subscriber. *)
 let unsubscribe_external id =
@@ -288,20 +297,34 @@ let external_subscriber_count () =
   with_ext_sub_ro (fun () ->
     Hashtbl.length external_subscribers)
 
-(** Fan out an event string to all external subscribers. *)
+(** Fan out an event string to all external subscribers.
+    Dead subscribers (where [is_alive] returns [false]) are automatically
+    removed during iteration, preventing resource leaks. *)
 let notify_external_subscribers event =
   let snapshot =
     with_ext_sub_ro (fun () ->
       Hashtbl.fold (fun _ v acc -> v :: acc) external_subscribers [])
   in
+  let dead = ref [] in
   List.iter (fun (sub : external_subscriber) ->
-    try sub.callback event
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Misc.warn "External subscriber %s failed: %s"
-        sub.sub_id (Printexc.to_string exn)
-  ) snapshot
+    if not (sub.is_alive ()) then
+      dead := sub.sub_id :: !dead
+    else begin
+      try sub.callback event
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Misc.warn "External subscriber %s failed: %s"
+          sub.sub_id (Printexc.to_string exn)
+    end
+  ) snapshot;
+  (* Remove dead subscribers *)
+  if !dead <> [] then begin
+    List.iter (fun id ->
+      with_ext_sub_rw (fun () -> Hashtbl.remove external_subscribers id);
+      Log.Misc.info "Auto-removed dead external subscriber: %s" id
+    ) !dead
+  end
 
 (** Internal broadcast implementation shared by [broadcast] and [broadcast_to].
     Pushes the formatted event string into each matching client's

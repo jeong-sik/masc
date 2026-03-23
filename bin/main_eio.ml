@@ -146,6 +146,46 @@ let make_extended_handler routes =
       else
         match request.meth, path with
         | `OPTIONS, _ -> options_handler request reqd
+        | `GET, "/ws" ->
+          (* WebSocket upgrade — opt-in via MASC_WS_ENABLED=1 *)
+          let ws_enabled = match Sys.getenv_opt "MASC_WS_ENABLED" with
+            | Some "1" | Some "true" -> true
+            | _ -> false
+          in
+          if ws_enabled then begin
+            match Masc_mcp.Server_mcp_transport_ws.upgrade_connection reqd with
+            | Ok () -> ()
+            | Error msg ->
+              let body = Printf.sprintf {|{"error":"ws_upgrade_failed","message":"%s"}|} msg in
+              let headers = Httpun.Headers.of_list [
+                ("content-type", "application/json");
+                ("content-length", string_of_int (String.length body));
+              ] in
+              let response = Httpun.Response.create ~headers `Bad_request in
+              Httpun.Reqd.respond_with_string reqd response body
+          end else begin
+            let body = {|{"error":"websocket_disabled","message":"Set MASC_WS_ENABLED=1 to enable"}|} in
+            let headers = Httpun.Headers.of_list [
+              ("content-type", "application/json");
+              ("content-length", string_of_int (String.length body));
+            ] in
+            let response = Httpun.Response.create ~headers `Not_found in
+            Httpun.Reqd.respond_with_string reqd response body
+          end
+        | `POST, "/webrtc/offer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
+          Http.Request.read_body_async reqd (fun body ->
+            match Masc_mcp.Server_webrtc_transport.handle_offer_request body with
+            | Ok json -> Http.Response.json json reqd
+            | Error msg ->
+              Http.Response.json ~status:`Bad_request
+                (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
+        | `POST, "/webrtc/answer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
+          Http.Request.read_body_async reqd (fun body ->
+            match Masc_mcp.Server_webrtc_transport.handle_answer_request body with
+            | Ok json -> Http.Response.json json reqd
+            | Error msg ->
+              Http.Response.json ~status:`Bad_request
+                (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
         | `DELETE, "/mcp" -> handle_delete_mcp request reqd
         | `DELETE, "/mcp/managed" ->
             handle_delete_mcp ~profile:Mcp_eio.Managed_agent request reqd

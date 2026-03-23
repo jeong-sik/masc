@@ -40,20 +40,20 @@ export function SelectionCard({
     && summary?.historical_verdict === 'proven'
     && summary?.live_verdict !== 'proven'
   return html`
-    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${selectionTone(selection)}">
-      <div class="command-guide-head">
-        <strong>${selectionLabel(selection)}</strong>
-        <span class="cmd-chip rounded-full ${selectionTone(selection)}">${selection.mode ?? 'none'}</span>
+    <div class="bg-card/30 backdrop-blur-sm border border-card-border/50 p-5 rounded-2xl shadow-sm cmd-guide-card ${selectionTone(selection)}">
+      <div class="flex items-center justify-between mb-3 pb-3 border-b border-card-border/50">
+        <strong class="text-[13px] text-text-strong tracking-wide">${selectionLabel(selection)}</strong>
+        <span class="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest bg-white/5 border border-white/10 ${selectionTone(selection)}">${selection.mode ?? 'none'}</span>
       </div>
-      <p>${selection.reason ?? '근거 컨텍스트 선택 정보가 없습니다.'}</p>
+      <p class="text-[13px] text-text-body leading-relaxed mb-4">${selection.reason ?? '근거 컨텍스트 선택 정보가 없습니다.'}</p>
       ${historicalStronger
-        ? html`<p>선택된 최신 세션은 과거 proof가 더 강하고 현재 live evidence는 더 약합니다.</p>`
+        ? html`<p class="text-[12px] text-warn/90 bg-warn/10 p-3 rounded-xl border border-warn/20 mb-4 shadow-inner">선택된 최신 세션은 과거 proof가 더 강하고 현재 live evidence는 더 약합니다.</p>`
         : null}
-      <div class="cmd-card rounded-xl-grid">
-        <span>선택된 세션</span><span>${selection.selected_session_id ?? '없음'}</span>
-        <span>작성자</span><span>${selection.selected_created_by ?? '없음'}</span>
-        <span>선택된 목표</span><span>${selection.selected_goal ?? '없음'}</span>
-        <span>선택 가능한 세션</span><span>${selection.available_session_count ?? 0}</span>
+      <div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2.5 text-[12px] bg-bg-1/40 p-4 rounded-xl shadow-inner border border-white/5">
+        <span class="text-text-muted font-medium">선택된 세션</span><span class="text-text-strong font-mono">${selection.selected_session_id ?? '없음'}</span>
+        <span class="text-text-muted font-medium">작성자</span><span class="text-text-strong">${selection.selected_created_by ?? '없음'}</span>
+        <span class="text-text-muted font-medium">선택된 목표</span><span class="text-text-strong">${selection.selected_goal ?? '없음'}</span>
+        <span class="text-text-muted font-medium">선택 가능한 세션</span><span class="text-text-strong">${selection.available_session_count ?? 0}</span>
       </div>
     </div>
   `
@@ -61,22 +61,23 @@ export function SelectionCard({
 
 export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) {
   return html`
-    <article class="cmd-card rounded-xl proof-artifact-row">
-      <div class="cmd-card rounded-xl-head">
-        <div>
-          <strong>${item.summary ?? item.event_type ?? '도구 근거'}</strong>
-          <div class="command-meta-line">
-            <span>${item.actor ?? '시스템'}</span>
-            <span>${item.event_type ?? 'event'}</span>
+    <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:-translate-y-0.5 hover:shadow-md hover:bg-card/60 transition-all duration-200">
+      <div class="flex items-start justify-between gap-4 mb-3">
+        <div class="flex flex-col gap-1.5 min-w-0">
+          <strong class="text-[13px] text-text-strong truncate">${item.summary ?? item.event_type ?? '도구 근거'}</strong>
+          <div class="flex items-center gap-2 text-[11px] font-medium text-text-muted">
+            <span class="px-2 py-0.5 rounded-md bg-white/5 border border-white/10">${item.actor ?? '시스템'}</span>
+            <span class="text-text-dim/60">•</span>
+            <span class="font-mono">${item.event_type ?? 'event'}</span>
           </div>
         </div>
-        <span class="cmd-chip rounded-full">${relativeTime(item.timestamp ?? null)}</span>
+        <span class="text-[11px] font-mono text-text-dim bg-white/5 px-2 py-0.5 rounded-md border border-white/5 shrink-0">${relativeTime(item.timestamp ?? null)}</span>
       </div>
       ${(() => {
         const tags = toolEvidenceTags(item)
         return tags.length > 0
-          ? html`<div class="flex flex-wrap gap-1.5 mb-3">
-              ${tags.map(name => html`<span class="semantic-tag">${name}</span>`)}
+          ? html`<div class="flex flex-wrap gap-2 mt-3 pt-3 border-t border-card-border/50">
+              ${tags.map(name => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-accent/10 text-accent border border-accent/20 shadow-sm">${name}</span>`)}
             </div>`
           : null
       })()}
@@ -89,37 +90,38 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
   const validationFailures = Array.isArray(item.validation_failures) ? item.validation_failures : []
   const toolNames = Array.isArray(item.tool_names) ? item.tool_names : []
   return html`
-    <article class="proof-actor-row">
-      <div class="flex justify-between gap-3 items-start">
-        <div>
-          <strong>${item.worker_name ?? item.worker_run_id}</strong>
-          <div class="flex flex-wrap gap-3 text-[var(--text-body)] text-[13px] leading-[1.45]">
-            <span>${item.worker_run_id}</span>
+    <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:border-accent/30 transition-all duration-200 flex flex-col gap-3">
+      <div class="flex justify-between gap-4 items-start">
+        <div class="flex flex-col gap-1.5 min-w-0">
+          <strong class="text-[13px] text-text-strong font-bold tracking-wide">${item.worker_name ?? item.worker_run_id}</strong>
+          <div class="flex flex-wrap gap-2 text-[11px] text-text-muted font-medium items-center">
+            <span class="font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5">${item.worker_run_id}</span>
+            <span class="text-text-dim/60">•</span>
             <span>${item.ts_iso ? relativeTime(item.ts_iso) : '기록 없음'}</span>
           </div>
         </div>
-        <span class="cmd-chip ${workerRunEvidenceTone(item)}">
+        <span class="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest shadow-sm ${workerRunEvidenceTone(item)}">
           ${workerRunEvidenceLabel(item)}
         </span>
       </div>
-      <div class="grid gap-1">
-        <span>${workerRunEvidenceMeta(item) || 'runtime/model 메타데이터 없음'}</span>
+      <div class="text-[11px] text-text-body/80 bg-white/5 p-2 rounded-lg border border-white/10 mt-1 shadow-inner">
+        ${workerRunEvidenceMeta(item) || 'runtime/model 메타데이터 없음'}
       </div>
       ${preview
-        ? html`<div class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)]">
-            <strong class="text-[var(--text-strong)]">${item.success === false || item.error || item.failure_reason ? '실패 요약' : '출력 요약'}</strong>
-            <span class="text-[rgba(255,255,255,0.8)] leading-normal">${preview}</span>
+        ? html`<div class="flex flex-col gap-1.5 py-3 px-4 rounded-xl border border-card-border bg-bg-1/40 shadow-inner mt-1">
+            <strong class="text-[11px] font-semibold uppercase tracking-widest text-text-muted">${item.success === false || item.error || item.failure_reason ? '실패 요약' : '출력 요약'}</strong>
+            <span class="text-[12px] text-text-body leading-relaxed whitespace-pre-wrap font-mono opacity-90">${preview}</span>
           </div>`
         : null}
       ${validationFailures.length > 0
-        ? html`<div class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--warn-soft)] bg-[rgba(251,191,36,0.08)]">
-            <strong class="text-[var(--text-strong)]">검증 실패</strong>
-            <span class="text-[rgba(255,255,255,0.8)] leading-normal">${validationFailures.join(' · ')}</span>
+        ? html`<div class="flex flex-col gap-1.5 py-3 px-4 rounded-xl border border-warn/30 bg-warn/10 shadow-inner mt-1">
+            <strong class="text-[11px] font-semibold uppercase tracking-widest text-warn">검증 실패</strong>
+            <span class="text-[12px] text-text-body leading-relaxed whitespace-pre-wrap">${validationFailures.join(' · ')}</span>
           </div>`
         : null}
       ${toolNames.length > 0
-        ? html`<div class="flex flex-wrap gap-1.5 mb-3">
-            ${toolNames.map(name => html`<span class="semantic-tag">${name}</span>`)}
+        ? html`<div class="flex flex-wrap gap-2 mt-2 pt-3 border-t border-card-border/50">
+            ${toolNames.map(name => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-accent/10 text-accent border border-accent/20 shadow-sm">${name}</span>`)}
           </div>`
         : null}
     </article>
@@ -128,21 +130,22 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
 
 export function TimelineRow({ item }: { item: DedupedTimelineItem }) {
   return html`
-    <article class="cmd-card rounded-xl proof-timeline-row">
-      <div class="cmd-card rounded-xl-head">
-        <div>
-          <strong>${item.summary ?? item.event_type ?? '이벤트'}</strong>
-          <div class="command-meta-line">
-            <span>${timelineMetaLabel(item)}</span>
-            <span>${item.event_type ?? '이벤트'}</span>
+    <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:-translate-y-0.5 hover:shadow-md hover:bg-card/60 transition-all duration-200">
+      <div class="flex items-start justify-between gap-4">
+        <div class="flex flex-col gap-1.5 min-w-0">
+          <strong class="text-[13px] text-text-strong font-medium truncate">${item.summary ?? item.event_type ?? '이벤트'}</strong>
+          <div class="flex items-center gap-2 text-[11px] font-medium text-text-muted flex-wrap">
+            <span class="px-2 py-0.5 rounded-md bg-white/5 border border-white/10">${timelineMetaLabel(item)}</span>
+            <span class="px-2 py-0.5 rounded-md bg-accent/10 text-accent border border-accent/20 shadow-sm">${item.event_type ?? '이벤트'}</span>
+            <span class="text-text-dim/60">•</span>
             <span>${item.actor ?? '시스템'}</span>
           </div>
         </div>
-        <span class="cmd-chip rounded-full">${relativeTime(item.timestamp)}</span>
+        <span class="text-[11px] font-mono text-text-dim bg-white/5 px-2 py-0.5 rounded-md border border-white/5 shrink-0">${relativeTime(item.timestamp)}</span>
       </div>
       ${item.sources.length > 1
-        ? html`<div class="flex flex-wrap gap-1.5 mb-3">
-            ${item.sources.map(source => html`<span class="semantic-tag">${source}</span>`)}
+        ? html`<div class="flex flex-wrap gap-2 mt-3 pt-3 border-t border-card-border/50">
+            ${item.sources.map(source => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-white/10 text-text-muted border border-white/5 shadow-sm">${source}</span>`)}
           </div>`
         : null}
     </article>

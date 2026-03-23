@@ -110,42 +110,42 @@ export function Proof() {
   )
 
   return html`
-    <section class="flex flex-col gap-5">
+    <section class="flex flex-col gap-6">
       <!-- Header -->
-      <div class="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h2 class="text-[17px] font-bold text-[var(--text-strong)] tracking-tight leading-tight mb-1">근거</h2>
-          <p class="text-[12px] text-[var(--text-muted)] leading-relaxed">이 세션이 실제로 여러 참여자의 흔적, 상호작용, 산출물, 실행 backing을 남겼는지 읽는 표면입니다.</p>
+      <div class="flex items-start justify-between gap-5 flex-wrap px-1">
+        <div class="max-w-2xl">
+          <h2 class="text-xl font-bold text-text-strong tracking-wide mb-2">근거 <span class="text-text-muted font-normal text-sm ml-2">Evidence & Context</span></h2>
+          <p class="text-[13px] text-text-muted leading-relaxed">이 세션이 실제로 여러 참여자의 흔적, 상호작용, 산출물, 실행 backing을 남겼는지 읽는 표면입니다.</p>
         </div>
-        <div class="flex gap-1.5 flex-wrap items-center">
-          <span class="cmd-chip rounded-full ${verdictTone(verdict)}">${verdictChipLabel(verdict)}</span>
-          ${snapshot?.session_id ? html`<span class="cmd-chip rounded-full">${snapshot.session_id}</span>` : null}
-          ${snapshot?.generated_at ? html`<span class="cmd-chip rounded-full">${relativeTime(snapshot.generated_at)}</span>` : null}
+        <div class="flex gap-2 flex-wrap items-center pt-1">
+          <span class="px-3 py-1.5 rounded-full text-[11px] font-bold border shadow-sm ${verdictTone(verdict)}">${verdictChipLabel(verdict)}</span>
+          ${snapshot?.session_id ? html`<span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-text-muted text-[11px] font-mono shadow-sm">${snapshot.session_id}</span>` : null}
+          ${snapshot?.generated_at ? html`<span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-text-muted text-[11px] font-mono shadow-sm">${relativeTime(snapshot.generated_at)}</span>` : null}
         </div>
       </div>
 
       ${proofError.value
-        ? html`<div class="p-4 rounded-xl border border-[var(--bad-30)] bg-[var(--bad-8)] text-[13px] text-[#f7b6b6]">${proofError.value}</div>`
+        ? html`<div class="p-4 rounded-xl border border-bad/30 bg-bad/10 text-[13px] text-bad font-medium shadow-sm">${proofError.value}</div>`
         : null}
 
       <${SelectionCard} selection=${selection} summary=${summary ?? null} />
 
       <!-- Primary stat cards -->
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
-        <div class="flex flex-col gap-2 ${CARD_STANDARD} ${verdictTone(verdict)}">
-          <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">판정</span>
-          <strong class="text-lg font-bold text-[var(--text-strong)] tabular-nums">${verdictLabel(verdict)}</strong>
-          <small class="text-[11px] text-[var(--text-muted)] leading-snug">${summary?.detail ?? '협업 증거를 verdict로 요약합니다.'}</small>
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4">
+        <div class="flex flex-col gap-2 p-5 rounded-2xl border border-card-border/50 bg-card/40 backdrop-blur-md shadow-sm ${verdictTone(verdict).replace('border', 'ring-1 ring')}">
+          <span class="text-[11px] text-text-muted tracking-widest uppercase font-semibold">판정</span>
+          <strong class="text-2xl font-bold text-text-strong tabular-nums">${verdictLabel(verdict)}</strong>
+          <small class="text-[11px] text-text-muted/80 leading-relaxed mt-1">${summary?.detail ?? '협업 증거를 verdict로 요약합니다.'}</small>
         </div>
-        <div class="flex flex-col gap-2 ${CARD_STANDARD}">
-          <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">실제 흔적</span>
-          <strong class="text-lg font-bold text-[var(--text-strong)] tabular-nums">${actorCount}</strong>
-          <small class="text-[11px] text-[var(--text-muted)] leading-snug">이벤트를 남긴 actor 수${plannedActorCount > 0 ? ` (계획 ${plannedActorCount})` : ''}</small>
+        <div class="flex flex-col gap-2 p-5 rounded-2xl border border-card-border/50 bg-card/40 backdrop-blur-md shadow-sm">
+          <span class="text-[11px] text-text-muted tracking-widest uppercase font-semibold">실제 흔적</span>
+          <strong class="text-2xl font-bold text-text-strong tabular-nums">${actorCount}</strong>
+          <small class="text-[11px] text-text-muted/80 leading-relaxed mt-1">이벤트를 남긴 actor 수${plannedActorCount > 0 ? ` (계획 ${plannedActorCount})` : ''}</small>
         </div>
-        <div class="flex flex-col gap-2 ${CARD_STANDARD} ${evidenceCount > 0 ? 'ok' : 'warn'}">
-          <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">근거</span>
-          <strong class="text-lg font-bold text-[var(--text-strong)] tabular-nums">${evidenceCount}</strong>
-          <small class="text-[11px] text-[var(--text-muted)] leading-snug">도구 ${(toolEvidence?.length ?? 0)} / 산출물 ${presentArtifacts}/${artifacts.length} / CP ${traceCount}</small>
+        <div class="flex flex-col gap-2 p-5 rounded-2xl border border-card-border/50 bg-card/40 backdrop-blur-md shadow-sm">
+          <span class="text-[11px] ${evidenceCount > 0 ? 'text-ok' : 'text-warn'} tracking-widest uppercase font-semibold">근거</span>
+          <strong class="text-2xl font-bold text-text-strong tabular-nums">${evidenceCount}</strong>
+          <small class="text-[11px] text-text-muted/80 leading-relaxed mt-1">도구 ${(toolEvidence?.length ?? 0)} / 산출물 ${presentArtifacts}/${artifacts.length} / CP ${traceCount}</small>
         </div>
       </div>
 

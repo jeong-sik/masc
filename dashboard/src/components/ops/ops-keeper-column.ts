@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { CARD_STANDARD } from '../common/card'
+import { showToast } from '../common/toast'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { openKeeperDetail } from '../keeper-detail'
 import { findKeeper } from '../execution/shared'
@@ -13,10 +14,12 @@ import type { Keeper, OperatorActionDescriptor, OperatorKeeperSnapshot } from '.
 import {
   actionTypeLabel,
   displayStatus,
+  executeAction,
   keeperPrioritySummary,
   keeperPriorityTone,
   relativeAge,
   selectedKeeperName,
+  selectedSessionId,
   targetTypeLabel,
   logEntryBorderClass,
 } from './helpers'
@@ -160,11 +163,30 @@ export function OpsKeeperColumn() {
                     <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">${targetTypeLabel(targetType)}</div>
                     <div class="flex flex-wrap gap-1">
                       ${group.map((action: OperatorActionDescriptor) => html`
-                        <span key=${action.action_type}
+                        <button key=${action.action_type}
+                          type="button"
                           title=${action.description ?? ''}
-                          class="text-[12px] px-2 py-0.5 rounded cursor-default ${action.confirm_required ? 'bg-[var(--warn-12)] border border-[var(--warn-28)] text-[var(--warn)]' : 'bg-[var(--accent-8)] border border-[var(--accent-12)] text-[var(--accent)]'}">
+                          onClick=${() => {
+                            const targetId =
+                              action.target_type === 'keeper' ? selectedKeeperName.value
+                              : action.target_type === 'team_session' ? selectedSessionId.value
+                              : undefined
+                            if ((action.target_type === 'keeper' || action.target_type === 'team_session') && !targetId) {
+                              const what = action.target_type === 'keeper' ? 'keeper' : '세션'
+                              showToast(`먼저 ${what}를 선택하세요`, 'warning')
+                              return
+                            }
+                            void executeAction({
+                              action_type: action.action_type as Parameters<typeof executeAction>[0]['action_type'],
+                              target_type: action.target_type as 'room' | 'team_session' | 'keeper',
+                              target_id: targetId,
+                              payload: {},
+                              successMessage: `${actionTypeLabel(action.action_type)} 실행 완료`,
+                            })
+                          }}
+                          class="text-[12px] px-2 py-0.5 rounded cursor-pointer hover:brightness-125 transition-all ${action.confirm_required ? 'bg-[var(--warn-12)] border border-[var(--warn-28)] text-[var(--warn)]' : 'bg-[var(--accent-8)] border border-[var(--accent-12)] text-[var(--accent)]'}">
                           ${actionTypeLabel(action.action_type)}
-                        </span>
+                        </button>
                       `)}
                     </div>
                   </div>

@@ -415,7 +415,7 @@ export function workflowTargetReady(
   return true
 }
 
-async function executeAction(input: {
+export async function executeAction(input: {
   action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message'
   target_type: 'room' | 'team_session' | 'keeper'
   target_id?: string

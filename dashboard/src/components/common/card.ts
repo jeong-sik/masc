@@ -6,10 +6,10 @@ import type { ComponentChildren } from 'preact'
 import { SectionHeader } from './section-header'
 
 // ── Exported class constants for non-component usage ──
-export const CARD_BASE = 'rounded-xl border border-[var(--card-border)]'
-export const CARD_STANDARD = `${CARD_BASE} p-4 bg-[var(--card)]`
-export const CARD_LIGHT = `${CARD_BASE} p-4 bg-[var(--white-3)]`
-export const CARD_COMPACT = `${CARD_BASE} p-3.5 bg-[var(--card)]`
+export const CARD_BASE = 'rounded-2xl border border-card-border shadow-sm'
+export const CARD_STANDARD = `${CARD_BASE} p-6 bg-card/60 backdrop-blur-md`
+export const CARD_LIGHT = `${CARD_BASE} p-6 bg-card/40 backdrop-blur-sm`
+export const CARD_COMPACT = `${CARD_BASE} p-5 bg-card/60 backdrop-blur-md`
 
 type CardVariant = 'standard' | 'light' | 'compact'
 
@@ -54,7 +54,7 @@ export function SectionCard({
   children,
 }: SectionCardProps) {
   return html`
-    <${SurfaceCard} variant=${variant} class="flex flex-col gap-2 ${cx ?? ''}">
+    <${SurfaceCard} variant=${variant} class="flex flex-col gap-4 ${cx ?? ''}">
       <${SectionHeader}>${label}<//>
       ${children}
     <//>
@@ -96,7 +96,7 @@ export function ClickableCard({
 }: ClickableCardProps) {
   const cls = [
     VARIANT_CLASSES[variant],
-    'cursor-pointer transition-colors hover:border-[var(--accent-20)]',
+    'cursor-pointer transition-all duration-200 hover:border-accent/40 hover:-translate-y-0.5 hover:shadow-md group',
     cx,
   ].filter(Boolean).join(' ')
   return html`<div class=${cls} onClick=${onClick}>${children}</div>`

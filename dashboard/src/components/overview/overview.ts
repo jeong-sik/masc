@@ -90,25 +90,25 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
 
   return html`
     <div
-      class="p-4 rounded-xl border bg-card/60 backdrop-blur-md cursor-pointer transition-all duration-200 shadow-sm shadow-black/10 hover:shadow-md hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/50' : 'border-card-border hover:border-accent/40'}"
+      class="p-5 rounded-2xl border bg-card/60 backdrop-blur-md cursor-pointer transition-all duration-200 shadow-sm shadow-black/10 hover:shadow-md hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/50' : 'border-card-border hover:border-accent/40'}"
       key=${s.session_id}
       onClick=${() => navigate('status', { section: 'sessions', session_id: s.session_id })}
     >
-      <div class="flex items-start gap-3 mb-2">
-        <span class="w-2 h-2 rounded-full shrink-0 mt-1.5 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${statusDotColor(s.status)}"></span>
+      <div class="flex items-start gap-3 mb-3">
+        <span class="w-2.5 h-2.5 rounded-full shrink-0 mt-1 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${statusDotColor(s.status)}"></span>
         <div class="min-w-0 flex-1">
-          <div class="text-[13px] font-semibold text-text-strong leading-snug truncate group-hover:text-accent transition-colors">${primary}</div>
-          ${secondary ? html`<div class="text-xs text-text-muted mt-1 truncate">${secondary}</div>` : null}
+          <div class="text-[14px] font-bold text-text-strong leading-snug truncate group-hover:text-accent transition-colors">${primary}</div>
+          ${secondary ? html`<div class="text-[12px] text-text-muted mt-1 truncate">${secondary}</div>` : null}
         </div>
       </div>
-      <div class="flex items-center gap-3 text-[11px] text-text-muted/80 pl-5 font-medium">
+      <div class="flex items-center gap-4 text-[11px] text-text-muted/90 pl-6 font-medium">
         ${creator ? html`<span>${systemSession ? '시스템' : creator}</span>` : null}
         ${s.status ? html`<span>${statusLabel(s.status)}</span>` : null}
         ${s.elapsed_sec ? html`<span>${formatDuration(s.elapsed_sec)}</span>` : null}
         ${s.member_names?.length ? html`<span>${s.member_names.length}명</span>` : null}
       </div>
       ${hasBlocker ? html`
-        <div class="text-[11px] text-bad-light mt-3 pl-5 truncate bg-bad/10 py-1 px-2 rounded-md">${s.blocker_summary}</div>
+        <div class="text-[11px] font-medium text-bad-light mt-4 pl-6 truncate bg-bad/10 py-1.5 px-3 rounded-lg border border-bad/20">${s.blocker_summary}</div>
       ` : null}
     </div>
   `
@@ -200,23 +200,23 @@ function AgentPulse() {
         linkLabel="전체 보기 ->"
         onLink=${() => navigate('status', { section: 'agents' })}
       />
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
+      <div class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
-            class="flex items-start gap-3 p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)] cursor-pointer transition-colors hover:border-[var(--accent-20)]"
+            class="flex items-start gap-4 p-5 rounded-2xl border border-card-border bg-card/60 backdrop-blur-md cursor-pointer transition-all duration-200 shadow-sm shadow-black/10 hover:shadow-md hover:bg-card hover:-translate-y-0.5 hover:border-accent/40 group"
             key=${a.name}
             onClick=${() => navigate('status', { section: 'agents', agent: a.name })}
           >
-            <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${36} />
-            <div class="flex flex-col min-w-0 flex-1 gap-1">
-              <div class="flex items-center gap-1.5">
-                <span class="w-2 h-2 rounded-full shrink-0 ${agentStateDot(a.state)}"></span>
-                <span class="text-sm font-semibold text-[var(--text-strong)]">${a.koreanName ?? a.name}</span>
+            <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${40} />
+            <div class="flex flex-col min-w-0 flex-1 gap-1.5">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full shrink-0 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${agentStateDot(a.state)}"></span>
+                <span class="text-[14px] font-bold text-text-strong group-hover:text-accent transition-colors">${a.koreanName ?? a.name}</span>
               </div>
               ${a.koreanName && a.koreanName !== a.name ? html`
-                <span class="text-[10px] text-[var(--text-dim)] font-mono leading-none">${a.name}</span>
+                <span class="text-[11px] text-text-dim font-mono leading-none tracking-wide">${a.name}</span>
               ` : null}
-              <span class="text-[11px] text-[var(--text-muted)] leading-relaxed" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
+              <span class="text-[12px] text-text-muted/90 leading-relaxed font-medium mt-0.5" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
                 ${a.focus ?? a.currentTask ?? a.status}
               </span>
             </div>
@@ -234,21 +234,23 @@ export function Overview() {
   const roomHealth = snap?.summary?.room_health ?? null
 
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-6">
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
 
-      <div class="p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)]">
+      <div class="p-6 rounded-3xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">
         <${HotSessions} />
       </div>
 
-      <div class="p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)]">
+      <div class="p-6 rounded-3xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">
         <${AgentPulse} />
       </div>
 
-      <${OasPipeline} />
+      <div class="opacity-90 hover:opacity-100 transition-opacity">
+        <${OasPipeline} />
+      </div>
 
-      <div class="p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)]">
+      <div class="p-6 rounded-3xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">
         <${HomeSectionHeader} label="최근 활동" />
         <${NarrativeTimeline} entries=${journal} maxItems=${8} />
       </div>

@@ -38,15 +38,6 @@ function statusBadgeClass(status: string | undefined): string {
   return 'roster-badge--idle'
 }
 
-function pressureClass(ratio: number | null | undefined): string {
-  if (ratio == null) return ''
-  const pct = ratio * 100
-  if (pct < 50) return 'pressure--ok'
-  if (pct < 70) return 'pressure--amber'
-  if (pct < 85) return 'pressure--orange'
-  return 'pressure--red'
-}
-
 interface KeeperInfo {
   generation?: number | null
   context_ratio?: number | null

@@ -46,11 +46,39 @@ export function LogViewer() {
   })
 
   return html`
-    <div class="flex flex-col gap-4 h-full min-h-0">
-      <div class="flex justify-between items-center gap-4 p-3 rounded-2xl border border-card-border/50 bg-card/40 backdrop-blur-md shadow-sm shrink-0">
-        <div class="flex gap-2.5 items-center">
+    <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
+      <section class="rounded-[26px] border border-[rgba(138,163,211,0.16)] bg-[linear-gradient(135deg,rgba(9,22,42,0.95),rgba(7,13,24,0.92))] px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="min-w-0 max-w-[760px]">
+            <div class="text-[10px] font-semibold uppercase tracking-[0.22em] text-[rgba(154,217,255,0.72)]">Observer</div>
+            <h2 class="mt-2 text-[26px] font-semibold tracking-[-0.04em] text-[var(--text-strong)]">Execution Log Stream</h2>
+            <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-muted)]">
+              backend stdout/stderr와 구조화된 런타임 로그를 같은 흐름에서 읽습니다. 에러는 빠르게 띄우고, 나머지는 모듈과 수준으로 좁혀서 봅니다.
+            </p>
+          </div>
+
+          <div class="grid min-w-[240px] gap-2 rounded-[20px] border border-[rgba(255,255,255,0.07)] bg-[rgba(255,255,255,0.04)] p-3">
+            <div class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
+              <span>현재 필터</span>
+              <strong class="text-[var(--text-strong)]">${levelFilter.value}+</strong>
+            </div>
+            <div class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
+              <span>조회 건수</span>
+              <strong class="text-[var(--text-strong)] tabular-nums">${(logTotal.value ?? 0).toLocaleString()}</strong>
+            </div>
+            <div class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
+              <span>새로고침</span>
+              <strong class="${autoRefresh.value ? 'text-[#92f3b4]' : 'text-[var(--text-strong)]'}">${autoRefresh.value ? 'auto' : 'manual'}</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[26px] border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]">
+        <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] px-4 py-4">
+          <div class="logs-filters flex flex-wrap gap-2 items-center">
           <select
-            class="py-1.5 px-3 rounded-lg border border-card-border bg-bg-1/80 text-[12px] font-semibold text-text-strong focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 cursor-pointer shadow-inner appearance-none pr-8 relative"
+            class="logs-select rounded-[14px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
             value=${levelFilter.value}
             onChange=${(e: Event) => {
               levelFilter.value = (e.target as HTMLSelectElement).value
@@ -64,9 +92,9 @@ export function LogViewer() {
           </select>
 
           <input
-            class="py-1.5 px-4 rounded-lg border border-card-border bg-bg-1/80 text-[12px] text-text-strong font-mono placeholder:text-text-muted focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 shadow-inner w-48"
+            class="logs-module-input min-w-[220px] rounded-[14px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
             type="text"
-            placeholder="module filter..."
+            placeholder="module filter"
             value=${moduleFilter.value}
             onInput=${(e: Event) => {
               moduleFilter.value = (e.target as HTMLInputElement).value
@@ -77,65 +105,75 @@ export function LogViewer() {
           />
 
           <select
-            class="py-1.5 px-3 rounded-lg border border-card-border bg-bg-1/80 text-[12px] font-semibold text-text-strong focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 cursor-pointer shadow-inner appearance-none pr-8"
+            class="logs-select rounded-[14px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
             value=${String(logLimit.value)}
             onChange=${(e: Event) => {
               logLimit.value = parseInt((e.target as HTMLSelectElement).value, 10)
               void loadLogs()
             }}
           >
-            <option value="100">100 rows</option>
-            <option value="500">500 rows</option>
-            <option value="1000">1000 rows</option>
-            <option value="3000">3000 rows</option>
+            <option value="100">100</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+            <option value="3000">3000</option>
           </select>
         </div>
 
-        <div class="flex gap-4 items-center text-[12px] font-medium text-text-muted">
-          <span class="tabular-nums px-2.5 py-1 bg-white/5 rounded-md border border-white/5 shadow-sm">${(logTotal.value ?? 0).toLocaleString()}건</span>
-          <label class="flex items-center gap-2 cursor-pointer hover:text-text-body transition-colors select-none">
-            <div class="relative w-7 h-3.5 rounded-full transition-colors duration-200 ${autoRefresh.value ? 'bg-accent' : 'bg-white/10'}">
-              <div class="absolute top-[2px] left-[2px] size-2.5 bg-white rounded-full transition-transform duration-200 shadow-sm ${autoRefresh.value ? 'translate-x-3.5' : 'translate-x-0'}"></div>
-            </div>
-            자동 갱신
+        <div class="logs-actions flex flex-wrap gap-3 items-center text-[11px] text-[color:var(--text-muted)]">
+          <span class="rounded-full border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-2.5 py-1 tabular-nums">${(logTotal.value ?? 0).toLocaleString()} total</span>
+          <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked=${autoRefresh.value}
+              onChange=${() => { autoRefresh.value = !autoRefresh.value }}
+            />
+            자동
           </label>
-          <button class="px-3 py-1.5 rounded-lg border border-transparent bg-white/5 hover:bg-white/10 text-text-strong transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50" onClick=${() => { void loadLogs() }}
+          <button class="logs-refresh-btn rounded-[14px] border border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.12)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]" onClick=${() => { void loadLogs() }}
             disabled=${logLoading.value}>
-            ${logLoading.value ? '가져오는 중...' : '새로고침'}
+            ${logLoading.value ? '...' : '새로고침'}
           </button>
         </div>
-      </div>
-
-      ${logError.value ? html`
-        <div class="p-3.5 bg-bad/10 border border-bad/30 text-bad text-[13px] font-medium rounded-xl shadow-sm">${logError.value}</div>
-      ` : null}
-
-      <div class="flex-1 min-h-0 rounded-2xl border border-card-border/50 bg-card/60 backdrop-blur-md shadow-inner overflow-hidden flex flex-col">
-        <div class="overflow-y-auto custom-scrollbar flex-1">
-          <table class="w-full text-left border-collapse text-[12px] font-mono leading-relaxed">
-            <thead class="sticky top-0 bg-bg-1/95 backdrop-blur-xl border-b border-card-border/80 z-10 shadow-sm">
-              <tr>
-                <th class="py-2.5 px-4 w-44 whitespace-nowrap text-text-muted font-semibold tracking-wider">TIMESTAMP</th>
-                <th class="py-2.5 px-4 w-16 whitespace-nowrap text-text-strong font-semibold tracking-wider">LEVEL</th>
-                <th class="py-2.5 px-4 w-32 whitespace-nowrap text-accent font-semibold tracking-wider">MODULE</th>
-                <th class="py-2.5 px-4 text-text-strong font-semibold tracking-wider">MESSAGE</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-card-border/30">
-              ${logEntries.value.map(entry => html`
-                <tr key=${entry.seq} class="hover:bg-white/5 transition-colors ${entry.level === 'ERROR' ? 'bg-bad/10 hover:bg-bad/20' : entry.level === 'WARN' ? 'bg-warn/10 hover:bg-warn/20' : ''}">
-                  <td class="py-1.5 px-4 w-44 whitespace-nowrap text-text-muted/80">${entry.ts.replace('T', ' ').replace('Z', '')}</td>
-                  <td class="py-1.5 px-4 w-16 whitespace-nowrap font-bold" style="color: ${LEVEL_COLORS[entry.level] ?? 'inherit'}">
-                    ${entry.level}
-                  </td>
-                  <td class="py-1.5 px-4 w-32 whitespace-nowrap text-accent/90">${entry.module}</td>
-                  <td class="py-1.5 px-4 break-words text-text-body whitespace-pre-wrap">${entry.message}</td>
-                </tr>
-              `)}
-            </tbody>
-          </table>
         </div>
-      </div>
+
+        ${logError.value ? html`
+          <div class="mx-4 mt-4 rounded-[18px] border border-solid border-[#e05050] bg-[rgba(224,80,80,0.12)] px-4 py-3 text-[12px] text-[#ffb3b3]">${logError.value}</div>
+        ` : null}
+
+        <div class="logs-table-wrap min-h-0 flex-1 overflow-auto px-3 pb-3">
+          <table class="logs-table w-full border-separate border-spacing-y-2">
+          <thead>
+            <tr>
+              <th class="logs-col-ts w-44 whitespace-nowrap px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">timestamp</th>
+              <th class="logs-col-level w-20 whitespace-nowrap px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">level</th>
+              <th class="logs-col-module w-40 whitespace-nowrap px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">module</th>
+              <th class="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">message</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${logEntries.value.map(entry => html`
+              <tr
+                key=${entry.seq}
+                class="logs-row ${entry.level === 'ERROR' ? 'bg-[rgba(224,80,80,0.08)]' : entry.level === 'WARN' ? 'bg-[rgba(230,167,0,0.05)]' : 'bg-[rgba(255,255,255,0.02)]'}"
+              >
+                <td class="logs-col-ts rounded-l-[18px] border-y border-l border-[rgba(255,255,255,0.05)] px-3 py-3 align-top font-mono text-[11px] whitespace-nowrap text-[color:var(--text-muted)]">
+                  ${entry.ts.replace('T', ' ').replace('Z', '')}
+                </td>
+                <td class="logs-col-level border-y border-[rgba(255,255,255,0.05)] px-3 py-3 align-top font-mono text-[11px] font-semibold whitespace-nowrap" style="color: ${LEVEL_COLORS[entry.level] ?? 'inherit'}">
+                  ${entry.level}
+                </td>
+                <td class="logs-col-module border-y border-[rgba(255,255,255,0.05)] px-3 py-3 align-top font-mono text-[11px] whitespace-nowrap text-[color:var(--accent)]">
+                  ${entry.module}
+                </td>
+                <td class="rounded-r-[18px] border-y border-r border-[rgba(255,255,255,0.05)] px-3 py-3 align-top font-mono text-[12px] leading-relaxed break-words text-[var(--text-body)]">
+                  ${entry.message}
+                </td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+        </div>
+      </section>
     </div>
   `
 }

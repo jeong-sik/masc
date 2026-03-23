@@ -30,7 +30,7 @@ let test_grpc_subscribe_receives_sse_broadcast () =
           timestamp_ms = 0L;
           payload_json = sse_event;
         } in
-        Grpc_eio.Stream.add stream (T.Event.to_bytes event));
+        Grpc_eio.Stream.add stream (T.Event.to_bytes event)) ();
     (* Stream should be empty before broadcast *)
     Alcotest.(check bool) "empty before broadcast"
       true (Grpc_eio.Stream.is_empty stream);
@@ -63,7 +63,7 @@ let test_grpc_subscribe_multiple_broadcasts () =
           seq; event_type = "sse_broadcast"; source_agent = "server";
           timestamp_ms = 0L; payload_json = sse_event;
         } in
-        Grpc_eio.Stream.add stream (T.Event.to_bytes event));
+        Grpc_eio.Stream.add stream (T.Event.to_bytes event)) ();
     (* Fire 3 broadcasts *)
     Masc_mcp.Sse.broadcast (`Assoc [("n", `Int 1)]);
     Masc_mcp.Sse.broadcast (`Assoc [("n", `Int 2)]);
@@ -90,7 +90,7 @@ let test_grpc_unsubscribe_stops_events () =
           seq = 1L; event_type = "sse_broadcast"; source_agent = "server";
           timestamp_ms = 0L; payload_json = sse_event;
         } in
-        Grpc_eio.Stream.add stream (T.Event.to_bytes event));
+        Grpc_eio.Stream.add stream (T.Event.to_bytes event)) ();
     Masc_mcp.Sse.broadcast (`Assoc [("msg", `String "before")]);
     Alcotest.(check int) "1 event" 1 (Grpc_eio.Stream.length stream);
     (* Unsubscribe *)
@@ -111,7 +111,7 @@ let test_ws_external_subscriber_receives_broadcast () =
     let received = ref [] in
     let sub_id = "integration-test-ws" in
     Masc_mcp.Sse.subscribe_external ~id:sub_id
-      ~callback:(fun sse_event -> received := sse_event :: !received);
+      ~callback:(fun sse_event -> received := sse_event :: !received) ();
     Masc_mcp.Sse.broadcast (`Assoc [("type", `String "ws_test")]);
     Alcotest.(check int) "ws received 1" 1 (List.length !received);
     let event = List.hd !received in
@@ -166,7 +166,61 @@ let test_webrtc_full_signaling_flow () =
       0 (Wrtc.active_peer_count ()))
 
 (* ============================================================
-   4. Transport Enum Consistency
+   4. Dead Subscriber Auto-Cleanup (is_alive)
+   ============================================================ *)
+
+let test_dead_subscriber_auto_removed () =
+  Eio_main.run (fun _env ->
+    let alive = ref true in
+    let received = ref 0 in
+    let sub_id = "integration-test-dead" in
+    Masc_mcp.Sse.subscribe_external ~id:sub_id
+      ~is_alive:(fun () -> !alive)
+      ~callback:(fun _ev -> incr received)
+      ();
+    (* First broadcast: subscriber is alive *)
+    Masc_mcp.Sse.broadcast (`Assoc [("n", `Int 1)]);
+    Alcotest.(check int) "received while alive" 1 !received;
+    (* Kill the subscriber *)
+    alive := false;
+    (* Second broadcast: subscriber should be auto-removed *)
+    Masc_mcp.Sse.broadcast (`Assoc [("n", `Int 2)]);
+    Alcotest.(check int) "not received after death" 1 !received;
+    (* Verify it was removed from registry *)
+    let count_before = Masc_mcp.Sse.external_subscriber_count () in
+    Masc_mcp.Sse.unsubscribe_external sub_id; (* no-op if already removed *)
+    let count_after = Masc_mcp.Sse.external_subscriber_count () in
+    Alcotest.(check int) "no change from redundant unsub" count_before count_after)
+
+let test_grpc_stream_closed_triggers_cleanup () =
+  Eio_main.run (fun _env ->
+    let stream = Grpc_eio.Stream.create 16 in
+    let sub_id = "integration-test-stream-close" in
+    let seq_counter = Atomic.make 1 in
+    Masc_mcp.Sse.subscribe_external ~id:sub_id
+      ~is_alive:(fun () -> not (Grpc_eio.Stream.is_closed stream))
+      ~callback:(fun sse_event ->
+        if not (Grpc_eio.Stream.is_closed stream) then begin
+          let seq = Int64.of_int (Atomic.fetch_and_add seq_counter 1) in
+          let event = T.Event.{
+            seq; event_type = "sse_broadcast"; source_agent = "server";
+            timestamp_ms = 0L; payload_json = sse_event;
+          } in
+          Grpc_eio.Stream.add stream (T.Event.to_bytes event)
+        end)
+      ();
+    (* Broadcast while stream is open *)
+    Masc_mcp.Sse.broadcast (`Assoc [("n", `Int 1)]);
+    Alcotest.(check int) "1 event in stream" 1 (Grpc_eio.Stream.length stream);
+    (* Close the stream (simulates gRPC disconnect) *)
+    Grpc_eio.Stream.close stream;
+    (* Broadcast again — subscriber should be auto-removed via is_alive *)
+    Masc_mcp.Sse.broadcast (`Assoc [("n", `Int 2)]);
+    (* Stream should still have only 1 event *)
+    Alcotest.(check int) "still 1 after close" 1 (Grpc_eio.Stream.length stream))
+
+(* ============================================================
+   5. Transport Enum Consistency
    ============================================================ *)
 
 let test_all_protocol_variants_roundtrip () =
@@ -208,6 +262,12 @@ let () =
     ("webrtc_signaling", [
       Alcotest.test_case "full offer/answer/cleanup flow" `Quick
         test_webrtc_full_signaling_flow;
+    ]);
+    ("auto_cleanup", [
+      Alcotest.test_case "dead subscriber auto-removed" `Quick
+        test_dead_subscriber_auto_removed;
+      Alcotest.test_case "closed gRPC stream triggers cleanup" `Quick
+        test_grpc_stream_closed_triggers_cleanup;
     ]);
     ("transport_enum", [
       Alcotest.test_case "all protocol variants roundtrip" `Quick

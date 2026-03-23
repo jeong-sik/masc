@@ -98,9 +98,12 @@ let upgrade_connection
             Hashtbl.replace sessions session_id session);
           (* Register as SSE external subscriber for broadcast events *)
           Sse.subscribe_external ~id:session_id
+            ~is_alive:(fun () ->
+              not session.closed && not (Httpun_ws.Wsd.is_closed session.wsd))
             ~callback:(fun sse_event ->
               if not session.closed then
-                ignore (send_text session sse_event));
+                ignore (send_text session sse_event))
+            ();
           Log.Server.info "WebSocket session %s connected" session_id;
           let buf = Buffer.create 4096 in
           { Httpun_ws.Websocket_connection.

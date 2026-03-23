@@ -38,7 +38,7 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
     },
     id: Math.floor(Date.now() % 1000000),
   }, {
-    Accept: 'application/json, text/event-stream',
+    Accept: 'application/json',
   }, DEFAULT_MCP_TIMEOUT_MS)
   const parsed = parseMcpHttpResponse(text)
   return extractMcpText(parsed)

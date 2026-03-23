@@ -19,11 +19,11 @@ let configured_port () =
       default_port)
   | None -> default_port
 
-(** Check whether gRPC is enabled (default: disabled, opt-in via env). *)
+(** Check whether gRPC is enabled (default: enabled, opt-out via env). *)
 let is_enabled () =
   match Sys.getenv_opt "MASC_GRPC_ENABLED" with
-  | Some "1" | Some "true" -> true
-  | _ -> false
+  | Some "0" | Some "false" -> false
+  | _ -> true
 
 (** Start the gRPC coordination server.
 

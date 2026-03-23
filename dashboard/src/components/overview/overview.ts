@@ -11,7 +11,6 @@ import { formatDuration, statusLabel } from '../mission-utils'
 import { SituationBanner } from './situation-banner'
 import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
-import { OasPipeline } from './oas-pipeline'
 import { AgentAvatar } from './agent-avatar'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type { DashboardMissionSessionBrief } from '../../types'
@@ -114,28 +113,6 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
   `
 }
 
-type SessionLaneProps = {
-  title: string
-  icon: string
-  sessions: DashboardMissionSessionBrief[]
-  emptyCopy: string
-}
-
-function SessionLane({ title, icon, sessions, emptyCopy }: SessionLaneProps) {
-  return html`
-    <div class="flex flex-col gap-3">
-      <div class="flex items-center gap-2">
-        <span class="text-xs text-[var(--text-muted)]">${icon}</span>
-        <span class="text-xs font-medium text-[var(--text-strong)]">${title}</span>
-        <span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-6)] text-[var(--text-muted)] tabular-nums">${sessions.length}</span>
-      </div>
-      ${sessions.length > 0
-        ? html`<div class="flex flex-col gap-2">${sessions.map(renderSessionCard)}</div>`
-        : html`<div class="text-xs text-[var(--text-muted)] py-3 text-center">${emptyCopy}</div>`}
-    </div>
-  `
-}
-
 function HotSessions() {
   const snap = missionSnapshot.value
   const sessions = snap?.sessions ?? snap?.session_briefs ?? []
@@ -150,31 +127,19 @@ function HotSessions() {
     if (aStatus !== bStatus) return aStatus - bStatus
     return (b.elapsed_sec ?? 0) - (a.elapsed_sec ?? 0)
   })
-  const userSessions = sorted.filter(s => !isSystemSession(s)).slice(0, 3)
-  const systemSessions = sorted.filter(s => isSystemSession(s)).slice(0, 3)
+  const userSessions = sorted.filter(s => !isSystemSession(s)).slice(0, 5)
 
   return html`
     <div>
       <${HomeSectionHeader}
         label="세션"
-        count=${sessions.length}
+        count=${userSessions.length}
         linkLabel="전체 보기 ->"
         onLink=${() => navigate('status', { section: 'sessions' })}
       />
-      <div class="grid grid-cols-2 max-[960px]:grid-cols-1 gap-4">
-        <${SessionLane}
-          title="사용자 작업"
-          icon="\u{1F464}"
-          sessions=${userSessions}
-          emptyCopy="사용자 세션 없음"
-        />
-        <${SessionLane}
-          title="시스템 루프"
-          icon="\u{2699}\u{FE0F}"
-          sessions=${systemSessions}
-          emptyCopy="시스템 세션 없음"
-        />
-      </div>
+      ${userSessions.length > 0
+        ? html`<div class="grid grid-cols-2 max-[960px]:grid-cols-1 gap-3">${userSessions.map(renderSessionCard)}</div>`
+        : html`<div class="text-xs text-[var(--text-muted)] py-6 text-center">활성 세션 없음</div>`}
     </div>
   `
 }
@@ -244,10 +209,6 @@ export function Overview() {
 
       <div class="p-6 rounded-xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">
         <${AgentPulse} />
-      </div>
-
-      <div class="opacity-90 hover:opacity-100 transition-opacity">
-        <${OasPipeline} />
       </div>
 
       <div class="p-6 rounded-xl border border-card-border/50 bg-card/30 backdrop-blur-xl shadow-lg shadow-black/10">

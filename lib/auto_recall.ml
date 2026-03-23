@@ -297,33 +297,43 @@ let fetch_context_eio
 (** {1 Formatting} *)
 
 (** Format recall result as grep-like injection-ready text *)
+let metadata_string_opt (metadata : Yojson.Safe.t) key =
+  match metadata with
+  | `Assoc _ ->
+      metadata |> Yojson.Safe.Util.member key
+      |> Yojson.Safe.Util.to_string_option
+  | _ -> None
+
+let metadata_int_opt (metadata : Yojson.Safe.t) key =
+  match metadata with
+  | `Assoc _ ->
+      metadata |> Yojson.Safe.Util.member key
+      |> Yojson.Safe.Util.to_int_option
+  | _ -> None
+
 let grep_like_line_of_item (item : recall_item) =
   let source, location =
     match item.source with
     | Masc_cache ->
         let key =
-          item.metadata |> Yojson.Safe.Util.member "key"
-          |> Yojson.Safe.Util.to_string_option
+          metadata_string_opt item.metadata "key"
           |> Option.value ~default:"entry"
         in
         ("cache", key)
     | Recent_broadcasts ->
         let from_agent =
-          item.metadata |> Yojson.Safe.Util.member "from"
-          |> Yojson.Safe.Util.to_string_option
+          metadata_string_opt item.metadata "from"
           |> Option.value ~default:"agent"
         in
         let seq =
-          item.metadata |> Yojson.Safe.Util.member "seq"
-          |> Yojson.Safe.Util.to_int_option
+          metadata_int_opt item.metadata "seq"
           |> Option.map string_of_int
           |> Option.value ~default:"latest"
         in
         ("broadcast", Printf.sprintf "%s#%s" from_agent seq)
     | File_context ->
         let path =
-          item.metadata |> Yojson.Safe.Util.member "path"
-          |> Yojson.Safe.Util.to_string_option
+          metadata_string_opt item.metadata "path"
           |> Option.value ~default:"recent-file"
         in
         ("file", path)

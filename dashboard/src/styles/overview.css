@@ -4,20 +4,3 @@
 .health-beacon__dot {
   animation: pulse 2s ease-in-out infinite;
 }
-
-/* ── Narrative Timeline ──────────────────────────── */
-.narrative-event__raw summary {
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: var(--fs-2xs);
-}
-
-.narrative-event__raw span {
-  display: block;
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
-  padding: 4px 8px;
-  background: var(--white-2);
-  margin-top: 2px;
-  line-height: 1.4;
-}

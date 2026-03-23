@@ -1,20 +1,4 @@
-/* ── Board (Posts) ─────────────────────────────────────────── */
-
-.board-sort-btn:hover { background: var(--white-8); color: #ccc; }
-.board-sort-btn.active {
-  background: var(--ok-soft);
-  color: var(--ok);
-  border-color: var(--ok-30);
-}
-
-.board-post {
-  transition: border-color 0.2s, transform 0.2s, background 0.2s;
-}
-.board-post:hover {
-  border-color: rgba(71, 184, 255, 0.26);
-  background: var(--white-6);
-  transform: translateY(-1px);
-}
+/* ── Board ─────────────────────────────────────────── */
 
 /* Vote column */
 .vote-btn {

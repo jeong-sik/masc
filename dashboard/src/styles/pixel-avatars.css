@@ -119,7 +119,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .pixel-avatar[data-status] { animation: none; }
-  .pixel-avatar-particle { display: none; }
   .pixel-avatar--has-blocker {
     animation: none;
     box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.6);

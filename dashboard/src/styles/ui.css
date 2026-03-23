@@ -38,20 +38,6 @@
   }
 }
 
-/* ── SPA Refresh ─────────────────────────────────────────── */
-.main-tab-btn {
-  &:hover {
-    color: #d6e5ff;
-    border-color: var(--border-slate-35);
-  }
-
-  &.active {
-    color: #c9ebff;
-    border-color: rgba(71, 184, 255, 0.5);
-    background: var(--accent-soft);
-  }
-}
-
 button.agent,
 button.agent-card {
   cursor: pointer;
@@ -82,7 +68,6 @@ button.agent-card {
   }
 }
 
-button.monitor-alert,
 button.monitor-row {
   transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
 
@@ -112,7 +97,7 @@ button.monitor-row {
 .status-badge.idle { background: rgba(136,136,136,0.15); color: var(--text-dim); }
 .status-badge.offline { background: rgba(85,85,85,0.15); color: #555; }
 .status-badge.todo { background: rgba(136,136,136,0.15); color: var(--text-dim); }
-.status-badge.in-progress, .status-badge.in_progress {
+.status-badge.in_progress {
   background: var(--warn-15); color: var(--warn);
 }
 .status-badge.done, .status-badge.completed {

@@ -11,36 +11,7 @@
   isolation: isolate;
 }
 
-.keeper-field-search:focus { outline: none; border-color: var(--ok-40); }
-
-/* Keeper Comms */
-.keeper-comms-diagnostics-toggle::-webkit-details-marker {
-  display: none;
-}
-
-.keeper-comms-diagnostics-toggle::before {
-  content: ">";
-  display: inline-block;
-  margin-right: 8px;
-  transition: transform 0.15s ease;
-  font-size: var(--fs-xs);
-}
-
-.keeper-comms-diagnostics[open] > .keeper-comms-diagnostics-toggle::before {
-  transform: rotate(90deg);
-}
-
 /* ── Keeper Chat Panel ────────── */
-.keeper-chat__msg--user .keeper-chat__role {
-  text-align: right;
-}
-
-.keeper-chat__msg--user .keeper-chat__text {
-  background: var(--accent-12);
-  border: 1px solid var(--accent-20);
-  color: var(--text-body, var(--text-body));
-}
-
 .keeper-chat__msg--assistant .keeper-chat__text {
   background: var(--ff-gold-8);
   border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));

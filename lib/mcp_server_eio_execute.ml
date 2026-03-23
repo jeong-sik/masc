@@ -509,10 +509,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_cost ->
         Tool_cost.dispatch { Tool_cost.agent_name } ~name ~args:arguments
     | Mod_walph ->
-        (match state.Mcp_server.net with
-         | None -> Some (false, "walph requires net context (unavailable in stdio/test setups)")
-         | Some net ->
-           let ctx : _ Tool_walph.context = { config; agent_name; net; clock } in
+        (let ctx : _ Tool_walph.context = { config; agent_name; clock } in
            Tool_walph.dispatch ctx ~name ~args:arguments)
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:arguments

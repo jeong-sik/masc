@@ -22,9 +22,8 @@ let () = test "dispatch_unknown_tool" (fun () ->
     (Printf.sprintf "masc-walph-test-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
-  let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; clock } in
   let args = `Assoc [] in
   assert (Tool_walph.dispatch ctx ~name:"unknown_tool" ~args = None)
 )
@@ -37,9 +36,8 @@ let () = test "dispatch_walph_control" (fun () ->
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
-  let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; clock } in
   let args = `Assoc [("command", `String "STATUS")] in
   match Tool_walph.dispatch ctx ~name:"masc_walph_control" ~args with
   | Some (success, _result) -> assert success
@@ -54,9 +52,8 @@ let () = test "dispatch_walph_status" (fun () ->
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
-  let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; clock } in
   let args = `Assoc [] in
   match Tool_walph.dispatch ctx ~name:"masc_walph_status" ~args with
   | Some (success, result) ->
@@ -78,9 +75,8 @@ let () = test "walph_natural_stop" (fun () ->
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
-  let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; clock } in
   let args = `Assoc [("message", `String "stop the loop")] in
   let (success, _result) = Tool_walph.handle_walph_natural ctx args in
   assert success
@@ -94,9 +90,8 @@ let () = test "walph_natural_pause" (fun () ->
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
-  let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; clock } in
   let args = `Assoc [("message", `String "잠깐 일시정지")] in
   let (success, _result) = Tool_walph.handle_walph_natural ctx args in
   assert success
@@ -110,9 +105,8 @@ let () = test "walph_natural_resume" (fun () ->
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
-  let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; clock } in
   let args = `Assoc [("message", `String "계속 진행해")] in
   let (success, _result) = Tool_walph.handle_walph_natural ctx args in
   assert success
@@ -126,9 +120,8 @@ let () = test "walph_natural_status" (fun () ->
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
-  let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; clock } in
   let args = `Assoc [("message", `String "뭐해? 상태 알려줘")] in
   let (success, _result) = Tool_walph.handle_walph_natural ctx args in
   assert success
@@ -141,9 +134,8 @@ let () = test "walph_natural_ignore" (fun () ->
     (Printf.sprintf "masc-walph-test7-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
-  let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; clock } in
   let args = `Assoc [("message", `String "random gibberish xyz")] in
   let (success, result) = Tool_walph.handle_walph_natural ctx args in
   assert success;
@@ -157,9 +149,8 @@ let () = test "walph_natural_empty" (fun () ->
     (Printf.sprintf "masc-walph-test8-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
-  let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; clock } in
   let args = `Assoc [("message", `String "")] in
   let (success, result) = Tool_walph.handle_walph_natural ctx args in
   (* Empty message should return failure with error message *)

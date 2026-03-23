@@ -83,14 +83,11 @@ let request_accepts_json (request : Httpun.Request.t) =
 
 let classify_mcp_accept_for_body (request : Httpun.Request.t) body_str =
   match classify_mcp_accept request with
-  | Http_negotiation.Rejected ->
-      if request_accepts_json request then
-        Http_negotiation.Legacy_accepted
-      else (
-        match body_jsonrpc_method body_str with
-        | Some (method_, false) when is_notification_method method_ ->
-            Http_negotiation.Legacy_accepted
-        | _ -> Http_negotiation.Rejected)
+  | Http_negotiation.Rejected -> (
+      match body_jsonrpc_method body_str with
+      | Some (method_, false) when is_notification_method method_ ->
+          Http_negotiation.Legacy_accepted
+      | _ -> Http_negotiation.Rejected)
   | accept_mode -> accept_mode
 
 let should_use_sse_for_body (request : Httpun.Request.t) body_str accept_mode =

@@ -67,10 +67,6 @@ export function Ops() {
   const workflowReady = workflowTargetReady(workflowContext, sessions, keepers)
 
   useEffect(() => {
-    void refreshOperatorRoomDigest()
-  }, [])
-
-  useEffect(() => {
     if (route.value.tab !== 'command' || route.value.params.section !== 'intervene') {
       hydratedWorkflowId.value = null
       return
@@ -177,10 +173,10 @@ export function Ops() {
           <button type="button"
             class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
             onClick=${() => {
-              void refreshRoomTruth()
-              void refreshOperatorSnapshot()
-              void refreshOperatorRoomDigest()
-              void refreshOperatorSessionDigest(selectedSession?.session_id ?? null)
+              void refreshRoomTruth({ force: true })
+              void refreshOperatorSnapshot({ force: true })
+              void refreshOperatorRoomDigest({ force: true })
+              void refreshOperatorSessionDigest(selectedSession?.session_id ?? null, { force: true })
             }}
             disabled=${operatorLoading.value || operatorActionBusy.value}
           >

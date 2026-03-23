@@ -198,7 +198,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
 
       ${!collapsed ? html`
         <div class="shrink-0 border-t border-[rgba(255,255,255,0.08)] p-4 bg-[rgba(0,0,0,0.1)]">
-          <${SnapshotCard} currentTab=${currentTab} />
+          <${SnapshotCard} />
         </div>
       ` : null}
     </nav>

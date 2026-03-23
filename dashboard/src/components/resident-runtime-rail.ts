@@ -7,8 +7,8 @@ import {
   keepers,
   serverStatus,
 } from '../store'
-import { refreshForTab } from '../tab-refresh'
-import { navigate } from '../router'
+import { refreshForRoute } from '../tab-refresh'
+import { navigate, route } from '../router'
 import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from '../operator-store'
 import { selectPendingConfirmState } from '../pending-confirm'
 
@@ -18,7 +18,7 @@ function shortCommit(commit: string | null | undefined): string {
   return value.length > 10 ? value.slice(0, 10) : value
 }
 
-export function SnapshotCard({ currentTab }: { currentTab: string }) {
+export function SnapshotCard() {
   const liveConnected = connected.value
   const build = serverStatus.value?.build
 
@@ -69,8 +69,8 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
           class="w-full rounded-md border border-solid border-[rgba(71,184,255,0.26)] bg-[rgba(71,184,255,0.14)] px-3 py-2 text-[11px] font-medium text-[#dff3ff] cursor-pointer transition-colors duration-150 hover:bg-[rgba(71,184,255,0.2)]"
           onClick=${(e: Event) => {
             e.preventDefault()
-            void refreshDashboard().catch(() => {})
-            try { refreshForTab(currentTab) } catch {}
+            void refreshDashboard({ force: true }).catch(() => {})
+            refreshForRoute(route.value)
           }}
         >
           Room sync
@@ -116,8 +116,8 @@ export function InterveneRailCard() {
         <button type="button"
           class="w-full border border-solid border-[rgba(71,184,255,0.3)] rounded-lg bg-[var(--accent-12)] text-[#d7efff] py-1.5 px-2 text-[11px] cursor-pointer transition-colors duration-150 hover:bg-[var(--accent-20)]"
           onClick=${() => {
-            refreshOperatorSnapshot()
-            refreshOperatorRoomDigest()
+            void refreshOperatorSnapshot({ force: true })
+            void refreshOperatorRoomDigest({ force: true })
           }}
         >
           갱신

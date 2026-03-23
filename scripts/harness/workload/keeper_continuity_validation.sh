@@ -151,7 +151,7 @@ call_mcp_tool() {
     --argjson args "$args_json" \
     '{jsonrpc:"2.0",id:$id,method:"tools/call",params:{name:$tool,arguments:$args}}')"
 
-  if ! raw="$(curl -sS -m "$timeout_sec" -X POST "$MCP_URL" \
+  if ! raw="$(curl -sS --http2-prior-knowledge -m "$timeout_sec" -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d "$payload")"; then

@@ -58,7 +58,7 @@ jsonrpc_call() {
   local method="$2"
   local params="$3"
   local raw
-  raw="$(curl -sS --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
+  raw="$(curl -sS --http2-prior-knowledge --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H "mcp-session-id: $MCP_SESSION_ID" \
@@ -185,7 +185,7 @@ wait_for_http() {
   local delay="${3:-1}"
   local i=0
   while [ "$i" -lt "$attempts" ]; do
-    if curl -fsS --max-time "$HTTP_TIMEOUT_SEC" "$url" >/dev/null 2>&1; then
+    if curl -fsS --http2-prior-knowledge --max-time "$HTTP_TIMEOUT_SEC" "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep "$delay"

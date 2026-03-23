@@ -95,7 +95,7 @@ jsonrpc_call() {
   local body_file
   body_file="$(mktemp "${TMPDIR:-/tmp}/masc-jsonrpc-body.XXXXXX.json")"
   printf '{"jsonrpc":"2.0","id":%s,"method":"%s","params":%s}' "$id" "$method" "$params" >"$body_file"
-  local cmd=(curl -sS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$endpoint" \
+  local cmd=(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H "Mcp-Session-Id: $session_id" \

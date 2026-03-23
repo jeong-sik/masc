@@ -97,7 +97,7 @@ jsonrpc_call() {
   body_file="$(mktemp "${TMPDIR:-/tmp}/coding-worker-jsonrpc.XXXXXX")"
   printf '{"jsonrpc":"2.0","id":%s,"method":"%s","params":%s}' "$id" "$method" "$params" >"$body_file"
   local response
-  response="$(curl -sS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
+  response="$(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H "Mcp-Session-Id: $session_id" \

@@ -110,7 +110,7 @@ mcp_call() {
     --arg tool "$tool_name" \
     --argjson args "$args_json" \
     '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:$tool,arguments:$args}}')"
-  raw="$(curl -sS "$MCP_URL" \
+  raw="$(curl -sS --http2-prior-knowledge "$MCP_URL" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "MCP-Protocol-Version: 2025-11-25" \
@@ -227,7 +227,7 @@ maybe_snapshot_dashboard() {
   if [[ "$DRY_RUN" == "1" ]]; then
     return 0
   fi
-  curl -sS "${MASC_URL%/}/api/v1/dashboard" > "$SNAP_DIR/dashboard_${arm}_r${round}.json" || true
+  curl -sS --http2-prior-knowledge "${MASC_URL%/}/api/v1/dashboard" > "$SNAP_DIR/dashboard_${arm}_r${round}.json" || true
 }
 
 summarize_arm() {

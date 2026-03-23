@@ -70,11 +70,11 @@ let test_all_shards_count () =
 
 let test_default_shard_names () =
   let defaults = Tool_shard.default_shard_names in
-  Alcotest.(check int) "6 defaults" 6 (List.length defaults);
+  Alcotest.(check int) "7 defaults" 7 (List.length defaults);
   List.iter (fun name ->
     Alcotest.(check bool) (name ^ " in defaults") true
       (List.mem name defaults)
-  ) ["base"; "board"; "filesystem"; "shell"; "weather"; "voice"]
+  ) ["base"; "board"; "filesystem"; "shell"; "weather"; "voice"; "taskboard"]
 
 (* ============================================================
    tools_of_shards tests
@@ -99,8 +99,8 @@ let test_tools_of_shards_unknown_ignored () =
 
 let test_keeper_model_tools_count () =
   let tools = Tool_shard.keeper_model_tools in
-  (* base=3 + board=5 + filesystem=2 + shell=3 + weather=1 + voice=5 = 19 *)
-  Alcotest.(check int) "19 total tools" 19 (List.length tools)
+  (* base=3 + board=5 + filesystem=2 + shell=3 + weather=1 + voice=5 + taskboard=7 = 26 *)
+  Alcotest.(check int) "26 total tools" 26 (List.length tools)
 
 (* ============================================================
    grant_shard tests
@@ -178,7 +178,7 @@ let test_revoke_unknown () =
 let test_get_agent_shards_default () =
   (* Unknown agent gets default shards *)
   let shards = Tool_shard.get_agent_shards "new-agent-never-seen" in
-  Alcotest.(check int) "defaults" 6 (List.length shards)
+  Alcotest.(check int) "defaults" 7 (List.length shards)
 
 let test_set_get_agent_shards () =
   Hashtbl.remove Tool_shard.agent_shards "test-agent-x";

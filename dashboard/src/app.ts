@@ -22,6 +22,7 @@ import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 
 export const sidebarCollapsed = signal(false)
+export const mobileMenuOpen = signal(false)
 
 export function App() {
   useEffect(() => {
@@ -71,6 +72,12 @@ export function App() {
         <div class="mx-auto flex w-full max-w-[1680px] items-start justify-between gap-6 max-[860px]:flex-col max-[860px]:items-stretch">
           <div class="min-w-0">
             <div class="flex items-center gap-4">
+              <button type="button"
+                class="hidden max-[768px]:flex size-10 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] text-[var(--text-body)] cursor-pointer hover:bg-[rgba(255,255,255,0.1)]"
+                onClick=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }}
+              >
+                ${mobileMenuOpen.value ? '\u2715' : '\u2630'}
+              </button>
               <div class="flex size-11 shrink-0 items-center justify-center rounded-[14px] border border-[rgba(71,184,255,0.3)] bg-[linear-gradient(135deg,rgba(71,184,255,0.2),rgba(10,28,58,0.8))] text-[18px] font-bold text-[#bfe7ff] shadow-[0_0_20px_rgba(71,184,255,0.15)]">
                 ${currentView?.icon ?? 'M'}
               </div>
@@ -96,7 +103,7 @@ export function App() {
       </header>
 
       <div class="flex flex-1 gap-5 overflow-hidden p-5 max-[1100px]:flex-col max-[1100px]:p-4">
-        <aside class="${sidebarCollapsed.value ? 'w-16' : 'w-[260px]'} shrink-0 overflow-y-auto overflow-x-hidden rounded-[20px] border border-[rgba(255,255,255,0.06)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[360px] relative">
+        <aside class="${sidebarCollapsed.value ? 'w-16' : 'w-[260px]'} shrink-0 overflow-y-auto overflow-x-hidden rounded-[20px] border border-[rgba(255,255,255,0.06)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[360px] ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'} relative">
           <div class="absolute inset-0 bg-gradient-to-b from-[rgba(255,255,255,0.03)] to-transparent pointer-events-none rounded-[20px]"></div>
           <div class="relative h-full">
             <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />

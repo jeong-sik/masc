@@ -1,7 +1,6 @@
 // Goal sub-components: GoalRow, HorizonGroup, FilterBar, GoalsSummary
 
 import { html } from 'htm/preact'
-import { Card } from '../common/card'
 import { StatusBadge } from '../common/status-badge'
 import { TimeAgo } from '../common/time-ago'
 import { FilterChips } from '../common/filter-chips'

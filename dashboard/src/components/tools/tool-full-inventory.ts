@@ -36,7 +36,7 @@ export function FullInventoryView({
   const listContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (route.value.tab !== 'operations' || route.value.params.section !== 'tools') return
+    if (route.value.tab !== 'lab' || route.value.params.section !== 'tools') return
     const q = route.value.params.q?.trim()
     searchQuery.value = q ?? ''
   }, [route.value.tab, route.value.params.section, route.value.params.q])

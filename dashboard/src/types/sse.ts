@@ -159,15 +159,19 @@ export interface DashboardSemanticsResponse {
 }
 
 export type TabId =
-  | 'home'
-  | 'status'
-  | 'work'
-  | 'operations'
+  | 'overview'
+  | 'monitoring'
+  | 'command'
+  | 'workspace'
   | 'lab'
   | 'logs'
 
 /** Pre-restructure tab IDs kept for redirect aliases. */
 export type LegacyTabId =
+  | 'home'
+  | 'status'
+  | 'work'
+  | 'operations'
   | 'situation'
   | 'agents'
   | 'activity'
@@ -181,7 +185,6 @@ export type LegacyTabId =
   | 'governance'
   | 'planning'
   | 'intervene'
-  | 'command'
   | 'social'
   | 'agent-roster'
   | 'keeper-roster'
@@ -190,33 +193,36 @@ export type LegacyTabId =
 export type AnyTabId = TabId | LegacyTabId
 
 export const VALID_TABS: TabId[] = [
-  'home',
-  'status',
-  'work',
-  'operations',
+  'overview',
+  'monitoring',
+  'command',
+  'workspace',
   'lab',
   'logs',
 ]
 
 /** Maps legacy tab IDs to new tab + optional section params. */
 export const LEGACY_TAB_REDIRECTS: Record<LegacyTabId, { tab: TabId; params?: Record<string, string> }> = {
-  'situation': { tab: 'status', params: { section: 'sessions' } },
-  'agents': { tab: 'status', params: { section: 'agents' } },
-  'activity': { tab: 'status', params: { section: 'activity' } },
-  'control': { tab: 'operations', params: { section: 'intervene' } },
-  'mission': { tab: 'status', params: { section: 'sessions' } },
-  'agent-roster': { tab: 'status', params: { section: 'agents' } },
-  'execution': { tab: 'status', params: { section: 'sessions' } },
-  'keeper-roster': { tab: 'status', params: { section: 'agents' } },
-  'live': { tab: 'status', params: { section: 'activity' } },
-  'social': { tab: 'status', params: { section: 'activity' } },
-  'proof': { tab: 'work', params: { section: 'evidence' } },
-  'memory': { tab: 'work', params: { section: 'board' } },
-  'governance': { tab: 'work', params: { section: 'governance' } },
-  'planning': { tab: 'work', params: { section: 'planning' } },
-  'tools': { tab: 'operations', params: { section: 'tools' } },
-  'intervene': { tab: 'operations', params: { section: 'intervene' } },
-  'command': { tab: 'operations', params: { section: 'command' } },
+  'home': { tab: 'overview' },
+  'status': { tab: 'monitoring', params: { section: 'sessions' } },
+  'work': { tab: 'workspace', params: { section: 'board' } },
+  'operations': { tab: 'command', params: { section: 'intervene' } },
+  'situation': { tab: 'monitoring', params: { section: 'sessions' } },
+  'agents': { tab: 'monitoring', params: { section: 'agents' } },
+  'activity': { tab: 'monitoring', params: { section: 'activity' } },
+  'control': { tab: 'command', params: { section: 'intervene' } },
+  'mission': { tab: 'monitoring', params: { section: 'sessions' } },
+  'agent-roster': { tab: 'monitoring', params: { section: 'agents' } },
+  'execution': { tab: 'monitoring', params: { section: 'sessions' } },
+  'keeper-roster': { tab: 'monitoring', params: { section: 'agents' } },
+  'live': { tab: 'monitoring', params: { section: 'activity' } },
+  'social': { tab: 'monitoring', params: { section: 'activity' } },
+  'proof': { tab: 'workspace', params: { section: 'evidence' } },
+  'memory': { tab: 'workspace', params: { section: 'board' } },
+  'governance': { tab: 'command', params: { section: 'governance' } },
+  'planning': { tab: 'workspace', params: { section: 'planning' } },
+  'tools': { tab: 'lab', params: { section: 'tools' } },
+  'intervene': { tab: 'command', params: { section: 'intervene' } },
 }
 
 // --- Activity Graph types ---

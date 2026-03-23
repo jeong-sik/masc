@@ -11,13 +11,12 @@ export type SurfaceSectionId =
   | 'planning'
   | 'worktrees'
   | 'intervene'
-  | 'command'
+  | 'warroom'
   | 'tools'
-  | 'overview'
   | 'trpg'
   | 'avatars'
 
-type NonHomeTabId = Exclude<TabId, 'home'>
+type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 const OPERATIONS_COMMAND_SURFACES = new Set([
   'warroom',
   'summary',
@@ -58,54 +57,54 @@ export interface DashboardSectionNavItem {
 
 export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
-    id: 'home',
-    label: '홈',
+    id: 'overview',
+    label: '오버뷰',
     icon: '🏠',
-    description: '지금 필요한 신호만 빠르게 보는 첫 화면',
-    defaultTab: 'home',
-    tabs: ['home'],
+    description: '빠른 신호 및 브리핑 통합 화면',
+    defaultTab: 'overview',
+    tabs: ['overview'],
   },
   {
-    id: 'status',
-    label: '현황',
+    id: 'monitoring',
+    label: '모니터링',
     icon: '📡',
-    description: '세션, 에이전트, 활동 흐름을 읽는 기본 관찰면',
-    defaultTab: 'status',
+    description: '세션 룸 및 에이전트/키퍼 현황 관찰',
+    defaultTab: 'monitoring',
     defaultParams: { section: 'sessions' },
-    tabs: ['status'],
+    tabs: ['monitoring'],
   },
   {
-    id: 'work',
+    id: 'command',
+    label: '지휘 통제',
+    icon: '🎛️',
+    description: '실시간 개입, 워룸, 거버넌스 제어',
+    defaultTab: 'command',
+    defaultParams: { section: 'intervene' },
+    tabs: ['command'],
+  },
+  {
+    id: 'workspace',
     label: '작업',
     icon: '📋',
-    description: '게시판, 거버넌스, 근거, 계획을 모아 보는 작업면',
-    defaultTab: 'work',
+    description: '작업 게시판, 근거 및 계획 이력 탐색',
+    defaultTab: 'workspace',
     defaultParams: { section: 'board' },
-    tabs: ['work'],
-  },
-  {
-    id: 'operations',
-    label: '운영',
-    icon: '🎛️',
-    description: '개입, 지휘, 도구를 다루는 운영면',
-    defaultTab: 'operations',
-    defaultParams: { section: 'intervene' },
-    tabs: ['operations'],
+    tabs: ['workspace'],
   },
   {
     id: 'lab',
-    label: '실험',
+    label: '실험실',
     icon: '🧪',
-    description: 'TRPG와 실험 기능을 분리한 실험면',
+    description: '시스템 도구 테스트 및 TRPG 실험',
     defaultTab: 'lab',
-    defaultParams: { section: 'overview' },
+    defaultParams: { section: 'tools' },
     tabs: ['lab'],
   },
   {
     id: 'logs',
     label: '로그',
     icon: '📜',
-    description: '시스템 실행 로그 (바이너리 stdout/stderr)',
+    description: '시스템 실행 로그',
     defaultTab: 'logs',
     tabs: ['logs'],
   },
@@ -120,84 +119,78 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
 }))
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
-  status: [
+  monitoring: [
     {
       id: 'sessions',
-      label: '세션',
-      description: '지금 진행 중인 세션과 attention을 먼저 읽습니다.',
+      label: '세션 & 룸',
+      description: '진행 중인 세션과 룸 현황을 봅니다.',
       params: { section: 'sessions' },
     },
     {
       id: 'agents',
-      label: '에이전트',
-      description: '에이전트, 키퍼, 세션을 한곳에서 탐색합니다.',
+      label: '에이전트 & 키퍼',
+      description: '로스터 및 활성 에이전트 상태를 탐색합니다.',
       params: { section: 'agents' },
     },
     {
       id: 'activity',
-      label: '활동',
-      description: '실시간 이벤트 흐름과 활동 그래프를 봅니다.',
+      label: '활동 그래프',
+      description: '실시간 이벤트 흐름을 봅니다.',
       params: { section: 'activity' },
     },
   ],
-  work: [
+  command: [
     {
-      id: 'board',
-      label: '게시판',
-      description: '팀 대화와 지식 공유를 보는 기본 작업면입니다.',
-      params: { section: 'board' },
+      id: 'intervene',
+      label: '실시간 개입',
+      description: '방, 세션, 키퍼에 바로 개입합니다.',
+      params: { section: 'intervene' },
+    },
+    {
+      id: 'warroom',
+      label: '워룸 & 스웜',
+      description: '워룸 상황판과 오케스트라 지휘면입니다.',
+      params: { section: 'warroom' },
     },
     {
       id: 'governance',
       label: '거버넌스',
-      description: '의사결정 기록과 판결 흐름을 봅니다.',
+      description: '의사결정 기록 및 판결 흐름 제어입니다.',
       params: { section: 'governance' },
+    },
+  ],
+  workspace: [
+    {
+      id: 'board',
+      label: '작업 게시판',
+      description: '팀 대화와 지식 공유를 봅니다.',
+      params: { section: 'board' },
     },
     {
       id: 'evidence',
-      label: '근거',
+      label: '근거 및 이력',
       description: '작업 증거와 검증 결과를 봅니다.',
       params: { section: 'evidence' },
     },
     {
       id: 'planning',
-      label: '계획',
-      description: '장기 목표와 메트릭 루프를 봅니다.',
+      label: '계획 및 메트릭',
+      description: '장기 목표와 루프를 봅니다.',
       params: { section: 'planning' },
     },
     {
       id: 'worktrees',
       label: '워크트리',
-      description: '현재 활성화된 작업 공간(Worktree)을 봅니다.',
+      description: '현재 활성화된 작업 공간입니다.',
       params: { section: 'worktrees' },
-    },
-  ],
-  operations: [
-    {
-      id: 'intervene',
-      label: '개입',
-      description: '방, 세션, 키퍼에 바로 개입하는 화면입니다.',
-      params: { section: 'intervene' },
-    },
-    {
-      id: 'command',
-      label: '지휘',
-      description: '워룸, 스웜, 오케스트라를 포함한 지휘면입니다.',
-      params: { section: 'command' },
-    },
-    {
-      id: 'tools',
-      label: '도구',
-      description: '도구 인벤토리와 도구 메트릭을 봅니다.',
-      params: { section: 'tools' },
     },
   ],
   lab: [
     {
-      id: 'overview',
-      label: '개요',
-      description: '실험면의 성격과 진입점을 먼저 보여줍니다.',
-      params: { section: 'overview' },
+      id: 'tools',
+      label: '도구 & 실험',
+      description: '도구 인벤토리와 기타 실험을 진행합니다.',
+      params: { section: 'tools' },
     },
     {
       id: 'trpg',
@@ -212,7 +205,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'avatars' },
     },
   ],
-  logs: [],
 }
 
 function validSectionIds(tab: NonHomeTabId): SurfaceSectionId[] {
@@ -224,8 +216,8 @@ export function defaultParamsForTab(tabId: TabId): Record<string, string> {
 }
 
 export function sectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {
-  if (tabId === 'home') return []
-  return DASHBOARD_SECTION_ITEMS[tabId]
+  if (tabId === 'overview' || tabId === 'logs') return []
+  return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId]
 }
 
 export function surfaceForTab(tabId: TabId): SurfaceId {
@@ -235,55 +227,35 @@ export function surfaceForTab(tabId: TabId): SurfaceId {
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
   const next = { ...params }
 
-  if (tabId === 'home') {
+  if (tabId === 'overview' || tabId === 'logs') {
     delete next.section
     delete next.surface
     return next
   }
 
-  if (tabId === 'status') {
-    if (!validSectionIds('status').includes(next.section as SurfaceSectionId)) {
-      next.section = 'sessions'
-    }
-    delete next.surface
-    return next
+  const typedTabId = tabId as NonHomeTabId
+
+  if (!validSectionIds(typedTabId).includes(next.section as SurfaceSectionId)) {
+    next.section = defaultParamsForTab(tabId).section ?? ''
   }
 
-  if (tabId === 'work') {
-    if (!validSectionIds('work').includes(next.section as SurfaceSectionId)) {
-      next.section = 'board'
-    }
-    delete next.surface
-    return next
-  }
-
-  if (tabId === 'operations') {
-    if (!validSectionIds('operations').includes(next.section as SurfaceSectionId)) {
-      next.section =
-        typeof next.surface === 'string' && OPERATIONS_COMMAND_SURFACES.has(next.surface)
-          ? 'command'
-          : 'intervene'
-    }
-    if (next.section === 'command') {
+  if (tabId === 'command') {
+    if (next.section === 'warroom') {
       if (next.surface && !OPERATIONS_COMMAND_SURFACES.has(next.surface)) {
         delete next.surface
       }
     } else {
       delete next.surface
     }
-    return next
+  } else {
+    delete next.surface
   }
 
-  if (!validSectionIds('lab').includes(next.section as SurfaceSectionId)) {
-    if (next.surface === 'trpg' || next.surface === 'avatars') next.section = next.surface
-    else next.section = 'overview'
-  }
-  delete next.surface
   return next
 }
 
 export function currentSectionForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): DashboardSectionNavItem | null {
-  if (routeState.tab === 'home') return null
+  if (routeState.tab === 'overview' || routeState.tab === 'logs') return null
   const normalized = normalizeRouteParams(routeState.tab, routeState.params)
   return sectionItemsForTab(routeState.tab).find(item => item.params.section === normalized.section) ?? null
 }

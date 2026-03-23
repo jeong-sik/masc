@@ -103,8 +103,8 @@ export function closeAgentDetail(): void {
   taskHistories.value = []
   agentTimeline.value = null
   mentionText.value = ''
-  if (route.value.tab === 'status' && route.value.params.agent) {
-    navigate('status', { section: 'agents' })
+  if (route.value.tab === 'monitoring' && route.value.params.agent) {
+    navigate('monitoring', { section: 'agents' })
   }
 }
 

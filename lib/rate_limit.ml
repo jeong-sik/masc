@@ -99,15 +99,18 @@ let cleanup limiter ~older_than_seconds =
     List.length to_remove
   )
 
-(** {1 Global Instance} *)
+(** {1 Global Instance}
 
-let global = lazy (create_from_env ())
+    Uses [Eio.Lazy] for fiber-safe initialization.
+    [cancel:`Protect] ensures init completes even if forcing fiber is cancelled. *)
+
+let global = Eio.Lazy.from_fun ~cancel:`Protect create_from_env
 
 let check_global ~key =
-  check (Lazy.force global) ~key
+  check (Eio.Lazy.force global) ~key
 
 let remaining_global ~key =
-  remaining (Lazy.force global) ~key
+  remaining (Eio.Lazy.force global) ~key
 
 (** {1 Automatic Cleanup Loop} *)
 

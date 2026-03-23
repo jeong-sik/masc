@@ -440,31 +440,31 @@ let delete_post store ~post_id : (unit, board_error) result =
 
 (** {1 Global Store}
 
-    Uses [ref option] instead of [Lazy.t] because [Lazy.force] is not
-    fiber-safe: when two Eio fibers force the same lazy concurrently,
-    the second raises [CamlinternalLazy.Undefined].
+    Uses [Eio.Lazy] for fiber-safe initialization.
+    [cancel:`Protect] ensures store creation completes even if the
+    forcing fiber is cancelled. *)
 
-    Initialization is idempotent — the first call creates and stores the
-    instance, subsequent calls return it immediately. *)
-
-let global_store : store option ref = ref None
-
-let global () =
-  match !global_store with
-  | Some store -> store
-  | None ->
+let global_lazy : store Eio.Lazy.t ref =
+  ref (Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let store = create_store () in
     load_persisted_posts store;
     load_persisted_comments store;
     recalculate_reply_counts store;
     load_persisted_votes store;
-    global_store := Some store;
-    store
+    store))
+
+let global () = Eio.Lazy.force !global_lazy
 
 (** Reset global store for test isolation. Next [global ()] call creates fresh store.
     Safe: only called from test setup before concurrent fibers exist. *)
 let reset_global_for_test () =
-  global_store := None
+  global_lazy := Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
+    let store = create_store () in
+    load_persisted_posts store;
+    load_persisted_comments store;
+    recalculate_reply_counts store;
+    load_persisted_votes store;
+    store)
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss. *)
 let flush_dirty store =

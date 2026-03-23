@@ -41,12 +41,12 @@ let load_config () =
   | _ ->
       { secret_key = ""; public_key = ""; host; enabled = false }
 
-(** Global config - loaded lazily *)
-let config = lazy (load_config ())
+(** Global config - fiber-safe lazy init via [Eio.Lazy]. *)
+let config = Eio.Lazy.from_fun ~cancel:`Protect load_config
 
 (** Check if Langfuse is enabled *)
 let is_enabled () =
-  let cfg = Lazy.force config in
+  let cfg = Eio.Lazy.force config in
   Log.Langfuse.info "is_enabled check: enabled=%b, host=%s" cfg.enabled cfg.host;
   cfg.enabled
 
@@ -190,7 +190,7 @@ let span_to_json (s : span) =
 let send_to_langfuse ~endpoint ~body () =
   if not (is_enabled ()) then ()
   else begin
-    let cfg = Lazy.force config in
+    let cfg = Eio.Lazy.force config in
     let url = cfg.host ^ "/api/public" ^ endpoint in
     let auth = Base64.encode_string (cfg.public_key ^ ":" ^ cfg.secret_key) in
     let headers = [
@@ -338,7 +338,7 @@ let trace_span ~trace ~name ?metadata f =
 
 (** Get Langfuse status *)
 let status () =
-  let cfg = Lazy.force config in
+  let cfg = Eio.Lazy.force config in
   if cfg.enabled then
     Printf.sprintf "Langfuse: ENABLED (host: %s)" cfg.host
   else

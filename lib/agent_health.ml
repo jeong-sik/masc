@@ -95,7 +95,7 @@ let get_summary ~agent_name : agent_health_summary =
 
 (** Get health summaries for all known agents. *)
 let get_all_summaries () : agent_health_summary list =
-  let breakers = Circuit_breaker.list_all_breakers (Lazy.force Circuit_breaker.global) in
+  let breakers = Circuit_breaker.list_all_breakers (Eio.Lazy.force Circuit_breaker.global) in
   List.map (fun (s : Circuit_breaker.breaker_status) ->
     let health_status = match s.state_name with
       | "closed" -> Healthy

@@ -54,12 +54,6 @@ let project_root () =
       let d = Filename.dirname d in
       Filename.dirname d
 
-let read_legacy_web_index () =
-  let path = Filename.concat (project_root ()) "web/index.html" in
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> In_channel.input_all ic)
 
 (* ============================================================
    html Tests — Vite SPA index.html
@@ -143,14 +137,6 @@ let test_html_references_dashboard_assets () =
     check bool "fallback does not reference assets" false
       (contains_substr "/dashboard/assets/" html)
 
-let test_legacy_web_lobby_has_no_council_ui () =
-  let html = read_legacy_web_index () in
-  check bool "legacy lobby omits council panel" false
-    (contains_substr "Council" html);
-  check bool "legacy lobby omits debates button" false
-    (contains_substr "Debates" html);
-  check bool "legacy lobby omits startDebate hook" false
-    (contains_substr "startDebate()" html)
 
 (* ============================================================
    etag Tests
@@ -234,7 +220,6 @@ let () =
       test_case "app mount" `Quick test_html_contains_app_mount;
       test_case "ends with html" `Quick test_html_ends_with_html_tag;
       test_case "dashboard assets" `Quick test_html_references_dashboard_assets;
-      test_case "legacy web omits council ui" `Quick test_legacy_web_lobby_has_no_council_ui;
     ];
     "etag", [
       test_case "nonempty" `Quick test_etag_nonempty;

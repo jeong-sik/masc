@@ -1,6 +1,80 @@
-// MASC Dashboard — MCP-over-HTTP client and autoresearch helpers
+// MASC Dashboard — MCP-over-HTTP client with session lifecycle
 
-import { postRaw, DEFAULT_MCP_TIMEOUT_MS } from './core'
+import { fetchWithTimeout, DEFAULT_MCP_TIMEOUT_MS } from './core'
+
+// --- MCP Session Management ---
+
+let mcpSessionId: string | null = null
+let initPromise: Promise<void> | null = null
+
+function mcpHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(extra ?? {}),
+  }
+  if (mcpSessionId) {
+    headers['Mcp-Session-Id'] = mcpSessionId
+  }
+  return headers
+}
+
+async function mcpPost(body: unknown, timeoutMs = DEFAULT_MCP_TIMEOUT_MS): Promise<string> {
+  const res = await fetchWithTimeout('/mcp', {
+    method: 'POST',
+    headers: mcpHeaders(),
+    body: JSON.stringify(body),
+  }, timeoutMs)
+  // Capture session ID from response
+  const sid = res.headers.get('Mcp-Session-Id')
+  if (sid) mcpSessionId = sid
+  if (!res.ok) {
+    throw new Error(`POST /mcp: ${res.status} ${res.statusText}`)
+  }
+  return res.text()
+}
+
+async function ensureSession(): Promise<void> {
+  if (mcpSessionId) return
+  if (initPromise) return initPromise
+  initPromise = (async () => {
+    try {
+      const res = await fetchWithTimeout('/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-03-26',
+            capabilities: {},
+            clientInfo: { name: 'masc-dashboard', version: '1.0.0' },
+          },
+          id: 0,
+        }),
+      }, 10000)
+      const sid = res.headers.get('Mcp-Session-Id')
+      if (sid) mcpSessionId = sid
+      // Send initialized notification
+      if (mcpSessionId) {
+        await fetchWithTimeout('/mcp', {
+          method: 'POST',
+          headers: mcpHeaders(),
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'notifications/initialized',
+          }),
+        }, 5000).catch(() => {})
+      }
+    } finally {
+      initPromise = null
+    }
+  })()
+  return initPromise
+}
 
 // --- MCP over HTTP helper ---
 
@@ -13,7 +87,6 @@ interface McpCallResponse {
 }
 
 function parseMcpHttpResponse(raw: string): McpCallResponse {
-  // Streamable HTTP may return SSE-formatted payload; extract first "data:" line
   const line = raw.split('\n').find(l => l.startsWith('data: '))
   const payload = line ? line.slice(6).trim() : raw.trim()
   return JSON.parse(payload) as McpCallResponse
@@ -29,7 +102,8 @@ function extractMcpText(res: McpCallResponse): string {
 }
 
 export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
-  const text = await postRaw('/mcp', {
+  await ensureSession()
+  const text = await mcpPost({
     jsonrpc: '2.0',
     method: 'tools/call',
     params: {
@@ -37,9 +111,7 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
       arguments: args,
     },
     id: Math.floor(Date.now() % 1000000),
-  }, {
-    Accept: 'application/json',
-  }, DEFAULT_MCP_TIMEOUT_MS)
+  })
   const parsed = parseMcpHttpResponse(text)
   return extractMcpText(parsed)
 }

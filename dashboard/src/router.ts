@@ -9,18 +9,13 @@ import { normalizeRouteParams } from './config/navigation'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
 const COMMAND_SURFACE_SEGMENTS = new Set([
-  'warroom',
-  'summary',
   'orchestra',
   'swarm',
   'operations',
-  'topology',
-  'alerts',
-  'trace',
   'chains',
   'control',
 ])
-const LAB_SECTION_SEGMENTS = new Set(['overview', 'trpg', 'avatars'])
+const LAB_SECTION_SEGMENTS = new Set(['overview', 'trpg', 'avatars', 'autoresearch'])
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)

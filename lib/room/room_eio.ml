@@ -545,6 +545,11 @@ let message_seq_key = "counters:message_seq"
     Uses file-based atomic_increment for cross-process safety.
     Ensures unique seq even under concurrent broadcasts from multiple processes.
 *)
+(** Notification callback: invoked after a successful broadcast with the
+    mention target (if any). Set by Keeper bootstrap to wire up wakeup. *)
+let on_broadcast_mention : (string option -> unit) ref =
+  ref (fun _mention -> ())
+
 let broadcast config ~from_agent ~content =
   (* Atomic increment via file lock - safe for multiple processes *)
   let seq = match Backend_eio.FileSystem.atomic_increment config.backend message_seq_key with
@@ -578,6 +583,9 @@ let broadcast config ~from_agent ~content =
           ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
         ]) in
 
+      (* Notify keepers about the mention *)
+      (try !on_broadcast_mention msg.mention
+       with _ -> ());
       Ok msg
   | Error e ->
       Error (match e with

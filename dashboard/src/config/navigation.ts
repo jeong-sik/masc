@@ -15,17 +15,13 @@ export type SurfaceSectionId =
   | 'tools'
   | 'trpg'
   | 'avatars'
+  | 'autoresearch'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 const OPERATIONS_COMMAND_SURFACES = new Set([
-  'warroom',
-  'summary',
   'orchestra',
   'swarm',
   'operations',
-  'topology',
-  'alerts',
-  'trace',
   'chains',
   'control',
 ])
@@ -148,8 +144,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'warroom',
-      label: '워룸 & 스웜',
-      description: '워룸 상황판과 오케스트라 지휘면입니다.',
+      label: '지휘면',
+      description: '오케스트라, 스웜, 체인, 제어 표면입니다.',
       params: { section: 'warroom' },
     },
     {
@@ -191,6 +187,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '도구 & 실험',
       description: '도구 인벤토리와 기타 실험을 진행합니다.',
       params: { section: 'tools' },
+    },
+    {
+      id: 'autoresearch',
+      label: '오토리서치',
+      description: '자율 실험 루프 상태와 이력을 봅니다.',
+      params: { section: 'autoresearch' },
     },
     {
       id: 'trpg',

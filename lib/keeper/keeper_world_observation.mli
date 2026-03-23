@@ -45,9 +45,17 @@ type world_observation = {
   (** Comma-separated triage trigger strings from last deliberation triage. *)
 }
 
+(** Collect recent board activity within the keeper's heartbeat window.
+    Returns [(event_summaries, new_post_count, mention_count)].
+    Used by both the world observation builder and the deliberation triage
+    in keepalive to populate board-related triggers. *)
+val collect_board_events :
+  meta:Keeper_types.keeper_meta -> string list * int * int
+
 (** Build a world observation from room state and keeper metadata.
 
-    Reads room backlog, agent list, checkpoint context, and economy state.
+    Reads room backlog, agent list, checkpoint context, economy state,
+    and recent board activity.
     All I/O errors are caught and produce safe defaults (0, empty, Normal).
 
     @param config Room configuration for I/O operations

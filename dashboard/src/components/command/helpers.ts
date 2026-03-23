@@ -4,7 +4,6 @@ import type {
   CommandPlaneHelpPitfall,
   CommandPlaneHelpStep,
   CommandPlaneSurface,
-  OperatorSessionSnapshot,
   Task,
 } from '../../types'
 import {
@@ -15,7 +14,6 @@ import {
   commandPlaneSummary,
   commandPlaneSwarm,
 } from '../../command-store'
-import { operatorSnapshot } from '../../operator-store'
 import { route } from '../../router'
 import type { DashboardWorkflowContext } from '../../workflow-context'
 import { relativeTime, formatElapsed } from '../../lib/format-time'
@@ -119,25 +117,16 @@ export const COMMAND_SURFACE_GROUPS: Array<{ id: CommandSurfaceGroup; label: str
 ]
 
 export const COMMAND_SURFACE_META: Array<{ id: CommandPlaneSurface; label: string; group: CommandSurfaceGroup }> = [
-  { id: 'warroom', label: '워룸', group: 'status' },
-  { id: 'summary', label: '요약', group: 'status' },
-  { id: 'topology', label: '토폴로지', group: 'status' },
   { id: 'orchestra', label: '오케스트라', group: 'status' },
   { id: 'swarm', label: '스웜', group: 'status' },
   { id: 'operations', label: '작전', group: 'history' },
-  { id: 'trace', label: '트레이스', group: 'history' },
   { id: 'chains', label: '체인', group: 'history' },
   { id: 'control', label: '제어', group: 'control' },
-  { id: 'alerts', label: '알림', group: 'control' },
 ]
 const COMMAND_SURFACES: CommandPlaneSurface[] = COMMAND_SURFACE_META.map(item => item.id)
 export const CHAIN_SSE_EVENT_TYPES = ['chain_start', 'node_start', 'node_complete', 'chain_complete', 'chain_error']
 
 export const COMMAND_SURFACE_GUIDE: Record<CommandPlaneSurface, { title: string; description: string }> = {
-  warroom: {
-    title: '실시간 워룸',
-    description: '실제 실행, 워커, 메시지, 트레이스를 한 화면에서 따라가는 기본 진입 표면입니다.',
-  },
   operations: {
     title: '현재 작전 상세',
     description: '활성 작전, 분견대, 의존 관계를 먼저 읽는 기본 진입 표면입니다.',
@@ -154,25 +143,9 @@ export const COMMAND_SURFACE_GUIDE: Record<CommandPlaneSurface, { title: string;
     title: '체인 런타임',
     description: '체인 연결 상태와 작전별 실행 그래프를 확인하는 표면입니다.',
   },
-  topology: {
-    title: '지휘 계층',
-    description: '실제 관리 유닛인지, 실시간 에이전트 기반 자동 투영인지 구분해서 봅니다.',
-  },
-  alerts: {
-    title: '경보 모음',
-    description: '지금 개입을 밀어올리는 alert만 모아서 보는 표면입니다.',
-  },
-  trace: {
-    title: '최근 트레이스',
-    description: '작전, 주체, 유닛 단위 이벤트를 시간순으로 보는 표면입니다.',
-  },
   control: {
     title: '승인과 제어',
     description: '결정 승인과 유닛 제어를 실제로 수행하는 표면입니다.',
-  },
-  summary: {
-    title: '지휘 요약',
-    description: '전체 지휘면을 한 번에 훑는 계기판 성격의 요약 표면입니다.',
   },
 }
 
@@ -205,7 +178,7 @@ export function surfaceRouteParams(surface: CommandPlaneSurface): Record<string,
     const operationId = commandPlaneChainFocusOperationId.value
     return operationId ? { ...base, surface, operation: operationId } : { ...base, surface }
   }
-  if (surface === 'swarm' || surface === 'warroom' || surface === 'orchestra') {
+  if (surface === 'swarm' || surface === 'orchestra') {
     return {
       ...base,
       surface,
@@ -258,11 +231,6 @@ export function currentSurfaceRecommendation(surface: CommandPlaneSurface): {
   const chainSummary = commandPlaneChainSummary.value
 
   switch (surface) {
-    case 'warroom':
-      return {
-        tool: 'masc_observe_operations',
-        reason: '실시간 실행, 워커, 메시지, 트레이스를 한 화면에서 보고 필요한 세부 표면으로 바로 이동합니다.',
-      }
     case 'operations':
       return {
         tool: 'masc_operation_status',
@@ -283,48 +251,17 @@ export function currentSurfaceRecommendation(surface: CommandPlaneSurface): {
         tool: chainSummary?.operations[0]?.preview_run?.chain_id ? 'masc_chain_run_get' : 'masc_chain_snapshot',
         reason: '체인 연결 상태와 최근 run 그래프를 함께 보면 병목을 빨리 좁힐 수 있습니다.',
       }
-    case 'topology':
-      return {
-        tool: 'masc_observe_topology',
-        reason: '이 구조가 실제 관리 단위인지 자동 투영인지 먼저 구분해야 지휘면을 오해하지 않습니다.',
-      }
-    case 'alerts':
-      return {
-        tool: 'masc_observe_alerts',
-        reason: '경보에서 먼저 문제가 된 유닛과 작전을 고릅니다.',
-      }
-    case 'trace':
-      return {
-        tool: 'masc_observe_traces',
-        reason: '트레이스 흐름으로 원인 이벤트를 바로 따라갈 수 있습니다.',
-      }
     case 'control':
       return {
         tool: 'masc_operator_action',
         reason: '승인이나 kill switch 같은 실제 조작은 제어 표면과 operator action이 이어집니다.',
       }
-    case 'summary':
     default:
       return {
         tool: 'masc_observe_operations',
-        reason: '요약을 본 뒤에는 현재 작전 표면으로 내려가 실제 움직임을 확인하는 게 가장 빠릅니다.',
+        reason: '현재 작전 표면으로 가서 실제 움직임을 확인하는 게 가장 빠릅니다.',
       }
   }
-}
-
-export function summaryHighlightKey(context: DashboardWorkflowContext | null): string | null {
-  const focus = context?.focus_kind?.toLowerCase() ?? ''
-  if (!focus) return null
-  if (focus.includes('artifact_scope') || focus.includes('routing_confidence') || focus.includes('cache_contention')) {
-    return 'microarch'
-  }
-  if (focus.includes('leader_offline') || focus.includes('roster_offline')) {
-    return 'alerts'
-  }
-  if (focus.includes('stale_data')) {
-    return 'swarm'
-  }
-  return null
 }
 
 export function swarmFocusKey(context: DashboardWorkflowContext | null): string | null {
@@ -418,9 +355,6 @@ export async function fire(action: () => Promise<void>) {
   }
 }
 
-export function normalizedStatus(value?: string | null): string {
-  return value?.trim().toLowerCase() ?? ''
-}
 
 export function hasSwarmActivity(): boolean {
   const swarm = commandPlaneSwarm.value
@@ -454,28 +388,4 @@ export function hasSwarmActivity(): boolean {
   )
 }
 
-export function isSessionLive(session: OperatorSessionSnapshot): boolean {
-  const normalized = normalizedStatus(session.status)
-  return normalized === 'active' || normalized === 'running'
-}
 
-export function pickWarRoomSession(): OperatorSessionSnapshot | null {
-  const sessions = operatorSnapshot.value?.sessions ?? []
-  const swarm = commandPlaneSwarm.value
-  const linkedSessionId = swarm?.detachment?.session_id ?? null
-  if (linkedSessionId) {
-    const linked = sessions.find(session => session.session_id === linkedSessionId)
-    if (linked) return linked
-  }
-  const operationId = swarm?.operation?.operation_id ?? dashboardSwarmOperationId()
-  if (operationId) {
-    const operationLinked = sessions.find(session => session.command_plane_operation_id === operationId)
-    if (operationLinked) return operationLinked
-  }
-  const detachmentId = swarm?.detachment?.detachment_id ?? null
-  if (detachmentId) {
-    const detachmentLinked = sessions.find(session => session.command_plane_detachment_id === detachmentId)
-    if (detachmentLinked) return detachmentLinked
-  }
-  return sessions.find(isSessionLive) ?? sessions[0] ?? null
-}

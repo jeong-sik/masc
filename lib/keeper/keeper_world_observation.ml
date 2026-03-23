@@ -143,6 +143,68 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
       let trimmed = String.trim meta.continuity_summary in
       if trimmed = "" then "No continuity snapshot available." else trimmed
 
+(** Collect recent board activity within the keeper's heartbeat window.
+    Returns (event summaries, new post count, mention count). *)
+let collect_board_events ~(meta : keeper_meta) : string list * int * int =
+  try
+    let window_sec =
+      float_of_int (max 30 (min 300 meta.presence_keepalive_sec)) *. 1.5
+    in
+    let since_ts = Time_compat.now () -. window_sec in
+    let posts =
+      Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:20 ()
+    in
+    let recent =
+      List.filter (fun (p : Board.post) -> p.created_at >= since_ts) posts
+    in
+    let new_count = List.length recent in
+    let targets =
+      if meta.mention_targets <> [] then meta.mention_targets
+      else [ meta.name ]
+    in
+    let mention_count =
+      List.length
+        (List.filter
+           (fun (p : Board.post) ->
+             let haystack =
+               String.lowercase_ascii (p.title ^ " " ^ p.body ^ " " ^ p.content)
+             in
+             List.exists
+               (fun target ->
+                 let needle =
+                   "@" ^ String.lowercase_ascii target
+                 in
+                 try
+                   let _ =
+                     Str.search_forward (Str.regexp_string needle) haystack 0
+                   in
+                   true
+                 with Not_found -> false)
+               targets)
+           recent)
+    in
+    let events =
+      let capped =
+        if List.length recent > 5 then
+          List.filteri (fun i _ -> i < 5) recent
+        else recent
+      in
+      List.map
+        (fun (p : Board.post) ->
+          Printf.sprintf "[%s] %s: %s"
+            (Board.Agent_id.to_string p.author)
+            p.title
+            (short_preview ~max_len:80 p.content))
+        capped
+    in
+    (events, new_count, mention_count)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Keeper.warn "board event collection failed: %s"
+      (Printexc.to_string exn);
+    ([], 0, 0)
+
 let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
   let pending_mentions = collect_pending_mentions ~config ~meta in
   let unclaimed_task_count, failed_task_count =
@@ -160,9 +222,12 @@ let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
     Agent_economy.economic_pressure ~base_path:config.base_path
       ~agent_name:meta.name
   in
+  let pending_board_events, _board_new_count, _board_mention_count =
+    collect_board_events ~meta
+  in
   {
     pending_mentions;
-    pending_board_events = [];
+    pending_board_events;
     idle_seconds;
     active_goals = meta.active_goal_ids;
     autonomy_level;

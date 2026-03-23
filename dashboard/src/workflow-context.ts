@@ -394,22 +394,12 @@ export function workflowActionLabel(actionType?: string | null): string {
 
 export function workflowCommandSurfaceLabel(surface?: string | null): string {
   switch (surface) {
-    case 'warroom':
-      return '워룸'
-    case 'summary':
-      return '요약'
     case 'orchestra':
       return '오케스트라'
     case 'swarm':
       return '스웜'
     case 'chains':
       return '체인'
-    case 'topology':
-      return '토폴로지'
-    case 'alerts':
-      return '알림'
-    case 'trace':
-      return '트레이스'
     case 'control':
       return '제어'
     case 'operations':

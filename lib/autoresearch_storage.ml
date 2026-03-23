@@ -99,3 +99,29 @@ let latest_cycle_record ~base_path loop_id =
           Log.Autoresearch.warn "cycle parse failed: %s" (Printexc.to_string exn);
           last
     ) None lines
+
+(** Load full cycle history from results.jsonl for a loop. *)
+let load_cycle_history ~base_path loop_id =
+  let path = results_file ~base_path loop_id in
+  if not (Fs_compat.file_exists path) then
+    []
+  else
+    let lines = Fs_compat.load_jsonl path in
+    List.filter_map (fun json ->
+      try Some (Autoresearch_serde.cycle_of_yojson json)
+      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+    ) lines
+
+(** Scan .masc/autoresearch/ for all persisted loop IDs.
+    Returns loop IDs (directory names) that contain a state.json file. *)
+let scan_persisted_loop_ids ~base_path =
+  let dir = Filename.concat base_path (Filename.concat ".masc" "autoresearch") in
+  if not (Sys.file_exists dir) then []
+  else
+    try
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun name ->
+             let state_path = Filename.concat (Filename.concat dir name) "state.json" in
+             Fs_compat.file_exists state_path)
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []

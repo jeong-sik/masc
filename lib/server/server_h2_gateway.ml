@@ -484,6 +484,38 @@ let make_request_handler ~sw ~clock ~server_start_time =
                 (Yojson.Safe.to_string (mdal_loops_error_json msg))
                 ~status:`Bad_request ~extra_headers:cors)
 
+      | `GET, "/api/v1/autoresearch/loops" ->
+          let state = get_server_state () in
+          let base_path = state.Mcp_server.room_config.base_path in
+          let json =
+            Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, p when String.length p > 27
+                   && String.sub p 0 27 = "/api/v1/autoresearch/loops/" ->
+          let state = get_server_state () in
+          let base_path = state.Mcp_server.room_config.base_path in
+          let loop_id = String.trim (String.sub p 27 (String.length p - 27)) in
+          if String.length loop_id = 0 then
+            h2_respond_json h2_reqd {|{"error":"loop_id is required"}|}
+              ~status:`Bad_request ~extra_headers:cors
+          else
+            (match
+               Dashboard_http_autoresearch.autoresearch_loop_detail_json
+                 ~base_path ~loop_id ~history_limit:100
+             with
+             | Ok json ->
+                 h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+             | Error msg ->
+                 h2_respond_json h2_reqd
+                   (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
+                   ~status:`Not_found ~extra_headers:cors
+             | exception Invalid_argument msg ->
+                 h2_respond_json h2_reqd
+                   (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
+                   ~status:`Not_found ~extra_headers:cors)
+
       | `GET, "/api/v1/command-plane" ->
           let state = get_server_state () in
           let json = command_plane_snapshot_http_json ~state in

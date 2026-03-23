@@ -15,6 +15,7 @@ open Keeper_execution
 type supervised_entry = {
   name : string;
   stop : bool ref;
+  wakeup : bool ref;
   started_at : float; [@warning "-69"]
   done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
   done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
@@ -104,7 +105,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta) entry
     Fun.protect
       (fun () ->
         Keeper_keepalive.run_heartbeat_loop ~proactive_warmup_sec
-          ctx meta entry.stop;
+          ctx meta entry.stop ~wakeup:entry.wakeup;
         Eio.Promise.resolve entry.done_r `Stopped;
         publish_lifecycle "stopped" meta.name "normal exit")
       ~finally:(fun () ->
@@ -127,9 +128,10 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     let stop = ref false in
     let now = Time_compat.now () in
     let done_p, done_r = Eio.Promise.create () in
+    let wakeup_ref = ref false in
     let entry = {
       name = meta.name;
-      stop; started_at = now;
+      stop; wakeup = wakeup_ref; started_at = now;
       done_p; done_r;
       restart_count = ref 0;
       last_restart_ts = ref 0.0;
@@ -137,8 +139,9 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     } in
     Hashtbl.replace supervised_registry meta.name entry;
     (* Backward compat: register in legacy keepalive registry *)
+    let wakeup = ref false in
     Keeper_keepalive.register_keepalive meta.name
-      { Keeper_keepalive.stop; started_at = now; grpc_close = None };
+      { Keeper_keepalive.stop; wakeup; started_at = now; grpc_close = None };
     (* Room initialization *)
     (try
        if not (Room_utils.is_initialized ctx.config) then
@@ -191,9 +194,11 @@ let sweep_and_recover (ctx : _ context) =
     | Ok (Some meta) ->
         let attempt = !(old_entry.restart_count) + 1 in
         let done_p, done_r = Eio.Promise.create () in
+        let new_wakeup = ref false in
         let new_entry = {
           name;
           stop = ref false;
+          wakeup = new_wakeup;
           started_at = now;
           done_p; done_r;
           restart_count = ref attempt;
@@ -202,7 +207,8 @@ let sweep_and_recover (ctx : _ context) =
         } in
         Hashtbl.replace supervised_registry name new_entry;
         Keeper_keepalive.register_keepalive name
-          { Keeper_keepalive.stop = new_entry.stop; started_at = now; grpc_close = None };
+          { Keeper_keepalive.stop = new_entry.stop; wakeup = new_wakeup;
+            started_at = now; grpc_close = None };
         launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta new_entry;
         publish_lifecycle "restarted" name
           (Printf.sprintf "attempt %d" attempt);

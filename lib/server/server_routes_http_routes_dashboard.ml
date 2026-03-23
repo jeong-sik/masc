@@ -383,3 +383,50 @@ let add_routes ~sw ~clock router =
              Http.Response.json ~status:`Bad_request
                (Yojson.Safe.to_string (mdal_loops_error_json msg)) reqd
        ) request reqd)
+
+  (* Autoresearch loops list — all active + persisted loops *)
+  |> Http.Router.get "/api/v1/autoresearch/loops" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let json =
+           Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  (* Autoresearch loop detail — single loop with full cycle history *)
+  |> Http.Router.prefix_get "/api/v1/autoresearch/loops/" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let req_path = Http.Request.path req in
+         let prefix = "/api/v1/autoresearch/loops/" in
+         let loop_id =
+           String.trim
+             (String.sub req_path (String.length prefix)
+                (String.length req_path - String.length prefix))
+         in
+         if String.length loop_id = 0 then
+           Http.Response.json ~status:`Bad_request
+             {|{"error":"loop_id is required"}|} reqd
+         else
+           let history_limit =
+             Server_utils.int_query_param req "history_limit" ~default:100
+             |> Server_utils.clamp ~min_v:0 ~max_v:1000
+           in
+           match
+             Dashboard_http_autoresearch.autoresearch_loop_detail_json
+               ~base_path ~loop_id ~history_limit
+           with
+           | Ok json ->
+               Http.Response.json ~compress:true ~request:req
+                 (Yojson.Safe.to_string json) reqd
+           | Error msg ->
+               Http.Response.json ~status:`Not_found
+                 (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
+                 reqd
+           | exception Invalid_argument msg ->
+               Http.Response.json ~status:`Not_found
+                 (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
+                 reqd
+       ) request reqd)

@@ -187,6 +187,7 @@ let default_voice_agent_id_for name =
 let canonical_policy_shell_mode = function
   | "readonly" -> "readonly"
   | "sandboxed" -> "sandboxed"
+  | "coding" -> "coding"
   | _ -> "disabled"
 
 let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =

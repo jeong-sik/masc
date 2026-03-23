@@ -76,8 +76,9 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     let with_voice =
       if meta.policy_voice_enabled then keeper_voice_tool_names @ base else base
     in
+    let shell_mode = canonical_policy_shell_mode meta.policy_shell_mode in
     let with_shell =
-      if canonical_policy_shell_mode meta.policy_shell_mode = "readonly" then
+      if shell_mode = "readonly" || shell_mode = "coding" then
         keeper_shell_readonly_tool_names @ with_voice
       else with_voice
     in

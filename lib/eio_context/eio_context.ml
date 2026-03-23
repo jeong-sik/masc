@@ -74,8 +74,8 @@ let get_switch () =
 let https_connector :
   (Uri.t ->
    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-   [> Eio.Flow.two_way_ty ] Eio.Resource.t) lazy_t =
-  lazy (
+   [> Eio.Flow.two_way_ty ] Eio.Resource.t) Eio.Lazy.t =
+  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let fail_closed msg =
       Log.Misc.info "%s" msg;
       (fun _uri _raw -> failwith msg)
@@ -106,4 +106,4 @@ let https_connector :
   )
 
 let get_https_connector () =
-  Lazy.force https_connector
+  Eio.Lazy.force https_connector

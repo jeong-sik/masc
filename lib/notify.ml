@@ -77,7 +77,7 @@ let is_macos () =
 
 (** Check if terminal-notifier is available *)
 let has_terminal_notifier =
-  lazy (
+  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let result = run_argv_line ["which"; "terminal-notifier"] in
     result <> ""
   )
@@ -185,7 +185,7 @@ let send_notification ?(sound=false) ?focus_cmd ~title ~subtitle ~message () =
   if not (is_macos ()) then
     (* Silently skip on non-macOS *)
     ()
-  else if Lazy.force has_terminal_notifier then
+  else if Eio.Lazy.force has_terminal_notifier then
     send_via_terminal_notifier ~title ~subtitle ~message ~sound ~focus_cmd
   else begin
     send_via_osascript ~title ~subtitle ~message;

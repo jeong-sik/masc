@@ -23,16 +23,16 @@ type call_stats = {
 let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
 let registry_mutex = Eio.Mutex.create ()
 
-let known_tool_names : (string, unit) Hashtbl.t Lazy.t =
-  lazy
-    (let tbl = Hashtbl.create 256 in
-     List.iter
-       (fun (schema : Types.tool_schema) -> Hashtbl.replace tbl schema.name ())
-       Config.all_tool_schemas;
-     tbl)
+let known_tool_names : (string, unit) Hashtbl.t Eio.Lazy.t =
+  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
+    let tbl = Hashtbl.create 256 in
+    List.iter
+      (fun (schema : Types.tool_schema) -> Hashtbl.replace tbl schema.name ())
+      Config.all_tool_schemas;
+    tbl)
 
 let is_known_tool tool_name =
-  Hashtbl.mem (Lazy.force known_tool_names) tool_name
+  Hashtbl.mem (Eio.Lazy.force known_tool_names) tool_name
 
 (** Record a tool call. Called from handle_call_tool_eio after execution. *)
 let record_call ~tool_name ~success ~duration_ms =

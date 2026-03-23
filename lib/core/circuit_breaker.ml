@@ -312,14 +312,20 @@ let wrap_exn t ~agent_id (f : unit -> 'a) : ('a, string) result =
          record_failure t ~agent_id ~reason:msg;
          Error msg)
 
-(** {1 Global Instance} *)
+(** {1 Global Instance}
 
-let global = lazy (create_from_env ())
+    Uses [Eio.Lazy] instead of [Stdlib.Lazy] because [Lazy.force] is not
+    fiber-safe: concurrent forcing raises [CamlinternalLazy.Undefined].
+    [Eio.Lazy] blocks the second caller until init completes.
+    [cancel:`Protect] ensures init finishes even if the forcing fiber
+    is cancelled. *)
 
-let check_global ~agent_id = check (Lazy.force global) ~agent_id
-let record_failure_global ~agent_id ~reason = record_failure (Lazy.force global) ~agent_id ~reason
-let record_success_global ~agent_id = record_success (Lazy.force global) ~agent_id
+let global = Eio.Lazy.from_fun ~cancel:`Protect create_from_env
+
+let check_global ~agent_id = check (Eio.Lazy.force global) ~agent_id
+let record_failure_global ~agent_id ~reason = record_failure (Eio.Lazy.force global) ~agent_id ~reason
+let record_success_global ~agent_id = record_success (Eio.Lazy.force global) ~agent_id
 let force_open_global ~agent_id ~reason ~duration_sec =
-  force_open (Lazy.force global) ~agent_id ~reason ~duration_sec
-let force_close_global ~agent_id = force_close (Lazy.force global) ~agent_id
-let get_status_global ~agent_id = get_status (Lazy.force global) ~agent_id
+  force_open (Eio.Lazy.force global) ~agent_id ~reason ~duration_sec
+let force_close_global ~agent_id = force_close (Eio.Lazy.force global) ~agent_id
+let get_status_global ~agent_id = get_status (Eio.Lazy.force global) ~agent_id

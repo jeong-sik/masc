@@ -123,6 +123,7 @@
    server_mcp_transport_http_headers
    server_mcp_transport_http_sse
    server_mcp_transport_ws
+   server_ws_standalone
    server_webrtc_transport
    web_dashboard
    credits_dashboard

@@ -1,0 +1,140 @@
+(** Standalone WebSocket server for MASC MCP.
+
+    Runs on a separate port (default 8937, configurable via MASC_WS_PORT).
+    Opt-in via MASC_WS_ENABLED=1.
+
+    Unlike the /ws upgrade path on the HTTP port, this server owns the
+    full TCP socket, so httpun-ws can run the HTTP->WS upgrade lifecycle
+    end-to-end without conflicting with gluten's protocol management.
+
+    Session state is shared with {!Server_mcp_transport_ws}: the same
+    [sessions] hashtable, [send_to_session], and [cleanup_session] are
+    reused.  This module only handles TCP accept + connection handler
+    wiring. *)
+
+module Ws = Httpun_ws
+module Ws_eio = Httpun_ws_eio
+
+let default_port = 8937
+
+(** Read the configured WS port from environment or use default. *)
+let configured_port () =
+  match Sys.getenv_opt "MASC_WS_PORT" with
+  | Some s -> (
+    match int_of_string_opt s with
+    | Some p when p > 0 && p < 65536 -> p
+    | _ ->
+      Log.Server.warn "MASC_WS_PORT=%s is not a valid port, using %d" s default_port;
+      default_port)
+  | None -> default_port
+
+(** Check whether standalone WS is enabled (default: disabled). *)
+let is_enabled () =
+  match Sys.getenv_opt "MASC_WS_ENABLED" with
+  | Some "1" | Some "true" -> true
+  | _ -> false
+
+(** WebSocket handler factory.
+
+    For each accepted connection, httpun-ws-eio calls this with the
+    client address and a [Wsd.t].  We create a session in the shared
+    registry and wire frame callbacks to [on_message]. *)
+let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
+    Ws.Websocket_connection.input_handlers =
+  let session_id = Server_mcp_transport_ws.next_id () in
+  let session : Server_mcp_transport_ws.ws_session =
+    { id = session_id; wsd; closed = false }
+  in
+  Server_mcp_transport_ws.with_sessions_rw (fun () ->
+    Hashtbl.replace Server_mcp_transport_ws.sessions session_id session);
+  (* Register as SSE external subscriber for broadcast events *)
+  Sse.subscribe_external ~id:session_id
+    ~is_alive:(fun () ->
+      not session.closed && not (Ws.Wsd.is_closed session.wsd))
+    ~callback:(fun sse_event ->
+      if not session.closed then
+        ignore (Server_mcp_transport_ws.send_text session sse_event))
+    ();
+  Log.Server.info "WebSocket session %s connected (standalone port)" session_id;
+  let buf = Buffer.create 4096 in
+  { Ws.Websocket_connection.
+    frame = (fun ~opcode ~is_fin:_ ~len:_ payload ->
+      match opcode with
+      | `Text | `Binary ->
+        Buffer.clear buf;
+        Ws.Payload.schedule_read payload
+          ~on_eof:(fun () ->
+            let text = Buffer.contents buf in
+            if String.length text > 0 then
+              on_message session_id text)
+          ~on_read:(fun bs ~off ~len ->
+            Buffer.add_string buf
+              (Bigstringaf.substring bs ~off ~len))
+      | `Ping ->
+        Ws.Wsd.send_pong wsd;
+        Ws.Payload.close payload
+      | `Connection_close ->
+        Server_mcp_transport_ws.cleanup_session session_id;
+        Ws.Payload.close payload
+      | `Pong | `Continuation | `Other _ ->
+        Ws.Payload.close payload
+    );
+    eof = (fun ?error:_ () ->
+      Server_mcp_transport_ws.cleanup_session session_id)
+  }
+
+(** Start the standalone WebSocket server.
+
+    Forks a fiber that listens for TCP connections and runs the
+    httpun-ws-eio connection handler for each.  Does nothing if
+    [MASC_WS_ENABLED] is not set.
+
+    @param sw Eio switch for structured concurrency.
+    @param env Eio environment (for network access).
+    @param on_message Called with [(session_id, body_str)] for each
+      inbound text frame. *)
+let start
+    ~(sw : Eio.Switch.t)
+    ~(env : Eio_unix.Stdenv.base)
+    ~(on_message : string -> string -> unit)
+  : unit =
+  if not (is_enabled ()) then
+    Log.Server.info "WebSocket transport disabled (set MASC_WS_ENABLED=1 to enable)"
+  else begin
+    let port = configured_port () in
+    let net = Eio.Stdenv.net env in
+    let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
+    let socket =
+      Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:128 addr
+    in
+    let connection_handler =
+      Ws_eio.Server.create_connection_handler ~sw
+        (make_websocket_handler ~on_message)
+    in
+    Eio.Fiber.fork ~sw (fun () ->
+      Log.Server.info "WebSocket server starting on port %d" port;
+      let rec accept_loop backoff_s =
+        try
+          let flow, client_addr = Eio.Net.accept ~sw socket in
+          Eio.Fiber.fork ~sw (fun () ->
+            try connection_handler client_addr flow
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Server.warn "WS standalone handler error: %s"
+                (Printexc.to_string exn));
+          accept_loop 0.05
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Server.error "WS standalone accept error: %s"
+            (Printexc.to_string exn);
+          (* Backoff to avoid tight error loops *)
+          (try Eio.Time.sleep (Eio.Stdenv.clock env) backoff_s
+           with Eio.Cancel.Cancelled _ as e -> raise e
+              | _ -> ());
+          let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
+          accept_loop next_backoff
+      in
+      accept_loop 0.05)
+  end

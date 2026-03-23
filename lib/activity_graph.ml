@@ -298,7 +298,7 @@ let list_events config ?room_id ?(kinds = []) ~after_seq ~limit () =
            value.seq > after_seq && matches_filters ?room_id ~kinds value)
   in
   if after_seq > 0 then
-    Server_utils.take limit all
+    List.take limit all
   else
     let total = List.length all in
     all |> List.drop (max 0 (total - limit))

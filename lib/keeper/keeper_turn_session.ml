@@ -22,7 +22,10 @@ let _keeper_team_session_model (meta : keeper_meta) =
   else
     match meta.models with
     | model :: _ -> model
-    | [] -> "default"
+    | [] ->
+      (match Oas_model_resolve.models_of_cascade_name meta.cascade_name with
+       | model :: _ -> model
+       | [] -> "default")
 
 let keeper_team_session_note (meta : keeper_meta) (message : string) =
   Printf.sprintf
@@ -180,7 +183,10 @@ let start_keeper_auto_team_session (ctx : _ context) (meta : keeper_meta)
         ("communication_mode", `String "hybrid");
         ("instruction_profile", `String "strict");
         ("alert_channel", `String "both");
-        ("model_cascade", `List (List.map (fun model -> `String model) meta.models));
+        ("model_cascade", `List (List.map (fun model -> `String model)
+           (let m = meta.models in
+            if m <> [] then m
+            else Oas_model_resolve.models_of_cascade_name meta.cascade_name)));
         ( "agents",
           `List
             (Team_session_types.dedup_strings

@@ -149,3 +149,78 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
       Error (Printf.sprintf "No valid/available model specs for labels: %s (missing: %s)"
         (String.concat ", " labels)
         (String.concat ", " missing))
+
+(* ── Cascade model resolution (Eio-free) ──────────────── *)
+
+(* Locate config/cascade.json via CWD or ME_ROOT.
+   Inlined from Oas_worker.default_config_path to avoid circular dependency. *)
+let cascade_config_path () : string option =
+  let base dir name = Filename.concat (Filename.concat dir "config") name in
+  let cwd = Sys.getcwd () in
+  let me_root =
+    Sys.getenv_opt "ME_ROOT"
+    |> Option.value
+         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
+  in
+  let masc_root = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
+  let candidates =
+    [ base cwd "cascade.json";
+      base masc_root "cascade.json" ]
+  in
+  List.find_opt Sys.file_exists candidates
+
+(* Simple JSON cache without Eio.Mutex — safe for use outside Eio context.
+   Uses mtime-based reload, matching Cascade_inference's pattern. *)
+let cascade_json_cache : (string, float * Yojson.Safe.t) Hashtbl.t =
+  Hashtbl.create 2
+
+let load_cascade_json (path : string) : Yojson.Safe.t option =
+  try
+    let st = Unix.stat path in
+    let mtime = st.Unix.st_mtime in
+    match Hashtbl.find_opt cascade_json_cache path with
+    | Some (cached_mtime, json) when Float.equal cached_mtime mtime ->
+      Some json
+    | _ ->
+      let ic = open_in path in
+      let content = Fun.protect
+          ~finally:(fun () -> close_in_noerr ic)
+          (fun () ->
+             let len = in_channel_length ic in
+             let buf = Bytes.create len in
+             really_input ic buf 0 len;
+             Bytes.to_string buf)
+      in
+      let json = Yojson.Safe.from_string content in
+      Hashtbl.replace cascade_json_cache path (mtime, json);
+      Some json
+  with _ -> None
+
+let load_cascade_profile ~config_path ~name : string list =
+  let key = name ^ "_models" in
+  match load_cascade_json config_path with
+  | None -> []
+  | Some json ->
+    let open Yojson.Safe.Util in
+    match json |> member key with
+    | `List items ->
+      List.filter_map
+        (function `String s -> Some (String.trim s) | _ -> None)
+        items
+    | _ -> []
+
+(** Resolve model label strings from a cascade name by reading cascade.json.
+    Returns the model list from the "{cascade_name}_models" key in cascade.json.
+    Falls back to "default_models" then ["llama:auto"; "glm:auto"] if absent.
+    Does NOT use Eio.Mutex — safe to call outside Eio context. *)
+let models_of_cascade_name (cascade_name : string) : string list =
+  let defaults = ["llama:auto"; "glm:auto"] in
+  match cascade_config_path () with
+  | None -> defaults
+  | Some config_path ->
+    let from_named = load_cascade_profile ~config_path ~name:cascade_name in
+    if from_named <> [] then from_named
+    else
+      let from_default = load_cascade_profile ~config_path ~name:"default" in
+      if from_default <> [] then from_default
+      else defaults

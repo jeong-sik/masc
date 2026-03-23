@@ -11,6 +11,7 @@ import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
 import {
   DASHBOARD_SURFACES,
+  DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
   sectionItemsForTab,
 } from '../config/navigation'
@@ -126,15 +127,15 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
 
   return html`
     <nav class="flex flex-col h-full">
-      <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-3 pt-3 pb-1">
+      <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-4 pt-4 pb-2">
         ${!collapsed ? html`
           <div class="px-1">
-            <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">Navigation</div>
-            <div class="mt-0.5 text-[14px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
+            <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-[rgba(154,217,255,0.5)]">Navigation</div>
+            <div class="mt-0.5 text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)] drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">MASC Core</div>
           </div>
         ` : null}
         <button
-          class="flex size-7 items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--text-body)] cursor-pointer transition-colors duration-150"
+          class="flex size-7 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.08)] hover:text-white cursor-pointer transition-all duration-200"
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
         >
@@ -142,8 +143,8 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         </button>
       </div>
 
-      <div class="flex-1 overflow-y-auto ${collapsed ? 'px-1.5' : 'px-3'} py-3">
-        <div class="flex flex-col gap-3">
+      <div class="flex-1 overflow-y-auto ${collapsed ? 'px-2' : 'px-4'} py-3">
+        <div class="flex flex-col gap-4">
           ${DASHBOARD_SURFACES.map(surface => {
             const isSurfaceActive = surface.id === currentTab
             const sections = sectionItemsForTab(surface.id)
@@ -151,39 +152,39 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
             if (collapsed) {
               return html`
                 <button
-                  class="flex items-center justify-center w-full rounded-lg p-2 cursor-pointer transition-colors duration-150 ${isSurfaceActive ? 'bg-[rgba(71,184,255,0.14)] text-[#d9f2ff]' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.06)]'}"
+                  class="flex items-center justify-center w-full rounded-xl p-2.5 cursor-pointer transition-all duration-200 ${isSurfaceActive ? 'bg-[rgba(71,184,255,0.18)] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.2)]' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.06)] border border-transparent'}"
                   onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
                   title=${surface.label}
                 >
-                  <span class="text-[16px]">${surface.icon}</span>
+                  <span class="text-[18px] drop-shadow-md">${surface.icon}</span>
                 </button>
               `
             }
 
             return html`
-              <div class="flex flex-col gap-1">
+              <div class="flex flex-col gap-1.5">
                 <button
-                  class="flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left cursor-pointer transition-colors duration-150 ${isSurfaceActive && sections.length === 0 ? 'bg-[rgba(71,184,255,0.14)] text-[#d9f2ff]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.04)]'}"
+                  class="flex items-center gap-3 w-full rounded-xl px-3 py-2.5 text-left cursor-pointer transition-all duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.15),rgba(71,184,255,0.05))] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.2)]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.05)] border border-transparent'}"
                   onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
                 >
-                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] text-[14px]">
+                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-[16px] shadow-sm">
                     ${surface.icon}
                   </span>
                   <div class="flex-1 min-w-0">
-                    <div class="text-[13px] font-semibold truncate leading-none ${isSurfaceActive ? 'text-[#9ad9ff]' : ''}">${surface.label}</div>
+                    <div class="text-[14px] font-medium truncate leading-none ${isSurfaceActive ? 'text-[#9ad9ff] drop-shadow-[0_0_8px_rgba(71,184,255,0.4)]' : ''}">${surface.label}</div>
                   </div>
                 </button>
 
                 ${sections.length > 0 ? html`
-                  <div class="flex flex-col gap-0.5 pl-10 pr-1">
+                  <div class="flex flex-col gap-0.5 pl-11 pr-1 border-l border-[rgba(255,255,255,0.05)] ml-7">
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id
                       return html`
                         <button
-                          class="w-full rounded-md px-2.5 py-1.5 text-left cursor-pointer text-[12px] transition-colors duration-150 ${isSectionActive ? 'bg-[rgba(71,184,255,0.12)] text-[#cfeaff] font-medium' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-body)]'}"
+                          class="w-full rounded-lg px-3 py-2 text-left cursor-pointer text-[13px] transition-all duration-200 ${isSectionActive ? 'bg-[rgba(71,184,255,0.15)] text-[#cfeaff] font-medium shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.15)]' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--text-body)] border border-transparent'}"
                           onClick=${() => navigate(surface.id, item.params)}
                         >
-                          <div class="truncate">${item.label}</div>
+                          <div class="truncate ${isSectionActive ? 'drop-shadow-[0_0_8px_rgba(71,184,255,0.3)]' : ''}">${item.label}</div>
                         </button>
                       `
                     })}
@@ -196,7 +197,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
       </div>
 
       ${!collapsed ? html`
-        <div class="shrink-0 border-t border-[rgba(255,255,255,0.06)] p-3">
+        <div class="shrink-0 border-t border-[rgba(255,255,255,0.08)] p-4 bg-[rgba(0,0,0,0.1)]">
           <${SnapshotCard} currentTab=${currentTab} />
         </div>
       ` : null}
@@ -245,6 +246,25 @@ export function TabContent() {
   }
 }
 
+function SurfaceLead() {
+  const currentTab = route.value.tab
+  const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
+  const currentSection = currentSectionForRoute(route.value)
+
+  return html`
+    <div class="mb-8 flex flex-wrap items-end justify-between gap-4">
+      <div class="min-w-0">
+        <h2 class="text-[32px] font-bold tracking-tight text-[var(--text-strong)] flex items-center gap-3 drop-shadow-md">
+          ${currentSection?.label ?? currentView?.label ?? '홈'}
+        </h2>
+        <p class="mt-2 max-w-[700px] text-[14px] leading-relaxed text-[rgba(255,255,255,0.5)]">
+          ${currentSection?.description ?? currentView?.description ?? '지금 필요한 신호를 가장 안정적으로 읽을 수 있는 기본 화면입니다.'}
+        </p>
+      </div>
+    </div>
+  `
+}
+
 export function DashboardMain() {
   if (dashboardLoading.value && !connected.value && !roomTruthInitializing.value) {
     return html`<div class="loading-state loading-pulse">대시보드 불러오는 중...</div>`
@@ -264,6 +284,7 @@ export function DashboardMain() {
     ${roomTruthInitializing.value ? html`
       <div class="text-center py-[6px] px-4 bg-[rgba(230,167,0,0.12)] border-b border-solid border-b-[rgba(230,167,0,0.3)] text-[#e6a700] text-[0.8rem] shrink-0 rounded-xl mb-4">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
     ` : null}
+    <${SurfaceLead} />
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <${TabContent} />
     <//>

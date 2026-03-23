@@ -193,7 +193,19 @@ let command_plane_orchestra_http_json ~deps ~state request =
       mcp_session_id = deps.get_session_id_any request;
     }
   in
-  let full = Command_plane_orchestra.json ?run_id ?operation_id ctx in
+  let clock = deps.get_clock () in
+  let full =
+    match Eio.Time.with_timeout clock 30.0 (fun () ->
+      Ok (Command_plane_orchestra.json ?run_id ?operation_id ctx)
+    ) with
+    | Ok v -> v
+    | Error `Timeout ->
+        `Assoc [
+          ("error", `String "timeout");
+          ("message", `String "Orchestra computation timed out after 30s");
+          ("generated_at", `String (Types.now_iso ()));
+        ]
+  in
   if summary_only then
     (* Strip heavy nodes/edges for lightweight summary response *)
     match full with

@@ -60,15 +60,14 @@ export function App() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
-  const showSectionChip = currentSection != null && currentSection.label !== currentView?.label
 
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--bg-0)] text-[var(--text-body)]">
-      <header class="shrink-0 border-b border-[rgba(138,163,211,0.16)] bg-[rgba(4,9,18,0.78)] px-4 py-4 backdrop-blur-xl z-10">
+      <header class="shrink-0 border-b border-[var(--card-border)] bg-[rgba(4,9,18,0.82)] px-6 py-4 backdrop-blur-xl z-10">
         <div class="mx-auto flex w-full max-w-[1680px] items-start justify-between gap-6 max-[860px]:flex-col max-[860px]:items-stretch">
           <div class="min-w-0">
             <div class="flex items-center gap-4">
-              <div class="flex size-12 shrink-0 items-center justify-center rounded-[14px] border border-[rgba(113,214,255,0.28)] bg-[linear-gradient(145deg,rgba(61,157,255,0.34),rgba(10,28,58,0.95))] text-[18px] font-semibold text-white shadow-[0_18px_36px_rgba(3,8,18,0.38)]">
+              <div class="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-[rgba(113,214,255,0.28)] bg-[linear-gradient(145deg,rgba(61,157,255,0.34),rgba(10,28,58,0.95))] text-[18px] font-semibold text-white shadow-lg">
                 ${currentView?.icon ?? 'M'}
               </div>
               <div class="min-w-0">
@@ -98,13 +97,13 @@ export function App() {
         </div>
       </header>
 
-      <div class="flex flex-1 gap-4 overflow-hidden px-4 pb-4 pt-4 max-[1100px]:flex-col">
-        <aside class="w-[296px] shrink-0 overflow-y-auto rounded-[28px] border border-[rgba(138,163,211,0.16)] bg-[linear-gradient(180deg,rgba(9,17,31,0.94),rgba(7,14,26,0.9))] shadow-[0_30px_80px_rgba(2,6,14,0.42)] max-[1100px]:w-full max-[1100px]:max-h-[360px]">
+      <div class="flex flex-1 gap-5 overflow-hidden p-5 max-[1100px]:flex-col max-[1100px]:p-4">
+        <aside class="w-72 shrink-0 overflow-y-auto rounded-3xl border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,17,31,0.94),rgba(7,14,26,0.9))] shadow-xl max-[1100px]:w-full max-[1100px]:max-h-[360px]">
           <${SideRail} />
         </aside>
 
-        <main class="min-w-0 flex-1 overflow-hidden rounded-[30px] border border-[rgba(138,163,211,0.16)] bg-[linear-gradient(180deg,rgba(8,15,28,0.92),rgba(9,14,25,0.88))] shadow-[0_30px_80px_rgba(2,6,14,0.4)] max-[1100px]:min-h-0">
-          <div class="mx-auto h-full max-w-[1500px] overflow-y-auto px-5 py-5 lg:px-8 lg:py-7">
+        <main class="min-w-0 flex-1 overflow-hidden rounded-3xl border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(8,15,28,0.92),rgba(9,14,25,0.88))] shadow-xl max-[1100px]:min-h-0">
+          <div class="mx-auto h-full max-w-[1600px] overflow-y-auto p-6 lg:p-8">
             <${DashboardMain} />
           </div>
         </main>

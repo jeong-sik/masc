@@ -11,7 +11,6 @@ import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
 import {
   DASHBOARD_SURFACES,
-  DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
   sectionItemsForTab,
 } from '../config/navigation'
@@ -119,6 +118,108 @@ export function BuildIdentityBadge() {
   `
 }
 
+
+
+export function SideRail() {
+  const currentTab = route.value.tab
+  const currentSection = currentSectionForRoute(route.value)
+
+  return html`
+    <nav class="flex flex-col h-full">
+      <div class="flex-1 overflow-y-auto px-4 py-5">
+        <div class="mb-5 px-2">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">Navigation</div>
+          <div class="mt-1 text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
+        </div>
+
+        <div class="flex flex-col gap-4">
+          ${DASHBOARD_SURFACES.map(surface => {
+            const isSurfaceActive = surface.id === currentTab
+            const sections = sectionItemsForTab(surface.id)
+
+            return html`
+              <div class="flex flex-col gap-1.5">
+                <button
+                  class="flex items-center gap-3 w-full rounded-2xl px-3 py-3 text-left cursor-pointer transition-all duration-150 ${isSurfaceActive && sections.length === 0 ? 'bg-[rgba(71,184,255,0.14)] text-[#d9f2ff] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.04)]'}"
+                  onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
+                >
+                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] text-[16px]">
+                    ${surface.icon}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-[14px] font-semibold truncate leading-none ${isSurfaceActive ? 'text-[#9ad9ff]' : ''}">${surface.label}</div>
+                  </div>
+                </button>
+                
+                ${sections.length > 0 ? html`
+                  <div class="flex flex-col gap-1 pl-12 pr-1">
+                    ${sections.map(item => {
+                      const isSectionActive = isSurfaceActive && currentSection?.id === item.id
+                      return html`
+                        <button
+                          class="w-full rounded-xl px-3 py-2 text-left cursor-pointer text-[13px] transition-all duration-150 ${isSectionActive ? 'bg-[rgba(71,184,255,0.12)] text-[#cfeaff] font-medium' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-body)]'}"
+                          onClick=${() => navigate(surface.id, item.params)}
+                        >
+                          <div class="truncate">${item.label}</div>
+                        </button>
+                      `
+                    })}
+                  </div>
+                ` : null}
+              </div>
+            `
+          })}
+        </div>
+      </div>
+
+      <div class="shrink-0 border-t border-[rgba(255,255,255,0.06)] p-4">
+        <${SnapshotCard} currentTab=${currentTab} />
+      </div>
+    </nav>
+  `
+}
+
+export function TabContent() {
+  const tab = route.value.tab
+
+  switch (tab) {
+    case 'overview':
+      return html`<${Overview} />`
+    case 'monitoring':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('모니터링 화면')}>
+          <${LazyStatus} />
+        <//>
+      `
+    case 'workspace':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('작업 화면')}>
+          <${LazyWork} />
+        <//>
+      `
+    case 'command':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('지휘 통제 화면')}>
+          <${LazyOperations} />
+        <//>
+      `
+    case 'lab':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('실험실 화면')}>
+          <${LazyLabSurface} />
+        <//>
+      `
+    case 'logs':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('시스템 로그')}>
+          <${LazyLogViewer} />
+        <//>
+      `
+    default:
+      return html`<${Overview} />`
+  }
+}
+
 export function DashboardMain() {
   if (dashboardLoading.value && !connected.value && !roomTruthInitializing.value) {
     return html`<div class="loading-state loading-pulse">대시보드 불러오는 중...</div>`
@@ -136,7 +237,7 @@ export function DashboardMain() {
 
   return html`
     ${roomTruthInitializing.value ? html`
-      <div class="text-center py-[6px] px-4 bg-[rgba(230,167,0,0.12)] border-b border-solid border-b-[rgba(230,167,0,0.3)] text-[#e6a700] text-[0.8rem] shrink-0">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
+      <div class="text-center py-[6px] px-4 bg-[rgba(230,167,0,0.12)] border-b border-solid border-b-[rgba(230,167,0,0.3)] text-[#e6a700] text-[0.8rem] shrink-0 rounded-xl mb-4">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
     ` : null}
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <${TabContent} />

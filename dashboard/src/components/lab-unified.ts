@@ -17,29 +17,31 @@ export function LabSurface() {
   const section = currentSection()
 
   return html`
-    <div class="tab-unified grid gap-4">
-      <div class="tab-pill-bar">
+    <div class="flex flex-col gap-6">
+      <div class="flex gap-1.5 p-1.5 bg-card/40 backdrop-blur-md border border-card-border rounded-xl w-fit shadow-sm shadow-black/10">
         <button
-          class="tab-pill-btn ${section === 'overview' ? 'active' : ''}"
+          class="px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200 cursor-pointer border border-transparent ${section === 'overview' ? 'bg-accent/10 text-accent border-accent/20 shadow-sm' : 'bg-transparent text-text-muted hover:bg-white/5 hover:text-text-body'}"
           onClick=${() => navigate('lab', { section: 'overview' })}
         >
           개요
         </button>
         <button
-          class="tab-pill-btn ${section === 'trpg' ? 'active' : ''}"
+          class="px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200 cursor-pointer border border-transparent ${section === 'trpg' ? 'bg-accent/10 text-accent border-accent/20 shadow-sm' : 'bg-transparent text-text-muted hover:bg-white/5 hover:text-text-body'}"
           onClick=${() => navigate('lab', { section: 'trpg' })}
         >
-          TRPG
+          TRPG 실험
         </button>
         <button
-          class="tab-pill-btn ${section === 'avatars' ? 'active' : ''}"
+          class="px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200 cursor-pointer border border-transparent ${section === 'avatars' ? 'bg-accent/10 text-accent border-accent/20 shadow-sm' : 'bg-transparent text-text-muted hover:bg-white/5 hover:text-text-body'}"
           onClick=${() => navigate('lab', { section: 'avatars' })}
         >
-          아바타
+          아바타 갤러리
         </button>
       </div>
 
-      <${Lab} />
+      <div class="transition-opacity duration-300">
+        <${Lab} />
+      </div>
     </div>
   `
 }

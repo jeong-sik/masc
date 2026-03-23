@@ -51,6 +51,8 @@ let risk_overrides : (string * risk_level) list = [
   (* Explicit claim surfaces. *)
   ("masc_claim_next", Medium);
   ("masc_claim_task", Medium);
+  (* Canonical task transition entrypoint; covers claim/start/done/cancel flows. *)
+  ("masc_transition", Medium);
 ]
 
 let critical_patterns =

@@ -314,6 +314,7 @@
    tool_schemas_control
    tool_schemas_a2a
    tool_schemas_misc
+   tool_improve_loop_schemas
    tool_plan
    tool_run
    tool_bridge
@@ -359,6 +360,7 @@
    tool_room
    workflow_guide
    tool_control
+   tool_improve_loop
    tool_verification
    tool_misc
    tool_agent_timeline

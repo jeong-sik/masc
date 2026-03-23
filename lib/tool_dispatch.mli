@@ -85,6 +85,7 @@ type module_tag =
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper | Mod_compact | Mod_mdal
   | Mod_notifications | Mod_inline
+  | Mod_improve_loop
   | Mod_autoresearch
   | Mod_research
   | Mod_model_catalog

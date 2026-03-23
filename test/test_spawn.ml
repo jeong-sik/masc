@@ -122,14 +122,18 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_run_deliverable" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains board_post" true
     (List.mem "mcp__masc__masc_board_post" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains tool_stats" true
+  Alcotest.(check bool) "omits tool_stats" false
     (List.mem "mcp__masc__masc_tool_stats" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains tool_help" true
     (List.mem "mcp__masc__masc_tool_help" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains tool_admin_snapshot" true
+  Alcotest.(check bool) "omits tool_admin_snapshot" false
     (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains keeper_tool_catalog" true
+  Alcotest.(check bool) "omits keeper_tool_catalog" false
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "omits operator_snapshot" false
+    (List.mem "mcp__masc__masc_operator_snapshot" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "omits team_session_prove" false
+    (List.mem "mcp__masc__masc_team_session_prove" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits tool_list (no schema)" false
     (List.mem "mcp__masc__masc_tool_list" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits tool_grant (no schema)" false

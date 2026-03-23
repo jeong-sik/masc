@@ -172,6 +172,20 @@ let make_extended_handler routes =
             let response = Httpun.Response.create ~headers `Not_found in
             Httpun.Reqd.respond_with_string reqd response body
           end
+        | `POST, "/webrtc/offer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
+          Http.Request.read_body_async reqd (fun body ->
+            match Masc_mcp.Server_webrtc_transport.handle_offer_request body with
+            | Ok json -> Http.Response.json json reqd
+            | Error msg ->
+              Http.Response.json ~status:`Bad_request
+                (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
+        | `POST, "/webrtc/answer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
+          Http.Request.read_body_async reqd (fun body ->
+            match Masc_mcp.Server_webrtc_transport.handle_answer_request body with
+            | Ok json -> Http.Response.json json reqd
+            | Error msg ->
+              Http.Response.json ~status:`Bad_request
+                (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
         | `DELETE, "/mcp" -> handle_delete_mcp request reqd
         | `DELETE, "/mcp/managed" ->
             handle_delete_mcp ~profile:Mcp_eio.Managed_agent request reqd

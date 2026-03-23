@@ -37,6 +37,7 @@ type protocol =
   | Grpc
   | Sse
   | Ws
+  | Webrtc
 
 let protocol_to_string = function
   | JsonRpc -> "json-rpc"
@@ -44,6 +45,7 @@ let protocol_to_string = function
   | Grpc -> "grpc"
   | Sse -> "sse"
   | Ws -> "ws"
+  | Webrtc -> "webrtc"
 
 let protocol_of_string = function
   | "json-rpc" | "jsonrpc" -> Some JsonRpc
@@ -51,6 +53,7 @@ let protocol_of_string = function
   | "grpc" -> Some Grpc
   | "sse" -> Some Sse
   | "ws" | "websocket" -> Some Ws
+  | "webrtc" -> Some Webrtc
   | _ -> None
 
 (** Transport binding configuration *)

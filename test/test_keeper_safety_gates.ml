@@ -264,16 +264,15 @@ let test_learned_readonly_combined_voice () =
   check bool "has voice_speak" true (List.mem "keeper_voice_speak" tools);
   check bool "has board tools" true (List.mem "keeper_board_post" tools)
 
-let test_coding_mode_canonical_is_disabled () =
-  (* canonical_policy_shell_mode maps "coding" to "disabled",
-     so coding tools are NOT added *)
+let test_coding_mode_grants_tools () =
+  (* canonical_policy_shell_mode now recognizes "coding" — grants
+     coding tools plus all lower-tier tools *)
   let meta = make_meta ~policy_shell_mode:"coding"
     ~policy_mode:"learned_offline_v1" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  (* Since "coding" → canonical "disabled", no shell_readonly either *)
-  check bool "no keeper_shell_readonly" false (List.mem "keeper_shell_readonly" tools);
-  (* masc_code_write etc. not granted because canonical never returns "coding" *)
-  check bool "no masc_code_write" false (List.mem "masc_code_write" tools)
+  check bool "keeper_shell_readonly included" true (List.mem "keeper_shell_readonly" tools);
+  check bool "keeper_fs_read included" true (List.mem "keeper_fs_read" tools);
+  check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
 
 let test_sandboxed_mode () =
   (* "sandboxed" is preserved by canonical but treated same as disabled for tool grants *)
@@ -444,7 +443,7 @@ let () =
       test_case "learned non-research profile" `Quick test_learned_non_research_profile;
       test_case "heuristic mode" `Quick test_heuristic_mode_tools;
       test_case "readonly + voice combined" `Quick test_learned_readonly_combined_voice;
-      test_case "coding canonical is disabled" `Quick test_coding_mode_canonical_is_disabled;
+      test_case "coding mode grants tools" `Quick test_coding_mode_grants_tools;
       test_case "sandboxed mode" `Quick test_sandboxed_mode;
     ]);
     ("extract_command_from_input", [

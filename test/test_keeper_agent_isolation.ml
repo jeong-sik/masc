@@ -48,11 +48,15 @@ let make_meta
 let has_keeper_prefix name =
   String.length name >= 7 && String.sub name 0 7 = "keeper_"
 
+let has_prefix prefix name =
+  String.length name >= String.length prefix &&
+  String.sub name 0 (String.length prefix) = prefix
+
 let is_research_shard_tool name =
-  let prefixes = ["masc_autoresearch_"; "masc_research_"] in
-  List.exists (fun prefix ->
-    String.length name >= String.length prefix &&
-    String.sub name 0 (String.length prefix) = prefix) prefixes
+  has_prefix "masc_autoresearch_" name || has_prefix "masc_research_" name
+
+let is_coding_tool name =
+  has_prefix "masc_code_" name
 
 (* ============================================================
    Invariant 1: Non-research keepers only get keeper_* tools
@@ -83,9 +87,10 @@ let test_research_extra_tools_are_research_only () =
       ~soul_profile:"research" () in
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
-  let unexpected = List.filter (fun n -> not (is_research_shard_tool n)) non_keeper in
+  let unexpected = List.filter (fun n ->
+    not (is_research_shard_tool n) && not (is_coding_tool n)) non_keeper in
   Alcotest.(check (list string))
-    "research keeper only adds research shard tools" [] unexpected
+    "research+coding keeper only adds research/coding tools" [] unexpected
 
 let test_write_done_returns_empty () =
   let meta = make_meta ~policy_mode:"Learned_offline_v1"

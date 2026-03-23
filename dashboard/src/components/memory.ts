@@ -135,7 +135,7 @@ function authorAvatar(name: string): string {
   for (let i = 0; i < name.length; i++) {
     hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
   }
-  return avatars[Math.abs(hash) % avatars.length]
+  return avatars[Math.abs(hash) % avatars.length] || '🤖'
 }
 
 function kindBadgeColor(kind: string): string {
@@ -269,14 +269,14 @@ function SortBar() {
   const current = boardSortMode.value
   const hideLabel = hideAutomationPosts.value ? '자동화 글 숨김' : '자동화 글 표시 중'
   return html`
-    <div class="flex flex-col gap-3 mb-4 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-      <div class="flex items-center gap-1.5 flex-wrap">
+    <div class="flex flex-col gap-3 mb-6 p-4 rounded-2xl border border-card-border/50 bg-card/30 backdrop-blur-md shadow-inner">
+      <div class="flex items-center gap-2 flex-wrap">
         ${SORT_MODES.map(mode => html`
           <button
-            class="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150 border cursor-pointer
+            class="px-4 py-2 rounded-xl text-[12px] font-bold transition-all duration-200 border cursor-pointer shadow-sm
               ${current === mode.id
-                ? 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)]'
-                : 'bg-transparent text-[var(--text-muted)] border-transparent hover:bg-[var(--white-8)] hover:text-[var(--text-body)]'
+                ? 'bg-ok/10 text-ok border-ok/30 shadow-[0_0_10px_rgba(74,222,128,0.1)]'
+                : 'bg-white/5 text-text-muted border-transparent hover:bg-white/10 hover:text-text-body hover:border-white/10'
               }"
             onClick=${() => {
               boardSortMode.value = mode.id
@@ -288,12 +288,12 @@ function SortBar() {
           </button>
         `)}
       </div>
-      <div class="flex items-center gap-2 flex-wrap">
+      <div class="flex items-center gap-3 flex-wrap">
         <button
-          class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer
+          class="px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-200 border cursor-pointer
             ${hideAutomationPosts.value
-              ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)]'
-              : 'bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
+              ? 'bg-accent/10 text-accent border-accent/20 shadow-sm'
+              : 'bg-transparent text-text-muted border-white/10 hover:bg-white/5 hover:text-text-body'
             }"
           onClick=${() => {
             hideAutomationPosts.value = !hideAutomationPosts.value
@@ -302,10 +302,10 @@ function SortBar() {
           ${hideLabel}
         </button>
         <button
-          class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer
+          class="px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-200 border cursor-pointer
             ${boardExcludeSystem.value
-              ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)]'
-              : 'bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
+              ? 'bg-accent/10 text-accent border-accent/20 shadow-sm'
+              : 'bg-transparent text-text-muted border-white/10 hover:bg-white/5 hover:text-text-body'
             }"
           onClick=${() => {
             boardExcludeSystem.value = !boardExcludeSystem.value
@@ -316,7 +316,7 @@ function SortBar() {
         </button>
         <div class="ml-auto">
           <button
-            class="px-3 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-4 py-1.5 rounded-lg text-[11px] font-bold transition-all duration-200 border cursor-pointer bg-white/5 text-text-muted border-white/10 hover:bg-white/10 hover:text-text-strong shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${refreshBoard}
             disabled=${boardLoading.value}
           >
@@ -333,7 +333,7 @@ function MemorySummary() {
   const grouped = splitVisiblePosts(boardPosts.value)
   const visibleCount = grouped.human.length + grouped.operations.length
   return html`
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 mb-4">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4 mb-6">
       <${KpiCard} label="보이는 글" value=${visibleCount} />
       <${KpiCard} label="정렬" value=${sortLabel} />
       <${KpiCard} label="잡음 필터" value=${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 숨김` : '분리된 레인 표시'} />
@@ -358,46 +358,48 @@ function PostCard({ post }: { post: BoardPost }) {
 
   return html`
     <div
-      class="board-post group flex gap-3 rounded-xl p-4 border border-[var(--card-border)] bg-[var(--card)] hover:bg-[var(--white-6)] hover:border-[rgba(71,184,255,0.26)] transition-all duration-200 cursor-pointer"
+      class="group flex gap-4 rounded-2xl p-5 border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:shadow-md hover:bg-card/60 hover:-translate-y-0.5 hover:border-accent/30 transition-all duration-200 cursor-pointer"
       onClick=${() => navigateToPost(post.id)}
     >
       <!-- Vote column -->
-      <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-[36px]">
+      <div class="flex flex-col items-center gap-1.5 pt-1 min-w-[40px]">
         <button
-          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[#ff4500] hover:bg-[rgba(255,69,0,0.1)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="w-8 h-6 flex items-center justify-center rounded-md text-[13px] font-bold text-text-muted hover:text-[#ff4500] hover:bg-[#ff4500]/10 transition-colors cursor-pointer border border-transparent hover:border-[#ff4500]/20"
           onClick=${(event: Event) => handleVote('up', event)}
         >▲</button>
-        <span class="text-[13px] font-semibold tabular-nums text-[var(--text-strong)]">${post.votes ?? 0}</span>
+        <span class="text-[14px] font-bold tabular-nums text-text-strong bg-white/5 w-full text-center py-1 rounded-md shadow-inner">${post.votes ?? 0}</span>
         <button
-          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[#7193ff] hover:bg-[rgba(113,147,255,0.1)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="w-8 h-6 flex items-center justify-center rounded-md text-[13px] font-bold text-text-muted hover:text-accent hover:bg-accent/10 transition-colors cursor-pointer border border-transparent hover:border-accent/20"
           onClick=${(event: Event) => handleVote('down', event)}
         >▼</button>
       </div>
 
       <!-- Post body -->
-      <div class="flex-1 min-w-0">
+      <div class="flex-1 min-w-0 flex flex-col">
         <!-- Title -->
-        <div class="text-[14px] font-medium text-[var(--text-strong)] leading-snug mb-2 group-hover:text-[var(--accent)] transition-colors">${post.title}</div>
+        <div class="text-[15px] font-bold text-text-strong leading-snug mb-2.5 group-hover:text-accent transition-colors tracking-wide">${post.title}</div>
 
         <!-- Content preview: max 3 lines -->
-        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] mb-3 overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${previewText(stripStateBlocks(post.body))}</div>
+        <div class="text-[13px] text-text-body/90 leading-relaxed mb-4 overflow-hidden font-medium" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${previewText(stripStateBlocks(post.body))}</div>
 
         <!-- Footer: author + meta + badges -->
-        <div class="flex items-center gap-2 flex-wrap">
+        <div class="flex items-center gap-3 flex-wrap mt-auto pt-3 border-t border-card-border/50">
           <!-- Author line -->
-          <span class="text-[12px] text-[var(--text-muted)]">${authorAvatar(post.author)}</span>
-          <a
-            class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
-            onClick=${(e: Event) => { e.stopPropagation(); openAuthorDetail(post.author) }}
-          >${post.author}</a>
-          <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
-          ${isUpdated(post) ? html`<span class="text-[10px] text-[var(--text-muted)] opacity-50">(수정됨)</span>` : null}
+          <div class="flex items-center gap-1.5 bg-white/5 pl-1 pr-2 py-0.5 rounded-lg border border-white/5 shadow-sm">
+            <span class="text-[13px]">${authorAvatar(post.author)}</span>
+            <a
+              class="text-[11px] font-bold text-text-muted hover:text-accent transition-colors cursor-pointer tracking-wider"
+              onClick=${(e: Event) => { e.stopPropagation(); openAuthorDetail(post.author) }}
+            >${post.author}</a>
+          </div>
+          <span class="text-[11px] font-mono text-text-muted/60"><${TimeAgo} timestamp=${post.created_at} /></span>
+          ${isUpdated(post) ? html`<span class="text-[10px] font-semibold text-text-dim/50">(수정됨)</span>` : null}
 
           <!-- Separator -->
-          <span class="text-[var(--text-muted)] opacity-30">|</span>
+          <span class="text-white/10">|</span>
 
           <!-- Counts -->
-          <span class="text-[11px] text-[var(--text-muted)]">댓글 ${post.comment_count}</span>
+          <span class="text-[11px] font-semibold text-text-muted flex items-center gap-1"><span class="text-[13px]">💬</span> ${post.comment_count}</span>
 
           <!-- Category badges -->
           ${kind !== 'human' ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(kind)}">${kind}</span>` : null}
@@ -423,16 +425,16 @@ function CommentItem({ comment }: { comment: BoardComment }) {
   const needsTruncation = (comment.content?.length ?? 0) > 300
 
   return html`
-    <div class="board-comment rounded-lg p-4 bg-[var(--white-3)] border border-[var(--border-slate-12)]">
-      <div class="flex items-center gap-2.5 mb-2">
-        <span class="text-[12px]">${authorAvatar(comment.author)}</span>
-        <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => openAuthorDetail(comment.author)}>${comment.author}</a>
-        <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
+    <div class="board-comment rounded-2xl p-5 bg-card/60 backdrop-blur-md border border-card-border/50 shadow-sm hover:shadow-md transition-shadow">
+      <div class="flex items-center gap-3 mb-3">
+        <span class="text-[14px] bg-white/5 size-6 flex items-center justify-center rounded-lg shadow-inner border border-white/5">${authorAvatar(comment.author)}</span>
+        <a class="text-[12px] font-bold text-text-strong hover:text-accent transition-colors cursor-pointer tracking-wide" onClick=${() => openAuthorDetail(comment.author)}>${comment.author}</a>
+        <span class="text-[10px] text-text-dim/80 font-mono"><${TimeAgo} timestamp=${comment.created_at} /></span>
       </div>
-      <div class="comment-text text-[13px] text-[var(--text-body)] leading-[1.55]">${comment.content}</div>
+      <div class="comment-text text-[13px] text-text-body/90 leading-relaxed font-medium">${comment.content}</div>
       ${needsTruncation ? html`
         <button
-          class="comment-expand-btn mt-1 text-[11px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
+          class="comment-expand-btn mt-2 text-[11px] font-bold text-accent hover:text-accent/80 transition-colors cursor-pointer bg-accent/10 px-2 py-0.5 rounded-md border border-accent/20"
           style="display: inline"
           onClick=${toggleCommentExpand}
         >더 보기...</button>

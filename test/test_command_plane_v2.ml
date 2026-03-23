@@ -58,5 +58,13 @@ let () =
             Test_command_plane_v2_search.test_best_first_search_blocks_and_routes_research_pipeline;
           Alcotest.test_case "invalid search strategy is rejected" `Quick
             Test_command_plane_v2_search.test_invalid_search_strategy_is_rejected;
+          Alcotest.test_case
+            "operation trace filter keeps older matching cp events"
+            `Quick
+            Test_command_plane_v2_traces.test_operation_filter_reads_full_event_log;
+          Alcotest.test_case
+            "trace filter keeps older matching operator events"
+            `Quick
+            Test_command_plane_v2_traces.test_trace_filter_reads_full_operator_log;
         ] );
     ]

@@ -53,8 +53,10 @@ let normalize_response_text ~(text : string) ~(tool_names : string list) :
     @param generation Current generation counter
     @param max_turns Maximum agent turns (default 3)
     @param guardrails Optional OAS guardrails for tool safety gates
-    @param temperature MODEL temperature (default 0.3)
-    @param max_tokens Maximum output tokens (default 4096) *)
+    @param temperature MODEL temperature override; when omitted, resolved
+           from [Cascade_inference] with a 0.3 fallback
+    @param max_tokens Maximum output tokens override; when omitted, resolved
+           from [Cascade_inference] with a 4096 fallback *)
 let run_turn
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
@@ -69,13 +71,28 @@ let run_turn
     ~(generation : int)
     ?(max_turns : int = 100)
     ?guardrails
-    ?(temperature : float = 0.3)
-    ?(max_tokens : int = 4096)
+    ?temperature
+    ?max_tokens
     ?max_cost_usd
     ?on_event
     ?(autonomy_filter : string option)
     ()
   : (run_result, string) result =
+  (* 0. Resolve inference parameters via Cascade_inference *)
+  let temperature = match temperature with
+    | Some t -> t
+    | None ->
+      Cascade_inference.resolve_temperature
+        ~cascade_name
+        ~fallback:(fun () -> 0.3)
+  in
+  let max_tokens = match max_tokens with
+    | Some t -> t
+    | None ->
+      Cascade_inference.resolve_max_tokens
+        ~cascade_name
+        ~fallback:(fun () -> 4096)
+  in
   (* 1. Ensure session directory *)
   Keeper_types.mkdir_p base_dir;
   (* 2. Load checkpoint *)

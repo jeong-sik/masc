@@ -25,6 +25,9 @@ type experiment_entry = {
   metric : Research_metric.t;
 }
 
+let log_best_effort_failure step exn =
+  Log.Server.warn "research: %s failed: %s" step (Printexc.to_string exn)
+
 (** Gather minimal context about the repo for the LLM. *)
 let gather_context ~(config : Research_config.repo_config) : string =
   let parts = Buffer.create 2048 in
@@ -37,7 +40,7 @@ let gather_context ~(config : Research_config.repo_config) : string =
     Buffer.add_string parts "## Recent commits\n```\n";
     Buffer.add_string parts stdout;
     Buffer.add_string parts "```\n\n"
-  with _ -> ());
+  with exn -> log_best_effort_failure "git log context" exn);
   (* OCaml source files *)
   (try
     let _, stdout =
@@ -53,7 +56,7 @@ let gather_context ~(config : Research_config.repo_config) : string =
     if count > 30 then
       Buffer.add_string parts (Printf.sprintf "... and %d more\n" (count - 30));
     Buffer.add_string parts "```\n\n"
-  with _ -> ());
+  with exn -> log_best_effort_failure "source file context" exn);
   (* API surface from .mli files — prevents LLM from hallucinating APIs *)
   (try
     let _, stdout =
@@ -71,7 +74,7 @@ let gather_context ~(config : Research_config.repo_config) : string =
         Buffer.add_string parts (Printf.sprintf "... and %d more\n" (count - 40));
       Buffer.add_string parts "```\n\n"
     end
-  with _ -> ());
+  with exn -> log_best_effort_failure "signature context" exn);
   (* TODOs *)
   (try
     let _, stdout =
@@ -113,11 +116,11 @@ let gather_context ~(config : Research_config.repo_config) : string =
                 incr snippets_added
               end
             end
-          with _ -> ())
+          with exn -> log_best_effort_failure "TODO snippet context" exn)
         | _ -> ()
       end
     ) (if count > 3 then List.filteri (fun i _ -> i < 3) todos else todos)
-  with _ -> ());
+  with exn -> log_best_effort_failure "TODO context" exn);
   Buffer.contents parts
 
 (** Parse a JSON hypothesis from LLM response. *)
@@ -145,7 +148,9 @@ let parse_hypothesis (response : string) : hypothesis option =
       old_text = str_or_empty "old_text";
       new_text = str_or_empty "new_text";
     }
-  with _ -> None
+  with exn ->
+    log_best_effort_failure "hypothesis parse" exn;
+    None
 
 (** Detect no-op hypotheses that would not change any code. *)
 let is_noop_hypothesis (h : hypothesis) : bool =
@@ -235,7 +240,9 @@ let create_worktree ~(repo_path : string) ~(experiment_id : string) : string opt
       [ "git"; "-C"; repo_path; "worktree"; "add"; worktree_path; "-b"; branch; "HEAD" ]
     in
     Some worktree_path
-  with _ -> None
+  with exn ->
+    log_best_effort_failure "worktree creation" exn;
+    None
 
 (** Remove experiment worktree. *)
 let cleanup_worktree ~(repo_path : string) ~(worktree_path : string) : unit =
@@ -243,7 +250,7 @@ let cleanup_worktree ~(repo_path : string) ~(worktree_path : string) : unit =
     let _ = Process_eio.run_argv_with_status ~timeout_sec:30.0
       [ "git"; "-C"; repo_path; "worktree"; "remove"; worktree_path ]
     in ()
-  with _ -> ())
+  with exn -> log_best_effort_failure "worktree cleanup" exn)
 
 (** Apply a patch to the target file in the worktree.
     Supports (in priority order):
@@ -306,7 +313,9 @@ let apply_patch ~(worktree_path : string) ~(hypothesis : hypothesis) : bool =
           output_string oc patch; close_out oc;
           true
         end
-    with _ -> false
+    with exn ->
+      log_best_effort_failure "patch application" exn;
+      false
   end
 
 (** Log a result to the TSV file. *)
@@ -318,7 +327,9 @@ let log_result ~(results_file : string) ~(entry : experiment_entry) : unit =
     try
       let pos = LargeFile.pos_out oc in
       pos = Int64.zero
-    with _ -> false
+      with exn ->
+        log_best_effort_failure "results header check" exn;
+        false
   in
   (try
     if needs_header then output_string oc header;
@@ -443,7 +454,7 @@ let run ~sw ~net ~clock ~(config : Research_config.t) : experiment_entry list =
           (Research_metric.status_to_string entry.metric.status)
           (entry.metric.test_pass_rate *. 100.0) in
         Log.Server.info "%s" msg
-      with _ -> ())
+      with exn -> log_best_effort_failure "research status broadcast" exn)
   done;
 
   let kept = List.filter (fun e -> e.metric.status = Research_metric.Keep) !history in

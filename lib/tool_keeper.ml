@@ -127,6 +127,18 @@ let handle_resident_keeper_status ctx args : tool_result =
            (annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true
               ~resident_registered:true json))
 
+let inject_models_from_meta config name args =
+  match Safe_ops.json_string_list "models" args with
+  | _ :: _ -> args
+  | [] ->
+    match read_meta config name with
+    | Ok (Some meta) when meta.models <> [] ->
+      let models_json = `List (List.map (fun m -> `String m) meta.models) in
+      (match args with
+       | `Assoc fields -> `Assoc (("models", models_json) :: fields)
+       | _ -> args)
+    | _ -> args
+
 let inject_goal_from_message args =
   match Safe_ops.json_string_opt "goal" args with
   | Some _ -> args
@@ -145,8 +157,11 @@ let handle_resident_keeper_msg ctx args : tool_result =
     match read_resident_keeper ctx.config name with
     | Ok (Some _) -> Ok ()
     | _ ->
-        let args_with_goal = inject_goal_from_message args in
-        let ok, body = handle_resident_keeper_up ctx args_with_goal in
+        let args_enriched =
+          args |> inject_goal_from_message
+               |> inject_models_from_meta ctx.config name
+        in
+        let ok, body = handle_resident_keeper_up ctx args_enriched in
         if ok then Ok () else Error body
   in
   match ensure_result with
@@ -176,8 +191,11 @@ let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
     match read_resident_keeper ctx.config name with
     | Ok (Some _) -> Ok ()
     | _ ->
-        let args_with_goal = inject_goal_from_message args in
-        let ok, body = handle_resident_keeper_up ctx args_with_goal in
+        let args_enriched =
+          args |> inject_goal_from_message
+               |> inject_models_from_meta ctx.config name
+        in
+        let ok, body = handle_resident_keeper_up ctx args_enriched in
         if ok then Ok () else Error body
   in
   match ensure_result with

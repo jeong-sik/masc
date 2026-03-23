@@ -1322,6 +1322,56 @@ let test_write_meta_syncs_registered_resident_seed () =
         Yojson.Safe.Util.(
           resident_json |> member "seed_meta" |> member "trigger_mode" |> to_string))
 
+let test_keeper_up_persists_allowed_paths_to_status_policy () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let allowed_paths = [ "lib"; "docs/spec" ] in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("goal", `String "Stay resident");
+              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+              ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let ok, status_body =
+        dispatch "masc_keeper_status"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("include_history_tail", `Bool false);
+              ("include_compaction_history", `Bool false);
+              ("include_context", `Bool false);
+              ("include_metrics_overview", `Bool false);
+              ("include_memory_bank", `Bool false);
+            ])
+      in
+      check bool "status ok" true ok;
+      let status_json = Yojson.Safe.from_string status_body in
+      let persisted =
+        Yojson.Safe.Util.(
+          status_json |> member "policy" |> member "allowed_paths" |> to_list |> filter_string)
+      in
+      check (list string) "allowed_paths roundtrip" allowed_paths persisted)
 let test_keeper_policy_set_accepts_explicit_event_v1 () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1487,6 +1537,8 @@ let () =
            test_keeper_up_update_preserves_proactive_when_omitted;
          test_case "write_meta syncs registered resident seed" `Quick
            test_write_meta_syncs_registered_resident_seed;
+         test_case "keeper up persists allowed paths" `Quick
+           test_keeper_up_persists_allowed_paths_to_status_policy;
          test_case "policy set accepts explicit_event_v1" `Quick
            test_keeper_policy_set_accepts_explicit_event_v1;
          test_case "resident bootstrap marks stale explicit keeper" `Quick

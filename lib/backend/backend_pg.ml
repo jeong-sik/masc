@@ -221,15 +221,18 @@ let create_eio ~sw ~env (cfg : config) : (t, error) result =
   | None -> Error (ConnectionFailed "PostgreSQL URL not configured (set MASC_POSTGRES_URL)")
   | Some url ->
       let uri = Uri.of_string url in
+      (* Pool sizing: Supabase session pooler shares pool_size across all
+         clients. Keep low to avoid MaxClientsInSessionMode on restarts.
+         Rule: (CPU cores * 2) is overkill for a single app; 3 suffices. *)
       let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-        | Some s -> (try int_of_string s with _ -> 10)
-        | None -> 10
+        | Some s -> (try min (int_of_string s) 5 with _ -> 3)
+        | None -> 3
       in
       let pool_config = Caqti_pool_config.create
           ~max_size:max_pool
-          ~max_idle_size:(min max_pool 3)
-          ~max_idle_age:(Some (Mtime.Span.of_uint64_ns 30_000_000_000L))
-          ~max_use_count:(Some 50)
+          ~max_idle_size:(min max_pool 2)
+          ~max_idle_age:(Some (Mtime.Span.of_uint64_ns 15_000_000_000L))
+          ~max_use_count:(Some 100)
           () in
       let uri =
         if Uri.get_query_param uri "keepalives" <> None then uri

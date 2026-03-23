@@ -266,37 +266,12 @@ let get_pg_pool ~sw ~env =
   match !pg_pool_ref with
   | Some pool -> Ok pool
   | None ->
-    match get_postgres_url () with
-    | None -> Error "DATABASE_URL not set"
-    | Some url ->
-      let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-        | Some s -> (try int_of_string s with _ -> 5)
-        | None -> 5
-      in
-      let pool_config = Caqti_pool_config.create
-          ~max_size:max_pool ~max_idle_size:(min max_pool 2)
-          ~max_idle_age:(Some (Mtime.Span.of_uint64_ns 30_000_000_000L))
-          ~max_use_count:(Some 50) () in
-      let uri = Uri.of_string url in
-      let uri =
-        if Uri.get_query_param uri "keepalives" <> None then uri
-        else uri
-          |> (fun u -> Uri.add_query_param' u ("keepalives", "1"))
-          |> (fun u -> Uri.add_query_param' u ("keepalives_idle", "15"))
-          |> (fun u -> Uri.add_query_param' u ("keepalives_interval", "5"))
-          |> (fun u -> Uri.add_query_param' u ("keepalives_count", "3"))
-      in
-      match Caqti_eio_unix.connect_pool ~sw ~pool_config uri ~stdenv:env with
-      | Ok pool ->
-        pg_pool_ref := Some pool;
-        (* Register shutdown hook to drain PG connections.
-           Without this, force-exit leaves TCP connections as zombies
-           and Supabase session pooler hits MaxClientsInSessionMode. *)
-        at_exit (fun () ->
-          try Caqti_eio.Pool.drain pool
-          with _ -> ());
-        Ok pool
-      | Error e -> Error (Caqti_error.show e)
+    (* Do not create an independent pool here. The shared pool from
+       backend_pg should be injected via set_shared_pool at bootstrap.
+       Independent pools waste Supabase session pooler slots and cause
+       MaxClientsInSessionMode on rapid restarts. *)
+    ignore (sw, env);
+    Error "PG shared pool not injected (archive standalone pool removed)"
 
 (** PostgreSQL에 레코드 저장 *)
 let save_to_postgres ~sw ~env (r : record) : (unit, string) result =

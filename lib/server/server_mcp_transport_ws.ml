@@ -136,6 +136,16 @@ let upgrade_connection
        httpun-ws handles this internally when using respond_with_upgrade. *)
     ignore ws_conn)
 
+(** Send a text frame to a specific session by ID.
+    Returns [false] if the session is not found or the send fails. *)
+let send_to_session session_id text =
+  let session_opt =
+    with_sessions_rw (fun () -> Hashtbl.find_opt sessions session_id)
+  in
+  match session_opt with
+  | None -> false
+  | Some session -> send_text session text
+
 (** Broadcast a JSON string to all WebSocket sessions.
     Independent of SSE -- for WS-only messages. *)
 let broadcast_ws json_str =

@@ -301,7 +301,7 @@ let list_events config ?room_id ?(kinds = []) ~after_seq ~limit () =
     Server_utils.take limit all
   else
     let total = List.length all in
-    all |> Server_utils.drop (max 0 (total - limit))
+    all |> List.drop (max 0 (total - limit))
 
 let latest_seq config = read_current_seq config
 
@@ -708,7 +708,7 @@ let graph_json config ?room_id ?(kinds = []) ?(limit = 500)
   in
   let timeline =
     let total = List.length events in
-    events |> Server_utils.drop (max 0 (total - timeline_limit))
+    events |> List.drop (max 0 (total - timeline_limit))
   in
   let count_kind prefix =
     nodes_json

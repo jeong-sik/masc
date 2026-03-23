@@ -97,6 +97,46 @@ let persisted_to_loop_summary_json (base_path : string)
 (** Sort key: (status_rank, negative_elapsed) for running-first, newest-first ordering. *)
 type sort_key = { status_rank : int; neg_elapsed : float }
 
+let safe_active_entry_json ~(base_path : string)
+    (state : Autoresearch_types.loop_state) =
+  try
+    let json = loop_summary_json base_path state in
+    let sk =
+      {
+        status_rank =
+          (match state.status with Running -> 0 | _ -> 1);
+        neg_elapsed = -. (Time_compat.now () -. state.start_time);
+      }
+    in
+    Some (state.loop_id, sk, json)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Autoresearch.warn
+        "dashboard autoresearch list skipped active loop %s: %s"
+        state.loop_id (Printexc.to_string exn);
+      None
+
+let safe_persisted_entry_json ~(base_path : string)
+    (summary : Autoresearch_types.persisted_summary) =
+  try
+    let json = persisted_to_loop_summary_json base_path summary in
+    let sk =
+      {
+        status_rank =
+          (match summary.status with Running -> 0 | _ -> 1);
+        neg_elapsed = -. summary.elapsed_s;
+      }
+    in
+    Some (summary.loop_id, sk, json)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Autoresearch.warn
+        "dashboard autoresearch list skipped persisted loop %s: %s"
+        summary.loop_id (Printexc.to_string exn);
+      None
+
 (** Build the loops list JSON for GET /api/v1/autoresearch/loops.
     Merges in-memory active loops with persisted-only loops.
     Converts to JSON early to avoid polymorphic variant type mismatch. *)
@@ -106,14 +146,9 @@ let autoresearch_loops_json ~(base_path : string) : Yojson.Safe.t =
     Autoresearch.with_loops_ro (fun () ->
       Hashtbl.fold
         (fun _id (state : Autoresearch_types.loop_state) acc ->
-          let json = loop_summary_json base_path state in
-          let sk =
-            { status_rank =
-                (match state.status with Running -> 0 | _ -> 1);
-              neg_elapsed = -. (Time_compat.now () -. state.start_time);
-            }
-          in
-          (state.loop_id, sk, json) :: acc)
+          match safe_active_entry_json ~base_path state with
+          | Some entry -> entry :: acc
+          | None -> acc)
         Autoresearch.active_loops [])
   in
   let active_ids =
@@ -129,14 +164,7 @@ let autoresearch_loops_json ~(base_path : string) : Yojson.Safe.t =
       (fun loop_id ->
         match Autoresearch.load_state ~base_path loop_id with
         | Some summary ->
-            let json = persisted_to_loop_summary_json base_path summary in
-            let sk =
-              { status_rank =
-                  (match summary.status with Running -> 0 | _ -> 1);
-                neg_elapsed = -. summary.elapsed_s;
-              }
-            in
-            Some (loop_id, sk, json)
+            safe_persisted_entry_json ~base_path summary
         | None -> None)
       persisted_ids
   in

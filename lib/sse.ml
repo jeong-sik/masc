@@ -326,6 +326,28 @@ let notify_external_subscribers event =
     ) !dead
   end
 
+(** Actively reap dead external subscribers.
+    Unlike [notify_external_subscribers] which only checks [is_alive] during
+    broadcast delivery, this function proactively scans all subscribers and
+    removes dead ones.  Call periodically from the background maintenance loop
+    to prevent stale subscribers from accumulating when no broadcasts occur. *)
+let reap_dead_external_subscribers () =
+  let snapshot =
+    with_ext_sub_ro (fun () ->
+      Hashtbl.fold (fun _ v acc -> v :: acc) external_subscribers [])
+  in
+  let dead = ref [] in
+  List.iter (fun (sub : external_subscriber) ->
+    if not (sub.is_alive ()) then
+      dead := sub.sub_id :: !dead
+  ) snapshot;
+  if !dead <> [] then
+    List.iter (fun id ->
+      with_ext_sub_rw (fun () -> Hashtbl.remove external_subscribers id);
+      Log.Misc.info "Reaped dead external subscriber: %s" id
+    ) !dead;
+  List.length !dead
+
 (** Internal broadcast implementation shared by [broadcast] and [broadcast_to].
     Pushes the formatted event string into each matching client's
     [event_stream].  The registry read-lock is held only for the Hashtbl

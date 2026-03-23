@@ -91,6 +91,43 @@ let test_multiple_subscribers () =
     Masc_mcp.Sse.unsubscribe_external "multi-a";
     Masc_mcp.Sse.unsubscribe_external "multi-b")
 
+let test_reap_dead_subscribers () =
+  setup ();
+  Eio_main.run (fun _env ->
+    let alive_counter = ref 0 in
+    let dead_flag = ref true in
+    (* Register a subscriber that becomes dead *)
+    Masc_mcp.Sse.subscribe_external ~id:"reap-dead"
+      ~is_alive:(fun () -> !dead_flag)
+      ~callback:(fun _ev -> ()) ();
+    (* Register a subscriber that stays alive *)
+    Masc_mcp.Sse.subscribe_external ~id:"reap-alive"
+      ~is_alive:(fun () -> true)
+      ~callback:(fun _ev -> incr alive_counter) ();
+    let before = Masc_mcp.Sse.external_subscriber_count () in
+    Alcotest.(check bool) "both registered" true (before >= 2);
+    (* Mark dead subscriber *)
+    dead_flag := false;
+    (* Reap should remove exactly 1 *)
+    let reaped = Masc_mcp.Sse.reap_dead_external_subscribers () in
+    Alcotest.(check int) "reaped 1 dead subscriber" 1 reaped;
+    let after = Masc_mcp.Sse.external_subscriber_count () in
+    Alcotest.(check int) "count decreased by 1" (before - 1) after;
+    (* Alive subscriber still works *)
+    Masc_mcp.Sse.broadcast (`Assoc [("msg", `String "post-reap")]);
+    Alcotest.(check int) "alive subscriber still receives" 1 !alive_counter;
+    Masc_mcp.Sse.unsubscribe_external "reap-alive")
+
+let test_reap_returns_zero_when_all_alive () =
+  setup ();
+  Eio_main.run (fun _env ->
+    Masc_mcp.Sse.subscribe_external ~id:"all-alive"
+      ~is_alive:(fun () -> true)
+      ~callback:(fun _ev -> ()) ();
+    let reaped = Masc_mcp.Sse.reap_dead_external_subscribers () in
+    Alcotest.(check int) "nothing reaped" 0 reaped;
+    Masc_mcp.Sse.unsubscribe_external "all-alive")
+
 let () =
   Alcotest.run "SSE External Subscribers" [
     ("lifecycle", [
@@ -108,5 +145,11 @@ let () =
         test_callback_error_does_not_crash_broadcast;
       Alcotest.test_case "multiple subscribers" `Quick
         test_multiple_subscribers;
+    ]);
+    ("reaper", [
+      Alcotest.test_case "reap dead subscribers" `Quick
+        test_reap_dead_subscribers;
+      Alcotest.test_case "reap returns zero when all alive" `Quick
+        test_reap_returns_zero_when_all_alive;
     ]);
   ]

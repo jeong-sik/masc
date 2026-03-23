@@ -324,6 +324,21 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
         if sse_guards_reaped + http_guards_reaped + sessions_reaped > 0 then
           Log.Server.info "reaped %d SSE guards + %d HTTP guards + %d stale sessions"
             sse_guards_reaped http_guards_reaped sessions_reaped;
+        (* Reap dead external subscribers (gRPC, WebSocket, etc.)
+           that remain registered after their transport connection drops.
+           Without this, stale subscribers accumulate when no broadcasts
+           occur to trigger the lazy is_alive check. *)
+        let ext_reaped = Sse.reap_dead_external_subscribers () in
+        if ext_reaped > 0 then
+          Log.Server.info "reaped %d dead external subscribers" ext_reaped;
+        (* Clean up expired WebRTC signaling offers.
+           Offers older than 60s are removed to prevent indefinite
+           accumulation from failed handshake attempts. *)
+        if Server_webrtc_transport.is_enabled () then begin
+          let webrtc_expired = Server_webrtc_transport.cleanup_expired_offers () in
+          if webrtc_expired > 0 then
+            Log.Server.info "WebRTC: cleaned %d expired offers" webrtc_expired
+        end;
         loop ()
       in
       loop ());
@@ -600,7 +615,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     match Sys.getenv_opt "MASC_USE_H2" with
     | Some "1" | Some "true" -> `H2_only
     | Some "0" | Some "false" -> `H1_only
-    | Some "auto" | None -> `Auto
+    | Some "auto" -> `Auto
+    | None -> `H1_only
     | Some other ->
       Log.Server.warn "MASC_USE_H2=%s unrecognised, falling back to auto" other;
       `Auto

@@ -87,8 +87,7 @@ let () = Room_hooks.cleanup_board_artifacts_fn := (fun () ->
   let stale_system_daily_sec = 12.0 *. 3600.0 in
   let board_artifact_title title =
     let title = String.lowercase_ascii (String.trim title) in
-    String.starts_with ~prefix:"[sentinel daily]" title
-    || String.starts_with ~prefix:"[keeper daily]" title
+    String.starts_with ~prefix:"[keeper daily]" title
   in
   let board_artifact_author author =
     let author = String.lowercase_ascii (String.trim author) in
@@ -104,8 +103,7 @@ let () = Room_hooks.cleanup_board_artifacts_fn := (fun () ->
        (fun removed (post : Board.post) ->
          let author = Board.Agent_id.to_string post.author in
          if board_artifact_author author
-            || ((String.equal (String.lowercase_ascii author) "sentinel"
-                 || String.equal (String.lowercase_ascii author) "keeper")
+            || (String.equal (String.lowercase_ascii author) "keeper"
                 && board_artifact_title post.title
                 && now -. post.updated_at >= stale_system_daily_sec) then
            match Board_dispatch.delete_post

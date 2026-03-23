@@ -17,8 +17,8 @@ let contains_substring text needle =
   loop 0
 
 let system_session_creator_prefixes =
-  [ "keeper"; "dashboard"; "operator"; "system"; "gardener"; "sentinel";
-    "guardian"; "lodge-system"; "team-session"; "ecosystem" ]
+  [ "keeper"; "dashboard"; "operator"; "system";
+    "lodge-system"; "team-session"; "ecosystem" ]
 
 let creator_looks_system created_by =
   let normalized = String.lowercase_ascii (String.trim created_by) in

@@ -68,6 +68,10 @@ let () =
             `Quick
             Test_operator_control_keeper
             .test_keeper_status_exposes_summary_and_recoverable;
+          Alcotest.test_case "keeper config exposes live runtime and sources"
+            `Quick
+            Test_operator_control_keeper
+            .test_keeper_config_exposes_live_runtime_and_sources;
           Alcotest.test_case "snapshot keeper tool audit fallback" `Quick
             Test_operator_control_keeper.test_snapshot_keeper_tool_audit_fallback;
           Alcotest.test_case "keeper msg auto team session bridge" `Quick

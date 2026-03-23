@@ -63,7 +63,10 @@ let _gen_case_id () =
 
 let handle_petition_submit ctx args =
   let title = get_string args "title" "" in
-  let subject = get_string args "subject" "" in
+  let subject =
+    let by_schema = get_string args "subject_type" "" in
+    if by_schema <> "" then by_schema else get_string args "subject" ""
+  in
   let risk = get_string args "risk_class" "low" in
   let _config = ensure_room_ready ctx in
   if title = "" then json_err "title is required"
@@ -108,7 +111,16 @@ let handle_case_brief_submit ctx args =
   let case_id = get_string args "case_id" "" in
   let stance = get_string args "stance" "neutral" in
   let summary = get_string args "summary" "" in
-  let evidence = get_string args "evidence_refs" "" in
+  let evidence_refs =
+    match member "evidence_refs" args with
+    | `List items ->
+        items
+        |> List.filter_map (function
+             | `String value when String.trim value <> "" -> Some value
+             | _ -> None)
+    | `String value when String.trim value <> "" -> [ value ]
+    | _ -> []
+  in
   if case_id = "" then json_err "case_id is required"
   else begin
     match GV2.brief_stance_of_string stance with
@@ -118,7 +130,7 @@ let handle_case_brief_submit ctx args =
         ~case_id ~author:ctx.agent_name
         ~stance:stance_val
         ~summary
-        ~evidence_refs:(if evidence = "" then [] else [evidence])
+        ~evidence_refs
       in
       match brief_result with
       | Error msg -> json_err msg

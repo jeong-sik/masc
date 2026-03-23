@@ -189,7 +189,7 @@ let test_write_done_kills_all () =
   check (list string) "write_done returns empty" [] tools
 
 let test_learned_disabled_mode () =
-  (* learned + disabled: read tools + board tools only *)
+  (* learned + disabled: read + coordination + board + governance *)
   let meta = make_meta ~policy_shell_mode:"disabled"
     ~policy_mode:"learned_offline_v1" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in

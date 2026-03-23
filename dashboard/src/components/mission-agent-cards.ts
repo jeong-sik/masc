@@ -36,7 +36,7 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
       : toolAuditStateLabel(observedToolsEmptyState(row.keeper, row.brief.tool_audit_source))
   return html`
     <article class="w-full p-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-3 text-inherit text-left cursor-pointer ${toneClass(row.brief.status ?? row.agent?.status)}">
-      <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => openAgentDetail(row.brief.agent_name)}>
+      <button type="button" class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => openAgentDetail(row.brief.agent_name)}>
         <div class="flex justify-between gap-3 items-start">
           <div class="flex gap-3 items-start">
             <span class="agent-emoji">${row.agent?.emoji ?? row.keeper?.emoji ?? ''}</span>
@@ -100,7 +100,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
 
   return html`
     <article class="w-full p-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-3 text-inherit text-left cursor-pointer ${toneClass(row.brief.status ?? row.keeper?.status)} ${liveStateClass(row.brief.status, row.keeper?.status)}">
-      <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => {
+      <button type="button" class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => {
         const keeper: Keeper = row.keeper ?? {
           name: row.brief.name,
           agent_name: row.brief.agent_name ?? row.brief.name,

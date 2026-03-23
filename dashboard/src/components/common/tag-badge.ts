@@ -13,7 +13,7 @@ interface TagBadgeProps {
 export function TagBadge({ children, onClick, class: className }: TagBadgeProps) {
   const base = 'px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.76)] text-xs leading-tight'
   if (onClick) {
-    return html`<button class="${base} cursor-pointer ${className ?? ''}" onClick=${onClick}>${children}</button>`
+    return html`<button type="button" class="${base} cursor-pointer ${className ?? ''}" onClick=${onClick}>${children}</button>`
   }
   return html`<span class="${base} ${className ?? ''}">${children}</span>`
 }

@@ -132,7 +132,7 @@ export function ChatMessageBubble({
         </div>
         ${canExpand
           ? html`
-              <button
+              <button type="button"
                 type="button"
                 class="chat-disclosure-btn rounded-full"
                 onClick=${() => { setExpanded(!expanded) }}
@@ -196,7 +196,7 @@ export function ChatMessageBubble({
               ${entry.details.rawPayload
                 ? html`
                     <div class="chat-detail-section">
-                      <button
+                      <button type="button"
                         type="button"
                         class="chat-raw-toggle rounded-full"
                         onClick=${() => { setRawExpanded(!rawExpanded) }}

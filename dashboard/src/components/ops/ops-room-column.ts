@@ -100,7 +100,7 @@ export function OpsRoomColumn() {
                 <div class="mt-1.5 whitespace-pre-wrap break-words max-h-[200px] overflow-auto">${item.reason}</div>
                 ${item.suggested_payload ? html`
                   <div class="flex justify-between items-center gap-3 mt-3 max-[880px]:flex-col max-[880px]:items-start">
-                    <button class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item); openRoomControlDisclosure() }} disabled=${operatorActionBusy.value}>
+                    <button type="button" class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item); openRoomControlDisclosure() }} disabled=${operatorActionBusy.value}>
                       폼에 채우기
                     </button>
                   </div>
@@ -147,10 +147,10 @@ export function OpsRoomColumn() {
                 </div>
                 ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[11px] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
                 <div class="flex justify-between items-center gap-3 mt-3 max-[880px]:flex-col max-[880px]:items-start">
-                  <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
+                  <button type="button" class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
                     실행
                   </button>
-                  <button class="control-btn ghost" onClick=${() => { void confirmPending(item.confirm_token, 'deny') }} disabled=${operatorActionBusy.value}>
+                  <button type="button" class="control-btn ghost" onClick=${() => { void confirmPending(item.confirm_token, 'deny') }} disabled=${operatorActionBusy.value}>
                     거부
                   </button>
                   <span class="text-[var(--text-muted)] text-[var(--fs-xs)] font-mono break-all">${item.confirm_token}</span>
@@ -220,7 +220,7 @@ export function OpsRoomColumn() {
                 onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') void submitBroadcast() }}
                 disabled=${operatorActionBusy.value}
               />
-              <button class="control-btn" onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
+              <button type="button" class="control-btn" onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
                 보내기
               </button>
             </div>
@@ -235,10 +235,10 @@ export function OpsRoomColumn() {
                 onInput=${(event: Event) => { pauseReason.value = (event.target as HTMLInputElement).value }}
                 disabled=${operatorActionBusy.value}
               />
-              <button class="control-btn ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
+              <button type="button" class="control-btn ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
                 일시정지
               </button>
-              <button class="control-btn ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
+              <button type="button" class="control-btn ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
                 재개
               </button>
             </div>
@@ -273,7 +273,7 @@ export function OpsRoomColumn() {
                 <option value="4">P4</option>
                 <option value="5">P5</option>
               </select>
-              <button class="control-btn" onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
+              <button type="button" class="control-btn" onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
                 주입
               </button>
             </div>

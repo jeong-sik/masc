@@ -168,15 +168,33 @@ function handleReconnect(): void {
   const label = durationSec > 0 ? `${durationSec}초 단절 후 재연결됨` : '서버 연결 복구됨'
   showToast(label, 'success', 3000)
 
-  // Refresh all data to recover events missed during disconnect
+  // Refresh all data to recover events missed during disconnect.
+  // If the server is still warming up after restart, the first fetch may fail.
+  // Schedule a single retry after 3s to cover the warm-up window.
   invalidateDashboardCache()
-  void refreshRoomTruth({ force: true })
-  refreshDashboard()
-  refreshExecution()
-  refreshBoard()
-  _refreshCommandPlaneFn?.()
-  _refreshOperatorFn?.()
-  _refreshMissionFn?.()
+  void hydrateAfterReconnect()
+}
+
+async function hydrateAfterReconnect(): Promise<void> {
+  try {
+    await Promise.all([
+      refreshRoomTruth({ force: true }),
+      refreshDashboard(),
+      refreshExecution(),
+      refreshBoard(),
+    ])
+    _refreshCommandPlaneFn?.()
+    _refreshOperatorFn?.()
+    _refreshMissionFn?.()
+  } catch {
+    // First attempt failed (server may still be warming up) — retry once.
+    setTimeout(() => {
+      void refreshRoomTruth({ force: true })
+      refreshDashboard()
+      refreshExecution()
+      _refreshOperatorFn?.()
+    }, 3000)
+  }
 }
 
 // --- SSE reaction setup ---

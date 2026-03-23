@@ -218,7 +218,7 @@ async function submitNewPost() {
 function NewPostForm() {
   if (!showNewPostForm.value) {
     return html`
-      <button
+      <button type="button"
         class="w-full py-2.5 rounded-lg border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-4)] hover:text-[var(--text-body)] transition-colors bg-transparent"
         onClick=${() => { showNewPostForm.value = true }}
       >+ 새 글 작성</button>
@@ -241,11 +241,11 @@ function NewPostForm() {
         onInput=${(e: Event) => { newPostContent.value = (e.target as HTMLTextAreaElement).value }}
       ></textarea>
       <div class="flex gap-2 justify-end">
-        <button
+        <button type="button"
           class="px-3 py-1.5 rounded-lg text-[13px] border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]"
           onClick=${() => { showNewPostForm.value = false; newPostTitle.value = ''; newPostContent.value = '' }}
         >취소</button>
-        <button
+        <button type="button"
           class="px-4 py-1.5 rounded-lg text-[13px] font-medium border border-[rgba(71,184,255,0.4)] bg-[var(--accent-soft)] text-[var(--accent)] cursor-pointer hover:bg-[rgba(71,184,255,0.2)] disabled:opacity-50"
           disabled=${newPostSubmitting.value || !newPostTitle.value.trim() || !newPostContent.value.trim()}
           onClick=${() => { void submitNewPost() }}
@@ -262,7 +262,7 @@ function SortBar() {
     <div class="flex flex-col gap-3 mb-4 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
       <div class="flex items-center gap-1.5 flex-wrap">
         ${SORT_MODES.map(mode => html`
-          <button
+          <button type="button"
             class="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150 border cursor-pointer
               ${current === mode.id
                 ? 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)]'
@@ -279,7 +279,7 @@ function SortBar() {
         `)}
       </div>
       <div class="flex items-center gap-2 flex-wrap">
-        <button
+        <button type="button"
           class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer
             ${hideAutomationPosts.value
               ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)]'
@@ -291,7 +291,7 @@ function SortBar() {
         >
           ${hideLabel}
         </button>
-        <button
+        <button type="button"
           class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer
             ${boardExcludeSystem.value
               ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)]'
@@ -305,7 +305,7 @@ function SortBar() {
           ${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 글 표시 중'}
         </button>
         <div class="ml-auto">
-          <button
+          <button type="button"
             class="px-3 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${refreshBoard}
             disabled=${boardLoading.value}
@@ -368,12 +368,12 @@ function PostCard({ post }: { post: BoardPost }) {
     >
       <!-- Vote column -->
       <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-[36px]">
-        <button
+        <button type="button"
           class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[#ff4500] hover:bg-[rgba(255,69,0,0.1)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('up', event)}
         >▲</button>
         <span class="text-[13px] font-semibold tabular-nums text-[var(--text-strong)]">${post.votes ?? 0}</span>
-        <button
+        <button type="button"
           class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[#7193ff] hover:bg-[rgba(113,147,255,0.1)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('down', event)}
         >▼</button>
@@ -436,7 +436,7 @@ function CommentItem({ comment }: { comment: BoardComment }) {
       </div>
       <div class="comment-text text-[13px] text-[var(--text-body)] leading-[1.55]">${comment.content}</div>
       ${needsTruncation ? html`
-        <button
+        <button type="button"
           class="comment-expand-btn mt-1 text-[11px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
           style="display: inline"
           onClick=${toggleCommentExpand}
@@ -457,14 +457,14 @@ function CommentThread({ comments }: { comments: BoardComment[] }) {
   return html`
     <div class="flex flex-col gap-2">
       ${!expanded && hiddenCount > 0 ? html`
-        <button
+        <button type="button"
           class="text-[12px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1"
           onClick=${() => setExpanded(true)}
         >이전 댓글 ${hiddenCount}개 더 보기</button>
       ` : null}
       ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} />`)}
       ${expanded && hiddenCount > 0 ? html`
-        <button
+        <button type="button"
           class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 text-left py-1"
           onClick=${() => setExpanded(false)}
         >접기</button>
@@ -485,7 +485,7 @@ function CommentForm({ postId }: { postId: string }) {
         onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') submitComment(postId) }}
         disabled=${commentSubmitting.value}
       />
-      <button
+      <button type="button"
         class="py-2 px-4 rounded-lg text-[13px] font-medium font-[inherit] cursor-pointer transition-all duration-150 border
           ${commentSubmitting.value || commentText.value.trim() === ''
             ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
@@ -516,7 +516,7 @@ function PostDetail({ post }: { post: BoardPost }) {
 
   return html`
     <div>
-      <button
+      <button type="button"
         class="mb-4 px-3 py-1.5 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
         onClick=${() => navigate('work', { section: 'board' })}
       >← 게시판으로 돌아가기</button>
@@ -564,11 +564,11 @@ function PostDetail({ post }: { post: BoardPost }) {
 
           <!-- Vote buttons -->
           <div class="flex gap-2">
-            <button
+            <button type="button"
               class="vote-btn upvote px-3 py-1.5 rounded-lg text-[12px] font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[#ff4500] hover:border-[rgba(255,69,0,0.3)] hover:bg-[rgba(255,69,0,0.08)] transition-all cursor-pointer"
               onClick=${() => handleVote('up')}
             >▲ 추천</button>
-            <button
+            <button type="button"
               class="vote-btn downvote px-3 py-1.5 rounded-lg text-[12px] font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[#7193ff] hover:border-[rgba(113,147,255,0.3)] hover:bg-[rgba(113,147,255,0.08)] transition-all cursor-pointer"
               onClick=${() => handleVote('down')}
             >▼ 비추천</button>
@@ -609,7 +609,7 @@ export function Memory() {
       : html`
           <div>
             <${MemorySummary} />
-            <button
+            <button type="button"
               class="mb-4 px-3 py-1.5 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
               onClick=${() => navigate('work', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
@@ -638,7 +638,7 @@ export function Memory() {
                 </div>
                 ${grouped.human.length > visibleLimit.value ? html`
                   <div class="text-center py-4">
-                    <button
+                    <button type="button"
                       class="px-4 py-2 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
                       onClick=${() => { visibleLimit.value = visibleLimit.value + PAGE_SIZE }}
                     >

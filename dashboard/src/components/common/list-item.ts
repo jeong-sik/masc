@@ -22,7 +22,7 @@ export function ListItem({ title, subtitle, detail, onClick, class: className }:
   `
 
   if (onClick) {
-    return html`<button class="${base}" onClick=${onClick}>${content}</button>`
+    return html`<button type="button" class="${base}" onClick=${onClick}>${content}</button>`
   }
   return html`<div class="${base}">${content}</div>`
 }

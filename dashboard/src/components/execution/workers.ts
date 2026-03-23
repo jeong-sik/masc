@@ -32,7 +32,7 @@ export function WorkerSupportRow({
   const effectiveStatus = row.state === 'offline' ? 'offline' : (row.status ?? 'unknown')
 
   return html`
-    <button class="monitor-row rounded-xl p-4 ${row.tone} state-${row.state} ${row.state === 'offline' ? 'opacity-35 border-[rgba(85,85,85,0.15)] bg-[rgba(0,0,0,0.08)] hover:opacity-55' : ''}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
+    <button type="button" class="monitor-row rounded-xl p-4 ${row.tone} state-${row.state} ${row.state === 'offline' ? 'opacity-35 border-[rgba(85,85,85,0.15)] bg-[rgba(0,0,0,0.08)] hover:opacity-55' : ''}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
       <div class="monitor-row rounded-xl-header">
         <span class="agent-emoji ${row.state === 'offline' ? 'grayscale' : ''}">${row.emoji ?? ''}</span>
         <div class="min-w-0">

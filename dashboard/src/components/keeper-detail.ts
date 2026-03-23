@@ -183,7 +183,7 @@ export function KeeperDetailOverlay() {
               ${keeper.koreanName ? html`<span class="text-xs text-[var(--text-muted)]">${keeper.koreanName}</span>` : null}
             </div>
           </div>
-          <button
+          <button type="button"
             onClick=${() => closeKeeperDetail()}
             class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm"
             aria-label="Close"

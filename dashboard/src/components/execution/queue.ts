@@ -20,7 +20,7 @@ import {
 export function QueueCard({ item, selected }: { item: DashboardExecutionQueueItem; selected: boolean }) {
   const terminal = isTerminalStatus(item.status)
   return html`
-    <button
+    <button type="button"
       class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.queue-card"
       onClick=${() => {

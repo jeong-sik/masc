@@ -62,7 +62,7 @@ export function Planning() {
 
       <!-- Compact refresh toolbar -->
       <div class="flex justify-end">
-        <button
+        <button type="button"
           class="px-4 py-2 rounded-xl text-[12px] font-semibold border border-transparent bg-white/5 text-text-muted hover:bg-white/10 hover:text-text-strong transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
           onClick=${() => {
             refreshGoals()

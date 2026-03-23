@@ -78,7 +78,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
 
   return html`
     <article class=${wrapperClass}>
-      <button class=${buttonClass} data-testid=${testId} onClick=${onClick}>
+      <button type="button" class=${buttonClass} data-testid=${testId} onClick=${onClick}>
         <div class=${variant === 'mission' ? 'flex justify-between gap-3 items-start' : 'monitor-row-header'}>
           <div class=${variant === 'mission' ? 'flex gap-3 items-start' : 'min-w-0'}>
             <span class="agent-emoji ${model.stateClass === 'offline' ? 'grayscale' : ''}">${model.emoji ?? ''}</span>

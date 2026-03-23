@@ -51,7 +51,7 @@ export function ActionButton({
   ].filter(Boolean).join(' ')
 
   return html`
-    <button class=${cls} onClick=${onClick} disabled=${disabled}>${children}</button>
+    <button type="button" class=${cls} onClick=${onClick} disabled=${disabled}>${children}</button>
   `
 }
 

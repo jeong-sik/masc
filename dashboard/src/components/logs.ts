@@ -136,7 +136,7 @@ export function LogViewer() {
             />
             자동
           </label>
-          <button class="logs-refresh-btn rounded-md border border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.12)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]" onClick=${() => { void loadLogs() }}
+          <button type="button" class="logs-refresh-btn rounded-md border border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.12)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]" onClick=${() => { void loadLogs() }}
             disabled=${logLoading.value}>
             ${logLoading.value ? '...' : '새로고침'}
           </button>

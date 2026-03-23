@@ -25,7 +25,7 @@ interface ActionBtnProps {
 
 export function ActionBtn({ label, onClick, disabled }: ActionBtnProps) {
   return html`
-    <button class="control-btn rounded-lg ghost" onClick=${onClick} disabled=${disabled}>
+    <button type="button" class="control-btn rounded-lg ghost" onClick=${onClick} disabled=${disabled}>
       ${label}
     </button>
   `

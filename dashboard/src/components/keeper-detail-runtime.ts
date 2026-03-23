@@ -188,7 +188,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${SignalRow} label="Skill route" value=${skillRouteLabel} />
 
       <div class="flex justify-end mt-1">
-        <button
+        <button type="button"
           class="py-1.5 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer"
           onClick=${() => { openToolsInventory(openToolsQuery) }}
         >

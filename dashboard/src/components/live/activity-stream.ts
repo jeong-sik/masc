@@ -25,7 +25,7 @@ function FilterBar() {
   return html`
     <div class="flex gap-1.5">
       ${FILTER_OPTIONS.map(opt => html`
-        <button
+        <button type="button"
           key=${opt.kind}
           class="px-2 py-0.5 text-[11px] rounded-md border cursor-pointer transition-all duration-150 ${active.has(opt.kind)
             ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'

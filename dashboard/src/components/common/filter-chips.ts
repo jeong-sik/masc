@@ -19,7 +19,7 @@ export function FilterChips<T extends string>({ chips, active, onChange }: Filte
   return html`
     <div class="flex gap-1.5 flex-wrap">
       ${chips.map(chip => html`
-        <button
+        <button type="button"
           key=${chip.key}
           class="px-2.5 py-1 text-[length:var(--fs-xs)] rounded-xl border cursor-pointer transition-all duration-150 ${active.value === chip.key
             ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'

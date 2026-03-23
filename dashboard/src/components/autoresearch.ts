@@ -134,7 +134,7 @@ function LoopSelector() {
           ? 'px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/60 bg-accent/10 text-[var(--text-strong)] cursor-pointer'
           : 'px-3 py-1.5 rounded-lg text-xs font-medium border border-card-border bg-card/60 text-[var(--text-muted)] cursor-pointer hover:border-accent/30 transition-colors'
         return html`
-          <button key=${loop.loop_id} class=${cls} onClick=${() => selectLoop(loop.loop_id)}>
+          <button type="button" key=${loop.loop_id} class=${cls} onClick=${() => selectLoop(loop.loop_id)}>
             <span class="${statusColor(loop.status)} mr-1">\u25CF</span>
             ${loop.loop_id.slice(0, 8)}
             <span class="ml-1 opacity-60">${statusLabel(loop.status)}</span>
@@ -381,7 +381,7 @@ export function Autoresearch() {
         <div class="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
           ${loopsError.value}
         </div>
-        <button
+        <button type="button"
           class="self-start px-3 py-1.5 rounded-lg text-xs font-medium border border-card-border text-[var(--text-muted)] hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"
           onClick=${() => loadLoops()}
         >
@@ -403,7 +403,7 @@ export function Autoresearch() {
         <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium">
           전체 ${loops.length}개 루프
         </div>
-        <button
+        <button type="button"
           class="px-2.5 py-1 rounded text-[11px] text-[var(--text-muted)] border border-card-border hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"
           onClick=${() => loadLoops()}
         >

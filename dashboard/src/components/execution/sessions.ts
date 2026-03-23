@@ -21,7 +21,7 @@ export function SessionCard({ brief, selected }: { brief: DashboardExecutionSess
   const seenCount = brief.seen_count ?? liveCount
   const plannedCount = brief.planned_count ?? brief.member_names.length
   return html`
-    <button
+    <button type="button"
       class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.session-card"
       onClick=${() => {

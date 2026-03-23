@@ -65,16 +65,17 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
       </div>
 
       <div class="grid grid-cols-2 gap-2">
-        <button
+        <button type="button"
           class="w-full rounded-md border border-solid border-[rgba(71,184,255,0.26)] bg-[rgba(71,184,255,0.14)] px-3 py-2 text-[11px] font-medium text-[#dff3ff] cursor-pointer transition-colors duration-150 hover:bg-[rgba(71,184,255,0.2)]"
-          onClick=${() => {
-            refreshDashboard()
-            refreshForTab(currentTab)
+          onClick=${(e: Event) => {
+            e.preventDefault()
+            void refreshDashboard().catch(() => {})
+            try { refreshForTab(currentTab) } catch {}
           }}
         >
           Room sync
         </button>
-        <button
+        <button type="button"
           class="w-full rounded-md border border-solid border-[var(--card-border)] px-3 py-2 bg-[rgba(255,255,255,0.04)] text-[var(--text-body)] text-[11px] font-medium cursor-pointer transition-colors duration-150 hover:bg-[rgba(255,255,255,0.08)]"
           onClick=${() => navigate('operations', { section: 'intervene' })}
         >
@@ -112,7 +113,7 @@ export function InterveneRailCard() {
         </div>
       </div>
       <div class="grid grid-cols-2 gap-1.5">
-        <button
+        <button type="button"
           class="w-full border border-solid border-[rgba(71,184,255,0.3)] rounded-lg bg-[var(--accent-12)] text-[#d7efff] py-1.5 px-2 text-[11px] cursor-pointer transition-colors duration-150 hover:bg-[var(--accent-20)]"
           onClick=${() => {
             refreshOperatorSnapshot()
@@ -121,7 +122,7 @@ export function InterveneRailCard() {
         >
           갱신
         </button>
-        <button
+        <button type="button"
           class="w-full border border-solid border-[var(--card-border)] rounded-lg py-1.5 px-2 bg-[var(--white-4)] text-[var(--text-body)] text-[11px] cursor-pointer transition-colors duration-150 hover:bg-[var(--white-8)]"
           onClick=${() => navigate('operations', { section: 'intervene' })}
         >

@@ -50,7 +50,7 @@ function SurfaceTabs() {
             ${COMMAND_SURFACE_META
               .filter(surface => surface.group === group.id)
               .map(surface => html`
-                <button
+                <button type="button"
                   class="border border-[var(--white-12)] bg-[var(--white-4)] text-[var(--white-72)] p-[8px_14px] capitalize rounded-full cmd-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
                   onClick=${() => {
                     setCommandPlaneSurface(surface.id)
@@ -200,7 +200,7 @@ export function Command() {
           <p class="text-[13px] text-[var(--text-muted)] leading-relaxed max-w-[62ch]">작전, 오케스트라, 스웜, 체인, 제어 표면을 선택해 실제 MCP 도구 기반 현황을 확인합니다.</p>
         </div>
         <div class="flex gap-3 flex-wrap">
-          <button
+          <button type="button"
             class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
             onClick=${() => {
               void fire(() => runCommandPlaneDispatchTick())
@@ -209,7 +209,7 @@ export function Command() {
           >
             ${actionDisabled('dispatch:tick') ? '정리 중...' : 'Tick 실행'}
           </button>
-          <button
+          <button type="button"
             class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
             onClick=${() => {
               void refreshRoomTruth()

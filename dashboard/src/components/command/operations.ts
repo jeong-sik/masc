@@ -117,7 +117,7 @@ function ChainOperationListItem(
   const chain = overlay.operation.chain
   const runtime = overlay.runtime
   return html`
-    <button class="w-full text-left text-inherit font-[inherit] cursor-pointer bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-chain-item ${selected ? 'selected' : ''}" onClick=${onSelect}>
+    <button type="button" class="w-full text-left text-inherit font-[inherit] cursor-pointer bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-chain-item ${selected ? 'selected' : ''}" onClick=${onSelect}>
       <div class="cmd-card rounded-xl-head">
         <div>
           <strong>${overlay.operation.objective}</strong>

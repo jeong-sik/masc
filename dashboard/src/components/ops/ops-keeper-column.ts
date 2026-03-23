@@ -58,7 +58,7 @@ export function OpsKeeperColumn() {
               const tone = keeperPriorityTone(keeper)
               const prioritySummary = keeperPrioritySummary(keeper)
               return html`
-            <button
+            <button type="button"
               key=${keeper.name}
               class="ops-entity-card p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] text-inherit text-left cursor-pointer w-full ${selectedKeeper?.name === keeper.name ? 'active' : ''}"
               onClick=${() => { selectedKeeperName.value = keeper.name }}
@@ -70,7 +70,7 @@ export function OpsKeeperColumn() {
                     <span class="w-2 h-2 rounded-full ${keeper.status === 'offline' ? 'bg-[var(--text-muted)]' : keeper.status === 'active' || keeper.status === 'running' ? 'bg-[var(--ok)]' : 'bg-[var(--warn)]'}"></span>
                     ${displayStatus(keeper.status)}
                   </span>
-                  <button
+                  <button type="button"
                     class="text-[11px] py-0.5 px-2 rounded-md border border-[rgba(71,184,255,0.25)] bg-[rgba(71,184,255,0.08)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.18)] cursor-pointer transition-colors"
                     onClick=${(e: Event) => { e.stopPropagation(); openOpsKeeperDetail(keeper) }}
                   >상세 보기</button>
@@ -135,7 +135,7 @@ export function OpsKeeperColumn() {
                     <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">${targetTypeLabel(targetType)}</div>
                     <div class="flex flex-wrap gap-1">
                       ${group.map((action: OperatorActionDescriptor) => html`
-                        <button key=${action.action_type}
+                        <button type="button" key=${action.action_type}
                           type="button"
                           title=${action.description ?? ''}
                           onClick=${() => {

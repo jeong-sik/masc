@@ -87,53 +87,56 @@ let load_lines path =
     with Sys_error _ -> []
 
 (** Read the last [n] non-empty lines from a file without loading the entire
-    file into memory.  Reads backwards in 8 KB chunks from the end. *)
+    file into memory.  Reads backwards in 8 KB chunks from the end.
+
+    Uses a generous 3x multiplier on newline counting to handle files with
+    blank lines between data.  Chunks are collected in a list (O(1) prepend)
+    and concatenated once at the end to avoid O(N^2) buffer copying. *)
 let load_tail_lines path ~max_lines =
   if max_lines <= 0 || not (Fs_compat.file_exists path) then []
   else
-    try
-      let ic = open_in_bin path in
+    let ic = open_in_bin path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
       let file_len = in_channel_length ic in
-      if file_len = 0 then (close_in_noerr ic; [])
+      if file_len = 0 then []
       else
         let chunk_size = 8192 in
-        let buf = Buffer.create (min file_len (chunk_size * 4)) in
+        (* Use 3x multiplier: blank lines mean newlines > non-empty lines *)
+        let target_newlines = max_lines * 3 in
+        let chunks = ref [] in
+        let total_newlines = ref 0 in
         let pos = ref file_len in
-        let found_enough = ref false in
-        (* Read backwards in chunks, counting newlines *)
-        while !pos > 0 && not !found_enough do
+        while !pos > 0 && !total_newlines <= target_newlines do
           let read_start = max 0 (!pos - chunk_size) in
           let read_len = !pos - read_start in
           seek_in ic read_start;
           let chunk = Bytes.create read_len in
           really_input ic chunk 0 read_len;
-          (* Prepend chunk to buffer *)
-          let old_contents = Buffer.contents buf in
-          Buffer.clear buf;
-          Buffer.add_bytes buf chunk;
-          Buffer.add_string buf old_contents;
-          pos := read_start;
-          (* Count newlines to check if we have enough *)
-          let newline_count = ref 0 in
-          let s = Buffer.contents buf in
-          for i = 0 to String.length s - 1 do
-            if s.[i] = '\n' then incr newline_count
+          chunks := chunk :: !chunks;
+          (* Count newlines in this chunk only (not accumulated) *)
+          for i = 0 to read_len - 1 do
+            if Bytes.get chunk i = '\n' then incr total_newlines
           done;
-          (* Need max_lines + 1 newlines to have max_lines complete lines *)
-          if !newline_count > max_lines then found_enough := true
+          pos := read_start
         done;
-        close_in_noerr ic;
+        (* Concatenate chunks once (already in file order) *)
+        let total_bytes = List.fold_left (fun acc c -> acc + Bytes.length c) 0 !chunks in
+        let combined = Bytes.create total_bytes in
+        let _ = List.fold_left (fun off c ->
+          let len = Bytes.length c in
+          Bytes.blit c 0 combined off len;
+          off + len
+        ) 0 !chunks in
         let all_lines =
-          Buffer.contents buf
+          Bytes.to_string combined
           |> String.split_on_char '\n'
           |> List.filter (fun l -> String.trim l <> "")
         in
         let total = List.length all_lines in
         if total <= max_lines then all_lines
         else
-          (* Take only the last max_lines *)
           List.filteri (fun i _ -> i >= total - max_lines) all_lines
-    with Sys_error _ | End_of_file -> []
+    )
 
 (* ── Public API ───────────────────────────────────────── *)
 

@@ -275,8 +275,8 @@ let write_reward_model path =
         "question_mark": 0.2
       }
     },
-    "board_post": {
-      "bias": -0.3,
+        "board_post": {
+          "bias": -0.3,
       "weights": {
         "active_goal_count": 0.8,
         "idle_seconds": 1.0,
@@ -285,8 +285,51 @@ let write_reward_model path =
         "board_newest_external_post_freshness": 0.4
       }
     }
-  }
+    }
 }|})
+
+let make_keeper_exec_meta
+    ?(name = "sangsu")
+    ?(policy_mode = "heuristic")
+    ?(policy_shell_mode = "disabled")
+    ?(allowed_paths = [])
+    () =
+  let json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String name);
+        ("trace_id", `String ("trace-" ^ name));
+        ("policy_mode", `String policy_mode);
+        ("policy_shell_mode", `String policy_shell_mode);
+        ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
+      ]
+  in
+  match Masc_mcp.Keeper_types.meta_of_json json with
+  | Ok meta -> meta
+  | Error e -> failwith ("make_keeper_exec_meta failed: " ^ e)
+
+let write_file path contents =
+  mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+
+let check_keeper_shell_tool_presence label meta ~expect_bash ~expect_shell_readonly =
+  let allowed_names = Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed_model_names =
+    Masc_mcp.Keeper_exec_tools.keeper_allowed_model_tools meta
+    |> List.map (fun (tool : Types.tool_schema) -> tool.name)
+  in
+  check bool (label ^ " bash allowed names") expect_bash
+    (List.mem "keeper_bash" allowed_names);
+  check bool (label ^ " shell readonly allowed names") expect_shell_readonly
+    (List.mem "keeper_shell_readonly" allowed_names);
+  check bool (label ^ " bash model tools") expect_bash
+    (List.mem "keeper_bash" allowed_model_names);
+  check bool (label ^ " shell readonly model tools") expect_shell_readonly
+    (List.mem "keeper_shell_readonly" allowed_model_names)
 
 let write_jsonl_lines path lines =
   mkdir_p (Filename.dirname path);
@@ -303,6 +346,118 @@ let write_jsonl_lines path lines =
 (* test_persona_list_and_create_from_persona removed:
    persona concept deleted (CLAUDE.md). Schema fields policy_voice_enabled,
    policy_shell_mode, initiative_* removed in #2607. *)
+
+let test_keeper_shell_tool_policy_gates () =
+  let heuristic = make_keeper_exec_meta () in
+  let learned_disabled =
+    make_keeper_exec_meta ~name:"learned-disabled"
+      ~policy_mode:"learned_offline_v1" ()
+  in
+  let learned_readonly =
+    make_keeper_exec_meta ~name:"learned-readonly"
+      ~policy_mode:"learned_offline_v1"
+      ~policy_shell_mode:"readonly" ()
+  in
+  let explicit_event =
+    make_keeper_exec_meta ~name:"explicit-event"
+      ~policy_mode:"explicit_event_v1" ()
+  in
+  let deliberation =
+    make_keeper_exec_meta ~name:"deliberation"
+      ~policy_mode:"model_deliberation" ()
+  in
+  check_keeper_shell_tool_presence "heuristic" heuristic
+    ~expect_bash:true ~expect_shell_readonly:true;
+  check_keeper_shell_tool_presence "learned disabled" learned_disabled
+    ~expect_bash:false ~expect_shell_readonly:false;
+  check_keeper_shell_tool_presence "learned readonly" learned_readonly
+    ~expect_bash:false ~expect_shell_readonly:true;
+  check_keeper_shell_tool_presence "explicit event" explicit_event
+    ~expect_bash:true ~expect_shell_readonly:true;
+  check_keeper_shell_tool_presence "model deliberation" deliberation
+    ~expect_bash:true ~expect_shell_readonly:true
+
+let test_keeper_shell_readonly_enforces_allowed_paths () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let allowed_rel = "allowed/note.txt" in
+      let blocked_rel = "blocked/secret.txt" in
+      write_file (Filename.concat base_dir allowed_rel) "keeper-ok\n";
+      write_file (Filename.concat base_dir blocked_rel) "should-not-read\n";
+      let meta =
+        make_keeper_exec_meta ~policy_mode:"learned_offline_v1"
+          ~policy_shell_mode:"readonly"
+          ~allowed_paths:[ "allowed" ] ()
+      in
+      let ctx_work =
+        Masc_mcp.Keeper_exec_context.create ~system_prompt:"test"
+          ~max_tokens:4000
+      in
+      let allowed_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_shell_readonly"
+          ~input:(`Assoc [ ("op", `String "cat"); ("path", `String allowed_rel) ])
+        |> parse_json_exn
+      in
+      check bool "allowed cat ok" true
+        Yojson.Safe.Util.(allowed_json |> member "ok" |> to_bool);
+      check string "allowed cat content" "keeper-ok\n"
+        Yojson.Safe.Util.(allowed_json |> member "content" |> to_string);
+      let blocked_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_shell_readonly"
+          ~input:(`Assoc [ ("op", `String "cat"); ("path", `String blocked_rel) ])
+        |> parse_json_exn
+      in
+      let error_text =
+        Yojson.Safe.Util.(blocked_json |> member "error" |> to_string)
+      in
+      check bool "blocked path rejected" true
+        (contains_substring error_text "path_not_in_allowed_paths"))
+
+let test_keeper_bash_requires_cmd_and_runs () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let meta = make_keeper_exec_meta () in
+      let ctx_work =
+        Masc_mcp.Keeper_exec_context.create ~system_prompt:"test"
+          ~max_tokens:4000
+      in
+      let missing_cmd_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_bash"
+          ~input:(`Assoc [ ("cmd", `String "   ") ])
+        |> parse_json_exn
+      in
+      check string "missing cmd rejected" "cmd_required"
+        Yojson.Safe.Util.(missing_cmd_json |> member "error" |> to_string);
+      let ok_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_bash"
+          ~input:
+            (`Assoc
+              [
+                ("cmd", `String "printf keeper-ok");
+                ("timeout_sec", `Float 5.0);
+              ])
+        |> parse_json_exn
+      in
+      check bool "keeper bash ok" true
+        Yojson.Safe.Util.(ok_json |> member "ok" |> to_bool);
+      check bool "keeper bash output captured" true
+        Yojson.Safe.Util.(
+          ok_json |> member "output" |> to_string
+          |> fun out -> contains_substring out "keeper-ok"))
 
 let test_resident_keeper_and_persistent_agent_lists_split () =
   Eio_main.run @@ fun env ->
@@ -1134,6 +1289,12 @@ let () =
            test_keeper_dispatch_auxiliary_surfaces_smoke;
          test_case "keeper status detailed reads metrics/history/memory" `Quick
            test_keeper_status_detailed_reads_metrics_history_and_memory;
+         test_case "shell tool policy gates" `Quick
+           test_keeper_shell_tool_policy_gates;
+         test_case "shell readonly enforces allowed paths" `Quick
+           test_keeper_shell_readonly_enforces_allowed_paths;
+         test_case "keeper bash requires cmd and runs" `Quick
+           test_keeper_bash_requires_cmd_and_runs;
          test_case "policy tools roundtrip" `Quick
            test_keeper_policy_tools_roundtrip;
          test_case "policy set rejects invalid mode" `Quick

@@ -1,6 +1,6 @@
-// Keeper detail overlay — full keeper info with KPIs, field dictionary,
-// memory, conversations, equipment, relationships, handoff timeline
-// Redesigned: professional dashboard-grade layout with Tailwind inline styles.
+// Keeper detail overlay — keeper operational dashboard with KPIs,
+// context chart, runtime signals, config, memory, and comms.
+// Redesigned: keeper-focused layout, TRPG/game elements removed.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -16,14 +16,10 @@ import {
 } from './keeper-shared'
 import { showToast } from './common/toast'
 import {
-  AutonomyMeter,
   ContextChart,
-  EquipmentList,
   FieldDictionary,
   KpiGrid,
-  RelationshipList,
   TraitsList,
-  TrpgStats,
 } from './keeper-detail-panels'
 import {
   KeeperNeighborhood,
@@ -240,38 +236,6 @@ export function KeeperDetailOverlay() {
                 </div>`
               : null}
           <//>
-
-          ${keeper.autonomy_level
-            ? html`
-              <${SectionCard} title="Autonomy">
-                <${AutonomyMeter} keeper=${keeper} />
-              <//>
-            `
-            : null}
-
-          ${keeper.trpg_stats
-            ? html`
-              <${SectionCard} title="TRPG Stats">
-                <${TrpgStats} stats=${keeper.trpg_stats} />
-              <//>
-            `
-            : null}
-
-          ${keeper.inventory && keeper.inventory.length > 0
-            ? html`
-              <${SectionCard} title="Equipment (${keeper.inventory.length})">
-                <${EquipmentList} items=${keeper.inventory} />
-              <//>
-            `
-            : null}
-
-          ${keeper.relationships && Object.keys(keeper.relationships).length > 0
-            ? html`
-              <${SectionCard} title="Relationships (${Object.keys(keeper.relationships).length})">
-                <${RelationshipList} rels=${keeper.relationships} />
-              <//>
-            `
-            : null}
 
           <${SectionCard} title="Runtime Signals">
             <${RuntimeSignals} keeper=${keeper} />

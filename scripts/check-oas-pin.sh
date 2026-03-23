@@ -9,6 +9,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ahead of the latest tag.
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 
+min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"
+
 latest_main_sha="$(
   git ls-remote "${OAS_AGENT_SDK_URL}" "refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
     | awk '{print $1}'
@@ -24,12 +26,12 @@ if [[ "${OAS_AGENT_SDK_SHA}" != "${latest_main_sha}" ]]; then
   exit 1
 fi
 
-if ! grep -Eq '\(agent_sdk \(>= 0\.88\.0\)\)' "${REPO_ROOT}/dune-project"; then
+if ! grep -Eq "\\(agent_sdk \\(>= ${min_version_re}\\)\\)" "${REPO_ROOT}/dune-project"; then
   echo "dune-project agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
   exit 1
 fi
 
-if ! grep -Eq '"agent_sdk" \{>= "0\.88\.0"\}' "${REPO_ROOT}/masc_mcp.opam"; then
+if ! grep -Eq "\"agent_sdk\" \\{>= \"${min_version_re}\"\\}" "${REPO_ROOT}/masc_mcp.opam"; then
   echo "masc_mcp.opam agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
   exit 1
 fi

@@ -82,13 +82,10 @@ let upsert_unit config ~(actor : string) json =
   let managed_units = read_units config in
   let effective_units = effective_units_for_validation config managed_units in
   let kind =
-    match
-      (match get_string_opt json "kind" with
-      | Some value -> unit_kind_of_string value
-      | None -> None)
-    with
-    | Some value -> value
-    | None -> invalid_arg "kind is required (company|platoon|squad|agent)"
+    Option.bind (get_string_opt json "kind") unit_kind_of_string
+    |> function
+       | Some value -> value
+       | None -> invalid_arg "kind is required (company|platoon|squad|agent)"
   in
   let label =
     match get_string_opt json "label" with
@@ -98,9 +95,9 @@ let upsert_unit config ~(actor : string) json =
   let unit_id = resolve_unit_id label kind (get_string_opt json "unit_id") in
   let existing = lookup_unit managed_units unit_id in
   let created_at =
-    match existing with
-    | Some unit -> unit.created_at
-    | None -> Types.now_iso ()
+    existing
+    |> Option.map (fun (unit : unit_record) -> unit.created_at)
+    |> Option.value ~default:(Types.now_iso ())
   in
   let policy_json =
     match U.member "policy" json with `Assoc _ as value -> value | _ -> `Assoc []
@@ -196,9 +193,9 @@ let augment_managed_units units agents =
         units
     in
     let existing_company_leader =
-      match List.find_opt (fun (u : unit_record) -> u.kind = Company) units with
-      | Some u -> u.leader_id
-      | None -> None
+      Option.bind
+        (List.find_opt (fun (u : unit_record) -> u.kind = Company) units)
+        (fun (u : unit_record) -> u.leader_id)
     in
     let pick_leader_stable ~existing_leader candidates =
       match existing_leader with
@@ -250,9 +247,9 @@ let augment_managed_units units agents =
       else
         let squad_id = "squad-unassigned" in
         let existing_squad_leader =
-          match List.find_opt (fun (u : unit_record) -> u.unit_id = squad_id) units with
-          | Some u -> u.leader_id
-          | None -> None
+          Option.bind
+            (List.find_opt (fun (u : unit_record) -> u.unit_id = squad_id) units)
+            (fun (u : unit_record) -> u.leader_id)
         in
         let squad =
           {
@@ -278,9 +275,7 @@ let rec descendant_units_of_kind units unit_id kind =
   let direct_children =
     units
     |> List.filter (fun (unit : unit_record) ->
-           match unit.parent_unit_id with
-           | Some parent_id -> String.equal parent_id unit_id
-           | None -> false)
+           option_exists (String.equal unit_id) unit.parent_unit_id)
   in
   let direct_matches =
     direct_children
@@ -304,9 +299,7 @@ let agent_status_map agents =
   List.map (fun (agent : Types.agent) -> (agent.name, Types.string_of_agent_status agent.status)) agents
 
 let agent_status_for agents agent_name =
-  match List.assoc_opt agent_name agents with
-  | Some status -> status
-  | None -> "offline"
+  List.assoc_opt agent_name agents |> Option.value ~default:"offline"
 
 let active_operation_status = function
   | Active | Planned -> true
@@ -318,13 +311,13 @@ let children_map units =
       match unit.parent_unit_id with
       | None -> acc
       | Some parent_id ->
-          let existing = match List.assoc_opt parent_id acc with Some xs -> xs | None -> [] in
+          let existing = List.assoc_opt parent_id acc |> Option.value ~default:[] in
           (parent_id, unit :: existing)
           :: List.remove_assoc parent_id acc)
     [] units
 
 let rec descendant_ids child_map unit_id =
-  let children = match List.assoc_opt unit_id child_map with Some xs -> xs | None -> [] in
+  let children = List.assoc_opt unit_id child_map |> Option.value ~default:[] in
   let direct = List.map (fun (unit : unit_record) -> unit.unit_id) children in
   direct @ List.concat_map (fun child_id -> descendant_ids child_map child_id) direct
 

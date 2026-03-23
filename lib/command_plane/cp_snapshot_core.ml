@@ -589,9 +589,8 @@ let list_alerts_json_from_state config (state : snapshot_state) =
                | None -> "Pending policy gate approval"));
   (* Add occurrences count to deduped alerts *)
   let enriched = List.rev !alerts |> List.map (fun (key, json) ->
-    let occurrences = match Hashtbl.find_opt seen key with
-      | Some count -> !count
-      | None -> 1
+    let occurrences =
+      Hashtbl.find_opt seen key |> Option.map (fun count -> !count) |> Option.value ~default:1
     in
     match json with
     | `Assoc fields ->

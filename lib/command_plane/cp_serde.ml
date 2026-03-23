@@ -369,11 +369,7 @@ let unit_to_json (unit : unit_record) =
     ]
 
 let unit_of_json json =
-  match
-    (match get_string_opt json "kind" with
-    | Some value -> unit_kind_of_string value
-    | None -> None)
-  with
+  match Option.bind (get_string_opt json "kind") unit_kind_of_string with
   | None -> None
   | Some kind ->
       let unit_id = get_string_default json "unit_id" "" in
@@ -487,11 +483,7 @@ let operation_of_json json =
         | _ -> None)
     | _ -> None
   in
-  match
-    (match get_string_opt json "status" with
-    | Some value -> operation_status_of_string value
-    | None -> None)
-  with
+  match Option.bind (get_string_opt json "status") operation_status_of_string with
   | None -> None
   | Some status ->
       let operation_id = get_string_default json "operation_id" "" in

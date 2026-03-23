@@ -1,0 +1,90 @@
+let run_git_capture_lines ~workdir args =
+  try
+    let ic =
+      Unix.open_process_args_in "git"
+        (Array.of_list ("git" :: "-C" :: workdir :: args))
+    in
+    let rec loop acc =
+      match input_line ic with
+      | line -> loop (line :: acc)
+      | exception End_of_file -> List.rev acc
+    in
+    let lines = loop [] in
+    match Unix.close_process_in ic with
+    | Unix.WEXITED 0 -> Some lines
+    | _ -> None
+  with Sys_error _ | Unix.Unix_error _ -> None
+
+let repo_root_for ~base_path =
+  match run_git_capture_lines ~workdir:base_path [ "rev-parse"; "--show-toplevel" ] with
+  | Some (root :: _) ->
+      let root = String.trim root in
+      if root = "" then None else Some root
+  | _ -> None
+
+let current_status_lines ~repo_root =
+  let contains_substring text ~substring =
+    let text_len = String.length text in
+    let substring_len = String.length substring in
+    let rec loop idx =
+      if substring_len = 0 then true
+      else if idx > text_len - substring_len then false
+      else if String.sub text idx substring_len = substring then true
+      else loop (idx + 1)
+    in
+    loop 0
+  in
+  run_git_capture_lines ~workdir:repo_root [ "status"; "--porcelain" ]
+  |> Option.value ~default:[]
+  |> List.map String.trim
+  |> List.filter (fun line ->
+         not (contains_substring line ~substring:".masc/"))
+  |> List.filter (fun line -> line <> "")
+
+let state_dir ~repo_root =
+  Filename.concat (Filename.concat repo_root ".masc") "live-context"
+
+let state_file ~repo_root ~actor_key =
+  let safe_key = Room_utils.safe_filename actor_key in
+  Filename.concat (state_dir ~repo_root)
+    (Printf.sprintf "%s.git-status-hash" safe_key)
+
+let read_file_if_exists path =
+  try
+    if Sys.file_exists path then
+      Some (String.trim (Fs_compat.load_file path))
+    else
+      None
+  with Sys_error _ -> None
+
+let write_text path content =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let hash_lines lines =
+  Digest.string (String.concat "\n" lines) |> Digest.to_hex
+
+let change_block_of_lines lines =
+  let visible_lines =
+    if List.length lines > 20 then
+      List.filteri (fun idx _ -> idx < 20) lines
+    else
+      lines
+  in
+  let change_count = List.length lines in
+  Printf.sprintf
+    "<git_status_change>\nWorking tree changed since last keeper turn (%d files):\n%s\n</git_status_change>"
+    change_count
+    (String.concat "\n" visible_lines)
+
+let capture_change_block ~base_path ~actor_key =
+  match repo_root_for ~base_path with
+  | None -> None
+  | Some repo_root ->
+      let lines = current_status_lines ~repo_root in
+      let current_hash = hash_lines lines in
+      let path = state_file ~repo_root ~actor_key in
+      let previous_hash = read_file_if_exists path |> Option.value ~default:"" in
+      write_text path current_hash;
+      if lines = [] || current_hash = previous_hash then None
+      else Some (change_block_of_lines lines)

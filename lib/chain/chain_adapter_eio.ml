@@ -428,6 +428,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
        | "uppercase" -> Ok (String.uppercase_ascii input)
        | "lowercase" -> Ok (String.lowercase_ascii input)
        | "trim" -> Ok (String.trim input)
+       | "grep_projection" ->
+           Ok (Retrieval_projection.format_search_output input)
        | "extract_json" | "extract_json_object" | "extract_json_array" ->
            let len = String.length input in
            let rec find_start i =

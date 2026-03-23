@@ -89,6 +89,15 @@ local fallback review helper:
 이 helper는 `.masc/review-cache/local-review/` 아래에 결과 cache를 남기고,
 동일 diff에 대한 concurrent review 요청은 single-flight로 합치며,
 stale pending reviewer PID가 있으면 정리한 뒤 다시 시작한다.
+기본 프롬프트는 fresh-context diff-only reviewer로 동작하므로,
+티켓/회의 맥락 없이도 structural risk를 따로 잡는 fallback gate로 본다.
+
+`pr-review-pipeline` canonical path도 clean-context structural stage를 포함한다.
+즉 review stack은 다음 3층으로 본다:
+
+- context-aware multi-check review
+- cross-model review evidence
+- fresh-context structural pass
 
 ## Autoresearch Wrapper
 

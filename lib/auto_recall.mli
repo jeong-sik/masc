@@ -24,7 +24,7 @@
 type recall_source =
   | Masc_cache        (** Shared context store *)
   | Recent_broadcasts (** Last N broadcasts in room *)
-  | File_context      (** Recently touched files (TODO) *)
+  | File_context      (** Recently touched files from the current working tree *)
 
 (** Configuration for auto-recall *)
 type recall_config = {
@@ -124,7 +124,7 @@ val fetch_context_smart :
 
 (** {1 Formatting} *)
 
-(** Format recall result as injection-ready text.
+(** Format recall result as grep-like injection-ready text.
     Suitable for prepending to system prompts. *)
 val format_for_injection : recall_result -> string
 

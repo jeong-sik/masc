@@ -148,6 +148,7 @@
    level2_config
    level4_config
    local_runtime_pool
+   retrieval_projection
    sdk_tool_contract
    worker_oas
    worker_runtime
@@ -329,6 +330,7 @@
    tool_a2a
    tool_handover
    tool_relay
+   worktree_live_context
    tool_goals
    tool_operator
    tool_team_session_support

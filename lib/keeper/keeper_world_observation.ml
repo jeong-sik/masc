@@ -15,6 +15,7 @@ type world_observation = {
   idle_seconds : int;
   active_goals : string list;
   continuity_summary : string;
+  worktree_change_summary : string option;
   context_ratio : float;
   economic_pressure : Agent_economy.pressure_mode;
   unclaimed_task_count : int;
@@ -215,6 +216,10 @@ let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
   let idle_seconds = compute_idle_seconds ~meta in
   let context_ratio = read_context_ratio ~config ~meta in
   let continuity_summary = read_continuity_summary ~config ~meta in
+  let worktree_change_summary =
+    Worktree_live_context.capture_change_block
+      ~base_path:config.base_path ~actor_key:meta.name
+  in
   let economic_pressure =
     Agent_economy.economic_pressure ~base_path:config.base_path
       ~agent_name:meta.name
@@ -228,6 +233,7 @@ let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
     idle_seconds;
     active_goals = meta.active_goal_ids;
     continuity_summary;
+    worktree_change_summary;
     context_ratio;
     economic_pressure;
     unclaimed_task_count;

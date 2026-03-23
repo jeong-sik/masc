@@ -65,13 +65,31 @@
       "output_key": "doc_review"
     },
     {
+      "id": "structural-review",
+      "type": "spawn",
+      "clean": true,
+      "pass_vars": ["pr_diff", "changed_files"],
+      "inherit_cache": false,
+      "depends_on": ["fetch-pr-diff", "fetch-pr-files"],
+      "inner": {
+        "id": "structural-review-inner",
+        "type": "model",
+        "model": {
+          "model": "codex",
+          "prompt": "You are a fresh-context structural reviewer. You do NOT know the product intent, JIRA history, or prior discussion. Review only what is visible in the changed files list and diff.\n\nChanged files:\n{{changed_files}}\n\nDiff:\n```\n{{pr_diff}}\n```\n\nCheck only for:\n1. Missing error paths or cleanup\n2. Interface/contract mismatches\n3. Unhandled branches or obvious test blind spots\n4. Resource or concurrency hazards\n5. Scope creep hidden in unrelated files\n\nReturn JSON: {\"structural_findings\": [{\"severity\": \"high|medium|low\", \"category\": \"error_path|contract|branch|resource|concurrency|scope\", \"location\": \"path:line\", \"evidence\": \"...\"}], \"summary\": \"...\", \"no_findings\": true|false}",
+          "thinking": false
+        },
+        "output_key": "structural_findings"
+      }
+    },
+    {
       "id": "synthesize-review",
       "type": "model",
       "model": {
         "model": "claude-cli",
-        "prompt": "Synthesize a comprehensive PR review from these analyses:\n\nComplexity Analysis:\n{{complexity_analysis}}\n\nTest Coverage:\n{{test_coverage}}\n\nSecurity Findings:\n{{security_findings}}\n\nDocumentation Review:\n{{doc_review}}\n\nGenerate a PR review comment in markdown with:\n1. **Summary** (1-2 sentences)\n2. **Verdict** (APPROVE / REQUEST_CHANGES / COMMENT)\n3. **Critical Issues** (must fix before merge)\n4. **Suggestions** (nice to have)\n5. **Kudos** (things done well)\n\nBe constructive and specific."
+        "prompt": "Synthesize a comprehensive PR review from these analyses:\n\nComplexity Analysis:\n{{complexity_analysis}}\n\nTest Coverage:\n{{test_coverage}}\n\nSecurity Findings:\n{{security_findings}}\n\nDocumentation Review:\n{{doc_review}}\n\nFresh-context Structural Findings:\n{{structural_findings}}\n\nGenerate a PR review comment in markdown with:\n1. **Summary** (1-2 sentences)\n2. **Verdict** (APPROVE / REQUEST_CHANGES / COMMENT)\n3. **Critical Issues** (must fix before merge)\n4. **Structural Risks** (fresh-context findings that may be easy to miss)\n5. **Suggestions** (nice to have)\n6. **Kudos** (things done well)\n\nBe constructive and specific."
       },
-      "depends_on": ["analyze-complexity", "check-test-coverage", "security-scan", "doc-check"],
+      "depends_on": ["analyze-complexity", "check-test-coverage", "security-scan", "doc-check", "structural-review"],
       "output_key": "final_review"
     }
   ],

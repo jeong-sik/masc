@@ -135,6 +135,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               if policy_mode_learned then SkillSelectHeuristic
               else keeper_skill_selection_mode ()
             in
+            let live_worktree_change =
+              Worktree_live_context.capture_change_block
+                ~base_path:ctx.config.base_path ~actor_key:meta.name
+            in
             let build_turn_prompt ~base_system_prompt ~messages =
               let continuity_snapshot = latest_state_snapshot_from_messages messages in
               let continuity_summary =
@@ -183,6 +187,12 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     Printf.sprintf "%s\n\n%s"
                       prompt
                       (String.concat "\n" policy_lines)
+              in
+              let prompt =
+                match live_worktree_change with
+                | Some summary when String.trim summary <> "" ->
+                    Printf.sprintf "%s\n\n%s" prompt summary
+                | _ -> prompt
               in
               match turn_instructions with
               | None -> prompt

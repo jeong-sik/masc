@@ -296,19 +296,56 @@ let fetch_context_eio
 
 (** {1 Formatting} *)
 
-(** Format recall result as injection-ready text *)
+(** Format recall result as grep-like injection-ready text *)
+let metadata_string_opt (metadata : Yojson.Safe.t) key =
+  match metadata with
+  | `Assoc _ ->
+      metadata |> Yojson.Safe.Util.member key
+      |> Yojson.Safe.Util.to_string_option
+  | _ -> None
+
+let metadata_int_opt (metadata : Yojson.Safe.t) key =
+  match metadata with
+  | `Assoc _ ->
+      metadata |> Yojson.Safe.Util.member key
+      |> Yojson.Safe.Util.to_int_option
+  | _ -> None
+
+let grep_like_line_of_item (item : recall_item) =
+  let source, location =
+    match item.source with
+    | Masc_cache ->
+        let key =
+          metadata_string_opt item.metadata "key"
+          |> Option.value ~default:"entry"
+        in
+        ("cache", key)
+    | Recent_broadcasts ->
+        let from_agent =
+          metadata_string_opt item.metadata "from"
+          |> Option.value ~default:"agent"
+        in
+        let seq =
+          metadata_int_opt item.metadata "seq"
+          |> Option.map string_of_int
+          |> Option.value ~default:"latest"
+        in
+        ("broadcast", Printf.sprintf "%s#%s" from_agent seq)
+    | File_context ->
+        let path =
+          metadata_string_opt item.metadata "path"
+          |> Option.value ~default:"recent-file"
+        in
+        ("file", path)
+  in
+  Retrieval_projection.grep_like_line
+    ~source ~location ~content:item.content
+
 let format_for_injection (result : recall_result) : string =
   if result.items = [] then ""
   else
     let header = "=== Auto-Recalled Context ===" in
-    let items_str = List.map (fun item ->
-      let source_name = match item.source with
-        | Masc_cache -> "cache"
-        | Recent_broadcasts -> "broadcast"
-        | File_context -> "file"
-      in
-      Printf.sprintf "[%s] %s" source_name item.content
-    ) result.items in
+    let items_str = List.map grep_like_line_of_item result.items in
     let footer =
       if result.truncated then
         Printf.sprintf "=== (truncated, ~%d tokens) ===" result.total_tokens

@@ -198,6 +198,105 @@ let test_no_duplicate_tools () =
   check int "no duplicates" (List.length unique) (List.length tools)
 
 (* ============================================================
+   10. Path resolution security (resolve_keeper_target_path)
+   ============================================================ *)
+
+let make_path_test_dir () =
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "keeper_path_test_%d" (Random.int 100000)) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let sub = Filename.concat dir "lib" in
+  (try Unix.mkdir sub 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let sub2 = Filename.concat dir "src" in
+  (try Unix.mkdir sub2 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  dir
+
+let cleanup_path_test_dir dir =
+  let rec rm path =
+    if Sys.is_directory path then begin
+      Sys.readdir path |> Array.iter (fun f -> rm (Filename.concat path f));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+  in
+  (try rm dir with _ -> ())
+
+let test_path_relative_within_root () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    let config = Room.default_config dir in
+    let result = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:[] ~raw_path:"lib/foo.ml" in
+    check bool "relative path within root ok" true (Result.is_ok result))
+
+let test_path_absolute_outside_root () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    let config = Room.default_config dir in
+    let result = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:[] ~raw_path:"/etc/passwd" in
+    check bool "absolute outside root rejected" true (Result.is_error result);
+    let err = Result.get_error result in
+    check bool "error mentions outside" true
+      (String.length err > 0
+       && try let _ = Str.search_forward
+         (Str.regexp_string "path_outside_project_root") err 0 in true
+       with Not_found -> false))
+
+let test_path_traversal_attack () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    let config = Room.default_config dir in
+    let result = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:[] ~raw_path:"../../etc/passwd" in
+    check bool "traversal attack rejected" true (Result.is_error result))
+
+let test_path_allowed_paths_filter () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    let config = Room.default_config dir in
+    (* lib is allowed, src is not *)
+    let ok_result = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:["lib"] ~raw_path:"lib/foo.ml" in
+    check bool "lib path allowed" true (Result.is_ok ok_result);
+    let err_result = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:["lib"] ~raw_path:"src/bar.ml" in
+    check bool "src path rejected" true (Result.is_error err_result);
+    let err = Result.get_error err_result in
+    check bool "error mentions allowed_paths" true
+      (try let _ = Str.search_forward
+        (Str.regexp_string "path_not_in_allowed_paths") err 0 in true
+       with Not_found -> false))
+
+let test_path_empty_rejected () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    let config = Room.default_config dir in
+    let result = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:[] ~raw_path:"" in
+    check bool "empty path rejected" true (Result.is_error result))
+
+let test_path_whitespace_only_rejected () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    let config = Room.default_config dir in
+    let result = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:[] ~raw_path:"   " in
+    check bool "whitespace path rejected" true (Result.is_error result))
+
+let test_path_empty_allowed_permits_all_within_root () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    let config = Room.default_config dir in
+    (* Empty allowed_paths = permit all within root *)
+    let r1 = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:[] ~raw_path:"lib/a.ml" in
+    let r2 = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:[] ~raw_path:"src/b.ml" in
+    check bool "lib ok with empty allowed" true (Result.is_ok r1);
+    check bool "src ok with empty allowed" true (Result.is_ok r2))
+
+(* ============================================================
    Runner
    ============================================================ *)
 
@@ -237,5 +336,14 @@ let () =
     ]);
     ("deduplication", [
       test_case "no duplicate tools" `Quick test_no_duplicate_tools;
+    ]);
+    ("path_resolution", [
+      test_case "relative within root" `Quick test_path_relative_within_root;
+      test_case "absolute outside root" `Quick test_path_absolute_outside_root;
+      test_case "traversal attack" `Quick test_path_traversal_attack;
+      test_case "allowed_paths filter" `Quick test_path_allowed_paths_filter;
+      test_case "empty path rejected" `Quick test_path_empty_rejected;
+      test_case "whitespace only rejected" `Quick test_path_whitespace_only_rejected;
+      test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;
     ]);
   ]

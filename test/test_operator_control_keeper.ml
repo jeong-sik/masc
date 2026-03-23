@@ -1,15 +1,15 @@
 open Masc_mcp
 open Test_operator_control_support
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
   let rec loop i =
-    if i + needle_len > haystack_len then false
-    else if String.sub haystack i needle_len = needle then true
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
     else loop (i + 1)
   in
-  needle_len = 0 || loop 0
+  if n_len = 0 then true else loop 0
 
 let test_snapshot_exposes_keeper_and_social_actions () =
   Eio_main.run @@ fun env ->
@@ -131,15 +131,104 @@ let test_keeper_status_exposes_summary_and_recoverable () =
               ])
       in
       Alcotest.(check bool) "persistent status ok" true ok;
-      let diagnostic = parse_json_exn body |> Yojson.Safe.Util.member "diagnostic" in
+      let status_json = parse_json_exn body in
+      let diagnostic = status_json |> Yojson.Safe.Util.member "diagnostic" in
       Alcotest.(check string) "health_state" "offline"
         Yojson.Safe.Util.(diagnostic |> member "health_state" |> to_string);
       Alcotest.(check string) "next action recover" "recover"
         Yojson.Safe.Util.(diagnostic |> member "next_action_path" |> to_string);
       Alcotest.(check bool) "recoverable true" true
         Yojson.Safe.Util.(diagnostic |> member "recoverable" |> to_bool);
+      Alcotest.(check string) "auto team session wired" "wired"
+        Yojson.Safe.Util.(
+          status_json |> member "auto_team_session" |> member "status" |> to_string);
       Alcotest.(check bool) "summary present" true
         (String.length Yojson.Safe.Util.(diagnostic |> member "summary" |> to_string) > 0))
+
+let test_keeper_config_exposes_live_runtime_and_sources () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let cwd = Sys.getcwd () in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chdir cwd;
+      cleanup_dir base_dir)
+    (fun () ->
+      Unix.chdir base_dir;
+      let keepers_dir = Filename.concat (Filename.concat base_dir "config") "keepers" in
+      Fs_compat.mkdir_p keepers_dir;
+      Fs_compat.save_file
+        (Filename.concat keepers_dir "config-provenance.toml")
+        {|
+[keeper]
+goal = "Defaults goal"
+models = ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
+room_scope = "all"
+trigger_mode = "legacy"
+proactive_enabled = true
+initiative_enabled = true
+initiative_scope = "board_only"
+initiative_idle_sec = 3600
+initiative_cooldown_sec = 3600
+initiative_context_mode = "board_snapshot"
+initiative_post_ttl_hours = 24
+|};
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+        }
+      in
+      let keeper_name = "config-provenance" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "keeper meta missing"
+        | Error err -> Alcotest.fail ("meta read failed: " ^ err)
+      in
+      let mutated =
+        {
+          meta with
+          room_scope = "current";
+          trigger_mode = "explicit_only";
+          proactive_enabled = false;
+          paused = true;
+          updated_at = Types.now_iso ();
+        }
+      in
+      (match Masc_mcp.Keeper_types.write_meta config mutated with
+      | Ok () -> ()
+      | Error err -> Alcotest.fail ("meta write failed: " ^ err));
+      let status, json =
+        Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
+      in
+      Alcotest.(check bool) "config found" true (status = `OK);
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "trigger_mode from live meta" "explicit_only"
+        (json |> member "coordination" |> member "trigger_mode" |> to_string);
+      Alcotest.(check string) "room_scope from live meta" "current"
+        (json |> member "coordination" |> member "room_scope" |> to_string);
+      Alcotest.(check bool) "runtime paused from live meta" true
+        (json |> member "runtime" |> member "paused" |> to_bool);
+      Alcotest.(check bool) "proactive enabled from live meta" false
+        (json |> member "proactive" |> member "enabled" |> to_bool);
+      Alcotest.(check string) "default source kind" "toml"
+        (json |> member "sources" |> member "default_source_kind" |> to_string);
+      Alcotest.(check bool) "live override flagged" true
+        (json |> member "sources" |> member "has_live_override" |> to_bool);
+      Alcotest.(check string) "auto team session wired" "wired"
+        (json |> member "auto_team_session" |> member "status" |> to_string))
 
 let test_snapshot_keeper_tool_audit_fallback () =
   Eio_main.run @@ fun env ->
@@ -198,15 +287,17 @@ let test_snapshot_keeper_tool_audit_fallback () =
 
 let test_keeper_msg_auto_team_session_bridge () =
   (* This test triggers a real LLM cascade call (keeper_msg -> run_turn).
-     In CI there is no LLM server, so the cascade hangs until timeout.
-     Skip when CI=true or ALCOTEST_QUICK_TESTS=1 to prevent the build
-     from timing out. The quick-suite harness also exports
+     It is opt-in because local runtime/model availability is not stable
+     across developer machines or CI.
+     Skip unless MASC_RUN_LIVE_KEEPER_TEAM_SESSION_TEST=1. The quick-suite
+     harness also exports
      CI_TEST_TIMEOUT_SEC, which is more reliable than ALCOTEST_QUICK_TESTS
      under dune test in CI. See: #1936 *)
   let local_runtime_available =
     Masc_mcp.Local_runtime_pool.healthy_runtime_count () > 0
   in
-  if Sys.getenv_opt "CI" = Some "true"
+  if Sys.getenv_opt "MASC_RUN_LIVE_KEEPER_TEAM_SESSION_TEST" <> Some "1"
+     || Sys.getenv_opt "CI" = Some "true"
      || Sys.getenv_opt "ALCOTEST_QUICK_TESTS" = Some "1"
      || Sys.getenv_opt "CI_TEST_TIMEOUT_SEC" <> None
      || not local_runtime_available then
@@ -255,10 +346,20 @@ let test_keeper_msg_auto_team_session_bridge () =
       in
       if not ok then
         let body_lc = String.lowercase_ascii body in
-        if contains_substring body_lc "agent.run failed"
-           || contains_substring body_lc "api key"
-           || contains_substring body_lc "provider"
-           || contains_substring body_lc "runtime" then
+        let body_has needle =
+          let s_len = String.length body_lc in
+          let n_len = String.length needle in
+          let rec loop i =
+            if i + n_len > s_len then false
+            else if String.sub body_lc i n_len = needle then true
+            else loop (i + 1)
+          in
+          n_len = 0 || loop 0
+        in
+        if body_has "agent.run failed"
+           || body_has "api key"
+           || body_has "provider"
+           || body_has "runtime" then
           Alcotest.skip ()
         else
           Alcotest.failf "keeper msg failed unexpectedly: %s" body

@@ -314,9 +314,7 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
     | [] -> `Null
   in
   let has_text key json =
-    match json_string_field_opt key json with
-    | Some _ -> true
-    | None -> false
+    json_string_field_opt key json |> Option.is_some
   in
   let execution_summary =
     let existing = json_assoc_field "summary" execution_json in

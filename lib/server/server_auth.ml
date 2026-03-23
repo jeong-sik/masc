@@ -27,12 +27,11 @@ let env_flag_enabled name =
       v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
 
 let configured_bind_host () =
-  match trim_opt (Sys.getenv_opt "MASC_HTTP_BIND_HOST") with
-  | Some host -> host
-  | None -> (
-      match trim_opt (Sys.getenv_opt "MASC_HOST") with
-      | Some host -> host
-      | None -> "127.0.0.1")
+  trim_opt (Sys.getenv_opt "MASC_HTTP_BIND_HOST")
+  |> Option.value
+       ~default:
+         (trim_opt (Sys.getenv_opt "MASC_HOST")
+         |> Option.value ~default:"127.0.0.1")
 
 let ipaddr_is_loopback = function
   | Ipaddr.V4 addr ->
@@ -127,21 +126,16 @@ let verify_operator_mcp_auth ~base_path request =
         | Error err -> Error (Types.masc_error_to_string err))
 
 let bearer_token_from_header value =
-  let prefix = "Bearer " in
-  let prefix_lower = "bearer " in
-  if String.length value >= String.length prefix &&
-     String.sub value 0 (String.length prefix) = prefix then
-    Some (String.sub value (String.length prefix) (String.length value - String.length prefix))
-  else if String.length value >= String.length prefix_lower &&
-          String.sub value 0 (String.length prefix_lower) = prefix_lower then
-    Some (String.sub value (String.length prefix_lower) (String.length value - String.length prefix_lower))
-  else
-    None
+  let prefix_len = 7 in (* String.length "Bearer " *)
+  if String.length value > prefix_len
+     && String.lowercase_ascii (String.sub value 0 prefix_len) = "bearer "
+  then Some (String.sub value prefix_len (String.length value - prefix_len))
+  else None
 
 let auth_token_from_request request =
-  match Httpun.Headers.get request.Httpun.Request.headers "authorization" with
-  | Some v -> bearer_token_from_header v
-  | None -> None
+  Option.bind
+    (Httpun.Headers.get request.Httpun.Request.headers "authorization")
+    bearer_token_from_header
 
 (** TTS proxy — forwards text to ElevenLabs and returns audio/mpeg bytes.
     Reads ELEVENLABS_API_KEY from environment. *)
@@ -164,20 +158,15 @@ let voice_config_payload () =
   | Error json -> (`Error, json)
 
 let agent_from_request request =
-  let decode v = match Uri.pct_decode v with s -> s in
-  match Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent" with
-  | Some v -> Some (decode v)
-  | None ->
-      match Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent-name" with
-      | Some v -> Some (decode v)
-      | None ->
-          (match query_param request "agent" with
-           | Some v -> Some (decode v)
-           | None -> Option.map decode (query_param request "agent_name"))
+  let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in
+  let qp key = query_param request key in
+  let first_some xs = List.find_map Fun.id xs in
+  first_some [ hdr "x-masc-agent"; hdr "x-masc-agent-name"; qp "agent"; qp "agent_name" ]
+  |> Option.map Uri.pct_decode
 
 let effective_port_of_uri (uri : Uri.t) =
   match Uri.port uri with
-  | Some port -> Some port
+  | Some _ as p -> p
   | None -> (
       match Uri.scheme uri with
       | Some "http" -> Some 80
@@ -237,9 +226,8 @@ let server_state : Mcp_server.server_state option ref = ref None
 
 (** CORS origin *)
 let get_origin (request : Httpun.Request.t) =
-  match Httpun.Headers.get request.headers "origin" with
-  | Some o -> o
-  | None -> "*"
+  Httpun.Headers.get request.headers "origin"
+  |> Option.value ~default:"*"
 
 (** CORS headers *)
 let cors_allow_headers_value =

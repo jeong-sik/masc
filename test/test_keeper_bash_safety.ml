@@ -78,6 +78,51 @@ let test_empty_command () =
   Alcotest.(check bool) "empty blocked" true (is_error (validate ""));
   Alcotest.(check bool) "whitespace blocked" true (is_error (validate "   "))
 
+let is_write = Masc_mcp.Worker_dev_tools.is_write_operation
+
+let test_write_ops_detected () =
+  let writes = [
+    "git push origin main";
+    "git commit -m 'msg'";
+    "git merge feature";
+    "git rebase main";
+    "git reset --hard HEAD~1";
+    "git checkout other-branch";
+    "git stash pop";
+    "dune clean";
+    "make deploy";
+    "make install";
+    "npm publish";
+    "mv file1 file2";
+    "cp src dst";
+    "mkdir newdir";
+    "touch newfile";
+    "chmod 755 script.sh";
+  ] in
+  List.iter (fun cmd ->
+    Alcotest.(check bool) (Printf.sprintf "write: %s" cmd) true (is_write cmd)
+  ) writes
+
+let test_read_ops_pass () =
+  let reads = [
+    "git status";
+    "git log --oneline -5";
+    "git diff HEAD";
+    "dune build";
+    "dune exec test.exe";
+    "make test";
+    "npm run build";
+    "npm run dev";
+    "rg pattern lib/";
+    "cat file.ml";
+    "ls -la";
+    "head -20 file.ml";
+    "python3 script.py";
+  ] in
+  List.iter (fun cmd ->
+    Alcotest.(check bool) (Printf.sprintf "read: %s" cmd) false (is_write cmd)
+  ) reads
+
 let () =
   Alcotest.run "Keeper bash safety" [
     ("allowlist", [
@@ -86,6 +131,10 @@ let () =
     ]);
     ("metachar", [
       Alcotest.test_case "shell metacharacters blocked" `Quick test_shell_metachar_blocked;
+    ]);
+    ("write_gate", [
+      Alcotest.test_case "write operations detected" `Quick test_write_ops_detected;
+      Alcotest.test_case "read operations pass" `Quick test_read_ops_pass;
     ]);
     ("edge", [
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;

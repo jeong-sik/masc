@@ -439,7 +439,7 @@ let test_rest_tool_to_endpoint_add_task () =
   check string "path" "/mcp" path
 
 let test_rest_tool_to_endpoint_claim () =
-  let (m, path) = Transport.Rest.tool_to_endpoint "masc_claim" in
+  let (m, path) = Transport.Rest.tool_to_endpoint "masc_transition" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
   check string "path" "/mcp" path
 

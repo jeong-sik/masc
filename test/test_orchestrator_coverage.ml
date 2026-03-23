@@ -126,7 +126,7 @@ let test_make_orchestrator_prompt_contains_claim () =
   let prompt = Orchestrator.make_orchestrator_prompt ~port:8935 in
   check bool "mentions masc_claim" true
     (try
-      let _ = Str.search_forward (Str.regexp "masc_claim") prompt 0 in true
+      let _ = Str.search_forward (Str.regexp "masc_transition") prompt 0 in true
     with Not_found -> false)
 
 let test_make_orchestrator_prompt_contains_done () =

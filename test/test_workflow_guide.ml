@@ -41,7 +41,7 @@ let test_join_failure () =
   check_has_tool g.next_steps "masc_set_room"
 
 let test_claim_success () =
-  let g = WG.next_steps ~tool_name:"masc_claim" ~success:true in
+  let g = WG.next_steps ~tool_name:"masc_claim_next" ~success:true in
   check_has_tool g.next_steps "masc_worktree_create";
   check bool "claim has common_mistakes" true (List.length g.common_mistakes > 0)
 

@@ -22,9 +22,9 @@ let test_wrap_json_response () =
 let test_wrap_plain_string () =
   let start = Time_compat.now () in
   let raw = (false, "Something went wrong") in
-  let r = Tool_result.wrap ~tool_name:"masc_claim" ~start_time:start raw in
+  let r = Tool_result.wrap ~tool_name:"masc_transition" ~start_time:start raw in
   Alcotest.(check bool) "failure" false r.success;
-  Alcotest.(check string) "tool_name" "masc_claim" r.tool_name;
+  Alcotest.(check string) "tool_name" "masc_transition" r.tool_name;
   (* Non-JSON string should be wrapped as `String *)
   (match r.data with
    | `String s ->

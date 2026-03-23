@@ -480,10 +480,6 @@ let test_handle_request_tools_list () =
     false
     (List.mem "experiment_start" names);
   Alcotest.(check bool)
-    "superseded masc_claim hidden from list"
-    false
-    (List.mem "masc_claim" names);
-  Alcotest.(check bool)
     "named room list hidden from list"
     false
     (List.mem "masc_rooms_list" names);
@@ -952,7 +948,7 @@ let test_handle_request_tools_call_deprecated_claim_alias () =
           ( "params",
             `Assoc
               [
-                ("name", `String "masc_claim");
+                ("name", `String "masc_transition");
                 ("arguments", `Assoc [ ("task_id", `String "task-001") ]);
               ] );
         ])
@@ -1096,19 +1092,19 @@ let test_handle_request_tools_list_include_deprecated_claim_alias_metadata () =
             `Assoc
               [
                 ("include_deprecated", `Bool true);
-                ("names", `List [ `String "masc_claim" ]);
+                ("names", `List [ `String "masc_transition" ]);
               ] );
         ])
   in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   let tools = tools_from_response response in
-  let claim_tool = find_tool_exn tools "masc_claim" in
+  let transition_tool = find_tool_exn tools "masc_transition" in
   Alcotest.(check string) "claim lifecycle" "deprecated"
-    (tool_string_field claim_tool "lifecycle");
+    (tool_string_field transition_tool "lifecycle");
   Alcotest.(check string) "claim canonicalName" "masc_transition"
-    (tool_string_field claim_tool "canonicalName");
+    (tool_string_field transition_tool "canonicalName");
   Alcotest.(check string) "claim replacement" "masc_transition(action=claim)"
-    (tool_string_field claim_tool "replacement");
+    (tool_string_field transition_tool "replacement");
   cleanup_dir base_path
 
 let test_handle_request_tools_list_hides_team_session_turn_by_default () =

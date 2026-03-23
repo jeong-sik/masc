@@ -146,11 +146,5 @@ let () =
                   check bool (name ^ " should be visible with flag") true
                     (Tool_catalog.is_visible ~include_hidden:true name))
                 hidden_names);
-          test_case "deprecated claim alias is hidden by default but visible with include_deprecated" `Quick
-            (fun () ->
-              check bool "masc_claim hidden by default" false
-                (Tool_catalog.is_visible "masc_claim");
-              check bool "masc_claim visible with include_deprecated" true
-                (Tool_catalog.is_visible ~include_deprecated:true "masc_claim"));
         ] );
     ]

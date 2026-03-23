@@ -18,6 +18,18 @@ let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
       ("tool_usage", Tool_unified.summary_report ());
     ]
 
+let warm_shell_cache (state : Mcp_server.server_state) =
+  let t0 = Time_compat.now () in
+  (try
+     ignore (dashboard_shell_http_json state.room_config);
+     Log.Dashboard.info "shell cache pre-warmed (%.1fms)"
+       ((Time_compat.now () -. t0) *. 1000.0)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Dashboard.warn "shell cache pre-warm failed: %s"
+       (Printexc.to_string exn))
+
 let _execution_json_ref : Yojson.Safe.t ref =
   ref (`Assoc [
     ("status", `String "initializing");

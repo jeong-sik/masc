@@ -679,7 +679,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     | Some "1" | Some "true" -> `H2_only
     | Some "0" | Some "false" -> `H1_only
     | Some "auto" -> `Auto
-    | None -> `H1_only
+    | None -> `Auto
     | Some other ->
       Log.Server.warn "MASC_USE_H2=%s unrecognised, falling back to auto" other;
       `Auto

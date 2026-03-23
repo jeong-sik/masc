@@ -14,13 +14,13 @@
     This module manages the signaling state, peer registry, and live
     WebRTC connections via ocaml-webrtc (Webrtc.Webrtc_eio).
 
-    Opt-in via MASC_WEBRTC_ENABLED=1. *)
+    Enabled by default. Opt-out via MASC_WEBRTC_ENABLED=0. *)
 
-(** Whether WebRTC transport is enabled. *)
+(** Whether WebRTC transport is enabled (default: true). *)
 let is_enabled () =
   match Sys.getenv_opt "MASC_WEBRTC_ENABLED" with
-  | Some "1" | Some "true" -> true
-  | _ -> false
+  | Some "0" | Some "false" -> false
+  | _ -> true
 
 (** {1 Signaling State} *)
 

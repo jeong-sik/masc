@@ -126,7 +126,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
 
       ${hasDetailDisclosure
         ? html`
-            <details class="pt-2 border-t border-[var(--white-6)] mt-3">
+            <details class="pt-3 border-t border-[var(--white-6)] mt-4">
               <summary>${model.disclosureLabel ?? '세부 정보'}</summary>
               <div class="flex flex-wrap gap-3 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
                 ${model.recentEvent ? html`<span>최근 일 · ${model.recentEvent}</span>` : null}

@@ -13,7 +13,7 @@ interface ListItemProps {
 }
 
 export function ListItem({ title, subtitle, detail, onClick, class: className }: ListItemProps) {
-  const base = `w-full p-4 rounded-xl border border-[var(--white-6)] bg-[var(--white-3)] grid gap-1.5 text-left text-inherit ${onClick ? 'cursor-pointer' : 'cursor-default'} ${className ?? ''}`
+  const base = `w-full p-4 rounded-xl border border-[var(--white-6)] bg-[var(--white-3)] grid gap-2.5 text-left text-inherit ${onClick ? 'cursor-pointer' : 'cursor-default'} ${className ?? ''}`
 
   const content = html`
     <strong class="text-[var(--text-strong)]">${title}</strong>

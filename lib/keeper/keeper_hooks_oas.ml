@@ -143,8 +143,9 @@ let make_hooks
              | Some allowed -> not (List.mem tool_name allowed)
            in
            if autonomy_blocked then (
-             Log.Keeper.info "keeper:%s autonomy gate: %s not in allowed set, skipping"
-               (!meta_ref).name tool_name;
+             Log.Keeper.warn "keeper:%s autonomy gate: %s not in allowed set (level=%s), skipping"
+               (!meta_ref).name tool_name
+               (match autonomy_filter with Some l -> l | None -> "none");
              Agent_sdk.Hooks.Skip)
            else
            (* Safety gate 3: Destructive pattern detection *)

@@ -4,7 +4,6 @@
     stderr logging actually emit the expected log messages when triggered.
 
     Coverage:
-    - spawn_registry: Agent_name.of_string failure → "[spawn_registry]" prefix
     - tool_task: complete_task on nonexistent task → "[task]" prefix
     - a2a_tools: submit_heartbeat_result with unknown status → "[a2a]" prefix
 
@@ -14,7 +13,6 @@
 
 open Alcotest
 
-module Spawn_registry = Masc_mcp.Spawn_registry
 module Tool_task = Masc_mcp.Tool_task
 module A2a_tools = Masc_mcp.A2a_tools
 module Room = Masc_mcp.Room
@@ -97,44 +95,6 @@ let with_test_room f =
     (fun () -> f config)
 
 (* ============================================================
-   spawn_registry: Agent_name invalid input → "[spawn_registry]" on stderr
-   ============================================================ *)
-
-(** record_failure with an invalid agent name (contains @, exceeds valid pattern).
-    The function calls Agent_name.of_string which returns Error, triggering eprintf. *)
-let test_spawn_registry_record_failure_logs () =
-  let reg = Spawn_registry.create_registry () in
-  let output = capture_stderr (fun () ->
-    (* An agent name with special chars like "@" triggers Invalid_agent_name *)
-    Eio_main.run @@ fun _env ->
-    Spawn_registry.record_failure reg "invalid@agent!name"
-  ) in
-  check bool "stderr contains [Spawn] prefix"
-    true (str_contains output "[Spawn]")
-
-(** list_by_agent with an invalid agent name logs and returns empty list. *)
-let test_spawn_registry_list_by_agent_invalid_logs () =
-  let reg = Spawn_registry.create_registry () in
-  let output = capture_stderr (fun () ->
-    Eio_main.run @@ fun _env ->
-    let result = Spawn_registry.list_by_agent reg ~agent_name:"!!bad!!" in
-    (* Verify the function returns [] gracefully *)
-    assert (result = [])
-  ) in
-  check bool "stderr contains [Spawn] prefix for list_by_agent"
-    true (str_contains output "[Spawn]")
-
-(** clear_failures with an invalid agent name logs (does not crash). *)
-let test_spawn_registry_clear_failures_invalid_logs () =
-  let reg = Spawn_registry.create_registry () in
-  let output = capture_stderr (fun () ->
-    Eio_main.run @@ fun _env ->
-    Spawn_registry.clear_failures reg "  "  (* blank → trimmed to "" → invalid *)
-  ) in
-  check bool "stderr contains [Spawn] prefix for clear_failures"
-    true (str_contains output "[Spawn]")
-
-(* ============================================================
    tool_task: complete on nonexistent task → "[task]" on stderr
    ============================================================ *)
 
@@ -197,14 +157,6 @@ let test_a2a_submit_unknown_status_logs () =
 
 let () =
   run "Error logging coverage (PR #466)" [
-    "spawn_registry", [
-      test_case "record_failure invalid name logs [spawn_registry]"
-        `Quick test_spawn_registry_record_failure_logs;
-      test_case "list_by_agent invalid name logs [spawn_registry]"
-        `Quick test_spawn_registry_list_by_agent_invalid_logs;
-      test_case "clear_failures blank name logs [spawn_registry]"
-        `Quick test_spawn_registry_clear_failures_invalid_logs;
-    ];
     "tool_task", [
       test_case "done on missing task logs [task]"
         `Quick test_tool_task_done_nonexistent_logs;

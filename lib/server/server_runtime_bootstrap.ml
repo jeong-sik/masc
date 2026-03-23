@@ -690,6 +690,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_dashboard_http.start_operator_refresh_loop ~state ~sw ~clock;
       Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
       Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
+      (* Pre-warm shell cache so the first /dashboard load is instant.
+         shell is the only room-truth component without a proactive refresh loop. *)
+      Server_dashboard_http.warm_shell_cache state;
       start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
       (* gRPC coordination transport (opt-in via MASC_GRPC_ENABLED=1) *)
       let tool_dispatcher tool_name args_json =

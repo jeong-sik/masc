@@ -193,18 +193,7 @@ let test_dashboard_component_split_contracts () =
   check bool "swarm live panels exported from split file" true
     (file_contains_pattern "dashboard/src/components/command/swarm-live-panels.ts"
        "export function SwarmLivePanels");
-  check bool "war room surface imports hero strip" true
-    (file_contains_pattern "dashboard/src/components/command/war-room.ts"
-       "import { WarRoomHeroStrip } from './war-room-hero'");
-  check bool "war room surface imports body grid" true
-    (file_contains_pattern "dashboard/src/components/command/war-room.ts"
-       "import { WarRoomBodyGrid } from './war-room-body'");
-  check bool "war room hero exported from split file" true
-    (file_contains_pattern "dashboard/src/components/command/war-room-hero.ts"
-       "export function WarRoomHeroStrip");
-  check bool "war room body exported from split file" true
-    (file_contains_pattern "dashboard/src/components/command/war-room-body.ts"
-       "export function WarRoomBodyGrid");
+  (* war room surface removed — dead UI cleanup PR #2569 *)
   check bool "room backend setup normalizes postgres pooler url before connect" true
     (file_contains_pattern "lib/room/room_utils_backend_setup.ml"
        "pooler.supabase.com");

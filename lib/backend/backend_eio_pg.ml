@@ -129,7 +129,11 @@ let create ~sw ~env ~url ~cluster_name ~node_id =
       ) pool in
       (match init_result with
        | Error err -> Error (caqti_error_to_masc err)
-       | Ok () -> Ok { pool; namespace = cluster_name; node_id })
+       | Ok () ->
+           at_exit (fun () ->
+             try Caqti_eio.Pool.drain pool
+             with _ -> ());
+           Ok { pool; namespace = cluster_name; node_id })
 
 let get t key =
   let nkey = namespaced_key t.namespace key in

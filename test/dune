@@ -1038,3 +1038,9 @@
  (name test_keeper_safety_gates)
  (modules test_keeper_safety_gates)
  (libraries masc_mcp alcotest str yojson unix))
+
+; Eval_gate evasion — destructive pattern normalization and known gaps
+(test
+ (name test_eval_gate_evasion)
+ (modules test_eval_gate_evasion)
+ (libraries masc_mcp alcotest yojson))

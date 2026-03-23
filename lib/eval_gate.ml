@@ -64,14 +64,46 @@ let destructive_patterns : (string * string) list = [
   ("reboot", "system reboot");
 ]
 
+(** Normalize a command string for pattern matching.
+    Strips inline single/double quotes and collapses whitespace.
+    This catches simple evasion like 'r''m' '-rf' or r"m" -rf
+    without requiring full shell AST parsing.
+
+    Known limitations (documented in test_eval_gate_evasion.ml):
+    - Variable expansion ($\{IFS\}, $cmd) is not resolved
+    - Hex/octal escapes (\\x72\\x6d) are not decoded
+    - Command substitution ($(echo rm)) is not evaluated *)
+let normalize_command (cmd : string) : string =
+  let buf = Buffer.create (String.length cmd) in
+  let in_single = ref false in
+  let in_double = ref false in
+  let last_was_space = ref false in
+  String.iter (fun c ->
+    match c with
+    | '\'' when not !in_double ->
+      in_single := not !in_single
+    | '"' when not !in_single ->
+      in_double := not !in_double
+    | ' ' | '\t' | '\n' | '\r' ->
+      if not !last_was_space then begin
+        Buffer.add_char buf ' ';
+        last_was_space := true
+      end
+    | '\\' -> ()  (* strip backslash escapes *)
+    | _ ->
+      Buffer.add_char buf c;
+      last_was_space := false
+  ) cmd;
+  String.trim (Buffer.contents buf)
+
 (** Check if a bash command contains destructive patterns.
-    Returns None if safe, Some(pattern, description) if dangerous. *)
+    Returns None if safe, Some(pattern, description) if dangerous.
+
+    Applies normalization (quote stripping, whitespace collapse,
+    backslash removal) before substring matching. *)
 let detect_destructive (command : string) : (string * string) option =
-  let cmd_lower = String.lowercase_ascii command in
+  let cmd_lower = String.lowercase_ascii (normalize_command command) in
   List.find_opt (fun (pattern, _desc) ->
-    (* Use simple substring matching — sufficient for safety gate.
-       More sophisticated parsing (AST-level) would be needed for
-       evasion-resistant detection, but this catches common patterns. *)
     let pat_lower = String.lowercase_ascii pattern in
     let rec find_at i =
       if i + String.length pat_lower > String.length cmd_lower then false

@@ -73,7 +73,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
   const buttonClass =
     variant === 'mission'
       ? 'w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer'
-      : `monitor-row p-3.5 ${toneClass}${model.stateClass ? ` state-${model.stateClass}` : ''}${model.stateClass === 'offline' ? ' opacity-35 border-[rgba(85,85,85,0.15)] bg-[rgba(0,0,0,0.08)] hover:opacity-55' : ''}`
+      : `monitor-row p-4 ${toneClass}${model.stateClass ? ` state-${model.stateClass}` : ''}${model.stateClass === 'offline' ? ' opacity-35 border-[rgba(85,85,85,0.15)] bg-[rgba(0,0,0,0.08)] hover:opacity-55' : ''}`
 
   return html`
     <article class=${wrapperClass}>

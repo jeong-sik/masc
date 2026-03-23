@@ -56,7 +56,7 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
           <span class="cmd-chip rounded-full">${relativeTime(lane.last_movement_at)}</span>
         </div>
       </div>
-      <p class="mt-2.5 mb-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.movement_reason}</p>
+      <p class="mt-3 mb-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.movement_reason}</p>
       <div class="swarm-lane-track rounded-full">
         <span class="${toneClass(tone)}" style=${`width:${progressPercent}%`}></span>
       </div>
@@ -103,7 +103,7 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
   const featured = lanes.slice(0, 4)
   if (featured.length === 0) return null
   return html`
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-3.5">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
       ${featured.map(lane => {
         const tone = swarmLaneTone(lane)
         const workers = lane.counts.workers ?? 0
@@ -229,7 +229,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
   }
 
   return html`
-    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${toneClass(tone)}">
+    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${toneClass(tone)}">
       <div class="flex justify-between gap-3 items-start">
         <strong>Run Resolution</strong>
         <span class="cmd-chip rounded-full ${toneClass(tone)}">
@@ -261,7 +261,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
         : null}
       ${pendingConfirm
         ? html`
-            <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card warn">
+            <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card warn">
               <div class="flex justify-between gap-3 items-start">
                 <strong>확인 대기</strong>
                 <span class="cmd-chip rounded-full warn">${pendingConfirm.confirm_token}</span>

@@ -91,7 +91,7 @@ export function WarRoomBodyGrid({
               `
             : selectedSession
               ? html`
-                  <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card">
+                  <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card">
                     <div class="flex justify-between gap-3 items-start">
                       <strong>${selectedSession.session_id}</strong>
                       <span class="cmd-chip rounded-full ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
@@ -181,10 +181,10 @@ export function WarRoomBodyGrid({
             ${swarmHasEvidence && swarm ? html`<${SwarmRunResolutionCard} swarm=${swarm} />` : null}
             ${blockers.length > 0
               ? blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)
-              : html`<div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ok"><p>지금 보이는 blocker는 없습니다.</p></div>`}
+              : html`<div class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ok"><p>지금 보이는 blocker는 없습니다.</p></div>`}
             ${pendingApprovals > 0
               ? html`
-                  <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card warn">
+                  <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card warn">
                     <div class="flex justify-between gap-3 items-start">
                       <strong>승인 대기</strong>
                       <span class="cmd-chip rounded-full warn">${pendingApprovals}</span>
@@ -195,7 +195,7 @@ export function WarRoomBodyGrid({
               : null}
             ${pendingConfirmTotal > 0
               ? html`
-                  <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card warn">
+                  <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card warn">
                     <div class="flex justify-between gap-3 items-start">
                       <strong>확인 대기</strong>
                       <span class="cmd-chip rounded-full warn">${pendingConfirmHidden > 0 ? `${pendingConfirmVisible}/${pendingConfirmTotal}` : pendingConfirmTotal}</span>

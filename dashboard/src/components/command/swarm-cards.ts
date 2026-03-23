@@ -11,7 +11,7 @@ import { alertBorderTone, relativeTime, toneClass } from './helpers'
 
 export function SwarmChecklistCard({ item }: { item: CommandPlaneSwarmChecklistItem }) {
   return html`
-    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${toneClass(item.status)}">
+    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${toneClass(item.status)}">
       <div class="flex justify-between gap-3 items-start">
         <strong>${item.title}</strong>
         <span class="cmd-chip rounded-full ${toneClass(item.status)}">${item.status}</span>
@@ -127,7 +127,7 @@ export function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
           ? 'ok'
           : 'warn'
   return html`
-    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${toneClass(tone)}">
+    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${toneClass(tone)}">
         <div class="flex justify-between gap-3 items-start">
           <strong>Hot Proof / 가동 증거</strong>
           <span class="cmd-chip rounded-full ${toneClass(tone)}">${proof?.status ?? 'missing'}</span>

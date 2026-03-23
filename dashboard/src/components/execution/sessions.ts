@@ -63,7 +63,7 @@ export function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecu
   const hasTerminal = terminalSessions.length > 0
 
   return html`
-    <div class="mb-3.5">
+    <div class="mb-4">
       <h2 class="monitor-headline">영향받는 세션</h2>
       <p class="monitor-subheadline">대기열에서 고른 실행이 어떤 세션 목표와 실행 막힘을 갖는지 요약합니다.</p>
     </div>

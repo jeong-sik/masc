@@ -1,5 +1,5 @@
 // ActionBar — consistent action button row at the bottom of cards.
-// Replaces repeated flex gap-2 flex-wrap mt-2.5 + control-btn patterns.
+// Replaces repeated flex gap-2 flex-wrap mt-3 + control-btn patterns.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'

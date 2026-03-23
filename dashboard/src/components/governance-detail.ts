@@ -62,7 +62,7 @@ export function DecisionDetail() {
   return html`
     <${Card}
       title=${item ? '사건 상세' : '거버넌스 상세'}
-      class="section mb-3.5"
+      class="section mb-4"
      
     >
       ${detailLoading.value
@@ -70,7 +70,7 @@ export function DecisionDetail() {
         : !item || !detail
           ? html`<${EmptyState} message="왼쪽 수신함에서 사건을 선택하면 청원, 심의, 판정, 집행 기록이 여기에 표시됩니다." compact />`
           : html`
-              <div class="flex justify-between items-start gap-4 mb-3.5">
+              <div class="flex justify-between items-start gap-4 mb-4">
                 <div>
                   <h3>${detail.case.title}</h3>
                   <div class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">

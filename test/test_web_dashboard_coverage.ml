@@ -144,13 +144,19 @@ let test_html_references_dashboard_assets () =
       (contains_substr "/dashboard/assets/" html)
 
 let test_legacy_web_lobby_has_no_council_ui () =
-  let html = read_legacy_web_index () in
-  check bool "legacy lobby omits council panel" false
-    (contains_substr "Council" html);
-  check bool "legacy lobby omits debates button" false
-    (contains_substr "Debates" html);
-  check bool "legacy lobby omits startDebate hook" false
-    (contains_substr "startDebate()" html)
+  (* web/index.html was removed in #2552 (dead code cleanup).
+     Skip gracefully if the file no longer exists. *)
+  let path = Filename.concat (project_root ()) "web/index.html" in
+  if not (Sys.file_exists path) then
+    () (* legacy web removed — nothing to assert *)
+  else
+    let html = read_legacy_web_index () in
+    check bool "legacy lobby omits council panel" false
+      (contains_substr "Council" html);
+    check bool "legacy lobby omits debates button" false
+      (contains_substr "Debates" html);
+    check bool "legacy lobby omits startDebate hook" false
+      (contains_substr "startDebate()" html)
 
 (* ============================================================
    etag Tests

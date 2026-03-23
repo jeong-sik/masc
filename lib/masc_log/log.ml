@@ -8,6 +8,11 @@ type level =
   | Warn
   | Error
 
+type source =
+  | Structured
+  | Legacy_stderr
+  | Legacy_traceln
+
 (** Current log level (Atomic for thread safety in OCaml 5) *)
 let current_level = Atomic.make 1 (* Info = 1 *)
 
@@ -33,6 +38,33 @@ let level_of_string s =
   | "warn" | "warning" -> Warn
   | "error" -> Error
   | _ -> Info  (* Default to Info *)
+
+let source_to_string = function
+  | Structured -> "structured"
+  | Legacy_stderr -> "legacy_stderr"
+  | Legacy_traceln -> "legacy_traceln"
+
+let has_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.sub value 0 prefix_len = prefix
+
+let infer_legacy_level message =
+  let trimmed = String.trim message in
+  let upper = String.uppercase_ascii trimmed in
+  if has_prefix ~prefix:"[FATAL]" upper || has_prefix ~prefix:"FATAL:" upper then
+    (Error, "FATAL")
+  else if has_prefix ~prefix:"[ERROR]" upper || has_prefix ~prefix:"ERROR:" upper then
+    (Error, "ERROR")
+  else if has_prefix ~prefix:"[WARN]" upper || has_prefix ~prefix:"[WARNING]" upper
+          || has_prefix ~prefix:"WARN:" upper || has_prefix ~prefix:"WARNING:" upper then
+    (Warn, "WARN")
+  else if has_prefix ~prefix:"[INFO]" upper || has_prefix ~prefix:"INFO:" upper then
+    (Info, "INFO")
+  else if has_prefix ~prefix:"[DEBUG]" upper || has_prefix ~prefix:"DEBUG:" upper then
+    (Debug, "DEBUG")
+  else
+    (Info, "INFO")
 
 (** Check if level should be logged *)
 let should_log level =
@@ -80,33 +112,74 @@ module Ring = struct
     seq : int;
     ts : string;
     level : string;
+    raw_level : string;
+    normalized_level : string;
+    source : string;
+    legacy_classified : bool;
     module_name : string;
     message : string;
   }
 
   let capacity = 5000
   let buf : entry array = Array.make capacity
-    { seq = 0; ts = ""; level = ""; module_name = ""; message = "" }
+    {
+      seq = 0;
+      ts = "";
+      level = "";
+      raw_level = "";
+      normalized_level = "";
+      source = "";
+      legacy_classified = false;
+      module_name = "";
+      message = "";
+    }
   let total = Atomic.make 0 (* total entries ever written *)
 
-  let push ~level_str ~module_name ~message =
+  let push
+      ?raw_level
+      ?(source = Structured)
+      ?(legacy_classified = false)
+      ~normalized_level
+      ~module_name
+      ~message
+      () =
     let seq = Atomic.fetch_and_add total 1 in
     let idx = seq mod capacity in
-    buf.(idx) <- { seq; ts = timestamp_iso (); level = level_str;
-                   module_name; message }
+    let raw_level = Option.value ~default:normalized_level raw_level in
+    let source = source_to_string source in
+    buf.(idx) <-
+      {
+        seq;
+        ts = timestamp_iso ();
+        level = normalized_level;
+        raw_level;
+        normalized_level;
+        source;
+        legacy_classified;
+        module_name;
+        message;
+      }
 
   let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")
+      ?since_seq
       ?(order = `Newest_first) () : entry list =
     let t = Atomic.get total in
     if t = 0 then []
     else begin
       let start = max 0 (t - capacity) in
+      let start =
+        match since_seq with
+        | Some seq -> max start (seq + 1)
+        | None -> start
+      in
       let entries = ref [] in
       let count = ref 0 in
       let i = ref (t - 1) in
       while !i >= start && !count < limit do
         let e = buf.(!i mod capacity) in
-        let level_ok = (level_to_int (level_of_string e.level)) >= min_level in
+        let level_ok =
+          (level_to_int (level_of_string e.normalized_level)) >= min_level
+        in
         let module_ok = module_filter = "" ||
           String.lowercase_ascii e.module_name =
           String.lowercase_ascii module_filter in
@@ -127,6 +200,10 @@ module Ring = struct
       ("seq", `Int e.seq);
       ("ts", `String e.ts);
       ("level", `String e.level);
+      ("raw_level", `String e.raw_level);
+      ("normalized_level", `String e.normalized_level);
+      ("source", `String e.source);
+      ("legacy_classified", `Bool e.legacy_classified);
       ("module", `String e.module_name);
       ("message", `String e.message);
     ]
@@ -149,7 +226,8 @@ let log level ?(ctx : string option) fmt =
         | None -> Printf.sprintf "[%s] [%s]" (timestamp ()) level_str
       in
       Printf.eprintf "%s %s\n%!" prefix msg;
-      Ring.push ~level_str ~module_name ~message:msg
+      Ring.push ~raw_level:level_str ~normalized_level:level_str ~module_name
+        ~message:msg ()
     end
   ) fmt
 
@@ -158,6 +236,26 @@ let debug ?ctx fmt = log Debug ?ctx fmt
 let info ?ctx fmt = log Info ?ctx fmt
 let warn ?ctx fmt = log Warn ?ctx fmt
 let error ?ctx fmt = log Error ?ctx fmt
+
+let emit_legacy_raw ?level ?(module_name = "") ~source message =
+  let normalized_level, raw_level, legacy_classified =
+    match level with
+    | Some level ->
+        let level_str = level_to_string level in
+        (level_str, level_str, false)
+    | None ->
+        let inferred, raw_level = infer_legacy_level message in
+        (level_to_string inferred, raw_level, true)
+  in
+  Printf.eprintf "%s\n%!" message;
+  Ring.push ~raw_level ~normalized_level ~source ~legacy_classified ~module_name
+    ~message ()
+
+let legacy_stderr ?level ?module_name message =
+  emit_legacy_raw ?level ?module_name ~source:Legacy_stderr message
+
+let legacy_traceln ?level ?module_name message =
+  emit_legacy_raw ?level ?module_name ~source:Legacy_traceln message
 
 (** Module-specific loggers.
     Each module checks MASC_LOG_{NAME}_LEVEL env var for per-module override,
@@ -184,7 +282,8 @@ module Make (M : sig val name : string end) = struct
         let prefix = Printf.sprintf "[%s] [%s] [%s]"
           (timestamp ()) level_str M.name in
         Printf.eprintf "%s %s\n%!" prefix msg;
-        Ring.push ~level_str ~module_name:M.name ~message:msg
+        Ring.push ~raw_level:level_str ~normalized_level:level_str
+          ~module_name:M.name ~message:msg ()
       end
     ) fmt
 

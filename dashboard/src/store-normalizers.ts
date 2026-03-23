@@ -308,7 +308,7 @@ export function normalizeAttentionItem(raw: unknown): OperatorAttentionItem | nu
   if (!kind || !summary || !targetType) return null
   return {
     kind,
-    severity: asString(raw.severity) ?? 'warn',
+    severity: asString(raw.severity) ?? 'unknown',
     summary,
     target_type: targetType,
     target_id: asString(raw.target_id) ?? null,
@@ -327,7 +327,7 @@ export function normalizeRecommendedAction(raw: unknown): OperatorRecommendedAct
     action_type: actionType,
     target_type: targetType,
     target_id: asString(raw.target_id) ?? null,
-    severity: asString(raw.severity) ?? 'warn',
+    severity: asString(raw.severity) ?? 'unknown',
     reason,
     confirm_required: asBoolean(raw.confirm_required),
     suggested_payload: isRecord(raw.suggested_payload) ? raw.suggested_payload : undefined,

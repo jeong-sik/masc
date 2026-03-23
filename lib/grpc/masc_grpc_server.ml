@@ -19,11 +19,19 @@ let configured_port () =
       default_port)
   | None -> default_port
 
-(** Check whether gRPC is enabled (default: enabled, opt-out via env). *)
+(** Check whether gRPC is enabled (default: disabled, opt-in via env). *)
 let is_enabled () =
   match Sys.getenv_opt "MASC_GRPC_ENABLED" with
-  | Some "0" | Some "false" -> false
-  | _ -> true
+  | Some s -> (
+    match String.trim s |> String.lowercase_ascii with
+    | "1" | "true" -> true
+    | "" | "0" | "false" -> false
+    | other ->
+      Log.Server.warn
+        "MASC_GRPC_ENABLED=%s is not recognised, defaulting to disabled"
+        other;
+      false)
+  | None -> false
 
 (** Start the gRPC coordination server.
 
@@ -44,24 +52,31 @@ let start
   end
   else begin
     let port = configured_port () in
-    let service =
-      Masc_grpc_service.create_service ~room_config ~tool_dispatcher
-    in
-    let server =
-      Grpc_eio.Reflection.create_server_with_reflection
-        ~config:{ Grpc_eio.Server.default_config with port; host = "127.0.0.1" }
-        ()
-      |> Grpc_eio.Server.add_service service
-      |> Grpc_eio.Server.with_interceptor (Grpc_eio.Interceptor.logging ())
-    in
     Eio.Fiber.fork ~sw (fun () ->
-      Log.Server.info "gRPC coordination server starting on port %d (reflection enabled)" port;
-      Log.Server.info "  service: %s" Masc_grpc_service.service_name;
-      Log.Server.info "  methods: Join, Leave, Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
       (try
+        let service =
+          Masc_grpc_service.create_service ~room_config ~tool_dispatcher
+        in
+        let server =
+          Grpc_eio.Reflection.create_server_with_reflection
+            ~config:{ Grpc_eio.Server.default_config with port; host = "127.0.0.1" }
+            ()
+          |> Grpc_eio.Server.add_service service
+          |> Grpc_eio.Server.with_interceptor (Grpc_eio.Interceptor.logging ())
+        in
+        Log.Server.info
+          "gRPC coordination server starting on port %d (reflection enabled)"
+          port;
+        Log.Server.info "  service: %s" Masc_grpc_service.service_name;
+        Log.Server.info
+          "  methods: Join, Leave, Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
         Grpc_eio.Server.serve ~sw ~env server
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
+      | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
+        Log.Server.error
+          "gRPC coordination transport unavailable on 127.0.0.1:%d: port already in use"
+          port
       | exn ->
         Log.Server.error "gRPC server failed: %s" (Printexc.to_string exn)))
   end

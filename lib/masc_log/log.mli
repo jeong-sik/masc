@@ -39,12 +39,22 @@ val info : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 val warn : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 val error : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 
+val legacy_stderr : ?level:level -> ?module_name:string -> string -> unit
+(** Mirror a legacy stderr line into the dashboard log ring. *)
+
+val legacy_traceln : ?level:level -> ?module_name:string -> string -> unit
+(** Mirror a legacy [Eio.traceln]-style line into the dashboard log ring. *)
+
 (** In-memory ring buffer exposed for dashboard log viewer routes. *)
 module Ring : sig
   type entry = {
     seq : int;
     ts : string;
     level : string;
+    raw_level : string;
+    normalized_level : string;
+    source : string;
+    legacy_classified : bool;
     module_name : string;
     message : string;
   }
@@ -53,6 +63,7 @@ module Ring : sig
     ?limit:int ->
     ?min_level:int ->
     ?module_filter:string ->
+    ?since_seq:int ->
     ?order:[< `Newest_first | `Oldest_first > `Newest_first ] ->
     unit ->
     entry list

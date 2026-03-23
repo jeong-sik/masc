@@ -48,10 +48,10 @@ function gatherSpotlightItems(snap: DashboardMissionResponse): SpotlightItem[] {
     }
   }
 
-  const severityOrder: Record<string, number> = { bad: 0, critical: 0, warn: 1, watch: 1, ok: 2 }
+  const severityOrder: Record<string, number> = { bad: 0, critical: 0, warn: 1, watch: 1, ok: 2, unknown: 2, info: 2 }
   items.sort((a, b) => {
-    const sa = severityOrder[a.severity] ?? 1
-    const sb = severityOrder[b.severity] ?? 1
+    const sa = severityOrder[a.severity] ?? 2
+    const sb = severityOrder[b.severity] ?? 2
     return sa - sb
   })
 
@@ -61,13 +61,13 @@ function gatherSpotlightItems(snap: DashboardMissionResponse): SpotlightItem[] {
 function severityDotColor(severity: string): string {
   if (severity === 'bad' || severity === 'critical') return 'bg-[var(--bad)]'
   if (severity === 'warn' || severity === 'watch') return 'bg-[var(--warn)]'
-  return 'bg-[var(--ok)]'
+  return 'bg-[var(--text-muted)]'
 }
 
 function severityBarColor(severity: string): string {
   if (severity === 'bad' || severity === 'critical') return 'bg-[var(--bad)]'
   if (severity === 'warn' || severity === 'watch') return 'bg-[var(--warn)]'
-  return 'bg-[var(--ok)]'
+  return 'bg-[var(--white-10)]'
 }
 
 interface AttentionSpotlightProps {

@@ -6,6 +6,9 @@
 export function toneClass(tone?: string | null): string {
   if (
     tone === 'bad'
+    || tone === 'error'
+    || tone === 'failed'
+    || tone === 'fatal'
     || tone === 'offline'
     || tone === 'critical'
     || tone === 'risk'
@@ -14,6 +17,7 @@ export function toneClass(tone?: string | null): string {
   }
   if (
     tone === 'warn'
+    || tone === 'warning'
     || tone === 'pending'
     || tone === 'degraded'
     || tone === 'interrupted'

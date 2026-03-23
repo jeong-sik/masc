@@ -59,7 +59,10 @@ let handle_read_resource_eio state id params =
               | json -> Some json
               | exception Yojson.Json_error msg ->
                 let preview = if String.length line > 50 then String.sub line 0 50 ^ "..." else line in
-                Eio.traceln "[WARN] Failed to parse event JSON: %s (line: %s)" msg preview;
+                Log.legacy_traceln ~level:Log.Warn ~module_name:"MCP"
+                  (Printf.sprintf
+                     "[WARN] Failed to parse event JSON: %s (line: %s)" msg
+                     preview);
                 None
             ) lines
           in

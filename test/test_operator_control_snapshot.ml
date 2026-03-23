@@ -41,7 +41,7 @@ let test_snapshot_has_expected_sections () =
         (Yojson.Safe.Util.member "recommendation_summary" json <> `Null);
       Alcotest.(check bool) "resident judge runtime present" true
         (Yojson.Safe.Util.member "resident_judge_runtime" json <> `Null);
-      Alcotest.(check bool) "resident judge disabled by default" false
+      Alcotest.(check bool) "resident judge enabled by default" true
         Yojson.Safe.Util.
           (json |> member "resident_judge_runtime" |> member "enabled" |> to_bool);
       Alcotest.(check string) "judgment owner" "fallback_read_model"

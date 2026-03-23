@@ -48,14 +48,14 @@ let start
       Masc_grpc_service.create_service ~room_config ~tool_dispatcher
     in
     let server =
-      Grpc_eio.Server.create
+      Grpc_eio.Reflection.create_server_with_reflection
         ~config:{ Grpc_eio.Server.default_config with port; host = "127.0.0.1" }
         ()
       |> Grpc_eio.Server.add_service service
       |> Grpc_eio.Server.with_interceptor (Grpc_eio.Interceptor.logging ())
     in
     Eio.Fiber.fork ~sw (fun () ->
-      Log.Server.info "gRPC coordination server starting on port %d" port;
+      Log.Server.info "gRPC coordination server starting on port %d (reflection enabled)" port;
       Log.Server.info "  service: %s" Masc_grpc_service.service_name;
       Log.Server.info "  methods: Join, Leave, Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
       (try

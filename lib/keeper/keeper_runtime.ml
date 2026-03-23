@@ -94,6 +94,9 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
           match ensure_resident_meta ctx.config spec with
           | Error _ -> (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
           | Ok m ->
+              if m.paused then
+                (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
+              else
               let stale_now =
                 stale_turn_sec > 0.0
                 && (m.last_turn_ts <= 0.0

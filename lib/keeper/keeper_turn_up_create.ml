@@ -401,6 +401,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             active_team_session_id = None;
             last_team_session_started_at = "";
             team_session_start_count_total = 0;
+            paused = false;
          } in
          match write_meta ctx.config meta with
          | Error e -> (false, e)

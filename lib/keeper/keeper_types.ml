@@ -105,6 +105,7 @@ type keeper_meta = {
   deliberation_cost_total_usd: float;
   last_deliberation_ts: float;
   last_triage_triggers: string;
+  paused: bool;
 }
 
 let now_iso () = Types.now_iso ()
@@ -213,6 +214,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("deliberation_cost_total_usd", `Float m.deliberation_cost_total_usd);
       ("last_deliberation_ts", `Float m.last_deliberation_ts);
       ("last_triage_triggers", `String m.last_triage_triggers);
+      ("paused", `Bool m.paused);
     ]
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
@@ -472,6 +474,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let last_triage_triggers =
       Safe_ops.json_string ~default:"" "last_triage_triggers" json
     in
+    let paused =
+      Safe_ops.json_bool ~default:false "paused" json
+    in
     if not (validate_name name) then
       Error "invalid keeper meta (bad name)"
     else if not (validate_name trace_id) then
@@ -577,6 +582,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           deliberation_cost_total_usd;
           last_deliberation_ts;
           last_triage_triggers;
+          paused;
         }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))

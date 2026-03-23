@@ -76,25 +76,22 @@ type run_result = {
 (* ================================================================ *)
 
 (** Resolve a model label string to an OAS Provider.config.
-    Uses OAS Cascade_config.parse_model_string as primary path, which
-    resolves via Provider_registry directly. Falls back to Oas_type_adapters
-    for provider-kind dispatch, then glm as last resort. *)
+    Uses OAS Cascade_config.parse_model_string (Provider_registry SSOT).
+    Falls back to glm when parsing fails.
+
+    Note: the previous middle fallback via [to_oas_provider_of_label]
+    was dead code — it calls parse_model_string internally, so if
+    line 84 fails, line 88 also fails. Removed in v2.136.0. *)
 let resolve_provider_of_label (label : string) : Oas.Provider.config =
-  (* Primary: parse via OAS Cascade_config (uses Provider_registry directly) *)
   match Llm_provider.Cascade_config.parse_model_string label with
   | Some pc -> Oas_type_adapters.provider_config_to_oas pc
   | None ->
-    (* Fallback: try Oas_type_adapters which handles provider alias resolution *)
-    match Oas_type_adapters.to_oas_provider_of_label label with
-    | Some cfg -> cfg
-    | None ->
-      (* Last resort: use glm as fallback provider *)
-      Oas_type_adapters.provider_config_to_oas
-        (Llm_provider.Provider_config.make
-           ~kind:Llm_provider.Provider_config.Glm
-           ~model_id:"auto"
-           ~base_url:"https://open.bigmodel.cn/api/paas/v4"
-           ~request_path:"/chat/completions" ())
+    Oas_type_adapters.provider_config_to_oas
+      (Llm_provider.Provider_config.make
+         ~kind:Llm_provider.Provider_config.Glm
+         ~model_id:"auto"
+         ~base_url:"https://open.bigmodel.cn/api/paas/v4"
+         ~request_path:"/chat/completions" ())
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)

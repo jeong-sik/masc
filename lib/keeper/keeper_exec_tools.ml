@@ -694,6 +694,31 @@ let execute_keeper_tool_call
         let _ = Room.broadcast config ~from_agent:agent ~content:message in
         Yojson.Safe.to_string
           (`Assoc [ ("ok", `Bool true); ("broadcast", `String message) ])
+  | "keeper_task_claim" ->
+      let result = Room.claim_next config ~agent_name:meta.agent_name in
+      Yojson.Safe.to_string (`Assoc [ ("result", `String result) ])
+  | "keeper_task_done" ->
+      let task_id =
+        Safe_ops.json_string ~default:"" "task_id" args |> String.trim
+      in
+      let result_text =
+        Safe_ops.json_string ~default:"" "result" args |> String.trim
+      in
+      if task_id = "" then
+        Yojson.Safe.to_string (`Assoc [ ("error", `String "task_id required") ])
+      else
+        let agent = Printf.sprintf "keeper:%s" meta.name in
+        let notes = if result_text = "" then "" else result_text in
+        (match
+           Room.force_done_task_r config ~agent_name:agent ~task_id ~notes ()
+         with
+         | Ok msg ->
+             Yojson.Safe.to_string
+               (`Assoc [ ("ok", `Bool true); ("result", `String msg) ])
+         | Error e ->
+             Yojson.Safe.to_string
+               (`Assoc [ ("ok", `Bool false);
+                          ("error", `String (Types.masc_error_to_string e)) ]))
   | name when String.starts_with ~prefix:"masc_autoresearch_" name ->
       let ctx : Tool_autoresearch.context = {
         base_path = project_root_of_config config;

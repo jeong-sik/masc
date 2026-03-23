@@ -67,9 +67,9 @@ export function App() {
 
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--bg-0)] bg-[radial-gradient(ellipse_at_top,rgba(25,40,70,0.3)_0%,rgba(11,18,32,1)_80%)] text-[var(--text-body)]">
-      <header class="shrink-0 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(8,14,26,0.5)] px-6 py-4 backdrop-blur-2xl z-10 relative">
+      <header class="shrink-0 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(8,14,26,0.5)] px-4 py-2.5 backdrop-blur-2xl z-10 relative">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[rgba(71,184,255,0.15)] to-transparent"></div>
-        <div class="mx-auto flex w-full max-w-[1680px] items-start justify-between gap-6 max-[860px]:flex-col max-[860px]:items-stretch">
+        <div class="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-4 max-[860px]:flex-col max-[860px]:items-stretch">
           <div class="min-w-0">
             <div class="flex items-center gap-4">
               <button type="button"
@@ -78,14 +78,14 @@ export function App() {
               >
                 ${mobileMenuOpen.value ? '\u2715' : '\u2630'}
               </button>
-              <div class="flex size-11 shrink-0 items-center justify-center rounded-[14px] border border-[rgba(71,184,255,0.3)] bg-[linear-gradient(135deg,rgba(71,184,255,0.2),rgba(10,28,58,0.8))] text-[18px] font-bold text-[#bfe7ff] shadow-[0_0_20px_rgba(71,184,255,0.15)]">
+              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[rgba(71,184,255,0.3)] bg-[linear-gradient(135deg,rgba(71,184,255,0.2),rgba(10,28,58,0.8))] text-[15px] font-bold text-[#bfe7ff]">
                 ${currentView?.icon ?? 'M'}
               </div>
               <div class="min-w-0 flex flex-col justify-center">
                 <div class="flex flex-wrap items-center gap-2 mb-0.5">
                   <span class="text-[10px] font-bold uppercase tracking-[0.25em] text-[rgba(154,217,255,0.6)]">MASC Control Deck</span>
                 </div>
-                <h1 class="text-[18px] font-semibold tracking-[-0.02em] text-[var(--text-strong)] leading-none flex items-center gap-2">
+                <h1 class="text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)] leading-none flex items-center gap-1.5">
                   ${currentView?.label ?? 'Multi-Agent Room Console'}
                   ${currentSection && currentSection.label !== currentView?.label
                     ? html`<span class="text-[13px] font-medium text-[rgba(154,217,255,0.5)]">/</span><span class="text-[15px] font-medium text-[rgba(154,217,255,0.8)]">${currentSection.label}</span>`
@@ -102,17 +102,13 @@ export function App() {
         </div>
       </header>
 
-      <div class="flex flex-1 gap-5 overflow-hidden p-5 max-[1100px]:flex-col max-[1100px]:p-4">
-        <aside class="${sidebarCollapsed.value ? 'w-16' : 'w-[260px]'} shrink-0 overflow-y-auto overflow-x-hidden rounded-[20px] border border-[rgba(255,255,255,0.06)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[360px] ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'} relative">
-          <div class="absolute inset-0 bg-gradient-to-b from-[rgba(255,255,255,0.03)] to-transparent pointer-events-none rounded-[20px]"></div>
-          <div class="relative h-full">
-            <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
-          </div>
+      <div class="flex flex-1 gap-3 overflow-hidden p-3 max-[1100px]:flex-col max-[1100px]:p-2">
+        <aside class="${sidebarCollapsed.value ? 'w-14' : 'w-[220px]'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[300px] ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+          <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
         </aside>
 
-        <main class="min-w-0 flex-1 overflow-hidden rounded-[20px] border border-[rgba(255,255,255,0.06)] bg-[rgba(10,15,26,0.7)] backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] max-[1100px]:min-h-0 relative">
-          <div class="absolute inset-0 bg-gradient-to-b from-[rgba(255,255,255,0.02)] to-transparent pointer-events-none rounded-[20px]"></div>
-          <div class="relative mx-auto h-full max-w-[1600px] overflow-y-auto p-6 lg:p-8">
+        <main class="min-w-0 flex-1 overflow-hidden rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(10,15,26,0.7)] backdrop-blur-xl max-[1100px]:min-h-0">
+          <div class="mx-auto h-full max-w-[1600px] overflow-y-auto p-4 lg:p-5">
             <${DashboardMain} />
           </div>
         </main>

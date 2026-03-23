@@ -127,11 +127,11 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
 
   return html`
     <nav class="flex flex-col h-full">
-      <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-4 pt-4 pb-2">
+      <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-3 pt-3 pb-1.5">
         ${!collapsed ? html`
           <div class="px-1">
             <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-[rgba(154,217,255,0.5)]">Navigation</div>
-            <div class="mt-0.5 text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)] drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">MASC Core</div>
+            <div class="mt-0.5 text-[13px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
           </div>
         ` : null}
         <button type="button"
@@ -143,8 +143,8 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         </button>
       </div>
 
-      <div class="flex-1 overflow-y-auto ${collapsed ? 'px-2' : 'px-4'} py-3">
-        <div class="flex flex-col gap-4">
+      <div class="flex-1 overflow-y-auto ${collapsed ? 'px-1.5' : 'px-3'} py-2">
+        <div class="flex flex-col gap-2.5">
           ${DASHBOARD_SURFACES.map(surface => {
             const isSurfaceActive = surface.id === currentTab
             const sections = sectionItemsForTab(surface.id)
@@ -164,10 +164,10 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
             return html`
               <div class="flex flex-col gap-1.5">
                 <button type="button"
-                  class="flex items-center gap-3 w-full rounded-xl px-3 py-2.5 text-left cursor-pointer transition-all duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.15),rgba(71,184,255,0.05))] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.2)]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.05)] border border-transparent'}"
+                  class="flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left cursor-pointer transition-all duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.15),rgba(71,184,255,0.05))] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.2)]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.05)] border border-transparent'}"
                   onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
                 >
-                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-[16px] shadow-sm">
+                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-[14px]">
                     ${surface.icon}
                   </span>
                   <div class="flex-1 min-w-0">

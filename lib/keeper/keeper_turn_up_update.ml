@@ -97,6 +97,9 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     |> Option.value ~default:"disabled"
     |> canonical_policy_shell_mode
   in
+  let allowed_paths =
+    Option.value ~default:old.allowed_paths p.allowed_paths_opt
+  in
   let initiative_enabled =
     first_some
       p.initiative_enabled_opt
@@ -228,6 +231,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     policy_reward_model_path;
     policy_voice_enabled;
     policy_shell_mode;
+    allowed_paths;
     initiative_enabled;
     initiative_scope;
     initiative_idle_sec;

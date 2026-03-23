@@ -135,6 +135,7 @@ let ensure_keeper_exists
       |> Option.value ~default:"disabled"
       |> canonical_policy_shell_mode
     in
+    let allowed_paths = [] in
     let initiative_enabled =
       (if use_profile_policy_defaults then profile_defaults.initiative_enabled else None)
       |> Option.value ~default:false
@@ -207,6 +208,7 @@ let ensure_keeper_exists
       policy_reward_model_path;
       policy_voice_enabled;
       policy_shell_mode;
+      allowed_paths;
       initiative_enabled;
       initiative_scope;
       initiative_idle_sec;

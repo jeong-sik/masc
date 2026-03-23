@@ -23,6 +23,7 @@ type parsed_args = {
   policy_reward_model_path_opt : string option;
   policy_voice_enabled_opt : bool option;
   policy_shell_mode_opt : string option;
+  allowed_paths_opt : string list option;
   initiative_enabled_opt : bool option;
   initiative_scope_opt : string option;
   initiative_idle_sec_opt : int option;
@@ -85,6 +86,10 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let policy_reward_model_path_opt = get_string_opt args "policy_reward_model_path" in
     let policy_voice_enabled_opt = get_bool_opt args "policy_voice_enabled" in
     let policy_shell_mode_opt = get_string_opt args "policy_shell_mode" in
+    let allowed_paths_opt =
+      let raw = get_string_list args "allowed_paths" in
+      if raw = [] then None else Some raw
+    in
     let initiative_enabled_opt = get_bool_opt args "initiative_enabled" in
     let initiative_scope_opt = get_string_opt args "initiative_scope" in
     let initiative_idle_sec_opt = Safe_ops.json_int_opt "initiative_idle_sec" args in
@@ -164,6 +169,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       policy_reward_model_path_opt;
       policy_voice_enabled_opt;
       policy_shell_mode_opt;
+      allowed_paths_opt;
       initiative_enabled_opt;
       initiative_scope_opt;
       initiative_idle_sec_opt;

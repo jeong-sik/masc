@@ -18,7 +18,8 @@ let normalize_path_for_check (path : string) : string =
     in
     Filename.concat parent_norm (Filename.basename path)
 
-let resolve_keeper_target_path ~(config : Room.config) ~(raw_path : string)
+let resolve_keeper_target_path ~(config : Room.config)
+    ~(allowed_paths : string list) ~(raw_path : string)
     : (string, string) result =
   let raw = String.trim raw_path in
   if raw = "" then Error "path_required"
@@ -29,17 +30,33 @@ let resolve_keeper_target_path ~(config : Room.config) ~(raw_path : string)
     in
     let root_norm = normalize_path_for_check root in
     let target_norm = normalize_path_for_check candidate in
-    let allowed =
+    let within_root =
       target_norm = root_norm
       || starts_with ~prefix:(root_norm ^ "/") target_norm
     in
-    if allowed then Ok candidate
-    else
+    if not within_root then
       Error
-        (Printf.sprintf
-           "path_outside_project_root: %s (root=%s)"
-           target_norm
-           root_norm)
+        (Printf.sprintf "path_outside_project_root: %s (root=%s)"
+           target_norm root_norm)
+    else if allowed_paths = [] then
+      Ok candidate
+    else
+      let rel =
+        let prefix = root_norm ^ "/" in
+        if starts_with ~prefix target_norm then
+          String.sub target_norm (String.length prefix)
+            (String.length target_norm - String.length prefix)
+        else ""
+      in
+      let matches_any =
+        List.exists (fun ap -> starts_with ~prefix:ap rel) allowed_paths
+      in
+      if matches_any then Ok candidate
+      else
+        Error
+          (Printf.sprintf
+             "path_not_in_allowed_paths: %s (allowed: [%s])"
+             raw (String.concat ", " allowed_paths))
 
 let truncate_tool_output ?(max_len = 12000) (s : string) : string =
   if String.length s <= max_len then s

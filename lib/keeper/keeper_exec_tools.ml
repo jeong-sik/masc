@@ -292,7 +292,7 @@ let execute_keeper_tool_call
         Safe_ops.json_int ~default:20000 "max_bytes" args
         |> fun n -> max 512 (min 200000 n)
       in
-      (match resolve_keeper_target_path ~config ~raw_path:path with
+      (match resolve_keeper_target_path ~config ~allowed_paths:meta.allowed_paths ~raw_path:path with
       | Error e -> Yojson.Safe.to_string (`Assoc [ ("error", `String e) ])
       | Ok target -> (
           match Safe_ops.read_file_safe target with
@@ -321,7 +321,7 @@ let execute_keeper_tool_call
         Safe_ops.json_string ~default:"overwrite" "mode" args
         |> String.lowercase_ascii
       in
-      (match resolve_keeper_target_path ~config ~raw_path:path with
+      (match resolve_keeper_target_path ~config ~allowed_paths:meta.allowed_paths ~raw_path:path with
       | Error e -> Yojson.Safe.to_string (`Assoc [ ("error", `String e) ])
       | Ok target ->
           (try
@@ -387,7 +387,7 @@ let execute_keeper_tool_call
       let root = project_root_of_config config in
       let read_target () =
         let raw_path = Safe_ops.json_string ~default:"." "path" args in
-        resolve_keeper_target_path ~config ~raw_path
+        resolve_keeper_target_path ~config ~allowed_paths:meta.allowed_paths ~raw_path
       in
       let render_process_result ~cmd argv =
         let st, out =

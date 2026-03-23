@@ -469,6 +469,7 @@ let handle_keeper_status ctx args : tool_result =
                else `String m.policy_reward_model_path);
              ("voice_enabled", `Bool m.policy_voice_enabled);
              ("shell_mode", `String m.policy_shell_mode);
+             ("allowed_paths", string_list_to_json m.allowed_paths);
              ("allowed_tools", string_list_to_json allowed_tools);
              ("available_internal_tools", string_list_to_json all_internal_tools);
              ("blocked_internal_tools", string_list_to_json blocked_internal_tools);

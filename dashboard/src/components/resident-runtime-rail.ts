@@ -56,7 +56,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
         </div>
         <div class="rounded-md border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
           <div class="text-[10px] text-[var(--text-muted)]">태스크</div>
-          <strong class="mt-1 block text-[18px] font-semibold tabular-nums text-[var(--warn)]">${tasks.value.length}</strong>
+          <strong class="mt-1 block text-[18px] font-semibold tabular-nums ${tasks.value.length > 0 ? 'text-[var(--warn)]' : 'text-[var(--text-muted)]'}">${tasks.value.length}</strong>
         </div>
         <div class="rounded-md border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
           <div class="text-[10px] text-[var(--text-muted)]">이벤트</div>

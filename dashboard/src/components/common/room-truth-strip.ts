@@ -24,7 +24,7 @@ export function RoomTruthStrip() {
     <section class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3 mb-4">
       <article class="room-truth-card rounded-xl">
         <span class="room-truth-label">현황</span>
-        <strong>에이전트 ${counts?.agents ?? 0} · 태스크 ${counts?.tasks ?? 0} · 키퍼 ${counts?.keepers ?? 0}</strong>
+        <strong>에이전트 ${counts?.agents ?? 0} · 키퍼 ${counts?.keepers ?? 0}${(counts?.tasks ?? 0) > 0 ? ` · 태스크 ${counts?.tasks}` : ''}</strong>
         <p>${status?.project ?? 'project'} · ${status?.paused ? '일시정지' : '활성'}</p>
       </article>
 

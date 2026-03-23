@@ -285,6 +285,7 @@ let allowed_origins = [
   "https://127.0.0.1";
   (* Cloudflare tunnel *)
   "https://masc.crying.pictures";
+  "https://masc-dev.crying.pictures";
 ]
 
 (** Validate Origin header for DNS rebinding protection *)

@@ -4,8 +4,6 @@
     Each parameter is registered with [Runtime_params] with validation bounds.
 
     Surfaces:
-    - [lodge_behavior]:    tick interval, agents per tick, quiet hours (Low risk)
-    - [lodge_limits]:      daily action / post caps (Low risk)
     - [board_policy]:      default TTL, message max count (Low risk)
     - [inference_config]:        default model, timeout (High risk)
 
@@ -40,58 +38,6 @@ let deserialize_string json =
   match json with
   | `String s -> Ok s
   | _ -> Error "expected string"
-
-(* ── lodge_behavior surface ──────────────────────────────────── *)
-
-let lodge_tick_interval =
-  Runtime_params.register
-    ~key:"lodge.tick_interval_seconds"
-    ~default:(fun () -> Env_config_governance.LodgeV2.tick_interval_seconds)
-    ~validate:(validate_float_range ~min:60.0 ~max:14400.0 "tick_interval")
-    ~serialize:(fun v -> `Float v)
-    ~deserialize:deserialize_float
-
-let lodge_agents_per_tick =
-  Runtime_params.register
-    ~key:"lodge.agents_per_tick"
-    ~default:(fun () -> Env_config_governance.LodgeV2.agents_per_tick)
-    ~validate:(validate_int_range ~min:1 ~max:20 "agents_per_tick")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
-
-let lodge_quiet_start =
-  Runtime_params.register
-    ~key:"lodge.quiet_start"
-    ~default:(fun () -> Env_config_governance.LodgeV2.quiet_start)
-    ~validate:(validate_int_range ~min:0 ~max:23 "quiet_start")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
-
-let lodge_quiet_end =
-  Runtime_params.register
-    ~key:"lodge.quiet_end"
-    ~default:(fun () -> Env_config_governance.LodgeV2.quiet_end)
-    ~validate:(validate_int_range ~min:0 ~max:23 "quiet_end")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
-
-(* ── lodge_limits surface ────────────────────────────────────── *)
-
-let lodge_max_daily_actions =
-  Runtime_params.register
-    ~key:"lodge.max_daily_actions"
-    ~default:(fun () -> Env_config_governance.LodgeV2.max_daily_actions)
-    ~validate:(validate_int_range ~min:1 ~max:100 "max_daily_actions")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
-
-let lodge_max_posts_per_day =
-  Runtime_params.register
-    ~key:"lodge.max_posts_per_day"
-    ~default:(fun () -> Env_config_governance.LodgeV2.max_posts_per_day)
-    ~validate:(validate_int_range ~min:1 ~max:50 "max_posts_per_day")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
 
 (* ── board_policy surface ────────────────────────────────────── *)
 
@@ -134,28 +80,6 @@ type surface = {
 
 let surfaces =
   [
-    {
-      id = "lodge_behavior";
-      description = "Lodge tick interval, agents per tick, quiet hours";
-      risk = "low";
-      param_keys =
-        [
-          "lodge.tick_interval_seconds";
-          "lodge.agents_per_tick";
-          "lodge.quiet_start";
-          "lodge.quiet_end";
-        ];
-    };
-    {
-      id = "lodge_limits";
-      description = "Lodge daily action and post caps";
-      risk = "low";
-      param_keys =
-        [
-          "lodge.max_daily_actions";
-          "lodge.max_posts_per_day";
-        ];
-    };
     {
       id = "board_policy";
       description = "Message retention cap";

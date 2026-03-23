@@ -196,10 +196,6 @@ let () =
   in
 
   let test_governance_registry_validation () =
-    (* Lodge tick interval should reject < 60 *)
-    (match Runtime_params.set Governance_registry.lodge_tick_interval 10.0 with
-     | Error _ -> ()
-     | Ok () -> Alcotest.fail "should reject tick_interval < 60");
     (* Default inference model should reject empty string *)
     (match Runtime_params.set Governance_registry.inference_default_model "" with
      | Error _ -> ()

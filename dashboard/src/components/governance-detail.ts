@@ -28,7 +28,7 @@ export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['pe
       <div class="flex flex-wrap items-center gap-2 text-[#9ab3de] text-[11px]">
         <span class="governance-badge rounded-full text-[#b7cbee]">청원</span>
         <strong>${petition.created_by || petition.origin || 'system'}</strong>
-        ${petition.created_at ? html`<span><${TimeAgo} timestamp=${petition.created_at} /></span>` : null}
+        ${petition.created_at ? html`<span><${TimeAgo} timestamp=${petition.created_at} /></span>` : html``}
       </div>
       <div class="mt-2 text-[#d7e7ff] leading-[1.5] break-words">${petition.title}</div>
       <div class="governance-chip rounded-full-row">
@@ -44,7 +44,7 @@ export function BriefEntry({ brief }: { brief: GovernanceCaseBrief }) {
       <div class="flex flex-wrap items-center gap-2 text-[#9ab3de] text-[11px]">
         <span class="governance-badge rounded-full ${governanceToneClass(brief.stance)}">${stanceLabel(brief.stance)}</span>
         <strong>${brief.author}</strong>
-        ${brief.created_at ? html`<span><${TimeAgo} timestamp=${brief.created_at} /></span>` : null}
+        ${brief.created_at ? html`<span><${TimeAgo} timestamp=${brief.created_at} /></span>` : html``}
       </div>
       <div class="mt-2 text-[#d7e7ff] leading-[1.5] break-words">${brief.summary}</div>
       <div class="governance-chip rounded-full-row">

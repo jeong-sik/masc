@@ -320,7 +320,147 @@ let persona_profile_path_opt name =
       let path = Filename.concat (Filename.concat root name) "profile.json" in
       if Sys.file_exists path then Some path else None
 
-let load_keeper_profile_defaults name : keeper_profile_defaults =
+(* ================================================================ *)
+(* TOML -> keeper_profile_defaults conversion                        *)
+(* ================================================================ *)
+
+let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
+    : (keeper_profile_defaults, string) result =
+  let k key = "keeper." ^ key in
+  let str key = Keeper_toml_loader.toml_string_opt doc (k key) in
+  let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
+  let bool_ key = Keeper_toml_loader.toml_bool_opt doc (k key) in
+  let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
+  (* Validate soul_profile if provided *)
+  (match str "soul_profile" with
+   | Some raw ->
+     (match canonical_soul_profile raw with
+      | None ->
+        Error (Printf.sprintf
+                 "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, minimal)"
+                 raw)
+      | Some _ -> Ok ())
+   | None -> Ok ())
+  |> Result.map (fun () ->
+       {
+         manifest_path = None;
+         goal = str "goal";
+         short_goal =
+           str "short_goal"
+           |> normalize_goal_horizon_opt;
+         mid_goal =
+           str "mid_goal"
+           |> normalize_goal_horizon_opt;
+         long_goal =
+           str "long_goal"
+           |> normalize_goal_horizon_opt;
+         soul_profile =
+           str "soul_profile"
+           |> Option.map (fun s ->
+                canonical_soul_profile s
+                |> Option.value ~default:default_soul_profile);
+         will = str "will";
+         needs = str "needs";
+         desires = str "desires";
+         instructions = str "instructions";
+         models = strs "models";
+         allowed_models = strs "allowed_models";
+         active_model = str "active_model";
+         policy_mode =
+           str "policy_mode"
+           |> Option.map canonical_policy_mode;
+         policy_action_budget =
+           str "policy_action_budget"
+           |> Option.map canonical_policy_action_budget;
+         policy_reward_model_path = str "policy_reward_model_path";
+         policy_voice_enabled = bool_ "policy_voice_enabled";
+         policy_shell_mode =
+           str "policy_shell_mode"
+           |> Option.map canonical_policy_shell_mode;
+         initiative_enabled = bool_ "initiative_enabled";
+         initiative_scope =
+           str "initiative_scope"
+           |> Option.map canonical_initiative_scope;
+         initiative_idle_sec =
+           int_ "initiative_idle_sec"
+           |> Option.map normalize_initiative_idle_sec;
+         initiative_cooldown_sec =
+           int_ "initiative_cooldown_sec"
+           |> Option.map normalize_initiative_cooldown_sec;
+         initiative_context_mode =
+           str "initiative_context_mode"
+           |> Option.map canonical_initiative_context_mode;
+         initiative_post_ttl_hours =
+           int_ "initiative_post_ttl_hours"
+           |> Option.map normalize_initiative_post_ttl_hours;
+         room_scope = str "room_scope";
+         scope_kind = str "scope_kind";
+         trigger_mode = str "trigger_mode";
+         mention_targets = strs "mention_targets";
+         presence_keepalive = bool_ "presence_keepalive";
+         presence_keepalive_sec = int_ "presence_keepalive_sec";
+         proactive_enabled = bool_ "proactive_enabled";
+       })
+
+let load_keeper_toml (path : string)
+    : (string * keeper_profile_defaults, string) result =
+  match Safe_ops.read_file_safe path with
+  | Error e -> Error (Printf.sprintf "cannot read %s: %s" path e)
+  | Ok content ->
+    match Keeper_toml_loader.parse_toml content with
+    | Error e -> Error (Printf.sprintf "%s: %s" path e)
+    | Ok doc ->
+      match profile_defaults_of_toml doc with
+      | Error e -> Error (Printf.sprintf "%s: %s" path e)
+      | Ok defaults ->
+        let name =
+          match Keeper_toml_loader.toml_string_opt doc "keeper.name" with
+          | Some n when n <> "" -> n
+          | _ ->
+            Filename.basename path
+            |> Filename.remove_extension
+        in
+        if not (validate_name name) then
+          Error (Printf.sprintf "%s: invalid keeper name '%s'" path name)
+        else
+          Ok (name, { defaults with manifest_path = Some path })
+
+let discover_keepers_toml (dir : string)
+    : (string * keeper_profile_defaults) list =
+  if not (Sys.file_exists dir && Sys.is_directory dir) then []
+  else
+    dir
+    |> Sys.readdir
+    |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".toml")
+    |> List.sort String.compare
+    |> List.filter_map (fun f ->
+         let path = Filename.concat dir f in
+         match load_keeper_toml path with
+         | Ok pair -> Some pair
+         | Error e ->
+           Log.Keeper.warn "toml_loader: skipping %s: %s" f e;
+           None)
+
+let keeper_toml_path_opt name =
+  (* Check config/keepers/<name>.toml relative to repo root *)
+  let candidates =
+    let cwd_path = Filename.concat (Filename.concat "config" "keepers") (name ^ ".toml") in
+    match
+      try Some (Env_config.me_root ()) with _ -> None
+    with
+    | Some me_root ->
+      let me_path =
+        Filename.concat
+          (Filename.concat (Filename.concat me_root "workspace/yousleepwhen/masc-mcp") "config")
+          (Filename.concat "keepers" (name ^ ".toml"))
+      in
+      [cwd_path; me_path]
+    | None -> [cwd_path]
+  in
+  List.find_opt Sys.file_exists candidates
+
+let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
   match persona_profile_path_opt name with
   | None -> empty_keeper_profile_defaults
   | Some path -> (
@@ -390,6 +530,18 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
                 proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
+
+let load_keeper_profile_defaults name : keeper_profile_defaults =
+  (* Priority: TOML config/keepers/<name>.toml > persona profile.json *)
+  match keeper_toml_path_opt name with
+  | Some toml_path ->
+    (match load_keeper_toml toml_path with
+     | Ok (_name, defaults) -> defaults
+     | Error e ->
+       Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
+       load_keeper_profile_defaults_from_persona name)
+  | None ->
+    load_keeper_profile_defaults_from_persona name
 
 (** Load extended persona description from AGENT.md if present.
     Truncated to [max_chars] to avoid bloating the system prompt. *)

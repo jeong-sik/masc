@@ -1,0 +1,412 @@
+open Alcotest
+
+module TL = Masc_mcp.Keeper_toml_loader
+module KTP = Masc_mcp.Keeper_types_profile
+
+(* ================================================================ *)
+(* TOML parser tests                                                 *)
+(* ================================================================ *)
+
+let test_parse_empty () =
+  match TL.parse_toml "" with
+  | Ok doc -> check int "empty doc" 0 (List.length doc)
+  | Error e -> fail e
+
+let test_parse_comments_and_blanks () =
+  let input = {|
+# This is a comment
+   # indented comment
+
+  |} in
+  match TL.parse_toml input with
+  | Ok doc -> check int "no entries" 0 (List.length doc)
+  | Error e -> fail e
+
+let test_parse_string_value () =
+  let input = {|key = "hello world"|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) -> check string "string value" "hello world" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail e
+
+let test_parse_string_escapes () =
+  let input = {|key = "line1\nline2\ttab"|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) -> check string "escapes" "line1\nline2\ttab" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail e
+
+let test_parse_int_value () =
+  let input = "count = 42" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "count" doc with
+     | Some (TL.Toml_int i) -> check int "int value" 42 i
+     | _ -> fail "expected Toml_int")
+  | Error e -> fail e
+
+let test_parse_negative_int () =
+  let input = "offset = -10" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "offset" doc with
+     | Some (TL.Toml_int i) -> check int "negative int" (-10) i
+     | _ -> fail "expected Toml_int")
+  | Error e -> fail e
+
+let test_parse_float_value () =
+  let input = "ratio = 0.75" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "ratio" doc with
+     | Some (TL.Toml_float f) ->
+       check (float 0.001) "float value" 0.75 f
+     | _ -> fail "expected Toml_float")
+  | Error e -> fail e
+
+let test_parse_bool_values () =
+  let input = "enabled = true\ndisabled = false" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "enabled" doc with
+     | Some (TL.Toml_bool b) -> check bool "true" true b
+     | _ -> fail "expected true");
+    (match List.assoc_opt "disabled" doc with
+     | Some (TL.Toml_bool b) -> check bool "false" false b
+     | _ -> fail "expected false")
+  | Error e -> fail e
+
+let test_parse_string_array () =
+  let input = {|tags = ["alpha", "beta", "gamma"]|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "tags" doc with
+     | Some (TL.Toml_string_array xs) ->
+       check int "array length" 3 (List.length xs);
+       check string "first" "alpha" (List.nth xs 0);
+       check string "second" "beta" (List.nth xs 1);
+       check string "third" "gamma" (List.nth xs 2)
+     | _ -> fail "expected Toml_string_array")
+  | Error e -> fail e
+
+let test_parse_empty_array () =
+  let input = "items = []" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "items" doc with
+     | Some (TL.Toml_string_array xs) ->
+       check int "empty array" 0 (List.length xs)
+     | _ -> fail "expected empty Toml_string_array")
+  | Error e -> fail e
+
+let test_parse_table () =
+  let input = {|
+[keeper]
+goal = "test goal"
+count = 5
+|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "keeper.goal" doc with
+     | Some (TL.Toml_string s) -> check string "table key" "test goal" s
+     | _ -> fail "expected keeper.goal");
+    (match List.assoc_opt "keeper.count" doc with
+     | Some (TL.Toml_int i) -> check int "table int" 5 i
+     | _ -> fail "expected keeper.count")
+  | Error e -> fail e
+
+let test_parse_inline_comment () =
+  let input = {|key = "value" # this is a comment|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) -> check string "value with comment" "value" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail e
+
+let test_parse_error_unterminated_table () =
+  let input = "[missing_bracket" in
+  match TL.parse_toml input with
+  | Ok _ -> fail "expected parse error"
+  | Error _ -> ()
+
+let test_parse_error_no_equals () =
+  let input = "no_equals_here" in
+  match TL.parse_toml input with
+  | Ok _ -> fail "expected parse error"
+  | Error _ -> ()
+
+(* ================================================================ *)
+(* Profile defaults conversion tests                                 *)
+(* ================================================================ *)
+
+let test_profile_minimal () =
+  let input = {|
+[keeper]
+goal = "test goal"
+models = ["llama:test"]
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    match KTP.profile_defaults_of_toml doc with
+    | Error e -> fail e
+    | Ok defaults ->
+      check (option string) "goal" (Some "test goal") defaults.goal;
+      check int "models count" 1 (List.length defaults.models);
+      check string "model" "llama:test" (List.hd defaults.models);
+      check (option string) "soul_profile" None defaults.soul_profile
+
+let test_profile_full () =
+  let input = {|
+[keeper]
+goal = "analyze logs"
+short_goal = "current session"
+mid_goal = "build patterns"
+long_goal = "continuous improvement"
+soul_profile = "research"
+will = "detect issues"
+needs = "log access"
+desires = "low false positives"
+instructions = "You are a log analyzer."
+models = ["llama:qwen3.5-35b-a3b-ud-q4-xl"]
+allowed_models = ["llama:qwen3.5-35b-a3b-ud-q4-xl", "llama:qwen3.5-35b-a3b-ud-q8-xl"]
+active_model = "llama:qwen3.5-35b-a3b-ud-q4-xl"
+room_scope = "all"
+scope_kind = "global"
+trigger_mode = "explicit_only"
+mention_targets = ["sherlock", "log-analyzer"]
+proactive_enabled = true
+presence_keepalive = true
+presence_keepalive_sec = 30
+policy_mode = "heuristic"
+policy_action_budget = "board"
+policy_shell_mode = "readonly"
+policy_voice_enabled = false
+initiative_enabled = true
+initiative_scope = "board_only"
+initiative_idle_sec = 3600
+initiative_cooldown_sec = 7200
+initiative_context_mode = "board_snapshot"
+initiative_post_ttl_hours = 48
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    match KTP.profile_defaults_of_toml doc with
+    | Error e -> fail e
+    | Ok d ->
+      check (option string) "goal" (Some "analyze logs") d.goal;
+      check (option string) "soul_profile" (Some "research") d.soul_profile;
+      check (option string) "will" (Some "detect issues") d.will;
+      check int "models" 1 (List.length d.models);
+      check int "allowed_models" 2 (List.length d.allowed_models);
+      check (option string) "active_model" (Some "llama:qwen3.5-35b-a3b-ud-q4-xl") d.active_model;
+      check (option string) "room_scope" (Some "all") d.room_scope;
+      check (option string) "trigger_mode" (Some "explicit_only") d.trigger_mode;
+      check int "mention_targets" 2 (List.length d.mention_targets);
+      check (option bool) "proactive" (Some true) d.proactive_enabled;
+      check (option bool) "keepalive" (Some true) d.presence_keepalive;
+      check (option int) "keepalive_sec" (Some 30) d.presence_keepalive_sec;
+      check (option string) "policy_mode" (Some "heuristic") d.policy_mode;
+      check (option string) "policy_action_budget" (Some "board") d.policy_action_budget;
+      check (option string) "policy_shell_mode" (Some "readonly") d.policy_shell_mode;
+      check (option bool) "policy_voice" (Some false) d.policy_voice_enabled;
+      check (option bool) "initiative" (Some true) d.initiative_enabled;
+      check (option int) "initiative_idle" (Some 3600) d.initiative_idle_sec;
+      check (option int) "initiative_cooldown" (Some 7200) d.initiative_cooldown_sec;
+      check (option int) "initiative_ttl" (Some 48) d.initiative_post_ttl_hours
+
+let test_profile_invalid_soul_profile () =
+  let input = {|
+[keeper]
+goal = "test"
+soul_profile = "nonexistent"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    match KTP.profile_defaults_of_toml doc with
+    | Ok _ -> fail "expected validation error for invalid soul_profile"
+    | Error msg ->
+      check bool "contains 'invalid'" true
+        (String.length msg > 0)
+
+(* ================================================================ *)
+(* File loading tests                                                *)
+(* ================================================================ *)
+
+let test_load_from_file () =
+  (* Write a temp file *)
+  let tmp = Filename.temp_file "keeper_toml_test" ".toml" in
+  let content = {|
+[keeper]
+name = "test-keeper"
+goal = "testing file load"
+models = ["llama:test-model"]
+soul_profile = "balanced"
+|} in
+  let oc = open_out tmp in
+  output_string oc content;
+  close_out oc;
+  (match KTP.load_keeper_toml tmp with
+   | Error e -> fail e
+   | Ok (name, defaults) ->
+     check string "name from toml" "test-keeper" name;
+     check (option string) "goal" (Some "testing file load") defaults.goal;
+     check (option string) "manifest" (Some tmp) defaults.manifest_path);
+  Sys.remove tmp
+
+let test_load_name_from_filename () =
+  let tmp_dir = Filename.get_temp_dir_name () in
+  let path = Filename.concat tmp_dir "my-analyzer.toml" in
+  let content = {|
+[keeper]
+goal = "analyze stuff"
+models = ["llama:test"]
+|} in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  (match KTP.load_keeper_toml path with
+   | Error e -> fail e
+   | Ok (name, _) ->
+     check string "name from filename" "my-analyzer" name);
+  Sys.remove path
+
+let test_load_invalid_name () =
+  let tmp = Filename.temp_file "keeper_toml_test" ".toml" in
+  let content = {|
+[keeper]
+name = "invalid name with spaces"
+goal = "test"
+|} in
+  let oc = open_out tmp in
+  output_string oc content;
+  close_out oc;
+  (match KTP.load_keeper_toml tmp with
+   | Ok _ -> fail "expected error for invalid name"
+   | Error _ -> ());
+  Sys.remove tmp
+
+(* ================================================================ *)
+(* Discovery tests                                                   *)
+(* ================================================================ *)
+
+let test_discover_empty_dir () =
+  let tmp_dir = Filename.temp_file "keeper_discover" "" in
+  Sys.remove tmp_dir;
+  Unix.mkdir tmp_dir 0o755;
+  let result = KTP.discover_keepers_toml tmp_dir in
+  check int "empty dir" 0 (List.length result);
+  Unix.rmdir tmp_dir
+
+let test_discover_with_files () =
+  let tmp_dir = Filename.temp_file "keeper_discover" "" in
+  Sys.remove tmp_dir;
+  Unix.mkdir tmp_dir 0o755;
+  (* Create two TOML files *)
+  let write_file name content =
+    let path = Filename.concat tmp_dir name in
+    let oc = open_out path in
+    output_string oc content;
+    close_out oc
+  in
+  write_file "alpha.toml" {|
+[keeper]
+goal = "alpha goal"
+models = ["llama:alpha"]
+|};
+  write_file "beta.toml" {|
+[keeper]
+goal = "beta goal"
+models = ["llama:beta"]
+|};
+  write_file "not-toml.json" {|{"ignored": true}|};
+  let result = KTP.discover_keepers_toml tmp_dir in
+  check int "two keepers" 2 (List.length result);
+  let names = List.map fst result in
+  check bool "has alpha" true (List.mem "alpha" names);
+  check bool "has beta" true (List.mem "beta" names);
+  (* Cleanup *)
+  Array.iter
+    (fun f -> Sys.remove (Filename.concat tmp_dir f))
+    (Sys.readdir tmp_dir);
+  Unix.rmdir tmp_dir
+
+let test_discover_nonexistent_dir () =
+  let result = KTP.discover_keepers_toml "/nonexistent/path/keepers" in
+  check int "nonexistent dir" 0 (List.length result)
+
+let test_discover_skips_bad_files () =
+  let tmp_dir = Filename.temp_file "keeper_discover" "" in
+  Sys.remove tmp_dir;
+  Unix.mkdir tmp_dir 0o755;
+  let write_file name content =
+    let path = Filename.concat tmp_dir name in
+    let oc = open_out path in
+    output_string oc content;
+    close_out oc
+  in
+  write_file "good.toml" {|
+[keeper]
+goal = "works"
+models = ["llama:test"]
+|};
+  write_file "bad.toml" "[broken";
+  let result = KTP.discover_keepers_toml tmp_dir in
+  check int "one good keeper" 1 (List.length result);
+  check string "good name" "good" (fst (List.hd result));
+  Array.iter
+    (fun f -> Sys.remove (Filename.concat tmp_dir f))
+    (Sys.readdir tmp_dir);
+  Unix.rmdir tmp_dir
+
+(* ================================================================ *)
+(* Test suite                                                        *)
+(* ================================================================ *)
+
+let () =
+  run "Keeper TOML Loader"
+    [
+      ( "parser",
+        [
+          test_case "empty" `Quick test_parse_empty;
+          test_case "comments and blanks" `Quick test_parse_comments_and_blanks;
+          test_case "string value" `Quick test_parse_string_value;
+          test_case "string escapes" `Quick test_parse_string_escapes;
+          test_case "int value" `Quick test_parse_int_value;
+          test_case "negative int" `Quick test_parse_negative_int;
+          test_case "float value" `Quick test_parse_float_value;
+          test_case "bool values" `Quick test_parse_bool_values;
+          test_case "string array" `Quick test_parse_string_array;
+          test_case "empty array" `Quick test_parse_empty_array;
+          test_case "table" `Quick test_parse_table;
+          test_case "inline comment" `Quick test_parse_inline_comment;
+          test_case "error: unterminated table" `Quick test_parse_error_unterminated_table;
+          test_case "error: no equals" `Quick test_parse_error_no_equals;
+        ] );
+      ( "profile_defaults",
+        [
+          test_case "minimal" `Quick test_profile_minimal;
+          test_case "full" `Quick test_profile_full;
+          test_case "invalid soul_profile" `Quick test_profile_invalid_soul_profile;
+        ] );
+      ( "file_loading",
+        [
+          test_case "load from file" `Quick test_load_from_file;
+          test_case "name from filename" `Quick test_load_name_from_filename;
+          test_case "invalid name" `Quick test_load_invalid_name;
+        ] );
+      ( "discovery",
+        [
+          test_case "empty dir" `Quick test_discover_empty_dir;
+          test_case "with files" `Quick test_discover_with_files;
+          test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
+          test_case "skips bad files" `Quick test_discover_skips_bad_files;
+        ] );
+    ]

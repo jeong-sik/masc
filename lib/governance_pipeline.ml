@@ -46,12 +46,11 @@ let risk_overrides : (string * risk_level) list = [
   ("masc_a2a_query_skill", Low);       (* "skill" contains "kill" substring *)
   ("masc_keeper_tool_catalog", Low);   (* "catalog" is read-only *)
   ("masc_model_catalog", Low);         (* read-only *)
-  (* Canonical task lifecycle entrypoint after masc_claim removal. *)
-  ("masc_transition", Medium);
   ("masc_keeper_dataset_export", Medium);  (* export, not delete *)
   ("masc_persistent_agent_dataset_export", Medium);
-  (* Canonical task transition entrypoint; covers claim/start/done/cancel flows. *)
-  ("masc_transition", Medium);
+  (* Explicit claim surfaces. *)
+  ("masc_claim_next", Medium);
+  ("masc_claim_task", Medium);
 ]
 
 let critical_patterns =
@@ -80,15 +79,33 @@ let contains_pattern name patterns =
       check 0
   ) patterns
 
-let assess_risk ~tool_name ~input:_ =
+let classify_name name =
+  if contains_pattern name critical_patterns then Critical
+  else if contains_pattern name high_patterns then High
+  else if contains_pattern name medium_patterns then Medium
+  else Low
+
+let transition_action input =
+  match input with
+  | `Assoc kvs ->
+      (match List.assoc_opt "action" kvs with
+       | Some (`String action) ->
+           let trimmed = String.trim action in
+           if trimmed = "" then None else Some (String.lowercase_ascii trimmed)
+       | _ -> None)
+  | _ -> None
+
+let assess_risk ~tool_name ~input =
   (* Check explicit overrides first *)
   match List.assoc_opt tool_name risk_overrides with
   | Some level -> level
   | None ->
-  if contains_pattern tool_name critical_patterns then Critical
-  else if contains_pattern tool_name high_patterns then High
-  else if contains_pattern tool_name medium_patterns then Medium
-  else Low
+      if String.equal tool_name "masc_transition" then
+        match transition_action input with
+        | Some action -> classify_name action
+        | None -> Low
+      else
+        classify_name tool_name
 
 (* ── Trace ID generation ────────────────────────────────────── *)
 

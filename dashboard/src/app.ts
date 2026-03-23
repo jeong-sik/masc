@@ -64,25 +64,27 @@ export function App() {
 
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--bg-0)] text-[var(--text-body)]">
-      <header class="shrink-0 border-b border-[rgba(138,163,211,0.16)] bg-[rgba(4,9,18,0.78)] px-4 py-4 backdrop-blur-xl">
+      <header class="shrink-0 border-b border-[rgba(138,163,211,0.16)] bg-[rgba(4,9,18,0.78)] px-4 py-4 backdrop-blur-xl z-10">
         <div class="mx-auto flex w-full max-w-[1680px] items-start justify-between gap-6 max-[860px]:flex-col max-[860px]:items-stretch">
           <div class="min-w-0">
-            <div class="flex items-center gap-3">
-              <div class="flex size-11 shrink-0 items-center justify-center rounded-[18px] border border-[rgba(113,214,255,0.28)] bg-[linear-gradient(145deg,rgba(61,157,255,0.34),rgba(10,28,58,0.95))] text-[15px] font-semibold text-white shadow-[0_18px_36px_rgba(3,8,18,0.38)]">
-                M
+            <div class="flex items-center gap-4">
+              <div class="flex size-12 shrink-0 items-center justify-center rounded-[14px] border border-[rgba(113,214,255,0.28)] bg-[linear-gradient(145deg,rgba(61,157,255,0.34),rgba(10,28,58,0.95))] text-[18px] font-semibold text-white shadow-[0_18px_36px_rgba(3,8,18,0.38)]">
+                ${currentView?.icon ?? 'M'}
               </div>
               <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-[10px] font-semibold uppercase tracking-[0.22em] text-[rgba(154,217,255,0.7)]">MASC Control Deck</span>
+                <div class="flex flex-wrap items-center gap-2 mb-1">
+                  <span class="text-[10px] font-semibold uppercase tracking-[0.22em] text-[rgba(154,217,255,0.7)]">MASC</span>
                   ${currentView
-                    ? html`<span class="rounded-full border border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.12)] px-2 py-0.5 text-[10px] font-medium text-[#9ad9ff]">${currentView.label}</span>`
-                    : null}
-                  ${showSectionChip
-                    ? html`<span class="rounded-full border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.05)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">${currentSection?.label}</span>`
+                    ? html`
+                        <span class="text-[10px] font-medium text-[rgba(154,217,255,0.4)]">/</span>
+                        <span class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[rgba(154,217,255,0.9)]">${currentView.label}</span>
+                      `
                     : null}
                 </div>
-                <h1 class="mt-1 text-[20px] font-semibold tracking-[-0.03em] text-[var(--text-strong)]">Multi-Agent Room Console</h1>
-                <p class="mt-1 max-w-[760px] text-[12px] leading-relaxed text-[var(--text-muted)]">
+                <h1 class="text-[22px] font-semibold tracking-[-0.03em] text-[var(--text-strong)] leading-none">
+                  ${currentSection?.label ?? currentView?.label ?? 'Multi-Agent Room Console'}
+                </h1>
+                <p class="mt-1.5 max-w-[760px] text-[12px] leading-relaxed text-[var(--text-muted)]">
                   ${currentSection?.description ?? currentView?.description ?? 'Rooms, keepers, governance, and operational signals in one place.'}
                 </p>
               </div>

@@ -183,7 +183,7 @@ let test_turn_events_and_prove () =
   let session_id = start_session_exn ctx ~goal:"turn-events-prove" |> get_session_id in
 
   let invalid_turn_ok, _ =
-    dispatch_exn ctx ~name:"masc_team_session_turn"
+    dispatch_exn ctx ~name:"masc_team_session_step"
       ~args:
         (`Assoc
           [
@@ -193,7 +193,7 @@ let test_turn_events_and_prove () =
   in
   Alcotest.(check bool) "invalid turn kind rejected" false invalid_turn_ok;
   let empty_note_ok, _ =
-    dispatch_exn ctx ~name:"masc_team_session_turn"
+    dispatch_exn ctx ~name:"masc_team_session_step"
       ~args:
         (`Assoc
           [
@@ -215,7 +215,7 @@ let test_turn_events_and_prove () =
 
   let check_turn turn_kind extra =
     let ok, _ =
-      dispatch_exn ctx ~name:"masc_team_session_turn"
+      dispatch_exn ctx ~name:"masc_team_session_step"
         ~args:
           (`Assoc
             ([
@@ -304,82 +304,7 @@ let test_turn_events_and_prove () =
     proof_schema_version;
   cleanup_dir base_dir
 
-let test_step_plain_turn_matches_legacy_turn () =
-  with_eio @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  let config = Room.default_config base_dir in
-  ignore (Room.init config ~agent_name:(Some "tester"));
-  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
-  let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
-  in
-  let legacy_session_id =
-    start_session_exn ctx ~goal:"legacy-turn-parity" |> get_session_id
-  in
-  let legacy_ok, legacy_body =
-    dispatch_exn ctx ~name:"masc_team_session_turn"
-      ~args:
-        (`Assoc
-          [
-            ("session_id", `String legacy_session_id);
-            ("turn_kind", `String "note");
-            ("message", `String "legacy note");
-          ])
-  in
-  Alcotest.(check bool) "legacy turn ok" true legacy_ok;
-  let legacy_turn = parse_json_exn legacy_body |> result_field in
-  Alcotest.(check string) "legacy kind" "note"
-    Yojson.Safe.Util.(legacy_turn |> member "kind" |> to_string);
-
-  let step_session_id =
-    start_session_exn ctx ~goal:"step-turn-parity" |> get_session_id
-  in
-  let step_ok, step_body =
-    dispatch_exn ctx ~name:"masc_team_session_step"
-      ~args:
-        (`Assoc
-          [
-            ("session_id", `String step_session_id);
-            ("turn_kind", `String "note");
-            ("message", `String "step note");
-          ])
-  in
-  Alcotest.(check bool) "step turn ok" true step_ok;
-  let step_turn =
-    parse_json_exn step_body |> result_field |> Yojson.Safe.Util.member "turn"
-  in
-  Alcotest.(check string) "step kind" "note"
-    Yojson.Safe.Util.(step_turn |> member "kind" |> to_string);
-  Alcotest.(check bool) "step spawn null" true
-    (parse_json_exn step_body |> result_field |> Yojson.Safe.Util.member "spawn"
-    = `Null);
-
-  let team_turn_detail_exn session_id =
-    match
-      List.find_opt
-        (fun json ->
-          Yojson.Safe.Util.(json |> member "event_type" |> to_string = "team_turn"))
-        (Team_session_store.read_events ~max_events:20 config session_id)
-    with
-    | Some event -> Yojson.Safe.Util.member "detail" event
-    | None -> Alcotest.fail "expected team_turn event"
-  in
-  let legacy_detail = team_turn_detail_exn legacy_session_id in
-  let step_detail = team_turn_detail_exn step_session_id in
-  Alcotest.(check string) "legacy detail kind" "note"
-    Yojson.Safe.Util.(legacy_detail |> member "kind" |> to_string);
-  Alcotest.(check string) "step detail kind" "note"
-    Yojson.Safe.Util.(step_detail |> member "kind" |> to_string);
-  Alcotest.(check string) "legacy actor" "tester"
-    Yojson.Safe.Util.(legacy_detail |> member "actor" |> to_string);
-  Alcotest.(check string) "step actor" "tester"
-    Yojson.Safe.Util.(step_detail |> member "actor" |> to_string);
-  Alcotest.(check string) "legacy message" "legacy note"
-    Yojson.Safe.Util.(legacy_detail |> member "message" |> to_string);
-  Alcotest.(check string) "step message" "step note"
-    Yojson.Safe.Util.(step_detail |> member "message" |> to_string);
-  cleanup_dir base_dir
+(* test_step_plain_turn_matches_legacy_turn removed — handle_turn archived *)
 
 let test_idle_session_stays_running_before_first_step () =
   with_eio @@ fun env ->

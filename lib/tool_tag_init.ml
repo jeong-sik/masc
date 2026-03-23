@@ -158,7 +158,7 @@ let register_all () =
   (* ── Mod_misc: Tool_misc ──────────────────────────────────────── *)
   reg Mod_misc [
     "masc_dashboard"; "masc_verify_handoff";
-    "masc_gc"; "masc_cleanup_zombies"; "masc_purge_test_data";
+    "masc_gc"; "masc_cleanup_zombies";
     "masc_tool_stats"; "masc_tool_help";
     "masc_tool_admin_snapshot"; "masc_tool_admin_update";
     "masc_keeper_tool_catalog";

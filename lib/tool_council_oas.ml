@@ -370,10 +370,10 @@ let dispatch (ctx : context) ~name ~args : result option =
     | "masc_case_brief_submit" -> Some handle_case_brief_submit
     | "masc_cases" -> Some handle_cases
     | "masc_case_status" -> Some handle_case_status
-    | "masc_council_route" | "masc_route" -> Some handle_route
-    | "masc_council_execute" | "masc_execute" -> Some handle_execute
-    | "masc_council_execute_dry_run" | "masc_execute_dry_run" -> Some handle_execute_dry_run
-    | "masc_governance_petition" | "masc_petition_submit" -> Some handle_petition_submit
+    | "masc_route" -> Some handle_route
+    | "masc_execute" -> Some handle_execute
+    | "masc_execute_dry_run" -> Some handle_execute_dry_run
+    | "masc_petition_submit" -> Some handle_petition_submit
     | "masc_governance_status" -> Some handle_governance_status
     | "masc_governance_feed" -> Some handle_governance_feed
     | "masc_ruling_status" -> Some handle_ruling_status

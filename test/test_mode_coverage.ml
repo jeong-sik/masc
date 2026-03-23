@@ -204,8 +204,6 @@ let test_tool_category_core () =
     (Mode.tool_category "masc_team_session_step" = Mode.Core_Session);
   check bool "team_session_finalize" true
     (Mode.tool_category "masc_team_session_finalize" = Mode.Core_Session);
-  check bool "team_session_turn" true
-    (Mode.tool_category "masc_team_session_turn" = Mode.Unknown);
   check bool "team_session_events" true
     (Mode.tool_category "masc_team_session_events" = Mode.Core_Session);
   (* Core_Ops *)
@@ -293,7 +291,8 @@ let test_tool_category_ecosystem_voice () =
     (Mode.tool_category "masc_voice_conference_start" = Mode.Voice)
 
 let test_tool_category_namespace_mapping () =
-  check bool "trpg namespace" true (Mode.tool_category "trpg.dice.roll" = Mode.TRPG);
+  (* trpg.* prefix removed — TRPG archived (#1668) *)
+  check bool "trpg namespace archived" true (Mode.tool_category "trpg.dice.roll" = Mode.Unknown);
   check bool "experiment namespace" true (Mode.tool_category "experiment.start" = Mode.Ecosystem);
   check bool "decision namespace" true (Mode.tool_category "decision.create" = Mode.Consensus);
   check bool "decision underscore" true (Mode.tool_category "decision_consensus" = Mode.Consensus);

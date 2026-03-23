@@ -245,6 +245,31 @@ let weather_tools : Types.tool_schema list = [
   };
 ]
 
+let library_tools : Types.tool_schema list = [
+  {
+    name = "keeper_library_search";
+    description = "Search agent knowledge library documents by keyword query. Returns matching titles, confidence scores, and snippets.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [("type", `String "string"); ("description", `String "Search query string")]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
+  {
+    name = "keeper_library_read";
+    description = "Read a specific document from the agent knowledge library by topic name.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [("type", `String "string"); ("description", `String "Document topic name to read")]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+]
+
 let taskboard_tools : Types.tool_schema list = [
   {
     name = "keeper_tasks_list";
@@ -366,6 +391,13 @@ let shard_voice : shard = {
   description = "Voice bridge speak output";
 }
 
+let shard_library : shard = {
+  name = "library";
+  tools = library_tools;
+  removable = true;
+  description = "Knowledge library: search, read documents";
+}
+
 let shard_taskboard : shard = {
   name = "taskboard";
   tools = taskboard_tools;
@@ -400,6 +432,7 @@ let default_shard_names : string list = [
   "shell";
   "weather";
   "voice";
+  "library";
   "taskboard";
 ]
 
@@ -420,6 +453,7 @@ let all_shards : (string, shard) Hashtbl.t =
     shard_shell;
     shard_weather;
     shard_voice;
+    shard_library;
     shard_taskboard;
     shard_autoresearch;
   ];

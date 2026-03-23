@@ -28,8 +28,6 @@ let () =
           Alcotest.test_case "list-and-compare" `Quick Test_tool_team_session_flow.test_list_and_compare;
           Alcotest.test_case "turn-events-prove" `Quick
             Test_tool_team_session_flow.test_turn_events_and_prove;
-          Alcotest.test_case "step-plain-turn-matches-legacy-turn" `Quick
-            Test_tool_team_session_flow.test_step_plain_turn_matches_legacy_turn;
           Alcotest.test_case "idle-session-stays-running-before-first-step"
             `Quick
             Test_tool_team_session_flow

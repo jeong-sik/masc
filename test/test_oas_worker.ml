@@ -335,7 +335,7 @@ let test_petition_submit_creates_case () =
     ("subject", `String "task");
     ("risk_class", `String "low");
   ] in
-  match Tool_council_oas.dispatch ctx ~name:"masc_governance_petition" ~args with
+  match Tool_council_oas.dispatch ctx ~name:"masc_petition_submit" ~args with
   | Some (ok, body) ->
     Alcotest.(check bool) "petition ok" true ok;
     let json = parse_json body in
@@ -351,7 +351,7 @@ let test_petition_submit_empty_title_err () =
   with_council_base @@ fun base_path ->
   let ctx = make_council_ctx ~base_path in
   let args = `Assoc [("title", `String "")] in
-  match Tool_council_oas.dispatch ctx ~name:"masc_governance_petition" ~args with
+  match Tool_council_oas.dispatch ctx ~name:"masc_petition_submit" ~args with
   | Some (ok, body) ->
     Alcotest.(check bool) "empty title rejected" false ok;
     let json = parse_json body in
@@ -416,7 +416,7 @@ let test_governance_status_after_petition () =
     ("subject", `String "task");
     ("risk_class", `String "low");
   ] in
-  (match Tool_council_oas.dispatch ctx ~name:"masc_governance_petition" ~args with
+  (match Tool_council_oas.dispatch ctx ~name:"masc_petition_submit" ~args with
    | Some (ok, _) -> Alcotest.(check bool) "petition ok" true ok
    | None -> Alcotest.fail "petition dispatch returned None");
   match Tool_council_oas.dispatch ctx ~name:"masc_governance_status" ~args:(`Assoc []) with

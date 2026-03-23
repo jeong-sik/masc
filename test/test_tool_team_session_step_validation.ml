@@ -35,7 +35,7 @@ let test_missing_required_args () =
       ~args:(`Assoc [ ("status", `String "not-a-status") ])
   in
   let ok10, _ =
-    dispatch_exn ctx ~name:"masc_team_session_turn" ~args:(`Assoc [])
+    dispatch_exn ctx ~name:"masc_team_session_step" ~args:(`Assoc [])
   in
   let ok11, _ =
     dispatch_exn ctx ~name:"masc_team_session_events" ~args:(`Assoc [])

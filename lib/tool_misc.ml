@@ -734,36 +734,6 @@ let handle_keeper_tool_catalog _ctx args =
   in
   (true, Yojson.Safe.pretty_to_string json)
 
-(** BUG-014: Purge test data (test-* prefix agents, tasks, messages).
-    Requires confirm=true to execute. *)
-let handle_purge_test_data ctx args =
-  let confirm = get_bool args "confirm" false in
-  if not confirm then
-    (false, "Purge requires confirm=true. This will remove all test-* agents, tasks, and messages.")
-  else begin
-    let config = ctx.config in
-    let removed = ref 0 in
-    (* Remove test-* agent files *)
-    let agents_path = Room.agents_dir config in
-    if Sys.file_exists agents_path then
-      Sys.readdir agents_path |> Array.iter (fun name ->
-        if String.length name > 5 && String.sub name 0 5 = "test-" then begin
-          (try Sys.remove (Filename.concat agents_path name)
-           with Sys_error msg -> Log.Misc.warn "purge remove %s: %s" name msg);
-          incr removed
-        end);
-    (* Remove test-* messages *)
-    let messages_path = Room.messages_dir config in
-    if Sys.file_exists messages_path then
-      Sys.readdir messages_path |> Array.iter (fun name ->
-        if String.length name > 5 && String.sub name 0 5 = "test-" then begin
-          (try Sys.remove (Filename.concat messages_path name)
-           with Sys_error msg -> Log.Misc.warn "purge remove %s: %s" name msg);
-          incr removed
-        end);
-    (true, Printf.sprintf "Purged %d test-* files" !removed)
-  end
-
 (* Dispatch function *)
 let dispatch ctx ~name ~args : result option =
   match name with
@@ -771,7 +741,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_verify_handoff" -> Some (handle_verify_handoff ctx args)
   | "masc_gc" -> Some (handle_gc ctx args)
   | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ctx args)
-  | "masc_purge_test_data" -> Some (handle_purge_test_data ctx args)
   | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
   | "masc_tool_help" -> Some (handle_tool_help ctx args)
   | "masc_tool_admin_snapshot" -> Some (handle_tool_admin_snapshot ctx args)

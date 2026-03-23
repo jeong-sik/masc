@@ -57,7 +57,7 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
     ("call_stats", stats_json);
   ]
 
-(** Summary report for dashboard / masc_stats. *)
+(** Summary report for dashboard. *)
 let summary_report () : Yojson.Safe.t =
   let total = Tool_registry.total_calls () in
   let distinct = Tool_registry.distinct_tools_called () in

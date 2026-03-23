@@ -221,7 +221,7 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
           ("ts_iso", `String (Types.now_iso ()));
         ]);
   ignore
-    (dispatch_exn ctx ~name:"masc_team_session_turn"
+    (dispatch_exn ctx ~name:"masc_team_session_step"
        ~args:
          (`Assoc
            [
@@ -376,7 +376,7 @@ let test_report_and_proof_expose_empty_note_turn_evidence () =
           ("ts_iso", `String (Types.now_iso ()));
         ]);
   ignore
-    (dispatch_exn ctx ~name:"masc_team_session_turn"
+    (dispatch_exn ctx ~name:"masc_team_session_step"
        ~args:
          (`Assoc
            [

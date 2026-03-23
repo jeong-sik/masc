@@ -118,29 +118,6 @@ let handle_compare ctx args : result =
   | Error e, _ -> (false, json_error e)
   | _, Error e -> (false, json_error e)
 
-let handle_turn ctx args : result =
-  match get_valid_session_id args with
-  | Error e -> (false, json_error e)
-  | Ok session_id -> (
-      match ensure_session_access ctx session_id with
-      | Error e -> (false, json_error e)
-      | Ok () -> (
-          match parse_turn_kind args with
-          | Error e -> (false, json_error e)
-          | Ok turn_kind ->
-              let message = get_string_opt args "message" in
-              let target_agent = get_string_opt args "target_agent" in
-              let task_title = get_string_opt args "task_title" in
-              let task_description = get_string_opt args "task_description" in
-              let task_priority = get_int args "task_priority" 3 in
-              (match
-                 record_session_turn_json ~config:ctx.config ~session_id
-                   ~actor:ctx.agent_name ~turn_kind ~message ~target_agent
-                   ~task_title ~task_description ~task_priority
-               with
-              | Ok json -> (true, json_ok [ ("result", json) ])
-              | Error e -> (false, json_error e))))
-
 (* Routing, spawn spec parsing, model inference, worker management *)
 include Tool_team_session_routing_workers
 
@@ -567,7 +544,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_team_session_report" -> Some (handle_report ctx args)
   | "masc_team_session_list" -> Some (handle_list ctx args)
   | "masc_team_session_compare" -> Some (handle_compare ctx args)
-  | "masc_team_session_turn" -> Some (handle_turn ctx args)
   | "masc_team_session_events" -> Some (handle_events ctx args)
   | "masc_team_session_prove" -> Some (handle_prove ctx args)
   | "masc_team_session_verify_trace" -> Some (handle_verify_trace ctx args)

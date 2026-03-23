@@ -36,7 +36,7 @@ include Room_task
 include Room_task_schedule
 
 (* Walph control system: state machine, loop, presets *)
-include Room_walph
+include Room_walph_eio
 
 (* Task/agent/message query and listing *)
 include Room_query

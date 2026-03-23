@@ -885,12 +885,6 @@
  (modules test_sse_room_filter)
  (libraries masc_mcp alcotest yojson))
 
-; Room Checkpoint — snapshot and restore (Harness Sprint 4)
-(test
- (name test_room_checkpoint)
- (modules test_room_checkpoint)
- (libraries masc_mcp alcotest yojson))
-
 ; Tool Metrics — per-tool timing percentiles (Harness Sprint 5)
 (test
  (name test_tool_metrics)

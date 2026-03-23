@@ -32,6 +32,9 @@ let keeper_read_tool_names =
     "keeper_context_status";
   ]
 
+let keeper_coordination_tool_names =
+  [ "keeper_tasks_list"; "keeper_broadcast" ]
+
 let keeper_board_tool_names =
   [
     "keeper_board_get";
@@ -64,16 +67,28 @@ let is_research_profile (meta : keeper_meta) =
 
 let keeper_coding_tool_names = Tool_code_write.tool_names
 
-(** masc_* tool bridge — expose all MCP tools to keeper.
+(** Curated masc_* bridge for keepers.
     Schema list is injected at server init to avoid cyclic dependency on Tools.
-    All masc_* tools are exposed; no Mode-based filtering. *)
+    Keep raw masc_* passthrough minimal and prefer keeper_* wrappers elsewhere. *)
+
+let keeper_passthrough_masc_tool_names =
+  [
+    "masc_status";
+    "masc_who";
+    "masc_messages";
+    "masc_poll_events";
+    "masc_relay_status";
+    "masc_relay_checkpoint";
+  ]
 
 let masc_schemas_ref : Types.tool_schema list ref = ref []
 
 let inject_masc_schemas (schemas : Types.tool_schema list) =
   masc_schemas_ref :=
     List.filter (fun (s : Types.tool_schema) ->
-      String.starts_with ~prefix:"masc_" s.name) schemas
+      String.starts_with ~prefix:"masc_" s.name
+      && List.mem s.name keeper_passthrough_masc_tool_names)
+      schemas
 
 let keeper_masc_tool_names (_meta : keeper_meta) : string list =
   !masc_schemas_ref
@@ -90,7 +105,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
   if write_done then
     []
   else if keeper_policy_mode_is_learned meta then
-    let base = keeper_read_tool_names in
+    let base = keeper_coordination_tool_names @ keeper_read_tool_names in
     let with_voice =
       if meta.policy_voice_enabled then keeper_voice_tool_names @ base else base
     in

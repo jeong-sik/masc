@@ -168,15 +168,15 @@ let test_masc_mcp_tools_has_tool_help () =
     (List.mem "mcp__masc__masc_tool_help" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_tool_stats () =
-  check bool "has tool_stats" true
+  check bool "omits tool_stats" false
     (List.mem "mcp__masc__masc_tool_stats" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_tool_admin_snapshot () =
-  check bool "has tool_admin_snapshot" true
+  check bool "omits tool_admin_snapshot" false
     (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_keeper_tool_catalog () =
-  check bool "has keeper_tool_catalog" true
+  check bool "omits keeper_tool_catalog" false
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_tool_list () =
@@ -731,10 +731,12 @@ let () =
       test_case "has a2a_delegate" `Quick test_masc_mcp_tools_has_a2a_delegate;
       test_case "has vote_create" `Quick test_masc_mcp_tools_has_vote_create;
       test_case "has run_deliverable" `Quick test_masc_mcp_tools_has_run_deliverable;
-      test_case "has tool_stats" `Quick test_masc_mcp_tools_has_tool_stats;
+      test_case "omits tool_stats" `Quick test_masc_mcp_tools_has_tool_stats;
       test_case "has tool_help" `Quick test_masc_mcp_tools_has_tool_help;
-      test_case "has tool_admin_snapshot" `Quick test_masc_mcp_tools_has_tool_admin_snapshot;
-      test_case "has keeper_tool_catalog" `Quick test_masc_mcp_tools_has_keeper_tool_catalog;
+      test_case "omits tool_admin_snapshot" `Quick
+        test_masc_mcp_tools_has_tool_admin_snapshot;
+      test_case "omits keeper_tool_catalog" `Quick
+        test_masc_mcp_tools_has_keeper_tool_catalog;
       test_case "has tool_list" `Quick test_masc_mcp_tools_has_tool_list;
       test_case "has tool_grant" `Quick test_masc_mcp_tools_has_tool_grant;
       test_case "has tool_revoke" `Quick test_masc_mcp_tools_has_tool_revoke;

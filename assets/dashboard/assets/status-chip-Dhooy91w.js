@@ -1,1 +1,0 @@
-import{m as a}from"./index-D0qvPfou.js";function p({label:s,tone:c="",class:r=""}){const t=`cmd-chip rounded-full ${c} ${r}`.replace(/\s+/g," ").trim();return a`<span class="${t}">${s}</span>`}export{p as S};

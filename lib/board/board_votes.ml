@@ -306,7 +306,7 @@ let load_persisted_comments store =
             Hashtbl.replace store.comments cid c;
             (* Build comments_by_post index *)
             let post_key = Post_id.to_string c.post_id in
-            let existing = try Hashtbl.find store.comments_by_post post_key with Not_found -> [] in
+            let existing = Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[] in
             Hashtbl.replace store.comments_by_post post_key (cid :: existing);
             incr loaded
         | _ -> ()
@@ -374,7 +374,7 @@ let list_hearths store : (string * int) list =
     Hashtbl.iter (fun _ (p : post) ->
       match p.hearth with
       | Some h ->
-          let c = try Hashtbl.find counts h with Not_found -> 0 in
+          let c = Hashtbl.find_opt counts h |> Option.value ~default:0 in
           Hashtbl.replace counts h (c + 1)
       | None -> ()
     ) store.posts;
@@ -503,12 +503,12 @@ let get_all_karma store =
       let karma_map = Hashtbl.create 64 in
       Hashtbl.iter (fun _ (p : post) ->
         let author = Agent_id.to_string p.author in
-        let current = try Hashtbl.find karma_map author with Not_found -> 0 in
+        let current = Hashtbl.find_opt karma_map author |> Option.value ~default:0 in
         Hashtbl.replace karma_map author (current + p.votes_up)
       ) store.posts;
       Hashtbl.iter (fun _ (c : comment) ->
         let author = Agent_id.to_string c.author in
-        let current = try Hashtbl.find karma_map author with Not_found -> 0 in
+        let current = Hashtbl.find_opt karma_map author |> Option.value ~default:0 in
         Hashtbl.replace karma_map author (current + c.votes_up)
       ) store.comments;
       let result = Hashtbl.fold (fun k v acc -> (k, v) :: acc) karma_map [] in

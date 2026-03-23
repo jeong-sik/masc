@@ -1,9 +1,8 @@
-import { route } from './router'
-import { refreshExecution, refreshBoard, refreshGoals, refreshTrpg } from './store'
+import type { RouteState } from './types'
+import { refreshExecution, refreshBoard, refreshGoals } from './store'
 import { refreshRoomTruth } from './room-truth-store'
 import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
-import { refreshMissionBriefing, refreshMissionSnapshot } from './mission-store'
-import { refreshProofSnapshot } from './proof-store'
+import { refreshMissionSnapshot } from './mission-store'
 import {
   commandPlaneSurface,
   refreshCommandPlaneChainSummary,
@@ -12,90 +11,98 @@ import {
   refreshCommandPlaneSwarm,
 } from './command-store'
 
-async function refreshGovernanceSurface(): Promise<void> {
-  const { refreshGovernance } = await import('./components/governance')
-  await refreshGovernance()
-}
-
-async function refreshToolsSurface(): Promise<void> {
-  const { refreshTools } = await import('./components/tools')
-  await refreshTools()
-}
-
 async function refreshActivityGraphSurface(): Promise<void> {
   const { refreshActivityGraph } = await import('./components/activity-graph')
   await refreshActivityGraph()
 }
 
-export function refreshForTab(tab: string) {
-  if (tab === 'home') {
-    refreshRoomTruth()
-    refreshExecution()
-    refreshMissionSnapshot()
-  }
+export type RefreshTask =
+  | 'roomTruth'
+  | 'missionSnapshot'
+  | 'execution'
+  | 'activityGraph'
+  | 'board'
+  | 'goals'
+  | 'commandCurrentSurface'
+  | 'commandChainSummary'
+  | 'commandSwarm'
+  | 'commandOrchestra'
+  | 'operatorSnapshot'
+  | 'operatorRoomDigest'
 
-  if (tab === 'status') {
-    const section = route.value.params.section
-    if (section === 'activity') {
-      refreshExecution()
-      void refreshActivityGraphSurface()
-    } else if (section === 'agents') {
-      refreshRoomTruth()
-      refreshExecution()
-      refreshMissionSnapshot()
-    } else {
-      refreshRoomTruth()
-      refreshMissionSnapshot()
-      refreshMissionBriefing()
-    }
-  }
-
-  if (tab === 'work') {
-    const section = route.value.params.section
-    if (section === 'evidence') {
-      refreshProofSnapshot(route.value.params.session_id, route.value.params.operation_id)
-    } else if (section === 'governance') {
-      void refreshGovernanceSurface()
-    } else if (section === 'planning') {
-      refreshGoals()
-      refreshExecution()
-    } else {
-      refreshBoard()
-    }
-  }
-
-  if (tab === 'operations') {
-    const section = route.value.params.section
-    if (section === 'command') {
-      refreshRoomTruth()
-      refreshCommandPlaneCurrentSurface()
-      refreshCommandPlaneChainSummary()
-      if (
-        commandPlaneSurface.value === 'swarm'
-        || commandPlaneSurface.value === 'orchestra'
-      ) {
-        refreshCommandPlaneSwarm()
+export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
+  switch (routeState.tab) {
+    case 'overview':
+      return ['roomTruth', 'missionSnapshot']
+    case 'monitoring':
+      if (routeState.params.section === 'activity') {
+        return ['execution', 'activityGraph']
       }
-      if (commandPlaneSurface.value === 'orchestra') {
-        refreshCommandPlaneOrchestra()
+      if (routeState.params.section === 'agents') {
+        return ['roomTruth', 'execution', 'missionSnapshot']
       }
-    } else if (section === 'tools') {
-      void refreshToolsSurface()
-    } else {
-      refreshRoomTruth()
-      refreshOperatorSnapshot()
-      refreshOperatorRoomDigest()
-    }
+      return ['roomTruth', 'missionSnapshot']
+    case 'command':
+      if (routeState.params.section === 'warroom') {
+        const tasks: RefreshTask[] = [
+          'roomTruth',
+          'commandCurrentSurface',
+          'commandChainSummary',
+        ]
+        if (
+          commandPlaneSurface.value === 'swarm'
+          || commandPlaneSurface.value === 'orchestra'
+        ) {
+          tasks.push('commandSwarm')
+        }
+        if (commandPlaneSurface.value === 'orchestra') {
+          tasks.push('commandOrchestra')
+        }
+        return tasks
+      }
+      if (routeState.params.section === 'intervene') {
+        return ['roomTruth', 'operatorSnapshot', 'operatorRoomDigest']
+      }
+      return []
+    case 'workspace':
+      if (routeState.params.section === 'planning') {
+        return ['goals', 'execution']
+      }
+      if (routeState.params.section === 'board') {
+        return ['board']
+      }
+      return []
+    case 'lab':
+      if (routeState.params.section === 'avatars') {
+        return ['execution']
+      }
+      if (routeState.params.section === 'overview') {
+        return ['roomTruth']
+      }
+      return []
+    case 'logs':
+    default:
+      return []
   }
+}
 
-  if (tab === 'lab') {
-    const section = route.value.params.section
-    if (section === 'trpg') {
-      refreshTrpg()
-    } else if (section === 'avatars' || section === 'overview') {
-      refreshRoomTruth()
-    } else {
-      refreshRoomTruth()
-    }
-  }
+const REFRESHERS: Record<RefreshTask, () => void> = {
+  roomTruth: () => { void refreshRoomTruth() },
+  missionSnapshot: () => { void refreshMissionSnapshot() },
+  execution: () => { void refreshExecution({ force: true }) },
+  activityGraph: () => { void refreshActivityGraphSurface() },
+  board: () => { void refreshBoard() },
+  goals: () => { void refreshGoals() },
+  commandCurrentSurface: () => { void refreshCommandPlaneCurrentSurface({ force: true }) },
+  commandChainSummary: () => { void refreshCommandPlaneChainSummary({ force: true }) },
+  commandSwarm: () => { void refreshCommandPlaneSwarm(undefined, undefined, { force: true }) },
+  commandOrchestra: () => { void refreshCommandPlaneOrchestra(undefined, undefined, { force: true }) },
+  operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
+  operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },
+}
+
+export function refreshForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): void {
+  refreshPlanForRoute(routeState).forEach(task => {
+    REFRESHERS[task]()
+  })
 }

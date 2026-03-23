@@ -295,6 +295,18 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 
 // --- Refresh orchestration ---
 
+interface RefreshOptions {
+  force?: boolean
+}
+
+const SHELL_TTL_MS = 5_000
+const EXECUTION_TTL_MS = 30_000
+
+let inflightDashboardRefresh: Promise<void> | null = null
+let inflightShellRefresh: Promise<void> | null = null
+let inflightExecutionRefresh: Promise<void> | null = null
+let lastShellRefreshAt = 0
+
 export function isDashboardRefreshEvent(eventType: string): boolean {
   return (
     eventType === 'dashboard_refresh'
@@ -314,16 +326,21 @@ export function invalidateDashboardCache(): void {
   // Projection endpoints are intentionally fresh-first after the operator-console rewrite.
 }
 
-export async function refreshDashboard(): Promise<void> {
+export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
+  if (inflightDashboardRefresh) return inflightDashboardRefresh
   dashboardLoading.value = true
-  try {
-    await Promise.all([refreshShell(), refreshExecution()])
-    lastDashboardRefreshAt.value = new Date().toISOString()
-  } catch (err) {
-    console.warn('[Dashboard] refresh error:', err)
-  } finally {
-    dashboardLoading.value = false
-  }
+  inflightDashboardRefresh = (async () => {
+    try {
+      await Promise.all([refreshShell(opts), refreshExecution(opts)])
+      lastDashboardRefreshAt.value = new Date().toISOString()
+    } catch (err) {
+      console.warn('[Dashboard] refresh error:', err)
+    } finally {
+      dashboardLoading.value = false
+      inflightDashboardRefresh = null
+    }
+  })()
+  return inflightDashboardRefresh
 }
 
 export function findDashboardSemanticPanel(panelId: string): DashboardSemanticPanel | null {
@@ -387,28 +404,36 @@ function applyPlanningEnvelope(data: {
         : 'ready'
 }
 
-export async function refreshShell(): Promise<void> {
-  try {
-    const data = await fetchDashboardShell()
-    const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
-    if (normalizedStatus) {
-      serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
-    }
-    // Extract lightweight counts for fast initial render (before execution loads)
-    if (data.counts) {
-      shellCounts.value = {
-        agents: data.counts.agents ?? 0,
-        tasks: data.counts.tasks ?? 0,
-        keepers: data.counts.keepers ?? 0,
+export async function refreshShell(opts?: RefreshOptions): Promise<void> {
+  if (inflightShellRefresh) return inflightShellRefresh
+  if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return
+  inflightShellRefresh = (async () => {
+    try {
+      const data = await fetchDashboardShell()
+      const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
+      if (normalizedStatus) {
+        serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
       }
+      // Extract lightweight counts for fast initial render (before execution loads)
+      if (data.counts) {
+        shellCounts.value = {
+          agents: data.counts.agents ?? 0,
+          tasks: data.counts.tasks ?? 0,
+          keepers: data.counts.keepers ?? 0,
+        }
+      }
+      if (data.providers) {
+        providerCapacity.value = data.providers as unknown as ProviderCapacity
+      }
+      lastShellRefreshAt = Date.now()
+    } catch (err) {
+      console.warn('[Dashboard] shell fetch error:', err)
+      showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
+    } finally {
+      inflightShellRefresh = null
     }
-    if (data.providers) {
-      providerCapacity.value = data.providers as unknown as ProviderCapacity
-    }
-  } catch (err) {
-    console.warn('[Dashboard] shell fetch error:', err)
-    showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
-  }
+  })()
+  return inflightShellRefresh
 }
 
 export async function refreshAgentActivity(): Promise<void> {
@@ -420,64 +445,68 @@ export async function refreshAgentActivity(): Promise<void> {
   }
 }
 
-const EXECUTION_TTL_MS = 30_000
-
-export async function refreshExecution(opts?: { force?: boolean }): Promise<void> {
+export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
+  if (inflightExecutionRefresh) return inflightExecutionRefresh
   if (!opts?.force && Date.now() - lastExecutionRefreshAt.value < EXECUTION_TTL_MS) return
-  try {
-    const data = await fetchDashboardExecution()
-    const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
-    const previousRoom = serverStatus.value?.room
-    if (normalizedStatus) {
-      serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
+  inflightExecutionRefresh = (async () => {
+    try {
+      const data = await fetchDashboardExecution()
+      const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
+      const previousRoom = serverStatus.value?.room
+      if (normalizedStatus) {
+        serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
+      }
+      const roomChanged = previousRoom != null && normalizedStatus?.room != null && previousRoom !== normalizedStatus.room
+      const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
+        .map(normalizeAgent)
+        .filter((row): row is Agent => row !== null)
+      setArrayByKeyIfChanged(agents, normalizedAgents, a => a.name)
+      const normalizedTasks = (Array.isArray(data.tasks) ? data.tasks : [])
+        .map(normalizeTask)
+        .filter((row): row is Task => row !== null)
+      setArrayByKeyIfChanged(tasks, normalizedTasks, t => t.id)
+      const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
+        .map(normalizeMessage)
+        .filter((row): row is Message => row !== null)
+      messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
+      keepers.value = normalizeKeepers(data.keepers)
+      executionSummary.value = normalizeExecutionSummary(data.summary)
+      const normalizedQueue = (Array.isArray(data.execution_queue) ? data.execution_queue : Array.isArray(data.priority_queue) ? data.priority_queue : [])
+        .map(normalizeExecutionQueueItem)
+        .filter((row): row is DashboardExecutionQueueItem => row !== null)
+      setArrayByKeyIfChanged(executionQueue, normalizedQueue, q => q.id)
+      const normalizedSessionBriefs = (Array.isArray(data.session_briefs) ? data.session_briefs : [])
+        .map(normalizeExecutionSessionBrief)
+        .filter((row): row is DashboardExecutionSessionBrief => row !== null)
+      setArrayByKeyIfChanged(executionSessionBriefs, normalizedSessionBriefs, s => s.session_id)
+      const normalizedOpBriefs = (Array.isArray(data.operation_briefs) ? data.operation_briefs : [])
+        .map(normalizeExecutionOperationBrief)
+        .filter((row): row is DashboardExecutionOperationBrief => row !== null)
+      setArrayByKeyIfChanged(executionOperationBriefs, normalizedOpBriefs, o => o.operation_id)
+      const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
+        .map(normalizeExecutionWorkerSupportBrief)
+        .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
+      setArrayByKeyIfChanged(executionWorkerSupportBriefs, normalizedWorkerBriefs, w => w.name)
+      const normalizedContinuityBriefs = (Array.isArray(data.continuity_briefs) ? data.continuity_briefs : [])
+        .map(normalizeExecutionContinuityBrief)
+        .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
+      setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name)
+      const normalizedOfflineBriefs = (Array.isArray(data.offline_worker_briefs) ? data.offline_worker_briefs : [])
+        .map(normalizeExecutionWorkerSupportBrief)
+        .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
+      setArrayByKeyIfChanged(executionOfflineWorkerBriefs, normalizedOfflineBriefs, w => w.name)
+      perpetualStatus.value = null
+      executionLoaded.value = true
+      lastExecutionRefreshAt.value = Date.now()
+      lastDashboardRefreshAt.value = new Date().toISOString()
+    } catch (err) {
+      console.warn('[Dashboard] execution fetch error:', err)
+      showToast('실행 데이터 로드 실패', 'error', 5000)
+    } finally {
+      inflightExecutionRefresh = null
     }
-    const roomChanged = previousRoom != null && normalizedStatus?.room != null && previousRoom !== normalizedStatus.room
-    const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
-      .map(normalizeAgent)
-      .filter((row): row is Agent => row !== null)
-    setArrayByKeyIfChanged(agents, normalizedAgents, a => a.name)
-    const normalizedTasks = (Array.isArray(data.tasks) ? data.tasks : [])
-      .map(normalizeTask)
-      .filter((row): row is Task => row !== null)
-    setArrayByKeyIfChanged(tasks, normalizedTasks, t => t.id)
-    const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
-      .map(normalizeMessage)
-      .filter((row): row is Message => row !== null)
-    messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
-    keepers.value = normalizeKeepers(data.keepers)
-    executionSummary.value = normalizeExecutionSummary(data.summary)
-    const normalizedQueue = (Array.isArray(data.execution_queue) ? data.execution_queue : Array.isArray(data.priority_queue) ? data.priority_queue : [])
-      .map(normalizeExecutionQueueItem)
-      .filter((row): row is DashboardExecutionQueueItem => row !== null)
-    setArrayByKeyIfChanged(executionQueue, normalizedQueue, q => q.id)
-    const normalizedSessionBriefs = (Array.isArray(data.session_briefs) ? data.session_briefs : [])
-      .map(normalizeExecutionSessionBrief)
-      .filter((row): row is DashboardExecutionSessionBrief => row !== null)
-    setArrayByKeyIfChanged(executionSessionBriefs, normalizedSessionBriefs, s => s.session_id)
-    const normalizedOpBriefs = (Array.isArray(data.operation_briefs) ? data.operation_briefs : [])
-      .map(normalizeExecutionOperationBrief)
-      .filter((row): row is DashboardExecutionOperationBrief => row !== null)
-    setArrayByKeyIfChanged(executionOperationBriefs, normalizedOpBriefs, o => o.operation_id)
-    const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
-      .map(normalizeExecutionWorkerSupportBrief)
-      .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
-    setArrayByKeyIfChanged(executionWorkerSupportBriefs, normalizedWorkerBriefs, w => w.name)
-    const normalizedContinuityBriefs = (Array.isArray(data.continuity_briefs) ? data.continuity_briefs : [])
-      .map(normalizeExecutionContinuityBrief)
-      .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
-    setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name)
-    const normalizedOfflineBriefs = (Array.isArray(data.offline_worker_briefs) ? data.offline_worker_briefs : [])
-      .map(normalizeExecutionWorkerSupportBrief)
-      .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
-    setArrayByKeyIfChanged(executionOfflineWorkerBriefs, normalizedOfflineBriefs, w => w.name)
-    perpetualStatus.value = null
-    executionLoaded.value = true
-    lastExecutionRefreshAt.value = Date.now()
-    lastDashboardRefreshAt.value = new Date().toISOString()
-  } catch (err) {
-    console.warn('[Dashboard] execution fetch error:', err)
-    showToast('실행 데이터 로드 실패', 'error', 5000)
-  }
+  })()
+  return inflightExecutionRefresh
 }
 
 export async function refreshAgents(): Promise<void> {

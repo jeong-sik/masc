@@ -60,8 +60,39 @@ export const commandPlaneChainRunError = signal<string | null>(null)
 export const commandPlaneChainFocusOperationId = signal<string | null>(null)
 let activeChainRunRequestId: string | null = null
 
+interface RefreshOptions {
+  force?: boolean
+}
+
+const COMMAND_REFRESH_TTL_MS = 1_000
+const COMMAND_HELP_TTL_MS = 60_000
+
+let summaryRefreshInflight: Promise<void> | null = null
+let detailRefreshInflight: Promise<void> | null = null
+let helpRefreshInflight: Promise<void> | null = null
+let chainRefreshInflight: Promise<void> | null = null
+let swarmRefreshInflight: Promise<void> | null = null
+let orchestraRefreshInflight: Promise<void> | null = null
+
+let lastSummaryRefreshAt = 0
+let lastDetailRefreshAt = 0
+let lastHelpRefreshAt = 0
+let lastChainRefreshAt = 0
+let lastSwarmRefreshAt = 0
+let lastOrchestraRefreshAt = 0
+let lastSwarmRefreshKey = ''
+let lastOrchestraRefreshKey = ''
+
 function surfaceNeedsDetail(surface: CommandPlaneSurface): boolean {
   return surface !== 'swarm' && surface !== 'orchestra'
+}
+
+function isFresh(lastAt: number, ttlMs: number, opts?: RefreshOptions): boolean {
+  return !opts?.force && Date.now() - lastAt < ttlMs
+}
+
+function refreshKey(runId?: string, operationId?: string): string {
+  return `${runId ?? ''}:${operationId ?? ''}`
 }
 
 function currentLocationParams(): URLSearchParams {
@@ -97,36 +128,50 @@ export function setCommandPlaneSurface(surface: CommandPlaneSurface): void {
   }
 }
 
-export async function refreshCommandPlaneSummary(): Promise<void> {
+export async function refreshCommandPlaneSummary(opts?: RefreshOptions): Promise<void> {
+  if (summaryRefreshInflight) return summaryRefreshInflight
+  if (isFresh(lastSummaryRefreshAt, COMMAND_REFRESH_TTL_MS, opts)) return
   commandPlaneLoading.value = true
   commandPlaneError.value = null
-  try {
-    const raw = await fetchCommandPlaneSummary()
-    commandPlaneSummary.value = normalizeSummarySnapshot(raw)
-  } catch (err) {
-    commandPlaneError.value =
-      err instanceof Error ? err.message : 'Failed to load command-plane summary'
-  } finally {
-    commandPlaneLoading.value = false
-  }
+  summaryRefreshInflight = (async () => {
+    try {
+      const raw = await fetchCommandPlaneSummary()
+      commandPlaneSummary.value = normalizeSummarySnapshot(raw)
+      lastSummaryRefreshAt = Date.now()
+    } catch (err) {
+      commandPlaneError.value =
+        err instanceof Error ? err.message : 'Failed to load command-plane summary'
+    } finally {
+      commandPlaneLoading.value = false
+      summaryRefreshInflight = null
+    }
+  })()
+  return summaryRefreshInflight
 }
 
 export function focusCommandPlaneChainOperation(operationId: string | null): void {
   commandPlaneChainFocusOperationId.value = operationId
 }
 
-export async function refreshCommandPlaneSnapshot(): Promise<void> {
+export async function refreshCommandPlaneSnapshot(opts?: RefreshOptions): Promise<void> {
+  if (detailRefreshInflight) return detailRefreshInflight
+  if (isFresh(lastDetailRefreshAt, COMMAND_REFRESH_TTL_MS, opts)) return
   commandPlaneDetailLoading.value = true
   commandPlaneDetailError.value = null
-  try {
-    const raw = await fetchCommandPlaneSnapshot()
-    commandPlaneSnapshot.value = normalizeSnapshot(raw)
-  } catch (err) {
-    commandPlaneDetailError.value =
-      err instanceof Error ? err.message : 'Failed to load command-plane snapshot'
-  } finally {
-    commandPlaneDetailLoading.value = false
-  }
+  detailRefreshInflight = (async () => {
+    try {
+      const raw = await fetchCommandPlaneSnapshot()
+      commandPlaneSnapshot.value = normalizeSnapshot(raw)
+      lastDetailRefreshAt = Date.now()
+    } catch (err) {
+      commandPlaneDetailError.value =
+        err instanceof Error ? err.message : 'Failed to load command-plane snapshot'
+    } finally {
+      commandPlaneDetailLoading.value = false
+      detailRefreshInflight = null
+    }
+  })()
+  return detailRefreshInflight
 }
 
 export async function ensureCommandPlaneDetail(): Promise<void> {
@@ -134,32 +179,39 @@ export async function ensureCommandPlaneDetail(): Promise<void> {
   await refreshCommandPlaneSnapshot()
 }
 
-export async function refreshCommandPlaneCurrentSurface(): Promise<void> {
-  await refreshCommandPlaneSummary()
+export async function refreshCommandPlaneCurrentSurface(opts?: RefreshOptions): Promise<void> {
+  await refreshCommandPlaneSummary(opts)
   if (surfaceNeedsDetail(commandPlaneSurface.value)) {
-    await refreshCommandPlaneSnapshot()
+    await refreshCommandPlaneSnapshot(opts)
   }
 }
 
-export async function refreshCommandPlaneChainSummary(): Promise<void> {
+export async function refreshCommandPlaneChainSummary(opts?: RefreshOptions): Promise<void> {
+  if (chainRefreshInflight) return chainRefreshInflight
+  if (isFresh(lastChainRefreshAt, COMMAND_REFRESH_TTL_MS, opts)) return
   commandPlaneChainLoading.value = true
   commandPlaneChainError.value = null
-  try {
-    const raw = await fetchChainSummary()
-    const normalized = normalizeChainSummary(raw)
-    commandPlaneChainSummary.value = normalized
-    const focused = commandPlaneChainFocusOperationId.value
-    if (normalized.operations.length === 0) {
-      commandPlaneChainFocusOperationId.value = null
-    } else if (!focused || !normalized.operations.some(item => item.operation.operation_id === focused)) {
-      commandPlaneChainFocusOperationId.value = normalized.operations[0]?.operation.operation_id ?? null
+  chainRefreshInflight = (async () => {
+    try {
+      const raw = await fetchChainSummary()
+      const normalized = normalizeChainSummary(raw)
+      commandPlaneChainSummary.value = normalized
+      const focused = commandPlaneChainFocusOperationId.value
+      if (normalized.operations.length === 0) {
+        commandPlaneChainFocusOperationId.value = null
+      } else if (!focused || !normalized.operations.some(item => item.operation.operation_id === focused)) {
+        commandPlaneChainFocusOperationId.value = normalized.operations[0]?.operation.operation_id ?? null
+      }
+      lastChainRefreshAt = Date.now()
+    } catch (err) {
+      commandPlaneChainError.value =
+        err instanceof Error ? err.message : 'Failed to load chain summary'
+    } finally {
+      commandPlaneChainLoading.value = false
+      chainRefreshInflight = null
     }
-  } catch (err) {
-    commandPlaneChainError.value =
-      err instanceof Error ? err.message : 'Failed to load chain summary'
-  } finally {
-    commandPlaneChainLoading.value = false
-  }
+  })()
+  return chainRefreshInflight
 }
 
 export function clearCommandPlaneChainRun(): void {
@@ -189,52 +241,79 @@ export async function loadCommandPlaneChainRun(runId: string): Promise<void> {
   }
 }
 
-export async function refreshCommandPlaneHelp(): Promise<void> {
+export async function refreshCommandPlaneHelp(opts?: RefreshOptions): Promise<void> {
+  if (helpRefreshInflight) return helpRefreshInflight
+  if (isFresh(lastHelpRefreshAt, COMMAND_HELP_TTL_MS, opts)) return
   commandPlaneHelpLoading.value = true
   commandPlaneHelpError.value = null
-  try {
-    const raw = await fetchCommandPlaneHelp()
-    commandPlaneHelp.value = normalizeHelp(raw)
-  } catch (err) {
-    commandPlaneHelpError.value =
-      err instanceof Error ? err.message : 'Failed to load command-plane help'
-  } finally {
-    commandPlaneHelpLoading.value = false
-  }
+  helpRefreshInflight = (async () => {
+    try {
+      const raw = await fetchCommandPlaneHelp()
+      commandPlaneHelp.value = normalizeHelp(raw)
+      lastHelpRefreshAt = Date.now()
+    } catch (err) {
+      commandPlaneHelpError.value =
+        err instanceof Error ? err.message : 'Failed to load command-plane help'
+    } finally {
+      commandPlaneHelpLoading.value = false
+      helpRefreshInflight = null
+    }
+  })()
+  return helpRefreshInflight
 }
 
 export async function refreshCommandPlaneSwarm(
   runId = currentSwarmRunId(),
   operationId = currentSwarmOperationId(),
+  opts?: RefreshOptions,
 ): Promise<void> {
+  const key = refreshKey(runId, operationId)
+  if (swarmRefreshInflight && key === lastSwarmRefreshKey) return swarmRefreshInflight
+  if (key === lastSwarmRefreshKey && isFresh(lastSwarmRefreshAt, COMMAND_REFRESH_TTL_MS, opts)) return
   commandPlaneSwarmLoading.value = true
   commandPlaneSwarmError.value = null
-  try {
-    const raw = await fetchCommandPlaneSwarm(runId, operationId)
-    commandPlaneSwarm.value = normalizeSwarm(raw)
-  } catch (err) {
-    commandPlaneSwarmError.value =
-      err instanceof Error ? err.message : 'Failed to load command-plane swarm view'
-  } finally {
-    commandPlaneSwarmLoading.value = false
-  }
+  lastSwarmRefreshKey = key
+  swarmRefreshInflight = (async () => {
+    try {
+      const raw = await fetchCommandPlaneSwarm(runId, operationId)
+      commandPlaneSwarm.value = normalizeSwarm(raw)
+      lastSwarmRefreshAt = Date.now()
+    } catch (err) {
+      commandPlaneSwarmError.value =
+        err instanceof Error ? err.message : 'Failed to load command-plane swarm view'
+    } finally {
+      commandPlaneSwarmLoading.value = false
+      swarmRefreshInflight = null
+    }
+  })()
+  return swarmRefreshInflight
 }
 
 export async function refreshCommandPlaneOrchestra(
   runId = currentSwarmRunId(),
   operationId = currentSwarmOperationId(),
+  opts?: RefreshOptions,
 ): Promise<void> {
+  const key = refreshKey(runId, operationId)
+  if (orchestraRefreshInflight && key === lastOrchestraRefreshKey) return orchestraRefreshInflight
+  if (key === lastOrchestraRefreshKey && isFresh(lastOrchestraRefreshAt, COMMAND_REFRESH_TTL_MS, opts)) return
   commandPlaneOrchestraLoading.value = true
   commandPlaneOrchestraError.value = null
-  try {
-    const raw = await fetchCommandPlaneOrchestra(runId, operationId)
-    commandPlaneOrchestra.value = normalizeOrchestra(raw)
-  } catch (err) {
-    commandPlaneOrchestraError.value =
-      err instanceof Error ? err.message : 'Failed to load orchestra map'
-  } finally {
-    commandPlaneOrchestraLoading.value = false
-  }
+  lastOrchestraRefreshKey = key
+  orchestraRefreshInflight = (async () => {
+    try {
+      const raw = await fetchCommandPlaneOrchestra(runId, operationId)
+      commandPlaneOrchestra.value = normalizeOrchestra(raw)
+      lastOrchestraRefreshAt = Date.now()
+    } catch (err) {
+      commandPlaneOrchestraError.value =
+        err instanceof Error ? err.message : 'Failed to load orchestra map'
+    } finally {
+      commandPlaneOrchestraLoading.value = false
+      orchestraRefreshInflight = null
+    }
+  })()
+  return orchestraRefreshInflight
 }
 
 async function runAction(key: string, path: string, body: Record<string, unknown>): Promise<void> {
@@ -242,13 +321,13 @@ async function runAction(key: string, path: string, body: Record<string, unknown
   commandPlaneActionError.value = null
   try {
     await runCommandPlaneAction(path, body)
-    await refreshCommandPlaneSummary()
+    await refreshCommandPlaneSummary({ force: true })
     if (commandPlaneSnapshot.value || surfaceNeedsDetail(commandPlaneSurface.value)) {
-      await refreshCommandPlaneSnapshot()
+      await refreshCommandPlaneSnapshot({ force: true })
     }
-    await refreshCommandPlaneSwarm()
-    await refreshCommandPlaneOrchestra()
-    await refreshCommandPlaneChainSummary()
+    await refreshCommandPlaneSwarm(undefined, undefined, { force: true })
+    await refreshCommandPlaneOrchestra(undefined, undefined, { force: true })
+    await refreshCommandPlaneChainSummary({ force: true })
   } catch (err) {
     commandPlaneActionError.value =
       err instanceof Error ? err.message : 'Failed to execute command-plane action'
@@ -312,16 +391,16 @@ export function toggleCommandPlaneKillSwitch(unitId: string, enabled: boolean): 
 }
 
 registerCommandPlaneRefresh(() => {
-  void refreshCommandPlaneCurrentSurface()
-  void refreshCommandPlaneChainSummary()
+  void refreshCommandPlaneCurrentSurface({ force: true })
+  void refreshCommandPlaneChainSummary({ force: true })
   if (
     commandPlaneSurface.value === 'swarm'
     || commandPlaneSurface.value === 'orchestra'
     || commandPlaneSwarm.value !== null
   ) {
-    void refreshCommandPlaneSwarm()
+    void refreshCommandPlaneSwarm(undefined, undefined, { force: true })
   }
   if (commandPlaneSurface.value === 'orchestra' || commandPlaneOrchestra.value !== null) {
-    void refreshCommandPlaneOrchestra()
+    void refreshCommandPlaneOrchestra(undefined, undefined, { force: true })
   }
 })

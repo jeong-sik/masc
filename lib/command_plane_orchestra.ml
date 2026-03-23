@@ -2,10 +2,7 @@ module U = Yojson.Safe.Util
 
 let trim_to_option = Dashboard_utils.trim_to_option
 
-let first_some left right =
-  match left with
-  | Some _ -> left
-  | None -> right
+let first_some = Dashboard_utils.first_some
 
 let string_opt json key =
   match U.member key json with

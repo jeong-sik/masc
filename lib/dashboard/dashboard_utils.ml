@@ -9,6 +9,9 @@ let parse_iso_opt = function
       try Some (Types.parse_iso8601 raw) with Failure _ -> None)
   | _ -> None
 
+let first_some left right =
+  match left with Some _ -> left | None -> right
+
 let trim_to_option text =
   let trimmed = String.trim text in
   if trimmed = "" then None else Some trimmed

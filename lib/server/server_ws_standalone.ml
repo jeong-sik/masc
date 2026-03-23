@@ -1,7 +1,7 @@
 (** Standalone WebSocket server for MASC MCP.
 
     Runs on a separate port (default 8937, configurable via MASC_WS_PORT).
-    Opt-in via MASC_WS_ENABLED=1.
+    Enabled by default. Disable with MASC_WS_ENABLED=0.
 
     Unlike the /ws upgrade path on the HTTP port, this server owns the
     full TCP socket, so httpun-ws can run the HTTP->WS upgrade lifecycle
@@ -28,11 +28,12 @@ let configured_port () =
       default_port)
   | None -> default_port
 
-(** Check whether standalone WS is enabled (default: disabled). *)
+(** Check whether standalone WS is enabled (default: enabled).
+    Disable with MASC_WS_ENABLED=0 or MASC_WS_ENABLED=false. *)
 let is_enabled () =
   match Sys.getenv_opt "MASC_WS_ENABLED" with
-  | Some "1" | Some "true" -> true
-  | _ -> false
+  | Some "0" | Some "false" -> false
+  | _ -> true
 
 (** WebSocket handler factory.
 
@@ -99,7 +100,7 @@ let start
     ~(on_message : string -> string -> unit)
   : unit =
   if not (is_enabled ()) then
-    Log.Server.info "WebSocket transport disabled (set MASC_WS_ENABLED=1 to enable)"
+    Log.Server.info "WebSocket transport disabled (MASC_WS_ENABLED=0)"
   else begin
     let port = configured_port () in
     let net = Eio.Stdenv.net env in

@@ -39,6 +39,12 @@ let detect_from_fd (fd : Unix.file_descr) : (protocol, string) result =
   | _ ->
     (* 0 bytes = connection closed before sending anything *)
     Error "connection closed before protocol detection"
+  | exception Unix.Unix_error (Unix.EAGAIN, _, _)
+  | exception Unix.Unix_error (Unix.EWOULDBLOCK, _, _) ->
+    (* Non-blocking socket has no data yet.  HTTP/2 h2c clients send the
+       connection preface immediately, so absence of data means HTTP/1.1.
+       This is the common path for SSE/EventSource connections. *)
+    Ok Http1
   | exception Unix.Unix_error (err, _fn, _arg) ->
     Error (Printf.sprintf "peek failed: %s" (Unix.error_message err))
 

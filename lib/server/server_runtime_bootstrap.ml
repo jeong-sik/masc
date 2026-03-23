@@ -299,6 +299,9 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   (* Auto-boot resident keepers: read .masc/resident-keepers/*.json,
      load or parse each keeper's meta, and start keepalive loops. *)
   fork_subsystem "keeper_autoboot" (fun () ->
+    if not Env_config.KeeperBootstrap.enabled then
+      Log.Keeper.info "autoboot: disabled via MASC_KEEPER_BOOTSTRAP_ENABLED=false"
+    else begin
     (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
     Eio.Time.sleep clock 5.0;
     let config = state.room_config in
@@ -341,7 +344,8 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
             (Printexc.to_string exn)
     ) specs;
     Log.Keeper.info "autoboot: %d/%d resident keepers started"
-      !booted (List.length specs));
+      !booted (List.length specs)
+    end);
   (* Phase 5: unified startup subsystem summary *)
   Log.info ~ctx:"startup" "subsystems: resident loops started"
 

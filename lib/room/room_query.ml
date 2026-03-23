@@ -214,6 +214,7 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
               (match message_of_yojson json with
                | Ok msg when msg.seq > since_seq -> loop (remaining - 1) (msg :: acc) rest
                | _ -> loop remaining acc rest)
+          | exception (Eio.Cancel.Cancelled _ as e) -> raise e
           | exception e ->
               Eio.traceln "[WARN] Failed to read %s %s: %s" warn_label name (Printexc.to_string e);
               loop remaining acc rest

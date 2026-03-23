@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { ActionButton } from '../common/button'
+import { StatusChip } from '../common/status-chip'
 import type {
   Agent,
   CommandPlaneChainOverlay,
@@ -392,7 +393,7 @@ export function WarRoomOrchestrationRail({
                   <strong>Chain Orchestration</strong>
                   <div class="cmd-card rounded-xl-sub">${chainOverlay.operation.operation_id}</div>
                 </div>
-                <span class="cmd-chip rounded-full ${toneClass(sessionStatusTone(chainOverlay.operation.status))}">${displayStatus(chainOverlay.operation.status)}</span>
+                <${StatusChip} label=${displayStatus(chainOverlay.operation.status)} tone=${toneClass(sessionStatusTone(chainOverlay.operation.status))} />
               </div>
               <div class="cmd-card rounded-xl-grid">
                 <span>Chain</span><span>${chainOverlay.runtime?.chain_id ?? chainOverlay.preview_run?.chain_id ?? 'n/a'}</span>
@@ -418,7 +419,7 @@ export function WarRoomOrchestrationRail({
                   <strong>Autoresearch Loop</strong>
                   <div class="cmd-card rounded-xl-sub">${linkedAutoresearch.loop_id ?? linkedAutoresearch.session_id ?? 'linked session'}</div>
                 </div>
-                <span class="cmd-chip rounded-full ${linkedAutoresearch.error ? 'bad' : linkedAutoresearch.status === 'running' ? 'warn' : 'ok'}">${linkedAutoresearch.status ?? 'unknown'}</span>
+                <${StatusChip} label=${linkedAutoresearch.status ?? 'unknown'} tone=${linkedAutoresearch.error ? 'bad' : linkedAutoresearch.status === 'running' ? 'warn' : 'ok'} />
               </div>
               <div class="cmd-card rounded-xl-grid">
                 <span>Cycle</span><span>${linkedAutoresearch.current_cycle ?? 0}</span>

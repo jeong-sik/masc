@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { CmdStatCard } from './cmd-stat-card'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import {
   commandPlaneSwarm,
   commandPlaneSwarmError,
@@ -138,7 +139,7 @@ export function SwarmLivePanels() {
                         <div class="min-w-0 [overflow-wrap:anywhere] break-words">
                           <div class="flex justify-between items-start">
                             <strong>${sample.active_slots} active</strong>
-                            <span class="cmd-chip rounded-full">${relativeTime(sample.timestamp)}</span>
+                            <${StatusChip} label=${relativeTime(sample.timestamp)} />
                           </div>
                           <div class="cmd-card rounded-xl-sub">slots ${sample.active_slot_ids.join(', ') || 'none'}</div>
                         </div>
@@ -172,7 +173,7 @@ export function SwarmLivePanels() {
                   <div class="min-w-0 [overflow-wrap:anywhere] break-words">
                     <div class="flex justify-between items-start">
                       <strong>${message.from}</strong>
-                      <span class="cmd-chip rounded-full">${relativeTime(message.timestamp)}</span>
+                      <${StatusChip} label=${relativeTime(message.timestamp)} />
                     </div>
                     <div class="cmd-card rounded-xl-sub">seq ${message.seq}</div>
                   </div>

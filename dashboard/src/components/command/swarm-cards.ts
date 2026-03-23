@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { StatusChip } from '../common/status-chip'
 import type {
   CommandPlaneSwarmBlocker,
   CommandPlaneSwarmChecklistItem,
@@ -14,7 +15,7 @@ export function SwarmChecklistCard({ item }: { item: CommandPlaneSwarmChecklistI
     <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${toneClass(item.status)}">
       <div class="flex justify-between gap-3 items-start">
         <strong>${item.title}</strong>
-        <span class="cmd-chip rounded-full ${toneClass(item.status)}">${item.status}</span>
+        <${StatusChip} label=${item.status} tone=${toneClass(item.status)} />
       </div>
       <p>${item.detail}</p>
       <div class="cmd-card rounded-xl-foot">Next tool: ${item.next_tool}</div>
@@ -27,7 +28,7 @@ export function SwarmBlockerCard({ blocker }: { blocker: CommandPlaneSwarmBlocke
     <article class="cmd-alert ${toneClass(blocker.severity)} ${alertBorderTone(toneClass(blocker.severity))}">
       <div class="cmd-card rounded-xl-head">
         <strong>${blocker.title}</strong>
-        <span class="cmd-chip rounded-full ${toneClass(blocker.severity)}">${blocker.severity}</span>
+        <${StatusChip} label=${blocker.severity} tone=${toneClass(blocker.severity)} />
       </div>
       <div class="flex justify-between items-start">
         <span>${blocker.code}</span>
@@ -46,9 +47,7 @@ export function SwarmWorkerCard({ worker }: { worker: CommandPlaneSwarmWorker })
           <strong>${worker.name}</strong>
           <div class="cmd-card rounded-xl-sub">${worker.role} · ${worker.lane}</div>
         </div>
-        <span class="cmd-chip rounded-full ${toneClass(worker.joined ? (worker.heartbeat_fresh ? 'ok' : 'warn') : 'bad')}">
-          ${worker.status}
-        </span>
+        <${StatusChip} label=${worker.status} tone=${toneClass(worker.joined ? (worker.heartbeat_fresh ? 'ok' : 'warn') : 'bad')} />
       </div>
       <div class="cmd-card rounded-xl-grid">
         <span>Joined</span><span>${worker.joined ? 'yes' : 'no'}</span>
@@ -111,7 +110,7 @@ export function SwarmGapDot({ gap }: { gap: CommandPlaneSwarmGap }) {
   return html`
     <div class="flex items-center gap-1.5 py-[3px] text-[0.78rem]">
       <span class="swarm-gap-dot"></span>
-      <span class="cmd-chip rounded-full ${toneClass(gap.severity)}">${gap.code} (${gap.count})</span>
+      <${StatusChip} label=${`${gap.code} (${gap.count})`} tone=${toneClass(gap.severity)} />
       <span class="cmd-card rounded-xl-sub">${gap.summary}</span>
     </div>
   `
@@ -130,7 +129,7 @@ export function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
     <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${toneClass(tone)}">
         <div class="flex justify-between gap-3 items-start">
           <strong>Hot Proof / 가동 증거</strong>
-          <span class="cmd-chip rounded-full ${toneClass(tone)}">${proof?.status ?? 'missing'}</span>
+          <${StatusChip} label=${proof?.status ?? 'missing'} tone=${toneClass(tone)} />
         </div>
       ${proof
         ? html`

@@ -222,7 +222,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
           in
           let auth_result =
             match profile with
-            | Mcp_eio.Full | Mcp_eio.Managed_agent | Mcp_eio.Role_filtered _ ->
+            | Mcp_eio.Full | Mcp_eio.Managed_agent ->
                 verify_mcp_auth ~base_path httpun_request
             | Mcp_eio.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
@@ -318,7 +318,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
           in
           let auth_result =
             match profile with
-            | Mcp_eio.Full | Mcp_eio.Managed_agent | Mcp_eio.Role_filtered _ -> Ok None
+            | Mcp_eio.Full | Mcp_eio.Managed_agent -> Ok None
             | Mcp_eio.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
           in

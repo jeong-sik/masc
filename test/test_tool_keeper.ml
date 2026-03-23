@@ -459,7 +459,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
           ~input:
             (`Assoc
               [
-                ("cmd", `String "printf keeper-ok");
+                ("cmd", `String "pwd");
                 ("timeout_sec", `Float 5.0);
               ])
         |> parse_json_exn
@@ -469,7 +469,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
       check bool "keeper bash output captured" true
         Yojson.Safe.Util.(
           ok_json |> member "output" |> to_string
-          |> fun out -> contains_substring out "keeper-ok");
+          |> fun out -> contains_substring out base_dir);
       let failed_json =
         Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
           ~config ~meta ~ctx_work

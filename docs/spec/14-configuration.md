@@ -220,76 +220,19 @@ Level4는 `Normalized.t` (0.0-1.0 범위 보장) 추상 타입을 제공한다. 
 
 ---
 
-## 4. Mode System
+## 4. Tool Surface
 
-### 4.1 개요
-
-300+ 도구를 22개 category로 분류하고, 8개 preset mode로 필터링한다. Serena MCP의 `switch_modes` 패턴에서 영감.
-
-### 4.2 Category 목록
-
-| Category | 설명 | 대표 도구 |
-|----------|------|----------|
-| `Core_Room` | Room 진입/퇴장 | `masc_join`, `masc_leave`, `masc_rooms_list` |
-| `Core_Task` | Task 생명주기 | `masc_add_task`, `masc_claim_next`, `masc_transition` |
-| `Core_Session` | Team session | `masc_team_session_start/step/finalize` |
-| `Core_Ops` | 고급 운영 | `masc_run_init`, `masc_operator_snapshot`, dispatch, policy |
-| `Comm` | 커뮤니케이션 | `masc_broadcast`, `masc_messages`, `masc_lock` |
-| `Portal` | A2A 직접 통신 | `masc_portal_open/send/close`, `masc_a2a_delegate` |
-| `Worktree` | Git worktree | `masc_worktree_create/remove/list` |
-| `Code` | 코드 탐색/편집 | `masc_code_search/symbols/read/write` |
-| `Health` | 유지보수 | `masc_heartbeat`, `masc_gc`, `masc_metrics_record` |
-| `Discovery` | 에이전트 검색 | `masc_agent_card`, `masc_agent_fitness` |
-| `Voting` | Room 투표 | `masc_vote_create/cast/status` |
-| `Interrupt` | 체크포인트 | `masc_interrupt`, `masc_approve/reject` |
-| `Cost` | 비용 추적 | `masc_cost_log/report` |
-| `Auth` | 인증/거버넌스 | `masc_auth_*`, `masc_audit_*`, `masc_governance_set` |
-| `RateLimit` | 속도 제한 | `masc_rate_limit_status/config` |
-| `Encryption` | 암호화 | `masc_encryption_*`, `masc_generate_key` |
-| `Board` | 게시판 | `masc_board_post/list/comment/vote` |
-| `Plan` | 계획/목표 | `masc_plan_*`, `masc_goal_*`, `masc_intent_*` |
-| `Consensus` | 합의/토론 | `masc_walph_*`, `masc_convo_*`, `masc_petition_submit` |
-| `Ecosystem` | Keeper/MDAL/Spawn | `masc_keeper_*`, `masc_mdal_*`, `masc_spawn` |
-| `Voice` | 음성 브릿지 | `masc_voice_speak/session_start/conference_*` |
-| `TRPG` | 탁상 RPG | `masc_trpg_session_start/round_run/dice_roll` |
-| `Unknown` | 미매핑 (차단됨) | 새 도구 추가 시 명시적 매핑 필수 |
-
-`Core`는 가상 슈퍼카테고리로, `Core_Room + Core_Task + Core_Session + Core_Ops`를 포함한다.
-
-### 4.3 Mode Presets
-
-| Mode | 포함 category | 예상 도구 수 | 용도 |
-|------|---------------|-------------|------|
-| `minimal` | Core_Room, Core_Task, Health | ~20 | 최소 운영 |
-| `standard` | Core 전체, Comm, Worktree, Health, Plan, Board, Consensus, Voice | ~100 | 일반 협업 |
-| `parallel` | Standard + Portal, Discovery, Voting, Interrupt | ~150 | 멀티 에이전트 |
-| `coding` | Core 전체, Worktree, Code, Health, Plan, Consensus | ~80 | 개발 전용 |
-| `full` | 전체 22개 category | ~322 | 기본값 (v2.99 이후) |
-| `solo` | Core_Room, Core_Task, Worktree | ~23 | 단독 작업 |
-| `agent` | Core_Room, Core_Task, Worktree, Board, Comm | ~30 | 에이전트 최적화 |
-| `custom` | 사용자 정의 | - | category 직접 지정 |
-
-### 4.4 3-Layer Filter Architecture
+Mode/category 기반 필터링은 제거되었다. 현재 공개 도구 표면은 아래 순서로 결정된다.
 
 ```
 raw_all_tool_schemas (전체 등록 도구)
   -> capability_registry (surface projection: Public_mcp / Keeper / Worker)
   -> tool_catalog (visibility: Default/Hidden, lifecycle: Active/Deprecated)
-  -> mode filter (category 체크)
+  -> profile/auth/runtime checks
 ```
 
-`masc_switch_mode`, `masc_get_config`, `masc_tool_enable`, `masc_tool_disable`는 mode filter를 bypass한다 (항상 사용 가능).
-
-### 4.5 Progressive Disclosure
-
-`Mode.extra_enabled_tools` Hashtbl로 세션별 도구를 개별 활성화할 수 있다.
-
-```
-masc_tool_enable("masc_spawn")  -> 현재 세션에서 masc_spawn 활성화
-masc_tool_disable("masc_spawn") -> 비활성화
-```
-
-이 메커니즘은 mode category 필터를 bypass하므로, 좁은 mode에서도 특정 도구를 추가 노출할 수 있다.
+즉, 도구 노출 제어는 `Full` / `Managed_agent` / `Operator_remote` profile, tool catalog,
+auth/RBAC, 그리고 개별 runtime guard에 의해 이뤄진다.
 
 ---
 

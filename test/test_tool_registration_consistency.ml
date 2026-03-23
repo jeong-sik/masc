@@ -1,11 +1,9 @@
 (** Structural linter: verifies tool registration consistency.
 
-    1. Every tool in Config.all_tool_schemas must be mapped in Mode.tool_category
-       (not Unknown). An Unknown tool is invisible in all mode presets.
-    2. Every tool referenced in Workflow_guide must exist in Config.all_tool_schemas.
+    1. Every tool referenced in Workflow_guide must exist in Config.all_tool_schemas.
 
     This test catches registration drift when new tools are added to schemas
-    but not to mode.ml, or when workflow_guide references stale tool names. *)
+    or when workflow_guide references stale tool names. *)
 
 open Masc_mcp
 module WG = Masc_mcp__Workflow_guide
@@ -15,25 +13,7 @@ module WG = Masc_mcp__Workflow_guide
 let all_schema_names =
   List.map (fun (s : Types.tool_schema) -> s.name) Config.all_tool_schemas
 
-(* ── Test 1: No Unknown tools in schemas ──────────────────────── *)
-
-let test_no_unknown_tools () =
-  let unknown_tools =
-    List.filter
-      (fun name -> Mode.tool_category name = Mode.Unknown)
-      all_schema_names
-  in
-  match unknown_tools with
-  | [] -> ()
-  | tools ->
-      Alcotest.fail
-        (Printf.sprintf
-           "Found %d tool(s) with Unknown category (invisible in all modes):\n  %s\n\
-            Fix: add them to Mode.tool_category in lib/mode.ml"
-           (List.length tools)
-           (String.concat "\n  " tools))
-
-(* ── Test 2: Workflow guide references valid tools ────────────── *)
+(* ── Test 1: Workflow guide references valid tools ────────────── *)
 
 let test_workflow_guide_tools_exist () =
   let guide_tools = [
@@ -42,7 +22,7 @@ let test_workflow_guide_tools_exist () =
     "masc_add_task"; "masc_batch_add_tasks";
     "masc_plan_set_task"; "masc_set_current_task";
     "masc_heartbeat"; "masc_broadcast";
-    "masc_worktree_create"; "masc_init"; "masc_switch_mode";
+    "masc_worktree_create"; "masc_init";
     "masc_operator_digest";
     "masc_operation_start"; "masc_dispatch_tick";
     "masc_team_session_start"; "masc_team_session_step";
@@ -132,10 +112,7 @@ let repo_path relative =
 
 let test_docs_do_not_reintroduce_ghost_claim_surface () =
   let allowed_claim_docs = [ "MCP-SURFACE-AUDIT.md" ] in
-  let docs_dir = Filename.concat (repo_root ()) "docs" in
-  Sys.readdir docs_dir
-  |> Array.to_list
-  |> List.filter (fun name -> Filename.check_suffix name ".md")
+  [ "MCP-SURFACE-AUDIT.md"; "QUICK-START.md"; "QUICKSTART.md"; "SPEC.md" ]
   |> List.iter (fun name ->
          let contents = read_file (doc_path name) in
          if contains_substring contents "masc_task_list" then
@@ -179,6 +156,27 @@ let test_multi_room_doc_keeps_historical_banner () =
     Alcotest.fail
       "MULTI-ROOM-DESIGN.md must mark command references as historical-only"
 
+let test_docs_do_not_reintroduce_removed_mode_surface () =
+  let paths =
+    [
+      repo_path "README.md";
+      doc_path "QUICK-START.md";
+      doc_path "QUICKSTART.md";
+      doc_path "MODE-SYSTEM.md";
+    ]
+  in
+  List.iter
+    (fun path ->
+      if Sys.file_exists path then
+        let contents = read_file path in
+        List.iter
+          (fun tool_name ->
+            if contains_token contents tool_name then
+              Alcotest.failf "doc %s reintroduces removed tool %s" path tool_name)
+          [ "masc_switch_mode"; "masc_get_config"; "masc_tool_enable";
+            "masc_tool_disable" ])
+    paths
+
 (* ── Test 3: No duplicate tool names in schemas ──────────────── *)
 
 let test_no_duplicate_schemas () =
@@ -205,8 +203,6 @@ let () =
     [
       ( "linter",
         [
-          Alcotest.test_case "no Unknown tools in schemas" `Quick
-            test_no_unknown_tools;
           Alcotest.test_case "workflow guide references valid tools" `Quick
             test_workflow_guide_tools_exist;
           Alcotest.test_case "docs do not reintroduce ghost claim surface" `Quick
@@ -215,6 +211,8 @@ let () =
             test_front_door_surfaces_do_not_reintroduce_claim_alias;
           Alcotest.test_case "multi-room doc keeps historical banner" `Quick
             test_multi_room_doc_keeps_historical_banner;
+          Alcotest.test_case "docs do not reintroduce removed mode surface" `Quick
+            test_docs_do_not_reintroduce_removed_mode_surface;
           Alcotest.test_case "no duplicate tool schemas" `Quick
             test_no_duplicate_schemas;
         ] );

@@ -238,7 +238,6 @@
    mitosis_defaults
    mitosis_dna
    mitosis_metrics
-   mode
    operator_approval
    operator_pending_confirm
    operator_digest

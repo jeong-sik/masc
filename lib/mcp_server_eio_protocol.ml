@@ -11,7 +11,6 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
-  | Role_filtered of Mode.mode
 
 let make_response = Mcp_server.make_response
 let make_error = Mcp_server.make_error
@@ -174,7 +173,7 @@ let handle_initialize_eio ?(profile = Full) id params =
              ( "instructions",
                `String
                  (match profile with
-                 | Full | Role_filtered _ -> TP.default_instructions
+                 | Full -> TP.default_instructions
                  | Managed_agent -> TP.managed_agent_instructions
                  | Operator_remote -> TP.operator_remote_instructions) );
            ]))
@@ -183,7 +182,7 @@ let public_tool_help_schemas () =
   Config.visible_tool_schemas ()
 
 let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
-    ?(include_deprecated = false) ?(include_usage = false) ?mode ?tier ?cursor
+    ?(include_deprecated = false) ?(include_usage = false) ?tier ?cursor
     state id =
   let usage_summary =
     if include_usage then
@@ -198,7 +197,7 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
   in
   let tools =
     TP.tool_schemas_for_profile ~include_hidden ~include_deprecated
-      ?mode_override:mode state profile
+      state profile
     |> (match names with
        | None -> Fun.id
        | Some wanted ->
@@ -213,16 +212,6 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
            String.compare a.name b.name)
   in
   let total_count = List.length tools in
-  let mode_str =
-    match mode with
-    | Some m -> m
-    | None -> (
-        match profile with
-        | Full -> "full"
-        | Managed_agent -> "managed_agent"
-        | Operator_remote -> "operator_remote"
-        | Role_filtered m -> Mode.mode_to_string m)
-  in
   match TP.page_items_with_cursor ~kind:"tools" tools cursor with
   | Error msg -> make_error ~id (-32602) msg
   | Ok (page, next_cursor) ->
@@ -239,7 +228,6 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
               `Assoc
                 [
                   ("totalCount", `Int total_count);
-                  ("mode", `String mode_str);
                   ("pageSize", `Int (TP.list_page_size ()));
                 ] );
           ]
@@ -442,22 +430,15 @@ let handle_request
                    | "tools/list" -> (
                        match TP.requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier; cursor } ->
-                           (* BUG-017 fix: Default to Full profile for tools/list.
-                              Previously wrapped in Role_filtered which filtered out
-                              core coordination tools (masc_join, masc_transition, etc.)
-                              from discovery while tools/call still allowed them. *)
+                       | Ok { names; include_hidden; include_deprecated; include_usage; tier; cursor } ->
                            let list_profile =
                              match profile with
                              | Managed_agent | Operator_remote ->
-                               profile  (* preserve non-Full profiles unconditionally *)
-                             | Full | Role_filtered _ ->
-                               (match mode with
-                                | Some _ -> profile  (* explicit mode param: respect it *)
-                                | None -> Full)
+                               profile
+                             | Full -> Full
                            in
                            handle_list_tools_eio ~profile:list_profile ?names ~include_hidden
-                             ~include_deprecated ~include_usage ?mode ?tier ?cursor
+                             ~include_deprecated ~include_usage ?tier ?cursor
                              state id)
                    | "tools/call" ->
                        (match req.params with
@@ -467,7 +448,7 @@ let handle_request
                              (* tools/call: respect each profile's allowed toolset.
                                 Managed_agent keeps its SDK alias tools.
                                 Operator_remote keeps its restricted tools.
-                                Full/Role_filtered use the full catalog for direct calls. *)
+                                Full uses the full catalog for direct calls. *)
                              let call_profile = match profile with
                                | Operator_remote | Managed_agent -> profile
                                | _ -> Full

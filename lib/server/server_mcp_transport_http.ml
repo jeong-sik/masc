@@ -272,7 +272,7 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   in
   let auth_result =
     match profile with
-    | Mcp_eio.Full | Mcp_eio.Managed_agent | Mcp_eio.Role_filtered _ ->
+    | Mcp_eio.Full | Mcp_eio.Managed_agent ->
         deps.verify_mcp_auth ~base_path request
     | Mcp_eio.Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
@@ -742,7 +742,7 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   in
   let auth_result =
     match profile with
-    | Mcp_eio.Full | Mcp_eio.Managed_agent | Mcp_eio.Role_filtered _ -> Ok ()
+    | Mcp_eio.Full | Mcp_eio.Managed_agent -> Ok ()
     | Mcp_eio.Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in

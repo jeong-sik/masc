@@ -40,11 +40,6 @@ let register_all () =
     "masc_transition";
   ];
 
-  (* ── Mod_control: non-schema tools ──────────────────────────── *)
-  reg Mod_control [
-    "masc_switch_mode"; "masc_get_config";
-  ];
-
   (* ── Mod_run: Tool_run ────────────────────────────────────────── *)
   reg Mod_run [
     "masc_run_init"; "masc_run_plan"; "masc_run_log";

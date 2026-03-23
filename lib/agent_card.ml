@@ -294,39 +294,22 @@ let now_iso8601 () : string =
     tm.Unix.tm_min
     tm.Unix.tm_sec
 
-(** Build A2A skills dynamically from MCP tool schemas grouped by category.
+(** Build A2A skills dynamically from MCP tool schemas.
 
-    Each [Mode.category] becomes one A2A skill. The skill description comes
-    from [Mode.category_description] and [tool_count] tracks how many
-    MCP tools are aggregated under that category.
-
-    Categories with zero visible tools are excluded. [Unknown] is always excluded. *)
+    Returns a single "masc" skill covering all tools. *)
 let skills_from_tools (schemas : Types.tool_schema list) : skill list =
-  let tbl : (string, int) Hashtbl.t = Hashtbl.create 20 in
-  List.iter (fun (schema : Types.tool_schema) ->
-    let cat = Mode.tool_category schema.name in
-    if cat <> Mode.Unknown then begin
-      let key = Mode.category_to_string cat in
-      let prev = try Hashtbl.find tbl key with Not_found -> 0 in
-      Hashtbl.replace tbl key (prev + 1)
-    end
-  ) schemas;
-  Hashtbl.fold (fun cat_str count acc ->
-    match Mode.category_of_string cat_str with
-    | None -> acc
-    | Some cat ->
-      let skill : skill = {
-        id = cat_str;
-        name = String.capitalize_ascii cat_str;
-        description = Some (Mode.category_description cat);
-        tags = [cat_str; "masc"];
-        input_modes = ["application/json"];
-        output_modes = ["application/json"; "text/plain"];
-        tool_count = count;
-      } in
-      skill :: acc
-  ) tbl []
-  |> List.sort (fun (a : skill) (b : skill) -> String.compare a.id b.id)
+  let count = List.length schemas in
+  if count = 0 then []
+  else
+    [{
+      id = "masc";
+      name = "MASC";
+      description = Some "Multi-Agent Streaming Coordination tools";
+      tags = ["masc"];
+      input_modes = ["application/json"];
+      output_modes = ["application/json"; "text/plain"];
+      tool_count = count;
+    }]
 
 (** Generate default MASC agent card (A2A v0.3 compliant).
     [schemas] defaults to [Config.raw_all_tool_schemas] when provided,

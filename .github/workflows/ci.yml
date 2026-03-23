@@ -28,10 +28,12 @@ jobs:
         env:
           PR_HEAD_REF: ${{ github.head_ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           chmod +x scripts/check-pr-sync.sh
           scripts/check-pr-sync.sh \
             --head-branch "$PR_HEAD_REF" \
+            --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Setup OCaml
@@ -107,10 +109,12 @@ jobs:
         env:
           PR_HEAD_REF: ${{ github.head_ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           chmod +x scripts/check-pr-sync.sh
           scripts/check-pr-sync.sh \
             --head-branch "$PR_HEAD_REF" \
+            --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Run PR hygiene guards
@@ -139,10 +143,12 @@ jobs:
         env:
           PR_HEAD_REF: ${{ github.head_ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           chmod +x scripts/check-pr-sync.sh
           scripts/check-pr-sync.sh \
             --head-branch "$PR_HEAD_REF" \
+            --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Setup OCaml
@@ -222,10 +228,12 @@ jobs:
         env:
           PR_HEAD_REF: ${{ github.head_ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           chmod +x scripts/check-pr-sync.sh
           scripts/check-pr-sync.sh \
             --head-branch "$PR_HEAD_REF" \
+            --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Setup OCaml
@@ -289,10 +297,12 @@ jobs:
         env:
           PR_HEAD_REF: ${{ github.head_ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           chmod +x scripts/check-pr-sync.sh
           scripts/check-pr-sync.sh \
             --head-branch "$PR_HEAD_REF" \
+            --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Setup OCaml

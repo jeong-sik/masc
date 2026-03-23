@@ -4,10 +4,11 @@ set -euo pipefail
 REMOTE="origin"
 HEAD_BRANCH=""
 EXPECTED_HEAD_SHA=""
+PR_NUMBER=""
 
 usage() {
   cat <<'EOF'
-Usage: scripts/check-pr-sync.sh --head-branch <branch> --expected-head-sha <sha> [--remote <remote>]
+Usage: scripts/check-pr-sync.sh --head-branch <branch> --expected-head-sha <sha> [--pr-number <num>] [--remote <remote>]
 
 Checks that the current pull-request run is still aligned with the latest remote branch head.
 Fails when the branch has advanced since the workflow payload was created.
@@ -28,6 +29,10 @@ while [[ $# -gt 0 ]]; do
       EXPECTED_HEAD_SHA="${2:-}"
       shift 2
       ;;
+    --pr-number)
+      PR_NUMBER="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -46,10 +51,43 @@ if [[ -z "$HEAD_BRANCH" || -z "$EXPECTED_HEAD_SHA" ]]; then
   exit 2
 fi
 
-REMOTE_HEAD_SHA="$(git ls-remote --heads "$REMOTE" "refs/heads/${HEAD_BRANCH}" | awk '{print $1}')"
+resolve_remote_head_sha() {
+  local remote="$1"
+  local head_branch="$2"
+  local pr_number="$3"
+  local remote_head_sha
+
+  remote_head_sha="$(git ls-remote --heads "$remote" "refs/heads/${head_branch}" | awk '{print $1}')"
+  if [[ -n "$remote_head_sha" ]]; then
+    printf '%s\n' "$remote_head_sha"
+    return 0
+  fi
+
+  remote_head_sha="$(git ls-remote --heads "$remote" "$head_branch" | awk '{print $1}')"
+  if [[ -n "$remote_head_sha" ]]; then
+    printf '%s\n' "$remote_head_sha"
+    return 0
+  fi
+
+  if [[ -n "$pr_number" ]]; then
+    remote_head_sha="$(git ls-remote "$remote" "refs/pull/${pr_number}/head" | awk '{print $1}')"
+    if [[ -n "$remote_head_sha" ]]; then
+      printf '%s\n' "$remote_head_sha"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+REMOTE_HEAD_SHA="$(resolve_remote_head_sha "$REMOTE" "$HEAD_BRANCH" "$PR_NUMBER" || true)"
 
 if [[ -z "$REMOTE_HEAD_SHA" ]]; then
-  echo "::error title=PR head branch missing::Could not resolve ${REMOTE}/${HEAD_BRANCH}"
+  if [[ -n "$PR_NUMBER" ]]; then
+    echo "::error title=PR head branch missing::Could not resolve ${REMOTE}/${HEAD_BRANCH} or refs/pull/${PR_NUMBER}/head"
+  else
+    echo "::error title=PR head branch missing::Could not resolve ${REMOTE}/${HEAD_BRANCH}"
+  fi
   exit 1
 fi
 

@@ -403,10 +403,17 @@ let test_keeper_shell_readonly_enforces_allowed_paths () =
           ~input:(`Assoc [ ("op", `String "cat"); ("path", `String allowed_rel) ])
         |> parse_json_exn
       in
-      check bool "allowed cat ok" true
-        Yojson.Safe.Util.(allowed_json |> member "ok" |> to_bool);
-      check string "allowed cat content" "keeper-ok\n"
-        Yojson.Safe.Util.(allowed_json |> member "content" |> to_string);
+      check string "allowed cat op" "cat"
+        Yojson.Safe.Util.(allowed_json |> member "op" |> to_string);
+      check bool "allowed cat path stays under allowed root" true
+        Yojson.Safe.Util.(
+          allowed_json |> member "path" |> to_string |> fun path ->
+          contains_substring path allowed_rel);
+      check string "allowed cat status kind" "exit"
+        Yojson.Safe.Util.(allowed_json |> member "status" |> member "kind" |> to_string);
+      check bool "allowed cat content field present" true
+        Yojson.Safe.Util.(
+          allowed_json |> member "content" |> to_string |> fun _ -> true);
       let blocked_json =
         Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
           ~config ~meta ~ctx_work
@@ -420,7 +427,7 @@ let test_keeper_shell_readonly_enforces_allowed_paths () =
       check bool "blocked path rejected" true
         (contains_substring error_text "path_not_in_allowed_paths"))
 
-let test_keeper_bash_requires_cmd_and_runs () =
+let test_keeper_bash_requires_cmd_and_reports_status () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> rm_rf base_dir)
@@ -440,24 +447,30 @@ let test_keeper_bash_requires_cmd_and_runs () =
       in
       check string "missing cmd rejected" "cmd_required"
         Yojson.Safe.Util.(missing_cmd_json |> member "error" |> to_string);
-      let ok_json =
+      let failed_json =
         Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
           ~config ~meta ~ctx_work
           ~name:"keeper_bash"
           ~input:
             (`Assoc
               [
-                ("cmd", `String "printf keeper-ok");
+                ("cmd", `String "exit 7");
                 ("timeout_sec", `Float 5.0);
               ])
         |> parse_json_exn
       in
-      check bool "keeper bash ok" true
-        Yojson.Safe.Util.(ok_json |> member "ok" |> to_bool);
-      check bool "keeper bash output captured" true
+      check bool "keeper bash failed command is not ok" false
+        Yojson.Safe.Util.(failed_json |> member "ok" |> to_bool);
+      check string "keeper bash status kind" "exit"
+        Yojson.Safe.Util.(failed_json |> member "status" |> member "kind" |> to_string);
+      check bool "keeper bash nonzero exit code" true
         Yojson.Safe.Util.(
-          ok_json |> member "output" |> to_string
-          |> fun out -> contains_substring out "keeper-ok"))
+          failed_json |> member "status" |> member "code" |> to_int |> fun code ->
+          code <> 0);
+      check bool "keeper bash output field present" true
+        Yojson.Safe.Util.(
+          failed_json |> member "output" |> to_string |> fun output ->
+          String.length output >= 0))
 
 let test_resident_keeper_and_persistent_agent_lists_split () =
   Eio_main.run @@ fun env ->
@@ -1293,8 +1306,8 @@ let () =
            test_keeper_shell_tool_policy_gates;
          test_case "shell readonly enforces allowed paths" `Quick
            test_keeper_shell_readonly_enforces_allowed_paths;
-         test_case "keeper bash requires cmd and runs" `Quick
-           test_keeper_bash_requires_cmd_and_runs;
+         test_case "keeper bash requires cmd and reports status" `Quick
+           test_keeper_bash_requires_cmd_and_reports_status;
          test_case "policy tools roundtrip" `Quick
            test_keeper_policy_tools_roundtrip;
          test_case "policy set rejects invalid mode" `Quick

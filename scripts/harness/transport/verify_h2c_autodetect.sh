@@ -26,23 +26,29 @@ else
   fail "HTTP/1.1 health check" "failed"
 fi
 
-# Test 2: Check if h2c is active
-h2_resp=$(curl -sf --http2 "${MASC_BASE_URL}/health" 2>&1)
-h2_exit=$?
-h2_proto=$(curl -sf -o /dev/null -w '%{http_version}' --http2 "${MASC_BASE_URL}/health" 2>&1 || echo "unknown")
-
-if [ "$h2_exit" -eq 0 ]; then
-  if [ "$h2_proto" = "2" ] || [ "$h2_proto" = "2.0" ]; then
-    pass "HTTP/2 h2c health check (proto: ${h2_proto})"
-  else
-    # curl --http2 falls back to HTTP/1.1 if h2c upgrade fails
-    skip "h2c upgrade" "server responded as HTTP/${h2_proto} (h2c may not be enabled)"
-  fi
+# Test 2: h2c prior-knowledge (direct HTTP/2 without upgrade)
+# This is the reliable way to test h2c — --http2 uses Upgrade header
+# which serve_auto may not support (MSG_PEEK detects connection preface).
+h2pk_proto=$(curl -sf -o /dev/null -w '%{http_version}' --http2-prior-knowledge "${MASC_BASE_URL}/health" 2>&1 || echo "fail")
+if [ "$h2pk_proto" = "2" ] || [ "$h2pk_proto" = "2.0" ]; then
+  pass "h2c prior-knowledge health check (proto: ${h2pk_proto})"
 else
-  skip "h2c health check" "curl --http2 failed (h2c likely not enabled)"
+  skip "h2c prior-knowledge" "proto=${h2pk_proto} (MASC_USE_H2 may not be set)"
 fi
 
-# Test 3: HTTP/1.1 SSE endpoint (most critical path)
+# Test 3: MCP POST over h2c (the actual production path)
+h2_mcp_code=$(curl -sf --http2-prior-knowledge -X POST "${MASC_BASE_URL}/mcp" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"h2c-harness","version":"1.0"}},"id":1}' \
+  -o /dev/null -w '%{http_code}' 2>&1 || echo "0")
+if [ "$h2_mcp_code" = "200" ]; then
+  pass "MCP initialize over h2c (status: ${h2_mcp_code})"
+else
+  skip "MCP over h2c" "status=${h2_mcp_code} (h2c may not be enabled)"
+fi
+
+# Test 4: HTTP/1.1 SSE endpoint (most critical path)
 sse_headers=$(curl -sf -I -m 3 --http1.1 "${MASC_BASE_URL}/sse" 2>&1 || true)
 if echo "$sse_headers" | grep -qi "200\|text/event-stream"; then
   pass "HTTP/1.1 SSE endpoint accessible"
@@ -50,7 +56,7 @@ else
   skip "HTTP/1.1 SSE endpoint" "may need session"
 fi
 
-# Test 4: Concurrent connections (HTTP/1.1 while h2c might be active)
+# Test 5: Concurrent connections (HTTP/1.1 while h2c might be active)
 pids=()
 success=0
 for i in 1 2 3 4; do

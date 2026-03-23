@@ -11,6 +11,12 @@ val keeper_allowed_model_tools :
     Must be called once during server initialization. *)
 val inject_masc_schemas : Types.tool_schema list -> unit
 
+(** masc_* tool names available for a keeper profile. *)
+val keeper_masc_tool_names : keeper_meta -> string list
+
+(** masc_* tool schemas available for a keeper profile. *)
+val keeper_masc_tool_schemas : keeper_meta -> Types.tool_schema list
+
 val execute_keeper_tool_call :
   config:Room.config ->
   meta:keeper_meta ->

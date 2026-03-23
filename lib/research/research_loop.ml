@@ -310,8 +310,14 @@ let apply_patch ~(worktree_path : string) ~(hypothesis : hypothesis) : bool =
 (** Log a result to the TSV file. *)
 let log_result ~(results_file : string) ~(entry : experiment_entry) : unit =
   let header = "experiment\tbuild_ok\ttest_pass_rate\tloc_delta\tfiles_changed\tstatus\tdescription\n" in
-  let needs_header = not (Sys.file_exists results_file) in
   let oc = open_out_gen [ Open_append; Open_creat ] 0o644 results_file in
+  (* Check file size after open to avoid TOCTOU race on needs_header *)
+  let needs_header =
+    try
+      let pos = LargeFile.pos_out oc in
+      pos = Int64.zero
+    with _ -> false
+  in
   (try
     if needs_header then output_string oc header;
     Printf.fprintf oc "%s\t%d\t%.4f\t%d\t%d\t%s\t%s\n"

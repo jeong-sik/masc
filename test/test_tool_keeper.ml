@@ -69,6 +69,14 @@ let parse_json_exn body =
   try Yojson.Safe.from_string body
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
 
+let require_json_bool_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `Bool value -> value
+  | _ ->
+      fail
+        (Printf.sprintf "expected bool field %S in %s" key
+           (Yojson.Safe.to_string json))
+
 let contains_substring s needle =
   let s_len = String.length s in
   let n_len = String.length needle in
@@ -331,6 +339,17 @@ let check_keeper_shell_tool_presence label meta ~expect_bash ~expect_shell_reado
   check bool (label ^ " shell readonly model tools") expect_shell_readonly
     (List.mem "keeper_shell_readonly" allowed_model_names)
 
+let check_keeper_exec_tool_presence label meta ~tool_name ~expect_allowed =
+  let allowed_names = Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed_model_names =
+    Masc_mcp.Keeper_exec_tools.keeper_allowed_model_tools meta
+    |> List.map (fun (tool : Types.tool_schema) -> tool.name)
+  in
+  check bool (label ^ " allowed names") expect_allowed
+    (List.mem tool_name allowed_names);
+  check bool (label ^ " model tools") expect_allowed
+    (List.mem tool_name allowed_model_names)
+
 let write_jsonl_lines path lines =
   mkdir_p (Filename.dirname path);
   let oc = open_out path in
@@ -465,7 +484,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
         |> parse_json_exn
       in
       check bool "keeper bash ok" true
-        Yojson.Safe.Util.(ok_json |> member "ok" |> to_bool);
+        (require_json_bool_field ok_json "ok");
       check bool "keeper bash output captured" true
         Yojson.Safe.Util.(
           ok_json |> member "output" |> to_string
@@ -483,13 +502,126 @@ let test_keeper_bash_requires_cmd_and_runs () =
         |> parse_json_exn
       in
       check bool "keeper bash failed command is not ok" false
-        Yojson.Safe.Util.(failed_json |> member "ok" |> to_bool);
+        (require_json_bool_field failed_json "ok");
       check string "keeper bash status kind" "exit"
         Yojson.Safe.Util.(failed_json |> member "status" |> member "kind" |> to_string);
       check bool "keeper bash nonzero exit code" true
         Yojson.Safe.Util.(
           failed_json |> member "status" |> member "code" |> to_int |> fun code ->
           code <> 0))
+
+let test_keeper_fs_edit_policy_gates () =
+  let heuristic = make_keeper_exec_meta () in
+  let learned_offline =
+    make_keeper_exec_meta ~name:"fs-edit-learned"
+      ~policy_mode:"learned_offline_v1" ()
+  in
+  let explicit_event =
+    make_keeper_exec_meta ~name:"fs-edit-explicit"
+      ~policy_mode:"explicit_event_v1" ()
+  in
+  let deliberation =
+    make_keeper_exec_meta ~name:"fs-edit-deliberation"
+      ~policy_mode:"model_deliberation" ()
+  in
+  check_keeper_exec_tool_presence "heuristic fs_edit" heuristic
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:true;
+  check_keeper_exec_tool_presence "learned fs_edit" learned_offline
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
+  check_keeper_exec_tool_presence "explicit event fs_edit" explicit_event
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:true;
+  check_keeper_exec_tool_presence "model deliberation fs_edit" deliberation
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:true
+
+let test_keeper_fs_edit_enforces_allowed_paths_and_modes () =
+  Eio_main.run @@ fun _env ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let allowed_rel = "allowed/note.txt" in
+      let blocked_rel = "blocked/secret.txt" in
+      let meta =
+        make_keeper_exec_meta ~allowed_paths:[ "allowed" ] ()
+      in
+      let ctx_work =
+        Masc_mcp.Keeper_exec_context.create ~system_prompt:"test"
+          ~max_tokens:4000
+      in
+      let overwrite_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_fs_edit"
+          ~input:
+            (`Assoc
+              [
+                ("path", `String allowed_rel);
+                ("content", `String "alpha\n");
+                ("mode", `String "overwrite");
+              ])
+        |> parse_json_exn
+      in
+      check bool "fs_edit overwrite ok" true
+        (require_json_bool_field overwrite_json "ok");
+      check string "fs_edit overwrite mode" "overwrite"
+        Yojson.Safe.Util.(overwrite_json |> member "mode" |> to_string);
+      check string "fs_edit overwrite writes file" "alpha\n"
+        (Fs_compat.load_file (Filename.concat base_dir allowed_rel));
+      let append_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_fs_edit"
+          ~input:
+            (`Assoc
+              [
+                ("path", `String allowed_rel);
+                ("content", `String "beta\n");
+                ("mode", `String "append");
+              ])
+        |> parse_json_exn
+      in
+      check bool "fs_edit append ok" true
+        (require_json_bool_field append_json "ok");
+      check string "fs_edit append mode" "append"
+        Yojson.Safe.Util.(append_json |> member "mode" |> to_string);
+      check string "fs_edit append updates file" "alpha\nbeta\n"
+        (Fs_compat.load_file (Filename.concat base_dir allowed_rel));
+      let blocked_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_fs_edit"
+          ~input:
+            (`Assoc
+              [
+                ("path", `String blocked_rel);
+                ("content", `String "nope\n");
+              ])
+        |> parse_json_exn
+      in
+      let blocked_error =
+        Yojson.Safe.Util.(blocked_json |> member "error" |> to_string)
+      in
+      check bool "fs_edit blocked path rejected" true
+        (contains_substring blocked_error "path_not_in_allowed_paths");
+      let invalid_mode_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_fs_edit"
+          ~input:
+            (`Assoc
+              [
+                ("path", `String allowed_rel);
+                ("content", `String "noop\n");
+                ("mode", `String "invalid");
+              ])
+        |> parse_json_exn
+      in
+      let invalid_mode_error =
+        Yojson.Safe.Util.(invalid_mode_json |> member "error" |> to_string)
+      in
+      check bool "fs_edit invalid mode rejected" true
+        (contains_substring invalid_mode_error "unsupported_mode:invalid"))
 
 let test_resident_keeper_and_persistent_agent_lists_split () =
   Eio_main.run @@ fun env ->
@@ -1327,6 +1459,10 @@ let () =
            test_keeper_shell_readonly_enforces_allowed_paths;
          test_case "keeper bash requires cmd and runs" `Quick
            test_keeper_bash_requires_cmd_and_runs;
+         test_case "fs_edit policy gates" `Quick
+           test_keeper_fs_edit_policy_gates;
+         test_case "fs_edit enforces allowed paths and modes" `Quick
+           test_keeper_fs_edit_enforces_allowed_paths_and_modes;
          test_case "policy tools roundtrip" `Quick
            test_keeper_policy_tools_roundtrip;
          test_case "policy set rejects invalid mode" `Quick

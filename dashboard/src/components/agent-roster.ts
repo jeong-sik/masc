@@ -124,7 +124,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           />
           <div class="flex gap-1.5">
             ${(['all', 'active', 'idle', 'offline'] as StatusFilter[]).map(f => html`
-              <button
+              <button type="button"
                 key=${f}
                 class="px-2.5 py-1 text-[11px] rounded-xl border cursor-pointer transition-all duration-150 ${filter === f
                   ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'

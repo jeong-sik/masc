@@ -27,7 +27,7 @@ export function PulseStrip() {
   return html`
     <div class="pulse-strip rounded-xl">
       ${pulses.map(p => html`
-        <button
+        <button type="button"
           key=${p.name}
           class="pulse-bubble ${pulseStateClass(p.state)} ${selected === p.name ? 'pulse-selected' : ''}"
           onClick=${() => openAgentDetail(p.name)}

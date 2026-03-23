@@ -225,7 +225,7 @@ export function KeeperConversationPanel({
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex justify-end">
-        <button
+        <button type="button"
           type="button"
           class="py-1 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer"
           onClick=${() => { setShowMetadata(!showMetadata) }}
@@ -234,7 +234,7 @@ export function KeeperConversationPanel({
         </button>
       </div>
       ${!historyExpanded && thread.length >= 10 ? html`
-        <button
+        <button type="button"
           type="button"
           class="py-1.5 px-4 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer self-center"
           disabled=${hydrating}
@@ -289,7 +289,7 @@ export function KeeperRuntimeActions({
 
   return html`
     <div class="flex flex-wrap gap-2">
-      <button
+      <button type="button"
         class=${recommended === 'probe' ? activeGhostBtn : ghostBtn}
         onClick=${() => {
           void probeKeeperRuntime(keeper.name, actor).catch(err => {
@@ -301,7 +301,7 @@ export function KeeperRuntimeActions({
       >
         ${probing ? 'Probing...' : 'Probe'}
       </button>
-      <button
+      <button type="button"
         class=${recommended === 'recover' ? activeSecondaryBtn : secondaryBtn}
         onClick=${() => {
           void recoverKeeperRuntime(keeper.name, actor).catch(err => {
@@ -313,7 +313,7 @@ export function KeeperRuntimeActions({
       >
         ${recovering ? 'Recovering...' : 'Recover'}
       </button>
-      <button
+      <button type="button"
         class=${recommended === 'manual_social_sweep' ? activeGhostBtn : ghostBtn}
         onClick=${onSocialSweep}
       >

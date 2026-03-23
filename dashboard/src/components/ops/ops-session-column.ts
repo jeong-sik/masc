@@ -122,7 +122,7 @@ export function OpsSessionColumn() {
     session: typeof sessions[number],
     archived = false,
   ) => html`
-    <button
+    <button type="button"
       key=${session.session_id}
       class="ops-entity-card p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] text-inherit text-left cursor-pointer ${selectedSession?.session_id === session.session_id ? 'active' : ''}"
       onClick=${() => { selectedSessionId.value = session.session_id }}
@@ -317,13 +317,13 @@ export function OpsSessionColumn() {
         ${linkedAutoresearch?.loop_id ? html`
           <label class="control-label" for="ops-autoresearch-hypothesis">Autoresearch 제어</label>
           <div class="control-row items-stretch">
-            <button class="control-btn ghost" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
+            <button type="button" class="control-btn ghost" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
               상태 새로고침
             </button>
-            <button class="control-btn" onClick=${() => { void cycleAutoresearch() }} disabled=${busy}>
+            <button type="button" class="control-btn" onClick=${() => { void cycleAutoresearch() }} disabled=${busy}>
               1 cycle 실행
             </button>
-            <button class="control-btn ghost" onClick=${() => { void stopAutoresearch() }} disabled=${busy}>
+            <button type="button" class="control-btn ghost" onClick=${() => { void stopAutoresearch() }} disabled=${busy}>
               loop 중지
             </button>
           </div>
@@ -337,7 +337,7 @@ export function OpsSessionColumn() {
             disabled=${busy}
           ></textarea>
           <div class="control-row items-stretch">
-            <button class="control-btn" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
+            <button type="button" class="control-btn" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
               hypothesis 주입
             </button>
             <span class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
@@ -359,7 +359,7 @@ export function OpsSessionColumn() {
             <option value="task">작업</option>
             <option value="worker_spawn_batch">worker 교체</option>
           </select>
-          <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSessionActionable}>
+          <button type="button" class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSessionActionable}>
             적용
           </button>
         </div>
@@ -422,7 +422,7 @@ export function OpsSessionColumn() {
             onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
             disabled=${busy || !selectedSessionActionable}
           />
-          <button class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSessionActionable}>
+          <button type="button" class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSessionActionable}>
             세션 중지
           </button>
         </div>

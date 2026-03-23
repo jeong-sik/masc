@@ -284,18 +284,18 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   const toolbar = html`
     <div class="flex gap-2 items-center mb-3">
       ${isEditing ? html`
-        <button
+        <button type="button"
           class="${btnBase} bg-[#4ade80] text-[#000]"
           onClick=${saveConfig}
           disabled=${isSaving}
         >${isSaving ? 'Saving...' : 'Save'}</button>
-        <button
+        <button type="button"
           class="${btnBase} bg-[var(--white-10)] text-[var(--text-body)]"
           onClick=${cancelEdit}
           disabled=${isSaving}
         >Cancel</button>
       ` : html`
-        <button
+        <button type="button"
           class="${btnBase} bg-[var(--purple)] text-[#000]"
           onClick=${enterEditMode}
         >Edit</button>

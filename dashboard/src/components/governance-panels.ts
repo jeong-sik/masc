@@ -78,10 +78,10 @@ export function GuardrailPane({
                       <h4 class="text-[12px] font-bold text-warn uppercase tracking-wider">⚠️ 관리자 승인 대기</h4>
                       <div class="text-text-strong text-[13px] leading-relaxed">이 집행 명령은 고위험 작업으로 분류되어 승인이 필요합니다.</div>
                       <div class="flex gap-3 mt-2">
-                        <button class="px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all duration-200 shadow-sm shadow-black/20 disabled:opacity-50 border border-ok/30 bg-ok/20 text-ok hover:bg-ok/30" onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>
+                        <button type="button" class="px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all duration-200 shadow-sm shadow-black/20 disabled:opacity-50 border border-ok/30 bg-ok/20 text-ok hover:bg-ok/30" onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>
                           ${governanceActing.value ? '처리 중...' : '명령 승인'}
                         </button>
-                        <button class="px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all duration-200 shadow-sm shadow-black/20 disabled:opacity-50 border border-bad/30 bg-bad/20 text-bad hover:bg-bad/30" onClick=${() => respondToExecutionOrder('deny')} disabled=${governanceActing.value}>
+                        <button type="button" class="px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all duration-200 shadow-sm shadow-black/20 disabled:opacity-50 border border-bad/30 bg-bad/20 text-bad hover:bg-bad/30" onClick=${() => respondToExecutionOrder('deny')} disabled=${governanceActing.value}>
                           ${governanceActing.value ? '처리 중...' : '집행 거부'}
                         </button>
                       </div>
@@ -98,7 +98,7 @@ export function GuardrailPane({
               <div class="flex flex-col gap-4">
                 <div class="flex flex-wrap gap-2 p-1.5 bg-card/40 backdrop-blur-md rounded-xl border border-card-border/50 w-fit">
                   ${(['support', 'oppose', 'neutral'] as const).map(stance => html`
-                    <button
+                    <button type="button"
                       class="px-4 py-2 rounded-lg text-[12px] font-bold transition-all duration-200 border cursor-pointer
                         ${governanceBriefStance.value === stance
                           ? 'bg-accent/20 text-accent border-accent/30 shadow-sm'

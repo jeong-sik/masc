@@ -8,7 +8,9 @@ import {
   updateOasKeeperSnapshot,
   oasLastKeeperTick,
   oasTotalEvents,
+  refreshDashboard,
 } from './store'
+import { refreshRoomTruth } from './room-truth-store'
 import type { OasKeeperSnapshot } from './types/oas'
 
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
@@ -157,6 +159,9 @@ export function connectSSE(): void {
     connected.value = true
     if (wasDisconnected) {
       reconnectCount.value++
+      // Refetch all data after reconnection so counts don't stay at 0
+      void refreshDashboard().catch(() => {})
+      void refreshRoomTruth().catch(() => {})
     }
   }
 

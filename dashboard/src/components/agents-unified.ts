@@ -61,12 +61,16 @@ export function AgentsUnified() {
     }
   }, [routeView])
 
-  // Compute counts for chip badges
+  // Compute counts for chip badges.
+  // When agents store is empty (not yet loaded), fall back to keepers store
+  // so the tab badge matches Room Pulse sidebar counts.
   const kNames = keeperNameSet()
   const agentList = agents.value
   const totalCount = agentList.length
-  const keeperCount = agentList.filter((a: { name: string }) => kNames.has(a.name)).length
-  const agentOnlyCount = totalCount - keeperCount
+  const keeperCountFromAgents = agentList.filter((a: { name: string }) => kNames.has(a.name)).length
+  const keeperCountFallback = Math.max(keepers.value.length, missionKeeperBriefs.value.length)
+  const keeperCount = totalCount > 0 ? keeperCountFromAgents : keeperCountFallback
+  const agentOnlyCount = totalCount > 0 ? totalCount - keeperCountFromAgents : 0
 
   function chipCount(id: AgentsView): number | null {
     if (id === 'all') return totalCount
@@ -79,7 +83,7 @@ export function AgentsUnified() {
     <div class="flex flex-col gap-4">
       <div class="flex gap-1 p-1 bg-[var(--white-3)] rounded-lg w-fit">
         ${CHIPS.map(c => html`
-          <button
+          <button type="button"
             key=${c.id}
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer border-0 ${currentView === c.id ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-body)]'}"
             onClick=${() => {

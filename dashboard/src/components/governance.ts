@@ -91,7 +91,7 @@ function GovernanceToolbar() {
               }}
               disabled=${governanceStarting.value}
             />
-            <button
+            <button type="button"
               class="px-5 py-2.5 rounded-xl text-[13px] font-semibold border transition-all duration-200 cursor-pointer shadow-sm
                 ${governanceStarting.value || governanceTopicInput.value.trim() === ''
                   ? 'bg-card/40 text-text-muted border-card-border opacity-50 cursor-not-allowed'
@@ -102,7 +102,7 @@ function GovernanceToolbar() {
             >
               ${governanceStarting.value ? '접수 중...' : '청원 접수'}
             </button>
-            <button
+            <button type="button"
               class="px-4 py-2.5 rounded-xl text-[13px] font-semibold border border-transparent bg-white/5 text-text-muted hover:bg-white/10 hover:text-text-strong transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${refreshGovernance}
             disabled=${governanceLoading.value}
@@ -137,7 +137,7 @@ function DecisionInbox() {
           : items.map(item => {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`
-                <button
+                <button type="button"
                   class="w-full text-left flex gap-4 p-5 rounded-2xl border cursor-pointer transition-all duration-200 shadow-sm shadow-black/10 group hover:-translate-y-0.5 hover:shadow-md
                     ${selected
                       ? 'border-accent/40 bg-accent/10 shadow-[0_0_15px_rgba(71,184,255,0.15)]'

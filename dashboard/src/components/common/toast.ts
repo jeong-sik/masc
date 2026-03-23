@@ -60,7 +60,7 @@ export function ToastContainer() {
         >
           <span class="text-xs shrink-0 ${ICON_COLOR[t.type]}">${ICON[t.type]}</span>
           <span class="flex-1 text-[12px] text-[var(--text-body)] leading-[1.4]">${t.message}</span>
-          <button
+          <button type="button"
             class="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer text-[11px] p-0.5 transition-colors duration-150"
             onClick=${(e: Event) => { e.stopPropagation(); dismissToast(t.id) }}
             title="닫기"

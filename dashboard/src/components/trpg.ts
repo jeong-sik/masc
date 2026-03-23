@@ -44,7 +44,7 @@ export function Trpg() {
   if (!state) {
     return html`<${EmptyState}
       message="활성 TRPG 세션이 없습니다."
-      action=${html`<button class="px-3 py-1.5 text-xs border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] rounded-lg cursor-pointer hover:bg-[var(--white-8)]" onClick=${() => void safeFetchTrpg()}>새로고침</button>`}
+      action=${html`<button type="button" class="px-3 py-1.5 text-xs border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] rounded-lg cursor-pointer hover:bg-[var(--white-8)]" onClick=${() => void safeFetchTrpg()}>새로고침</button>`}
     />`
   }
 

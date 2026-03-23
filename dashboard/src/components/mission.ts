@@ -157,7 +157,7 @@ export function Mission() {
           { id: 'mission-output', label: '활동', count: focusSessionOutputs.length + keeperOutputRows.length },
           { id: 'mission-attention', label: '우선순위', count: attentionQueue.length },
         ].map(item => html`
-          <button
+          <button type="button"
             key=${item.id}
             class="px-2.5 py-1 rounded-full border border-[var(--card-border)] bg-[var(--white-3)] text-xs text-[var(--text-body)] cursor-pointer hover:bg-[var(--white-8)] transition-colors"
             onClick=${(e: Event) => { e.preventDefault(); document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth' }) }}
@@ -170,7 +170,7 @@ export function Mission() {
         ? html`
             <div class="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] text-xs text-[var(--text-body)]">
               <span class="truncate">관찰 세션: ${focusSession?.goal ?? activeSessionId}${activeAttention ? ` / ${activeAttention.summary}` : ''}</span>
-              <button class="shrink-0 px-2 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${clearMissionSelection}>해제</button>
+              <button type="button" class="shrink-0 px-2 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${clearMissionSelection}>해제</button>
             </div>
           `
         : null}
@@ -213,8 +213,8 @@ export function Mission() {
               : html`<div class="text-xs text-[var(--text-muted)] py-4 text-center">키퍼 없음.</div>`}
           </div>
           <div class="flex gap-2 flex-wrap mt-3">
-            <button class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('status', { section: 'sessions' })}>세션 보기</button>
-            <button class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('operations', { section: 'command' })}>지휘 진단면</button>
+            <button type="button" class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('status', { section: 'sessions' })}>세션 보기</button>
+            <button type="button" class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('operations', { section: 'command' })}>지휘 진단면</button>
           </div>
         </div>
       </details>

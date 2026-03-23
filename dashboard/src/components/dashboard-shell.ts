@@ -79,7 +79,7 @@ export function BuildIdentityBadge() {
 
   return html`
     <div class="relative">
-      <button
+      <button type="button"
         class="text-[11px] py-[6px] px-[11px] rounded-md border border-solid border-[rgba(71,184,255,0.28)] bg-[rgba(71,184,255,0.12)] text-[#bfe7ff] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[rgba(71,184,255,0.18)]"
         type="button"
         aria-expanded=${buildIdentityOpen.value}
@@ -134,7 +134,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
             <div class="mt-0.5 text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)] drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">MASC Core</div>
           </div>
         ` : null}
-        <button
+        <button type="button"
           class="flex size-7 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.08)] hover:text-white cursor-pointer transition-all duration-200"
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
@@ -151,7 +151,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
 
             if (collapsed) {
               return html`
-                <button
+                <button type="button"
                   class="flex items-center justify-center w-full rounded-xl p-2.5 cursor-pointer transition-all duration-200 ${isSurfaceActive ? 'bg-[rgba(71,184,255,0.18)] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.2)]' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.06)] border border-transparent'}"
                   onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
                   title=${surface.label}
@@ -163,7 +163,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
 
             return html`
               <div class="flex flex-col gap-1.5">
-                <button
+                <button type="button"
                   class="flex items-center gap-3 w-full rounded-xl px-3 py-2.5 text-left cursor-pointer transition-all duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.15),rgba(71,184,255,0.05))] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.2)]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.05)] border border-transparent'}"
                   onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
                 >
@@ -180,7 +180,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id
                       return html`
-                        <button
+                        <button type="button"
                           class="w-full rounded-lg px-3 py-2 text-left cursor-pointer text-[13px] transition-all duration-200 ${isSectionActive ? 'bg-[rgba(71,184,255,0.15)] text-[#cfeaff] font-medium shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.15)]' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--text-body)] border border-transparent'}"
                           onClick=${() => navigate(surface.id, item.params)}
                         >

@@ -37,7 +37,7 @@ export function Tools() {
               ? 'hidden/deprecated 포함 전체 도구 surface를 봅니다.'
               : '필수 도구와 사용 현황 요약입니다.'}
           </p>
-          <button
+          <button type="button"
             class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)] mt-2"
             onClick=${() => { showFullInventory.value = !showFullInventory.value }}
           >

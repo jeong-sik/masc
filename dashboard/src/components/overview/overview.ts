@@ -76,7 +76,7 @@ function HomeSectionHeader({
         ${count != null ? html`<${CountBadge}>${count}<//>` : null}
       </div>
       ${linkLabel && onLink
-        ? html`<button class="text-[10px] text-[var(--accent)] cursor-pointer bg-transparent border-0 p-0 hover:underline" onClick=${onLink}>${linkLabel}</button>`
+        ? html`<button type="button" class="text-[10px] text-[var(--accent)] cursor-pointer bg-transparent border-0 p-0 hover:underline" onClick=${onLink}>${linkLabel}</button>`
         : null}
     </div>
   `

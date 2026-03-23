@@ -147,10 +147,10 @@ export function AgentDetailOverlay() {
               : null}
           </div>
           <div class="flex gap-2 shrink-0">
-            <button class="px-4 py-2 text-[13px] font-semibold rounded-xl border border-card-border bg-card/60 text-text-body hover:bg-white/10 hover:text-text-strong transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed" onClick=${() => { void refreshAgentDetail() }} disabled=${loading.value}>
+            <button type="button" class="px-4 py-2 text-[13px] font-semibold rounded-xl border border-card-border bg-card/60 text-text-body hover:bg-white/10 hover:text-text-strong transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed" onClick=${() => { void refreshAgentDetail() }} disabled=${loading.value}>
               ${loading.value ? '새로고침 중...' : '새로고침'}
             </button>
-            <button class="px-4 py-2 text-[13px] font-semibold rounded-xl border border-transparent bg-white/10 text-text-strong hover:bg-white/20 transition-all duration-200 shadow-sm" onClick=${closeAgentDetail}>닫기</button>
+            <button type="button" class="px-4 py-2 text-[13px] font-semibold rounded-xl border border-transparent bg-white/10 text-text-strong hover:bg-white/20 transition-all duration-200 shadow-sm" onClick=${closeAgentDetail}>닫기</button>
           </div>
         </div>
 
@@ -191,7 +191,7 @@ export function AgentDetailOverlay() {
                 onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention() }}
                 disabled=${sendingMention.value}
               />
-              <button
+              <button type="button"
                 class="px-5 py-2.5 text-[13px] font-semibold rounded-xl border border-transparent bg-accent text-bg-0 hover:bg-accent/90 transition-all duration-200 shadow-md shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick=${() => { void submitMention() }}
                 disabled=${sendingMention.value || mentionText.value.trim() === ''}

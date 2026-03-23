@@ -111,7 +111,7 @@ export function FullInventoryView({
 
       <div class="flex flex-wrap gap-2 mb-4">
         ${(Object.keys(SURFACE_LABELS) as SurfaceFilter[]).map(key => html`
-          <button
+          <button type="button"
             class=${`px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer ${surfaceFilter.value === key ? 'border-[var(--accent)]/40 text-[var(--accent)] bg-[var(--accent-8)]' : 'border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] text-[var(--text-body)]'}`}
             onClick=${() => { surfaceFilter.value = key }}
           >
@@ -181,7 +181,7 @@ export function FullInventoryView({
           />
           <span>지원 중단 표시</span>
         </label>
-        <button
+        <button type="button"
           class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
           onClick=${() => { void loadTools() }}
           disabled=${loading}
@@ -205,7 +205,7 @@ export function FullInventoryView({
         : html`<${EmptyState} message="조건에 맞는 도구가 없습니다." compact />`}
     </div>
 
-    <button
+    <button type="button"
       class=${`tool-back-to-top${showBackToTop.value ? ' visible' : ''}`}
       onClick=${scrollToTop}
       title="맨 위로"

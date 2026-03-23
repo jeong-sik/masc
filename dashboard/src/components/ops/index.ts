@@ -174,7 +174,7 @@ export function Ops() {
             value=${actorName.value}
             onInput=${(event: Event) => persistActorName((event.target as HTMLInputElement).value)}
           />
-          <button
+          <button type="button"
             class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
             onClick=${() => {
               void refreshRoomTruth()
@@ -254,7 +254,7 @@ export function Ops() {
             <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-3">지금 할 수 있는 것</h3>
             <div class="flex flex-col gap-2">
               ${actions.slice(0, 3).map(action => html`
-                <button class="ops-action-guide-item rounded-lg ${action.tone}" onClick=${action.onClick}>
+                <button type="button" class="ops-action-guide-item rounded-lg ${action.tone}" onClick=${action.onClick}>
                   <strong class="font-semibold">${action.label}</strong>
                   <span>${action.desc}</span>
                 </button>

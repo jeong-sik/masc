@@ -360,7 +360,7 @@ export function OrchestraSurface() {
           <${StatusChip} label=${`${Math.round(camera.zoom * 100)}%`} />
         </div>
         <div class="orchestra-toolbar-group">
-          <button
+          <button type="button"
             class=${`control-btn ${density === 'balanced' ? 'is-active' : 'ghost'}`}
             onClick=${() => {
               orchestraDensity.value = 'balanced'
@@ -369,7 +369,7 @@ export function OrchestraSurface() {
           >
             균형
           </button>
-          <button
+          <button type="button"
             class=${`control-btn ${density === 'compact' ? 'is-active' : 'ghost'}`}
             onClick=${() => {
               orchestraDensity.value = 'compact'

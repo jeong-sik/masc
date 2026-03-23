@@ -18,7 +18,7 @@ import {
 export function OperationCard({ brief, selected }: { brief: DashboardExecutionOperationBrief; selected: boolean }) {
   const terminal = isTerminalStatus(brief.status)
   return html`
-    <button
+    <button type="button"
       class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.operation-card"
       onClick=${() => {

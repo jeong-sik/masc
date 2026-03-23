@@ -53,7 +53,7 @@ export function FocusSidebar() {
               ${agent.currentTask
                 ? html`<div class="text-[0.75rem] text-[var(--white-55)] py-[3px] px-2 bg-[var(--white-3)] border border-[var(--white-5)] whitespace-nowrap overflow-hidden text-ellipsis rounded-md">${agent.currentTask}</div>`
                 : null}
-              <div class="focus-agent-footer">
+              <div class="flex items-center gap-2 mt-1">
                 ${agent.lastActivityText
                   ? html`<span class="text-[11px] text-[var(--white-40)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0">${agent.lastActivityText}</span>`
                   : html`<span class="text-[11px] text-[var(--white-40)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 italic text-[rgba(255,255,255,0.25)]">No recent activity</span>`}

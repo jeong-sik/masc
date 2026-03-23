@@ -116,7 +116,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
         </div>
       `)}
       ${hasMore ? html`
-        <button
+        <button type="button"
           class="w-full py-2 bg-transparent border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-xs cursor-pointer text-center rounded-md hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
           onClick=${() => { expandedItems.value += baseLimit }}
         >

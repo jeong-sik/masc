@@ -162,7 +162,7 @@ let make_extended_handler routes =
             let response = Httpun.Response.create ~headers `OK in
             Httpun.Reqd.respond_with_string reqd response body
           end else begin
-            let body = {|{"error":"websocket_disabled","message":"Set MASC_WS_ENABLED=1 to enable"}|} in
+            let body = {|{"error":"websocket_disabled","message":"WebSocket is disabled (MASC_WS_ENABLED=0)"}|} in
             let headers = Httpun.Headers.of_list [
               ("content-type", "application/json");
               ("content-length", string_of_int (String.length body));

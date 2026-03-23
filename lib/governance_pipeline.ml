@@ -38,6 +38,18 @@ let risk_level_to_int = function
 (** Pattern sets for risk classification.
     Each pattern is checked against the tool name (case-insensitive substring). *)
 
+(** Explicit per-tool risk overrides.
+    Checked BEFORE pattern matching. Use this to correct misclassifications
+    caused by substring matching (e.g. "query_skill" matching "kill"). *)
+let risk_overrides : (string * risk_level) list = [
+  (* False positives from pattern matching *)
+  ("masc_a2a_query_skill", Low);       (* "skill" contains "kill" substring *)
+  ("masc_keeper_tool_catalog", Low);   (* "catalog" is read-only *)
+  ("masc_model_catalog", Low);         (* read-only *)
+  ("masc_keeper_dataset_export", Medium);  (* export, not delete *)
+  ("masc_persistent_agent_dataset_export", Medium);
+]
+
 let critical_patterns =
   [ "delete"; "remove"; "drop"; "force"; "reset"; "kill"; "destroy"; "purge" ]
 
@@ -65,6 +77,10 @@ let contains_pattern name patterns =
   ) patterns
 
 let assess_risk ~tool_name ~input:_ =
+  (* Check explicit overrides first *)
+  match List.assoc_opt tool_name risk_overrides with
+  | Some level -> level
+  | None ->
   if contains_pattern tool_name critical_patterns then Critical
   else if contains_pattern tool_name high_patterns then High
   else if contains_pattern tool_name medium_patterns then Medium

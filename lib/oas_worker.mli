@@ -51,6 +51,7 @@ val run_named :
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?agent_ref:Oas.Agent.t option ref ->
   ?transport:Masc_grpc_transport.t ->
+  ?allowed_paths:string list ->
   unit ->
   (run_result, string) result
 

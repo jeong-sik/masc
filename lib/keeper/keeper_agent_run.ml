@@ -192,6 +192,7 @@ let run_turn
       ?guardrails
       ?on_event
       ~agent_ref
+      ~allowed_paths:meta.allowed_paths
       ()
   with
   | Error e -> Error e

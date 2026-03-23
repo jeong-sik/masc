@@ -38,6 +38,7 @@ type config = {
   initial_messages : Oas.Types.message list;
   raw_trace : Oas.Raw_trace.t option;
   transport : Masc_grpc_transport.t;
+  allowed_paths : string list;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -57,6 +58,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     initial_messages = [];
     raw_trace = None;
     transport = Masc_grpc_transport.from_env ();
+    allowed_paths = [];
   }
 
 (* ================================================================ *)
@@ -172,6 +174,11 @@ let build
   let builder =
     if config.initial_messages <> [] then
       Oas.Builder.with_initial_messages config.initial_messages builder
+    else builder
+  in
+  let builder =
+    if config.allowed_paths <> [] then
+      Oas.Builder.with_allowed_paths config.allowed_paths builder
     else builder
   in
   Oas.Builder.build_safe builder
@@ -406,6 +413,7 @@ let run_named
     ?on_event
     ?agent_ref
     ?transport
+    ?(allowed_paths = [])
     ()
   : (run_result, string) result =
   match require_eio () with
@@ -444,6 +452,7 @@ let run_named
       guardrails; hooks; context_reducer; memory;
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
       transport = transport_resolved;
+      allowed_paths;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in

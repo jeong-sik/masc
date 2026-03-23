@@ -24,6 +24,28 @@
     reading a non-existent file 400+ times). *)
 let max_consecutive_failures = 3
 
+let keeper_tool_result_is_failure (result : string) : bool =
+  try
+    let json = Yojson.Safe.from_string result in
+    let has_error_field =
+      match Safe_ops.json_string_opt "error" json with
+      | Some msg -> String.trim msg <> ""
+      | None -> false
+    in
+    let has_error_status =
+      match Safe_ops.json_string_opt "status" json with
+      | Some status ->
+          String.equal (String.lowercase_ascii (String.trim status)) "error"
+      | None -> false
+    in
+    let has_ok_false =
+      match Safe_ops.json_bool_opt "ok" json with
+      | Some false -> true
+      | Some true | None -> false
+    in
+    has_error_field || has_error_status || has_ok_false
+  with Yojson.Json_error _ -> false
+
 let make_tools
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
@@ -65,8 +87,17 @@ let make_tools
                   ~config ~meta ~ctx_work:(!ctx_ref)
                   ~name:td.name ~input
               in
-              Hashtbl.remove failure_counts key;
-              (true, result)
+              if keeper_tool_result_is_failure result then begin
+                let count = prior_fails + 1 in
+                Hashtbl.replace failure_counts key count;
+                Log.Keeper.warn
+                  "tool %s returned error result (%d/%d) for same args"
+                  td.name count max_consecutive_failures;
+                (false, result)
+              end else begin
+                Hashtbl.remove failure_counts key;
+                (true, result)
+              end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               let count = prior_fails + 1 in
               Hashtbl.replace failure_counts key count;

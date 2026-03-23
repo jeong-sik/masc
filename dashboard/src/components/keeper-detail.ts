@@ -6,8 +6,9 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { runOperatorAction } from '../api'
 import { TimeAgo } from './common/time-ago'
-import type { Keeper } from '../types'
-import { invalidateDashboardCache, refreshDashboard } from '../store'
+import { StatusBadge } from './common/status-badge'
+import type { Keeper, Task } from '../types'
+import { invalidateDashboardCache, refreshDashboard, tasks } from '../store'
 import { selectKeeper } from '../keeper-runtime'
 import {
   KeeperConversationPanel,
@@ -194,6 +195,27 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Pipeline stage indicator ── */}
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
+
+        ${'' /* ── Assigned tasks (keeper = agent, may have claimed tasks) ── */}
+        ${(() => {
+          const agentName = keeper.agent_name ?? keeper.name
+          const ownedTasks: Task[] = tasks.value.filter(
+            (t: Task) => t.assignee === agentName || t.assignee === keeper.name
+          )
+          return ownedTasks.length > 0 ? html`
+            <${SectionCard} title="할당된 작업 (${ownedTasks.length})">
+              <div class="flex flex-col gap-2">
+                ${ownedTasks.map((t: Task) => html`
+                  <div key=${t.id} class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-5)] transition-colors">
+                    <span class="text-[10px] font-medium py-1 px-2.5 border border-[rgba(71,184,255,0.2)] bg-[rgba(71,184,255,0.08)] text-[#9ad9ff] whitespace-nowrap rounded-md">${t.id}</span>
+                    <span class="flex-1 text-[13px] text-[var(--text-strong)] font-medium truncate">${t.title}</span>
+                    <${StatusBadge} status=${t.status} />
+                  </div>
+                `)}
+              </div>
+            <//>
+          ` : null
+        })()}
 
         ${'' /* ── KPIs ── */}
         <${KpiGrid} keeper=${keeper} />

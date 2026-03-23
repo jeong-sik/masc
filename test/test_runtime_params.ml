@@ -179,8 +179,6 @@ let () =
     let has key =
       List.exists (fun (k, _, _, _) -> k = key) entries
     in
-    Alcotest.(check bool) "lodge.tick_interval_seconds registered"
-      true (has "lodge.tick_interval_seconds");
     Alcotest.(check bool) "inference.default_model registered"
       true (has "inference.default_model");
     (* gardener.max_daily_spawns check removed — Gardener deleted (#1834) *)

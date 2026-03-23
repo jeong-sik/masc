@@ -286,25 +286,7 @@ let local_worker_internal_seeds : capability_seed list =
              ~supports_direct_user_discovery:false ~surface:Local_worker
              schema)
   in
-  let compatibility_projection =
-    match
-      List.find_opt
-        (fun (schema : Types.tool_schema) ->
-          String.equal schema.name "masc_team_session_step")
-        local_worker_internal_schemas
-    with
-    | None -> []
-    | Some schema ->
-        [
-          make_seed ~capability_id:"masc_team_session_step" ~risk_class:Audited
-            ~audiences:[ Local_worker_agent ]
-            ~supports_audit_evidence:true
-            ~supports_direct_user_discovery:false ~surface:Local_worker
-            ~backend_tool_name:"masc_team_session_step"
-            { schema with name = "masc_team_session_turn" };
-        ]
-  in
-  base @ compatibility_projection
+  base
 
 let keeper_projection_seeds : capability_seed list =
   Tool_shard.keeper_model_tools

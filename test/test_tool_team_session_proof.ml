@@ -71,7 +71,7 @@ let test_proof_exposes_spawn_selection_rationale () =
            updated_at_iso = Types.now_iso ();
          }));
   let turn_ok, _ =
-    dispatch_exn ctx ~name:"masc_team_session_turn"
+    dispatch_exn ctx ~name:"masc_team_session_step"
       ~args:
         (`Assoc
           [
@@ -427,7 +427,7 @@ let test_prove_requires_multi_actor_turn_coverage () =
     |> get_session_id
   in
   let single_turn_ok, _ =
-    dispatch_exn ctx ~name:"masc_team_session_turn"
+    dispatch_exn ctx ~name:"masc_team_session_step"
       ~args:
         (`Assoc
           [

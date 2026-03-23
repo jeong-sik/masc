@@ -13,7 +13,7 @@ let test_prove_strong_requires_additional_evidence () =
   in
   let session_id = start_session_exn ctx ~goal:"prove-strong-check" |> get_session_id in
   ignore
-    (dispatch_exn ctx ~name:"masc_team_session_turn"
+    (dispatch_exn ctx ~name:"masc_team_session_step"
        ~args:
          (`Assoc
            [
@@ -122,7 +122,7 @@ let test_unauthorized_session_access () =
   Alcotest.(check bool) "unauthorized compare denied" false compare_ok;
 
   let turn_ok, _ =
-    dispatch_exn intruder_ctx ~name:"masc_team_session_turn"
+    dispatch_exn intruder_ctx ~name:"masc_team_session_step"
       ~args:
         (`Assoc
           [

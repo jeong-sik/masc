@@ -1129,15 +1129,6 @@ let test_handle_request_tools_list_hides_team_session_turn_by_default () =
              | _ -> false)
          | _ -> false)
        tools);
-  Alcotest.(check bool) "turn hidden by default" false
-    (List.exists
-       (function
-         | `Assoc fields -> (
-             match List.assoc_opt "name" fields with
-             | Some (`String "masc_team_session_turn") -> true
-             | _ -> false)
-         | _ -> false)
-       tools);
   cleanup_dir base_path
 
 let test_handle_request_tools_list_include_usage_metadata () =

@@ -48,7 +48,7 @@ let test_team_session_capability_merges_public_and_local_worker_projections () =
   let names = projection_names capability in
   check bool "public canonical projection" true
     (List.mem "masc_team_session_step" names);
-  check bool "local worker compatibility projection" true
+  check bool "turn alias removed" false
     (List.mem "masc_team_session_turn" names)
 
 let test_local_worker_projection_exposes_internal_and_auditable_tools () =
@@ -77,8 +77,6 @@ let test_spawned_agent_surface_stays_curated () =
   let names = Lib.Capability_registry.spawned_agent_prefixed_tools in
   check bool "contains masc_status" true
     (List.mem "mcp__masc__masc_status" names);
-  check bool "omits team_session_turn alias" false
-    (List.mem "mcp__masc__masc_team_session_turn" names);
   check bool "contains team_session_step" true
     (List.mem "mcp__masc__masc_team_session_step" names)
 

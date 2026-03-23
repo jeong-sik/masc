@@ -389,8 +389,7 @@ let tool_category tool_name =
   | "masc_library_add" | "masc_library_list" | "masc_library_read"
   | "masc_library_search" | "masc_library_promote"
   (* Spawn *)
-  | "masc_spawn"
-  | "masc_async_spawn" | "masc_job_status" | "masc_job_list" -> Ecosystem
+  | "masc_spawn" -> Ecosystem
 
   (* ── Voice: TTS, STT, sessions, conferences ── *)
   | "masc_voice_speak" | "masc_voice_session_start"
@@ -398,20 +397,7 @@ let tool_category tool_name =
   | "masc_voice_agent" | "masc_voice_transcript"
   | "masc_voice_conference_start" | "masc_voice_conference_end" -> Voice
 
-  (* ── TRPG (canonical + legacy masc_trpg_* names) ── *)
-  | "trpg_roleplay"
-  | "masc_trpg_actor_claim" | "masc_trpg_actor_delete"
-  | "masc_trpg_actor_match" | "masc_trpg_actor_release"
-  | "masc_trpg_actor_spawn" | "masc_trpg_actor_update"
-  | "masc_trpg_dice_roll"
-  | "masc_trpg_intervention_submit"
-  | "masc_trpg_join_eligibility" | "masc_trpg_mid_join_request"
-  | "masc_trpg_party_select" | "masc_trpg_pool_generate"
-  | "masc_trpg_preset_list"
-  | "masc_trpg_quest_update" | "masc_trpg_round_run"
-  | "masc_trpg_scene_transition"
-  | "masc_trpg_session_start" | "masc_trpg_stream"
-  | "masc_trpg_turn_advance" | "masc_trpg_world_event" -> TRPG
+  (* ── TRPG: archived (#1668), no active schemas ── *)
 
   (* ── Deprecated/archived tools (hidden via tool_catalog, excluded from presets) ── *)
 
@@ -420,8 +406,7 @@ let tool_category tool_name =
   | _ when String.starts_with ~prefix:"decision_" tool_name -> Consensus
   | _ when String.starts_with ~prefix:"experiment." tool_name -> Ecosystem
   | _ when String.starts_with ~prefix:"experiment_" tool_name -> Ecosystem
-  | _ when String.starts_with ~prefix:"trpg." tool_name -> TRPG
-  | _ when String.starts_with ~prefix:"masc_trpg_" tool_name -> TRPG
+  (* trpg.* and masc_trpg_* prefix fallbacks removed — archived (#1668) *)
   | _ when String.starts_with ~prefix:"client." tool_name -> Core_Ops
   | _ when String.starts_with ~prefix:"client_" tool_name -> Core_Ops
 

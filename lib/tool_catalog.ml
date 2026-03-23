@@ -238,7 +238,7 @@ let standard_tools =
     "masc_handover_get"; "masc_handover_list";
     (* Misc *)
     "masc_spawn"; "masc_agents"; "masc_progress";
-    "masc_note_add"; "masc_batch_add_tasks"; "masc_stats";
+    "masc_note_add"; "masc_batch_add_tasks";
   ]
 
 (** Pre-built Hashtbl sets for O(1) tier lookups.

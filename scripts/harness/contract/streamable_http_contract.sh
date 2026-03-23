@@ -17,7 +17,7 @@ curl_with_retry() {
   local timeout_sec="${CURL_TIMEOUT_SEC:-25}"
 
   while true; do
-    if curl --http2-prior-knowledge --max-time "$timeout_sec" "$@"; then
+    if curl --max-time "$timeout_sec" "$@"; then
       return 0
     fi
     local status=$?
@@ -40,7 +40,7 @@ wait_for_mcp_ready() {
   local timeout_sec="${MCP_READY_TIMEOUT_SEC:-20}"
   local deadline=$(( $(date +%s) + timeout_sec ))
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
-    if curl -fsS --http2-prior-knowledge --max-time 2 "$BASE_URL/health" >/dev/null 2>&1; then
+    if curl -fsS --max-time 2 "$BASE_URL/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -267,7 +267,7 @@ fi
 
 echo "[8/8] /sse deprecation headers"
 h8="$tmpdir/sse.headers"
-curl -sS --http2-prior-knowledge -D "$h8" -o /dev/null --max-time 1 \
+curl -sS -D "$h8" -o /dev/null --max-time 1 \
   -H 'Accept: text/event-stream' \
   "$BASE_URL/sse" || true
 require_header_contains "$h8" "Deprecation" "true"
@@ -276,7 +276,7 @@ require_header_contains "$h8" "Link" "</mcp>; rel=\"successor-version\""
 echo "[legacy] /messages deprecation headers"
 h9="$tmpdir/messages.headers"
 b9="$tmpdir/messages.body"
-curl -sS --http2-prior-knowledge -D "$h9" -o "$b9" \
+curl -sS -D "$h9" -o "$b9" \
   -X POST "$BASE_URL/messages" \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":9,"method":"ping"}'

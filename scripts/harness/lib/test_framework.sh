@@ -13,6 +13,9 @@
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${_HARNESS_DIR}/jsonrpc_sse.sh"
 
+# Contract harness validates MCP semantics, not h2c prior-knowledge support.
+# Use normal HTTP negotiation here so the suite doesn't hang when the server
+# speaks HTTP/1.1 on localhost.
 # POST a JSON body to the MCP endpoint with retry logic.
 # Includes mcp-session-id header when MCP_SESSION_ID is set.
 # Usage: curl_post_mcp '{"jsonrpc":"2.0",...}'
@@ -22,7 +25,7 @@ curl_post_mcp() {
   local output=""
   while [ "$attempt" -le "$CURL_RETRY_COUNT" ]; do
     if [ -n "$MCP_SESSION_ID" ]; then
-      output="$(curl -sS --http2-prior-knowledge -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
+      output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
         -H 'Content-Type: application/json' \
         -H 'Accept: application/json, text/event-stream' \
         -H "mcp-session-id: $MCP_SESSION_ID" \
@@ -30,7 +33,7 @@ curl_post_mcp() {
           printf "%s" "$output"
           return 0
         }
-    elif output="$(curl -sS --http2-prior-knowledge -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
+    elif output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
       -H 'Content-Type: application/json' \
       -H 'Accept: application/json, text/event-stream' \
       -d "$body" 2>/dev/null)"; then

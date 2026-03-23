@@ -3,7 +3,6 @@
 import { html } from 'htm/preact'
 import { EmptyState } from '../common/empty-state'
 import { LoadingState } from '../common/feedback-state'
-import { CARD_STANDARD } from '../common/card'
 import {
   goals,
   goalsLoading,

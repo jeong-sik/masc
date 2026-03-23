@@ -14,7 +14,6 @@ import {
   DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
   sectionItemsForTab,
-  surfaceForTab,
 } from '../config/navigation'
 import { SnapshotCard } from './resident-runtime-rail'
 
@@ -167,91 +166,59 @@ function SurfaceLead() {
 }
 
 export function SideRail() {
-  const current = route.value.tab
-  const currentSurface = surfaceForTab(current)
-  const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === current)
+  const currentTab = route.value.tab
   const currentSection = currentSectionForRoute(route.value)
-  const sectionItems = sectionItemsForTab(current)
 
   return html`
     <nav class="flex flex-col h-full">
       <div class="flex-1 overflow-y-auto px-3 py-4">
-        <div class="mb-4 rounded-[22px] border border-[rgba(255,255,255,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.02))] px-3 py-3">
+        <div class="mb-4 px-3">
           <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">Navigation</div>
-          <div class="mt-2 text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">Surface Atlas</div>
-          <p class="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
-            주요 면을 먼저 고르고, 같은 맥락의 하위 섹션을 바로 이동합니다.
-          </p>
+          <div class="mt-1 text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
         </div>
 
-        <div class="flex flex-col gap-2">
+        <div class="flex flex-col gap-4">
           ${DASHBOARD_SURFACES.map(surface => {
-            const isActive = surface.id === currentSurface
+            const isSurfaceActive = surface.id === currentTab
+            const sections = sectionItemsForTab(surface.id)
+
             return html`
-              <button
-                class="w-full rounded-[22px] border border-solid px-3 py-3 text-left cursor-pointer transition-all duration-150 ${isActive ? 'border-[rgba(71,184,255,0.28)] bg-[linear-gradient(135deg,rgba(71,184,255,0.18),rgba(255,255,255,0.04))] shadow-[0_14px_28px_rgba(0,0,0,0.18)]' : 'border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.02)] hover:border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.04)]'}"
-                key=${surface.id}
-                onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
-              >
-                <div class="flex items-start gap-3">
-                  <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] text-[18px]">
+              <div class="flex flex-col gap-1">
+                <button
+                  class="flex items-center gap-3 w-full rounded-[14px] px-3 py-2.5 text-left cursor-pointer transition-all duration-150 ${isSurfaceActive && sections.length === 0 ? 'bg-[rgba(71,184,255,0.14)] text-[#d9f2ff] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.04)]'}"
+                  onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
+                >
+                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] text-[14px]">
                     ${surface.icon}
                   </span>
-                  <div class="min-w-0 flex-1">
-                    <div class="flex items-center justify-between gap-2">
-                      <span class="text-[13px] font-semibold ${isActive ? 'text-[#d9f2ff]' : 'text-[var(--text-strong)]'}">${surface.label}</span>
-                      ${isActive
-                        ? html`<span class="rounded-full border border-[rgba(71,184,255,0.24)] bg-[rgba(71,184,255,0.14)] px-2 py-0.5 text-[10px] font-medium text-[#9ad9ff]">active</span>`
-                        : null}
-                    </div>
-                    <p class="mt-1 text-[11px] leading-relaxed ${isActive ? 'text-[rgba(214,236,255,0.78)]' : 'text-[var(--text-muted)]'}">
-                      ${surface.description}
-                    </p>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-[13px] font-semibold truncate leading-none ${isSurfaceActive ? 'text-[#9ad9ff]' : ''}">${surface.label}</div>
                   </div>
-                </div>
-              </button>
+                </button>
+                
+                ${sections.length > 0 ? html`
+                  <div class="flex flex-col gap-0.5 pl-11 pr-2">
+                    ${sections.map(item => {
+                      const isSectionActive = isSurfaceActive && currentSection?.id === item.id
+                      return html`
+                        <button
+                          class="w-full rounded-[10px] px-3 py-2 text-left cursor-pointer text-[12px] transition-all duration-150 ${isSectionActive ? 'bg-[rgba(71,184,255,0.12)] text-[#cfeaff] font-medium' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-body)]'}"
+                          onClick=${() => navigate(surface.id, item.params)}
+                        >
+                          <div class="truncate">${item.label}</div>
+                        </button>
+                      `
+                    })}
+                  </div>
+                ` : null}
+              </div>
             `
           })}
         </div>
-
-        ${(() => {
-          if (sectionItems.length === 0) return null
-          return html`
-            <div class="mt-5 rounded-[22px] border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.025)] px-3 py-3">
-              <div class="flex items-center justify-between gap-2">
-                <div>
-                  <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">
-                    ${currentView?.label ?? currentSurface}
-                  </div>
-                  <div class="mt-1 text-[13px] font-semibold text-[var(--text-strong)]">
-                    ${currentSection?.label ?? 'Sections'}
-                  </div>
-                </div>
-                <span class="rounded-full border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 text-[10px] text-[var(--text-muted)] tabular-nums">
-                  ${sectionItems.length}
-                </span>
-              </div>
-              <div class="mt-3 flex flex-col gap-1.5">
-                ${sectionItems.map(item => html`
-                  <button
-                    class="w-full rounded-[16px] border border-solid px-3 py-2 text-left cursor-pointer text-[12px] transition-all duration-150 ${currentSection?.id === item.id ? 'border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.14)] text-[#cfeaff] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]' : 'border-transparent bg-transparent text-[var(--text-muted)] hover:border-[rgba(255,255,255,0.08)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-body)]'}"
-                    key=${item.id}
-                    onClick=${() => navigate(currentSurface, item.params)}
-                  >
-                    <div class="font-medium">${item.label}</div>
-                    <div class="mt-1 text-[10px] leading-relaxed ${currentSection?.id === item.id ? 'text-[rgba(222,240,255,0.72)]' : 'text-[var(--text-muted)]'}">
-                      ${item.description}
-                    </div>
-                  </button>
-                `)}
-              </div>
-            </div>
-          `
-        })()}
       </div>
 
       <div class="shrink-0 border-t border-[rgba(255,255,255,0.06)] p-3">
-        <${SnapshotCard} currentTab=${current} />
+        <${SnapshotCard} currentTab=${currentTab} />
       </div>
     </nav>
   `
@@ -261,23 +228,23 @@ export function TabContent() {
   const tab = route.value.tab
 
   switch (tab) {
-    case 'home':
+    case 'overview':
       return html`<${Overview} />`
-    case 'status':
+    case 'monitoring':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('현황 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('모니터링 화면')}>
           <${LazyStatus} />
         <//>
       `
-    case 'work':
+    case 'workspace':
       return html`
         <${Suspense} fallback=${lazyTabFallback('작업 화면')}>
           <${LazyWork} />
         <//>
       `
-    case 'operations':
+    case 'command':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('운영 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('지휘 통제 화면')}>
           <${LazyOperations} />
         <//>
       `

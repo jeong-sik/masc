@@ -7,7 +7,7 @@ import type { RouteState, TabId, AnyTabId, LegacyTabId } from './types'
 import { VALID_TABS, LEGACY_TAB_REDIRECTS } from './types'
 import { normalizeRouteParams } from './config/navigation'
 
-const DEFAULT_ROUTE: RouteState = { tab: 'home', params: {}, postId: null }
+const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
 const COMMAND_SURFACE_SEGMENTS = new Set([
   'warroom',
   'summary',
@@ -76,8 +76,8 @@ function parseSegments(
       nextParams.operation = decodeSafe(segments[2])
     }
     return {
-      tab: 'operations',
-      params: normalizeRouteParams('operations', nextParams),
+      tab: 'command',
+      params: normalizeRouteParams('command', nextParams),
       postId: null,
     }
   }
@@ -98,8 +98,8 @@ function parseSegments(
       nextParams.section = 'command'
       nextParams.surface = section
       return {
-        tab: 'operations',
-        params: normalizeRouteParams('operations', nextParams),
+        tab: 'command',
+        params: normalizeRouteParams('command', nextParams),
         postId: null,
       }
     }
@@ -115,15 +115,15 @@ function parseSegments(
       }
       nextParams.section = 'command'
       return {
-        tab: 'operations',
-        params: normalizeRouteParams('operations', nextParams),
+        tab: 'command',
+        params: normalizeRouteParams('command', nextParams),
         postId: null,
       }
     }
     if (!params.section && !params.surface) {
       return {
-        tab: 'operations',
-        params: normalizeRouteParams('operations', { ...params, section: 'command' }),
+        tab: 'command',
+        params: normalizeRouteParams('command', { ...params, section: 'command' }),
         postId: null,
       }
     }
@@ -135,7 +135,7 @@ function parseSegments(
     }
   }
 
-  if (segments[0] === 'operations' && segments[1]) {
+  if ((segments[0] === 'operations' || segments[0] === 'command') && segments[1]) {
     const nextParams = { ...params }
     const second = decodeSafe(segments[1])
     if (second === 'intervene' || second === 'command' || second === 'tools') {
@@ -145,14 +145,15 @@ function parseSegments(
       nextParams.surface = second
     }
     return {
-      tab: 'operations',
-      params: normalizeRouteParams('operations', nextParams),
+      tab: 'command',
+      params: normalizeRouteParams('command', nextParams),
       postId: null,
     }
   }
 
-  if ((segments[0] === 'status' || segments[0] === 'work') && segments[1]) {
-    const tab = segments[0] as 'status' | 'work'
+  if ((segments[0] === 'status' || segments[0] === 'monitoring' || segments[0] === 'work' || segments[0] === 'workspace') && segments[1]) {
+    const rawTab = segments[0]
+    const tab = (rawTab === 'status' ? 'monitoring' : rawTab === 'work' ? 'workspace' : rawTab) as 'monitoring' | 'workspace'
     const nextParams = { ...params, section: decodeSafe(segments[1]) }
     return {
       tab,
@@ -175,14 +176,14 @@ function parseSegments(
       }
     }
     return {
-      tab: 'operations',
-      params: normalizeRouteParams('operations', nextParams),
+      tab: 'command',
+      params: normalizeRouteParams('command', nextParams),
       postId: null,
     }
   }
 
   // Resolve with legacy redirect support
-  const resolved = resolveTab(tabFromPath) || resolveTab(tabFromQuery) || { tab: 'home' as TabId }
+  const resolved = resolveTab(tabFromPath) || resolveTab(tabFromQuery) || { tab: 'overview' as TabId }
   const mergedParams = normalizeRouteParams(resolved.tab, { ...params, ...(resolved.params ?? {}) })
 
   return { tab: resolved.tab, params: mergedParams, postId: null }
@@ -284,7 +285,7 @@ export function navigate(tab: AnyTabId, params?: Record<string, string>): void {
 }
 
 export function navigateToPost(postId: string): void {
-  window.location.hash = `#work?section=board&post=${encodeURIComponent(postId)}`
+  window.location.hash = `#workspace?section=board&post=${encodeURIComponent(postId)}`
 }
 
 export function navigateBack(): void {
@@ -332,6 +333,6 @@ export function initRouter(): void {
   }
 
   // Default route
-  window.location.hash = '#home'
+  window.location.hash = '#overview'
   route.value = parseHash(window.location.hash)
 }

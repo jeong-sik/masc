@@ -118,7 +118,7 @@ export function Command() {
   }, [])
 
   useEffect(() => {
-    if (route.value.tab !== 'operations' || route.value.params.section !== 'command') return
+    if (route.value.tab !== 'command' || route.value.params.section !== 'warroom') return
     const requestedSurface = route.value.params.surface
     const requestedOperation = route.value.params.operation
     const workflowContext = workflowContextForRoute(route.value)

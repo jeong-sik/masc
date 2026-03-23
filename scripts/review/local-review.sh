@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_VERSION="local-review-v1"
 DEFAULT_MODEL="qwen3.5-35b-a3b-ud-q4-xl"
 DEFAULT_URL="http://127.0.0.1:8085/v1/chat/completions"
-DEFAULT_CACHE_DIR=".masc/review-cache/local-review"
+DEFAULT_CACHE_SUBDIR=".masc/review-cache/local-review"
 DEFAULT_PROMPT_VERSION="v1"
 DEFAULT_CHUNK_BYTES=40000
 DEFAULT_MAX_TOKENS=400
@@ -16,7 +16,7 @@ BASE_REF="origin/main"
 HEAD_REF="HEAD"
 MODEL="${MASC_LOCAL_REVIEW_MODEL:-$DEFAULT_MODEL}"
 REVIEW_URL="${MASC_LOCAL_REVIEW_URL:-$DEFAULT_URL}"
-CACHE_DIR="${MASC_LOCAL_REVIEW_CACHE_DIR:-$DEFAULT_CACHE_DIR}"
+CACHE_DIR="${MASC_LOCAL_REVIEW_CACHE_DIR:-}"
 PROMPT_VERSION="${MASC_LOCAL_REVIEW_PROMPT_VERSION:-$DEFAULT_PROMPT_VERSION}"
 CHUNK_BYTES="${MASC_LOCAL_REVIEW_CHUNK_BYTES:-$DEFAULT_CHUNK_BYTES}"
 MAX_TOKENS="${MASC_LOCAL_REVIEW_MAX_TOKENS:-$DEFAULT_MAX_TOKENS}"
@@ -50,7 +50,7 @@ Options:
 Environment:
   MASC_LOCAL_REVIEW_COMMAND   Optional local command override. Receives prompt on stdin.
   MASC_LOCAL_REVIEW_URL       OpenAI-compatible review endpoint.
-  MASC_LOCAL_REVIEW_CACHE_DIR Cache root (default: .masc/review-cache/local-review)
+  MASC_LOCAL_REVIEW_CACHE_DIR Cache root (default: <shared-repo-root>/.masc/review-cache/local-review)
   MASC_LOCAL_REVIEW_CHUNK_BYTES
   MASC_LOCAL_REVIEW_MAX_TOKENS
   MASC_LOCAL_REVIEW_MAX_TIME
@@ -120,6 +120,24 @@ require_cmd jq
 require_cmd shasum
 if [ -z "$REVIEW_COMMAND" ]; then
   require_cmd curl
+fi
+
+resolve_shared_repo_root() {
+  local common_dir
+  common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || git rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -n "$common_dir" ] && [ -d "$common_dir" ]; then
+    (cd "$common_dir/.." && pwd -P)
+  else
+    pwd -P
+  fi
+}
+
+default_cache_dir() {
+  printf '%s/%s\n' "$(resolve_shared_repo_root)" "$DEFAULT_CACHE_SUBDIR"
+}
+
+if [ -z "$CACHE_DIR" ]; then
+  CACHE_DIR="$(default_cache_dir)"
 fi
 
 case "$FORMAT" in

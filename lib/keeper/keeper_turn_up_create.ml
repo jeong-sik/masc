@@ -33,7 +33,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   let trigger_mode =
     p.trigger_mode_opt
     |> first_some p.profile_defaults.trigger_mode
-    |> Option.value ~default:"legacy"
+    |> Option.value ~default:"explicit_only"
     |> canonical_trigger_mode
   in
   let requested_models =

@@ -238,6 +238,9 @@ let test_local_review_script_contracts () =
   check bool "local review script caches under .masc review-cache" true
     (file_contains_pattern "scripts/review/local-review.sh"
        ".masc/review-cache/local-review");
+  check bool "local review script resolves shared git common dir cache root" true
+    (file_contains_pattern "scripts/review/local-review.sh"
+       "--git-common-dir");
   check bool "local review script keeps pending registry" true
     (file_contains_pattern "scripts/review/local-review.sh"
        ".pending.json");

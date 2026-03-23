@@ -209,7 +209,7 @@ let deterministic_policy_baseline_action_typed
 (** Backward-compatible string interface for existing callers. *)
 let deterministic_policy_baseline_action (obs : keeper_policy_observation) : string =
   deterministic_policy_baseline_action_typed obs
-  |> Keeper_deliberation.deliberation_action_to_legacy_string
+  |> Keeper_deliberation.deliberation_action_to_policy_label
 
 let choose_policy_action (candidates : keeper_policy_candidate_score list) :
     keeper_policy_candidate_score option =
@@ -640,4 +640,3 @@ let profile_kind_caps (profile : string) : (string * int) list =
 
 let cap_for_kind (caps : (string * int) list) (kind : string) : int =
   List.assoc_opt kind caps |> Option.value ~default:1
-

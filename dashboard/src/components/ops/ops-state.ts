@@ -2,12 +2,23 @@ import { signal } from '@preact/signals'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
+function safeStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const storage = window.localStorage
+    return storage && typeof storage.getItem === 'function' ? storage : null
+  } catch {
+    return null
+  }
+}
+
 function initialActorName(): string {
   const params = new URLSearchParams(window.location.search)
+  const storage = safeStorage()
   return (
     params.get('agent')?.trim()
     || params.get('agent_name')?.trim()
-    || localStorage.getItem(AGENT_NAME_KEY)?.trim()
+    || storage?.getItem(AGENT_NAME_KEY)?.trim()
     || 'dashboard'
   )
 }
@@ -39,5 +50,5 @@ export const hydratedWorkflowId = signal<string | null>(null)
 export function persistActorName(value: string): void {
   const trimmed = value.trim() || 'dashboard'
   actorName.value = trimmed
-  localStorage.setItem(AGENT_NAME_KEY, trimmed)
+  safeStorage()?.setItem(AGENT_NAME_KEY, trimmed)
 }

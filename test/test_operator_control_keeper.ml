@@ -121,15 +121,123 @@ let test_keeper_status_exposes_summary_and_recoverable () =
               ])
       in
       Alcotest.(check bool) "persistent status ok" true ok;
-      let diagnostic = parse_json_exn body |> Yojson.Safe.Util.member "diagnostic" in
+      let status_json = parse_json_exn body in
+      let diagnostic = status_json |> Yojson.Safe.Util.member "diagnostic" in
       Alcotest.(check string) "health_state" "offline"
         Yojson.Safe.Util.(diagnostic |> member "health_state" |> to_string);
       Alcotest.(check string) "next action recover" "recover"
         Yojson.Safe.Util.(diagnostic |> member "next_action_path" |> to_string);
       Alcotest.(check bool) "recoverable true" true
         Yojson.Safe.Util.(diagnostic |> member "recoverable" |> to_bool);
+      Alcotest.(check string) "auto team session wired" "wired"
+        Yojson.Safe.Util.(
+          status_json |> member "auto_team_session" |> member "status" |> to_string);
       Alcotest.(check bool) "summary present" true
         (String.length Yojson.Safe.Util.(diagnostic |> member "summary" |> to_string) > 0))
+
+let test_keeper_config_exposes_live_runtime_and_sources () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let cwd = Sys.getcwd () in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chdir cwd;
+      cleanup_dir base_dir)
+    (fun () ->
+      Unix.chdir base_dir;
+      let keepers_dir = Filename.concat (Filename.concat base_dir "config") "keepers" in
+      Fs_compat.mkdir_p keepers_dir;
+      Fs_compat.save_file
+        (Filename.concat keepers_dir "config-provenance.toml")
+        {|
+[keeper]
+goal = "Defaults goal"
+models = ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
+room_scope = "all"
+trigger_mode = "legacy"
+proactive_enabled = true
+initiative_enabled = true
+initiative_scope = "board_only"
+initiative_idle_sec = 3600
+initiative_cooldown_sec = 3600
+initiative_context_mode = "board_snapshot"
+initiative_post_ttl_hours = 24
+|};
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+        }
+      in
+      let keeper_name = "config-provenance" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "keeper meta missing"
+        | Error err -> Alcotest.fail ("meta read failed: " ^ err)
+      in
+      let mutated =
+        {
+          meta with
+          room_scope = "current";
+          trigger_mode = "explicit_only";
+          proactive_enabled = false;
+          paused = true;
+          updated_at = Types.now_iso ();
+        }
+      in
+      (match Masc_mcp.Keeper_types.write_meta config mutated with
+      | Ok () -> ()
+      | Error err -> Alcotest.fail ("meta write failed: " ^ err));
+      let status, json =
+        Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
+      in
+      Alcotest.(check bool) "config found" true (status = `OK);
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "trigger_mode from live meta" "explicit_only"
+        (json |> member "coordination" |> member "trigger_mode" |> to_string);
+      Alcotest.(check string) "room_scope from live meta" "current"
+        (json |> member "coordination" |> member "room_scope" |> to_string);
+      Alcotest.(check bool) "runtime paused from live meta" true
+        (json |> member "runtime" |> member "paused" |> to_bool);
+      Alcotest.(check bool) "proactive enabled from live meta" false
+        (json |> member "proactive" |> member "enabled" |> to_bool);
+      Alcotest.(check string) "default source kind" "toml"
+        (json |> member "sources" |> member "default_source_kind" |> to_string);
+      Alcotest.(check bool) "live override flagged" true
+        (json |> member "sources" |> member "has_live_override" |> to_bool);
+      Alcotest.(check string) "auto team session wired" "wired"
+        (json |> member "auto_team_session" |> member "status" |> to_string);
+      let override_fields =
+        json |> member "sources" |> member "override_fields" |> to_list
+        |> List.map to_string
+      in
+      Alcotest.(check bool) "override field trigger_mode" true
+        (List.mem "coordination.trigger_mode" override_fields);
+      Alcotest.(check bool) "override field room_scope" true
+        (List.mem "coordination.room_scope" override_fields);
+      Alcotest.(check bool) "override field proactive" true
+        (List.mem "proactive.enabled" override_fields);
+      Alcotest.(check string) "initiative source-only" "source_only"
+        (json |> member "initiative" |> member "status" |> to_string);
+      Alcotest.(check bool) "initiative configured in source" true
+        (json |> member "initiative" |> member "configured_in_source" |> to_bool);
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      Alcotest.(check bool) "keeper down ok" true ok)
 
 let test_snapshot_keeper_tool_audit_fallback () =
   Eio_main.run @@ fun env ->
@@ -190,9 +298,13 @@ let test_keeper_msg_auto_team_session_bridge () =
   (* This test triggers a real LLM cascade call (keeper_msg -> run_turn).
      In CI there is no LLM server, so the cascade hangs until timeout.
      Skip when CI=true or ALCOTEST_QUICK_TESTS=1 to prevent the build
-     from timing out.  See: #1936 *)
+     from timing out. The quick-suite harness also exports
+     CI_TEST_TIMEOUT_SEC, which is more reliable than ALCOTEST_QUICK_TESTS
+     under dune test in CI. See: #1936 *)
   if Sys.getenv_opt "CI" = Some "true"
      || Sys.getenv_opt "ALCOTEST_QUICK_TESTS" = Some "1" then
+    Alcotest.skip ()
+  else if Sys.getenv_opt "CI_TEST_TIMEOUT_SEC" <> None then
     Alcotest.skip ()
   else
   Eio_main.run @@ fun env ->
@@ -277,7 +389,6 @@ let test_keeper_msg_auto_team_session_bridge () =
         | Ok None -> Alcotest.fail "keeper meta missing after keeper_msg"
         | Error err -> Alcotest.fail ("meta read failed: " ^ err)
       in
-      (* auto_team_session_enabled field removed *)
       Alcotest.(check (option string)) "linked session id"
         (Some session_id) meta.active_team_session_id;
       Alcotest.(check int) "start count" 1 meta.team_session_start_count_total;
@@ -296,10 +407,15 @@ let test_keeper_msg_auto_team_session_bridge () =
       in
       Alcotest.(check bool) "keeper status ok" true status_ok;
       let status_json = parse_json_exn status_body in
-      Alcotest.(check bool) "status exposes opt-in" false
+      Alcotest.(check string) "status exposes auto team session wiring" "wired"
+        Yojson.Safe.Util.(status_json |> member "auto_team_session" |> member "status" |> to_string);
+      Alcotest.(check bool) "status exposes auto team session enabled" true
         Yojson.Safe.Util.(status_json |> member "auto_team_session_enabled" |> to_bool);
       Alcotest.(check string) "status exposes running bridge" "running"
         Yojson.Safe.Util.(status_json |> member "team_session_state" |> to_string);
+      Alcotest.(check bool) "status exposes bridge enabled" true
+        Yojson.Safe.Util.(
+          status_json |> member "team_session_bridge" |> member "enabled" |> to_bool);
       let events = Team_session_store.read_recent_events config session_id ~max_count:10 in
       let note_events =
         List.filter

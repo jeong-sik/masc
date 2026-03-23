@@ -36,7 +36,7 @@ import { abortKeeperThreadMessage, applyKeeperStreamEvent } from './keeper-strea
 async function refreshDashboardState(): Promise<void> {
   invalidateDashboardCache()
   try {
-    await refreshDashboard()
+    await refreshDashboard({ force: true })
   } catch (err) {
     console.warn('[keeper-runtime] dashboard refresh failed', err)
   }

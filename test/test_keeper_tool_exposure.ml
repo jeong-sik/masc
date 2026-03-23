@@ -164,6 +164,14 @@ let test_learned_mode_has_read_tools () =
   check bool "has keeper_fs_read" true (has_tool "keeper_fs_read" tools);
   check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools)
 
+let test_learned_mode_has_keeper_coordination_tools () =
+  let meta = make_meta ~policy_mode:"learned_offline_v1" () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "has keeper_tasks_list" true
+    (has_tool "keeper_tasks_list" tools);
+  check bool "has keeper_broadcast" true
+    (has_tool "keeper_broadcast" tools)
+
 let test_normal_mode_uses_shard_tools () =
   let meta = make_meta ~policy_mode:"" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
@@ -343,6 +351,8 @@ let () =
     ("learned_mode", [
       test_case "has board tools" `Quick test_learned_mode_has_board_tools;
       test_case "has read tools" `Quick test_learned_mode_has_read_tools;
+      test_case "has keeper coordination tools" `Quick
+        test_learned_mode_has_keeper_coordination_tools;
       test_case "normal mode uses shards" `Quick test_normal_mode_uses_shard_tools;
     ]);
     ("combined_profiles", [

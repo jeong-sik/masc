@@ -158,10 +158,6 @@ export interface KeeperGuardrailEvent {
   ts_unix: number
 }
 
-// --- Keeper Autonomy ---
-
-export type AutonomyLevel = 'L1_Reactive' | 'L2_Suggestive' | 'L3_Guided' | 'L4_Autonomous' | 'L5_Independent'
-
 export interface Goal {
   id: string
   horizon: 'short' | 'mid' | 'long'
@@ -176,13 +172,6 @@ export interface Goal {
   last_review_at?: string | null
   created_at: string
   updated_at: string
-}
-
-export interface KeeperAutonomyInfo {
-  autonomy_level: AutonomyLevel
-  active_goal_ids: string[]
-  last_autonomous_action_at?: string | null
-  autonomous_action_count: number
 }
 
 // --- Keeper ---
@@ -326,8 +315,6 @@ export interface Keeper {
   proactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
-  // Autonomy fields (Phase 2)
-  autonomy_level?: AutonomyLevel
   active_goal_ids?: string[]
   last_autonomous_action_at?: string | null
   autonomous_action_count?: number

@@ -188,10 +188,6 @@ After masc_tool_admin_snapshot to review current state before making changes.";
           ("type", `String "string");
           ("description", `String "Keeper action budget: conversation | board");
         ]);
-        ("autonomy_level", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper autonomy level such as L2_Suggestive or L4_Autonomous");
-        ]);
         ("reward_model_path", `Assoc [
           ("type", `String "string");
           ("description", `String "Reward model path for learned_offline_v1 keeper policy");

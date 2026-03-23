@@ -102,8 +102,6 @@ let projected_team_session_operations ?sessions config units managed_operations 
            objective = session.goal;
            intent_id = None;
            assigned_unit_id;
-           autonomy_level =
-             Team_session_types.orchestration_mode_to_string session.orchestration_mode;
            policy_class =
              Team_session_types.execution_scope_to_string session.execution_scope;
            budget_class =
@@ -168,7 +166,6 @@ let projected_swarm_operations config units managed_operations =
             objective = Printf.sprintf "Swarm %s (%s) generation %d" swarm_name behavior generation;
             intent_id = None;
             assigned_unit_id;
-            autonomy_level = "L5_Independent";
             policy_class = "swarm";
             budget_class = "adaptive";
             workload_template = None;

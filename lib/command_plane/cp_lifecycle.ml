@@ -411,7 +411,6 @@ let start_operation config ~(actor : string) json =
           objective;
           intent_id = Option.map (fun (intent : intent_record) -> intent.intent_id) intent_binding;
           assigned_unit_id;
-          autonomy_level = get_string_default json "autonomy_level" "L4_Autonomous";
           policy_class = get_string_default json "policy_class" "strict";
           budget_class = get_string_default json "budget_class" "standard";
           workload_template;
@@ -455,7 +454,6 @@ let start_operation config ~(actor : string) json =
           [
             ("objective", `String operation.objective);
             ("intent_id", match operation.intent_id with Some value -> `String value | None -> `Null);
-            ("autonomy_level", `String operation.autonomy_level);
             ("policy_class", `String operation.policy_class);
             ( "workload_template",
               match operation.workload_template with

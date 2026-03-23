@@ -78,7 +78,6 @@ type keeper_meta = {
   last_compaction_decision: string;
   last_continuity_update_ts: float;
   continuity_summary: string;
-  autonomy_level: string;
   active_goal_ids: string list;
   active_team_session_id: string option;
   last_team_session_started_at: string;
@@ -168,7 +167,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("last_compaction_decision", `String m.last_compaction_decision);
       ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
       ("continuity_summary", `String m.continuity_summary);
-      ("autonomy_level", `String m.autonomy_level);
       ("active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids));
       ( "active_team_session_id",
         match m.active_team_session_id with
@@ -366,9 +364,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       else
         parsed_ts
     in
-    let autonomy_level =
-      Safe_ops.json_string ~default:"l3_guided" "autonomy_level" json
-    in
     let active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
     let active_team_session_id =
       Safe_ops.json_string_opt "active_team_session_id" json
@@ -478,7 +473,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           last_compaction_decision;
           last_continuity_update_ts;
           continuity_summary;
-          autonomy_level;
           active_goal_ids;
           active_team_session_id;
           last_team_session_started_at;

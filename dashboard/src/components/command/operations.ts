@@ -183,7 +183,6 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
       <div class="cmd-card rounded-xl-grid">
         <span>유닛</span><span>${card.assigned_unit_label ?? op.assigned_unit_id}</span>
         <span>트레이스</span><span class="font-mono">${op.trace_id}</span>
-        <span>자율성</span><span>${op.autonomy_level ?? '정보 없음'}</span>
         <span>예산 등급</span><span>${op.budget_class ?? 'standard'}</span>
         <span>출처</span><span>${op.source ?? 'managed'}</span>
         <span>최근 갱신</span><span>${relativeTime(op.updated_at)}</span>

@@ -90,7 +90,6 @@ function CapacityRowCard({ row }: { row: CommandPlaneCapacityRow }) {
         <span class="text-[var(--text-muted)]">편성</span><span class="text-[var(--text-body)]">${row.roster_live ?? 0}/${row.roster_total ?? 0}</span>
         <span class="text-[var(--text-muted)]">정원</span><span class="text-[var(--text-body)]">${row.headcount_cap ?? 0}</span>
         <span class="text-[var(--text-muted)]">작전</span><span class="text-[var(--text-body)]">${row.active_operations ?? 0}/${row.active_operation_cap ?? 0}</span>
-        <span class="text-[var(--text-muted)]">자율성</span><span class="text-[var(--text-body)]">${unit.policy?.autonomy_level ?? '정보 없음'}</span>
         <span class="text-[var(--text-muted)]">동결</span><span class="text-[var(--text-body)]">${frozen ? '예' : '아니오'}</span>
         <span class="text-[var(--text-muted)]">킬 스위치</span><span class="text-[var(--text-body)]">${killSwitch ? '켜짐' : '꺼짐'}</span>
       </div>

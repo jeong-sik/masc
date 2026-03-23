@@ -354,14 +354,11 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
 
 (** Build a prompt for the MODEL to decide the keeper's next action.
     The prompt describes the keeper's identity, current state, detected triggers,
-    and available actions. The MODEL is asked to respond with JSON.
-    multi_step action is always available (autonomy_level dispatch removed). *)
+    and available actions. The MODEL is asked to respond with JSON. *)
 let build_deliberation_prompt
-    ?(autonomy_level : string option)
     ~keeper_name ~soul_profile ~goal
     ~(triggers : deliberation_trigger list)
     (obs : world_observation) : string =
-  ignore autonomy_level;
   let multi_step_line =
     "\n- multi_step: Execute multiple actions sequentially (max 5). \
      Requires steps array of action objects."

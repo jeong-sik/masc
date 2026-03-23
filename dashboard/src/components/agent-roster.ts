@@ -44,7 +44,6 @@ interface KeeperInfo {
   model?: string | null
   current_work?: string | null
   last_turn_ago_s?: number | null
-  autonomy_level?: string | null
 }
 
 function findKeeper(agentName: string, keeperList: Keeper[], keeperBriefs: DashboardMissionKeeperBrief[]): KeeperInfo | null {

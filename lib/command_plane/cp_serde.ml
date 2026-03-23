@@ -247,7 +247,6 @@ let default_policy kind =
         model_allowlist = [];
         requires_human_for =
           [ "cross_platoon_rebalance"; "budget_class_change"; "kill_switch" ];
-        autonomy_level = "L5_Independent";
         escalation_timeout_sec = 1800;
         kill_switch = false;
         frozen = false;
@@ -259,7 +258,6 @@ let default_policy kind =
         tool_allowlist = [];
         model_allowlist = [];
         requires_human_for = [ "cross_squad_rebalance"; "budget_burst" ];
-        autonomy_level = "L4_Autonomous";
         escalation_timeout_sec = 1200;
         kill_switch = false;
         frozen = false;
@@ -271,7 +269,6 @@ let default_policy kind =
         tool_allowlist = [];
         model_allowlist = [];
         requires_human_for = [ "destructive_tool"; "cross_squad_escalation" ];
-        autonomy_level = "L3_Guided";
         escalation_timeout_sec = 900;
         kill_switch = false;
         frozen = false;
@@ -283,7 +280,6 @@ let default_policy kind =
         tool_allowlist = [];
         model_allowlist = [];
         requires_human_for = [ "destructive_tool" ];
-        autonomy_level = "L2_Suggestive";
         escalation_timeout_sec = 600;
         kill_switch = false;
         frozen = false;
@@ -308,7 +304,6 @@ let policy_to_json (policy : policy_envelope) =
       ("tool_allowlist", json_list_of_strings policy.tool_allowlist);
       ("model_allowlist", json_list_of_strings policy.model_allowlist);
       ("requires_human_for", json_list_of_strings policy.requires_human_for);
-      ("autonomy_level", `String policy.autonomy_level);
       ("escalation_timeout_sec", `Int policy.escalation_timeout_sec);
       ("kill_switch", `Bool policy.kill_switch);
       ("frozen", `Bool policy.frozen);
@@ -324,7 +319,6 @@ let policy_of_json json kind =
     requires_human_for =
       (let requested = get_string_list json "requires_human_for" in
        if requested = [] then defaults.requires_human_for else requested);
-    autonomy_level = get_string_default json "autonomy_level" defaults.autonomy_level;
     escalation_timeout_sec =
       get_int_default json "escalation_timeout_sec" defaults.escalation_timeout_sec;
     kill_switch = get_bool_default json "kill_switch" defaults.kill_switch;
@@ -425,7 +419,6 @@ let operation_to_json (operation : operation_record) =
       ("objective", `String operation.objective);
       ("intent_id", match operation.intent_id with Some value -> `String value | None -> `Null);
       ("assigned_unit_id", `String operation.assigned_unit_id);
-      ("autonomy_level", `String operation.autonomy_level);
       ("policy_class", `String operation.policy_class);
       ("budget_class", `String operation.budget_class);
       ( "workload_template",
@@ -500,7 +493,6 @@ let operation_of_json json =
             objective;
             intent_id = get_string_opt json "intent_id";
             assigned_unit_id;
-            autonomy_level = get_string_default json "autonomy_level" "L4_Autonomous";
             policy_class = get_string_default json "policy_class" "strict";
             budget_class = get_string_default json "budget_class" "standard";
             workload_template =

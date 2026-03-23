@@ -361,7 +361,6 @@ let handle_keeper_eval ctx args : tool_result =
           ("unique_tools", `Int (List.length unique_tools));
           ("tool_distribution", `List tool_stats);
           ("scenario_file", scenario_info);
-          ("autonomy_level", `String m.autonomy_level);
           ("autonomous_action_count", `Int m.autonomous_action_count);
         ] in
         (true, Yojson.Safe.pretty_to_string json)

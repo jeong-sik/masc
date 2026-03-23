@@ -17,15 +17,6 @@ let format_goals (goal_ids : string list) : string =
   String.concat "\n"
     (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
 
-let autonomy_level_description (level : string) : string =
-  match String.lowercase_ascii (String.trim level) with
-  | "l1_reactive" -> "L1 Reactive: respond to mentions only"
-  | "l2_suggestive" -> "L2 Suggestive: generate suggestions, post to board"
-  | "l3_guided" -> "L3 Guided: auto-execute safe actions (read-only + board)"
-  | "l4_autonomous" -> "L4 Autonomous: auto-execute most actions including bash"
-  | "l5_independent" -> "L5 Independent: full autonomy, all tools available"
-  | other -> Printf.sprintf "%s: custom autonomy level" other
-
 let build_prompt ~(meta : Keeper_types.keeper_meta)
     ~(observation : Keeper_world_observation.world_observation) : string * string
     =
@@ -61,10 +52,6 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
   if meta.long_goal <> "" && meta.long_goal <> meta.goal then
     Buffer.add_string buf
       (Printf.sprintf "Long-term goal: %s\n" meta.long_goal);
-  (* Autonomy *)
-  Buffer.add_string buf
-    (Printf.sprintf "\nAutonomy: %s\n"
-       (autonomy_level_description observation.autonomy_level));
   (* Behavioral guidance *)
   Buffer.add_string buf
     "\n\

@@ -238,8 +238,6 @@ let operation_node op_json =
       [
         fact "unit"
           (string_opt op_json "assigned_unit_id" |> Option.value ~default:"n/a");
-        fact "autonomy"
-          (string_opt op_json "autonomy_level" |> Option.value ~default:"n/a");
         fact "source"
           (string_opt op_json "source" |> Option.value ~default:"managed");
         fact "trace"
@@ -420,8 +418,6 @@ let keeper_node row =
       [
         fact "agent"
           (string_opt row "agent_name" |> Option.value ~default:"n/a");
-        fact "autonomy"
-          (string_opt row "autonomy_level" |> Option.value ~default:"n/a");
         fact "context"
           (match float_opt row "context_ratio" with
           | Some value -> Printf.sprintf "%.0f%%" (value *. 100.)

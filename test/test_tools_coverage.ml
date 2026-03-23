@@ -804,9 +804,7 @@ let test_masc_tool_admin_update_schema () =
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has section" true (List.mem_assoc "section" props);
-          Alcotest.(check bool) "has policy" true (List.mem_assoc "policy" props);
-          Alcotest.(check bool) "has autonomy_level" true
-            (List.mem_assoc "autonomy_level" props)
+          Alcotest.(check bool) "has policy" true (List.mem_assoc "policy" props)
       | None -> Alcotest.fail "masc_tool_admin_update missing properties"
 
 (* ============================================================ *)

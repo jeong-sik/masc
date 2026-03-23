@@ -278,19 +278,6 @@ export async function fetchGoals(): Promise<import('../types').Goal[]> {
   }
 }
 
-export async function fetchKeeperAutonomy(name: string): Promise<import('../types').KeeperAutonomyInfo | null> {
-  try {
-    const res = await callMcpTool('masc_keeper_status', { name })
-    if (typeof res === 'string') {
-      const parsed = JSON.parse(res)
-      return parsed.autonomy ?? null
-    }
-    return (res as Record<string, unknown>).autonomy as import('../types').KeeperAutonomyInfo ?? null
-  } catch {
-    return null
-  }
-}
-
 // --- Activity Graph ---
 
 export async function fetchActivityGraph(): Promise<import('../types').ActivityGraphResponse | null> {

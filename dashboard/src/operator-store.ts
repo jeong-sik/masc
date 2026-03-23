@@ -332,7 +332,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     resident_registered: asBoolean(raw.resident_registered),
     agent_name: asString(raw.agent_name),
     status: asString(raw.status),
-    autonomy_level: asString(raw.autonomy_level),
     context_ratio: asNumber(raw.context_ratio) ?? asNumber(contextRaw?.context_ratio),
     generation: asNumber(raw.generation),
     active_goal_ids: asStringArray(raw.active_goal_ids),

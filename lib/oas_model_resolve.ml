@@ -123,9 +123,13 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
              Treat as available — the cascade resolves providers at runtime. *)
           true
       | Some pname ->
-        match Llm_provider.Provider_registry.find default_registry pname with
-        | None -> false
-        | Some entry -> entry.is_available ()
+        if pname = "custom" then
+          (* custom:model@url is self-hosted; always considered available *)
+          true
+        else
+          match Llm_provider.Provider_registry.find default_registry pname with
+          | None -> false
+          | Some entry -> entry.is_available ()
     ) labels in
     if any_available then Ok ()
     else
@@ -133,12 +137,14 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
         match provider_name_of_label label with
         | None -> None
         | Some pname ->
-          match Llm_provider.Provider_registry.find default_registry pname with
-          | None -> Some (Printf.sprintf "%s (unknown provider)" pname)
-          | Some entry ->
-            if entry.defaults.api_key_env = "" then None
-            else if entry.is_available () then None
-            else Some entry.defaults.api_key_env
+          if pname = "custom" then None  (* self-hosted, no API key needed *)
+          else
+            match Llm_provider.Provider_registry.find default_registry pname with
+            | None -> Some (Printf.sprintf "%s (unknown provider)" pname)
+            | Some entry ->
+              if entry.defaults.api_key_env = "" then None
+              else if entry.is_available () then None
+              else Some entry.defaults.api_key_env
       ) labels in
       Error (Printf.sprintf "No valid/available model specs for labels: %s (missing: %s)"
         (String.concat ", " labels)

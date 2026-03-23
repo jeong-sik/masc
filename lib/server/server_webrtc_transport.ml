@@ -295,9 +295,9 @@ let handle_answer_request body =
       Yojson.Safe.Util.(member "agent_name" json |> to_string) in
     (* Also accept optional answerer ICE candidates *)
     let answer_ice =
-      Yojson.Safe.Util.(member "ice_candidates" json |> to_list
-        |> List.map to_string)
-      |> (fun l -> l)
+      match Yojson.Safe.Util.member "ice_candidates" json with
+      | `Null -> []
+      | candidates -> Yojson.Safe.Util.(to_list candidates |> List.map to_string)
     in
     ignore answer_ice;
     match accept_offer ~offer_id ~answerer_agent:answerer with

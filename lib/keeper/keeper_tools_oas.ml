@@ -58,6 +58,18 @@ let make_tools
     Keeper_exec_tools.keeper_allowed_model_tools meta
   in
   let failure_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  let failure_counts_mu : Eio.Mutex.t option ref = ref None in
+  let with_failure_counts f =
+    match !failure_counts_mu with
+    | Some mu -> Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
+    | None -> (
+        match Eio_context.get_switch_opt () with
+        | Some _ ->
+            let mu = Eio.Mutex.create () in
+            failure_counts_mu := Some mu;
+            Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
+        | None -> f ())
+  in
   let args_key name input =
     let h = Hashtbl.hash (Yojson.Safe.to_string input) in
     Printf.sprintf "%s:%d" name h
@@ -71,8 +83,9 @@ let make_tools
         (fun input ->
           let key = args_key td.name input in
           let prior_fails =
-            match Hashtbl.find_opt failure_counts key with
-            | Some n -> n | None -> 0
+            with_failure_counts (fun () ->
+              match Hashtbl.find_opt failure_counts key with
+              | Some n -> n | None -> 0)
           in
           if prior_fails >= max_consecutive_failures then begin
             Log.Keeper.warn "tool %s blocked after %d consecutive failures (same args)"
@@ -89,18 +102,21 @@ let make_tools
               in
               if keeper_tool_result_is_failure result then begin
                 let count = prior_fails + 1 in
-                Hashtbl.replace failure_counts key count;
+                with_failure_counts (fun () ->
+                  Hashtbl.replace failure_counts key count);
                 Log.Keeper.warn
                   "tool %s returned error result (%d/%d) for same args"
                   td.name count max_consecutive_failures;
                 (false, result)
               end else begin
-                Hashtbl.remove failure_counts key;
+                with_failure_counts (fun () ->
+                  Hashtbl.remove failure_counts key);
                 (true, result)
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               let count = prior_fails + 1 in
-              Hashtbl.replace failure_counts key count;
+              with_failure_counts (fun () ->
+                Hashtbl.replace failure_counts key count);
               let msg = Printf.sprintf "tool %s failed (%d/%d): %s"
                 td.name count max_consecutive_failures
                 (Printexc.to_string exn) in

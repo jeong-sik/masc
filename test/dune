@@ -1061,3 +1061,9 @@
  (name test_context_budget)
  (modules test_context_budget)
  (libraries masc_mcp alcotest))
+
+; HTTP protocol auto-detection (MSG_PEEK on connection preface)
+(test
+ (name test_http_protocol_detect)
+ (modules test_http_protocol_detect)
+ (libraries masc_mcp alcotest unix))

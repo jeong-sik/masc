@@ -145,6 +145,7 @@
    hebbian_eio
    http_server_eio
    http_server_h2
+   http_protocol_detect
    institution_eio
    level2_config
    level4_config

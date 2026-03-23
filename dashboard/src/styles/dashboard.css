@@ -13,10 +13,6 @@
   display: inline;
 }
 
-.runtime-collapsible[open] > .runtime-summary::before {
-  content: '\25BE ';
-}
-
 /* ── Collapsible Sections ── */
 .overview-section-collapsible > summary,
 .mission-collapsible-summary {
@@ -36,8 +32,7 @@
   color: var(--text-slate);
 }
 
-.overview-section-collapsible[open] > summary::before,
-.mission-collapsible-section[open] > .mission-collapsible-summary::before {
+.overview-section-collapsible[open] > summary::before {
   transform: rotate(90deg);
 }
 
@@ -85,20 +80,16 @@
 }
 
 /* ── Card-level dimming ── */
-.mission-crew-card.mission-state-offline,
-.mission-activity-card.mission-state-offline {
+.mission-crew-card.mission-state-offline {
   opacity: 0.4;
 }
 
-.mission-crew-card.mission-state-offline:hover,
-.mission-activity-card.mission-state-offline:hover,
-.mission-activity-card.mission-state-idle {
+.mission-crew-card.mission-state-offline:hover {
   opacity: 0.65;
 }
 
 .mission-crew-card.mission-state-idle,
-.mission-crew-card.mission-state-idle:hover,
-.mission-activity-card.mission-state-idle:hover {
+.mission-crew-card.mission-state-idle:hover {
   opacity: 0.85;
 }
 
@@ -141,22 +132,6 @@
   padding: 48px 16px;
   text-align: center;
 }
-.empty-state-icon {
-  font-size: 1.875rem;
-  margin-bottom: 12px;
-  opacity: 0.5;
-}
-.empty-state-title {
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  color: var(--text-body);
-  margin-bottom: 4px;
-}
-.empty-state-desc {
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-}
-
 /* ── Loading state (standardized) ── */
 .loading-state {
   display: flex;
@@ -174,22 +149,11 @@
   animation: loadingPulse 1.5s ease-in-out infinite;
 }
 
-.tab-collapsible__summary:hover {
-  color: var(--text-strong);
-}
-
 /* ── Responsive (layout) ── */
-@media (max-width: 960px) {
-  .keeper-kpis { grid-template-columns: repeat(2, 1fr); }
-  .agent-detail-grid { grid-template-columns: 1fr; }
-}
 @media (max-width: 880px) {
-  .council-create { grid-template-columns: 1fr; }
   .control-row { grid-template-columns: 1fr; }
-  .agent-mention-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
-  .keeper-kpis { grid-template-columns: 1fr; }
   .metric-tip-pop {
     left: 0;
     transform: none;

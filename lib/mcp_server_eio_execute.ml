@@ -545,8 +545,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           start_team_session = None } in
         Tool_autoresearch.dispatch ctx ~name ~args:arguments
     | Mod_research ->
+        let net = match state.Mcp_server.net with
+          | Some n -> n
+          | None -> Eio_context.get_net ()
+        in
         let ctx : Tool_research.context = { base_path = config.base_path;
-          agent_name = Some agent_name } in
+          agent_name = Some agent_name; sw; net; clock } in
         Tool_research.dispatch ctx ~name ~args:arguments
     | Mod_shard ->
         let (ok, json) = Tool_shard.execute name arguments in

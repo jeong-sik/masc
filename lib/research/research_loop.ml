@@ -1,8 +1,8 @@
-(** Research_loop — Automated code improvement via local LLM.
+(** Research_loop — Automated code improvement via LLM.
 
     Core loop:
     1. Gather repo context (recent commits, TODOs, file list)
-    2. Ask LLM to propose a hypothesis (via llama-server HTTP)
+    2. Ask LLM to propose a hypothesis (via OAS cascade)
     3. Create isolated worktree
     4. Apply proposed change
     5. Build + test → measure metrics
@@ -165,8 +165,8 @@ let history_context (history : experiment_entry list) : string =
     Buffer.contents buf
   end
 
-(** Call LLM via direct HTTP to llama-server (OpenAI-compatible). *)
-let generate_hypothesis ~(config : Research_config.t)
+(** Call LLM via OAS cascade (provider-agnostic). *)
+let generate_hypothesis ~sw ~net ~clock ~(config : Research_config.t)
     ~context ~history : hypothesis option =
   let history_text = history_context history in
   let user_msg = Printf.sprintf
@@ -175,53 +175,36 @@ let generate_hypothesis ~(config : Research_config.t)
      or obvious simplification opportunities. Respond with a JSON object."
     context history_text
   in
-  let payload = `Assoc [
-    ("model", `String config.cascade_name);
-    ("messages", `List [
-      `Assoc [("role", `String "system"); ("content", `String config.system_prompt)];
-      `Assoc [("role", `String "user"); ("content", `String user_msg)];
-    ]);
-    ("temperature", `Float 0.7);
-    ("max_tokens", `Int config.llm_max_tokens);
+  let messages : Llm_provider.Types.message list = [
+    { role = User; content = [Text user_msg]; name = None; tool_call_id = None };
   ] in
-  let body = Yojson.Safe.to_string payload in
-  let url = config.llm_url in
-  let timeout_str = Printf.sprintf "%.0f" config.llm_timeout_sec in
-  Log.Server.info "research: calling LLM at %s (timeout=%ss)" url timeout_str;
-  try
-    let auth_headers =
-      if config.llm_api_key <> "" then
-        [ "-H"; Printf.sprintf "Authorization: Bearer %s" config.llm_api_key ]
-      else []
-    in
-    let argv =
-      [ "curl"; "-s"; "-X"; "POST"; url;
-        "-H"; "Content-Type: application/json" ]
-      @ auth_headers
-      @ [ "-d"; body; "--max-time"; timeout_str ]
-    in
-    let status, stdout =
-      Process_eio.run_argv_with_status ~timeout_sec:(config.llm_timeout_sec +. 10.0) argv
-    in
-    let exit_code = match status with Unix.WEXITED c -> c | _ -> 1 in
-    if String.length (String.trim stdout) = 0 then begin
-      Log.Server.warn "research: LLM returned empty response (exit=%d, slots likely busy)" exit_code;
+  Log.Server.info "research: calling LLM via OAS cascade '%s' (timeout=%ds)"
+    config.cascade_name config.timeout_sec;
+  match
+    Llm_provider.Cascade_config.complete_named ~sw ~net ~clock
+      ~name:config.cascade_name
+      ~defaults:config.cascade_defaults
+      ~messages
+      ~system_prompt:config.system_prompt
+      ~temperature:0.7
+      ~max_tokens:config.max_tokens
+      ~timeout_sec:config.timeout_sec
+      ()
+  with
+  | Ok resp ->
+    let content = Llm_provider.Cascade_config.text_of_response resp in
+    if String.length (String.trim content) = 0 then begin
+      Log.Server.warn "research: LLM returned empty content";
       None
-    end else begin
-      let json = Yojson.Safe.from_string stdout in
-      let open Yojson.Safe.Util in
-      (* Check for API error response *)
-      match member "error" json with
-      | `Null ->
-        let content = json |> member "choices" |> index 0
-          |> member "message" |> member "content" |> to_string in
-        parse_hypothesis content
-      | err ->
-        Log.Server.warn "research: LLM API error: %s" (Yojson.Safe.to_string err);
-        None
-    end
-  with exn ->
-    Log.Server.warn "research: LLM call failed: %s" (Printexc.to_string exn);
+    end else
+      parse_hypothesis content
+  | Error err ->
+    let msg = match err with
+      | Llm_provider.Http_client.HttpError { code; _ } ->
+        Printf.sprintf "HTTP %d" code
+      | Llm_provider.Http_client.NetworkError { message } -> message
+    in
+    Log.Server.warn "research: LLM cascade failed: %s" msg;
     None
 
 (** Create an isolated worktree for the experiment. *)
@@ -332,12 +315,12 @@ let log_result ~(results_file : string) ~(entry : experiment_entry) : unit =
   with exn -> close_out_noerr oc; raise exn)
 
 (** Run a single experiment iteration. *)
-let run_experiment ~(config : Research_config.t)
+let run_experiment ~sw ~net ~clock ~(config : Research_config.t)
     ~context ~history ~experiment_id : experiment_entry option =
   Log.Server.info "research: experiment %s — generating hypothesis" experiment_id;
 
   (* 1. Generate hypothesis *)
-  match generate_hypothesis ~config ~context ~history with
+  match generate_hypothesis ~sw ~net ~clock ~config ~context ~history with
   | None ->
     Log.Server.warn "research: no hypothesis generated, skipping";
     None
@@ -416,7 +399,7 @@ let run_experiment ~(config : Research_config.t)
        Some entry)
 
 (** Run the full research loop for N iterations. *)
-let run ~(config : Research_config.t) : experiment_entry list =
+let run ~sw ~net ~clock ~(config : Research_config.t) : experiment_entry list =
   Log.Server.info "research: starting loop (target=%s, max_iter=%d)"
     config.repo.path config.max_iterations;
 
@@ -425,7 +408,7 @@ let run ~(config : Research_config.t) : experiment_entry list =
 
   for i = 0 to config.max_iterations - 1 do
     let experiment_id = Printf.sprintf "%d-%03d" (int_of_float (Unix.gettimeofday ())) i in
-    match run_experiment ~config ~context ~history:!history ~experiment_id with
+    match run_experiment ~sw ~net ~clock ~config ~context ~history:!history ~experiment_id with
     | None -> ()
     | Some entry ->
       history := !history @ [ entry ];

@@ -337,10 +337,39 @@ let handle_subscribe
     with End_of_file -> ());
     close_in_noerr ic
   end;
-  (* The stream stays open for future events.
-     In a production implementation, this would hook into the SSE broadcast
-     mechanism to push real-time events. For now, close after backlog replay. *)
-  Grpc_eio.Stream.close stream;
+  (* Hook into SSE broadcast mechanism for real-time event push.
+     External subscriber receives formatted SSE event strings on every
+     Sse.broadcast/broadcast_to call, converts them to gRPC Event messages,
+     and pushes into the gRPC response stream. *)
+  let sub_id = Printf.sprintf "grpc-subscribe-%s-%Ld"
+    req.agent_name (now_ms ()) in
+  let seq_counter = Atomic.make (Int64.to_int req.since_seq + 1) in
+  let stream_closed = Atomic.make false in
+  Sse.subscribe_external ~id:sub_id ~callback:(fun sse_event ->
+    if Atomic.get stream_closed then ()
+    else begin
+      let seq = Int64.of_int (Atomic.fetch_and_add seq_counter 1) in
+      let event = T.Event.{
+        seq;
+        event_type = "sse_broadcast";
+        source_agent = "server";
+        timestamp_ms = now_ms ();
+        payload_json = sse_event;
+      } in
+      try Grpc_eio.Stream.add stream (T.Event.to_bytes event)
+      with
+      | Eio.Cancel.Cancelled _ ->
+        Atomic.set stream_closed true;
+        Sse.unsubscribe_external sub_id
+      | _exn ->
+        Atomic.set stream_closed true;
+        Sse.unsubscribe_external sub_id
+    end
+  );
+  (* Stream stays open; will be closed when the gRPC connection drops
+     or the server shuts down. The Grpc_eio runtime calls Stream.close
+     when the client disconnects, which is fine -- the subscriber callback
+     guards against writing to a closed stream via [stream_closed]. *)
   stream
 
 (** {1 Service Construction} *)

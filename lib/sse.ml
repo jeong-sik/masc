@@ -249,6 +249,60 @@ let client_matches_target target (client : client) =
   | Observers -> client.kind = Observer
   | Coordinators -> client.kind = Coordinator
 
+(** {1 External Subscriber Hook}
+
+    Allows non-SSE consumers (e.g. gRPC Subscribe streams) to receive
+    broadcast events without registering as an SSE client.  Subscribers
+    are called synchronously after SSE fan-out completes, receiving the
+    formatted SSE event string. *)
+
+type external_subscriber = {
+  sub_id: string;
+  callback: string -> unit;
+}
+
+let external_subscribers : (string, external_subscriber) Hashtbl.t = Hashtbl.create 8
+let ext_sub_mutex = Eio.Mutex.create ()
+
+let with_ext_sub_rw f =
+  try Eio.Mutex.use_rw ~protect:true ext_sub_mutex f
+  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
+let with_ext_sub_ro f =
+  try Eio.Mutex.use_ro ext_sub_mutex f
+  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
+(** Register an external subscriber that receives formatted SSE events
+    on every broadcast.  The [callback] must not block (use best-effort). *)
+let subscribe_external ~id ~callback =
+  with_ext_sub_rw (fun () ->
+    Hashtbl.replace external_subscribers id { sub_id = id; callback })
+
+(** Remove a previously registered external subscriber. *)
+let unsubscribe_external id =
+  with_ext_sub_rw (fun () ->
+    Hashtbl.remove external_subscribers id)
+
+(** Number of external subscribers (for diagnostics). *)
+let external_subscriber_count () =
+  with_ext_sub_ro (fun () ->
+    Hashtbl.length external_subscribers)
+
+(** Fan out an event string to all external subscribers. *)
+let notify_external_subscribers event =
+  let snapshot =
+    with_ext_sub_ro (fun () ->
+      Hashtbl.fold (fun _ v acc -> v :: acc) external_subscribers [])
+  in
+  List.iter (fun (sub : external_subscriber) ->
+    try sub.callback event
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Misc.warn "External subscriber %s failed: %s"
+        sub.sub_id (Printexc.to_string exn)
+  ) snapshot
+
 (** Internal broadcast implementation shared by [broadcast] and [broadcast_to].
     Pushes the formatted event string into each matching client's
     [event_stream].  The registry read-lock is held only for the Hashtbl
@@ -258,7 +312,10 @@ let client_matches_target target (client : client) =
     [Eio.Stream.add] on a bounded (capacity 1024) stream returns
     immediately as long as the stream is not full.  The per-client drain
     fiber (see [pop]) delivers events to the transport writer
-    independently, so broadcast is decoupled from per-connection I/O. *)
+    independently, so broadcast is decoupled from per-connection I/O.
+
+    After SSE fan-out, external subscribers (gRPC streams, etc.) are
+    also notified with the same formatted event string. *)
 let broadcast_impl target json =
   let data = Yojson.Safe.to_string json in
   let current_event_id = Atomic.get event_counter + 1 in
@@ -286,7 +343,9 @@ let broadcast_impl target json =
     end
   ) clients_snapshot;
   (* Remove failed connections *)
-  List.iter (fun sid -> unregister sid) !failed
+  List.iter (fun sid -> unregister sid) !failed;
+  (* Notify external subscribers (gRPC streams, etc.) *)
+  notify_external_subscribers event
 
 (** Broadcast event to all connected clients (backward-compatible). *)
 let broadcast json = broadcast_impl All json

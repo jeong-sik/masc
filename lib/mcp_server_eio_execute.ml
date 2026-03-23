@@ -400,7 +400,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   (* Dispatch a single module by tag — creates only that module's context *)
   let dispatch_by_tag (tag : Tool_dispatch.module_tag) : (bool * string) option =
-    match tag with
+    match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
+    | Some blocked -> Some (Tool_result.to_legacy blocked)
+    | None -> match tag with
     | Mod_plan ->
         Tool_plan.dispatch { config } ~name ~args:arguments
     | Mod_run ->

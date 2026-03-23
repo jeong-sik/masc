@@ -7,6 +7,8 @@
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Mcp = Masc_mcp.Mcp_server
 module Config = Masc_mcp.Config
+module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Tool_result = Masc_mcp.Tool_result
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
@@ -2357,6 +2359,40 @@ let test_execute_tool_help_tool () =
     Yojson.Safe.Util.(json |> member "name" |> to_string);
   cleanup_dir base_path
 
+let test_execute_tool_tag_dispatch_respects_pre_hooks () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Tool_dispatch.clear_hooks ();
+      cleanup_dir base_path)
+    (fun () ->
+      Tool_dispatch.clear_hooks ();
+      Tool_dispatch.register_pre_hook
+        (fun ~name ~args:_ ->
+          if String.equal name "masc_tool_help" then
+            Some
+              {
+                Tool_result.success = false;
+                data = `String "blocked-by-pre-hook";
+                tool_name = name;
+                duration_ms = 0.0;
+              }
+          else None);
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let room_path = Masc_mcp.Room.masc_dir state.room_config in
+      let _ = Config.switch_mode room_path Mode.Full in
+      let ok, msg =
+        Mcp_eio.execute_tool_eio ~sw ~clock state ~name:"masc_tool_help"
+          ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
+      in
+      Alcotest.(check bool) "pre-hook blocks tagged dispatch" false ok;
+      Alcotest.(check string) "blocked message returned" "blocked-by-pre-hook" msg)
+
 (* ===== Test Suites ===== *)
 
 let state_tests = [
@@ -2409,6 +2445,8 @@ let eio_tests = [
   "handle resources/subscribe roundtrip", `Quick,
     test_handle_request_resources_subscribe_roundtrip;
   "execute masc_tool_help", `Quick, test_execute_tool_help_tool;
+  "execute tag dispatch respects pre-hooks", `Quick,
+    test_execute_tool_tag_dispatch_respects_pre_hooks;
   "handle tools/list mdal descriptions", `Quick,
     test_handle_request_tools_list_mdal_descriptions;
   "handle tools/list filters requested names", `Quick,

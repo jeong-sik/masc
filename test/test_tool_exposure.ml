@@ -56,6 +56,27 @@ let () =
                 Alcotest.failf
                   "dead passthrough entries (no matching schema): %s"
                   (String.concat ", " dead));
+          test_case "agent passthrough omits operator and diagnostics" `Quick
+            (fun () ->
+              let names = Agent_tool_surfaces.spawned_agent_public_tool_names in
+              let banned =
+                [
+                  "masc_tool_stats";
+                  "masc_tool_admin_snapshot";
+                  "masc_keeper_tool_catalog";
+                  "masc_operator_snapshot";
+                  "masc_operator_action";
+                  "masc_operator_confirm";
+                  "masc_team_session_compare";
+                  "masc_team_session_prove";
+                  "masc_heartbeat_list";
+                ]
+              in
+              List.iter
+                (fun name ->
+                  check bool (name ^ " omitted from public agent surface") false
+                    (List.mem name names))
+                banned);
         ] );
       ( "tier_inclusion",
         [

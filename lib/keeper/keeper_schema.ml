@@ -67,7 +67,7 @@ let resident_schemas : tool_schema list = [
         ]);
         ("trigger_mode", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "legacy"; `String "explicit_only"]);
+          ("enum", `List [`String "explicit_only"]);
         ]);
         ("mention_targets", `Assoc [
           ("type", `String "array");
@@ -161,8 +161,8 @@ let resident_schemas : tool_schema list = [
         ]);
         ("trigger_mode", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "legacy"; `String "explicit_only"]);
-          ("description", `String "How autonomous room activity is triggered. 'explicit_only' disables heuristic triggers and only reacts to exact direct mentions.");
+          ("enum", `List [`String "explicit_only"]);
+          ("description", `String "Keeper trigger mode. Only 'explicit_only' is supported and it reacts to exact direct mentions.");
         ]);
         ("mention_targets", `Assoc [
           ("type", `String "array");
@@ -179,7 +179,7 @@ let resident_schemas : tool_schema list = [
         ]);
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");
-          ("description", `String "If true, keeper can send proactive check-ins after idle periods (default: true).");
+          ("description", `String "If true, keeper can send proactive check-ins after idle periods. Defaults to false unless explicitly enabled.");
         ]);
         ("proactive_idle_sec", `Assoc [
           ("type", `String "integer");
@@ -716,7 +716,7 @@ let housekeep_schemas : tool_schema list = [
       ("properties", `Assoc [
         ("category", `Assoc [
           ("type", `String "string");
-          ("description", `String "Filter by category: keeper_meta, keeper_metrics_legacy, keeper_memory, keeper_policy, keeper_feedback, jsonl_data, dated_split, events, other. Omit for all.");
+          ("description", `String "Filter by category: keeper_meta, keeper_metrics_single_file, keeper_memory, keeper_policy, keeper_feedback, jsonl_data, dated_split, events, other. Omit for all.");
         ]);
         ("min_age_days", `Assoc [
           ("type", `String "number");

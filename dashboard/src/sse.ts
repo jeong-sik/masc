@@ -160,8 +160,8 @@ export function connectSSE(): void {
     if (wasDisconnected) {
       reconnectCount.value++
       // Refetch all data after reconnection so counts don't stay at 0
-      void refreshDashboard().catch(() => {})
-      void refreshRoomTruth().catch(() => {})
+      void refreshDashboard({ force: true }).catch(() => {})
+      void refreshRoomTruth({ force: true }).catch(() => {})
     }
   }
 

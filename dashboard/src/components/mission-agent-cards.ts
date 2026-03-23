@@ -3,6 +3,7 @@ import { extractAgentInfo } from './common/agent-info'
 import { linkedRecentToolsEmptyState, observedToolsEmptyState, toolAuditStateLabel } from './common/tool-audit'
 import { StatCell } from './common/stat-cell'
 import { ActionBar, ActionBtn } from './common/action-bar'
+import { StatusChip } from './common/status-chip'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
 import { workflowActionLabel } from '../workflow-context'
@@ -44,7 +45,7 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
               <span>${info.model !== info.nickname ? `${info.model} · ` : ''}${info.nickname}</span>
             </div>
           </div>
-          <span class="cmd-chip rounded-full ${toneClass(row.brief.status ?? row.agent?.status)}">${statusLabel(row.brief.status ?? row.agent?.status)}</span>
+          <${StatusChip} label=${statusLabel(row.brief.status ?? row.agent?.status)} tone=${toneClass(row.brief.status ?? row.agent?.status)} />
         </div>
 
         <div class="flex flex-wrap gap-3 text-[var(--text-body)] text-[13px] leading-snug">
@@ -117,7 +118,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
               ${row.keeper?.koreanName ? html`<span>${row.keeper.koreanName}</span>` : null}
             </div>
           </div>
-          <span class="cmd-chip rounded-full ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
+          <${StatusChip} label=${statusLabel(row.brief.status ?? row.keeper?.status)} tone=${toneClass(row.brief.status ?? row.keeper?.status)} />
         </div>
 
         <div class="flex flex-wrap gap-3 text-[var(--text-body)] text-[13px] leading-snug">
@@ -159,9 +160,7 @@ export function InternalSignalCard({ item }: { item: DashboardMissionInternalSig
   return html`
     <article class="p-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-3 ${toneClass(item.severity)}">
       <div class="flex justify-between gap-3 items-start flex-wrap">
-        <span class="cmd-chip rounded-full ${toneClass(item.severity)}">
-          ${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? '내부 신호'}
-        </span>
+        <${StatusChip} label=${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? '내부 신호'} tone=${toneClass(item.severity)} />
         <span class="text-[var(--text-muted)] text-[13px]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
       </div>
       <p class="m-0 text-[rgba(255,255,255,0.8)] leading-normal">${item.summary}</p>

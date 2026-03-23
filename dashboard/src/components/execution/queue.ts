@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import { TimeAgo } from '../common/time-ago'
 import type { DashboardExecutionQueueItem } from '../../types'
 import {
@@ -33,7 +34,7 @@ export function QueueCard({ item, selected }: { item: DashboardExecutionQueueIte
           <div class="text-[var(--text-muted)] text-[13px]">${item.kind === 'session' ? item.target_id : item.linked_session_id ?? item.target_id}</div>
           <div class="mission-card rounded-xl-title">${item.summary}</div>
         </div>
-        <span class="cmd-chip rounded-full ${terminal ? 'muted' : toneClass(item.severity)}">${statusLabel(item.status ?? item.severity)}</span>
+        <${StatusChip} label=${statusLabel(item.status ?? item.severity)} tone=${terminal ? 'muted' : toneClass(item.severity)} />
       </div>
       <div class="mission-card rounded-xl-meta">
         <span>${queueKindLabel(item.kind)}</span>

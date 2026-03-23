@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import type { CommandPlaneHelpPath } from '../../types'
 import {
   commandPlaneDetailError,
@@ -200,7 +201,7 @@ function GuidedPanel() {
         <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card highlight mb-3">
           <div class="flex justify-between gap-3 items-start">
             <strong>${nextStep?.title ?? nextTool}</strong>
-            <span class="cmd-chip rounded-full ok">${nextTool}</span>
+            <${StatusChip} label=${nextTool} tone="ok" />
           </div>
           <p>${nextStep?.summary ?? '지금 막고 있는 병목을 풀기 위해 canonical flow의 다음 tool부터 실행합니다.'}</p>
           ${nextStep?.success_signals?.length
@@ -216,7 +217,7 @@ function GuidedPanel() {
               <div>
                 <div class="flex justify-between gap-3 items-start">
                   <strong>${item.title}</strong>
-                  <span class="cmd-chip rounded-full ${toneClass(item.tone)}">${item.tone}</span>
+                  <${StatusChip} label=${item.tone} tone=${toneClass(item.tone)} />
                 </div>
                 <p>${item.detail}</p>
               </div>
@@ -230,7 +231,7 @@ function GuidedPanel() {
               <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card warn">
                 <div class="flex justify-between gap-3 items-start">
                   <strong>자주 막히는 지점</strong>
-                  <span class="cmd-chip rounded-full warn">${pitfalls.length}</span>
+                  <${StatusChip} label=${String(pitfalls.length)} tone="warn" />
                 </div>
                 <div class="flex flex-col gap-3">
                   ${pitfalls.map(pitfall => html`
@@ -260,7 +261,7 @@ function GuidedPanel() {
                     <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card">
                       <div class="flex justify-between gap-3 items-start">
                         <strong>${path.title}</strong>
-                        <span class="cmd-chip rounded-full">${path.id}</span>
+                        <${StatusChip} label=${path.id} />
                       </div>
                       <p>${path.summary}</p>
                       <div class="cmd-card rounded-xl-sub">${path.when_to_use}</div>

@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import { TimeAgo } from '../common/time-ago'
 import type { DashboardExecutionOperationBrief } from '../../types'
 import {
@@ -30,7 +31,7 @@ export function OperationCard({ brief, selected }: { brief: DashboardExecutionOp
           <div class="text-[var(--text-muted)] text-[13px]">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
           <div class="mission-card rounded-xl-title">${brief.objective}</div>
         </div>
-        <span class="cmd-chip rounded-full ${terminal ? 'muted' : toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>
+        <${StatusChip} label=${statusLabel(brief.status)} tone=${terminal ? 'muted' : toneClass(brief.blocker_summary ? 'warn' : brief.status)} />
       </div>
       <div class="mission-card rounded-xl-meta">
         ${brief.stage ? html`<span>단계 · ${brief.stage}</span>` : null}

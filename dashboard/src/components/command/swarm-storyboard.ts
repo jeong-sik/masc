@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { ActionButton } from '../common/button'
+import { StatusChip } from '../common/status-chip'
 import type {
   CommandPlaneRunResolutionRecommendation,
   CommandPlaneRunResolutionState,
@@ -52,9 +53,9 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
           </div>
         </div>
         <div class="cmd-tag rounded-full-row">
-          <span class="cmd-chip rounded-full ${toneClass(tone)}">${lane.phase}</span>
-          <span class="cmd-chip rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
-          <span class="cmd-chip rounded-full">${relativeTime(lane.last_movement_at)}</span>
+          <${StatusChip} label=${lane.phase} tone=${toneClass(tone)} />
+          <${StatusChip} label=${lane.motion_state} tone=${toneClass(tone)} />
+          <${StatusChip} label=${relativeTime(lane.last_movement_at)} />
         </div>
       </div>
       <p class="mt-3 mb-0 text-[var(--frost-72)] leading-[1.5]">${lane.movement_reason}</p>
@@ -92,7 +93,7 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
       ${lane.hard_flags.length > 0
         ? html`
             <div class="flex flex-wrap gap-1 mt-1">
-              ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<span class="cmd-chip rounded-full ${toneClass(flag.severity)}">${flag.code}</span>`)}
+              ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<${StatusChip} label=${flag.code} tone=${toneClass(flag.severity)} />`)}
             </div>
           `
         : null}
@@ -113,8 +114,8 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
         return html`
           <article class="swarm-story-card rounded-xl ${toneClass(tone)}">
             <div class="swarm-story-topline flex justify-between gap-1.5 flex-wrap">
-              <span class="cmd-chip rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
-              <span class="cmd-chip rounded-full">${lane.phase}</span>
+              <${StatusChip} label=${lane.motion_state} tone=${toneClass(tone)} />
+              <${StatusChip} label=${lane.phase} />
             </div>
             <strong class="text-[var(--text-near-white)] text-lg leading-[1.3]">${lane.label}</strong>
             <p class="m-0 text-[var(--frost-72)] leading-[1.5]">${lane.current_step}</p>
@@ -233,9 +234,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
     <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${toneClass(tone)}">
       <div class="flex justify-between gap-3 items-start">
         <strong>Run Resolution</strong>
-        <span class="cmd-chip rounded-full ${toneClass(tone)}">
-          ${runResolutionLabel(resolution?.status ?? recommendation?.recommended_kind ?? null)}
-        </span>
+        <${StatusChip} label=${runResolutionLabel(resolution?.status ?? recommendation?.recommended_kind ?? null)} tone=${toneClass(tone)} />
       </div>
       <p>
         ${resolution?.status === 'abandoned'
@@ -265,7 +264,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
             <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card warn">
               <div class="flex justify-between gap-3 items-start">
                 <strong>확인 대기</strong>
-                <span class="cmd-chip rounded-full warn">${pendingConfirm.confirm_token}</span>
+                <${StatusChip} label=${pendingConfirm.confirm_token} tone="warn" />
               </div>
               ${pendingConfirm.preview ? html`<pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[13px] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${previewText(pendingConfirm.preview)}</pre>` : null}
               <div class="flex gap-3 flex-wrap mt-3">

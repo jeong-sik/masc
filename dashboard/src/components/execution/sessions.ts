@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import { TimeAgo } from '../common/time-ago'
 import type { DashboardExecutionSessionBrief } from '../../types'
 import {
@@ -33,7 +34,7 @@ export function SessionCard({ brief, selected }: { brief: DashboardExecutionSess
           <div class="text-[var(--text-muted)] text-[13px]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           <div class="mission-card rounded-xl-title">${brief.goal}</div>
         </div>
-        <span class="cmd-chip rounded-full ${terminal ? 'muted' : toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
+        <${StatusChip} label=${statusLabel(brief.status)} tone=${terminal ? 'muted' : toneClass(brief.health ?? brief.status)} />
       </div>
       <div class="mission-card rounded-xl-meta">
         <span>건강도 · ${statusLabel(brief.health ?? 'ok')}</span>

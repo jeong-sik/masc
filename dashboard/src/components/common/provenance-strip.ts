@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { StatusChip } from './status-chip'
 
 type ProvenanceItem = {
   kind?: string | null
@@ -25,25 +26,6 @@ function provenanceTone(value?: string | null): string {
   }
 }
 
-function provenanceDetail(value?: string | null): string {
-  switch (normalizeProvenance(value)) {
-    case 'truth':
-      return '직접 수집한 source of truth'
-    case 'derived':
-      return 'truth를 바탕으로 계산한 read-model'
-    case 'fallback':
-      return '직접 truth가 비어 있을 때 쓰는 대체 경로'
-    case 'recorded':
-      return '이미 기록된 결정 또는 증거'
-    case 'narrative':
-      return 'MODEL 해석 레이어'
-    case 'judgment':
-      return '판단 레이어'
-    default:
-      return '근거 계층'
-  }
-}
-
 function provenanceLabel(item: ProvenanceItem): string {
   const explicit = (item.label ?? '').trim()
   if (explicit) return explicit
@@ -53,11 +35,7 @@ function provenanceLabel(item: ProvenanceItem): string {
 export function ProvenanceChip({ item }: { item: ProvenanceItem }) {
   const label = provenanceLabel(item)
   const tone = provenanceTone(item.kind)
-  return html`
-    <span class="cmd-chip rounded-full ${tone}" title=${provenanceDetail(item.kind)}>
-      ${label}
-    </span>
-  `
+  return html`<${StatusChip} label=${label} tone=${tone} />`
 }
 
 export function ProvenanceStrip({

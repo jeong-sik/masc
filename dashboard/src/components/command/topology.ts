@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import type {
   CommandPlaneAlert,
   CommandPlaneTraceEvent,
@@ -77,12 +78,12 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
         <div>
           <div class="flex justify-between items-start flex-wrap gap-2">
             <strong>${node.unit.label}</strong>
-            <span class="cmd-chip rounded-full">${unitKindLabel(node.unit.kind)}</span>
-            <span class="cmd-chip rounded-full ${toneClass(node.health)}">${node.health ?? 'ok'}</span>
-            <span class="cmd-chip rounded-full ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
-            <span class="cmd-chip rounded-full ${activeOps > 0 ? 'ok' : 'warn'}">${connectionLabel}</span>
-            ${policy?.frozen ? html`<span class="cmd-chip rounded-full warn">동결됨</span>` : null}
-            ${policy?.kill_switch ? html`<span class="cmd-chip rounded-full bad">킬 스위치</span>` : null}
+            <${StatusChip} label=${unitKindLabel(node.unit.kind)} />
+            <${StatusChip} label=${node.health ?? 'ok'} tone=${toneClass(node.health)} />
+            <${StatusChip} label=${topologySourceLabel(source)} tone=${topologySourceTone(source)} />
+            <${StatusChip} label=${connectionLabel} tone=${activeOps > 0 ? 'ok' : 'warn'} />
+            ${policy?.frozen ? html`<${StatusChip} label="동결됨" tone="warn" />` : null}
+            ${policy?.kill_switch ? html`<${StatusChip} label="킬 스위치" tone="bad" />` : null}
           </div>
           <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[13px]">
             <span>ID ${node.unit.unit_id}</span>
@@ -113,7 +114,7 @@ function AlertCard({ alert }: { alert: CommandPlaneAlert }) {
     <article class="cmd-alert ${toneClass(alert.severity)} ${alertBorderTone(toneClass(alert.severity))}">
       <div class="cmd-card rounded-xl-head">
         <strong>${alert.title ?? alert.kind ?? alert.alert_id}</strong>
-        <span class="cmd-chip rounded-full ${toneClass(alert.severity)}">${alert.severity ?? 'warn'}</span>
+        <${StatusChip} label=${alert.severity ?? 'warn'} tone=${toneClass(alert.severity)} />
       </div>
       <div class="flex justify-between items-start">
         <span>${alert.scope_type ?? '범위'}:${alert.scope_id ?? '정보 없음'}</span>
@@ -130,8 +131,8 @@ export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
       <div class="min-w-0 [overflow-wrap:anywhere] break-words">
         <div class="flex justify-between items-start">
           <strong>${event.event_type}</strong>
-          <span class="cmd-chip rounded-full">${event.source ?? 'control_plane'}</span>
-          <span class="cmd-chip rounded-full">${relativeTime(event.timestamp)}</span>
+          <${StatusChip} label=${event.source ?? 'control_plane'} />
+          <${StatusChip} label=${relativeTime(event.timestamp)} />
         </div>
         <div class="cmd-card rounded-xl-sub">
           ${event.operation_id ?? event.trace_id}
@@ -160,9 +161,9 @@ export function TopologySurface() {
         ? html`
             <div class="mb-4 p-4 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
               <div class="flex justify-between items-start flex-wrap gap-2">
-                <span class="cmd-chip rounded-full ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
-                <span class="cmd-chip rounded-full">관리 유닛 ${managedUnits}</span>
-                <span class="cmd-chip rounded-full ${activeOps > 0 ? 'ok' : 'warn'}">활성 작전 ${activeOps}</span>
+                <${StatusChip} label=${topologySourceLabel(source)} tone=${topologySourceTone(source)} />
+                <${StatusChip} label=${`관리 유닛 ${managedUnits}`} />
+                <${StatusChip} label=${`활성 작전 ${activeOps}`} tone=${activeOps > 0 ? 'ok' : 'warn'} />
               </div>
               <p>${topologySourceExplanation(source)}</p>
             </div>

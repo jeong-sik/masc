@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { StatusChip } from './common/status-chip'
 import type {
   DashboardProofActorContribution,
   DashboardProofArtifactRef,
@@ -169,9 +170,7 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
             <span>${lastSeen ? relativeTime(lastSeen) : '기록 없음'}</span>
           </div>
         </div>
-        <span class="cmd-chip rounded-full ${actorActivityTone(item)}">
-          ${actorActivityLabel(item)}
-        </span>
+        <${StatusChip} label=${actorActivityLabel(item)} tone=${actorActivityTone(item)} />
       </div>
       <div class="grid gap-1">
         <span>${actorActivityMeta(item)}</span>
@@ -225,7 +224,7 @@ export function ArtifactRow({ item }: { item: DashboardProofArtifactRef }) {
             <span>${compactPath(item.path)}</span>
           </div>
         </div>
-        <span class="cmd-chip rounded-full ${item.exists ? 'ok' : 'warn'}">${item.exists ? '존재함' : '없음'}</span>
+        <${StatusChip} label=${item.exists ? '존재함' : '없음'} tone=${item.exists ? 'ok' : 'warn'} />
       </div>
     </article>
   `

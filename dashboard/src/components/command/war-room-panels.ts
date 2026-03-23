@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { StatusChip } from '../common/status-chip'
 import { displayStatus, relativeTime, sessionStatusTone, toneClass, toneBorder } from './helpers'
 import { truncate } from '../../lib/truncate'
 
@@ -84,7 +85,7 @@ export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
           <strong>${worker.name}</strong>
           <div class="cmd-card rounded-xl-sub">${worker.role} · ${worker.lane}</div>
         </div>
-        <span class="cmd-chip rounded-full ${toneClass(sessionStatusTone(worker.status))}">${displayStatus(worker.status)}</span>
+        <${StatusChip} label=${displayStatus(worker.status)} tone=${toneClass(sessionStatusTone(worker.status))} />
       </div>
       <div class="cmd-card rounded-xl-grid">
         <span>출처</span><span>${warRoomSourceLabel(worker.source)}</span>
@@ -110,7 +111,7 @@ export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
           <strong>${item.name}</strong>
           <div class="cmd-card rounded-xl-sub">${item.role} · ${item.source}</div>
         </div>
-        <span class="cmd-chip rounded-full ${item.tone}">${item.status}</span>
+        <${StatusChip} label=${item.status} tone=${item.tone} />
       </div>
       <div class="cmd-card rounded-xl-grid">
         <span>현재 과업</span><span>${item.task}</span>
@@ -131,7 +132,7 @@ export function WarRoomFeedCard({ item }: { item: WarRoomFeedItem }) {
       <div class="min-w-0 [overflow-wrap:anywhere] break-words">
         <div class="flex justify-between items-start">
           <strong>${item.title}</strong>
-          <span class="cmd-chip rounded-full ${item.tone}">${item.timestamp ? relativeTime(item.timestamp) : item.source}</span>
+          <${StatusChip} label=${item.timestamp ? relativeTime(item.timestamp) : item.source} tone=${item.tone} />
         </div>
         <div class="cmd-card rounded-xl-sub">${item.meta}</div>
       </div>

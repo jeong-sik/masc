@@ -4,6 +4,7 @@ import { StatCell } from './common/stat-cell'
 import { TagBadge } from './common/tag-badge'
 import { ListItem } from './common/list-item'
 import { ActionBar, ActionBtn } from './common/action-bar'
+import { StatusChip } from './common/status-chip'
 import { openAgentDetail } from './agent-detail'
 import { workflowActionLabel } from '../workflow-context'
 import type {
@@ -49,7 +50,7 @@ export function AttentionCard({
             <strong>${item.summary}</strong>
             <div class="text-[var(--text-muted)] text-[13px] mt-1">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</div>
           </div>
-          <span class="cmd-chip rounded-full ${toneClass(action?.severity ?? item.severity)}">${action ? actionModeLabel(action) : item.severity}</span>
+          <${StatusChip} label=${action ? actionModeLabel(action) : item.severity} tone=${toneClass(action?.severity ?? item.severity)} />
         </div>
 
         <div class="grid grid-cols-2 gap-3">

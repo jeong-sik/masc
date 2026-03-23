@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { ActionButton } from '../common/button'
 import { CARD_STANDARD } from '../common/card'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type {
   ChainHistoryEventSummary,
@@ -122,7 +123,7 @@ function ChainOperationListItem(
           <strong>${overlay.operation.objective}</strong>
           <div class="cmd-card rounded-xl-sub">${overlay.operation.operation_id}</div>
         </div>
-        <span class="cmd-chip rounded-full ${chainStatusTone(chain?.status)}">${chain?.status ?? overlay.operation.status}</span>
+        <${StatusChip} label=${chain?.status ?? overlay.operation.status} tone=${chainStatusTone(chain?.status)} />
       </div>
       <div class="cmd-tag rounded-full-row">
         <span class="cmd-tag rounded-full">${chain?.kind ?? 'chain_dsl'}</span>
@@ -139,7 +140,7 @@ function ChainHistoryRow({ item }: { item: ChainHistoryEventSummary }) {
     <article class="cmd-chain-history-row text-red-300">
       <div class="flex justify-between gap-3 items-start">
         <strong>${item.chain_id ?? '알 수 없는 체인'}</strong>
-        <span class="cmd-chip rounded-full ${chainStatusTone(item.event)}">${item.event}</span>
+        <${StatusChip} label=${item.event} tone=${chainStatusTone(item.event)} />
       </div>
       <div class="cmd-card rounded-xl-sub">${relativeTime(item.timestamp)}</div>
       <div class="cmd-card rounded-xl-sub">${historySummary(item)}</div>
@@ -152,7 +153,7 @@ function ChainRunNodeRow({ node }: { node: CommandPlaneChainRunNode }) {
     <article class="p-3 rounded-[10px] bg-[rgba(9,12,20,0.5)] border border-solid border-[var(--white-6)]">
       <div class="flex justify-between gap-3 items-start">
         <strong>${node.id}</strong>
-        <span class="cmd-chip rounded-full ${chainStatusTone(node.status)}">${node.status ?? '확인 필요'}</span>
+        <${StatusChip} label=${node.status ?? '확인 필요'} tone=${chainStatusTone(node.status)} />
       </div>
       <div class="cmd-card rounded-xl-sub">
         ${node.type ?? '노드'}
@@ -177,7 +178,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
           <strong>${op.objective}</strong>
           <div class="cmd-card rounded-xl-sub">${op.operation_id}</div>
         </div>
-        <span class="cmd-chip rounded-full ${toneClass(op.status === 'active' ? 'ok' : op.status === 'paused' ? 'warn' : op.status === 'failed' ? 'bad' : 'ok')}">${operationStatusLabel(op.status)}</span>
+        <${StatusChip} label=${operationStatusLabel(op.status)} tone=${toneClass(op.status === 'active' ? 'ok' : op.status === 'paused' ? 'warn' : op.status === 'failed' ? 'bad' : 'ok')} />
       </div>
       <div class="cmd-card rounded-xl-grid">
         <span>유닛</span><span>${card.assigned_unit_label ?? op.assigned_unit_id}</span>
@@ -259,7 +260,7 @@ function DetachmentCard({ card }: { card: CommandPlaneDetachmentCard }) {
           <strong>${detachment.detachment_id}</strong>
           <div class="cmd-card rounded-xl-sub">${card.operation?.objective ?? detachment.operation_id}</div>
         </div>
-        <span class="cmd-chip rounded-full ${toneClass(detachment.status)}">${detachment.status ?? 'active'}</span>
+        <${StatusChip} label=${detachment.status ?? 'active'} tone=${toneClass(detachment.status)} />
       </div>
       <div class="cmd-card rounded-xl-grid">
         <span>유닛</span><span>${card.assigned_unit_label ?? detachment.assigned_unit_id}</span>
@@ -340,7 +341,7 @@ export function ChainsSurface() {
         <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${chainStatusTone(summary?.connection.status)}">
           <div class="flex justify-between gap-3 items-start">
             <strong>native chain 연결</strong>
-            <span class="cmd-chip rounded-full ${chainStatusTone(summary?.connection.status)}">${summary?.connection.status ?? 'disconnected'}</span>
+            <${StatusChip} label=${summary?.connection.status ?? 'disconnected'} tone=${chainStatusTone(summary?.connection.status)} />
           </div>
           <p>${summary?.connection.message ?? '체인 요약은 MASC 프록시를 통해 집계됩니다.'}</p>
           <div class="cmd-card rounded-xl-grid">
@@ -375,7 +376,7 @@ export function ChainsSurface() {
         <div class="flex flex-col gap-3 mt-3.5">
           <div class="flex justify-between gap-3 items-start">
             <strong>최근 이력</strong>
-            <span class="cmd-chip rounded-full">${summary?.recent_history.length ?? 0}</span>
+            <${StatusChip} label=${String(summary?.recent_history.length ?? 0)} />
           </div>
           ${summary && summary.recent_history.length > 0
             ? html`
@@ -399,9 +400,7 @@ export function ChainsSurface() {
                     <strong>${selectedOverlay.operation.objective}</strong>
                     <div class="cmd-card rounded-xl-sub">${selectedOverlay.operation.operation_id}</div>
                   </div>
-                  <span class="cmd-chip rounded-full ${chainStatusTone(selectedOverlay.operation.chain?.status)}">
-                    ${selectedOverlay.operation.chain?.status ?? selectedOverlay.operation.status}
-                  </span>
+                  <${StatusChip} label=${selectedOverlay.operation.chain?.status ?? selectedOverlay.operation.status} tone=${chainStatusTone(selectedOverlay.operation.chain?.status)} />
                 </div>
                 <div class="cmd-card rounded-xl-grid">
                   <span>종류</span><span>${selectedOverlay.operation.chain?.kind ?? 'chain_dsl'}</span>
@@ -421,7 +420,7 @@ export function ChainsSurface() {
                     <div class="mt-3.5 p-4 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
                       <div class="flex justify-between gap-3 items-start">
                         <strong>Mermaid 그래프</strong>
-                        <span class="cmd-chip rounded-full">${selectedOverlay.operation.chain?.chain_id ?? 'graph'}</span>
+                        <${StatusChip} label=${selectedOverlay.operation.chain?.chain_id ?? 'graph'} />
                       </div>
                       <${MermaidGraph} source=${selectedOverlay.mermaid} />
                     </div>
@@ -431,11 +430,9 @@ export function ChainsSurface() {
               <div class="mt-3.5 p-4 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
                 <div class="flex justify-between gap-3 items-start">
                   <strong>실행 상세</strong>
-                  <span class="cmd-chip rounded-full ${run?.success === false ? 'bad' : 'ok'}">
-                    ${run
+                  <${StatusChip} label=${run
                       ? (run.success === false ? '실패' : isPreviewRun ? '미리보기' : '기록됨')
-                      : '대기 중'}
-                  </span>
+                      : '대기 중'} tone=${run?.success === false ? 'bad' : 'ok'} />
                 </div>
                 ${commandPlaneChainRunLoading.value
                   ? html`<${EmptyState} message="실행 상세 불러오는 중…" compact />`

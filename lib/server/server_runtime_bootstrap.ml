@@ -769,7 +769,29 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
-              Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn)))
+              Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn)));
+      (* WebRTC DataChannel transport (opt-in via MASC_WEBRTC_ENABLED=1) *)
+      if Server_webrtc_transport.is_enabled () then (
+        Log.Server.info "WebRTC DataChannel transport enabled";
+        Server_webrtc_transport.set_message_handler
+          (fun peer_id body_str ->
+            Eio.Fiber.fork ~sw (fun () ->
+              try
+                let response_json =
+                  Mcp_eio.handle_request ~clock ~sw
+                    ~mcp_session_id:peer_id state body_str
+                in
+                let response_str = Yojson.Safe.to_string response_json in
+                if response_str <> "null" then
+                  ignore (Server_webrtc_transport.send_to_peer peer_id response_str)
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Server.warn "WebRTC dispatch error %s: %s"
+                  peer_id (Printexc.to_string exn)));
+        Server_webrtc_transport.set_connection_starter
+          (fun peer_id ->
+            Server_webrtc_transport.start_webrtc_connection ~sw ~env peer_id))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

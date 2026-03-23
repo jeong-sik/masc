@@ -263,7 +263,8 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
     in
     let trigger_mode =
-      Safe_ops.json_string ~default:"legacy" "trigger_mode" json |> canonical_trigger_mode
+      Safe_ops.json_string ~default:"explicit_only" "trigger_mode" json
+      |> canonical_trigger_mode
     in
     let mention_targets =
       Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
@@ -670,12 +671,25 @@ let persistent_agent_names ?resident_names config =
       |> List.filter (fun name -> not (List.mem name resident))
       |> List.sort String.compare
 
+let sync_registered_resident_keeper_from_meta config (meta : keeper_meta) :
+    (unit, string) result =
+  match read_resident_keeper config meta.name with
+  | Ok None -> Ok ()
+  | Ok (Some _) -> register_resident_keeper_from_meta config meta
+  | Error e -> Error e
+
 let write_meta config (m : keeper_meta) : (unit, string) result =
   let path = keeper_meta_path config m.name in
   let content = Yojson.Safe.pretty_to_string (meta_to_json m) in
   try
     Fs_compat.save_file path content;
-    Ok ()
+    (match sync_registered_resident_keeper_from_meta config m with
+     | Ok () -> Ok ()
+     | Error e ->
+         Error
+           (Printf.sprintf
+              "meta written but resident sync failed for %s: %s"
+              m.name e))
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "failed to write meta %s: %s" path (Printexc.to_string exn))
 

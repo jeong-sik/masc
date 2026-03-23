@@ -304,6 +304,43 @@ let test_stale_pending_is_reaped () =
         (read_file count_file);
       check bool "pending file removed" false (Sys.file_exists pending_file))
 
+let test_default_cache_dir_shared_across_worktrees () =
+  with_temp_dir "local-review-worktree-cache" (fun dir ->
+      let base_sha, head_sha = init_repo dir in
+      let fake = make_fake_reviewer dir in
+      let count_file = Filename.concat dir "count.txt" in
+      let worktree_dir = Filename.concat dir "wt-review" in
+      ignore
+        (run_shell_ok ~cwd:dir
+           (Printf.sprintf "git worktree add -q %s -b review-cache-branch"
+              (quote worktree_dir)));
+      let env =
+        [
+          ("MASC_LOCAL_REVIEW_COMMAND", fake);
+          ("COUNT_FILE", count_file);
+          ("MASC_LOCAL_REVIEW_CHUNK_BYTES", "20");
+        ]
+      in
+      let cmd = review_cmd (script_path ()) base_sha head_sha in
+      let code1, stdout1, stderr1 = run_shell ~cwd:dir ~env cmd in
+      if code1 <> 0 then
+        failf "root run failed (%d): %s" code1 stderr1;
+      let json1 = parse_json_output stdout1 in
+      let open Yojson.Safe.Util in
+      let chunk_count = json1 |> member "chunk_count" |> to_int in
+      check bool "root run cache miss" false
+        (json1 |> member "cache_hit" |> to_bool);
+      check string "root run reviewer calls" (string_of_int chunk_count)
+        (read_file count_file);
+      let code2, stdout2, stderr2 = run_shell ~cwd:worktree_dir ~env cmd in
+      if code2 <> 0 then
+        failf "worktree run failed (%d): %s" code2 stderr2;
+      let json2 = parse_json_output stdout2 in
+      check bool "worktree run cache hit" true
+        (json2 |> member "cache_hit" |> to_bool);
+      check string "shared cache prevents second reviewer run"
+        (string_of_int chunk_count) (read_file count_file))
+
 let () =
   run "local_review_script"
     [
@@ -314,5 +351,7 @@ let () =
             test_single_flight_reuses_pending_worker;
           test_case "stale pending is reaped" `Quick
             test_stale_pending_is_reaped;
+          test_case "default cache dir shared across worktrees" `Quick
+            test_default_cache_dir_shared_across_worktrees;
         ] );
     ]

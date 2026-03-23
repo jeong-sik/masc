@@ -173,11 +173,10 @@ let init_task_backend () =
 
 let inject_shared_pg_pool () =
   match Board_dispatch.get_pg_pool () with
-  | Some pool ->
-      Council.Archive.set_shared_pool pool;
-      Log.Server.info "PG shared pool injected into council archive"
+  | Some _ ->
+      Log.Server.info "PG shared pool available"
   | None ->
-      Log.Server.info "No PG pool available; council archive will create own pool"
+      Log.Server.info "No PG pool available"
 
 let init_memory_pg_schema () =
   match Board_dispatch.get_pg_pool () with

@@ -39,10 +39,8 @@ let handle_episode_flush ~config ~arguments ~(state : Mcp_server.server_state) ~
         let module U = Yojson.Safe.Util in
         let ep_id = match Json_util.get_string json "ep_id" with Some v -> v | None -> raise Not_found in
 
-        (* Episode DB save removed — Jiphyeon module retired (#2135).
-           Episodes are still persisted as JSONL files. *)
         ignore (sw, state);
-        Log.Misc.info "[EPISODE/FILE] Episode %s recorded to JSONL (DB save disabled)" ep_id;
+        Log.Misc.info "[EPISODE/FILE] Episode %s recorded to JSONL" ep_id;
 
         let processed_dir = Filename.concat base_path ".masc/processed_episodes" in
         Fs_compat.mkdir_p processed_dir;

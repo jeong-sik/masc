@@ -1,5 +1,5 @@
-(** MoE-style MODEL Router for Jiphyeon
-    
+(** MoE-style MODEL Router
+
     Sparse activation: 2-3 agents per query
     Target: 90% small models, 10% large models *)
 

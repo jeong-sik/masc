@@ -83,7 +83,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       let siblings = List.filter (fun (_, _, _) -> true) all_statuses in
 
       let cell_id = cell.Mitosis.id in
-      (* Episode DB query removed — Jiphyeon module retired (#2135). *)
       ignore (sw, state, cell_id);
       let episode_count, recent_episode = (0, None) in
 

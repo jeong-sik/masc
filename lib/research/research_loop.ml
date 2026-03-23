@@ -165,9 +165,17 @@ let history_context (history : experiment_entry list) : string =
     Buffer.contents buf
   end
 
-(** Call LLM via OAS cascade (provider-agnostic). *)
+(** Call LLM via OAS cascade with retry on empty content.
+    GLM reasoning mode can consume all tokens on reasoning, returning empty content.
+    Retry up to 2 times before giving up. *)
 let generate_hypothesis ~sw ~net ~clock ~(config : Research_config.t)
     ~context ~history : hypothesis option =
+  let max_attempts = 3 in
+  let rec try_generate attempt =
+    if attempt >= max_attempts then begin
+      Log.Server.warn "research: LLM returned empty content after %d attempts, giving up" max_attempts;
+      None
+    end else
   let history_text = history_context history in
   let user_msg = Printf.sprintf
     "Here is the repository context:\n\n%s%s\n\n\
@@ -194,8 +202,8 @@ let generate_hypothesis ~sw ~net ~clock ~(config : Research_config.t)
   | Ok resp ->
     let content = Llm_provider.Cascade_config.text_of_response resp in
     if String.length (String.trim content) = 0 then begin
-      Log.Server.warn "research: LLM returned empty content";
-      None
+      Log.Server.warn "research: LLM returned empty content (attempt %d/%d)" (attempt + 1) max_attempts;
+      try_generate (attempt + 1)
     end else
       parse_hypothesis content
   | Error err ->
@@ -204,8 +212,10 @@ let generate_hypothesis ~sw ~net ~clock ~(config : Research_config.t)
         Printf.sprintf "HTTP %d" code
       | Llm_provider.Http_client.NetworkError { message } -> message
     in
-    Log.Server.warn "research: LLM cascade failed: %s" msg;
-    None
+    Log.Server.warn "research: LLM cascade failed (attempt %d/%d): %s" (attempt + 1) max_attempts msg;
+    try_generate (attempt + 1)
+  in
+  try_generate 0
 
 (** Create an isolated worktree for the experiment. *)
 let create_worktree ~(repo_path : string) ~(experiment_id : string) : string option =

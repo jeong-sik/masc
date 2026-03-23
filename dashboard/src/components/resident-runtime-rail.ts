@@ -23,11 +23,11 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
   const build = serverStatus.value?.build
 
   return html`
-    <section class="grid gap-2.5 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.02))] p-3">
+    <section class="grid gap-2 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.02))] p-2.5">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">Room Pulse</div>
-          <div class="mt-1 text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
+          <div class="mt-0.5 text-[13px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
             ${liveConnected ? 'Live control room' : 'Signal recovering'}
           </div>
         </div>

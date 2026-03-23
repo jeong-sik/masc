@@ -379,21 +379,37 @@ let execute_keeper_tool_call
               ("reason", `String reason);
             ])
         | Ok () ->
-          let root = project_root_of_config config in
-          let shell_cmd =
-            Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) cmd
-          in
-          let st, out =
-            Process_eio.run_argv_with_status ~timeout_sec
-              [ "/bin/bash"; "-lc"; shell_cmd ]
-          in
-          Yojson.Safe.to_string
-            (`Assoc
-              [
-                ("ok", `Bool (st = Unix.WEXITED 0));
-                ("status", process_status_to_json st);
-                ("output", `String (truncate_tool_output out));
+          if Worker_dev_tools.is_write_operation cmd then begin
+            Log.Keeper.info
+              "keeper_bash write-gate: %s (keeper=%s)"
+              cmd (meta.name);
+            Yojson.Safe.to_string
+              (`Assoc [
+                ("ok", `Bool false);
+                ("error", `String "write_operation_gated");
+                ("reason", `String
+                  "This command modifies state (git push/commit, make deploy, etc.). \
+                   Use keeper_shell_readonly for read operations, or request \
+                   shell_mode=coding policy from the operator.");
+                ("cmd", `String cmd);
               ])
+          end else begin
+            let root = project_root_of_config config in
+            let shell_cmd =
+              Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) cmd
+            in
+            let st, out =
+              Process_eio.run_argv_with_status ~timeout_sec
+                [ "/bin/bash"; "-lc"; shell_cmd ]
+            in
+            Yojson.Safe.to_string
+              (`Assoc
+                [
+                  ("ok", `Bool (st = Unix.WEXITED 0));
+                  ("status", process_status_to_json st);
+                  ("output", `String (truncate_tool_output out));
+                ])
+          end
       end
   | "keeper_shell_readonly" ->
       let op =

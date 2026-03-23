@@ -130,6 +130,26 @@ let validate_command_with_allowlist ~allowed_commands cmd =
 let validate_command cmd =
   validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
 
+(** Check if a command performs write/mutating operations.
+    Returns [true] for commands like [git push], [git commit],
+    [make deploy], [npm publish], [mv], [cp], etc.
+    Read-only commands (git status, dune build, rg) return [false]. *)
+let is_write_operation cmd =
+  let parts = String.split_on_char ' ' (String.trim cmd) in
+  match parts with
+  | "git" :: sub :: _ ->
+    List.mem sub ["push"; "commit"; "merge"; "rebase"; "reset";
+                  "checkout"; "branch"; "tag"; "stash"]
+  | "dune" :: sub :: _ ->
+    List.mem sub ["clean"; "promote"]
+  | "make" :: sub :: _ ->
+    List.mem sub ["clean"; "deploy"; "install"; "publish"]
+  | "npm" :: sub :: _ ->
+    List.mem sub ["publish"]
+  | cmd_name :: _ ->
+    List.mem cmd_name ["mv"; "cp"; "mkdir"; "touch"; "chmod"]
+  | [] -> false
+
 (* --- Recursive mkdir --- *)
 
 let mkdir_p path _perm =

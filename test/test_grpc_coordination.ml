@@ -1,7 +1,10 @@
 (** Tests for MASC gRPC Coordination Service.
 
     Tests the types, service construction, and handler logic without
-    requiring a running gRPC server or network connections. *)
+    requiring a running gRPC server or network connections.
+
+    Wire format: protobuf binary (not JSON). Tests verify roundtrip
+    serialization/deserialization via of_bytes/to_bytes. *)
 
 module T = Masc_mcp.Masc_grpc_types
 
@@ -32,7 +35,7 @@ let test_leave_request_roundtrip () =
   Alcotest.(check string) "agent_name" req.agent_name decoded.agent_name;
   Alcotest.(check string) "session_id" req.session_id decoded.session_id
 
-let test_join_response_serialization () =
+let test_join_response_roundtrip () =
   let resp = T.JoinResponse.{
     success = true;
     message = "Joined room";
@@ -49,15 +52,15 @@ let test_join_response_serialization () =
     ];
   } in
   let bytes = T.JoinResponse.to_bytes resp in
-  let json = Yojson.Safe.from_string bytes in
-  let open Yojson.Safe.Util in
-  Alcotest.(check bool) "success" true (json |> member "success" |> to_bool);
-  Alcotest.(check string) "message" "Joined room" (json |> member "message" |> to_string);
-  Alcotest.(check string) "session_id" "grpc-test-001" (json |> member "session_id" |> to_string);
-  let agents = json |> member "active_agents" |> to_list in
-  Alcotest.(check int) "active_agents count" 1 (List.length agents);
-  let agent = List.hd agents in
-  Alcotest.(check string) "agent name" "claude-swift-fox" (agent |> member "name" |> to_string)
+  let decoded = T.JoinResponse.of_bytes bytes in
+  Alcotest.(check bool) "success" true decoded.success;
+  Alcotest.(check string) "message" "Joined room" decoded.message;
+  Alcotest.(check string) "session_id" "grpc-test-001" decoded.session_id;
+  Alcotest.(check int) "active_agents count" 1 (List.length decoded.active_agents);
+  let agent = List.hd decoded.active_agents in
+  Alcotest.(check string) "agent name" "claude-swift-fox" agent.T.name;
+  Alcotest.(check string) "agent status" "active" agent.T.status;
+  Alcotest.(check (list string)) "agent capabilities" ["code"] agent.T.capabilities
 
 let test_broadcast_request_roundtrip () =
   let req = T.BroadcastRequest.{
@@ -65,31 +68,34 @@ let test_broadcast_request_roundtrip () =
     message = "CI fixed, ready to merge";
     mentions = ["claude"; "gemini"];
   } in
-  let bytes = T.BroadcastRequest.of_bytes (T.BroadcastRequest.(
-    `Assoc [
-      ("agent_name", `String req.agent_name);
-      ("message", `String req.message);
-      ("mentions", `List (List.map (fun s -> `String s) req.mentions));
-    ] |> Yojson.Safe.to_string)) in
-  Alcotest.(check string) "agent_name" req.agent_name bytes.agent_name;
-  Alcotest.(check string) "message" req.message bytes.message;
-  Alcotest.(check (list string)) "mentions" req.mentions bytes.mentions
+  let bytes = T.BroadcastRequest.to_bytes req in
+  let decoded = T.BroadcastRequest.of_bytes bytes in
+  Alcotest.(check string) "agent_name" req.agent_name decoded.agent_name;
+  Alcotest.(check string) "message" req.message decoded.message;
+  Alcotest.(check (list string)) "mentions" req.mentions decoded.mentions
 
-let test_broadcast_response_serialization () =
+let test_broadcast_response_roundtrip () =
   let resp = T.BroadcastResponse.{ success = true; seq = 42L } in
   let bytes = T.BroadcastResponse.to_bytes resp in
-  let json = Yojson.Safe.from_string bytes in
-  let open Yojson.Safe.Util in
-  Alcotest.(check bool) "success" true (json |> member "success" |> to_bool)
+  let decoded = T.BroadcastResponse.of_bytes bytes in
+  Alcotest.(check bool) "success" true decoded.success;
+  Alcotest.(check int64) "seq" 42L decoded.seq
 
-let test_heartbeat_ping_deserialization () =
-  let json_str = {|{"agent_name":"test-agent","session_id":"sess-1","timestamp_ms":1700000000000,"current_task_id":"task-42"}|} in
-  let ping = T.HeartbeatPing.of_bytes json_str in
-  Alcotest.(check string) "agent_name" "test-agent" ping.agent_name;
-  Alcotest.(check string) "session_id" "sess-1" ping.session_id;
-  Alcotest.(check string) "current_task_id" "task-42" ping.current_task_id
+let test_heartbeat_ping_roundtrip () =
+  let ping = T.HeartbeatPing.{
+    agent_name = "test-agent";
+    session_id = "sess-1";
+    timestamp_ms = 1700000000000L;
+    current_task_id = "task-42";
+  } in
+  let bytes = T.HeartbeatPing.to_bytes ping in
+  let decoded = T.HeartbeatPing.of_bytes bytes in
+  Alcotest.(check string) "agent_name" "test-agent" decoded.agent_name;
+  Alcotest.(check string) "session_id" "sess-1" decoded.session_id;
+  Alcotest.(check int64) "timestamp_ms" 1700000000000L decoded.timestamp_ms;
+  Alcotest.(check string) "current_task_id" "task-42" decoded.current_task_id
 
-let test_heartbeat_ack_serialization () =
+let test_heartbeat_ack_roundtrip () =
   let ack = T.HeartbeatAck.{
     timestamp_ms = 1700000000001L;
     active_agent_count = 5;
@@ -97,20 +103,26 @@ let test_heartbeat_ack_serialization () =
     directives = ["rebalance"];
   } in
   let bytes = T.HeartbeatAck.to_bytes ack in
-  let json = Yojson.Safe.from_string bytes in
-  let open Yojson.Safe.Util in
-  Alcotest.(check int) "active_agent_count" 5 (json |> member "active_agent_count" |> to_int);
-  Alcotest.(check int) "pending_task_count" 3 (json |> member "pending_task_count" |> to_int);
-  let dirs = json |> member "directives" |> to_list |> List.map to_string in
-  Alcotest.(check (list string)) "directives" ["rebalance"] dirs
+  let decoded = T.HeartbeatAck.of_bytes bytes in
+  Alcotest.(check int64) "timestamp_ms" 1700000000001L decoded.timestamp_ms;
+  Alcotest.(check int) "active_agent_count" 5 decoded.active_agent_count;
+  Alcotest.(check int) "pending_task_count" 3 decoded.pending_task_count;
+  Alcotest.(check (list string)) "directives" ["rebalance"] decoded.directives
 
-let test_subscribe_request_deserialization () =
-  let json_str = {|{"agent_name":"test","session_id":"s1","event_types":["message","task"],"since_seq":100}|} in
-  let req = T.SubscribeRequest.of_bytes json_str in
-  Alcotest.(check string) "agent_name" "test" req.agent_name;
-  Alcotest.(check (list string)) "event_types" ["message"; "task"] req.event_types
+let test_subscribe_request_roundtrip () =
+  let req = T.SubscribeRequest.{
+    agent_name = "test";
+    session_id = "s1";
+    event_types = ["message"; "task"];
+    since_seq = 100L;
+  } in
+  let bytes = Masc_mcp.Masc_grpc_types.SubscribeRequest_serde.to_bytes req in
+  let decoded = T.SubscribeRequest.of_bytes bytes in
+  Alcotest.(check string) "agent_name" "test" decoded.agent_name;
+  Alcotest.(check (list string)) "event_types" ["message"; "task"] decoded.event_types;
+  Alcotest.(check int64) "since_seq" 100L decoded.since_seq
 
-let test_event_serialization () =
+let test_event_roundtrip () =
   let event = T.Event.{
     seq = 42L;
     event_type = "broadcast";
@@ -119,19 +131,27 @@ let test_event_serialization () =
     payload_json = {|{"text":"hello"}|};
   } in
   let bytes = T.Event.to_bytes event in
-  let json = Yojson.Safe.from_string bytes in
-  let open Yojson.Safe.Util in
-  Alcotest.(check string) "event_type" "broadcast" (json |> member "event_type" |> to_string);
-  Alcotest.(check string) "source_agent" "claude" (json |> member "source_agent" |> to_string);
-  Alcotest.(check string) "payload_json" {|{"text":"hello"}|} (json |> member "payload_json" |> to_string)
+  let decoded = T.Event.of_bytes bytes in
+  Alcotest.(check int64) "seq" 42L decoded.seq;
+  Alcotest.(check string) "event_type" "broadcast" decoded.event_type;
+  Alcotest.(check string) "source_agent" "claude" decoded.source_agent;
+  Alcotest.(check int64) "timestamp_ms" 1700000000000L decoded.timestamp_ms;
+  Alcotest.(check string) "payload_json" {|{"text":"hello"}|} decoded.payload_json
 
-let test_tool_call_request_deserialization () =
-  let json_str = {|{"agent_name":"test","session_id":"s1","tool_name":"masc_status","arguments_json":"{}"}|} in
-  let req = T.ToolCallRequest.of_bytes json_str in
-  Alcotest.(check string) "tool_name" "masc_status" req.tool_name;
-  Alcotest.(check string) "arguments_json" "{}" req.arguments_json
+let test_tool_call_request_roundtrip () =
+  let req = T.ToolCallRequest.{
+    agent_name = "test";
+    session_id = "s1";
+    tool_name = "masc_status";
+    arguments_json = "{}";
+  } in
+  let bytes = T.ToolCallRequest.to_bytes req in
+  let decoded = T.ToolCallRequest.of_bytes bytes in
+  Alcotest.(check string) "agent_name" "test" decoded.agent_name;
+  Alcotest.(check string) "tool_name" "masc_status" decoded.tool_name;
+  Alcotest.(check string) "arguments_json" "{}" decoded.arguments_json
 
-let test_tool_call_response_serialization () =
+let test_tool_call_response_roundtrip () =
   let resp = T.ToolCallResponse.{
     success = true;
     result_json = {|{"status":"ok"}|};
@@ -139,12 +159,13 @@ let test_tool_call_response_serialization () =
     error_code = 0;
   } in
   let bytes = T.ToolCallResponse.to_bytes resp in
-  let json = Yojson.Safe.from_string bytes in
-  let open Yojson.Safe.Util in
-  Alcotest.(check bool) "success" true (json |> member "success" |> to_bool);
-  Alcotest.(check string) "result_json" {|{"status":"ok"}|} (json |> member "result_json" |> to_string)
+  let decoded = T.ToolCallResponse.of_bytes bytes in
+  Alcotest.(check bool) "success" true decoded.success;
+  Alcotest.(check string) "result_json" {|{"status":"ok"}|} decoded.result_json;
+  Alcotest.(check string) "error_message" "" decoded.error_message;
+  Alcotest.(check int) "error_code" 0 decoded.error_code
 
-let test_status_response_serialization () =
+let test_status_response_roundtrip () =
   let resp = T.StatusResponse.{
     agents = [
       {
@@ -169,16 +190,15 @@ let test_status_response_serialization () =
     room_path = "/tmp/test";
   } in
   let bytes = T.StatusResponse.to_bytes resp in
-  let json = Yojson.Safe.from_string bytes in
-  let open Yojson.Safe.Util in
-  Alcotest.(check int) "message_count" 10 (json |> member "message_count" |> to_int);
-  Alcotest.(check string) "room_path" "/tmp/test" (json |> member "room_path" |> to_string);
-  let agents = json |> member "agents" |> to_list in
-  Alcotest.(check int) "agents count" 1 (List.length agents);
-  let tasks = json |> member "tasks" |> to_list in
-  Alcotest.(check int) "tasks count" 1 (List.length tasks);
-  let task = List.hd tasks in
-  Alcotest.(check string) "task title" "Fix bug" (task |> member "title" |> to_string)
+  let decoded = T.StatusResponse.of_bytes bytes in
+  Alcotest.(check int) "message_count" 10 decoded.message_count;
+  Alcotest.(check string) "room_path" "/tmp/test" decoded.room_path;
+  Alcotest.(check int) "agents count" 1 (List.length decoded.agents);
+  Alcotest.(check int) "tasks count" 1 (List.length decoded.tasks);
+  let task = List.hd decoded.tasks in
+  Alcotest.(check string) "task title" "Fix bug" task.T.title;
+  Alcotest.(check string) "task assigned_to" "a1" task.T.assigned_to;
+  Alcotest.(check int) "task priority" 2 task.T.priority
 
 (* ====== Service construction test ====== *)
 
@@ -203,37 +223,28 @@ let test_grpc_disabled_by_default () =
   (match was_set with Some v -> Unix.putenv "MASC_GRPC_ENABLED" v | None -> ())
 
 let test_empty_request_handling () =
-  (* Verify graceful handling of minimal JSON input *)
-  let req = T.JoinRequest.of_bytes {|{"agent_name":""}|} in
+  (* Verify graceful handling of empty protobuf message (all defaults). *)
+  let bytes = T.JoinRequest.to_bytes {
+    agent_name = "";
+    capabilities = [];
+    metadata = [];
+  } in
+  let req = T.JoinRequest.of_bytes bytes in
   Alcotest.(check string) "empty agent_name" "" req.agent_name;
   Alcotest.(check (list string)) "empty capabilities" [] req.capabilities
 
-let test_agent_info_to_json () =
-  let info : T.agent_info = {
-    name = "test";
-    status = "active";
-    capabilities = ["a"; "b"];
-    last_heartbeat_ms = 100L;
-    joined_at_ms = 50L;
-    current_task_id = "t1";
+let test_protobuf_binary_format () =
+  (* Verify that serialized output is protobuf binary, not JSON. *)
+  let req = T.JoinRequest.{
+    agent_name = "test";
+    capabilities = [];
+    metadata = [];
   } in
-  let json = T.agent_info_to_json info in
-  let open Yojson.Safe.Util in
-  Alcotest.(check string) "name" "test" (json |> member "name" |> to_string);
-  Alcotest.(check string) "status" "active" (json |> member "status" |> to_string)
-
-let test_task_info_to_json () =
-  let info : T.task_info = {
-    id = "task-1";
-    title = "Review PR";
-    status = "pending";
-    assigned_to = "";
-    priority = 3;
-  } in
-  let json = T.task_info_to_json info in
-  let open Yojson.Safe.Util in
-  Alcotest.(check string) "id" "task-1" (json |> member "id" |> to_string);
-  Alcotest.(check int) "priority" 3 (json |> member "priority" |> to_int)
+  let bytes = T.JoinRequest.to_bytes req in
+  (* Protobuf binary does not start with '{' like JSON. *)
+  Alcotest.(check bool) "not JSON"
+    true
+    (String.length bytes = 0 || bytes.[0] <> '{')
 
 (* ====== Test suite ====== *)
 
@@ -244,19 +255,18 @@ let () =
         [
           Alcotest.test_case "JoinRequest" `Quick test_join_request_roundtrip;
           Alcotest.test_case "LeaveRequest" `Quick test_leave_request_roundtrip;
-          Alcotest.test_case "JoinResponse" `Quick test_join_response_serialization;
+          Alcotest.test_case "JoinResponse" `Quick test_join_response_roundtrip;
           Alcotest.test_case "BroadcastRequest" `Quick test_broadcast_request_roundtrip;
-          Alcotest.test_case "BroadcastResponse" `Quick test_broadcast_response_serialization;
-          Alcotest.test_case "HeartbeatPing" `Quick test_heartbeat_ping_deserialization;
-          Alcotest.test_case "HeartbeatAck" `Quick test_heartbeat_ack_serialization;
-          Alcotest.test_case "SubscribeRequest" `Quick test_subscribe_request_deserialization;
-          Alcotest.test_case "Event" `Quick test_event_serialization;
-          Alcotest.test_case "ToolCallRequest" `Quick test_tool_call_request_deserialization;
-          Alcotest.test_case "ToolCallResponse" `Quick test_tool_call_response_serialization;
-          Alcotest.test_case "StatusResponse" `Quick test_status_response_serialization;
+          Alcotest.test_case "BroadcastResponse" `Quick test_broadcast_response_roundtrip;
+          Alcotest.test_case "HeartbeatPing" `Quick test_heartbeat_ping_roundtrip;
+          Alcotest.test_case "HeartbeatAck" `Quick test_heartbeat_ack_roundtrip;
+          Alcotest.test_case "SubscribeRequest" `Quick test_subscribe_request_roundtrip;
+          Alcotest.test_case "Event" `Quick test_event_roundtrip;
+          Alcotest.test_case "ToolCallRequest" `Quick test_tool_call_request_roundtrip;
+          Alcotest.test_case "ToolCallResponse" `Quick test_tool_call_response_roundtrip;
+          Alcotest.test_case "StatusResponse" `Quick test_status_response_roundtrip;
           Alcotest.test_case "empty_request" `Quick test_empty_request_handling;
-          Alcotest.test_case "agent_info_to_json" `Quick test_agent_info_to_json;
-          Alcotest.test_case "task_info_to_json" `Quick test_task_info_to_json;
+          Alcotest.test_case "protobuf_binary" `Quick test_protobuf_binary_format;
         ] );
       ( "service",
         [

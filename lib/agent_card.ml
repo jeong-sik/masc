@@ -357,7 +357,7 @@ let generate_default ?(port=8935) ?(host="127.0.0.1") ?(schemas=[]) () : agent_c
       { protocol = "SSE"; url = Printf.sprintf "%s/sse" base_url };
       { protocol = "JSONRPC"; url = Printf.sprintf "%s/mcp" base_url };
       { protocol = "REST"; url = Printf.sprintf "%s/api/v1" base_url };
-      { protocol = "GRPC"; url = Printf.sprintf "grpc://%s:%d" host (port + 1000) };
+      { protocol = "GRPC"; url = Printf.sprintf "grpc://%s:%d" host (Masc_grpc_server.configured_port ()) };
     ];
     security_schemes = [
       ("bearer", {

@@ -63,7 +63,8 @@ let leave t ~sw ~env ~agent_name ~session_id =
     ~decode:T.LeaveResponse.of_bytes
 
 let get_status t ~sw ~env =
-  let request = "{}" in
+  (* StatusRequest is an empty protobuf message: 0 bytes on the wire. *)
+  let request = "" in
   call_unary_safe t ~sw ~env ~method_:"GetStatus" ~request
     ~decode:T.StatusResponse.of_bytes
 

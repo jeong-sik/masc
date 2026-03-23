@@ -125,6 +125,7 @@
    server_mcp_transport_http_headers
    server_mcp_transport_http_sse
    server_mcp_transport_http_mcp_handlers
+   server_mcp_transport_ws
    web_dashboard
    credits_dashboard
    cp_microarch_summary

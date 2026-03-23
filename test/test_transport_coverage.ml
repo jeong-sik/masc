@@ -35,6 +35,10 @@ let test_protocol_sse () =
   let p = Transport.Sse in
   check string "sse string" "sse" (Transport.protocol_to_string p)
 
+let test_protocol_ws () =
+  let p = Transport.Ws in
+  check string "ws string" "ws" (Transport.protocol_to_string p)
+
 let test_protocol_of_string_jsonrpc () =
   check (option bool) "json-rpc" (Some true)
     (Option.map (fun p -> p = Transport.JsonRpc) (Transport.protocol_of_string "json-rpc"));
@@ -53,12 +57,18 @@ let test_protocol_of_string_sse () =
   check (option bool) "sse" (Some true)
     (Option.map (fun p -> p = Transport.Sse) (Transport.protocol_of_string "sse"))
 
+let test_protocol_of_string_ws () =
+  check (option bool) "ws" (Some true)
+    (Option.map (fun p -> p = Transport.Ws) (Transport.protocol_of_string "ws"));
+  check (option bool) "websocket" (Some true)
+    (Option.map (fun p -> p = Transport.Ws) (Transport.protocol_of_string "websocket"))
+
 let test_protocol_of_string_invalid () =
   check (option string) "invalid" None
     (Option.map Transport.protocol_to_string (Transport.protocol_of_string "invalid"))
 
 let test_protocol_roundtrip () =
-  let protocols = [Transport.JsonRpc; Transport.Rest; Transport.Grpc; Transport.Sse] in
+  let protocols = [Transport.JsonRpc; Transport.Rest; Transport.Grpc; Transport.Sse; Transport.Ws] in
   List.iter (fun p ->
     let s = Transport.protocol_to_string p in
     match Transport.protocol_of_string s with
@@ -754,12 +764,14 @@ let () =
       test_case "rest" `Quick test_protocol_rest;
       test_case "grpc" `Quick test_protocol_grpc;
       test_case "sse" `Quick test_protocol_sse;
+      test_case "ws" `Quick test_protocol_ws;
     ];
     "protocol.of_string", [
       test_case "jsonrpc" `Quick test_protocol_of_string_jsonrpc;
       test_case "rest" `Quick test_protocol_of_string_rest;
       test_case "grpc" `Quick test_protocol_of_string_grpc;
       test_case "sse" `Quick test_protocol_of_string_sse;
+      test_case "ws" `Quick test_protocol_of_string_ws;
       test_case "invalid" `Quick test_protocol_of_string_invalid;
       test_case "roundtrip" `Quick test_protocol_roundtrip;
     ];

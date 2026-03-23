@@ -48,6 +48,10 @@ export interface LogEntry {
   seq: number
   ts: string
   level: string
+  raw_level: string
+  normalized_level: string
+  source: string
+  legacy_classified: boolean
   module: string
   message: string
 }
@@ -61,11 +65,15 @@ export function fetchLogs(opts?: {
   limit?: number
   level?: string
   module?: string
+  since_seq?: number
 }): Promise<LogsResponse> {
   const params = new URLSearchParams()
   if (opts?.limit) params.set('limit', String(opts.limit))
   if (opts?.level) params.set('level', opts.level)
   if (opts?.module) params.set('module', opts.module)
+  if (typeof opts?.since_seq === 'number' && opts.since_seq >= 0) {
+    params.set('since_seq', String(opts.since_seq))
+  }
   const qs = params.toString()
   return get(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
 }

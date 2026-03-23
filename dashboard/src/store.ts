@@ -313,8 +313,6 @@ export function isDashboardRefreshEvent(eventType: string): boolean {
     || eventType === 'masc/dashboard_refresh'
     || eventType.startsWith('goal_')
     || eventType.startsWith('masc/goal_')
-    || eventType.startsWith('mdal_')
-    || eventType.startsWith('masc/mdal_')
     || eventType.startsWith('operator_')
     || eventType.startsWith('masc/operator_')
     || eventType.startsWith('command_plane_')

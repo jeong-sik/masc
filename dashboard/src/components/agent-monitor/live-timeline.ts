@@ -8,6 +8,7 @@ import { TimeAgo } from '../common/time-ago'
 import { FilterChips } from '../common/filter-chips'
 import { EmptyState } from '../common/empty-state'
 import { journal } from '../../sse'
+import { isErrorJournalEntry } from '../../journal-entry'
 import type { JournalEntry, JournalEventType } from '../../types'
 
 type FilterKind = 'all' | 'heartbeat' | 'turn' | 'tool' | 'error' | 'lifecycle'
@@ -35,7 +36,7 @@ function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
     case 'tool':
       return entry.text.toLowerCase().includes('tool')
     case 'error':
-      return et === 'keeper_guardrail' || entry.text.toLowerCase().includes('error')
+      return et === 'keeper_guardrail' || isErrorJournalEntry(entry)
     case 'lifecycle':
       return et === 'agent_joined' || et === 'agent_left' || et === 'keeper_handoff' || et === 'keeper_compaction'
     default:
@@ -43,7 +44,9 @@ function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
   }
 }
 
-function eventKindBadgeClass(eventType: JournalEventType | undefined): string {
+function eventKindBadgeClass(entry: JournalEntry): string {
+  if (isErrorJournalEntry(entry)) return 'agent-event-badge--error'
+  const eventType = entry.eventType
   switch (eventType) {
     case 'keeper_heartbeat':
     case 'oas_keeper_snapshot':
@@ -150,7 +153,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
           ? html`<${EmptyState} message="필터에 맞는 이벤트 없음" compact />`
           : filtered.map((entry: JournalEntry, idx: number) => html`
               <div class="flex items-baseline gap-1.5 py-1 px-2 text-[13px] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
-                <span class="agent-event-badge ${eventKindBadgeClass(entry.eventType)}">
+                <span class="agent-event-badge ${eventKindBadgeClass(entry)}">
                   ${eventKindLabel(entry.eventType)}
                 </span>
                 <span class="flex-1 text-[#c8daf7] truncate">${compactText(entry.text)}</span>

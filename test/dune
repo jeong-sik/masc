@@ -162,6 +162,11 @@
  (libraries masc_mcp alcotest str yojson unix))
 
 (test
+ (name test_masc_log)
+ (modules test_masc_log)
+ (libraries masc_mcp alcotest unix))
+
+(test
  (name test_dashboard_room_truth)
  (modules test_dashboard_room_truth)
  (libraries masc_mcp alcotest eio eio_main yojson unix))

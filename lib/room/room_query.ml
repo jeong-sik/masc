@@ -216,7 +216,9 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
                | _ -> loop remaining acc rest)
           | exception (Eio.Cancel.Cancelled _ as e) -> raise e
           | exception e ->
-              Eio.traceln "[WARN] Failed to read %s %s: %s" warn_label name (Printexc.to_string e);
+              Log.legacy_traceln ~level:Log.Warn ~module_name:"Room"
+                (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
+                   name (Printexc.to_string e));
               loop remaining acc rest
   in
   loop limit [] names
@@ -329,4 +331,3 @@ let get_messages config ~since_seq ~limit =
     Buffer.add_string buf "(no new messages)\n";
 
   Buffer.contents buf
-

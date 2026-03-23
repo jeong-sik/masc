@@ -33,8 +33,13 @@ export type SSEEventType =
   | 'oas:masc:trust_updated'
   | 'oas:masc:reputation_changed'
 
+export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
+export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 'sse'
+
 export interface SSEEvent {
   type: SSEEventType
+  severity?: JournalSeverity | string
+  source?: JournalSource | string
   agent?: string
   from?: string
   from_agent?: string
@@ -95,6 +100,8 @@ export interface JournalEntry {
   text: string
   narrativeText?: string
   timestamp: number
+  severity?: JournalSeverity
+  source?: JournalSource
   kind?: 'board' | 'tasks' | 'keepers' | 'system' | 'oas'
   eventType?: JournalEventType
   author?: string

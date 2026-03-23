@@ -72,16 +72,28 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/logs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let limit = Server_utils.int_query_param req "limit" ~default:200 in
+         let limit =
+           Server_utils.int_query_param req "limit" ~default:200
+           |> max 1 |> min 3000
+         in
          let min_level = match Server_utils.query_param req "level" with
            | Some v -> Log.level_to_int (Log.level_of_string v)
            | None -> 0
+         in
+         let since_seq =
+           match Server_utils.query_param req "since_seq" with
+           | None -> None
+           | Some _ ->
+               let seq = Server_utils.int_query_param req "since_seq" ~default:(-1) in
+               if seq < 0 then None else Some seq
          in
          let module_filter = match Server_utils.query_param req "module" with
            | Some v -> v
            | None -> ""
          in
-         let entries = Log.Ring.recent ~limit ~min_level ~module_filter () in
+         let entries =
+           Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq ()
+         in
          let json = Log.Ring.to_json entries in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd

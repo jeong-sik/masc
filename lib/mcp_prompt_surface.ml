@@ -84,21 +84,8 @@ let assoc_string args key =
       if trimmed = "" then None else Some trimmed
   | _ -> None
 
-let string_contains ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      if idx + needle_len > haystack_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
-    in
-    loop 0
-
-let string_contains_ci ~needle haystack =
-  string_contains ~needle:(String.lowercase_ascii needle)
-    (String.lowercase_ascii haystack)
+let string_contains = Dashboard_utils.string_contains
+let string_contains_ci = Dashboard_utils.string_contains_ci
 
 let run_tokens run_id =
   let safe = Room_utils.safe_filename run_id |> String.lowercase_ascii in

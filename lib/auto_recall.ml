@@ -11,18 +11,7 @@
 
 (** {1 String Helpers} *)
 
-(** Check if haystack contains needle *)
-let string_contains ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len > haystack_len then false
-  else
-    let rec check i =
-      if i > haystack_len - needle_len then false
-      else if String.sub haystack i needle_len = needle then true
-      else check (i + 1)
-    in
-    check 0
+let string_contains = Dashboard_utils.string_contains
 
 
 (** {1 Types} *)

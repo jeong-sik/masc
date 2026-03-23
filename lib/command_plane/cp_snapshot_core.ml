@@ -626,21 +626,8 @@ let list_alerts_json_from_state config (state : snapshot_state) =
 let list_alerts_json config =
   list_alerts_json_from_state config (build_snapshot_state config)
 
-let string_contains ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      if idx + needle_len > haystack_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
-    in
-    loop 0
-
-let string_contains_ci ~needle haystack =
-  string_contains ~needle:(String.lowercase_ascii needle)
-    (String.lowercase_ascii haystack)
+let string_contains = Dashboard_utils.string_contains
+let string_contains_ci = Dashboard_utils.string_contains_ci
 
 let json_string_opt key = function
   | `Assoc fields -> List.assoc_opt key fields

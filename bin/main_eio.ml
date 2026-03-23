@@ -283,7 +283,39 @@ let base_path =
 (** Graceful shutdown exception *)
 exception Shutdown
 
+let pid_lock_path port = Printf.sprintf "/tmp/masc-%d.pid" port
+
+let acquire_pid_lock port =
+  let path = pid_lock_path port in
+  (let contents =
+     try
+       let ic = open_in path in
+       let s = In_channel.input_all ic in
+       close_in ic; Some s
+     with _ -> None
+   in
+   match contents with
+   | Some data ->
+     let pid_str = String.trim data in
+     (match int_of_string_opt pid_str with
+      | Some pid ->
+        (try Unix.kill pid 0;
+           Printf.eprintf
+             "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it first: kill %d\n%!"
+             pid port pid;
+           exit 1
+         with Unix.Unix_error (Unix.ESRCH, _, _) ->
+           Printf.eprintf "[WARN] Removing stale PID file (PID %d no longer running)\n%!" pid)
+      | None ->
+        Printf.eprintf "[WARN] Invalid PID file contents, overwriting\n%!")
+   | None -> ());
+  let oc = open_out path in
+  Printf.fprintf oc "%d\n" (Unix.getpid ());
+  close_out oc;
+  at_exit (fun () -> try Sys.remove path with _ -> ())
+
 let run_cmd host port base_path =
+  acquire_pid_lock port;
   Eio_main.run @@ fun env ->
   (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
   Mirage_crypto_rng_unix.use_default ();

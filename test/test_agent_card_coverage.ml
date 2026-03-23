@@ -129,7 +129,7 @@ let test_binding_json_roundtrip () =
 let test_binding_grpc () =
   let b : Agent_card.binding = {
     protocol = "GRPC";
-    url = "grpc://127.0.0.1:9935";
+    url = "grpc://127.0.0.1:8936";
   } in
   let json = Agent_card.binding_to_yojson b in
   match Agent_card.binding_of_yojson json with

@@ -5,6 +5,8 @@ module Room = Masc_mcp.Room
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Masc_mcp.Tool_result
 
+let explicit_claim_tool = "masc_claim_next"
+
 (* ── Helpers ────────────────────────────────────────────────── *)
 
 let make_tmpdir () =
@@ -104,9 +106,14 @@ let test_risk_high_spawn () =
   Alcotest.(check string) "spawn is high"
     "high" (Gp.risk_level_to_string risk)
 
-let test_risk_medium_claim () =
-  let risk = Gp.assess_risk ~tool_name:"masc_claim_next" ~input:`Null in
-  Alcotest.(check string) "claim is medium"
+let test_risk_medium_claim_next () =
+  let risk = Gp.assess_risk ~tool_name:explicit_claim_tool ~input:`Null in
+  Alcotest.(check string) "claim_next is medium"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_risk_medium_transition () =
+  let risk = Gp.assess_risk ~tool_name:"masc_transition" ~input:`Null in
+  Alcotest.(check string) "transition is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_join () =
@@ -400,6 +407,23 @@ let test_blocked_response_structure () =
    | None -> Alcotest.fail "paranoid should block medium");
   cleanup_tmpdir tmpdir
 
+let test_blocked_response_structure_claim_next () =
+  Eio_main.run @@ fun _env ->
+  let tmpdir = make_tmpdir () in
+  let config = Room.default_config tmpdir in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
+  let result = hook ~name:explicit_claim_tool ~args:`Null in
+  (match result with
+   | Some r ->
+       let module U = Yojson.Safe.Util in
+       let data = r.Tool_result.data in
+       let _risk = data |> U.member "risk_level" |> U.to_string in
+       let _tool = data |> U.member "tool_name" |> U.to_string in
+       Alcotest.(check string) "risk_level" "medium" _risk;
+       Alcotest.(check string) "tool_name" explicit_claim_tool _tool
+   | None -> Alcotest.fail "paranoid should block claim_next");
+  cleanup_tmpdir tmpdir
+
 (* ── Unknown governance level defaults to development ──────── *)
 
 let test_unknown_governance_level_allows_all () =
@@ -436,7 +460,8 @@ let () =
       Alcotest.test_case "high: merge" `Quick test_risk_high_merge;
       Alcotest.test_case "high: send" `Quick test_risk_high_send;
       Alcotest.test_case "high: spawn" `Quick test_risk_high_spawn;
-      Alcotest.test_case "medium: claim" `Quick test_risk_medium_claim;
+      Alcotest.test_case "medium: claim_next" `Quick test_risk_medium_claim_next;
+      Alcotest.test_case "medium: transition" `Quick test_risk_medium_transition;
       Alcotest.test_case "medium: join" `Quick test_risk_medium_join;
       Alcotest.test_case "medium: leave" `Quick test_risk_medium_leave;
       Alcotest.test_case "medium: start" `Quick test_risk_medium_start;
@@ -500,5 +525,7 @@ let () =
         test_hook_paranoid_blocks_medium;
       Alcotest.test_case "blocked response structure" `Quick
         test_blocked_response_structure;
+      Alcotest.test_case "blocked response structure: claim_next" `Quick
+        test_blocked_response_structure_claim_next;
     ];
   ]

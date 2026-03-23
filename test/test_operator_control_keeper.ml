@@ -228,7 +228,26 @@ initiative_post_ttl_hours = 24
       Alcotest.(check bool) "live override flagged" true
         (json |> member "sources" |> member "has_live_override" |> to_bool);
       Alcotest.(check string) "auto team session wired" "wired"
-        (json |> member "auto_team_session" |> member "status" |> to_string))
+        (json |> member "auto_team_session" |> member "status" |> to_string);
+      let override_fields =
+        json |> member "sources" |> member "override_fields" |> to_list
+        |> List.map to_string
+      in
+      Alcotest.(check bool) "trigger_mode canonicalized so not flagged as override" false
+        (List.mem "coordination.trigger_mode" override_fields);
+      Alcotest.(check bool) "override field room_scope" true
+        (List.mem "coordination.room_scope" override_fields);
+      Alcotest.(check bool) "override field proactive" true
+        (List.mem "proactive.enabled" override_fields);
+      Alcotest.(check string) "initiative source-only" "source_only"
+        (json |> member "initiative" |> member "status" |> to_string);
+      Alcotest.(check bool) "initiative configured in source" true
+        (json |> member "initiative" |> member "configured_in_source" |> to_bool);
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      Alcotest.(check bool) "keeper down ok" true ok)
 
 let test_snapshot_keeper_tool_audit_fallback () =
   Eio_main.run @@ fun env ->

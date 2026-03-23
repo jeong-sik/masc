@@ -68,6 +68,15 @@ let with_dashboard_timeout ~clock compute =
         ("generated_at", `String (Types.now_iso ()));
       ]
 
+let dashboard_active_or_recent_sessions config =
+  let cutoff_unix = Time_compat.now () -. 86400.0 in
+  let cutoff_iso = Dashboard_utils.iso_of_unix cutoff_unix in
+  Team_session_store.list_sessions ~since_unix:cutoff_unix config
+  |> List.filter (fun (session : Team_session_types.session) ->
+         match session.status with
+         | Running | Paused -> true
+         | _ -> session.updated_at_iso >= cutoff_iso)
+
 let dashboard_semantics_http_json () =
   Dashboard_semantics.json ()
 
@@ -262,12 +271,17 @@ let start_operator_refresh_loop ~state ~sw ~clock =
     let ctx : _ Operator_control.context =
       { config; agent_name = "dashboard"; sw; clock; proc_mgr; mcp_session_id = None }
     in
+    let sessions =
+      if Room.is_initialized config then dashboard_active_or_recent_sessions config
+      else []
+    in
     let snapshot =
       Operator_control.snapshot_json ~actor:"dashboard"
-        ~include_messages:true ~include_sessions:true ~include_keepers:true ctx
+        ~include_messages:true ~include_sessions:true ~include_keepers:true
+        ~sessions ctx
     in
     let digest =
-      match Operator_control.digest_json ~actor:"dashboard" ctx with
+      match Operator_control.digest_json ~actor:"dashboard" ~sessions ctx with
       | Ok json -> json
       | Error _ -> !_operator_digest_ref
     in

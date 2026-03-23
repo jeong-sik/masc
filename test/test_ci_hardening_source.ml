@@ -194,10 +194,8 @@ let test_dashboard_component_split_contracts () =
   (* war room surface removed — dead UI cleanup PR #2569 *)
   check bool "room backend setup normalizes postgres pooler url before connect" true
     (file_contains_pattern "lib/room/room_utils_backend_setup.ml"
-       "pooler.supabase.com");
-  check bool "council archive normalizes postgres url" true
-    (file_contains_pattern "lib/council/archive.ml"
        "pooler.supabase.com")
+  (* council archive.ml removed in dead-code sweep *)
 
 let test_activity_surface_contracts () =
   check bool "activity tab exposes activity graph label" true

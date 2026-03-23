@@ -39,6 +39,11 @@ let detect_from_fd (fd : Unix.file_descr) : (protocol, string) result =
   | _ ->
     (* 0 bytes = connection closed before sending anything *)
     Error "connection closed before protocol detection"
+  | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+    (* Non-blocking socket with no data yet. Default to HTTP/1.1 —
+       any HTTP/2 client sends the connection preface immediately,
+       so EAGAIN means a normal HTTP/1.1 request in flight. *)
+    Ok Http1
   | exception Unix.Unix_error (err, _fn, _arg) ->
     Error (Printf.sprintf "peek failed: %s" (Unix.error_message err))
 

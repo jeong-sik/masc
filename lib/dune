@@ -321,9 +321,7 @@
    mitosis_helpers
    mitosis_spawn
    tool_mitosis_utils
-   tool_mitosis_handoff
    tool_mitosis_schemas
-   tool_mitosis
    tool_mitosis_oas
    tool_portal
    tool_worktree
@@ -404,10 +402,7 @@
    tool_council_feed
    tool_council_helpers
    tool_council_internal_schemas
-   tool_council_logic
-   tool_council
    tool_council_json
-   tool_council_schemas
    tool_code
    tool_code_write
    code_swarm_plan
@@ -415,7 +410,6 @@
    tool_suspend
    tool_notifications
    tool_voice
-   debate
    mention_inbox
    agent_reputation
    activity_feed
@@ -556,7 +550,6 @@
  mitosis_helpers
  mitosis_spawn
  tool_mitosis_utils
- tool_mitosis_handoff
  mitosis_defaults
  board_core
  board_votes
@@ -675,8 +668,6 @@
   tool_council_feed
   tool_council_helpers
   tool_council_internal_schemas
-  tool_council_logic
-  tool_council_schemas
   tool_council_json
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules

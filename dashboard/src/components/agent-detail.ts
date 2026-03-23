@@ -85,12 +85,17 @@ export function AgentDetailOverlay() {
             : null
   const evidenceSource = missionBrief?.evidence_source ?? null
   const agentEmoji = agent?.emoji ?? keeper?.emoji
-  const koreanName = agent?.koreanName ?? keeper?.koreanName
+  const rawKoreanName = agent?.koreanName ?? keeper?.koreanName
+  // Don't show koreanName if it's actually an agent runtime name, not Korean text
+  const koreanName = rawKoreanName && rawKoreanName !== agentName && rawKoreanName !== displayName
+    ? rawKoreanName : null
   const continuitySummary =
     compactCopy(continuityBrief?.continuity_summary)
     ?? compactCopy(continuityBrief?.skill_route_summary)
     ?? null
   const keeperIdentity = keeperIdentityHint(keeper?.name, keeper?.agent_name)
+  // Skip secondaryLabel when keeperIdentity already shows the agent runtime name
+  const showSecondaryLabel = secondaryLabel && !keeperIdentity
 
   return html`
     <div
@@ -109,7 +114,7 @@ export function AgentDetailOverlay() {
                 <h2 class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
                   ${displayName}
                   ${koreanName ? html`<span class="text-sm text-text-dim font-medium tracking-normal">(${koreanName})</span>` : ''}
-                  ${secondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-white/5 px-2 py-0.5 rounded-md">${secondaryLabel}</span>` : ''}
+                  ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-white/5 px-2 py-0.5 rounded-md">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${headerStatus} />

@@ -16,18 +16,20 @@ type AgentsView = 'all' | 'agents' | 'keepers' | 'sessions'
 
 const activeView = signal<AgentsView>('all')
 
-/** Determine which agents have keeper runtime from keepers store + mission snapshot. */
+/** Determine which agents have keeper runtime from keepers store + mission snapshot.
+ *  Adds BOTH name ("dm-keeper") and agent_name ("keeper-dm-keeper-agent")
+ *  so agent list filtering matches regardless of which key the agent uses. */
 function keeperNameSet(): Set<string> {
   const names = new Set<string>()
   for (const k of keepers.value) {
-    const name = (k as { name?: string; agent_name?: string }).name
-      ?? (k as { agent_name?: string }).agent_name
-    if (name) names.add(name)
+    const typed = k as { name?: string; agent_name?: string }
+    if (typed.name) names.add(typed.name)
+    if (typed.agent_name) names.add(typed.agent_name)
   }
   for (const kb of missionKeeperBriefs.value) {
-    const name = (kb as { name?: string; agent_name?: string }).name
-      ?? (kb as { agent_name?: string }).agent_name
-    if (name) names.add(name)
+    const typed = kb as { name?: string; agent_name?: string }
+    if (typed.name) names.add(typed.name)
+    if (typed.agent_name) names.add(typed.agent_name)
   }
   return names
 }

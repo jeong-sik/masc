@@ -469,7 +469,27 @@ let test_keeper_bash_requires_cmd_and_runs () =
       check bool "keeper bash output captured" true
         Yojson.Safe.Util.(
           ok_json |> member "output" |> to_string
-          |> fun out -> contains_substring out "keeper-ok"))
+          |> fun out -> contains_substring out "keeper-ok");
+      let failed_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_bash"
+          ~input:
+            (`Assoc
+              [
+                ("cmd", `String "exit 7");
+                ("timeout_sec", `Float 5.0);
+              ])
+        |> parse_json_exn
+      in
+      check bool "keeper bash failed command is not ok" false
+        Yojson.Safe.Util.(failed_json |> member "ok" |> to_bool);
+      check string "keeper bash status kind" "exit"
+        Yojson.Safe.Util.(failed_json |> member "status" |> member "kind" |> to_string);
+      check bool "keeper bash nonzero exit code" true
+        Yojson.Safe.Util.(
+          failed_json |> member "status" |> member "code" |> to_int |> fun code ->
+          code <> 0))
 
 let test_resident_keeper_and_persistent_agent_lists_split () =
   Eio_main.run @@ fun env ->

@@ -184,31 +184,10 @@ let default_voice_channel_for name =
 let default_voice_agent_id_for name =
   if default_voice_enabled_for name then name else ""
 
-let canonical_policy_action_budget = function
-  | "board" -> "board"
-  | _ -> "conversation"
-
 let canonical_policy_shell_mode = function
   | "readonly" -> "readonly"
   | "sandboxed" -> "sandboxed"
   | _ -> "disabled"
-
-let canonical_initiative_scope = function
-  | "board_only" -> "board_only"
-  | _ -> "board_only"
-
-let canonical_initiative_context_mode = function
-  | "board_snapshot" -> "board_snapshot"
-  | _ -> "board_snapshot"
-
-let normalize_initiative_idle_sec (v : int) : int =
-  clamp_int v ~min_v:3600 ~max_v:604800
-
-let normalize_initiative_cooldown_sec (v : int) : int =
-  clamp_int v ~min_v:3600 ~max_v:604800
-
-let normalize_initiative_post_ttl_hours (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:168
 
 let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (room_id, seq) -> (room_id, `Int seq)) items)
@@ -244,16 +223,8 @@ type keeper_profile_defaults = {
   allowed_models : string list;
   active_model : string option;
   policy_mode : string option;
-  policy_action_budget : string option;
-  policy_reward_model_path : string option;
   policy_voice_enabled : bool option;
   policy_shell_mode : string option;
-  initiative_enabled : bool option;
-  initiative_scope : string option;
-  initiative_idle_sec : int option;
-  initiative_cooldown_sec : int option;
-  initiative_context_mode : string option;
-  initiative_post_ttl_hours : int option;
   room_scope : string option;
   scope_kind : string option;
   trigger_mode : string option;
@@ -287,16 +258,8 @@ let empty_keeper_profile_defaults = {
   allowed_models = [];
   active_model = None;
   policy_mode = None;
-  policy_action_budget = None;
-  policy_reward_model_path = None;
   policy_voice_enabled = None;
   policy_shell_mode = None;
-  initiative_enabled = None;
-  initiative_scope = None;
-  initiative_idle_sec = None;
-  initiative_cooldown_sec = None;
-  initiative_context_mode = None;
-  initiative_post_ttl_hours = None;
   room_scope = None;
   scope_kind = None;
   trigger_mode = None;
@@ -373,30 +336,10 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
          policy_mode =
            str "policy_mode"
            |> Option.map canonical_policy_mode;
-         policy_action_budget =
-           str "policy_action_budget"
-           |> Option.map canonical_policy_action_budget;
-         policy_reward_model_path = str "policy_reward_model_path";
          policy_voice_enabled = bool_ "policy_voice_enabled";
          policy_shell_mode =
            str "policy_shell_mode"
            |> Option.map canonical_policy_shell_mode;
-         initiative_enabled = bool_ "initiative_enabled";
-         initiative_scope =
-           str "initiative_scope"
-           |> Option.map canonical_initiative_scope;
-         initiative_idle_sec =
-           int_ "initiative_idle_sec"
-           |> Option.map normalize_initiative_idle_sec;
-         initiative_cooldown_sec =
-           int_ "initiative_cooldown_sec"
-           |> Option.map normalize_initiative_cooldown_sec;
-         initiative_context_mode =
-           str "initiative_context_mode"
-           |> Option.map canonical_initiative_context_mode;
-         initiative_post_ttl_hours =
-           int_ "initiative_post_ttl_hours"
-           |> Option.map normalize_initiative_post_ttl_hours;
          room_scope = str "room_scope";
          scope_kind = str "scope_kind";
          trigger_mode = str "trigger_mode";
@@ -494,11 +437,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 policy_mode =
                   Safe_ops.json_string_opt "policy_mode" keeper_json
                   |> Option.map canonical_policy_mode;
-                policy_action_budget =
-                  Safe_ops.json_string_opt "policy_action_budget" keeper_json
-                  |> Option.map canonical_policy_action_budget;
-                policy_reward_model_path =
-                  Safe_ops.json_string_opt "policy_reward_model_path" keeper_json;
                 policy_voice_enabled =
                   (match Yojson.Safe.Util.member "policy_voice_enabled" keeper_json with
                   | `Bool flag -> Some flag
@@ -506,25 +444,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 policy_shell_mode =
                   Safe_ops.json_string_opt "policy_shell_mode" keeper_json
                   |> Option.map canonical_policy_shell_mode;
-                initiative_enabled =
-                  (match Yojson.Safe.Util.member "initiative_enabled" keeper_json with
-                  | `Bool flag -> Some flag
-                  | _ -> None);
-                initiative_scope =
-                  Safe_ops.json_string_opt "initiative_scope" keeper_json
-                  |> Option.map canonical_initiative_scope;
-                initiative_idle_sec =
-                  Safe_ops.json_int_opt "initiative_idle_sec" keeper_json
-                  |> Option.map normalize_initiative_idle_sec;
-                initiative_cooldown_sec =
-                  Safe_ops.json_int_opt "initiative_cooldown_sec" keeper_json
-                  |> Option.map normalize_initiative_cooldown_sec;
-                initiative_context_mode =
-                  Safe_ops.json_string_opt "initiative_context_mode" keeper_json
-                  |> Option.map canonical_initiative_context_mode;
-                initiative_post_ttl_hours =
-                  Safe_ops.json_int_opt "initiative_post_ttl_hours" keeper_json
-                  |> Option.map normalize_initiative_post_ttl_hours;
                 room_scope = Safe_ops.json_string_opt "room_scope" keeper_json;
                 scope_kind = Safe_ops.json_string_opt "scope_kind" keeper_json;
                 trigger_mode = Safe_ops.json_string_opt "trigger_mode" keeper_json;

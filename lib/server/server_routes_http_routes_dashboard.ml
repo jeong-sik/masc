@@ -263,18 +263,11 @@ let add_routes ~sw ~clock router =
                           let new_desires =
                             Keeper_config.parse_self_model_opt args "new_desires"
                           in
-                          let new_drift_enabled_opt =
-                            Tool_args.get_bool_opt args "new_drift_enabled"
-                          in
-                          let new_drift_min_turn_gap_opt =
-                            Safe_ops.json_int_opt "new_drift_min_turn_gap" args
-                          in
                           let _updated =
                             Keeper_turn_setup.apply_settings_update
                               ~args ~meta0 ~new_short_goal ~new_mid_goal
                               ~new_long_goal ~new_soul_profile ~new_will
-                              ~new_needs ~new_desires ~new_drift_enabled_opt
-                              ~new_drift_min_turn_gap_opt ~config
+                              ~new_needs ~new_desires ~config
                           in
                           let (_st, json) =
                             Dashboard_http_keeper.keeper_config_json config name

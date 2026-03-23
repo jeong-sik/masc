@@ -19,18 +19,9 @@ type parsed_args = {
   allowed_models_in : string list;
   active_model_opt : string option;
   policy_mode_opt : string option;
-  policy_action_budget_opt : string option;
-  policy_reward_model_path_opt : string option;
   policy_voice_enabled_opt : bool option;
   policy_shell_mode_opt : string option;
   allowed_paths_opt : string list option;
-  initiative_enabled_opt : bool option;
-  initiative_scope_opt : string option;
-  initiative_idle_sec_opt : int option;
-  initiative_cooldown_sec_opt : int option;
-  initiative_context_mode_opt : string option;
-  initiative_post_ttl_hours_opt : int option;
-  auto_team_session_enabled_opt : bool option;
   room_scope_opt : string option;
   scope_kind_opt : string option;
   trigger_mode_opt : string option;
@@ -38,14 +29,11 @@ type parsed_args = {
   voice_channel_opt : string option;
   voice_agent_id_opt : string option;
   mention_targets_in : string list;
-  verify_opt : bool option;
   presence_keepalive_opt : bool option;
   presence_keepalive_sec_opt : int option;
   proactive_enabled_opt : bool option;
   proactive_idle_sec_opt : int option;
   proactive_cooldown_sec_opt : int option;
-  drift_enabled_opt : bool option;
-  drift_min_turn_gap_opt : int option;
   compaction_ratio_gate_opt : float option;
   compaction_message_gate_opt : int option;
   compaction_token_gate_opt : int option;
@@ -53,7 +41,6 @@ type parsed_args = {
   auto_handoff_opt : bool option;
   handoff_threshold_opt : float option;
   handoff_cooldown_sec_opt : int option;
-  context_budget_opt : float option;
   instructions_arg : string option;
   will_opt : string option;
   needs_opt : string option;
@@ -82,22 +69,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let allowed_models_in = get_string_list args "allowed_models" in
     let active_model_opt = get_string_opt args "active_model" in
     let policy_mode_opt = get_string_opt args "policy_mode" in
-    let policy_action_budget_opt = get_string_opt args "policy_action_budget" in
-    let policy_reward_model_path_opt = get_string_opt args "policy_reward_model_path" in
     let policy_voice_enabled_opt = get_bool_opt args "policy_voice_enabled" in
     let policy_shell_mode_opt = get_string_opt args "policy_shell_mode" in
     let allowed_paths_opt =
       let raw = get_string_list args "allowed_paths" in
       if raw = [] then None else Some raw
-    in
-    let initiative_enabled_opt = get_bool_opt args "initiative_enabled" in
-    let initiative_scope_opt = get_string_opt args "initiative_scope" in
-    let initiative_idle_sec_opt = Safe_ops.json_int_opt "initiative_idle_sec" args in
-    let initiative_cooldown_sec_opt = Safe_ops.json_int_opt "initiative_cooldown_sec" args in
-    let initiative_context_mode_opt = get_string_opt args "initiative_context_mode" in
-    let initiative_post_ttl_hours_opt = Safe_ops.json_int_opt "initiative_post_ttl_hours" args in
-    let auto_team_session_enabled_opt =
-      get_bool_opt args "auto_team_session_enabled"
     in
     let room_scope_opt = get_string_opt args "room_scope" in
     let scope_kind_opt = get_string_opt args "scope_kind" in
@@ -106,14 +82,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let voice_channel_opt = get_string_opt args "voice_channel" in
     let voice_agent_id_opt = get_string_opt args "voice_agent_id" in
     let mention_targets_in = get_string_list args "mention_targets" in
-    let verify_opt = get_bool_opt args "verify" in
     let presence_keepalive_opt = get_bool_opt args "presence_keepalive" in
     let presence_keepalive_sec_opt = Safe_ops.json_int_opt "presence_keepalive_sec" args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let proactive_idle_sec_opt = Safe_ops.json_int_opt "proactive_idle_sec" args in
     let proactive_cooldown_sec_opt = Safe_ops.json_int_opt "proactive_cooldown_sec" args in
-    let drift_enabled_opt = get_bool_opt args "drift_enabled" in
-    let drift_min_turn_gap_opt = Safe_ops.json_int_opt "drift_min_turn_gap" args in
     let compaction_ratio_gate_opt = Safe_ops.json_float_opt "compaction_ratio_gate" args in
     let compaction_message_gate_opt = Safe_ops.json_int_opt "compaction_message_gate" args in
     let compaction_token_gate_opt = Safe_ops.json_int_opt "compaction_token_gate" args in
@@ -123,7 +96,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let auto_handoff_opt = get_bool_opt args "auto_handoff" in
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
-    let context_budget_opt = Safe_ops.json_float_opt "context_budget" args in
     let instructions_arg = get_string_opt args "instructions" in
     let profile_defaults = load_keeper_profile_defaults name in
     let soul_path =
@@ -165,18 +137,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       allowed_models_in;
       active_model_opt;
       policy_mode_opt;
-      policy_action_budget_opt;
-      policy_reward_model_path_opt;
       policy_voice_enabled_opt;
       policy_shell_mode_opt;
       allowed_paths_opt;
-      initiative_enabled_opt;
-      initiative_scope_opt;
-      initiative_idle_sec_opt;
-      initiative_cooldown_sec_opt;
-      initiative_context_mode_opt;
-      initiative_post_ttl_hours_opt;
-      auto_team_session_enabled_opt;
       room_scope_opt;
       scope_kind_opt;
       trigger_mode_opt;
@@ -184,14 +147,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       voice_channel_opt;
       voice_agent_id_opt;
       mention_targets_in;
-      verify_opt;
       presence_keepalive_opt;
       presence_keepalive_sec_opt;
       proactive_enabled_opt;
       proactive_idle_sec_opt;
       proactive_cooldown_sec_opt;
-      drift_enabled_opt;
-      drift_min_turn_gap_opt;
       compaction_ratio_gate_opt;
       compaction_message_gate_opt;
       compaction_token_gate_opt;
@@ -199,7 +159,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       auto_handoff_opt;
       handoff_threshold_opt;
       handoff_cooldown_sec_opt;
-      context_budget_opt;
       instructions_arg;
       will_opt;
       needs_opt;
@@ -207,31 +166,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       profile_defaults;
       instructions_opt;
     }
-
-(** Validate policy constraints. Returns None if valid, Some error if invalid. *)
-let validate_policy
-    ~policy_mode ~policy_action_budget ~policy_voice_enabled
-    ~policy_shell_mode ~initiative_enabled
-  : string option =
-  if policy_mode = "heuristic" && policy_action_budget <> "conversation" then
-    Some "policy_action_budget=board requires policy_mode=learned_offline_v1"
-  else if policy_voice_enabled && policy_mode <> "learned_offline_v1" then
-    Some "policy_voice_enabled=true requires policy_mode=learned_offline_v1"
-  else if policy_shell_mode = "readonly" && policy_mode <> "learned_offline_v1" then
-    Some "policy_shell_mode=readonly requires policy_mode=learned_offline_v1"
-  else if initiative_enabled
-          && (policy_mode <> "learned_offline_v1" || policy_action_budget <> "board")
-  then
-    Some "initiative_enabled=true requires policy_mode=learned_offline_v1 and policy_action_budget=board"
-  else
-    None
-
-(** Resolve reward model path: make relative paths absolute against base_path. *)
-let resolve_reward_model_path ~base_path raw_path =
-  let trimmed = String.trim raw_path in
-  if trimmed = "" then ""
-  else if Filename.is_relative trimmed then Filename.concat base_path trimmed
-  else trimmed
 
 (** Resolve mention targets with dedup and filtering. *)
 let resolve_mention_targets ~mention_targets_in ~fallback_targets ~name =

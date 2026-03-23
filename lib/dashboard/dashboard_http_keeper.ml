@@ -411,14 +411,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 if String.trim m.last_proactive_reason = ""
                 then `Null
                 else `String m.last_proactive_reason);
-              ("drift_enabled", `Bool m.drift_enabled);
-              ("drift_min_turn_gap", `Int m.drift_min_turn_gap);
-              ("drift_count_total", `Int m.drift_count_total);
-              ("last_drift_turn", `Int m.last_drift_turn);
-              ("last_drift_reason",
-                if String.trim m.last_drift_reason = ""
-                then `Null
-                else `String m.last_drift_reason);
 	              ("last_proactive_preview",
 	                if String.trim m.last_proactive_preview = ""
 	                then `Null
@@ -529,7 +521,7 @@ let keeper_config_json (config : Room.config) (name : string)
           ("active_model", `String active_model);
           ("policy_mode", `String m.policy_mode);
           ("policy_shell_mode", `String m.policy_shell_mode);
-          ("verify", `Bool m.verify);
+          ("verify", `Bool false);
         ]
       in
       let compaction =
@@ -550,21 +542,19 @@ let keeper_config_json (config : Room.config) (name : string)
       in
       let drift =
         `Assoc [
-          ("enabled", `Bool m.drift_enabled);
-          ("min_turn_gap", `Int m.drift_min_turn_gap);
-          ("count_total", `Int m.drift_count_total);
-          ("last_reason",
-           if String.trim m.last_drift_reason = "" then `Null
-           else `String m.last_drift_reason);
+          ("enabled", `Bool false);
+          ("min_turn_gap", `Int 0);
+          ("count_total", `Int 0);
+          ("last_reason", `Null);
         ]
       in
       let initiative =
         `Assoc [
-          ("enabled", `Bool m.initiative_enabled);
-          ("scope", `String m.initiative_scope);
-          ("idle_sec", `Int m.initiative_idle_sec);
-          ("cooldown_sec", `Int m.initiative_cooldown_sec);
-          ("context_mode", `String m.initiative_context_mode);
+          ("enabled", `Bool false);
+          ("scope", `String "board_only");
+          ("idle_sec", `Int 3600);
+          ("cooldown_sec", `Int 3600);
+          ("context_mode", `String "board_snapshot");
         ]
       in
       let handoff =

@@ -223,7 +223,6 @@ let test_keeper_msg_auto_team_session_bridge () =
                 ("name", `String keeper_name);
                 ("goal", `String "Start projected team sessions from explicit keeper messages");
                 ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
-                ("auto_team_session_enabled", `Bool true);
                 ("presence_keepalive", `Bool false);
                 ("proactive_enabled", `Bool false);
               ])
@@ -280,8 +279,7 @@ let test_keeper_msg_auto_team_session_bridge () =
         | Ok None -> Alcotest.fail "keeper meta missing after keeper_msg"
         | Error err -> Alcotest.fail ("meta read failed: " ^ err)
       in
-      Alcotest.(check bool) "auto team session enabled" true
-        meta.auto_team_session_enabled;
+      (* auto_team_session_enabled field removed *)
       Alcotest.(check (option string)) "linked session id"
         (Some session_id) meta.active_team_session_id;
       Alcotest.(check int) "start count" 1 meta.team_session_start_count_total;
@@ -300,7 +298,7 @@ let test_keeper_msg_auto_team_session_bridge () =
       in
       Alcotest.(check bool) "keeper status ok" true status_ok;
       let status_json = parse_json_exn status_body in
-      Alcotest.(check bool) "status exposes opt-in" true
+      Alcotest.(check bool) "status exposes opt-in" false
         Yojson.Safe.Util.(status_json |> member "auto_team_session_enabled" |> to_bool);
       Alcotest.(check string) "status exposes running bridge" "running"
         Yojson.Safe.Util.(status_json |> member "team_session_state" |> to_string);

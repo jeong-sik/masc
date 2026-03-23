@@ -24,7 +24,7 @@ let team_session_bridge_json config (meta : keeper_meta) =
   in
   `Assoc
     [
-      ("enabled", `Bool meta.auto_team_session_enabled);
+      ("enabled", `Bool false);
       ("active_session_id",
        match meta.active_team_session_id with
        | Some session_id -> `String session_id

@@ -70,79 +70,23 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          ~default:default_policy_mode
     |> canonical_policy_mode
   in
-  let use_profile_policy_defaults =
-    not (default_voice_enabled_for p.name && Option.is_none p.policy_mode_opt)
-  in
-  let policy_action_budget =
-    first_some
-      p.policy_action_budget_opt
-      (if use_profile_policy_defaults then p.profile_defaults.policy_action_budget else None)
-    |> Option.value ~default:"conversation"
-    |> canonical_policy_action_budget
-  in
-  let policy_reward_model_path =
-    first_some
-      p.policy_reward_model_path_opt
-      (if use_profile_policy_defaults then p.profile_defaults.policy_reward_model_path else None)
-    |> Option.value ~default:""
-    |> resolve_reward_model_path ~base_path:ctx.config.base_path
-  in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
-      (if use_profile_policy_defaults then p.profile_defaults.policy_voice_enabled else None)
+      (if not (default_voice_enabled_for p.name && Option.is_none p.policy_mode_opt)
+       then p.profile_defaults.policy_voice_enabled else None)
     |> Option.value ~default:false
   in
   let policy_shell_mode =
     first_some
       p.policy_shell_mode_opt
-      (if use_profile_policy_defaults then p.profile_defaults.policy_shell_mode else None)
+      (if not (default_voice_enabled_for p.name && Option.is_none p.policy_mode_opt)
+       then p.profile_defaults.policy_shell_mode else None)
     |> Option.value ~default:"disabled"
     |> canonical_policy_shell_mode
   in
   let allowed_paths =
     Option.value ~default:[] p.allowed_paths_opt
-  in
-  let initiative_enabled =
-    first_some
-      p.initiative_enabled_opt
-      (if use_profile_policy_defaults then p.profile_defaults.initiative_enabled else None)
-    |> Option.value ~default:false
-  in
-  let initiative_scope =
-    first_some
-      p.initiative_scope_opt
-      (if use_profile_policy_defaults then p.profile_defaults.initiative_scope else None)
-    |> Option.value ~default:"board_only"
-    |> canonical_initiative_scope
-  in
-  let initiative_idle_sec =
-    first_some
-      p.initiative_idle_sec_opt
-      (if use_profile_policy_defaults then p.profile_defaults.initiative_idle_sec else None)
-    |> Option.value ~default:3600
-    |> normalize_initiative_idle_sec
-  in
-  let initiative_cooldown_sec =
-    first_some
-      p.initiative_cooldown_sec_opt
-      (if use_profile_policy_defaults then p.profile_defaults.initiative_cooldown_sec else None)
-    |> Option.value ~default:3600
-    |> normalize_initiative_cooldown_sec
-  in
-  let initiative_context_mode =
-    first_some
-      p.initiative_context_mode_opt
-      (if use_profile_policy_defaults then p.profile_defaults.initiative_context_mode else None)
-    |> Option.value ~default:"board_snapshot"
-    |> canonical_initiative_context_mode
-  in
-  let initiative_post_ttl_hours =
-    first_some
-      p.initiative_post_ttl_hours_opt
-      (if use_profile_policy_defaults then p.profile_defaults.initiative_post_ttl_hours else None)
-    |> Option.value ~default:24
-    |> normalize_initiative_post_ttl_hours
   in
   let voice_enabled =
     Option.value ~default:(default_voice_enabled_for p.name) p.voice_enabled_opt
@@ -155,9 +99,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   let voice_agent_id =
     Option.value ~default:(default_voice_agent_id_for p.name) p.voice_agent_id_opt
   in
-  let auto_team_session_enabled =
-    Option.value ~default:false p.auto_team_session_enabled_opt
-  in
   let mention_targets =
     resolve_mention_targets
       ~mention_targets_in:p.mention_targets_in
@@ -169,11 +110,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   else if requested_models = [] then
     (false, "models is required when creating a keeper")
   else
-    match validate_policy ~policy_mode ~policy_action_budget
-            ~policy_voice_enabled ~policy_shell_mode ~initiative_enabled with
-    | Some err -> (false, err)
-    | None ->
-    let verify = Option.value ~default:false p.verify_opt in
     let presence_keepalive =
       Option.value
         ~default:(Option.value ~default:true p.profile_defaults.presence_keepalive)
@@ -214,17 +150,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       Option.value ~default:default_proactive_cooldown_sec p.proactive_cooldown_sec_opt
       |> normalize_proactive_cooldown_sec
     in
-    let drift_enabled =
-      Option.value ~default:default_drift_enabled p.drift_enabled_opt
-    in
-    let drift_min_turn_gap =
-      Option.value ~default:default_drift_min_turn_gap p.drift_min_turn_gap_opt
-      |> normalize_drift_min_turn_gap
-    in
     let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
     let handoff_threshold = Option.value ~default:0.85 p.handoff_threshold_opt in
     let handoff_cooldown_sec = Option.value ~default:300 p.handoff_cooldown_sec_opt in
-    let context_budget = Option.value ~default:0.6 p.context_budget_opt in
     let soul_profile =
       Option.value
         ~default:(Option.value ~default:default_soul_profile p.profile_defaults.soul_profile)
@@ -322,17 +250,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            allowed_models;
            active_model;
            policy_mode;
-           policy_action_budget;
-           policy_reward_model_path;
            policy_voice_enabled;
            policy_shell_mode;
            allowed_paths;
-           initiative_enabled;
-           initiative_scope;
-           initiative_idle_sec;
-           initiative_cooldown_sec;
-           initiative_context_mode;
-           initiative_post_ttl_hours;
            scope_kind;
            room_scope;
            trigger_mode;
@@ -343,17 +263,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            joined_room_ids = [];
            last_seen_seq_by_room = [];
            generation = 0;
-           verify;
            presence_keepalive;
            presence_keepalive_sec;
            proactive_enabled;
            proactive_idle_sec;
            proactive_cooldown_sec;
-           drift_enabled;
-           drift_min_turn_gap;
-           drift_count_total = 0;
-           last_drift_turn = 0;
-           last_drift_reason = "";
            compaction_profile;
            compaction_ratio_gate;
            compaction_message_gate;
@@ -362,7 +276,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            auto_handoff;
            handoff_threshold;
            handoff_cooldown_sec;
-           context_budget;
            last_handoff_ts = 0.0;
            created_at = now_iso ();
            updated_at = now_iso ();
@@ -397,7 +310,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             deliberation_cost_total_usd = 0.0;
             last_deliberation_ts = 0.0;
             last_triage_triggers = "";
-            auto_team_session_enabled;
             active_team_session_id = None;
             last_team_session_started_at = "";
             team_session_start_count_total = 0;
@@ -432,22 +344,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              ("proactive_idle_sec", `Int meta.proactive_idle_sec);
              ("proactive_cooldown_sec", `Int meta.proactive_cooldown_sec);
              ("policy_mode", `String meta.policy_mode);
-             ("policy_action_budget", `String meta.policy_action_budget);
-             ("policy_reward_model_path",
-               if String.trim meta.policy_reward_model_path = ""
-               then `Null
-               else `String meta.policy_reward_model_path);
-             ("policy_voice_enabled", `Bool meta.policy_voice_enabled);
-             ("policy_shell_mode", `String meta.policy_shell_mode);
-             ("initiative_enabled", `Bool meta.initiative_enabled);
-             ("initiative_scope", `String meta.initiative_scope);
-             ("initiative_idle_sec", `Int meta.initiative_idle_sec);
-             ("initiative_cooldown_sec", `Int meta.initiative_cooldown_sec);
-             ("initiative_context_mode", `String meta.initiative_context_mode);
-             ("initiative_post_ttl_hours", `Int meta.initiative_post_ttl_hours);
-             ("auto_team_session_enabled", `Bool meta.auto_team_session_enabled);
-             ("drift_enabled", `Bool meta.drift_enabled);
-             ("drift_min_turn_gap", `Int meta.drift_min_turn_gap);
              ("compaction_profile", `String meta.compaction_profile);
              ("compaction_ratio_gate", `Float meta.compaction_ratio_gate);
              ("compaction_message_gate", `Int meta.compaction_message_gate);

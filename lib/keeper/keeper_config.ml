@@ -27,8 +27,6 @@ let default_soul_profile = "balanced"
 let default_proactive_enabled = true
 let default_proactive_idle_sec = 900
 let default_proactive_cooldown_sec = 1800
-let default_drift_enabled = true
-let default_drift_min_turn_gap = 6
 let default_keeper_will = ""
 let default_keeper_needs = ""
 let default_keeper_desires = ""
@@ -324,8 +322,6 @@ let normalize_proactive_idle_sec (v : int) : int =
 let normalize_proactive_cooldown_sec (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:172800
 
-let normalize_drift_min_turn_gap (v : int) : int =
-  clamp_int v ~min_v:1 ~max_v:500
 
 (* ================================================================ *)
 (* Proactive turn parameters                                        *)

@@ -20,8 +20,6 @@ let ensure_keeper_exists
     ~inline_will
     ~inline_needs
     ~inline_desires
-    ~inline_drift_enabled_opt
-    ~inline_drift_min_turn_gap_opt
     ~inline_soul_profile
     ~inline_models
   : (keeper_meta, string) result =
@@ -69,13 +67,6 @@ let ensure_keeper_exists
         ~default:(Option.value ~default:default_keeper_desires profile_defaults.desires)
         inline_desires
     in
-    let drift_enabled =
-      Option.value ~default:default_drift_enabled inline_drift_enabled_opt
-    in
-    let drift_min_turn_gap =
-      Option.value ~default:default_drift_min_turn_gap inline_drift_min_turn_gap_opt
-      |> normalize_drift_min_turn_gap
-    in
     let (env_ratio_gate, env_message_gate, env_token_gate) =
       keeper_compaction_policy_from_env ()
     in
@@ -116,55 +107,16 @@ let ensure_keeper_exists
               else "heuristic")
       |> canonical_policy_mode
     in
-    let use_profile_policy_defaults = not (default_voice_enabled_for name) in
-    let policy_action_budget =
-      (if use_profile_policy_defaults then profile_defaults.policy_action_budget else None)
-      |> Option.value ~default:"conversation"
-      |> canonical_policy_action_budget
-    in
-    let policy_reward_model_path =
-      (if use_profile_policy_defaults then profile_defaults.policy_reward_model_path else None)
-      |> Option.value ~default:""
-    in
     let policy_voice_enabled =
-      (if use_profile_policy_defaults then profile_defaults.policy_voice_enabled else None)
+      (if not (default_voice_enabled_for name) then profile_defaults.policy_voice_enabled else None)
       |> Option.value ~default:false
     in
     let policy_shell_mode =
-      (if use_profile_policy_defaults then profile_defaults.policy_shell_mode else None)
+      (if not (default_voice_enabled_for name) then profile_defaults.policy_shell_mode else None)
       |> Option.value ~default:"disabled"
       |> canonical_policy_shell_mode
     in
     let allowed_paths = [] in
-    let initiative_enabled =
-      (if use_profile_policy_defaults then profile_defaults.initiative_enabled else None)
-      |> Option.value ~default:false
-    in
-    let initiative_scope =
-      (if use_profile_policy_defaults then profile_defaults.initiative_scope else None)
-      |> Option.value ~default:"board_only"
-      |> canonical_initiative_scope
-    in
-    let initiative_idle_sec =
-      (if use_profile_policy_defaults then profile_defaults.initiative_idle_sec else None)
-      |> Option.value ~default:3600
-      |> normalize_initiative_idle_sec
-    in
-    let initiative_cooldown_sec =
-      (if use_profile_policy_defaults then profile_defaults.initiative_cooldown_sec else None)
-      |> Option.value ~default:3600
-      |> normalize_initiative_cooldown_sec
-    in
-    let initiative_context_mode =
-      (if use_profile_policy_defaults then profile_defaults.initiative_context_mode else None)
-      |> Option.value ~default:"board_snapshot"
-      |> canonical_initiative_context_mode
-    in
-    let initiative_post_ttl_hours =
-      (if use_profile_policy_defaults then profile_defaults.initiative_post_ttl_hours else None)
-      |> Option.value ~default:24
-      |> normalize_initiative_post_ttl_hours
-    in
     let room_scope =
       profile_defaults.room_scope |> Option.value ~default:"current"
       |> canonical_room_scope
@@ -205,17 +157,9 @@ let ensure_keeper_exists
       allowed_models;
       active_model;
       policy_mode;
-      policy_action_budget;
-      policy_reward_model_path;
       policy_voice_enabled;
       policy_shell_mode;
       allowed_paths;
-      initiative_enabled;
-      initiative_scope;
-      initiative_idle_sec;
-      initiative_cooldown_sec;
-      initiative_context_mode;
-      initiative_post_ttl_hours;
       scope_kind;
       room_scope;
       trigger_mode;
@@ -226,7 +170,6 @@ let ensure_keeper_exists
       joined_room_ids = [];
       last_seen_seq_by_room = [];
       generation = 0;
-      verify = false;
       presence_keepalive = true;
       presence_keepalive_sec = 30;
       proactive_enabled =
@@ -241,11 +184,6 @@ let ensure_keeper_exists
           profile_defaults.proactive_enabled;
       proactive_idle_sec = default_proactive_idle_sec;
       proactive_cooldown_sec = default_proactive_cooldown_sec;
-      drift_enabled;
-      drift_min_turn_gap;
-      drift_count_total = 0;
-      last_drift_turn = 0;
-      last_drift_reason = "";
       compaction_profile = default_compaction_profile;
       compaction_ratio_gate = env_ratio_gate;
       compaction_message_gate = env_message_gate;
@@ -254,7 +192,6 @@ let ensure_keeper_exists
       auto_handoff = true;
       handoff_threshold = 0.85;
       handoff_cooldown_sec = 300;
-      context_budget = 0.6;
       last_handoff_ts = 0.0;
       created_at = now_iso ();
       updated_at = now_iso ();
@@ -289,7 +226,6 @@ let ensure_keeper_exists
       deliberation_cost_total_usd = 0.0;
       last_deliberation_ts = 0.0;
       last_triage_triggers = "";
-      auto_team_session_enabled = false;
       active_team_session_id = None;
       last_team_session_started_at = "";
       team_session_start_count_total = 0;
@@ -339,8 +275,6 @@ let apply_settings_update
     ~new_will
     ~new_needs
     ~new_desires
-    ~new_drift_enabled_opt
-    ~new_drift_min_turn_gap_opt
     ~(config : Room.config)
   : keeper_meta =
   let new_goal_opt = normalize_goal_horizon_opt (get_string_opt args "new_goal") in
@@ -372,12 +306,6 @@ let apply_settings_update
   let will = Option.value ~default:meta0.will new_will in
   let needs = Option.value ~default:meta0.needs new_needs in
   let desires = Option.value ~default:meta0.desires new_desires in
-  let drift_enabled = Option.value ~default:meta0.drift_enabled new_drift_enabled_opt in
-  let drift_min_turn_gap =
-    match new_drift_min_turn_gap_opt with
-    | None -> meta0.drift_min_turn_gap
-    | Some v -> normalize_drift_min_turn_gap v
-  in
   if goal = meta0.goal
      && short_goal = meta0.short_goal
      && mid_goal = meta0.mid_goal
@@ -387,8 +315,6 @@ let apply_settings_update
      && needs = meta0.needs
      && desires = meta0.desires
      && instructions = meta0.instructions
-     && drift_enabled = meta0.drift_enabled
-     && drift_min_turn_gap = meta0.drift_min_turn_gap
   then
     meta0
   else
@@ -403,8 +329,6 @@ let apply_settings_update
       needs;
       desires;
       instructions;
-      drift_enabled;
-      drift_min_turn_gap;
       updated_at = now_iso ();
     } in
     (try

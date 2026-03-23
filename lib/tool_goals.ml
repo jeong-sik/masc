@@ -475,9 +475,7 @@ let run_keeper_call ctx ~models ~keeper_prefix ?(fallback_to_task = true) node =
             ("new_soul_profile", `String "delivery");
             ("presence_keepalive", `Bool true);
             ("auto_handoff", `Bool true);
-            ("context_budget", `Float 0.6);
             ("handoff_threshold", `Float 0.85);
-            ("drift_enabled", `Bool true);
             ("instructions", `String "Respond concise and execution-first.");
             ("new_short_goal", `String node.title);
             ("new_mid_goal", `String node.title);

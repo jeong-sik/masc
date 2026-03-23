@@ -26,17 +26,9 @@ type keeper_meta = {
   allowed_models: string list;
   active_model: string;
   policy_mode: string;
-  policy_action_budget: string;
-  policy_reward_model_path: string;
   policy_voice_enabled: bool;
   policy_shell_mode: string;
   allowed_paths: string list;
-  initiative_enabled: bool;
-  initiative_scope: string;
-  initiative_idle_sec: int;
-  initiative_cooldown_sec: int;
-  initiative_context_mode: string;
-  initiative_post_ttl_hours: int;
   scope_kind: string;
   room_scope: string;
   trigger_mode: string;
@@ -44,17 +36,11 @@ type keeper_meta = {
   joined_room_ids: string list;
   last_seen_seq_by_room: (string * int) list;
   generation: int;
-  verify: bool;
   presence_keepalive: bool;
   presence_keepalive_sec: int;
   proactive_enabled: bool;
   proactive_idle_sec: int;
   proactive_cooldown_sec: int;
-  drift_enabled: bool;
-  drift_min_turn_gap: int;
-  drift_count_total: int;
-  last_drift_turn: int;
-  last_drift_reason: string;
   compaction_profile: string;
   compaction_ratio_gate: float;
   compaction_message_gate: int;
@@ -63,7 +49,6 @@ type keeper_meta = {
   auto_handoff: bool;
   handoff_threshold: float;
   handoff_cooldown_sec: int;
-  context_budget: float;
   voice_enabled: bool;
   voice_channel: string;
   voice_agent_id: string;
@@ -95,7 +80,6 @@ type keeper_meta = {
   continuity_summary: string;
   autonomy_level: string;
   active_goal_ids: string list;
-  auto_team_session_enabled: bool;
   active_team_session_id: string option;
   last_team_session_started_at: string;
   team_session_start_count_total: int;
@@ -132,17 +116,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
       ("active_model", `String m.active_model);
       ("policy_mode", `String m.policy_mode);
-      ("policy_action_budget", `String m.policy_action_budget);
-      ("policy_reward_model_path", `String m.policy_reward_model_path);
       ("policy_voice_enabled", `Bool m.policy_voice_enabled);
       ("policy_shell_mode", `String m.policy_shell_mode);
       ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
-      ("initiative_enabled", `Bool m.initiative_enabled);
-      ("initiative_scope", `String m.initiative_scope);
-      ("initiative_idle_sec", `Int m.initiative_idle_sec);
-      ("initiative_cooldown_sec", `Int m.initiative_cooldown_sec);
-      ("initiative_context_mode", `String m.initiative_context_mode);
-      ("initiative_post_ttl_hours", `Int m.initiative_post_ttl_hours);
       ("scope_kind", `String m.scope_kind);
       ("room_scope", `String m.room_scope);
       ("trigger_mode", `String m.trigger_mode);
@@ -150,17 +126,11 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("joined_room_ids", `List (List.map (fun s -> `String s) m.joined_room_ids));
       ("last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room);
       ("generation", `Int m.generation);
-      ("verify", `Bool m.verify);
       ("presence_keepalive", `Bool m.presence_keepalive);
       ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
       ("proactive_enabled", `Bool m.proactive_enabled);
       ("proactive_idle_sec", `Int m.proactive_idle_sec);
       ("proactive_cooldown_sec", `Int m.proactive_cooldown_sec);
-      ("drift_enabled", `Bool m.drift_enabled);
-      ("drift_min_turn_gap", `Int m.drift_min_turn_gap);
-      ("drift_count_total", `Int m.drift_count_total);
-      ("last_drift_turn", `Int m.last_drift_turn);
-      ("last_drift_reason", `String m.last_drift_reason);
       ("compaction_profile", `String m.compaction_profile);
       ("compaction_ratio_gate", `Float m.compaction_ratio_gate);
       ("compaction_message_gate", `Int m.compaction_message_gate);
@@ -169,7 +139,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("auto_handoff", `Bool m.auto_handoff);
       ("handoff_threshold", `Float m.handoff_threshold);
       ("handoff_cooldown_sec", `Int m.handoff_cooldown_sec);
-      ("context_budget", `Float m.context_budget);
       ("voice_enabled", `Bool m.voice_enabled);
       ("voice_channel", `String m.voice_channel);
       ("voice_agent_id", `String m.voice_agent_id);
@@ -201,7 +170,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("continuity_summary", `String m.continuity_summary);
       ("autonomy_level", `String m.autonomy_level);
       ("active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids));
-      ("auto_team_session_enabled", `Bool m.auto_team_session_enabled);
       ( "active_team_session_id",
         match m.active_team_session_id with
         | Some value -> `String value
@@ -272,13 +240,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_string ~default:"heuristic" "policy_mode" json
       |> canonical_policy_mode
     in
-    let policy_action_budget =
-      Safe_ops.json_string ~default:"conversation" "policy_action_budget" json
-      |> canonical_policy_action_budget
-    in
-    let policy_reward_model_path =
-      Safe_ops.json_string ~default:"" "policy_reward_model_path" json
-    in
     let policy_voice_enabled =
       Safe_ops.json_bool ~default:(default_voice_enabled_for name) "policy_voice_enabled" json
     in
@@ -287,29 +248,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       |> canonical_policy_shell_mode
     in
     let allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
-    let initiative_enabled =
-      Safe_ops.json_bool ~default:false "initiative_enabled" json
-    in
-    let initiative_scope =
-      Safe_ops.json_string ~default:"board_only" "initiative_scope" json
-      |> canonical_initiative_scope
-    in
-    let initiative_idle_sec =
-      Safe_ops.json_int ~default:3600 "initiative_idle_sec" json
-      |> normalize_initiative_idle_sec
-    in
-    let initiative_cooldown_sec =
-      Safe_ops.json_int ~default:3600 "initiative_cooldown_sec" json
-      |> normalize_initiative_cooldown_sec
-    in
-    let initiative_context_mode =
-      Safe_ops.json_string ~default:"board_snapshot" "initiative_context_mode" json
-      |> canonical_initiative_context_mode
-    in
-    let initiative_post_ttl_hours =
-      Safe_ops.json_int ~default:24 "initiative_post_ttl_hours" json
-      |> normalize_initiative_post_ttl_hours
-    in
     let voice_enabled =
       Safe_ops.json_bool ~default:(default_voice_enabled_for name) "voice_enabled" json
     in
@@ -341,7 +279,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Yojson.Safe.Util.member "last_seen_seq_by_room" json |> room_seq_map_of_json
     in
     let generation = Safe_ops.json_int ~default:0 "generation" json in
-    let verify = Safe_ops.json_bool ~default:false "verify" json in
     let presence_keepalive = Safe_ops.json_bool ~default:true "presence_keepalive" json in
     let presence_keepalive_sec =
       Safe_ops.json_int ~default:30 "presence_keepalive_sec" json
@@ -357,16 +294,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_int ~default:default_proactive_cooldown_sec "proactive_cooldown_sec" json
       |> normalize_proactive_cooldown_sec
     in
-    let drift_enabled =
-      Safe_ops.json_bool ~default:default_drift_enabled "drift_enabled" json
-    in
-    let drift_min_turn_gap =
-      Safe_ops.json_int ~default:default_drift_min_turn_gap "drift_min_turn_gap" json
-      |> normalize_drift_min_turn_gap
-    in
-    let drift_count_total = Safe_ops.json_int ~default:0 "drift_count_total" json in
-    let last_drift_turn = Safe_ops.json_int ~default:0 "last_drift_turn" json in
-    let last_drift_reason = Safe_ops.json_string ~default:"" "last_drift_reason" json in
     let (env_ratio_gate, env_message_gate, env_token_gate) =
       keeper_compaction_policy_from_env ()
     in
@@ -397,7 +324,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let auto_handoff = Safe_ops.json_bool ~default:true "auto_handoff" json in
     let handoff_threshold = Safe_ops.json_float ~default:0.85 "handoff_threshold" json in
     let handoff_cooldown_sec = Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json in
-    let context_budget = Safe_ops.json_float ~default:0.6 "context_budget" json in
     let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
     let created_at = Safe_ops.json_string ~default:"" "created_at" json in
     let updated_at = Safe_ops.json_string ~default:"" "updated_at" json in
@@ -444,9 +370,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_string ~default:"l3_guided" "autonomy_level" json
     in
     let active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
-    let auto_team_session_enabled =
-      Safe_ops.json_bool ~default:false "auto_team_session_enabled" json
-    in
     let active_team_session_id =
       Safe_ops.json_string_opt "active_team_session_id" json
     in
@@ -503,17 +426,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           allowed_models;
           active_model;
           policy_mode;
-          policy_action_budget;
-          policy_reward_model_path;
           policy_voice_enabled;
           policy_shell_mode;
           allowed_paths;
-          initiative_enabled;
-          initiative_scope;
-          initiative_idle_sec;
-          initiative_cooldown_sec;
-          initiative_context_mode;
-          initiative_post_ttl_hours;
           scope_kind;
           room_scope;
           trigger_mode;
@@ -521,17 +436,11 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           joined_room_ids;
           last_seen_seq_by_room;
           generation;
-          verify;
           presence_keepalive;
           presence_keepalive_sec;
           proactive_enabled;
           proactive_idle_sec;
           proactive_cooldown_sec;
-          drift_enabled;
-          drift_min_turn_gap;
-          drift_count_total;
-          last_drift_turn;
-          last_drift_reason;
           compaction_profile;
           compaction_ratio_gate;
           compaction_message_gate;
@@ -540,7 +449,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           auto_handoff;
           handoff_threshold;
           handoff_cooldown_sec;
-          context_budget;
           voice_enabled;
           voice_channel;
           voice_agent_id;
@@ -572,7 +480,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           continuity_summary;
           autonomy_level;
           active_goal_ids;
-          auto_team_session_enabled;
           active_team_session_id;
           last_team_session_started_at;
           team_session_start_count_total;

@@ -275,7 +275,7 @@ let append_keeper_auto_team_session_note (ctx : _ context) (meta : keeper_meta)
 let maybe_handle_auto_team_session (ctx : _ context) (meta : keeper_meta)
     (message : string) :
     ((tool_result option * keeper_meta), string) result =
-  if not meta.auto_team_session_enabled then
+  if true then
     Ok (None, meta)
   else
     let linked_meta, running_session = running_session_for_keeper ctx.config meta in

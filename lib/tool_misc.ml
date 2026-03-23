@@ -154,10 +154,8 @@ let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
        ("status", `String status);
        ("autonomy_level", `String meta.autonomy_level);
        ("policy_mode", `String meta.policy_mode);
-       ("action_budget", `String meta.policy_action_budget);
-       ("reward_model_path",
-        if String.trim meta.policy_reward_model_path = "" then `Null
-        else `String meta.policy_reward_model_path);
+       ("action_budget", `String "conversation");
+       ("reward_model_path", `Null);
        ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
        ("allowed_models", `List (List.map (fun model -> `String model) meta.allowed_models));
        ("updated_at", `String meta.updated_at);
@@ -366,7 +364,7 @@ let apply_keeper_policy_update config ~runtime_class args =
         in
         let action_budget =
           match action_budget_opt with
-          | None -> Ok (Keeper_contract.policy_action_budget_of_string meta.policy_action_budget)
+          | None -> Ok Keeper_contract.Conversation
           | Some raw -> (
               match Keeper_contract.parse_policy_action_budget raw with
               | Some budget -> Ok budget
@@ -386,7 +384,7 @@ let apply_keeper_policy_update config ~runtime_class args =
             let reward_model_path_raw =
               match reward_model_path_opt with
               | Some value -> value
-              | None -> meta.policy_reward_model_path
+              | None -> ""
             in
             let reward_model_path =
               if reward_model_path_raw <> ""
@@ -410,9 +408,7 @@ let apply_keeper_policy_update config ~runtime_class args =
                   {
                     meta with
                     policy_mode = Keeper_contract.policy_mode_to_string policy_mode;
-                    policy_action_budget =
-                      Keeper_contract.policy_action_budget_to_string action_budget;
-                    policy_reward_model_path = effective_reward_path;
+                    (* policy_action_budget and policy_reward_model_path removed *)
                     autonomy_level;
                     updated_at = Types.now_iso ();
                   }
@@ -432,9 +428,9 @@ let apply_keeper_policy_update config ~runtime_class args =
                            ("runtime_class", `String runtime_class);
                            ("name", `String updated.name);
                            ("policy_mode", `String updated.policy_mode);
-                           ("action_budget", `String updated.policy_action_budget);
+                           ("action_budget", `String (Keeper_contract.policy_action_budget_to_string action_budget));
                            ("autonomy_level", `String updated.autonomy_level);
-                           ("reward_model_path", json_string_option (Some updated.policy_reward_model_path));
+                           ("reward_model_path", json_string_option (Some effective_reward_path));
                            ("reward_model_version", json_string_option reward_model_version);
                          ]
                         @ policy_json)))

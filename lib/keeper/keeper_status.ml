@@ -221,16 +221,7 @@ let handle_keeper_list ctx args : tool_result =
               ("continuity_compaction_cooldown_sec", `Int m.continuity_compaction_cooldown_sec);
               ("continuity_reflection_hold_s", `Float continuity_reflection_hold_s);
               ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
-              ("drift_enabled", `Bool m.drift_enabled);
-              ("drift_min_turn_gap", `Int m.drift_min_turn_gap);
-              ("drift_count_total", `Int m.drift_count_total);
               ("policy_mode", `String m.policy_mode);
-              ("policy_action_budget", `String m.policy_action_budget);
-              ("policy_reward_model_path",
-                if String.trim m.policy_reward_model_path = ""
-                then `Null
-                else `String m.policy_reward_model_path);
-              ("auto_team_session_enabled", `Bool m.auto_team_session_enabled);
               ("active_team_session_id",
                 match m.active_team_session_id with
                 | Some session_id -> `String session_id
@@ -242,11 +233,6 @@ let handle_keeper_list ctx args : tool_result =
               ("team_session_start_count_total",
                 `Int m.team_session_start_count_total);
               ("team_session_bridge", team_session_bridge_json ctx.config m);
-              ("last_drift_turn", `Int m.last_drift_turn);
-              ("last_drift_reason",
-                if String.trim m.last_drift_reason = ""
-                then `Null
-                else `String m.last_drift_reason);
               ("memory_note_count", `Int memory_bank_summary.total_notes);
               ("memory_top_kind",
                 match memory_bank_summary.top_kind with

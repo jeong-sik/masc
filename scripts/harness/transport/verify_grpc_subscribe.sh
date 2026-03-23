@@ -49,7 +49,7 @@ subscribe_resp=$(timeout 5 grpcurl -plaintext \
   -import-path "${PROTO_DIR}" \
   -proto masc_coordination.proto \
   -d '{"agent_name":"e2e-harness","since_seq":"0","event_types":["message"]}' \
-  "${MASC_GRPC_ADDR}" masc.MascCoordination/Subscribe 2>&1 || true)
+  "${MASC_GRPC_ADDR}" masc.coordination.v1.MascCoordination/Subscribe 2>&1 || true)
 if echo "$subscribe_resp" | grep -q "subscription_started"; then
   pass "Subscribe: received subscription_started event"
   # Check if the event has the expected fields
@@ -69,7 +69,7 @@ timeout 8 grpcurl -plaintext \
   -import-path "${PROTO_DIR}" \
   -proto masc_coordination.proto \
   -d '{"agent_name":"e2e-grpc-listener","since_seq":"0","event_types":["message"]}' \
-  "${MASC_GRPC_ADDR}" masc.MascCoordination/Subscribe \
+  "${MASC_GRPC_ADDR}" masc.coordination.v1.MascCoordination/Subscribe \
   >"${SUBSCRIBE_OUTPUT}" 2>&1 &
 SUBSCRIBE_PID=$!
 sleep 1  # Let subscriber connect

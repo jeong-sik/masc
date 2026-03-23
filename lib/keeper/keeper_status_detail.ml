@@ -5,7 +5,6 @@ open Tool_args
 open Keeper_types
 open Keeper_memory
 open Keeper_alerting
-open Keeper_exec_persona
 open Keeper_exec_tools
 open Keeper_keepalive
 open Keeper_execution
@@ -314,6 +313,7 @@ let handle_keeper_status ctx args : tool_result =
                 ~keepalive_started_at:(keeper_keepalive_started_at m.name)
                 ~now_ts
          in
+         let defaults_snapshot = keeper_default_source_snapshot m.name in
 
          let compaction_history_tail =
            if not include_compaction_history then
@@ -427,6 +427,7 @@ let handle_keeper_status ctx args : tool_result =
              ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
              ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
            ]);
+           ("paused", `Bool m.paused);
            ("keepalive_running", `Bool keepalive_running);
            ("agent", agent_status);
            ("diagnostic", diagnostic);
@@ -461,13 +462,7 @@ let handle_keeper_status ctx args : tool_result =
                then `Null
                else `String m.last_proactive_preview);
            ]);
-           ("drift", `Assoc [
-             ("enabled", `Bool false);
-             ("min_turn_gap", `Int 0);
-             ("count_total", `Int 0);
-             ("last_turn", `Int 0);
-             ("last_reason", `Null);
-           ]);
+           ("drift", drift_surface_json ());
            ("policy", `Assoc [
              ("mode", `String m.policy_mode);
              ("voice_enabled", `Bool m.policy_voice_enabled);
@@ -477,15 +472,8 @@ let handle_keeper_status ctx args : tool_result =
              ("available_internal_tools", string_list_to_json all_internal_tools);
              ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
            ]);
-           ("initiative", `Assoc [
-             ("enabled", `Bool false);
-             ("scope", `String "board_only");
-             ("idle_sec", `Int 3600);
-             ("cooldown_sec", `Int 3600);
-             ("context_mode", `String "board_snapshot");
-             ("post_ttl_hours", `Int 24);
-           ]);
-           ("auto_team_session_enabled", `Bool false);
+           ("initiative", initiative_surface_json defaults_snapshot.defaults);
+           ("auto_team_session", auto_team_session_surface_json ());
            ("active_team_session_id",
              match m.active_team_session_id with
              | Some session_id -> `String session_id
@@ -512,10 +500,13 @@ let handle_keeper_status ctx args : tool_result =
              ("include_history_tail", `Bool include_history_tail);
              ("include_compaction_history", `Bool include_compaction_history);
            ]);
-	           ("models_resolved", models_resolved);
-	           ("context", ctx_stats);
-	           ("skill_route", match last_skill_route with Some v -> v | None -> `Null);
-	           ("metrics_overview", metrics_summary_to_json metrics_overview);
+           ("models_resolved", models_resolved);
+           ("runtime", runtime_surface_json ctx.config m);
+           ("coordination", coordination_surface_json m);
+           ("sources", source_provenance_json ctx.config m);
+           ("context", ctx_stats);
+           ("skill_route", match last_skill_route with Some v -> v | None -> `Null);
+           ("metrics_overview", metrics_summary_to_json metrics_overview);
 	           ("memory_bank", memory_summary_to_json memory_bank_summary);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);

@@ -233,6 +233,12 @@ type keeper_profile_defaults = {
   presence_keepalive : bool option;
   presence_keepalive_sec : int option;
   proactive_enabled : bool option;
+  initiative_enabled : bool option;
+  initiative_scope : string option;
+  initiative_idle_sec : int option;
+  initiative_cooldown_sec : int option;
+  initiative_context_mode : string option;
+  initiative_post_ttl_hours : int option;
 }
 
 type persona_summary = {
@@ -268,6 +274,12 @@ let empty_keeper_profile_defaults = {
   presence_keepalive = None;
   presence_keepalive_sec = None;
   proactive_enabled = None;
+  initiative_enabled = None;
+  initiative_scope = None;
+  initiative_idle_sec = None;
+  initiative_cooldown_sec = None;
+  initiative_context_mode = None;
+  initiative_post_ttl_hours = None;
 }
 
 let personas_root_opt () =
@@ -348,6 +360,12 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
          presence_keepalive = bool_ "presence_keepalive";
          presence_keepalive_sec = int_ "presence_keepalive_sec";
          proactive_enabled = bool_ "proactive_enabled";
+         initiative_enabled = bool_ "initiative_enabled";
+         initiative_scope = str "initiative_scope";
+         initiative_idle_sec = int_ "initiative_idle_sec";
+         initiative_cooldown_sec = int_ "initiative_cooldown_sec";
+         initiative_context_mode = str "initiative_context_mode";
+         initiative_post_ttl_hours = int_ "initiative_post_ttl_hours";
        })
 
 let load_keeper_toml (path : string)
@@ -452,6 +470,15 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 presence_keepalive = Safe_ops.json_bool_opt "presence_keepalive" keeper_json;
                 presence_keepalive_sec = Safe_ops.json_int_opt "presence_keepalive_sec" keeper_json;
                 proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
+                initiative_enabled = Safe_ops.json_bool_opt "initiative_enabled" keeper_json;
+                initiative_scope = Safe_ops.json_string_opt "initiative_scope" keeper_json;
+                initiative_idle_sec = Safe_ops.json_int_opt "initiative_idle_sec" keeper_json;
+                initiative_cooldown_sec =
+                  Safe_ops.json_int_opt "initiative_cooldown_sec" keeper_json;
+                initiative_context_mode =
+                  Safe_ops.json_string_opt "initiative_context_mode" keeper_json;
+                initiative_post_ttl_hours =
+                  Safe_ops.json_int_opt "initiative_post_ttl_hours" keeper_json;
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 
@@ -466,6 +493,33 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
        load_keeper_profile_defaults_from_persona name)
   | None ->
     load_keeper_profile_defaults_from_persona name
+
+type keeper_default_source_snapshot = {
+  source_kind : string option;
+  defaults : keeper_profile_defaults;
+}
+
+let keeper_default_source_snapshot name : keeper_default_source_snapshot =
+  match keeper_toml_path_opt name with
+  | Some toml_path -> (
+      match load_keeper_toml toml_path with
+      | Ok (_name, defaults) ->
+          { source_kind = Some "toml"; defaults }
+      | Error e ->
+          Log.Keeper.warn
+            "toml config for %s failed (%s), falling back to persona"
+            name e;
+          let defaults = load_keeper_profile_defaults_from_persona name in
+          let source_kind =
+            if Option.is_some defaults.manifest_path then Some "persona" else None
+          in
+          { source_kind; defaults })
+  | None ->
+      let defaults = load_keeper_profile_defaults_from_persona name in
+      let source_kind =
+        if Option.is_some defaults.manifest_path then Some "persona" else None
+      in
+      { source_kind; defaults }
 
 (** Load extended persona description from AGENT.md if present.
     Truncated to [max_chars] to avoid bloating the system prompt. *)
@@ -535,4 +589,3 @@ let session_base_dir (config : Room.config) =
 
 let keeper_agent_name name =
   Printf.sprintf "keeper-%s-agent" name
-

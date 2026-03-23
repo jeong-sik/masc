@@ -6,6 +6,7 @@
 
 
 open Dashboard_http_helpers
+open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail
 
@@ -540,23 +541,9 @@ let keeper_config_json (config : Room.config) (name : string)
           ("cooldown_sec", `Int m.proactive_cooldown_sec);
         ]
       in
-      let drift =
-        `Assoc [
-          ("enabled", `Bool false);
-          ("min_turn_gap", `Int 0);
-          ("count_total", `Int 0);
-          ("last_reason", `Null);
-        ]
-      in
-      let initiative =
-        `Assoc [
-          ("enabled", `Bool false);
-          ("scope", `String "board_only");
-          ("idle_sec", `Int 3600);
-          ("cooldown_sec", `Int 3600);
-          ("context_mode", `String "board_snapshot");
-        ]
-      in
+      let defaults_snapshot = Keeper_types.keeper_default_source_snapshot m.name in
+      let drift = drift_surface_json () in
+      let initiative = initiative_surface_json defaults_snapshot.defaults in
       let handoff =
         `Assoc [
           ("auto", `Bool m.auto_handoff);
@@ -600,7 +587,10 @@ let keeper_config_json (config : Room.config) (name : string)
          ("proactive", proactive);
          ("drift", drift);
          ("initiative", initiative);
+         ("auto_team_session", auto_team_session_surface_json ());
          ("handoff", handoff);
+         ("runtime", runtime_surface_json config m);
+         ("coordination", coordination_surface_json m);
+         ("sources", source_provenance_json config m);
          ("metrics", metrics);
        ])
-

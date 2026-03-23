@@ -452,25 +452,74 @@ export interface KeeperConfigProactive {
   cooldown_sec: number
 }
 
+export type KeeperFeatureStatus = 'wired' | 'source_only' | 'unwired'
+
 export interface KeeperConfigDrift {
-  enabled: boolean
-  min_turn_gap: number
-  count_total: number
+  status: KeeperFeatureStatus
+  enabled: boolean | null
+  min_turn_gap: number | null
+  count_total: number | null
   last_reason: string | null
 }
 
+export interface KeeperConfigInitiativeSourceDefaults {
+  enabled: boolean | null
+  scope: string | null
+  idle_sec: number | null
+  cooldown_sec: number | null
+  context_mode: string | null
+  post_ttl_hours: number | null
+}
+
 export interface KeeperConfigInitiative {
-  enabled: boolean
-  scope: string
-  idle_sec: number
-  cooldown_sec: number
-  context_mode: string
+  status: KeeperFeatureStatus
+  enabled: boolean | null
+  scope: string | null
+  idle_sec: number | null
+  cooldown_sec: number | null
+  context_mode: string | null
+  configured_in_source: boolean
+  source_defaults: KeeperConfigInitiativeSourceDefaults | null
 }
 
 export interface KeeperConfigHandoff {
   auto: boolean
   threshold: number
   cooldown_sec: number
+}
+
+export interface KeeperConfigAutoTeamSession {
+  status: KeeperFeatureStatus
+  enabled: boolean | null
+}
+
+export interface KeeperConfigRuntime {
+  paused: boolean
+  desired: boolean
+  resident_registered: boolean
+  keepalive_running: boolean
+  fiber_health: string
+  presence_keepalive: boolean
+  presence_keepalive_sec: number
+}
+
+export interface KeeperConfigCoordination {
+  room_scope: string
+  scope_kind: string
+  trigger_mode: string
+  mention_targets: string[]
+  joined_room_ids: string[]
+}
+
+export interface KeeperConfigSources {
+  live_meta_path: string
+  resident_spec_path: string
+  resident_spec_exists: boolean
+  default_manifest_path: string | null
+  default_source_kind: 'toml' | 'persona' | null
+  precedence: string[]
+  has_live_override: boolean
+  override_fields: string[]
 }
 
 export interface KeeperConfigMetrics {
@@ -489,6 +538,10 @@ export interface KeeperConfig {
   proactive: KeeperConfigProactive
   drift: KeeperConfigDrift
   initiative: KeeperConfigInitiative
+  auto_team_session: KeeperConfigAutoTeamSession
   handoff: KeeperConfigHandoff
+  runtime: KeeperConfigRuntime
+  coordination: KeeperConfigCoordination
+  sources: KeeperConfigSources
   metrics: KeeperConfigMetrics
 }

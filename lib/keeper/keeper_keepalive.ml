@@ -299,9 +299,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                 in
                 let agent_count_changed =
                   let last_count =
-                    match Hashtbl.find_opt last_agent_counts meta_current.name with
-                    | Some c -> c
-                    | None -> 0
+                    Hashtbl.find_opt last_agent_counts meta_current.name
+                    |> Option.value ~default:0
                   in
                   let changed =
                     last_count > 0 && current_agent_count <> last_count

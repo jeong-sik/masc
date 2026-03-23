@@ -360,36 +360,14 @@ let apply_settings_update
     Option.value ~default:long_goal_default new_long_goal
     |> normalize_goal_horizon_text
   in
-  let soul_profile =
-    match new_soul_profile with
-    | None -> meta0.soul_profile
-    | Some sp -> sp
-  in
+  let soul_profile = Option.value ~default:meta0.soul_profile new_soul_profile in
   let instructions =
-    match get_string_opt args "new_instructions" with
-    | None -> meta0.instructions
-    | Some ni -> ni
+    Option.value ~default:meta0.instructions (get_string_opt args "new_instructions")
   in
-  let will =
-    match new_will with
-    | None -> meta0.will
-    | Some w -> w
-  in
-  let needs =
-    match new_needs with
-    | None -> meta0.needs
-    | Some n -> n
-  in
-  let desires =
-    match new_desires with
-    | None -> meta0.desires
-    | Some d -> d
-  in
-  let drift_enabled =
-    match new_drift_enabled_opt with
-    | None -> meta0.drift_enabled
-    | Some v -> v
-  in
+  let will = Option.value ~default:meta0.will new_will in
+  let needs = Option.value ~default:meta0.needs new_needs in
+  let desires = Option.value ~default:meta0.desires new_desires in
+  let drift_enabled = Option.value ~default:meta0.drift_enabled new_drift_enabled_opt in
   let drift_min_turn_gap =
     match new_drift_min_turn_gap_opt with
     | None -> meta0.drift_min_turn_gap

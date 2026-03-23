@@ -607,9 +607,8 @@ let resident_keeper_of_json (json : Yojson.Safe.t) :
     let open Yojson.Safe.Util in
     let name = json |> member "name" |> to_string in
     let persistent_name =
-      match json |> member "persistent_name" |> to_string_option with
-      | Some value -> value
-      | None -> name
+      json |> member "persistent_name" |> to_string_option
+      |> Option.value ~default:name
     in
     let desired =
       match json |> member "desired" with
@@ -627,9 +626,8 @@ let resident_keeper_of_json (json : Yojson.Safe.t) :
       | None -> default_voice_channel_for name
     in
     let voice_agent_id =
-      match json |> member "voice_agent_id" |> to_string_option with
-      | Some value -> value
-      | None -> default_voice_agent_id_for name
+      json |> member "voice_agent_id" |> to_string_option
+      |> Option.value ~default:(default_voice_agent_id_for name)
     in
     let seed_meta =
       match json |> member "seed_meta" with
@@ -637,14 +635,12 @@ let resident_keeper_of_json (json : Yojson.Safe.t) :
       | _ -> `Assoc []
     in
     let created_at =
-      match json |> member "created_at" |> to_string_option with
-      | Some value -> value
-      | None -> now_iso ()
+      json |> member "created_at" |> to_string_option
+      |> Option.value ~default:(now_iso ())
     in
     let updated_at =
-      match json |> member "updated_at" |> to_string_option with
-      | Some value -> value
-      | None -> created_at
+      json |> member "updated_at" |> to_string_option
+      |> Option.value ~default:created_at
     in
     Ok
       {

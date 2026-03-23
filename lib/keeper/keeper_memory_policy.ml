@@ -639,7 +639,5 @@ let profile_kind_caps (profile : string) : (string * int) list =
       [ ("constraints", 2); ("decision", 2); ("next", 2); ("goal", 2); ("progress", 2); ("open_question", 2) ]
 
 let cap_for_kind (caps : (string * int) list) (kind : string) : int =
-  match List.assoc_opt kind caps with
-  | Some v -> v
-  | None -> 1
+  List.assoc_opt kind caps |> Option.value ~default:1
 

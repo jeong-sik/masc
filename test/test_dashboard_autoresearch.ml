@@ -34,6 +34,12 @@ let write_file path contents =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc contents)
 
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
 let with_temp_base f =
   let dir = test_dir () in
   Fun.protect
@@ -55,6 +61,58 @@ let with_eio_test f =
   Eio_main.run @@ fun _env ->
   f ()
 
+let legacy_state_json ?(loop_id = "legacy-loop") ?(model = "glm:legacy") () =
+  Printf.sprintf
+    {|
+{
+  "loop_id": "%s",
+  "goal": "Improve code quality",
+  "metric_fn": "echo 0.75",
+  "llm_model": "%s",
+  "target_file": "README.md",
+  "status": "running",
+  "current_cycle": 0,
+  "baseline": 0.75,
+  "best_score": 0.75,
+  "best_cycle": 0,
+  "queued_hypothesis": null,
+  "total_keeps": 0,
+  "total_discards": 0,
+  "max_cycles": 1,
+  "cycle_timeout_s": 30.0,
+  "workdir": "/tmp/autoresearch/worktree",
+  "source_workdir": "/tmp/autoresearch",
+  "elapsed_s": 0.5,
+  "history_count": 0,
+  "insights_count": 0,
+  "program_note": null,
+  "warnings": [ "source_workdir_dirty" ],
+  "error": null
+}
+|}
+    loop_id model
+
+let test_load_state_migrates_legacy_model_key () =
+  with_eio_test @@ fun () ->
+  with_temp_base @@ fun base_path ->
+  let loop_id = "legacy-loop" in
+  let state_path =
+    Filename.concat base_path (Printf.sprintf ".masc/autoresearch/%s/state.json" loop_id)
+  in
+  write_file state_path (legacy_state_json ~loop_id ());
+  let summary = Lib.Autoresearch.load_state ~base_path loop_id in
+  let summary =
+    match summary with
+    | Some value -> value
+    | None -> fail "expected legacy autoresearch state to load"
+  in
+  check string "legacy key loads into canonical field" "glm:legacy" summary.model_model;
+  let migrated = Yojson.Safe.from_string (read_file state_path) in
+  check string "canonical key written back" "glm:legacy"
+    Yojson.Safe.Util.(migrated |> member "model_model" |> to_string);
+  check bool "legacy key removed after rewrite" true
+    Yojson.Safe.Util.(migrated |> member "llm_model" = `Null)
+
 let test_loops_json_skips_invalid_persisted_state () =
   with_eio_test @@ fun () ->
   with_clean_loops @@ fun () ->
@@ -71,6 +129,23 @@ let test_loops_json_skips_invalid_persisted_state () =
     Yojson.Safe.Util.(json |> member "total" |> to_int);
   check int "no loop entries" 0
     Yojson.Safe.Util.(json |> member "loops" |> to_list |> List.length)
+
+let test_loops_json_loads_legacy_persisted_state () =
+  with_eio_test @@ fun () ->
+  with_clean_loops @@ fun () ->
+  with_temp_base @@ fun base_path ->
+  let loop_id = "legacy-loop" in
+  let state_path =
+    Filename.concat base_path (Printf.sprintf ".masc/autoresearch/%s/state.json" loop_id)
+  in
+  write_file state_path (legacy_state_json ~loop_id ());
+  let json =
+    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+  in
+  check int "legacy persisted loop is listed" 1
+    Yojson.Safe.Util.(json |> member "total" |> to_int);
+  check string "legacy model surfaces as canonical field" "glm:legacy"
+    Yojson.Safe.Util.(json |> member "loops" |> index 0 |> member "model_model" |> to_string)
 
 let test_loops_json_tolerates_invalid_swarm_link_for_active_loop () =
   with_eio_test @@ fun () ->
@@ -108,8 +183,12 @@ let () =
     [
       ( "loops_json",
         [
+          test_case "migrates legacy model key on load" `Quick
+            test_load_state_migrates_legacy_model_key;
           test_case "skips invalid persisted state" `Quick
             test_loops_json_skips_invalid_persisted_state;
+          test_case "loads legacy persisted state" `Quick
+            test_loops_json_loads_legacy_persisted_state;
           test_case "tolerates invalid swarm link for active loop" `Quick
             test_loops_json_tolerates_invalid_swarm_link_for_active_loop;
         ] );

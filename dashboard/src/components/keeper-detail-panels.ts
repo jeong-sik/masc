@@ -93,12 +93,39 @@ const KPI_VALUE_TONE: Record<KpiTone, string> = {
   bad: 'text-[#ef4444]',
 }
 
-function KpiCard({ label, value, hint, tone = 'default' }: { label: string; value: string | number; hint?: string; tone?: KpiTone }) {
+const KPI_ICON: Record<string, string> = {
+  Generation: '🔄',
+  Turns: '↻',
+  Context: '📊',
+  Activity: '⚡',
+  Tokens: '🔤',
+  Handoffs: '🤝',
+  Compactions: '📦',
+  'Cost (USD)': '💰',
+}
+
+function KpiCard({ label, value, hint, tone = 'default', progress }: {
+  label: string
+  value: string | number
+  hint?: string
+  tone?: KpiTone
+  /** 0-100 progress bar */
+  progress?: number
+}) {
+  const icon = KPI_ICON[label] ?? ''
   return html`
-    <div class="p-4 rounded-xl border ${KPI_TONE[tone]} flex flex-col gap-1 transition-colors">
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${label}</div>
-      <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-tight">${value}</div>
-      ${hint ? html`<div class="text-[11px] text-[var(--text-muted)] leading-snug">${hint}</div>` : null}
+    <div class="p-3.5 rounded-xl border ${KPI_TONE[tone]} flex flex-col gap-1.5 transition-colors">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${label}</span>
+        ${icon ? html`<span class="text-[11px] opacity-60">${icon}</span>` : null}
+      </div>
+      <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-none">${value}</div>
+      ${progress != null ? html`
+        <div class="w-full h-1 bg-[var(--white-6)] rounded-full overflow-hidden mt-0.5">
+          <div class="h-full rounded-full transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${progress > 85 ? '#ef4444' : progress > 70 ? '#fbbf24' : '#4ade80'}"></div>
+        </div>
+      ` : null}
+      ${hint ? html`<div class="text-[10px] text-[var(--text-dim)] leading-snug">${hint}</div>` : null}
     </div>
   `
 }
@@ -121,44 +148,51 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const actTone: KpiTone = actLevel == null ? 'default' : actLevel >= 4 ? 'ok' : actLevel >= 2 ? 'warn' : 'default'
 
   return html`
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-      <${KpiCard}
-        label="Generation"
-        value=${keeper.generation ?? '-'}
-        hint="Succession count"
-      />
-      <${KpiCard}
-        label="Turns"
-        value=${keeper.turn_count ?? '-'}
-        hint="Total loop turns"
-      />
-      <${KpiCard}
-        label="Context"
-        value=${ctxPct != null ? `${ctxPct}%` : '-'}
-        hint=${ctxHint}
-        tone=${ctxTone}
-      />
-      <${KpiCard}
-        label="Activity"
-        value=${keeper.activityLevel ?? '-'}
-        hint="Level 0-5"
-        tone=${actTone}
-      />
-      <${KpiCard}
-        label="Tokens"
-        value=${formatTokens(keeper.context_tokens)}
-      />
-      <${KpiCard}
-        label="Handoffs"
-        value=${keeper.handoff_count_total ?? '-'}
-      />
-      <${KpiCard}
-        label="Compactions"
-        value=${keeper.compaction_count ?? '-'}
-      />
-      ${latestCost
-        ? html`<${KpiCard} label="Cost (USD)" value=${latestCost} />`
-        : null}
+    <div class="flex flex-col gap-3 mb-5">
+      ${'' /* Primary KPIs — 4 cols */}
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <${KpiCard}
+          label="Generation"
+          value=${keeper.generation ?? '-'}
+          hint="Succession count"
+        />
+        <${KpiCard}
+          label="Turns"
+          value=${keeper.turn_count ?? '-'}
+          hint="Total loop turns"
+        />
+        <${KpiCard}
+          label="Context"
+          value=${ctxPct != null ? `${ctxPct}%` : '-'}
+          hint=${ctxHint}
+          tone=${ctxTone}
+          progress=${ctxPct ?? undefined}
+        />
+        <${KpiCard}
+          label="Activity"
+          value=${keeper.activityLevel ?? '-'}
+          hint="Level 0-5"
+          tone=${actTone}
+        />
+      </div>
+      ${'' /* Secondary KPIs — 3-4 cols, smaller feel */}
+      <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+        <${KpiCard}
+          label="Tokens"
+          value=${formatTokens(keeper.context_tokens)}
+        />
+        <${KpiCard}
+          label="Handoffs"
+          value=${keeper.handoff_count_total ?? '-'}
+        />
+        <${KpiCard}
+          label="Compactions"
+          value=${keeper.compaction_count ?? '-'}
+        />
+        ${latestCost
+          ? html`<${KpiCard} label="Cost (USD)" value=${latestCost} />`
+          : null}
+      </div>
     </div>
   `
 }

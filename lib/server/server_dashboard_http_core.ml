@@ -319,8 +319,17 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       | Some ("0" | "false" | "no") -> false
       | _ -> true
     in
-    Operator_control.snapshot_json ?actor
-      ~include_messages ~include_sessions ~include_keepers ctx
+    match Eio.Time.with_timeout clock 30.0 (fun () ->
+      Ok (Operator_control.snapshot_json ?actor
+        ~include_messages ~include_sessions ~include_keepers ctx)
+    ) with
+    | Ok v -> v
+    | Error `Timeout ->
+        `Assoc [
+          ("error", `String "timeout");
+          ("message", `String "Operator snapshot timed out after 30s");
+          ("generated_at", `String (Types.now_iso ()));
+        ]
   end
 
 let operator_digest_http_json ~state ~sw ~clock request =

@@ -400,18 +400,11 @@ let run_grpc_heartbeat_fiber ~sw ~stop
     Log.Keeper.warn "gRPC heartbeat: Eio context not available";
     None
   | Some grpc_sw, Some _net ->
-  (* The gRPC client's heartbeat_stream needs sw+env. We use the global
-     Eio switch since the keeper sw has shorter lifetime. For env, we
-     cast via Obj.magic since Eio_context only stores net, not full env.
-     This is safe because grpc-direct connect ignores env at connect time
-     and only needs sw+env for call_bidi socket operations where net
-     suffices. Instead, we pass through the heartbeat data manually. *)
+  (* Use periodic unary gRPC calls instead of a bidi stream, since the
+     bidi stream requires Eio_unix.Stdenv.base which is not stored
+     globally. The server processes individual heartbeats. *)
   ignore grpc_sw;
   ignore grpc_client;
-  (* Use a simpler approach: fork a fiber that periodically does unary
-     gRPC calls instead of holding a bidi stream open, since the
-     bidi stream requires full Eio_unix.Stdenv.base which we don't have
-     stored globally. The server still processes individual heartbeats. *)
   let close_ref = ref false in
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =

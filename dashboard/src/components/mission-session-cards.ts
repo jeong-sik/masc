@@ -6,6 +6,7 @@ import { StatCell } from './common/stat-cell'
 import { TagBadge } from './common/tag-badge'
 import { ListItem } from './common/list-item'
 import { ActionBar, ActionBtn } from './common/action-bar'
+import { StatusChip } from './common/status-chip'
 import { openAgentDetail } from './agent-detail'
 import type {
   DashboardMissionSessionCard,
@@ -48,7 +49,7 @@ export function SessionBriefCard({
             </div>
             <div class="text-[var(--text-muted)] text-[13px] mt-1">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           </div>
-          <span class="cmd-chip rounded-full ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
+          <${StatusChip} label=${statusLabel(brief.status)} tone=${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)} />
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -147,7 +148,7 @@ export function SessionDetailCard({
         <div class="grid gap-3">
           <div class="flex justify-between gap-3 items-start flex-wrap">
             <strong>타임라인</strong>
-            <span class="cmd-chip rounded-full">${detail.timeline.length}</span>
+            <${StatusChip} label=${String(detail.timeline.length)} />
           </div>
           <div class="flex flex-col gap-3">
             ${detail.timeline.length > 0
@@ -165,7 +166,7 @@ export function SessionDetailCard({
         <div class="grid gap-3">
           <div class="flex justify-between gap-3 items-start flex-wrap">
             <strong>참여자</strong>
-            <span class="cmd-chip rounded-full">${detail.participants.length}</span>
+            <${StatusChip} label=${String(detail.participants.length)} />
           </div>
           <div class="flex flex-col gap-3">
             ${detail.participants.length > 0
@@ -186,7 +187,7 @@ export function SessionDetailCard({
         <div class="grid gap-3">
           <div class="flex justify-between gap-3 items-start flex-wrap">
             <strong>연결된 작전</strong>
-            <span class="cmd-chip rounded-full">${detail.operations.length}</span>
+            <${StatusChip} label=${String(detail.operations.length)} />
           </div>
           <div class="flex flex-col gap-3">
             ${detail.operations.length > 0
@@ -205,7 +206,7 @@ export function SessionDetailCard({
         <div class="grid gap-3">
           <div class="flex justify-between gap-3 items-start flex-wrap">
             <strong>연속성 관찰</strong>
-            <span class="cmd-chip rounded-full">${detail.keepers.length}</span>
+            <${StatusChip} label=${String(detail.keepers.length)} />
           </div>
           <div class="flex flex-col gap-3">
             ${detail.keepers.length > 0

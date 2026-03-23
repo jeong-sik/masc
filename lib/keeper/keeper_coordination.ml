@@ -29,7 +29,8 @@ let effective_model_labels_for_turn
     match Keeper_exec_status.active_model_of_meta m with
     | "" ->
         let pool = dedupe_keep_order (m.allowed_models @ m.models) in
-        if pool = [] then m.models else pool
+        if pool = [] then Oas_model_resolve.models_of_cascade_name m.cascade_name
+        else pool
     | model -> [ model ]
 
 let room_cursor_for meta room_id =

@@ -8,13 +8,21 @@ let active_model_of_meta (m : keeper_meta) : string =
   if String.trim m.active_model <> "" then m.active_model
   else if m.last_model_used <> "" then m.last_model_used
   else
-    match m.allowed_models @ m.models with
+    let pool = m.allowed_models @ m.models in
+    match pool with
     | model :: _ -> model
-    | [] -> ""
+    | [] ->
+      (match Oas_model_resolve.models_of_cascade_name m.cascade_name with
+       | model :: _ -> model
+       | [] -> "")
 
 let next_model_hint_of_meta (m : keeper_meta) : string option =
   let active = active_model_of_meta m in
-  let pool = dedupe_keep_order (m.allowed_models @ m.models) in
+  let base_pool = m.allowed_models @ m.models in
+  let pool = dedupe_keep_order
+    (if base_pool = [] then Oas_model_resolve.models_of_cascade_name m.cascade_name
+     else base_pool)
+  in
   match List.filter (fun model -> model <> active) pool with
   | next_model :: _ -> Some next_model
   | [] -> (

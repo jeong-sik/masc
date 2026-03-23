@@ -13,8 +13,13 @@ let structured_payload_of_message (message : string) : Yojson.Safe.t option =
     with Yojson.Json_error _ -> None
   in
   let trimmed = String.trim message in
+  let ensure_object = function
+    | `Assoc _ as obj -> Some obj
+    | `List _ as arr -> Some (`Assoc [ ("items", arr) ])
+    | _ -> None
+  in
   match parse_json trimmed with
-  | Some _ as json -> json
+  | Some json -> ensure_object json
   | None ->
       let len = String.length message in
       let rec loop from =
@@ -30,7 +35,7 @@ let structured_payload_of_message (message : string) : Yojson.Safe.t option =
               match suffix.[0] with
               | '{' | '[' -> (
                   match parse_json suffix with
-                  | Some _ as json -> json
+                  | Some json -> ensure_object json
                   | None -> loop (newline_idx + 1))
               | _ -> loop (newline_idx + 1)
       in

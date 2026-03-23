@@ -90,7 +90,8 @@ let run_turn
     | None ->
       Cascade_inference.resolve_max_tokens
         ~cascade_name
-        ~fallback:(fun () -> 4096)
+        (* Keep under Cloudflare tunnel 100s timeout: 2048 / 35 tok/s ~ 59s *)
+        ~fallback:(fun () -> 2048)
   in
   (* 1. Ensure session directory *)
   Keeper_types.mkdir_p base_dir;

@@ -72,9 +72,9 @@ let sweep store =
            let post_key = Post_id.to_string c.post_id in
            (match Hashtbl.find_opt store.comments_by_post post_key with
             | Some ids ->
-                let filtered = List.filter (fun id -> not (String.equal id cid)) ids in
-                if filtered = [] then Hashtbl.remove store.comments_by_post post_key
-                else Hashtbl.replace store.comments_by_post post_key filtered
+                (match List.filter (fun id -> not (String.equal id cid)) ids with
+                 | [] -> Hashtbl.remove store.comments_by_post post_key
+                 | filtered -> Hashtbl.replace store.comments_by_post post_key filtered)
             | None -> ())
        | None -> ());
       Hashtbl.remove store.comments cid
@@ -190,6 +190,15 @@ let contains_substring haystack needle =
       else loop (idx + 1)
     in
     loop 0
+
+(** Take at most [n] elements from a list. *)
+let take n lst =
+  let rec go n acc = function
+    | _ when n <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | x :: xs -> go (n - 1) (x :: acc) xs
+  in
+  go n [] lst
 
 let author_looks_automation author =
   String.starts_with ~prefix:"auto-" author
@@ -509,11 +518,6 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
           let h_norm = String.lowercase_ascii (String.trim h) in
           List.filter (fun (p : post) -> p.hearth = Some h_norm) filtered
     in
-    (* Take first N *)
-    let rec take n lst = match n, lst with
-      | 0, _ | _, [] -> []
-      | n, x :: xs -> x :: take (n-1) xs
-    in
     take (min limit 100) filtered  (* Hard cap at 100 *)
   )
 
@@ -529,10 +533,6 @@ let search_posts store ~predicate ~limit : post list =
     let sorted = List.sort (fun (a : post) (b : post) ->
       compare b.created_at a.created_at
     ) matches in
-    let rec take n lst = match n, lst with
-      | 0, _ | _, [] -> []
-      | n, x :: xs -> x :: take (n-1) xs
-    in
     take limit sorted
   )
 
@@ -576,8 +576,8 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
         (* Check comment count using index *)
         let post_key = Post_id.to_string pid in
         let post_comment_count =
-          try List.length (Hashtbl.find store.comments_by_post post_key)
-          with Not_found -> 0
+          Hashtbl.find_opt store.comments_by_post post_key
+          |> Option.value ~default:[] |> List.length
         in
         if post_comment_count >= Limits.max_comments_per_post then
           Error (Capacity_exceeded { current = post_comment_count; max = Limits.max_comments_per_post })
@@ -598,7 +598,7 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
           Hashtbl.add store.comments (Comment_id.to_string comment.id) comment;
           (* Update comments_by_post index *)
           let post_key = Post_id.to_string pid in
-          let existing = try Hashtbl.find store.comments_by_post post_key with Not_found -> [] in
+          let existing = Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[] in
           Hashtbl.replace store.comments_by_post post_key (Comment_id.to_string comment.id :: existing);
           (* Update post reply count and updated_at *)
           Hashtbl.replace store.posts post_key
@@ -617,7 +617,7 @@ let get_comments store ~post_id : (comment list, board_error) result =
   | Ok pid ->
       with_lock store (fun () ->
         let post_key = Post_id.to_string pid in
-        let comment_ids = try Hashtbl.find store.comments_by_post post_key with Not_found -> [] in
+        let comment_ids = Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[] in
         let comments = List.filter_map (fun cid ->
           Hashtbl.find_opt store.comments cid
         ) comment_ids in

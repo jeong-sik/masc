@@ -148,11 +148,7 @@ let list_posts ?(visibility_filter=None) ?hearth ?post_kind_filter ?(sort_by=Hot
       let posts = Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit () in
       let sorted = sort_posts_in_memory ~sort_by posts in
       let filtered = apply_post_kind_filter sorted in
-      let rec take n lst = match n, lst with
-        | 0, _ | _, [] -> []
-        | n, x :: xs -> x :: take (n - 1) xs
-      in
-      take limit filtered
+      Board.take limit filtered
   | Postgres t ->
       let pg_sort = match sort_by with
         | Hot -> Board_pg.Hot
@@ -168,11 +164,7 @@ let list_posts ?(visibility_filter=None) ?hearth ?post_kind_filter ?(sort_by=Hot
       let fetch_limit = if needs_filter then max limit (limit * 3) else limit in
       let posts = Board_pg.list_posts t ~visibility_filter ?hearth ~sort_by:pg_sort ~limit:fetch_limit () in
       let filtered = apply_post_kind_filter posts in
-      let rec take n lst = match n, lst with
-        | 0, _ | _, [] -> []
-        | n, x :: xs -> x :: take (n - 1) xs
-      in
-      take limit filtered
+      Board.take limit filtered
 
 let get_comments ~post_id =
   match backend () with

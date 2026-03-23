@@ -9,24 +9,16 @@ let parse_iso_opt = function
       try Some (Types.parse_iso8601 raw) with Failure _ -> None)
   | _ -> None
 
-let first_some left right =
-  match left with Some _ -> left | None -> right
+(* Delegate to Base — qualified access, no `open Base` *)
+let first_some = Base.Option.first_some
 
 let string_contains ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len > haystack_len then false
-  else if needle_len = 0 then true
-  else
-    let rec check i =
-      if i > haystack_len - needle_len then false
-      else if String.sub haystack i needle_len = needle then true
-      else check (i + 1)
-    in
-    check 0
+  Base.String.is_substring haystack ~substring:needle
 
 let string_contains_ci ~needle haystack =
-  string_contains ~needle:(String.lowercase_ascii needle) (String.lowercase_ascii haystack)
+  Base.String.is_substring
+    (Base.String.lowercase haystack)
+    ~substring:(Base.String.lowercase needle)
 
 let trim_to_option text =
   let trimmed = String.trim text in

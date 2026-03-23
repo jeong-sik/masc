@@ -4,7 +4,6 @@
     - Debate: 구조화된 토론 (파일 기반)
     - Consensus: 투표/합의 (메모리 기반)
     - Router: MoE 스타일 에이전트 라우팅
-    - Archive: 실록 저장 (Neo4j + PostgreSQL)
     - Balance: 공정성 정책
     - Conversation: 영속적 대화 (파일 + Neo4j)
 
@@ -16,7 +15,6 @@
 module Debate = Debate
 module Consensus = Consensus
 module Router = Router
-module Archive = Archive
 module Balance = Balance
 module Executor = Executor
 module Conversation = Conversation
@@ -126,26 +124,6 @@ module RouterApi = struct
   (** Get default agent specs *)
   let default_agents () =
     Router.default_agents
-end
-
-(** {1 Archive API (requires Eio context)} *)
-
-module ArchiveApi = struct
-  (** Create a new record *)
-  let create ~type_ ~content ~agents ?(metadata=[]) () =
-    Archive.create_record ~type_ ~content ~agents ~metadata ()
-
-  (** Save a record to both Neo4j and PostgreSQL *)
-  let save ~sw ~env record =
-    Archive.save ~sw ~env record
-
-  (** Search records with filter *)
-  let search ~sw ~env filter =
-    Archive.search_records ~sw ~env filter
-
-  (** Get agent history *)
-  let agent_history ~sw ~env agent_name =
-    Archive.get_agent_history ~sw ~env agent_name
 end
 
 (** {1 Balance API} *)

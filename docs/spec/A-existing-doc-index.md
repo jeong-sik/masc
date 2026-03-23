@@ -83,7 +83,6 @@
 | `docs/MULTI-ROOM-DESIGN.md` | 251 | Multi-room 호환성 노트 | Historical/internal |
 | `docs/MDAL.md` | 111 | Metric-Driven Agent Loop | 기능 설명 문서 |
 | `docs/INTERRUPT-DESIGN.md` | 153 | Human-in-the-loop 설계안 | LangGraph 패턴 참조 |
-| `docs/JIPHYEONJEON-DESIGN.md` | 264 | AI 의회 시스템 설계 | 집현전 컨셉 |
 | `docs/RESEARCH-BASED-IMPROVEMENTS.md` | 519 | 논문/연구 기반 개선 제안 | 초기 연구 정리 |
 | `docs/RESEARCH-GAPS-CONCURRENCY.md` | 164 | 동시성/지식 전파 연구 갭 | 연구 노트 |
 | `docs/SKEPTIC-PATTERNS.md` | 201 | Skeptic 리뷰 패턴 | 리뷰 가이드 |

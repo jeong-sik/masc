@@ -431,60 +431,6 @@ let executor_tests = [
 ]
 
 (* ============================================================
-   Archive Tests
-   ============================================================ *)
-
-module Archive = Council.Archive
-
-let test_archive_record_to_json () =
-  let record : Archive.record = {
-    id = "test-001";
-    type_ = Archive.Debate;
-    content = "Test content";
-    agents = ["agent1"; "agent2"];
-    timestamp = "2026-02-01T12:00:00Z";
-    metadata = [("key", "value")];
-  } in
-  let json = Archive.record_to_yojson record in
-  let id = Yojson.Safe.Util.(json |> member "id" |> to_string) in
-  check string "id matches" id "test-001"
-
-let test_archive_record_roundtrip () =
-  let record : Archive.record = {
-    id = "test-002";
-    type_ = Archive.Vote;
-    content = "Vote content";
-    agents = ["voter1"];
-    timestamp = "2026-02-01T13:00:00Z";
-    metadata = [];
-  } in
-  let json = Archive.record_to_yojson record in
-  match Archive.record_of_yojson json with
-  | Ok parsed ->
-    check string "id" parsed.id record.id;
-    check string "content" parsed.content record.content
-  | Error e -> fail e
-
-let test_archive_record_type_strings () =
-  check string "debate" (Archive.record_type_to_string Archive.Debate) "debate";
-  check string "vote" (Archive.record_type_to_string Archive.Vote) "vote";
-  check string "decision" (Archive.record_type_to_string Archive.Decision) "decision";
-  check string "post" (Archive.record_type_to_string Archive.Post) "post"
-
-let test_archive_neo4j_url_check () =
-  (* This test checks if Neo4j URL is configured, doesn't require connection *)
-  match Sys.getenv_opt "RAILWAY_NEO4J_URL" with
-  | Some url -> check bool "has url" (String.length url > 0) true
-  | None -> () (* Skip gracefully *)
-
-let archive_tests = [
-  "record to json", `Quick, test_archive_record_to_json;
-  "record roundtrip", `Quick, test_archive_record_roundtrip;
-  "record type strings", `Quick, test_archive_record_type_strings;
-  "neo4j url check", `Quick, test_archive_neo4j_url_check;
-]
-
-(* ============================================================
    Integration Tests - Full Council Flow
    ============================================================ *)
 
@@ -844,7 +790,6 @@ let () =
     "Router", router_tests;
     "Balance", balance_tests;
     "Executor", executor_tests;
-    "Archive", archive_tests;
     "Conversation", conversation_tests;
     "LoopGuard", loop_guard_tests;
     "ThreadPersist", persist_tests;

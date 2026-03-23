@@ -12,9 +12,12 @@ module U = Yojson.Safe.Util
 
 type result = bool * string
 
-type context = {
+type 'a context = {
   config : Room.config;
   agent_name : string;
+  sw : Eio.Switch.t option;
+  clock : 'a Eio.Time.clock option;
+  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
 }
 
 type loop_status =
@@ -843,125 +846,107 @@ let command_ok result =
 let run_and_capture driver argv =
   driver.run_command argv
 
-let execute_issue_plan driver repo_root (plan : action_plan) =
-  match (plan.worktree_path, plan.branch_name) with
-  | Some worktree_path, Some branch_name ->
-      ensure_parent_dir worktree_path;
-      let fetch_result =
-        run_and_capture driver [ "git"; "-C"; repo_root; "fetch"; "origin"; "--prune" ]
-      in
-      if not (command_ok fetch_result) then
-        Error ("git fetch failed: " ^ String.trim fetch_result.stderr)
-      else if Sys.file_exists worktree_path then
-        Ok (`Assoc [ ("mode", `String "executed"); ("reused_worktree", `Bool true); ("worktree_path", `String worktree_path) ])
-      else
-        let create_result =
-          run_and_capture driver
-            [
-              "git";
-              "-C";
-              repo_root;
-              "worktree";
-              "add";
-              "-B";
-              branch_name;
-              worktree_path;
-              "origin/main";
-            ]
-        in
-        if command_ok create_result then
-          Ok
-            (`Assoc
-              [
-                ("mode", `String "executed");
-                ("created_worktree", `Bool true);
-                ("worktree_path", `String worktree_path);
-              ])
-        else
-          Error ("worktree add failed: " ^ String.trim create_result.stderr)
-  | _ -> Error "issue plan missing worktree metadata"
+let team_session_goal_of_plan (state : state) (plan : action_plan) =
+  let candidate = plan.candidate in
+  let candidate_ref =
+    match candidate.kind with
+    | Conflict_pr | Failing_pr | Merge_ready_pr ->
+        Printf.sprintf "PR #%d" candidate.number
+    | Priority_issue | Backlog_issue ->
+        Printf.sprintf "Issue #%d" candidate.number
+  in
+  let header =
+    Printf.sprintf
+      "Improve-loop lane for %s in repo %s.\nTitle: %s\nPhase: %s"
+      candidate_ref state.repo candidate.title plan.phase
+  in
+  let worktree_hint =
+    match plan.worktree_path, plan.branch_name with
+    | Some worktree_path, Some branch_name ->
+        Printf.sprintf
+          "\nPreferred worktree path: %s\nPreferred branch: %s"
+          worktree_path branch_name
+    | _ -> ""
+  in
+  let commands =
+    if plan.commands = [] then
+      ""
+    else
+      "\nPlanned commands:\n"
+      ^ String.concat "\n" (List.map (fun line -> "- " ^ line) plan.commands)
+  in
+  let notes =
+    if plan.notes = [] then
+      ""
+    else
+      "\nConstraints:\n"
+      ^ String.concat "\n" (List.map (fun line -> "- " ^ line) plan.notes)
+  in
+  String.concat "\n"
+    [
+      header ^ worktree_hint;
+      "Required workflow:";
+      "- reproduce or inspect the candidate first";
+      "- use worktree-first changes";
+      "- patch narrowly";
+      "- run targeted verification";
+      "- open or update a draft PR only after local verification";
+      "- do not merge without cross-model review and green required checks";
+      commands;
+      notes;
+    ]
 
-let execute_failing_pr_plan driver repo_root (plan : action_plan) =
-  match (plan.worktree_path, plan.branch_name, plan.candidate.head_ref_name) with
-  | Some worktree_path, Some branch_name, Some remote_branch ->
-      ensure_parent_dir worktree_path;
-      let fetch_result =
-        run_and_capture driver [ "git"; "-C"; repo_root; "fetch"; "origin"; "--prune" ]
+let execute_team_session_plan (ctx : _ context) (state : state) (plan : action_plan) =
+  match ctx.sw, ctx.clock with
+  | Some sw, Some clock ->
+      let team_ctx : _ Tool_team_session.context =
+        {
+          Tool_team_session.config = ctx.config;
+          agent_name = ctx.agent_name;
+          sw;
+          clock;
+          proc_mgr = ctx.proc_mgr;
+        }
       in
-      if not (command_ok fetch_result) then
-        Error ("git fetch failed: " ^ String.trim fetch_result.stderr)
-      else if Sys.file_exists worktree_path then
-        Ok (`Assoc [ ("mode", `String "executed"); ("reused_worktree", `Bool true); ("worktree_path", `String worktree_path) ])
-      else
-        let create_result =
-          run_and_capture driver
-            [
-              "git";
-              "-C";
-              repo_root;
-              "worktree";
-              "add";
-              "-B";
-              branch_name;
-              worktree_path;
-              Printf.sprintf "origin/%s" remote_branch;
-            ]
-        in
-        if command_ok create_result then
-          Ok
-            (`Assoc
-              [
-                ("mode", `String "executed");
-                ("created_worktree", `Bool true);
-                ("worktree_path", `String worktree_path);
-              ])
-        else
-          Error ("worktree add failed: " ^ String.trim create_result.stderr)
-  | _ -> Error "failing PR plan missing branch metadata"
-
-let execute_conflict_pr_plan driver repo_root (plan : action_plan) =
-  match execute_failing_pr_plan driver repo_root plan with
-  | Error _ as err -> err
-  | Ok base_json -> (
-      match plan.worktree_path with
-      | None -> Error "conflict plan missing worktree path"
-      | Some worktree_path ->
-          let merge_result =
-            run_and_capture driver
-              [ "git"; "-C"; worktree_path; "merge"; "--no-edit"; "origin/main" ]
-          in
-          if command_ok merge_result then
-            Ok
-              (`Assoc
-                [
-                  ("mode", `String "executed");
-                  ("merge_applied", `Bool true);
-                  ("worktree_path", `String worktree_path);
-                  ("details", base_json);
-                ])
-          else
-            let conflicts_result =
-              run_and_capture driver
-                [ "git"; "-C"; worktree_path; "diff"; "--name-only"; "--diff-filter=U" ]
-            in
-            let conflict_files =
-              String.split_on_char '\n' conflicts_result.stdout
-              |> List.filter (fun value -> String.trim value <> "")
-            in
-            if conflict_files <> [] then
-              Ok
-                (`Assoc
-                  [
-                    ("mode", `String "executed");
-                    ("merge_applied", `Bool false);
-                    ("conflicts_ready", `Bool true);
-                    ("worktree_path", `String worktree_path);
-                    ( "conflict_files",
-                      `List (List.map (fun value -> `String value) conflict_files) );
-                    ("details", base_json);
-                  ])
-            else
-              Error ("merge failed: " ^ String.trim merge_result.stderr))
+      let args =
+        `Assoc
+          [
+            ("goal", `String (team_session_goal_of_plan state plan));
+            ("duration_seconds", `Int 1800);
+            ("checkpoint_interval_sec", `Int 120);
+            ("min_agents", `Int 2);
+            ("execution_scope", `String "limited_code_change");
+            ("orchestration_mode", `String "assist");
+            ("communication_mode", `String "broadcast");
+            ("instruction_profile", `String "standard");
+            ("alert_channel", `String "both");
+          ]
+      in
+      (match Tool_team_session.dispatch team_ctx ~name:"masc_team_session_start" ~args with
+       | Some (true, body) -> (
+           try
+             let json = Yojson.Safe.from_string body in
+             Ok
+               (`Assoc
+                 [
+                   ("mode", `String "team_session_started");
+                   ("plan", action_plan_to_json plan);
+                   ("session", json);
+                 ])
+           with Yojson.Json_error _ ->
+             Ok
+               (`Assoc
+                 [
+                   ("mode", `String "team_session_started");
+                   ("plan", action_plan_to_json plan);
+                   ("session_raw", `String body);
+                 ]))
+       | Some (false, message) ->
+           Error ("team session start failed: " ^ message)
+       | None ->
+           Error "team session dispatch unavailable")
+  | _ ->
+      Error "team session runtime unavailable for improve-loop execute path"
 
 let execute_merge_plan driver (state : state) (plan : action_plan) =
   match plan.merge_command with
@@ -990,12 +975,12 @@ let execute_merge_plan driver (state : state) (plan : action_plan) =
       else
         Error ("gh pr merge failed: " ^ String.trim result.stderr)
 
-let execute_plan driver repo_root state (plan : action_plan) =
+let execute_plan driver (_repo_root : string) (ctx : _ context) state
+    (plan : action_plan) =
   match plan.phase with
-  | "issue_burn_down" -> execute_issue_plan driver repo_root plan
-  | "pr_failing_checks" -> execute_failing_pr_plan driver repo_root plan
-  | "pr_conflict" -> execute_conflict_pr_plan driver repo_root plan
-    | "merge_ready" ->
+  | "issue_burn_down" | "pr_failing_checks" | "pr_conflict" ->
+      execute_team_session_plan ctx state plan
+  | "merge_ready" ->
       let plan =
         { plan with merge_command = merge_command_if_ready state ~review_ok:true plan.candidate }
       in
@@ -1087,7 +1072,7 @@ let resolve_selected_candidate state queue =
         (fun () -> list_hd_opt queue)
   | None -> list_hd_opt queue
 
-let tick_with_driver (driver : driver) (ctx : context) args : result =
+let tick_with_driver (driver : driver) (ctx : _ context) args : result =
   let state = load_state ctx.config in
   let limit = max 1 (get_int args "limit" 10) in
   let review_ok = get_bool args "review_ok" false in
@@ -1151,7 +1136,7 @@ let tick_with_driver (driver : driver) (ctx : context) args : result =
                Yojson.Safe.pretty_to_string
                  (state_status_json ~plan ~queue:(queue, limit) planned_state))
             end else
-              match execute_plan driver repo_root planned_state plan with
+              match execute_plan driver repo_root ctx planned_state plan with
               | Ok exec_json ->
                   let updated =
                     mark_success planned_state ~now ~phase:plan.phase
@@ -1190,7 +1175,7 @@ let tick_with_driver (driver : driver) (ctx : context) args : result =
                   in
                   (false, Yojson.Safe.pretty_to_string json)
 
-let handle_start ctx args =
+let handle_start (ctx : _ context) args =
   let current = load_state ctx.config in
   let now = Time_compat.now () in
   let state =
@@ -1217,11 +1202,11 @@ let handle_start ctx args =
       ]);
   (true, Yojson.Safe.pretty_to_string (state_status_json state))
 
-let handle_status ctx _args =
+let handle_status (ctx : _ context) _args =
   let state = load_state ctx.config in
   (true, Yojson.Safe.pretty_to_string (state_status_json state))
 
-let handle_pause ctx args =
+let handle_pause (ctx : _ context) args =
   let current = load_state ctx.config in
   let state =
     {
@@ -1241,7 +1226,7 @@ let handle_pause ctx args =
       ]);
   (true, Yojson.Safe.pretty_to_string (state_status_json state))
 
-let handle_resume ctx args =
+let handle_resume (ctx : _ context) args =
   let current = load_state ctx.config in
   let state =
     {
@@ -1259,14 +1244,16 @@ let handle_resume ctx args =
   (true, Yojson.Safe.pretty_to_string (state_status_json state))
 
 let maybe_tick_from_keepalive ~(config : Room.config) ~(agent_name : string)
-    ~(keeper_name : string) () =
+    ~(keeper_name : string) ~(sw : Eio.Switch.t)
+    ~(clock : _ Eio.Time.clock)
+    ~(proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option) () =
   let state = load_state config in
   let now = Time_compat.now () in
   if state.enabled && state.status = Running
      && String.equal state.keeper_name keeper_name
      && tick_due state ~now
   then
-    let ctx = { config; agent_name } in
+    let ctx = { config; agent_name; sw = Some sw; clock = Some clock; proc_mgr } in
     let _ok, _body =
       tick_with_driver default_driver ctx
         (`Assoc [ ("execute", `Bool true) ])
@@ -1275,7 +1262,7 @@ let maybe_tick_from_keepalive ~(config : Room.config) ~(agent_name : string)
   else
     ()
 
-let dispatch ctx ~name ~args : result option =
+let dispatch (ctx : _ context) ~name ~args : result option =
   match name with
   | "masc_improve_loop_start" -> Some (handle_start ctx args)
   | "masc_improve_loop_status" -> Some (handle_status ctx args)

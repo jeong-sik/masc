@@ -15,7 +15,13 @@ let with_temp_dir prefix f =
 
 let make_ctx base_path =
   let config = Room.default_config base_path in
-  { Tool_improve_loop.config; agent_name = "test-agent" }
+  {
+    Tool_improve_loop.config;
+    agent_name = "test-agent";
+    sw = None;
+    clock = None;
+    proc_mgr = None;
+  }
 
 let make_pr ?(head_ref_name = "feature/pr-1") ?(base_ref_name = Some "main")
     ?mergeable ?merge_state_status ?(failing_checks = []) ?(pending_checks = [])
@@ -181,6 +187,41 @@ let test_tick_picks_conflict_candidate () =
       in
       check int "conflict chosen first" 62 candidate_number)
 
+let test_execute_without_runtime_returns_team_session_error () =
+  with_temp_dir "masc-improve-loop-exec" (fun dir ->
+      let ctx = make_ctx dir in
+      let started =
+        { (Tool_improve_loop.default_state ()) with
+          enabled = true;
+          status = Tool_improve_loop.Running;
+          repo = "jeong-sik/masc-mcp";
+          dry_run = false;
+        }
+      in
+      Tool_improve_loop.save_state ctx.config started;
+      let fake_driver =
+        {
+          Tool_improve_loop.list_prs = (fun ~repo:_ -> Ok []);
+          list_issues = (fun ~repo:_ -> Ok [ make_issue 81 "bug" ~labels:[ "bug" ] ]);
+          run_command =
+            (fun _argv ->
+              { Tool_improve_loop.exit_code = 0; stdout = ""; stderr = "" });
+          now = (fun () -> 321.0);
+        }
+      in
+      let ok, body =
+        Tool_improve_loop.tick_with_driver fake_driver ctx
+          (`Assoc [ ("execute", `Bool true) ])
+      in
+      check bool "execute fails without runtime" false ok;
+      let json = Yojson.Safe.from_string body in
+      let error =
+        json |> Yojson.Safe.Util.member "execution_error"
+        |> Yojson.Safe.Util.to_string
+      in
+      check bool "runtime error surfaced" true
+        (Astring.String.is_infix ~affix:"team session runtime unavailable" error))
+
 let test_tick_due_immediate_on_fresh_start () =
   let state =
     { (Tool_improve_loop.default_state ()) with
@@ -233,6 +274,8 @@ let () =
             test_merge_command_requires_all_gates;
           test_case "tick selects conflict candidate" `Quick
             test_tick_picks_conflict_candidate;
+          test_case "execute without runtime surfaces team session error" `Quick
+            test_execute_without_runtime_returns_team_session_error;
           test_case "tick due fresh start" `Quick
             test_tick_due_immediate_on_fresh_start;
           test_case "tick due interval gate" `Quick

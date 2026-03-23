@@ -602,9 +602,10 @@ let list_alerts_json_from_state config (state : snapshot_state) =
     |> List.sort (fun a b ->
            let severity_rank json =
              match get_string_default json "severity" "warn" with
-             | "bad" -> 0
-             | "warn" -> 1
-             | _ -> 2
+             | "critical" -> 0
+             | "bad" -> 1
+             | "warn" -> 2
+             | _ -> 3
            in
            compare (severity_rank a) (severity_rank b))
   in
@@ -616,7 +617,8 @@ let list_alerts_json_from_state config (state : snapshot_state) =
         `Assoc
           [
             ("total", `Int (List.length ordered));
-            ("bad", `Int (List.length (List.filter (fun json -> get_string_default json "severity" "" = "bad") ordered)));
+            ("critical", `Int (List.length (List.filter (fun json -> get_string_default json "severity" "" = "critical") ordered)));
+            ("bad", `Int (List.length (List.filter (fun json -> let s = get_string_default json "severity" "" in s = "bad" || s = "critical") ordered)));
             ("warn", `Int (List.length (List.filter (fun json -> get_string_default json "severity" "" = "warn") ordered)));
           ] );
       ("alerts", `List ordered);

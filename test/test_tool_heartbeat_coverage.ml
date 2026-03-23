@@ -188,7 +188,4 @@ let () = test "handle_heartbeat_stop_not_found" (fun () ->
       assert (String.length result > 0 (* contains emoji *)))
 )
 
-(* Voice integration tests removed: Lodge_heartbeat deprecated (#1596, #1640).
-   Voice tools are now verified via test_tool_shard_coverage.ml (shard/revoke)
-   and integration through keeper_exec_tools dispatch. *)
 let () = Printf.printf "\n✅ All Tool_heartbeat tests passed!\n"

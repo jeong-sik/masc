@@ -146,9 +146,7 @@ let test_input_validation_contracts () =
        "let maybe_evict_expired config");
   check bool "cache get triggers batch eviction" true
     (file_contains_pattern "lib/cache_eio.ml"
-       "maybe_evict_expired config");
-  (* guardian GC cache eviction check removed — Guardian deleted (#1834) *)
-  ignore (fun () -> ())
+       "maybe_evict_expired config")
 
 let test_dashboard_component_split_contracts () =
   check bool "proof view imports proof helpers" true

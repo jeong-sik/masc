@@ -59,8 +59,6 @@ let test_snapshot_exposes_keeper_and_social_actions () =
           Alcotest.(check bool) "worker spawn batch confirm true" true
             Yojson.Safe.Util.(worker_spawn_batch |> member "confirm_required" |> to_bool))
 
-(* test_select_checkin_agents_manual_override_quiet_hours removed — Lodge deprecated #1596 *)
-
 let test_keeper_status_exposes_summary_and_recoverable () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -366,6 +364,3 @@ let test_keeper_msg_auto_team_session_bridge () =
         meta_after_down.last_team_session_started_at;
       Alcotest.(check int) "start count retained on down" 1
         meta_after_down.team_session_start_count_total)
-
-
-(* test_manual_lodge_tick_updates_observable_state removed — Lodge deprecated #1596 *)

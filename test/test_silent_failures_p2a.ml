@@ -225,10 +225,6 @@ let test_source_board_pg_vote_migration () =
     true (file_contains_pattern "lib/board/board_pg.ml"
       {|vote migration:|})
 
-(* test_source_heartbeat_traits removed — lodge_heartbeat_state.ml deleted (#1596) *)
-(* test_source_heartbeat_preferred_hours removed — lodge_heartbeat_state.ml deleted (#1596) *)
-(* test_source_heartbeat_interests removed — lodge_heartbeat_state.ml deleted (#1596) *)
-
 let test_source_keeper_log_parse () =
   check bool "dashboard http has keeper log parse logging"
     true (file_contains_pattern "lib/dashboard/dashboard_http_keeper_metrics.ml"
@@ -268,7 +264,6 @@ let () =
         `Quick test_source_social_vote_comment;
       test_case "MA-M3: board_pg vote migration logging present"
         `Quick test_source_board_pg_vote_migration;
-      (* MA-M4a/b/c: heartbeat tests removed — lodge_heartbeat_state.ml deleted (#1596) *)
       test_case "MA-M5: keeper log parse logging present"
         `Quick test_source_keeper_log_parse;
       test_case "MA-M7: trpg npc heal logging present"

@@ -399,7 +399,6 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
         loop ()
       in
       loop ());
-  (* Lodge init removed -- Lodge heartbeat deprecated (#1596) *)
   let resolved_base = state.room_config.base_path in
   let masc_dir = Filename.concat resolved_base ".masc" in
   A2a_tools.init ~masc_dir;

@@ -311,5 +311,3 @@ let add_routes router =
          ] in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
-
-  (* Lodge Agents REST API removed -- Lodge heartbeat deprecated (#1596) *)

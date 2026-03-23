@@ -55,7 +55,6 @@ let test_dashboard_execution_fixture () =
         let offline_worker_briefs = json |> member "offline_worker_briefs" |> to_list in
         check bool "summary removed from execution payload" true
           (json |> member "summary" = `Null);
-        (* social_tick / social_checkins / social_runtime removed — social renamed to activity #2093 *)
         check string "top queue kind" "session"
           (execution_queue |> List.hd |> member "kind" |> to_string);
         check string "top queue target" "ts-execution-fixture-001"
@@ -184,7 +183,7 @@ let test_dashboard_execution_fresh_join_not_marked_stale () =
       let config = Room_utils.default_config dir in
       Eio_main.run @@ fun env ->
       ignore (Lib.Room.init config ~agent_name:None);
-      ignore (Lib.Room.join config ~agent_name:"sentinel-kind-fox" ~capabilities:["sentinel"; "housekeeping"] ());
+      ignore (Lib.Room.join config ~agent_name:"test-agent-fox" ~capabilities:["housekeeping"] ());
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_execution.json
@@ -197,14 +196,14 @@ let test_dashboard_execution_fresh_join_not_marked_stale () =
         let open Yojson.Safe.Util in
         let worker_briefs = json |> member "worker_support_briefs" |> to_list in
         let offline_worker_briefs = json |> member "offline_worker_briefs" |> to_list in
-        let has_sentinel =
+        let has_test_agent =
           List.exists
             (fun row ->
-              row |> member "name" |> to_string = "sentinel-kind-fox")
+              row |> member "name" |> to_string = "test-agent-fox")
             (worker_briefs @ offline_worker_briefs)
         in
         check bool "freshly joined agent should not appear stale in execution worker briefs"
-          false has_sentinel
+          false has_test_agent
       ))
 
 let () =

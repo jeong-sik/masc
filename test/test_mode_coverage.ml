@@ -287,14 +287,12 @@ let test_tool_category_code () =
   check bool "code_read" true (Mode.tool_category "masc_code_read" = Mode.Code)
 
 let test_tool_category_ecosystem_voice () =
-  (* gardener_status check removed — Gardener deleted (#1834) *)
   check bool "voice_speak" true (Mode.tool_category "masc_voice_speak" = Mode.Voice);
   check bool "voice_sessions" true (Mode.tool_category "masc_voice_sessions" = Mode.Voice);
   check bool "voice_conference_start" true
     (Mode.tool_category "masc_voice_conference_start" = Mode.Voice)
 
 let test_tool_category_namespace_mapping () =
-  (* lodge_ prefix removed — Lodge heartbeat deprecated (#1596) *)
   check bool "trpg namespace" true (Mode.tool_category "trpg.dice.roll" = Mode.TRPG);
   check bool "experiment namespace" true (Mode.tool_category "experiment.start" = Mode.Ecosystem);
   check bool "decision namespace" true (Mode.tool_category "decision.create" = Mode.Consensus);

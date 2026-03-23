@@ -279,8 +279,6 @@ let test_governance_judge_timeout_reasonable () =
   check bool "governance judge timeout >= 5" true
     (Env_config.Inference.dashboard_governance_judge_timeout_seconds >= 5)
 
-(* test_gardener_spawn_timeout_reasonable removed — Gardener deleted (#1834) *)
-
 (* ============================================================
    Inference Cache Config Tests
    ============================================================ *)
@@ -424,7 +422,6 @@ let () =
         test_operator_judge_timeout_reasonable;
       test_case "governance judge timeout reasonable" `Quick
         test_governance_judge_timeout_reasonable;
-      (* gardener spawn timeout test removed — Gardener deleted (#1834) *)
     ];
     "inference_cache", [
       test_case "cache enabled bool" `Quick test_inference_cache_enabled_bool;

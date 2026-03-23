@@ -183,14 +183,12 @@ let () =
       true (has "lodge.tick_interval_seconds");
     Alcotest.(check bool) "inference.default_model registered"
       true (has "inference.default_model");
-    (* gardener.max_daily_spawns check removed — Gardener deleted (#1834) *)
     (* Validate surfaces *)
     let surfaces = Governance_registry.surfaces in
     Alcotest.(check bool) "has surfaces" true (List.length surfaces > 0);
     let surface_ids =
       List.map (fun (s : Governance_registry.surface) -> s.id) surfaces
     in
-    (* sentinel_timing surface check removed — Sentinel deleted (#1834) *)
     Alcotest.(check bool) "inference_config surface"
       true (List.mem "inference_config" surface_ids)
   in

@@ -430,8 +430,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_hearths" | "masc_board_migrate" ->
       Some (Tool_board.handle_tool name arguments)
 
-  (* Lodge tools removed -- Lodge heartbeat deprecated (#1596) *)
-
   | "masc_convo_start" ->
       let topic = arg_get_string "topic" "" in
       let raw_initiator = arg_get_string "initiator" agent_name in

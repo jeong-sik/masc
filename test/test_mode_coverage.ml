@@ -191,7 +191,6 @@ let test_tool_category_core () =
   check bool "join" true (Mode.tool_category "masc_join" = Mode.Core_Room);
   (* Core_Task *)
   check bool "status" true (Mode.tool_category "masc_status" = Mode.Core_Task);
-  check bool "claim" true (Mode.tool_category "masc_claim" = Mode.Core_Task);
   check bool "done" true (Mode.tool_category "masc_done" = Mode.Unknown);
   check bool "tasks" true (Mode.tool_category "masc_tasks" = Mode.Core_Task);
   check bool "add_task" true (Mode.tool_category "masc_add_task" = Mode.Core_Task);

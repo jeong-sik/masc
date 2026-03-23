@@ -158,7 +158,6 @@ let tool_category tool_name =
 
   (* ── Core_Task: task lifecycle ── *)
   | "masc_add_task" | "masc_batch_add_tasks"
-  | "masc_claim"
   | "masc_tasks" | "masc_claim_next"
   | "masc_update_priority" | "masc_transition"
   | "masc_task_history"

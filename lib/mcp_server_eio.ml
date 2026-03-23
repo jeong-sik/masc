@@ -95,7 +95,7 @@ let read_only_tools =
    "masc_operator_snapshot"; "masc_operator_digest"]
 
 let requires_join_tools = [
-  "masc_add_task"; "masc_claim"; "masc_claim_next"; "masc_transition";
+  "masc_add_task"; "masc_claim_next"; "masc_transition";
   "masc_broadcast"; "masc_listen"; "masc_heartbeat";
   "masc_plan_set_task"; "masc_plan_clear_task";
   "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";

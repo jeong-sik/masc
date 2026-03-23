@@ -201,7 +201,7 @@ let test_permission_for_tool_add_task () =
   | _ -> fail "expected CanAddTask"
 
 let test_permission_for_tool_claim () =
-  match Auth.permission_for_tool "masc_claim" with
+  match Auth.permission_for_tool "masc_claim_next" with
   | Some Types.CanClaimTask -> ()
   | _ -> fail "expected CanClaimTask"
 

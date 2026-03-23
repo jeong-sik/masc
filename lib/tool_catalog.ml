@@ -123,11 +123,6 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_votes",
       hidden_active
         "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
-    ( "masc_claim",
-      deprecated_default
-        ~canonical_name:"masc_transition"
-        ~replacement:"masc_transition(action=claim)"
-        "Compatibility alias for specific-task claim. Prefer masc_transition(action=claim) for exact task ownership; use masc_claim_next when any queued task is acceptable." );
     ( "masc_rooms_list",
       hidden_active
         "Named-room inventory is an internal compatibility surface. Repo-root room semantics remain the canonical default workflow." );

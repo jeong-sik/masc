@@ -366,7 +366,6 @@ let test_limit_for_category () =
 
 let test_category_for_tool () =
   check bool "broadcast" true (Types.category_for_tool "masc_broadcast" = Types.BroadcastLimit);
-  check bool "claim" true (Types.category_for_tool "masc_claim" = Types.TaskOpsLimit);
   check bool "status" true (Types.category_for_tool "masc_status" = Types.GeneralLimit)
 
 let test_multiplier_for_role () =

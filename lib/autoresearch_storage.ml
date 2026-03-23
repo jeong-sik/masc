@@ -97,8 +97,25 @@ let load_swarm_link_by_session ~base_path session_id =
 
 let load_state ~base_path loop_id =
   let path = state_file ~base_path loop_id in
-  decode_json_file ~path ~kind:"autoresearch state"
-    Autoresearch_serde.state_of_yojson
+  match load_json_file path with
+  | None -> None
+  | Some json ->
+      (try
+         match json with
+         | `Assoc fields
+           when List.mem_assoc "llm_model" fields
+                && not (List.mem_assoc "model_model" fields) ->
+             Log.Autoresearch.error
+               "unsupported legacy autoresearch state schema for %s: found llm_model; expected model_model"
+               path;
+             None
+         | _ -> Some (Autoresearch_serde.state_of_yojson json)
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Autoresearch.error "%s decode failed for %s: %s"
+             "autoresearch state" path (Printexc.to_string exn);
+           None)
 
 let latest_cycle_record ~base_path loop_id =
   let path = results_file ~base_path loop_id in

@@ -482,7 +482,7 @@ let is_label_runnable (label : string) : bool =
         | Provider_adapter.Gemini_api_key -> true
         | Provider_adapter.Gemini_vertex_adc _ -> false
         | Provider_adapter.Gemini_auth_missing _ -> false)
-    | _ -> Oas_type_adapters.to_oas_provider_of_label label <> None
+    | _ -> Llm_provider.Cascade_config.parse_model_string label <> None
 
 let run_system_prompt provider =
   Printf.sprintf

@@ -84,9 +84,9 @@ type run_result = {
     line 84 fails, line 88 also fails. Removed in v2.136.0. *)
 let resolve_provider_of_label (label : string) : Oas.Provider.config =
   match Llm_provider.Cascade_config.parse_model_string label with
-  | Some pc -> Oas_type_adapters.provider_config_to_oas pc
+  | Some pc -> Oas.Provider.config_of_provider_config pc
   | None ->
-    Oas_type_adapters.provider_config_to_oas
+    Oas.Provider.config_of_provider_config
       (Llm_provider.Provider_config.make
          ~kind:Llm_provider.Provider_config.Glm
          ~model_id:"auto"
@@ -430,7 +430,7 @@ let run_named
         ()
   in
   let provider : Oas.Provider.config =
-    Oas_type_adapters.provider_config_to_oas primary_provider
+    Oas.Provider.config_of_provider_config primary_provider
   in
   let transport_resolved = match transport with
     | Some t -> t

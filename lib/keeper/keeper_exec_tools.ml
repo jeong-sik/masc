@@ -47,6 +47,10 @@ let keeper_voice_tool_names =
 
 let keeper_shell_readonly_tool_names = [ "keeper_shell_readonly" ]
 
+let keeper_coding_shard_tool_names =
+  Tool_shard.coding_tools
+  |> List.map (fun (t : Types.tool_schema) -> t.name)
+
 let keeper_autoresearch_tool_names =
   Tool_shard.autoresearch_keeper_tools
   |> List.map (fun (t : Types.tool_schema) -> t.name)
@@ -84,7 +88,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     in
     let with_coding =
       if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
-        keeper_coding_tool_names @ with_research
+        keeper_coding_shard_tool_names @ keeper_coding_tool_names @ with_research
       else with_research
     in
     dedupe_tool_names (keeper_board_tool_names @ with_coding)
@@ -96,7 +100,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
       else base_names
     in
     if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
-      dedupe_tool_names (keeper_coding_tool_names @ with_research)
+      dedupe_tool_names (keeper_coding_shard_tool_names @ keeper_coding_tool_names @ with_research)
     else with_research
 
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
@@ -113,7 +117,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     in
     let all_tools =
       if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
-        with_research @ Tool_code_write.schemas
+        with_research @ Tool_shard.coding_tools @ Tool_code_write.schemas
       else with_research
     in
     all_tools

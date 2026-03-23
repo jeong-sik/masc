@@ -347,6 +347,60 @@ let test_revoke_voice_removes_all_tools () =
    direct access to Lodge_heartbeat internals. *)
 
 (* ============================================================
+   Keeper dispatch coverage: every shard schema has a dispatch handler
+   ============================================================ *)
+
+(** All keeper tool names from all shards (default + coding). *)
+let all_keeper_shard_tool_names () : string list =
+  let all_shard_names =
+    Tool_shard.list_all_shards ()
+    |> List.map (fun (name, _, _) -> name)
+  in
+  Tool_shard.tools_of_shards all_shard_names
+  |> List.filter (fun (t : Types.tool_schema) ->
+       String.length t.name >= 7
+       && String.sub t.name 0 7 = "keeper_")
+  |> List.map (fun (t : Types.tool_schema) -> t.name)
+  |> List.sort_uniq String.compare
+
+(** Verify that every keeper_ tool in any shard also appears in
+    keeper_model_tools (default) or coding_tools. This ensures no
+    tool schema is orphaned from the dispatch pipeline. *)
+let test_keeper_dispatch_coverage () =
+  let names = all_keeper_shard_tool_names () in
+  Alcotest.(check bool) "at least 25 keeper tools" true (List.length names >= 25);
+  let reachable =
+    List.concat [
+      (Tool_shard.keeper_model_tools
+       |> List.map (fun (t : Types.tool_schema) -> t.name));
+      (Tool_shard.coding_tools
+       |> List.map (fun (t : Types.tool_schema) -> t.name));
+    ]
+    |> List.sort_uniq String.compare
+  in
+  let missing = List.filter (fun n -> not (List.mem n reachable)) names in
+  if missing <> [] then
+    Alcotest.fail
+      (Printf.sprintf "Shard tools unreachable by dispatch: %s"
+         (String.concat ", " missing))
+
+(** Verify coding tools are NOT in keeper_model_tools (default set). *)
+let test_coding_tools_excluded_from_defaults () =
+  let default_names =
+    Tool_shard.keeper_model_tools
+    |> List.map (fun (t : Types.tool_schema) -> t.name)
+  in
+  let coding_names =
+    Tool_shard.coding_tools
+    |> List.map (fun (t : Types.tool_schema) -> t.name)
+  in
+  let leaked = List.filter (fun n -> List.mem n default_names) coding_names in
+  if leaked <> [] then
+    Alcotest.fail
+      (Printf.sprintf "Coding tools leaked into defaults: %s"
+         (String.concat ", " leaked))
+
+(* ============================================================
    Test runner
    ============================================================ *)
 
@@ -436,5 +490,9 @@ let () =
     ]);
     ("voice_shard_revoke", [
       Alcotest.test_case "revoke removes all voice tools" `Quick test_revoke_voice_removes_all_tools;
+    ]);
+    ("keeper_dispatch_coverage", [
+      Alcotest.test_case "all shard tools reachable" `Quick test_keeper_dispatch_coverage;
+      Alcotest.test_case "coding excluded from defaults" `Quick test_coding_tools_excluded_from_defaults;
     ]);
   ]

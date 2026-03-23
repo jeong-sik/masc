@@ -377,10 +377,10 @@ function PostCard({ post }: { post: BoardPost }) {
       <!-- Post body -->
       <div class="flex-1 min-w-0">
         <!-- Title -->
-        <div class="text-[14px] font-medium text-[var(--text-strong)] leading-snug mb-1.5 group-hover:text-[var(--accent)] transition-colors">${post.title}</div>
+        <div class="text-[14px] font-medium text-[var(--text-strong)] leading-snug mb-2 group-hover:text-[var(--accent)] transition-colors">${post.title}</div>
 
         <!-- Content preview: max 3 lines -->
-        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${previewText(stripStateBlocks(post.body))}</div>
+        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] mb-3 overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${previewText(stripStateBlocks(post.body))}</div>
 
         <!-- Footer: author + meta + badges -->
         <div class="flex items-center gap-2 flex-wrap">
@@ -423,8 +423,8 @@ function CommentItem({ comment }: { comment: BoardComment }) {
   const needsTruncation = (comment.content?.length ?? 0) > 300
 
   return html`
-    <div class="board-comment rounded-lg p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)]">
-      <div class="flex items-center gap-2 mb-1.5">
+    <div class="board-comment rounded-lg p-4 bg-[var(--white-3)] border border-[var(--border-slate-12)]">
+      <div class="flex items-center gap-2.5 mb-2">
         <span class="text-[12px]">${authorAvatar(comment.author)}</span>
         <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => openAuthorDetail(comment.author)}>${comment.author}</a>
         <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
@@ -450,7 +450,7 @@ function CommentThread({ comments }: { comments: BoardComment[] }) {
   const visible = expanded || comments.length <= INITIAL_SHOW ? comments : comments.slice(-INITIAL_SHOW)
 
   return html`
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-3">
       ${!expanded && hiddenCount > 0 ? html`
         <button
           class="text-[12px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1"
@@ -470,7 +470,7 @@ function CommentThread({ comments }: { comments: BoardComment[] }) {
 
 function CommentForm({ postId }: { postId: string }) {
   return html`
-    <div class="mt-4 flex gap-2">
+    <div class="mt-5 flex gap-3">
       <input
         type="text"
         class="flex-1 py-2 px-3 bg-[var(--white-5)] border border-[var(--border-slate-18)] rounded-lg text-[var(--text-body)] text-[13px] font-[inherit] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[rgba(71,184,255,0.55)] transition-colors"
@@ -517,7 +517,7 @@ function PostDetail({ post }: { post: BoardPost }) {
       >← 게시판으로 돌아가기</button>
 
       <${Card} title=${post.title}>
-        <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-5">
           <div class="text-[13px] text-[var(--text-body)] leading-[1.65]">
             <${Markdown} text=${stripStateBlocks(post.body)} />
           </div>
@@ -571,7 +571,7 @@ function PostDetail({ post }: { post: BoardPost }) {
         </div>
       <//>
 
-      <div class="mt-4">
+      <div class="mt-6">
         <${Card} title="댓글">
           ${detailLoading.value
             ? html`<${LoadingState}>댓글 불러오는 중...<//>`

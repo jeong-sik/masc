@@ -26,7 +26,7 @@ const LABEL_STYLES = {
 
 export function StatTile({ label, value, hint, variant = 'default' }: StatTileProps) {
   return html`
-    <div class="flex flex-col items-center px-3 py-2 rounded-lg border ${VARIANT_STYLES[variant]}">
+    <div class="flex flex-col items-center px-4 py-3 rounded-lg border ${VARIANT_STYLES[variant]}">
       <span class="text-base font-bold tabular-nums leading-tight">${value}</span>
       <span class="text-[length:var(--fs-2xs)] tracking-wider uppercase ${LABEL_STYLES[variant]}">${label}</span>
       ${hint ? html`<span class="text-[length:var(--fs-2xs)] text-[var(--text-dim)] mt-0.5">${hint}</span>` : null}
@@ -41,7 +41,7 @@ interface StatGridProps {
 
 export function StatGrid({ items, cols = 4 }: StatGridProps) {
   return html`
-    <div class="grid gap-2" style="grid-template-columns: repeat(${cols}, 1fr)">
+    <div class="grid gap-3" style="grid-template-columns: repeat(${cols}, 1fr)">
       ${items.map(item => html`<${StatTile} ...${item} />`)}
     </div>
   `

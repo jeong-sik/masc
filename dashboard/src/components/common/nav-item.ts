@@ -20,7 +20,7 @@ export function NavItem({ active, icon, onClick, children }: NavItemProps) {
     ? 'border-l-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
     : 'border-l-transparent bg-transparent text-[var(--text-body)] hover:bg-[var(--white-6)] hover:border-l-[var(--white-20)]'
   return html`
-    <button class="${NAV_BASE} gap-2.5 px-2.5 py-2 rounded-lg ${state}" onClick=${onClick}>
+    <button class="${NAV_BASE} gap-2.5 px-3 py-2.5 rounded-lg ${state}" onClick=${onClick}>
       ${icon ? html`<span class="text-sm w-5 text-center shrink-0">${icon}</span>` : null}
       <span class="text-[13px] font-medium truncate">${children}</span>
     </button>
@@ -33,7 +33,7 @@ export function SubNavItem({ active, onClick, children }: NavItemProps) {
     ? 'border-l-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-medium'
     : 'border-l-transparent bg-transparent text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]'
   return html`
-    <button class="${NAV_BASE} gap-2 px-2.5 py-1.5 rounded-md text-[13px] ${state}" onClick=${onClick}>
+    <button class="${NAV_BASE} gap-2 px-3 py-2 rounded-md text-[13px] ${state}" onClick=${onClick}>
       ${children}
     </button>
   `

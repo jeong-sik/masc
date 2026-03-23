@@ -219,5 +219,5 @@ export const topActiveAgents: ReadonlySignal<ObservatoryAgent[]> = computed(() =
   const allAgents = observatoryGroups.value.flatMap(g => g.agents)
   return allAgents
     .sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || a.name.localeCompare(b.name))
-    .slice(0, 8)
+    .slice(0, 12)
 })

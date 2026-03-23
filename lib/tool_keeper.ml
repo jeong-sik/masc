@@ -127,6 +127,17 @@ let handle_resident_keeper_status ctx args : tool_result =
            (annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true
               ~resident_registered:true json))
 
+let inject_goal_from_message args =
+  match Safe_ops.json_string_opt "goal" args with
+  | Some _ -> args
+  | None ->
+    let message = get_string args "message" "" in
+    if message = "" then args
+    else
+      match args with
+      | `Assoc fields -> `Assoc (("goal", `String message) :: fields)
+      | _ -> args
+
 let handle_resident_keeper_msg ctx args : tool_result =
   let name = get_string args "name" "" in
   if validate_name name then maybe_promote_live_legacy_keeper ctx.config name;
@@ -134,7 +145,8 @@ let handle_resident_keeper_msg ctx args : tool_result =
     match read_resident_keeper ctx.config name with
     | Ok (Some _) -> Ok ()
     | _ ->
-        let ok, body = handle_resident_keeper_up ctx args in
+        let args_with_goal = inject_goal_from_message args in
+        let ok, body = handle_resident_keeper_up ctx args_with_goal in
         if ok then Ok () else Error body
   in
   match ensure_result with
@@ -164,7 +176,8 @@ let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
     match read_resident_keeper ctx.config name with
     | Ok (Some _) -> Ok ()
     | _ ->
-        let ok, body = handle_resident_keeper_up ctx args in
+        let args_with_goal = inject_goal_from_message args in
+        let ok, body = handle_resident_keeper_up ctx args_with_goal in
         if ok then Ok () else Error body
   in
   match ensure_result with

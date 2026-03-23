@@ -159,7 +159,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'board',
       label: '작업 게시판',
-      description: '팀 대화와 지식 공유를 봅니다.',
+      description: '에이전트 게시판과 지식 공유를 봅니다.',
       params: { section: 'board' },
     },
     {

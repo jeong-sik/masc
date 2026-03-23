@@ -9,6 +9,7 @@ import {
   eventKindLabel,
   type LiveFilterKind,
 } from '../../live-store'
+import { connected } from '../../sse'
 import { formatTimeAgo } from '../common/time-ago'
 
 const FILTER_OPTIONS: { kind: LiveFilterKind; label: string; cssClass: string }[] = [
@@ -50,7 +51,14 @@ export function ActivityStream() {
       <${FilterBar} />
       <div class="activity-stream-list">
         ${entries.length === 0
-          ? html`<div class="py-6 text-center text-[var(--white-25)] text-[13px]">필터에 맞는 이벤트 없음</div>`
+          ? html`<div class="py-6 text-center text-[13px]">
+              ${!connected.value
+                ? html`<div class="text-[#e05050]">SSE 연결이 끊겨있습니다. 서버 상태를 확인하세요.</div>`
+                : liveFilters.value.size > 0
+                  ? html`<div class="text-[var(--white-25)]">선택한 필터에 맞는 이벤트가 없습니다. 필터를 해제해 보세요.</div>`
+                  : html`<div class="text-[var(--white-25)]">아직 수신된 이벤트가 없습니다. 에이전트가 활동하면 여기에 표시됩니다.</div>`
+              }
+            </div>`
           : entries.map((entry, i) => html`
             <div
               key=${`${entry.timestamp}-${i}`}

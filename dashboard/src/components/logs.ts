@@ -12,6 +12,8 @@ const moduleFilter = signal('')
 const autoRefresh = signal(true)
 const logLimit = signal(500)
 
+let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
 const LEVEL_COLORS: Record<string, string> = {
   DEBUG: 'var(--text-muted)',
   INFO: 'var(--text-body)',
@@ -98,9 +100,14 @@ export function LogViewer() {
             value=${moduleFilter.value}
             onInput=${(e: Event) => {
               moduleFilter.value = (e.target as HTMLInputElement).value
+              if (moduleDebounceTimer) clearTimeout(moduleDebounceTimer)
+              moduleDebounceTimer = setTimeout(() => { void loadLogs() }, 300)
             }}
             onKeyDown=${(e: KeyboardEvent) => {
-              if (e.key === 'Enter') void loadLogs()
+              if (e.key === 'Enter') {
+                if (moduleDebounceTimer) clearTimeout(moduleDebounceTimer)
+                void loadLogs()
+              }
             }}
           />
 

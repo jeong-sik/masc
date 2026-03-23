@@ -26,10 +26,20 @@ function provenanceTone(value?: string | null): string {
   }
 }
 
+const PROVENANCE_LABELS: Record<string, string> = {
+  truth: '검증됨',
+  derived: '파생',
+  fallback: '대체값',
+  narrative: '서술',
+  judgment: '판단',
+  recorded: '기록됨',
+}
+
 function provenanceLabel(item: ProvenanceItem): string {
   const explicit = (item.label ?? '').trim()
   if (explicit) return explicit
-  return normalizeProvenance(item.kind) || 'unknown'
+  const kind = normalizeProvenance(item.kind)
+  return PROVENANCE_LABELS[kind] ?? (kind || 'unknown')
 }
 
 export function ProvenanceChip({ item }: { item: ProvenanceItem }) {

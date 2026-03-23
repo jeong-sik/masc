@@ -30,12 +30,12 @@ export function Work() {
     : 'board'
 
   return html`
-    <div class="tab-unified grid gap-4">
-      <div class="tab-pill-bar">
+    <div class="flex flex-col gap-6">
+      <div class="flex gap-1.5 p-1.5 bg-card/40 backdrop-blur-md border border-card-border rounded-xl w-fit shadow-sm shadow-black/10">
         ${SECTIONS.map(s => html`
           <button
             key=${s.id}
-            class="tab-pill-btn ${current === s.id ? 'active' : ''}"
+            class="px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200 cursor-pointer border border-transparent ${current === s.id ? 'bg-accent/10 text-accent border-accent/20 shadow-sm' : 'bg-transparent text-text-muted hover:bg-white/5 hover:text-text-body'}"
             title=${s.tooltip}
             onClick=${() => navigate('work', { section: s.id })}
           >
@@ -44,14 +44,16 @@ export function Work() {
         `)}
       </div>
 
-      <${ErrorBoundary} label=${current}>
-        ${current === 'board' ? html`<${Memory} />`
-          : current === 'governance' ? html`<${Governance} />`
-          : current === 'evidence' ? html`<${Proof} />`
-          : current === 'planning' ? html`<${Planning} />`
-          : html`<${Worktrees} />`
-        }
-      </>
+      <div class="transition-opacity duration-300">
+        <${ErrorBoundary} label=${current}>
+          ${current === 'board' ? html`<${Memory} />`
+            : current === 'governance' ? html`<${Governance} />`
+            : current === 'evidence' ? html`<${Proof} />`
+            : current === 'planning' ? html`<${Planning} />`
+            : html`<${Worktrees} />`
+          }
+        </>
+      </div>
     </div>
   `
 }

@@ -546,7 +546,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         room = current_room;
       } in
       let threads = Council.Conversation.list_active ~config:convo_config in
-      let json = `List (List.map (fun th ->
+      let threads_json = `List (List.map (fun th ->
         `Assoc [
           ("id", `String th.Council.Conversation.id);
           ("topic", `String th.Council.Conversation.topic);
@@ -555,6 +555,10 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("participants", `List (List.map (fun p -> `String p) th.Council.Conversation.participants));
         ]
       ) threads) in
+      let json = `Assoc [
+        ("count", `Int (List.length threads));
+        ("threads", threads_json);
+      ] in
       Some (true, Printf.sprintf "Active threads: %d\n%s"
         (List.length threads) (Yojson.Safe.pretty_to_string json))
 

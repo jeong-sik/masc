@@ -367,15 +367,15 @@ let test_keeper_shell_tool_policy_gates () =
       ~policy_mode:"model_deliberation" ()
   in
   check_keeper_shell_tool_presence "heuristic" heuristic
-    ~expect_bash:true ~expect_shell_readonly:true;
+    ~expect_bash:false ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "learned disabled" learned_disabled
     ~expect_bash:false ~expect_shell_readonly:false;
   check_keeper_shell_tool_presence "learned readonly" learned_readonly
     ~expect_bash:false ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "explicit event" explicit_event
-    ~expect_bash:true ~expect_shell_readonly:true;
+    ~expect_bash:false ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "model deliberation" deliberation
-    ~expect_bash:true ~expect_shell_readonly:true
+    ~expect_bash:false ~expect_shell_readonly:true
 
 let test_keeper_shell_readonly_enforces_allowed_paths () =
   Eio_main.run @@ fun _env ->
@@ -459,7 +459,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
           ~input:
             (`Assoc
               [
-                ("cmd", `String "printf keeper-ok");
+                ("cmd", `String "pwd");
                 ("timeout_sec", `Float 5.0);
               ])
         |> parse_json_exn
@@ -469,7 +469,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
       check bool "keeper bash output captured" true
         Yojson.Safe.Util.(
           ok_json |> member "output" |> to_string
-          |> fun out -> contains_substring out "keeper-ok");
+          |> fun out -> contains_substring out base_dir);
       let failed_json =
         Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
           ~config ~meta ~ctx_work
@@ -477,7 +477,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
           ~input:
             (`Assoc
               [
-                ("cmd", `String "exit 7");
+                ("cmd", `String "grep keeper-ok missing-file");
                 ("timeout_sec", `Float 5.0);
               ])
         |> parse_json_exn

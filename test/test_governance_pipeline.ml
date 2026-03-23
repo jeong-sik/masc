@@ -105,7 +105,7 @@ let test_risk_high_spawn () =
     "high" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_claim () =
-  let risk = Gp.assess_risk ~tool_name:"masc_transition" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_claim_next" ~input:`Null in
   Alcotest.(check string) "claim is medium"
     "medium" (Gp.risk_level_to_string risk)
 
@@ -383,7 +383,7 @@ let test_blocked_response_structure () =
   let tmpdir = make_tmpdir () in
   let config = Room.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
-  let result = hook ~name:"masc_transition" ~args:`Null in
+  let result = hook ~name:"masc_join" ~args:`Null in
   (match result with
    | Some r ->
        let module U = Yojson.Safe.Util in
@@ -396,7 +396,7 @@ let test_blocked_response_structure () =
        let _tool = data |> U.member "tool_name" |> U.to_string in
        Alcotest.(check string) "governance_level" "paranoid" _gov;
        Alcotest.(check string) "risk_level" "medium" _risk;
-       Alcotest.(check string) "tool_name" "masc_transition" _tool
+       Alcotest.(check string) "tool_name" "masc_join" _tool
    | None -> Alcotest.fail "paranoid should block medium");
   cleanup_tmpdir tmpdir
 

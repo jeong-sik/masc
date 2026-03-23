@@ -22,7 +22,6 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
-  | Role_filtered of Mode.mode
 
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 

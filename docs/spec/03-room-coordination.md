@@ -625,10 +625,6 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | `masc_pause` | Room 일시 정지 |
 | `masc_resume` | Room 재개 |
 | `masc_pause_status` | 정지 상태 조회 |
-| `masc_switch_mode` | 운영 모드 전환 |
-| `masc_get_config` | 설정 조회 |
-| `masc_tool_enable` | 도구 활성화 |
-| `masc_tool_disable` | 도구 비활성화 |
 
 ### 14.8 Social (`tool_social`, vote 부분)
 

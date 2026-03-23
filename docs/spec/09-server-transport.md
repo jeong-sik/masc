@@ -203,7 +203,6 @@ type tool_profile =
   | Full              (* /mcp - 전체 도구 *)
   | Managed_agent     (* /mcp/managed - 제한된 도구 세트 *)
   | Operator_remote   (* /mcp/operator - operator 전용 도구 *)
-  | Role_filtered of Mode.mode  (* 모드별 필터링 *)
 ```
 
 동일 session ID로 다른 profile의 엔드포인트에 접근하면 `409 Conflict`를 반환한다 (`validate_mcp_session_profile`).

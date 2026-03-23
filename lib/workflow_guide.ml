@@ -342,18 +342,6 @@ let after_init ~success =
       preconditions = [];
       common_mistakes = [] }
 
-let after_switch_mode ~success =
-  if success then
-    { next_steps =
-        [ s "masc_status" "Verify the new mode is active" ];
-      preconditions = [ "room_set"; "joined" ];
-      common_mistakes = [] }
-  else
-    { next_steps =
-        [ s "masc_tool_help" "Check available modes" ];
-      preconditions = [];
-      common_mistakes = [] }
-
 let after_operator_digest ~success =
   if success then
     { next_steps =
@@ -395,7 +383,6 @@ let next_steps ~tool_name ~success =
   | "masc_broadcast" -> after_broadcast ~success
   | "masc_worktree_create" -> after_worktree_create ~success
   | "masc_init" -> after_init ~success
-  | "masc_switch_mode" -> after_switch_mode ~success
   | "masc_operator_digest" -> after_operator_digest ~success
   (* No guidance registered *)
   | _ -> empty

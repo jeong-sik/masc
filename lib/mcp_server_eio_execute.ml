@@ -109,9 +109,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> auth_token
   in
 
-  let room_path = Room.masc_dir config in
-  let _mode_config = Config.load room_path in
-
   let mode_gate_error =
     if not (Tool_catalog.allow_direct_call name) then
       Some
@@ -581,4 +578,3 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
     (false, Printf.sprintf "Unknown tool: %s" name)
-

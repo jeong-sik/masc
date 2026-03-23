@@ -19,15 +19,10 @@ masc_claim_next()
 # masc_plan_set_task(task_id="task-001")  # only if current_task is still missing
 ```
 
-## Modes
+## Tool Surface
 
-Default mode is **Coding** (~80 tools). Switch if needed:
-
-```
-masc_switch_mode(mode="full")       # All 371+ tools
-masc_switch_mode(mode="minimal")    # Core only (~20 tools)
-masc_switch_mode(mode="coding")     # Back to default
-```
+The public MCP surface is no longer mode-gated. Tool visibility now comes from
+the canonical catalog, profile, auth, and lifecycle metadata only.
 
 ## Error Recovery
 

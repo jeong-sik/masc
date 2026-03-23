@@ -210,7 +210,7 @@ let test_next_steps_reference_real_tools () =
     "masc_plan_set_task"; "masc_set_current_task";
     "masc_heartbeat"; "masc_broadcast";
     "masc_worktree_create"; "masc_init";
-    "masc_switch_mode"; "masc_operator_digest";
+    "masc_operator_digest";
   ] in
   List.iter (fun tool_name ->
     let g_ok = WG.next_steps ~tool_name ~success:true in

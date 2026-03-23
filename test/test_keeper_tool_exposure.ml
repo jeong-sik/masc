@@ -112,23 +112,16 @@ let test_disabled_shell_no_shell_tool () =
     (has_tool "keeper_shell_readonly" tools)
 
 (* ============================================================
-   5. Shell mode (coding) — documents current behavior
-      NOTE: canonical_policy_shell_mode maps "coding" -> "disabled",
-      so coding tools are NOT added. This documents the current
-      behavior as a regression test. When the canonical mapping
-      is fixed to include "coding", update these expected values.
+   5. Shell mode (coding)
    ============================================================ *)
 
-let test_coding_shell_current_behavior () =
+let test_coding_shell_adds_coding_tools () =
   let meta = make_meta ~policy_shell_mode:"coding"
     ~policy_mode:"learned_offline_v1" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  (* Current: canonical_policy_shell_mode "coding" = "disabled",
-     so coding tools are NOT added. This test documents the gap.
-     When fixed: change false -> true *)
   let coding_names = Tool_code_write.tool_names in
   let has_any_coding = List.exists (fun n -> has_tool n tools) coding_names in
-  check bool "coding tools absent (canonical maps coding->disabled)" false has_any_coding
+  check bool "coding tools present" true has_any_coding
 
 (* ============================================================
    6. Research profile
@@ -330,7 +323,7 @@ let () =
       test_case "disabled no shell" `Quick test_disabled_shell_no_shell_tool;
     ]);
     ("shell_coding", [
-      test_case "coding current behavior" `Quick test_coding_shell_current_behavior;
+      test_case "coding adds coding tools" `Quick test_coding_shell_adds_coding_tools;
     ]);
     ("research_profile", [
       test_case "adds autoresearch" `Quick test_research_adds_autoresearch;

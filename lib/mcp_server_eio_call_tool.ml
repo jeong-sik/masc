@@ -9,7 +9,6 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
-  | Role_filtered of Mode.mode
 
 let log_mcp_exn ~label exn =
   let tag = match exn with
@@ -189,7 +188,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             raise
               (Invalid_argument
                  ("managed agent tool translation failed: " ^ msg)))
-    | Full | Operator_remote | Role_filtered _ ->
+    | Full | Operator_remote ->
         (params |> U.member "name" |> U.to_string, params |> U.member "arguments")
   in
   let is_read_only = Tool_dispatch.is_read_only name in
@@ -345,7 +344,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
 
   maybe_emit_resource_notifications ~success ~tool_name:name;
   if success
-     && List.mem name [ "masc_switch_mode"; "masc_tool_admin_update" ]
+     && List.mem name [ "masc_tool_admin_update" ]
   then
     broadcast_tools_list_changed ();
 

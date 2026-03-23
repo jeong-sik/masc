@@ -178,9 +178,9 @@ let test_safe_empty () =
 (* ================================================================ *)
 
 (* Note on canonical_policy_shell_mode:
-   "readonly" -> "readonly", "sandboxed" -> "sandboxed", everything else -> "disabled".
-   So "coding" maps to "disabled" — coding tools are never granted through canonical path.
-   Tests verify the ACTUAL code behavior. *)
+   "readonly", "sandboxed", and "coding" are preserved; everything else
+   normalizes to "disabled". Tool grants treat "readonly" and "coding"
+   differently, so the assertions below check the actual policy behavior. *)
 
 let test_write_done_kills_all () =
   let meta = make_meta ~policy_shell_mode:"readonly"

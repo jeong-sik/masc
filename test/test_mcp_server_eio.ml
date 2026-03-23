@@ -7,7 +7,6 @@
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Mcp = Masc_mcp.Mcp_server
 module Config = Masc_mcp.Config
-module Mode = Masc_mcp.Mode
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
@@ -516,10 +515,6 @@ let test_handle_request_tools_list_mdal_descriptions () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  (* MDAL tools are Ecosystem category — not in Standard mode.
-     Switch to Full so the names filter can find them. *)
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   let tools =
     tools_list_all ~clock ~sw state
     |> List.filter
@@ -915,7 +910,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
 
-let test_handle_request_tools_call_deprecated_claim_alias () =
+let test_handle_request_tools_call_transition_claim_requires_action () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
@@ -957,10 +952,8 @@ let test_handle_request_tools_call_deprecated_claim_alias () =
     Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
   in
   let response_text = Yojson.Safe.to_string response in
-  Alcotest.(check bool) "deprecated claim still callable" true
-    (contains_substring response_text "task-001");
-  Alcotest.(check bool) "deprecated claim guidance omits plan_set_task" false
-    (List.mem "masc_plan_set_task" (workflow_next_step_names response));
+  Alcotest.(check bool) "missing action rejected" true
+    (contains_substring response_text "action is required");
   cleanup_dir base_path
 
 let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
@@ -1099,12 +1092,15 @@ let test_handle_request_tools_list_include_deprecated_claim_alias_metadata () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   let tools = tools_from_response response in
   let transition_tool = find_tool_exn tools "masc_transition" in
-  Alcotest.(check string) "claim lifecycle" "deprecated"
+  Alcotest.(check string) "transition lifecycle remains active" "active"
     (tool_string_field transition_tool "lifecycle");
-  Alcotest.(check string) "claim canonicalName" "masc_transition"
-    (tool_string_field transition_tool "canonicalName");
-  Alcotest.(check string) "claim replacement" "masc_transition(action=claim)"
-    (tool_string_field transition_tool "replacement");
+  (match transition_tool with
+   | `Assoc fields ->
+       Alcotest.(check bool) "transition omits canonical alias metadata" false
+         (List.mem_assoc "canonicalName" fields);
+       Alcotest.(check bool) "transition omits replacement alias metadata" false
+         (List.mem_assoc "replacement" fields)
+   | _ -> Alcotest.fail "tool is not an object");
   cleanup_dir base_path
 
 let test_handle_request_tools_list_hides_team_session_turn_by_default () =
@@ -1113,8 +1109,6 @@ let test_handle_request_tools_list_hides_team_session_turn_by_default () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   let tools = tools_list_all ~clock ~sw state in
   Alcotest.(check bool) "step still visible" true
     (List.exists
@@ -1166,10 +1160,6 @@ let _test_execute_tool_trpg_flow () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  (* TRPG tools are in TRPG category — switch to Full mode to pass mode gate *)
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
-
   let (ok_roll, roll_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock state
       ~name:"masc_trpg_dice_roll"
@@ -1240,9 +1230,6 @@ let test_execute_tool_coding_mode_allows_governance_status () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Coding in
-
   let (ok, msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock state
       ~name:"masc_governance_status"
@@ -1265,8 +1252,6 @@ let test_execute_tool_hidden_active_utility_direct_call () =
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   ignore (Masc_mcp.Room.init state.room_config ~agent_name:(Some "test-agent"));
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   (* Room.init required: vote_create calls ensure_initialized *)
   ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
 
@@ -1310,8 +1295,6 @@ let test_execute_tool_team_session_step_direct_call () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   let sid = "hidden-deprecated-team-turn" in
 
   let (ok_init, _init_msg) =
@@ -1374,10 +1357,6 @@ let _test_execute_tool_trpg_validation () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  (* TRPG tools are in TRPG category — switch to Full mode to pass mode gate *)
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
-
   let (ok_missing, msg_missing) =
     Mcp_eio.execute_tool_eio ~sw ~clock state
       ~name:"masc_trpg_turn_advance"
@@ -1568,9 +1547,6 @@ let test_convo_start_uses_current_room () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  (* Convo tools are Consensus category — switch to Full mode to pass mode gate *)
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   let sid = "mcp-convo-room-regression" in
   let room_id = "convo-proof-room" in
 
@@ -1598,11 +1574,7 @@ let test_convo_start_uses_current_room () =
   in
   Alcotest.(check bool) "room enter success" true ok_enter;
 
-  (* After entering a new room, its mode defaults to Full, so convo tools are
-     immediately available. *)
-  let new_room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let mode_config = Config.load new_room_path in
-  Alcotest.(check bool) "new room defaults to full" true (mode_config.mode = Mode.Full);
+  (* After entering a new room, convo tools are immediately available. *)
 
   let (ok_start, start_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -2375,8 +2347,6 @@ let test_execute_tool_help_tool () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   let ok, msg =
     Mcp_eio.execute_tool_eio ~sw ~clock state ~name:"masc_tool_help"
       ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
@@ -2470,8 +2440,8 @@ let eio_tests = [
     test_handle_request_tools_call_transition_claim_guidance;
   "handle tools/call transition done guidance", `Quick,
     test_handle_request_tools_call_transition_done_guidance;
-  "handle tools/call deprecated claim alias", `Quick,
-    test_handle_request_tools_call_deprecated_claim_alias;
+  "handle tools/call transition claim requires action", `Quick,
+    test_handle_request_tools_call_transition_claim_requires_action;
   "handle tools/call cache get structured content", `Quick,
     test_handle_request_tools_call_cache_get_structured_content;
   "handle tools/call board post structured content", `Quick,

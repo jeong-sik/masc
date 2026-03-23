@@ -126,7 +126,7 @@ export function OpsSessionColumn() {
       class="ops-entity-card p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] text-inherit text-left cursor-pointer ${selectedSession?.session_id === session.session_id ? 'active' : ''}"
       onClick=${() => { selectedSessionId.value = session.session_id }}
     >
-      <div class="flex justify-between items-center gap-2.5 max-[880px]:flex-col max-[880px]:items-start">
+      <div class="flex justify-between items-center gap-3 max-[880px]:flex-col max-[880px]:items-start">
         <strong>${session.session_id}</strong>
         <span class="border border-solid border-[var(--card-border)] ${session.status ?? 'idle'} ${session.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(session.status)}</span>
       </div>
@@ -147,11 +147,11 @@ export function OpsSessionColumn() {
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">지금 개입 가능한 세션만 위에 두고, 종료된 세션은 아래에 접어 둡니다.</p>
 
         <div class="flex flex-col gap-2">
-          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
+          <div class="flex items-center justify-between gap-3 text-[var(--fs-sm)] text-[var(--text-muted)]">
             <strong>${'개입 가능한 세션'}</strong>
             <span>${liveSessions.length}</span>
           </div>
-          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
+          <div class="flex items-center justify-between gap-3 text-[var(--fs-sm)] text-[var(--text-muted)]">
             ${liveSessions.length === 0
               ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">지금 바로 개입할 live team session이 없습니다.</div>`
               : liveSessions.map(session => renderSessionCard(session))}
@@ -162,7 +162,7 @@ export function OpsSessionColumn() {
           <details class="ops-archive-panel">
             <summary class="cursor-pointer text-[var(--text-muted)] text-[var(--fs-sm)] list-none">최근 종료 세션 ${archivedSessions.length}</summary>
             <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">완료/중단된 세션은 읽기 전용 참고용입니다. 새 노트, 작업, 중지는 위 live 세션에만 적용하세요.</p>
-            <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
+            <div class="flex items-center justify-between gap-3 text-[var(--fs-sm)] text-[var(--text-muted)]">
               ${archivedSessions.slice(0, 8).map(session => renderSessionCard(session, true))}
             </div>
           </details>

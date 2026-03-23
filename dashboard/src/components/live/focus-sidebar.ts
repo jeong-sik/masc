@@ -26,7 +26,7 @@ export function FocusSidebar() {
   const selected = selectedAgentName.value
 
   return html`
-    <div class="grid gap-2.5 grid-rows-[auto_1fr] min-h-0">
+    <div class="grid gap-3 grid-rows-[auto_1fr] min-h-0">
       <div class="focus-sidebar-head">
         <h3 class="m-0 text-[0.95rem] font-semibold">Agents</h3>
         <span class="text-xs text-[rgba(255,255,255,0.4)]">${list.length} active</span>

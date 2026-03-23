@@ -15,7 +15,7 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
 
   return html`
     <div class="planning-loop-row rounded-xl">
-      <div class="grid gap-2.5">
+      <div class="grid gap-3">
         <div class="flex justify-between gap-3 items-start flex-wrap">
           <div>
             <div class="text-[color:var(--text-strong)] text-[length:var(--fs-lg)] font-semibold capitalize">${loop.profile}</div>
@@ -27,7 +27,7 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
           </div>
         </div>
 
-        <div class="flex gap-2.5 flex-wrap text-[#b9c9ea] text-[length:var(--fs-sm)]">
+        <div class="flex gap-3 flex-wrap text-[#b9c9ea] text-[length:var(--fs-sm)]">
           <span>Baseline ${formatMetric(loop.baseline_metric)}</span>
           <span>현재 ${formatMetric(loop.current_metric)}</span>
           <span class=${formatMetricDelta(loop).startsWith('+') ? 'text-[#9af3ba]' : 'text-[#fda4af]'}>

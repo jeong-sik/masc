@@ -92,7 +92,7 @@ export function WarRoomBodyGrid({
             : selectedSession
               ? html`
                   <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card">
-                    <div class="flex justify-between gap-2.5 items-start">
+                    <div class="flex justify-between gap-3 items-start">
                       <strong>${selectedSession.session_id}</strong>
                       <span class="cmd-chip rounded-full ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
                     </div>
@@ -185,7 +185,7 @@ export function WarRoomBodyGrid({
             ${pendingApprovals > 0
               ? html`
                   <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card warn">
-                    <div class="flex justify-between gap-2.5 items-start">
+                    <div class="flex justify-between gap-3 items-start">
                       <strong>승인 대기</strong>
                       <span class="cmd-chip rounded-full warn">${pendingApprovals}</span>
                     </div>
@@ -196,7 +196,7 @@ export function WarRoomBodyGrid({
             ${pendingConfirmTotal > 0
               ? html`
                   <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card warn">
-                    <div class="flex justify-between gap-2.5 items-start">
+                    <div class="flex justify-between gap-3 items-start">
                       <strong>확인 대기</strong>
                       <span class="cmd-chip rounded-full warn">${pendingConfirmHidden > 0 ? `${pendingConfirmVisible}/${pendingConfirmTotal}` : pendingConfirmTotal}</span>
                     </div>

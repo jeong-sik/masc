@@ -399,7 +399,7 @@ export function WarRoomOrchestrationRail({
                 <span>Elapsed</span><span>${formatElapsed(chainOverlay.runtime?.elapsed_sec)}</span>
                 <span>최근 이벤트</span><span>${historySummary(chainOverlay.history)}</span>
               </div>
-              <div class="flex gap-2.5 flex-wrap mt-3">
+              <div class="flex gap-3 flex-wrap mt-3">
                 <${WarRoomJumpButton}
                   label="체인 상세"
                   surface="chains"
@@ -425,7 +425,7 @@ export function WarRoomOrchestrationRail({
                 <span>Target</span><span>${linkedAutoresearch.target_file ?? 'n/a'}</span>
                 <span>Last decision</span><span>${linkedAutoresearch.last_decision ?? linkedAutoresearch.error ?? '기록 없음'}</span>
               </div>
-              <div class="flex gap-2.5 flex-wrap mt-3">
+              <div class="flex gap-3 flex-wrap mt-3">
                 <${WarRoomJumpButton} label="세션 개입" />
                 ${linkedAutoresearch.operation_id
                   ? html`<${WarRoomJumpButton}

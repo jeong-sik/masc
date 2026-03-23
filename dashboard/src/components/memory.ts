@@ -528,7 +528,7 @@ function PostDetail({ post }: { post: BoardPost }) {
           </div>
 
           <!-- Author and meta -->
-          <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--border-slate-12)]">
+          <div class="flex gap-3 items-center flex-wrap pt-3 border-t border-[var(--border-slate-12)]">
             <span class="text-[13px]">${authorAvatar(post.author)}</span>
             <a class="text-[12px] text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('status', { section: 'agents', agent: post.author })}>${post.author}</a>
             <span class="text-[11px] text-[var(--text-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>

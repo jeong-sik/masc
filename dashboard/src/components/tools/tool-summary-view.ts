@@ -40,7 +40,7 @@ export function ToolSummaryView({ inventory }: { inventory: DashboardToolInvento
           <h4 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-3">필수 도구 (상위 ${essential.length}개)</h4>
           <div class="flex flex-col">
             ${essential.map(item => html`
-              <div class="flex items-center gap-2.5 py-2.5 border-b border-[var(--white-4)] hover:bg-[var(--white-3)] transition-colors px-2 rounded" key=${item.name}>
+              <div class="flex items-center gap-3 py-2.5 border-b border-[var(--white-4)] hover:bg-[var(--white-3)] transition-colors px-2 rounded" key=${item.name}>
                 <span class="text-[13px] font-medium text-[var(--text-strong)] min-w-[180px] shrink-0">${item.name}</span>
                 <span class="text-[12px] text-[var(--text-muted)] flex-1 overflow-hidden text-ellipsis whitespace-nowrap">${item.description?.slice(0, 60) ?? ''}</span>
                 ${(item.surfaces ?? []).map(s => toolBadge(s, 'surface'))}
@@ -55,7 +55,7 @@ export function ToolSummaryView({ inventory }: { inventory: DashboardToolInvento
           <h4 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-3">미사용 도구 (${neverUsed.length}개)</h4>
           <div class="flex flex-col">
             ${neverUsed.map(item => html`
-              <div class="flex items-center gap-2.5 py-2.5 border-b border-[var(--white-4)] hover:bg-[var(--white-3)] transition-colors px-2 rounded" key=${item.name}>
+              <div class="flex items-center gap-3 py-2.5 border-b border-[var(--white-4)] hover:bg-[var(--white-3)] transition-colors px-2 rounded" key=${item.name}>
                 <span class="text-[13px] font-medium text-[var(--text-strong)] min-w-[180px] shrink-0">${item.name}</span>
                 <span class="text-[12px] text-[var(--text-muted)] flex-1 overflow-hidden text-ellipsis whitespace-nowrap">${item.description?.slice(0, 60) ?? ''}</span>
                 ${toolBadge(item.category)}

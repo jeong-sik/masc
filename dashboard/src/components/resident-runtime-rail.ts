@@ -23,7 +23,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
   const build = serverStatus.value?.build
 
   return html`
-    <section class="grid gap-2.5">
+    <section class="grid gap-3">
       <!-- Connection + Version row -->
       <div class="flex items-center justify-between gap-2">
         <div class="flex items-center gap-1.5">

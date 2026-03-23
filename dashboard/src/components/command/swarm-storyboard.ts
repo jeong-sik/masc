@@ -103,7 +103,7 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
   const featured = lanes.slice(0, 4)
   if (featured.length === 0) return null
   return html`
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2.5 mb-3.5">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-3.5">
       ${featured.map(lane => {
         const tone = swarmLaneTone(lane)
         const workers = lane.counts.workers ?? 0
@@ -230,7 +230,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
 
   return html`
     <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${toneClass(tone)}">
-      <div class="flex justify-between gap-2.5 items-start">
+      <div class="flex justify-between gap-3 items-start">
         <strong>Run Resolution</strong>
         <span class="cmd-chip rounded-full ${toneClass(tone)}">
           ${runResolutionLabel(resolution?.status ?? recommendation?.recommended_kind ?? null)}
@@ -262,12 +262,12 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
       ${pendingConfirm
         ? html`
             <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card warn">
-              <div class="flex justify-between gap-2.5 items-start">
+              <div class="flex justify-between gap-3 items-start">
                 <strong>확인 대기</strong>
                 <span class="cmd-chip rounded-full warn">${pendingConfirm.confirm_token}</span>
               </div>
               ${pendingConfirm.preview ? html`<pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[length:var(--fs-sm)] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${previewText(pendingConfirm.preview)}</pre>` : null}
-              <div class="flex gap-2.5 flex-wrap mt-3">
+              <div class="flex gap-3 flex-wrap mt-3">
                 <button class="control-btn rounded-lg" onClick=${() => { void confirmPending('confirm') }} disabled=${operatorActionBusy.value}>확인 실행</button>
                 <button class="control-btn rounded-lg ghost" onClick=${() => { void confirmPending('deny') }} disabled=${operatorActionBusy.value}>취소</button>
               </div>

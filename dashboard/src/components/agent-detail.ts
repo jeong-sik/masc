@@ -106,7 +106,7 @@ export function AgentDetailOverlay() {
             <div class="flex items-center gap-4">
               ${agentEmoji ? html`<div class="size-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
               <div>
-                <h2 class="m-0 flex items-baseline gap-2.5 text-text-strong text-2xl font-bold tracking-tight">
+                <h2 class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
                   ${displayName}
                   ${koreanName ? html`<span class="text-sm text-text-dim font-medium tracking-normal">(${koreanName})</span>` : ''}
                   ${secondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-white/5 px-2 py-0.5 rounded-md">${secondaryLabel}</span>` : ''}
@@ -155,7 +155,7 @@ export function AgentDetailOverlay() {
           <${Card} title="할당된 작업">
             ${ownedTasks.length === 0
               ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`
-              : html`<div class="flex flex-col gap-2.5">${ownedTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`}
+              : html`<div class="flex flex-col gap-3">${ownedTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`}
           <//>
 
           <${Card} title="최근 활동">

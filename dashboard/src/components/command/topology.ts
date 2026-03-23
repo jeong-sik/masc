@@ -100,7 +100,7 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
         </div>
       </div>
       ${node.children.length > 0
-        ? html`<div class="flex flex-col gap-2.5 mt-3 pl-4 border-l border-[var(--white-8)]">
+        ? html`<div class="flex flex-col gap-3 mt-3 pl-4 border-l border-[var(--white-8)]">
             ${node.children.map(child => html`<${TopologyNode} node=${child} depth=${depth + 1} />`)}
           </div>`
         : null}

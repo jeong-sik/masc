@@ -138,7 +138,7 @@ export function SideRail() {
             const isActive = surface.id === currentSurface
             return html`
               <button
-                class="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left cursor-pointer border-l-2 border-t-0 border-r-0 border-b-0 border-solid transition-all duration-150 ${isActive ? 'border-l-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]' : 'border-l-transparent bg-transparent text-[var(--text-body)] hover:bg-[var(--white-6)] hover:border-l-[var(--white-20)]'}"
+                class="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left cursor-pointer border-l-2 border-t-0 border-r-0 border-b-0 border-solid transition-all duration-150 ${isActive ? 'border-l-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]' : 'border-l-transparent bg-transparent text-[var(--text-body)] hover:bg-[var(--white-6)] hover:border-l-[var(--white-20)]'}"
                 key=${surface.id}
                 onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
               >

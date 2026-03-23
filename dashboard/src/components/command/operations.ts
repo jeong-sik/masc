@@ -135,7 +135,7 @@ function ChainOperationListItem(
 function ChainHistoryRow({ item }: { item: ChainHistoryEventSummary }) {
   return html`
     <article class="cmd-chain-history-row text-red-300">
-      <div class="flex justify-between gap-2.5 items-start">
+      <div class="flex justify-between gap-3 items-start">
         <strong>${item.chain_id ?? '알 수 없는 체인'}</strong>
         <span class="cmd-chip rounded-full ${chainStatusTone(item.event)}">${item.event}</span>
       </div>
@@ -148,7 +148,7 @@ function ChainHistoryRow({ item }: { item: ChainHistoryEventSummary }) {
 function ChainRunNodeRow({ node }: { node: CommandPlaneChainRunNode }) {
   return html`
     <article class="p-3 rounded-[10px] bg-[rgba(9,12,20,0.5)] border border-solid border-[var(--white-6)]">
-      <div class="flex justify-between gap-2.5 items-start">
+      <div class="flex justify-between gap-3 items-start">
         <strong>${node.id}</strong>
         <span class="cmd-chip rounded-full ${chainStatusTone(node.status)}">${node.status ?? '확인 필요'}</span>
       </div>
@@ -198,7 +198,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
       ${op.checkpoint_ref
         ? html`<div class="cmd-card rounded-xl-foot">체크포인트 ${op.checkpoint_ref}</div>`
         : null}
-      <div class="flex gap-2.5 flex-wrap mt-3">
+      <div class="flex gap-3 flex-wrap mt-3">
         <button
           class="control-btn rounded-lg ghost"
           onClick=${() => {
@@ -336,7 +336,7 @@ export function ChainsSurface() {
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Chains</h3>
         </div>
         <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${chainStatusTone(summary?.connection.status)}">
-          <div class="flex justify-between gap-2.5 items-start">
+          <div class="flex justify-between gap-3 items-start">
             <strong>native chain 연결</strong>
             <span class="cmd-chip rounded-full ${chainStatusTone(summary?.connection.status)}">${summary?.connection.status ?? 'disconnected'}</span>
           </div>
@@ -371,7 +371,7 @@ export function ChainsSurface() {
             : html`<${EmptyState} message="체인 기반 작전이 아직 없습니다." compact />`}
 
         <div class="flex flex-col gap-3 mt-3.5">
-          <div class="flex justify-between gap-2.5 items-start">
+          <div class="flex justify-between gap-3 items-start">
             <strong>최근 이력</strong>
             <span class="cmd-chip rounded-full">${summary?.recent_history.length ?? 0}</span>
           </div>
@@ -417,7 +417,7 @@ export function ChainsSurface() {
               ${selectedOverlay.mermaid
                 ? html`
                     <div class="mt-3.5 p-3.5 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
-                      <div class="flex justify-between gap-2.5 items-start">
+                      <div class="flex justify-between gap-3 items-start">
                         <strong>Mermaid 그래프</strong>
                         <span class="cmd-chip rounded-full">${selectedOverlay.operation.chain?.chain_id ?? 'graph'}</span>
                       </div>
@@ -427,7 +427,7 @@ export function ChainsSurface() {
                 : html`<${EmptyState} message="기록된 Mermaid 그래프가 아직 없습니다." compact />`}
 
               <div class="mt-3.5 p-3.5 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
-                <div class="flex justify-between gap-2.5 items-start">
+                <div class="flex justify-between gap-3 items-start">
                   <strong>실행 상세</strong>
                   <span class="cmd-chip rounded-full ${run?.success === false ? 'bad' : 'ok'}">
                     ${run

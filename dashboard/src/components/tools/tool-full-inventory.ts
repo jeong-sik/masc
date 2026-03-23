@@ -121,7 +121,7 @@ export function FullInventoryView({
         `)}
       </div>
 
-      <div class="flex flex-wrap gap-2.5 items-center">
+      <div class="flex flex-wrap gap-3 items-center">
         <input
           class="w-full px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] focus:border-[var(--accent)]/50 outline-none max-w-[320px]"
           type="text"

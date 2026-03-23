@@ -90,10 +90,10 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
   const toolNames = Array.isArray(item.tool_names) ? item.tool_names : []
   return html`
     <article class="proof-actor-row">
-      <div class="flex justify-between gap-2.5 items-start">
+      <div class="flex justify-between gap-3 items-start">
         <div>
           <strong>${item.worker_name ?? item.worker_run_id}</strong>
-          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+          <div class="flex flex-wrap gap-3 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
             <span>${item.worker_run_id}</span>
             <span>${item.ts_iso ? relativeTime(item.ts_iso) : '기록 없음'}</span>
           </div>
@@ -158,10 +158,10 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
   const isPlanned = item.activity_state === 'planned_only'
   return html`
     <article class="proof-actor-row" style="${isPlanned ? 'opacity: 0.45;' : ''}">
-      <div class="flex justify-between gap-2.5 items-start">
+      <div class="flex justify-between gap-3 items-start">
         <div>
           <strong>${item.actor}</strong>
-          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+          <div class="flex flex-wrap gap-3 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
             <span>${item.role ?? '참여자'}</span>
             <span>${lastSeen ? relativeTime(lastSeen) : '기록 없음'}</span>
           </div>
@@ -192,7 +192,7 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
           </div>`
         : null}
       ${(input || output)
-        ? html`<div class="grid grid-cols-2 gap-2.5">
+        ? html`<div class="grid grid-cols-2 gap-3">
             <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
               <strong>최근 입력</strong>
               <span>${input ?? '표시 가능한 입력 없음'}</span>
@@ -237,7 +237,7 @@ export function KeyValueGrid({
 }) {
   if (rows.length === 0) return null
   return html`
-    <div class="grid gap-2.5">
+    <div class="grid gap-3">
       ${title ? html`<strong>${title}</strong>` : null}
       <div class="grid grid-cols-[132px_minmax(0,1fr)] gap-x-3 gap-y-2">
         ${rows.map(row => html`

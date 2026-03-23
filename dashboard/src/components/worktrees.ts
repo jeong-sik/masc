@@ -71,7 +71,7 @@ export function Worktrees() {
         ${worktrees.map(wt => html`
           <div key=${wt.id || wt.branch} class="flex flex-col gap-3 p-5 rounded-2xl border border-card-border bg-card/60 backdrop-blur-md hover:border-accent/40 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 shadow-sm shadow-black/10 group">
             <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5">
+              <div class="flex items-center gap-3">
                 <div class="size-7 rounded-lg bg-accent/10 flex items-center justify-center border border-accent/20">
                   <span class="text-[14px]">🌿</span>
                 </div>

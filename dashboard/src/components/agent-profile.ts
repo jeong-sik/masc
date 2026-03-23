@@ -262,14 +262,14 @@ function CharacterPlate({ name }: { name: string }) {
         </div>
 
         ${lastSeenAt || lastActivity != null ? html`
-          <div class="flex gap-2.5 flex-wrap text-[length:var(--fs-sm)] text-[var(--text-muted)]">
+          <div class="flex gap-3 flex-wrap text-[length:var(--fs-sm)] text-[var(--text-muted)]">
             ${lastSeenAt ? html`<span>마지막 확인: <${TimeAgo} timestamp=${lastSeenAt} /></span>` : null}
             ${lastActivity != null ? html`<span>${formatDuration(lastActivity)} 전 활동</span>` : null}
           </div>
         ` : null}
 
         ${keeperIdent || continuitySummary || brief?.related_session_id ? html`
-          <div class="flex gap-2.5 flex-wrap text-[length:var(--fs-sm)] text-[var(--text-muted)]">
+          <div class="flex gap-3 flex-wrap text-[length:var(--fs-sm)] text-[var(--text-muted)]">
             ${keeperIdent ? html`<span>${keeperIdent}</span>` : null}
             ${brief?.related_session_id ? html`<span>세션 ${brief.related_session_id}</span>` : null}
             ${continuitySummary ? html`<span>${continuitySummary}</span>` : null}

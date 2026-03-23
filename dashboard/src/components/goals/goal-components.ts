@@ -28,7 +28,7 @@ export function GoalRow({ goal }: { goal: Goal }) {
           </span>
           <span class="text-[length:var(--fs-base)] font-medium text-[color:var(--text-near-white)]">${goal.title}</span>
         </div>
-        <div class="flex gap-2.5 flex-wrap mt-1 text-[length:var(--fs-xs)] text-[var(--text-dim)]">
+        <div class="flex gap-3 flex-wrap mt-1 text-[length:var(--fs-xs)] text-[var(--text-dim)]">
           <span class="text-amber-500 tracking-[1px]" title="Priority ${goal.priority}">${priorityStars(goal.priority)}</span>
           ${goal.metric ? html`<span class="text-cyan">${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}</span>` : null}
           ${goal.due_date ? html`<span class="text-[var(--bad-light)]">Due: <${TimeAgo} timestamp=${goal.due_date} /></span>` : null}

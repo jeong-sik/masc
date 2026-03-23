@@ -296,6 +296,52 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
       ());
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
+  (* Auto-boot resident keepers: read .masc/resident-keepers/*.json,
+     load or parse each keeper's meta, and start keepalive loops. *)
+  fork_subsystem "keeper_autoboot" (fun () ->
+    (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
+    Eio.Time.sleep clock 5.0;
+    let config = state.room_config in
+    let specs = Keeper_types.list_resident_keepers config in
+    let booted = ref 0 in
+    List.iter (fun (spec : Keeper_types.resident_keeper_spec) ->
+      if not spec.desired then
+        Log.Keeper.info "autoboot: skipping %s (desired=false)" spec.name
+      else
+        try
+          (* Prefer persisted meta on disk; fall back to seed_meta from resident spec. *)
+          let meta =
+            match Keeper_types.read_meta config spec.name with
+            | Ok (Some m) -> Ok m
+            | Ok None -> Keeper_types.meta_of_json spec.seed_meta
+            | Error e -> Error e
+          in
+          match meta with
+          | Error e ->
+            Log.Keeper.error "autoboot: failed to load meta for %s: %s" spec.name e
+          | Ok m ->
+            if not m.presence_keepalive then
+              Log.Keeper.info "autoboot: skipping %s (presence_keepalive=false)" spec.name
+            else begin
+              let ctx : _ Keeper_types.context = {
+                config;
+                agent_name = m.agent_name;
+                sw;
+                clock;
+                proc_mgr = Some proc_mgr;
+              } in
+              Keeper_keepalive.start_keepalive ~proactive_warmup_sec:60 ctx m;
+              incr booted;
+              Log.Keeper.info "autoboot: started keepalive for %s" m.name
+            end
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Keeper.error "autoboot: exception for %s: %s" spec.name
+            (Printexc.to_string exn)
+    ) specs;
+    Log.Keeper.info "autoboot: %d/%d resident keepers started"
+      !booted (List.length specs));
   (* Phase 5: unified startup subsystem summary *)
   Log.info ~ctx:"startup" "subsystems: resident loops started"
 

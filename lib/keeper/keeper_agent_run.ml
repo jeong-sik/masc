@@ -69,7 +69,7 @@ let run_turn
     ~(user_message : string)
     ~(cascade_name : string)
     ~(generation : int)
-    ?(max_turns : int = 100)
+    ?(max_turns : int = 5)
     ?guardrails
     ?temperature
     ?max_tokens

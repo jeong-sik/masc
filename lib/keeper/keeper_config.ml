@@ -554,10 +554,12 @@ let keeper_unified_max_tokens () : int =
     ~max_v:16000
 
 (** Max agent turns (tool loops) for unified keeper turns.
-    Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 1000. *)
+    Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 5.
+    Most keeper tasks (read file + post to board) need 2-3 tool calls.
+    Previous default (1000) caused 787s+ latency per turn. *)
 let keeper_unified_max_turns () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TURNS"
-    ~default:1000
+    ~default:5
     ~min_v:1
-    ~max_v:1000000
+    ~max_v:50

@@ -118,7 +118,10 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
   else
     let any_available = List.exists (fun label ->
       match provider_name_of_label label with
-      | None -> false
+      | None ->
+          (* Label without "provider:model" format (e.g. cascade name "default").
+             Treat as available — the cascade resolves providers at runtime. *)
+          true
       | Some pname ->
         match Llm_provider.Provider_registry.find default_registry pname with
         | None -> false

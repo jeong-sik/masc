@@ -29,7 +29,7 @@ export function KanbanCard({ task }: { task: Task }) {
       </div>
       ${hasDescription ? html`
         <div
-          class="task-description-preview transition-colors duration-150 ${isExpanded ? 'task-description-preview--expanded' : ''}"
+          class="text-[length:var(--fs-sm)] text-[var(--text-dim)] cursor-pointer transition-colors duration-150 hover:text-[var(--text-body)]"
           onClick=${() => toggleTaskExpand(task.id)}
         >
           ${isExpanded ? task.description : truncate(task.description ?? '', 80)}

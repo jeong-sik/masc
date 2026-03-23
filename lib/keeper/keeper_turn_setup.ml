@@ -293,6 +293,7 @@ let ensure_keeper_exists
       active_team_session_id = None;
       last_team_session_started_at = "";
       team_session_start_count_total = 0;
+      paused = false;
     } in
     let base_dir = session_base_dir ctx.config in
     mkdir_p base_dir;

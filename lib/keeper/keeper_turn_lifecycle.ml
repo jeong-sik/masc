@@ -107,6 +107,7 @@ let handle_keeper_down ctx args : tool_result =
              active_team_session_id = None;
              last_team_session_started_at = "";
              updated_at = now_iso ();
+             paused = true;
            }
          in
          write_meta_logged ctx.config retained);

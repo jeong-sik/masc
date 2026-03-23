@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+import { signal } from '@preact/signals'
 import { route, initRouter } from './router'
 import { connectSSE, disconnectSSE } from './sse'
 import { refreshRoomTruth } from './room-truth-store'
@@ -19,6 +20,8 @@ import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
+
+export const sidebarCollapsed = signal(false)
 
 export function App() {
   useEffect(() => {
@@ -67,7 +70,7 @@ export function App() {
         <div class="mx-auto flex w-full max-w-[1680px] items-start justify-between gap-6 max-[860px]:flex-col max-[860px]:items-stretch">
           <div class="min-w-0">
             <div class="flex items-center gap-4">
-              <div class="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-[rgba(113,214,255,0.28)] bg-[linear-gradient(145deg,rgba(61,157,255,0.34),rgba(10,28,58,0.95))] text-[18px] font-semibold text-white shadow-lg">
+              <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-[rgba(113,214,255,0.28)] bg-[linear-gradient(145deg,rgba(61,157,255,0.34),rgba(10,28,58,0.95))] text-[18px] font-semibold text-white shadow-lg">
                 ${currentView?.icon ?? 'M'}
               </div>
               <div class="min-w-0">
@@ -97,13 +100,13 @@ export function App() {
         </div>
       </header>
 
-      <div class="flex flex-1 gap-5 overflow-hidden p-5 max-[1100px]:flex-col max-[1100px]:p-4">
-        <aside class="w-72 shrink-0 overflow-y-auto rounded-3xl border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,17,31,0.94),rgba(7,14,26,0.9))] shadow-xl max-[1100px]:w-full max-[1100px]:max-h-[360px]">
-          <${SideRail} />
+      <div class="flex flex-1 gap-4 overflow-hidden p-4 max-[1100px]:flex-col">
+        <aside class="${sidebarCollapsed.value ? 'w-14' : 'w-64'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,17,31,0.94),rgba(7,14,26,0.9))] transition-[width] duration-200 max-[1100px]:w-full max-[1100px]:max-h-[360px]">
+          <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
         </aside>
 
-        <main class="min-w-0 flex-1 overflow-hidden rounded-3xl border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(8,15,28,0.92),rgba(9,14,25,0.88))] shadow-xl max-[1100px]:min-h-0">
-          <div class="mx-auto h-full max-w-[1600px] overflow-y-auto p-6 lg:p-8">
+        <main class="min-w-0 flex-1 overflow-hidden rounded-xl border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(8,15,28,0.92),rgba(9,14,25,0.88))] max-[1100px]:min-h-0">
+          <div class="mx-auto h-full max-w-[1600px] overflow-y-auto p-5 lg:p-6">
             <${DashboardMain} />
           </div>
         </main>

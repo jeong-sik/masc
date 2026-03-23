@@ -6,7 +6,7 @@ import type { ComponentChildren } from 'preact'
 import { SectionHeader } from './section-header'
 
 // ── Exported class constants for non-component usage ──
-export const CARD_BASE = 'rounded-2xl border border-card-border shadow-sm'
+export const CARD_BASE = 'rounded-xl border border-card-border shadow-sm'
 export const CARD_STANDARD = `${CARD_BASE} p-6 bg-card/90 backdrop-blur-sm`
 export const CARD_LIGHT = `${CARD_BASE} p-6 bg-card/90 backdrop-blur-none`
 export const CARD_COMPACT = `${CARD_BASE} p-5 bg-card/90 backdrop-blur-sm`

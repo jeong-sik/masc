@@ -79,7 +79,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button
-        class="text-[11px] py-[6px] px-[11px] rounded-full border border-solid border-[rgba(71,184,255,0.28)] bg-[rgba(71,184,255,0.12)] text-[#bfe7ff] cursor-pointer font-[inherit] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-colors duration-150 hover:bg-[rgba(71,184,255,0.18)]"
+        class="text-[11px] py-[6px] px-[11px] rounded-md border border-solid border-[rgba(71,184,255,0.28)] bg-[rgba(71,184,255,0.12)] text-[#bfe7ff] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[rgba(71,184,255,0.18)]"
         type="button"
         aria-expanded=${buildIdentityOpen.value}
         onClick=${() => {
@@ -90,7 +90,7 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="absolute top-[calc(100%+10px)] right-0 min-w-[300px] py-3 px-3.5 border border-solid border-[var(--card-border)] rounded-[18px] bg-[rgba(6,14,28,0.97)] shadow-[0_24px_44px_rgba(0,0,0,0.36)] grid gap-2">
+            <div class="absolute top-[calc(100%+10px)] right-0 min-w-[300px] py-3 px-3.5 border border-solid border-[var(--card-border)] rounded-lg bg-[rgba(6,14,28,0.97)] shadow-lg grid gap-2">
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>릴리즈</span>
                 <strong class="text-[color:var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
@@ -120,44 +120,67 @@ export function BuildIdentityBadge() {
 
 
 
-export function SideRail() {
+export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggle?: () => void }) {
   const currentTab = route.value.tab
   const currentSection = currentSectionForRoute(route.value)
 
   return html`
     <nav class="flex flex-col h-full">
-      <div class="flex-1 overflow-y-auto px-4 py-5">
-        <div class="mb-5 px-2">
-          <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">Navigation</div>
-          <div class="mt-1 text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
-        </div>
+      <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-3 pt-3 pb-1">
+        ${!collapsed ? html`
+          <div class="px-1">
+            <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">Navigation</div>
+            <div class="mt-0.5 text-[14px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
+          </div>
+        ` : null}
+        <button
+          class="flex size-7 items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--text-body)] cursor-pointer transition-colors duration-150"
+          onClick=${onToggle}
+          title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
+        >
+          ${collapsed ? '\u25B6' : '\u25C0'}
+        </button>
+      </div>
 
-        <div class="flex flex-col gap-4">
+      <div class="flex-1 overflow-y-auto ${collapsed ? 'px-1.5' : 'px-3'} py-3">
+        <div class="flex flex-col gap-3">
           ${DASHBOARD_SURFACES.map(surface => {
             const isSurfaceActive = surface.id === currentTab
             const sections = sectionItemsForTab(surface.id)
 
-            return html`
-              <div class="flex flex-col gap-1.5">
+            if (collapsed) {
+              return html`
                 <button
-                  class="flex items-center gap-3 w-full rounded-2xl px-3 py-3 text-left cursor-pointer transition-all duration-150 ${isSurfaceActive && sections.length === 0 ? 'bg-[rgba(71,184,255,0.14)] text-[#d9f2ff] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.04)]'}"
+                  class="flex items-center justify-center w-full rounded-lg p-2 cursor-pointer transition-colors duration-150 ${isSurfaceActive ? 'bg-[rgba(71,184,255,0.14)] text-[#d9f2ff]' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.06)]'}"
+                  onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
+                  title=${surface.label}
+                >
+                  <span class="text-[16px]">${surface.icon}</span>
+                </button>
+              `
+            }
+
+            return html`
+              <div class="flex flex-col gap-1">
+                <button
+                  class="flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left cursor-pointer transition-colors duration-150 ${isSurfaceActive && sections.length === 0 ? 'bg-[rgba(71,184,255,0.14)] text-[#d9f2ff]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.04)]'}"
                   onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
                 >
-                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] text-[16px]">
+                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] text-[14px]">
                     ${surface.icon}
                   </span>
                   <div class="flex-1 min-w-0">
-                    <div class="text-[14px] font-semibold truncate leading-none ${isSurfaceActive ? 'text-[#9ad9ff]' : ''}">${surface.label}</div>
+                    <div class="text-[13px] font-semibold truncate leading-none ${isSurfaceActive ? 'text-[#9ad9ff]' : ''}">${surface.label}</div>
                   </div>
                 </button>
-                
+
                 ${sections.length > 0 ? html`
-                  <div class="flex flex-col gap-1 pl-12 pr-1">
+                  <div class="flex flex-col gap-0.5 pl-10 pr-1">
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id
                       return html`
                         <button
-                          class="w-full rounded-xl px-3 py-2 text-left cursor-pointer text-[13px] transition-all duration-150 ${isSectionActive ? 'bg-[rgba(71,184,255,0.12)] text-[#cfeaff] font-medium' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-body)]'}"
+                          class="w-full rounded-md px-2.5 py-1.5 text-left cursor-pointer text-[12px] transition-colors duration-150 ${isSectionActive ? 'bg-[rgba(71,184,255,0.12)] text-[#cfeaff] font-medium' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-body)]'}"
                           onClick=${() => navigate(surface.id, item.params)}
                         >
                           <div class="truncate">${item.label}</div>
@@ -172,9 +195,11 @@ export function SideRail() {
         </div>
       </div>
 
-      <div class="shrink-0 border-t border-[rgba(255,255,255,0.06)] p-4">
-        <${SnapshotCard} currentTab=${currentTab} />
-      </div>
+      ${!collapsed ? html`
+        <div class="shrink-0 border-t border-[rgba(255,255,255,0.06)] p-3">
+          <${SnapshotCard} currentTab=${currentTab} />
+        </div>
+      ` : null}
     </nav>
   `
 }

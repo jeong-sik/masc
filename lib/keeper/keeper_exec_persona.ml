@@ -82,14 +82,14 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let active_model =
     Safe_ops.json_string ~default:"" "active_model" json |> String.trim
   in
-  let policy_mode =
+  let _policy_mode =
     Safe_ops.json_string ~default:"heuristic" "policy_mode" json
     |> canonical_policy_mode
   in
-  let policy_voice_enabled =
+  let _policy_voice_enabled =
     Safe_ops.json_bool ~default:false "policy_voice_enabled" json
   in
-  let policy_shell_mode =
+  let _policy_shell_mode =
     Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json
     |> canonical_policy_shell_mode
   in
@@ -102,10 +102,6 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   if models = [] then errors := "models is required" :: !errors;
   if active_model <> "" && not (List.mem active_model (allowed_models @ models)) then
     errors := "active_model must be included in models or allowed_models" :: !errors;
-  if policy_voice_enabled && policy_mode <> "learned_offline_v1" then
-    errors := "policy_voice_enabled=true requires learned_offline_v1" :: !errors;
-  if policy_shell_mode = "readonly" && policy_mode <> "learned_offline_v1" then
-    errors := "policy_shell_mode=readonly requires learned_offline_v1" :: !errors;
   if
     (Safe_ops.json_string ~default:"explicit_only" "trigger_mode" json
      |> Keeper_contract.trigger_mode_of_string

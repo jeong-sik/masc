@@ -59,17 +59,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            | model :: _ -> model
             | [] -> "")
   in
-  let policy_mode =
-    let default_policy_mode =
-      if default_voice_enabled_for p.name then "explicit_event_v1" else "heuristic"
-    in
-    p.policy_mode_opt
-    |> first_some
-         (if default_voice_enabled_for p.name then None else p.profile_defaults.policy_mode)
-    |> Option.value
-         ~default:default_policy_mode
-    |> canonical_policy_mode
-  in
+  (* Mode categorization removed: always use fixed values. *)
+  let policy_mode = canonical_policy_mode "heuristic" in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
@@ -77,14 +68,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
        then p.profile_defaults.policy_voice_enabled else None)
     |> Option.value ~default:false
   in
-  let policy_shell_mode =
-    first_some
-      p.policy_shell_mode_opt
-      (if not (default_voice_enabled_for p.name && Option.is_none p.policy_mode_opt)
-       then p.profile_defaults.policy_shell_mode else None)
-    |> Option.value ~default:"disabled"
-    |> canonical_policy_shell_mode
-  in
+  let policy_shell_mode = canonical_policy_shell_mode "coding" in
   let allowed_paths =
     Option.value ~default:[] p.allowed_paths_opt
   in

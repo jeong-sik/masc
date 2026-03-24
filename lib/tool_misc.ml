@@ -60,20 +60,17 @@ let auth_snapshot_json ctx =
       ("credentials", `List credentials);
     ]
 
-(** Flat default keeper gate config. No autonomy level dispatch. *)
+(** Flat default keeper gate config.
+    allowlist_enabled=false: all tools are available by default.
+    Safety is enforced through the denied_tools list (eval_gate). *)
 let keeper_default_gate_config () : Eval_gate.gate_config =
   {
     max_cost_usd = 0.10;
     max_tool_calls_per_turn = 5;
     entropy_threshold = 2;
     destructive_check_enabled = true;
-    allowlist_enabled = true;
-    allowed_tools = [
-      "keeper_board_get"; "keeper_board_post"; "keeper_board_comment"; "keeper_board_list";
-      "keeper_read"; "keeper_fs_read";
-      "keeper_memory_search";
-      "keeper_time_now"; "keeper_context_status";
-    ];
+    allowlist_enabled = false;
+    allowed_tools = [];
     denied_tools = [
       "keeper_bash"; "keeper_edit"; "keeper_fs_edit"; "keeper_github";
     ];

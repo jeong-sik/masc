@@ -161,10 +161,9 @@ let canonical_trigger_mode = function
   | "explicit_only" -> "explicit_only"
   | _ -> "explicit_only"
 
+(** Mode categorization removed. Always returns "heuristic" regardless of input.
+    Field kept for JSON backward compatibility. *)
 let canonical_policy_mode = function
-  | "learned_offline_v1" -> "learned_offline_v1"
-  | "explicit_event_v1" -> "explicit_event_v1"
-  | "model_deliberation" -> "model_deliberation"
   | _ -> "heuristic"
 
 let canonical_voice_channel = function
@@ -184,11 +183,10 @@ let default_voice_channel_for name =
 let default_voice_agent_id_for name =
   if default_voice_enabled_for name then name else ""
 
+(** Mode categorization removed. Always returns "coding" (full access) regardless
+    of input. Field kept for JSON backward compatibility. *)
 let canonical_policy_shell_mode = function
-  | "readonly" -> "readonly"
-  | "sandboxed" -> "sandboxed"
-  | "coding" -> "coding"
-  | _ -> "disabled"
+  | _ -> "coding"
 
 let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (room_id, seq) -> (room_id, `Int seq)) items)

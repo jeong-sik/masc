@@ -19,6 +19,7 @@ let test_classify_runtime_blocker_prefers_slot_count_when_health_ok () =
       ~actual_model_id:(Some "qwen3.5-35b-a3b-ud-q8-xl")
       ~expected_slots:(Some 12) ~actual_slots_total:4
       ~expected_ctx:(Some 262144) ~actual_ctx:(Some 262144)
+      ~chat_completion_compatible:true
   in
   check (option string) "slot blocker" (Some "slot_count_insufficient")
     blocker;

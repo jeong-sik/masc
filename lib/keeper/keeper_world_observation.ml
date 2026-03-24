@@ -168,12 +168,15 @@ let collect_board_events ~(meta : keeper_meta) : string list * int * int =
         | Some ts -> ts
         | None -> Time_compat.now () -. bootstrap_window_sec)
     in
+    (* Capture cursor watermark BEFORE fetch to avoid blind window:
+       posts created between fetch and cursor update would be missed. *)
+    let cursor_watermark = Time_compat.now () in
     let posts =
       Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:20 ()
     in
     (* Update cursor AFTER successful read to avoid losing events on I/O failure *)
     Eio.Mutex.use_rw ~protect:true board_cursors_mu (fun () ->
-      Hashtbl.replace board_cursors meta.name (Time_compat.now ()));
+      Hashtbl.replace board_cursors meta.name cursor_watermark);
     let recent =
       List.filter (fun (p : Board.post) -> p.created_at >= since_ts) posts
     in

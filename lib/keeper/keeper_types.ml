@@ -6,6 +6,16 @@
 include Keeper_types_profile
 
 
+type proactive_config = {
+  enabled: bool;
+  idle_sec: int;
+  cooldown_sec: int;
+  count_total: int;
+  last_ts: float;
+  last_reason: string;
+  last_preview: string;
+}
+
 type keeper_meta = {
   name: string;
   agent_name: string;
@@ -38,9 +48,7 @@ type keeper_meta = {
   generation: int;
   presence_keepalive: bool;
   presence_keepalive_sec: int;
-  proactive_enabled: bool;
-  proactive_idle_sec: int;
-  proactive_cooldown_sec: int;
+  proactive: proactive_config;
   compaction_profile: string;
   compaction_ratio_gate: float;
   compaction_message_gate: int;
@@ -70,10 +78,6 @@ type keeper_meta = {
   last_compaction_ts: float;
   last_compaction_before_tokens: int;
   last_compaction_after_tokens: int;
-  proactive_count_total: int;
-  last_proactive_ts: float;
-  last_proactive_reason: string;
-  last_proactive_preview: string;
   last_compaction_check_ts: float;
   last_compaction_decision: string;
   last_continuity_update_ts: float;
@@ -124,9 +128,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("generation", `Int m.generation);
       ("presence_keepalive", `Bool m.presence_keepalive);
       ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
-      ("proactive_enabled", `Bool m.proactive_enabled);
-      ("proactive_idle_sec", `Int m.proactive_idle_sec);
-      ("proactive_cooldown_sec", `Int m.proactive_cooldown_sec);
+      ("proactive_enabled", `Bool m.proactive.enabled);
+      ("proactive_idle_sec", `Int m.proactive.idle_sec);
+      ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
       ("compaction_profile", `String m.compaction_profile);
       ("compaction_ratio_gate", `Float m.compaction_ratio_gate);
       ("compaction_message_gate", `Int m.compaction_message_gate);
@@ -156,10 +160,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("last_compaction_ts", `Float m.last_compaction_ts);
       ("last_compaction_before_tokens", `Int m.last_compaction_before_tokens);
       ("last_compaction_after_tokens", `Int m.last_compaction_after_tokens);
-      ("proactive_count_total", `Int m.proactive_count_total);
-      ("last_proactive_ts", `Float m.last_proactive_ts);
-      ("last_proactive_reason", `String m.last_proactive_reason);
-      ("last_proactive_preview", `String m.last_proactive_preview);
+      ("proactive_count_total", `Int m.proactive.count_total);
+      ("last_proactive_ts", `Float m.proactive.last_ts);
+      ("last_proactive_reason", `String m.proactive.last_reason);
+      ("last_proactive_preview", `String m.proactive.last_preview);
       ("last_compaction_check_ts", `Float m.last_compaction_check_ts);
       ("last_compaction_decision", `String m.last_compaction_decision);
       ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
@@ -419,9 +423,15 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           generation;
           presence_keepalive;
           presence_keepalive_sec;
-          proactive_enabled;
-          proactive_idle_sec;
-          proactive_cooldown_sec;
+          proactive = {
+            enabled = proactive_enabled;
+            idle_sec = proactive_idle_sec;
+            cooldown_sec = proactive_cooldown_sec;
+            count_total = proactive_count_total;
+            last_ts = last_proactive_ts;
+            last_reason = last_proactive_reason;
+            last_preview = last_proactive_preview;
+          };
           compaction_profile;
           compaction_ratio_gate;
           compaction_message_gate;
@@ -451,10 +461,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           last_compaction_ts;
           last_compaction_before_tokens;
           last_compaction_after_tokens;
-          proactive_count_total;
-          last_proactive_ts;
-          last_proactive_reason;
-          last_proactive_preview;
           last_compaction_check_ts;
           last_compaction_decision;
           last_continuity_update_ts;

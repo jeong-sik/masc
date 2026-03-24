@@ -173,8 +173,8 @@ let proactive_prompt_for_keeper
     |> Option.value ~default:default_soul_profile
   in
   let last_preview =
-    if String.trim meta.last_proactive_preview = "" then "none"
-    else meta.last_proactive_preview
+    if String.trim meta.proactive.last_preview = "" then "none"
+    else meta.proactive.last_preview
   in
   let continuity_snapshot =
     match snapshot with
@@ -381,7 +381,7 @@ let proactive_fallback_reply ~(meta : keeper_meta) ~(idle_seconds : int) : strin
     |]
   in
   let idx =
-    abs (Hashtbl.hash (meta.name, meta.proactive_count_total, idle_seconds))
+    abs (Hashtbl.hash (meta.name, meta.proactive.count_total, idle_seconds))
     mod Array.length templates
   in
   templates.(idx)

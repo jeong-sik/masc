@@ -82,7 +82,7 @@ let handle_keeper_status ctx args : tool_result =
          let last_handoff_ago_s = if m.last_handoff_ts <= 0.0 then 0.0 else now_ts -. m.last_handoff_ts in
          let last_compaction_ago_s = if m.last_compaction_ts <= 0.0 then 0.0 else now_ts -. m.last_compaction_ts in
          let last_proactive_ago_s =
-           if m.last_proactive_ts <= 0.0 then 0.0 else now_ts -. m.last_proactive_ts
+           if m.proactive.last_ts <= 0.0 then 0.0 else now_ts -. m.proactive.last_ts
          in
          let trace_history_count = List.length m.trace_history in
          let active_model = active_model_of_meta m in
@@ -447,20 +447,20 @@ let handle_keeper_status ctx args : tool_result =
              ("uptime_hours", `Float (keeper_age_s /. 3600.0));
            ]);
            ("proactive", `Assoc [
-             ("enabled", `Bool m.proactive_enabled);
-             ("idle_sec", `Int m.proactive_idle_sec);
-             ("cooldown_sec", `Int m.proactive_cooldown_sec);
-             ("count_total", `Int m.proactive_count_total);
-             ("last_ts", `Float m.last_proactive_ts);
+             ("enabled", `Bool m.proactive.enabled);
+             ("idle_sec", `Int m.proactive.idle_sec);
+             ("cooldown_sec", `Int m.proactive.cooldown_sec);
+             ("count_total", `Int m.proactive.count_total);
+             ("last_ts", `Float m.proactive.last_ts);
              ("last_ago_s", `Float last_proactive_ago_s);
              ("last_reason",
-               if String.trim m.last_proactive_reason = ""
+               if String.trim m.proactive.last_reason = ""
                then `Null
-               else `String m.last_proactive_reason);
+               else `String m.proactive.last_reason);
              ("last_preview",
-               if String.trim m.last_proactive_preview = ""
+               if String.trim m.proactive.last_preview = ""
                then `Null
-               else `String m.last_proactive_preview);
+               else `String m.proactive.last_preview);
            ]);
            ("drift", drift_surface_json ());
            ("policy", `Assoc [

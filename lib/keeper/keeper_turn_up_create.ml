@@ -247,9 +247,15 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            generation = 0;
            presence_keepalive;
            presence_keepalive_sec;
-           proactive_enabled;
-           proactive_idle_sec;
-           proactive_cooldown_sec;
+           proactive = {
+             enabled = proactive_enabled;
+             idle_sec = proactive_idle_sec;
+             cooldown_sec = proactive_cooldown_sec;
+             count_total = 0;
+             last_ts = 0.0;
+             last_reason = "";
+             last_preview = "";
+           };
            compaction_profile;
            compaction_ratio_gate;
            compaction_message_gate;
@@ -278,10 +284,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            last_compaction_after_tokens = 0;
            last_compaction_check_ts = now_ts;
            last_compaction_decision = "initialized";
-           proactive_count_total = 0;
-           last_proactive_ts = 0.0;
-            last_proactive_reason = "";
-            last_proactive_preview = "";
             last_continuity_update_ts = now_ts;
             continuity_summary = "";
             active_goal_ids = [];
@@ -330,9 +332,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              ("voice_agent_id", `String meta.voice_agent_id);
              ("presence_keepalive", `Bool meta.presence_keepalive);
              ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
-             ("proactive_enabled", `Bool meta.proactive_enabled);
-             ("proactive_idle_sec", `Int meta.proactive_idle_sec);
-             ("proactive_cooldown_sec", `Int meta.proactive_cooldown_sec);
+             ("proactive_enabled", `Bool meta.proactive.enabled);
+             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
+             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
              ("policy_mode", `String meta.policy_mode);
              ("compaction_profile", `String meta.compaction_profile);
              ("compaction_ratio_gate", `Float meta.compaction_ratio_gate);

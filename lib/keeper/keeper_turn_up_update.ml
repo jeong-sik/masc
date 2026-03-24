@@ -184,16 +184,18 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
              ~default:old.presence_keepalive_sec
              p.profile_defaults.presence_keepalive_sec)
         p.presence_keepalive_sec_opt;
-    proactive_enabled =
-      Option.value
-        ~default:old.proactive_enabled
-        p.proactive_enabled_opt;
-    proactive_idle_sec =
-      Option.value ~default:old.proactive_idle_sec p.proactive_idle_sec_opt
-      |> normalize_proactive_idle_sec;
-    proactive_cooldown_sec =
-      Option.value ~default:old.proactive_cooldown_sec p.proactive_cooldown_sec_opt
-      |> normalize_proactive_cooldown_sec;
+    proactive = { old.proactive with
+      enabled =
+        Option.value
+          ~default:old.proactive.enabled
+          p.proactive_enabled_opt;
+      idle_sec =
+        Option.value ~default:old.proactive.idle_sec p.proactive_idle_sec_opt
+        |> normalize_proactive_idle_sec;
+      cooldown_sec =
+        Option.value ~default:old.proactive.cooldown_sec p.proactive_cooldown_sec_opt
+        |> normalize_proactive_cooldown_sec;
+    };
     compaction_profile;
     compaction_ratio_gate;
     compaction_message_gate;

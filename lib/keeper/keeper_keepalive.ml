@@ -349,11 +349,11 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                     idle_seconds =
                       (let activity_ts =
                          max meta_current.last_turn_ts
-                           meta_current.last_proactive_ts
+                           meta_current.proactive.last_ts
                        in
                        if activity_ts <= 0.0 then 0
                        else int_of_float (max 0.0 (now_ts -. activity_ts)));
-                    idle_gate = meta_current.proactive_idle_sec;
+                    idle_gate = meta_current.proactive.idle_sec;
                     unclaimed_task_count = unclaimed_count;
                     failed_task_count = failed_count;
                     active_agent_count = current_agent_count;

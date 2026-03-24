@@ -169,7 +169,7 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
 let keeper_error_hint ~agent_status ~meta =
   let agent_error = json_string_opt "error" agent_status in
   let proactive_reason =
-    let reason = String.trim meta.last_proactive_reason in
+    let reason = String.trim meta.proactive.last_reason in
     if reason = "" then None else Some reason
   in
   let drift_reason = None in
@@ -211,7 +211,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     || agent_status_text = "offline"
     || agent_status_text = "inactive"
   then Some "disabled"
-  else if meta.total_turns = 0 && meta.proactive_count_total = 0 then
+  else if meta.total_turns = 0 && meta.proactive.count_total = 0 then
     let keeper_age_s =
       match Resilience.Time.parse_iso8601_opt meta.created_at with
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
@@ -236,16 +236,16 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
           else Some (max 0.0 (now_ts -. meta.last_turn_ts))
         in
         let last_proactive_ago_s =
-          if meta.last_proactive_ts <= 0.0 then None
-          else Some (max 0.0 (now_ts -. meta.last_proactive_ts))
+          if meta.proactive.last_ts <= 0.0 then None
+          else Some (max 0.0 (now_ts -. meta.proactive.last_ts))
         in
-        if meta.proactive_enabled then
+        if meta.proactive.enabled then
           match last_proactive_ago_s with
-          | Some age when age < float_of_int meta.proactive_cooldown_sec ->
+          | Some age when age < float_of_int meta.proactive.cooldown_sec ->
               Some "min_gap"
           | _ -> (
               match last_turn_ago_s with
-              | Some age when age < float_of_int meta.proactive_idle_sec ->
+              | Some age when age < float_of_int meta.proactive.idle_sec ->
                   Some "no_recent_activity"
               | _ -> None)
         else None
@@ -285,8 +285,8 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     match quiet_reason with
     | Some "graphql_error" | Some "model_error" -> "degraded"
     | _ ->
-        if meta.total_turns = 0 && meta.proactive_count_total = 0 then "idle"
-        else if last_turn_ago_s > float_of_int (max meta.proactive_idle_sec 900)
+        if meta.total_turns = 0 && meta.proactive.count_total = 0 then "idle"
+        else if last_turn_ago_s > float_of_int (max meta.proactive.idle_sec 900)
         then "idle"
         else "healthy"
 
@@ -305,9 +305,9 @@ let keeper_next_action_path ~health_state ~quiet_reason =
 
 let keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts =
   match quiet_reason with
-  | Some "min_gap" when meta.last_proactive_ts > 0.0 ->
+  | Some "min_gap" when meta.proactive.last_ts > 0.0 ->
       let remaining =
-        float_of_int meta.proactive_cooldown_sec -. (now_ts -. meta.last_proactive_ts)
+        float_of_int meta.proactive.cooldown_sec -. (now_ts -. meta.proactive.last_ts)
       in
       if remaining > 0.0 then `Float remaining else `Null
   | _ -> `Null
@@ -493,8 +493,8 @@ let derive_pipeline_stage
       else now_ts -. meta.last_handoff_ts
     in
     let proactive_ago =
-      if meta.last_proactive_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.last_proactive_ts
+      if meta.proactive.last_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.proactive.last_ts
     in
     (* Pick the most recent activity within the recency window.
        Priority order when multiple are recent: handoff > compacting > proactive > thinking *)

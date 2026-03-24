@@ -52,7 +52,7 @@ let handle_keeper_list ctx args : tool_result =
             let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
             let last_turn_ago_s = if m.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.last_turn_ts in
             let last_proactive_ago_s =
-              if m.last_proactive_ts <= 0.0 then 0.0 else now_ts -. m.last_proactive_ts
+              if m.proactive.last_ts <= 0.0 then 0.0 else now_ts -. m.proactive.last_ts
             in
             let active_model = active_model_of_meta m in
             let next_model_hint = next_model_hint_of_meta m in
@@ -107,7 +107,7 @@ let handle_keeper_list ctx args : tool_result =
             let continuity_reflection_hold_s =
               let cooldown = Float.of_int m.continuity_compaction_cooldown_sec in
               let last_reflection_ts =
-                max m.last_continuity_update_ts m.last_proactive_ts
+                max m.last_continuity_update_ts m.proactive.last_ts
               in
               if cooldown <= 0.0 then
                 0.0
@@ -197,23 +197,23 @@ let handle_keeper_list ctx args : tool_result =
               ("compaction_ratio_gate", `Float compact_ratio_gate);
               ("compaction_message_gate", `Int compact_message_gate);
               ("compaction_token_gate", `Int compact_token_gate);
-              ("proactive_enabled", `Bool m.proactive_enabled);
-              ("proactive_idle_sec", `Int m.proactive_idle_sec);
-              ("proactive_cooldown_sec", `Int m.proactive_cooldown_sec);
-              ("proactive_count_total", `Int m.proactive_count_total);
+              ("proactive_enabled", `Bool m.proactive.enabled);
+              ("proactive_idle_sec", `Int m.proactive.idle_sec);
+              ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
+              ("proactive_count_total", `Int m.proactive.count_total);
               ("last_compaction_check_ts", `Float m.last_compaction_check_ts);
               ("last_compaction_decision",
                 if String.trim m.last_compaction_decision = "" then `Null
                 else `String m.last_compaction_decision);
-              ("last_proactive_ts", `Float m.last_proactive_ts);
+              ("last_proactive_ts", `Float m.proactive.last_ts);
               ("last_proactive_reason",
-                if String.trim m.last_proactive_reason = ""
+                if String.trim m.proactive.last_reason = ""
                 then `Null
-                else `String m.last_proactive_reason);
+                else `String m.proactive.last_reason);
               ("last_proactive_preview",
-                if String.trim m.last_proactive_preview = ""
+                if String.trim m.proactive.last_preview = ""
                 then `Null
-                else `String m.last_proactive_preview);
+                else `String m.proactive.last_preview);
               ("continuity_summary",
                 if String.trim m.continuity_summary = ""
                 then `Null

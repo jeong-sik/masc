@@ -1472,7 +1472,7 @@ let test_keeper_up_update_preserves_proactive_when_omitted () =
         | Error e -> fail e
       in
       check string "initial trigger mode" "explicit_only" old_meta.trigger_mode;
-      check bool "initial proactive" true old_meta.proactive_enabled;
+      check bool "initial proactive" true old_meta.proactive.enabled;
       let parsed0 =
         match
           Masc_mcp.Keeper_turn_up_args.parse keeper_ctx
@@ -1506,7 +1506,7 @@ let test_keeper_up_update_preserves_proactive_when_omitted () =
         | Error e -> fail e
       in
       check string "trigger mode preserved" "explicit_only" updated_meta.trigger_mode;
-      check bool "proactive preserved when omitted" true updated_meta.proactive_enabled)
+      check bool "proactive preserved when omitted" true updated_meta.proactive.enabled)
 
 let test_write_meta_syncs_registered_resident_seed () =
   Eio_main.run @@ fun env ->
@@ -1548,7 +1548,7 @@ let test_write_meta_syncs_registered_resident_seed () =
       let updated_meta =
         {
           meta with
-          proactive_enabled = false;
+          proactive = { meta.proactive with enabled = false };
           voice_enabled = false;
           voice_channel = "text_only";
           voice_agent_id = "";
@@ -1711,7 +1711,7 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
           meta with
           policy_mode = "explicit_event_v1";
           presence_keepalive = true;
-          proactive_enabled = false;
+          proactive = { meta.proactive with enabled = false };
           last_turn_ts = 0.0;
         }
       in

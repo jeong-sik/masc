@@ -55,21 +55,23 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     last_total_tokens = Keeper_exec_context.total_tokens result.usage;
     last_latency_ms = latency_ms;
     (* Proactive count: any turn that produced text or tools *)
-    proactive_count_total =
-      meta.proactive_count_total + (if has_text || has_tool_calls then 1 else 0);
-    last_proactive_ts =
-      (if has_text || has_tool_calls then now_ts else meta.last_proactive_ts);
-    last_proactive_reason =
-      (if has_tool_calls then
-         Printf.sprintf "unified:tools=[%s]"
-           (String.concat "," result.tools_used)
-       else if has_text then "unified:text_response"
-       else meta.last_proactive_reason);
-    last_proactive_preview =
-      (if has_text then short_preview result.response_text
-       else if has_tool_calls then
-         Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
-       else meta.last_proactive_preview);
+    proactive = { meta.proactive with
+      count_total =
+        meta.proactive.count_total + (if has_text || has_tool_calls then 1 else 0);
+      last_ts =
+        (if has_text || has_tool_calls then now_ts else meta.proactive.last_ts);
+      last_reason =
+        (if has_tool_calls then
+           Printf.sprintf "unified:tools=[%s]"
+             (String.concat "," result.tools_used)
+         else if has_text then "unified:text_response"
+         else meta.proactive.last_reason);
+      last_preview =
+        (if has_text then short_preview result.response_text
+         else if has_tool_calls then
+           Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
+         else meta.proactive.last_preview);
+    };
     (* Autonomous action tracking from tool calls *)
     autonomous_action_count =
       meta.autonomous_action_count + List.length result.tools_used;
@@ -91,8 +93,10 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     total_turns = meta.total_turns + 1;
     last_turn_ts = now_ts;
     last_latency_ms = latency_ms;
-    last_proactive_reason = "unified:error:" ^ String.trim reason;
-    last_proactive_preview = preview;
+    proactive = { meta.proactive with
+      last_reason = "unified:error:" ^ String.trim reason;
+      last_preview = preview;
+    };
   }
 
 let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)

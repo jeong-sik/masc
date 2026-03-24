@@ -45,13 +45,13 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             if m.last_compaction_ts <= 0.0 then 0.0 else now_ts -. m.last_compaction_ts
           in
           let last_proactive_ago_s =
-            if m.last_proactive_ts <= 0.0 then 0.0 else now_ts -. m.last_proactive_ts
+            if m.proactive.last_ts <= 0.0 then 0.0 else now_ts -. m.proactive.last_ts
           in
           (* C-3 fix: compute last_activity from the most recent activity timestamp
              to avoid showing misleading staleness when agent is actually active *)
           let last_activity_ts =
             List.fold_left max 0.0
-              [ m.last_turn_ts; m.last_proactive_ts; m.last_handoff_ts;
+              [ m.last_turn_ts; m.proactive.last_ts; m.last_handoff_ts;
                 m.last_compaction_ts; created_ts ]
           in
           let last_activity_ago_s =
@@ -403,19 +403,19 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("compaction_ratio_gate", `Float compact_ratio_gate);
               ("compaction_message_gate", `Int compact_message_gate);
               ("compaction_token_gate", `Int compact_token_gate);
-              ("proactive_enabled", `Bool m.proactive_enabled);
-              ("proactive_idle_sec", `Int m.proactive_idle_sec);
-              ("proactive_cooldown_sec", `Int m.proactive_cooldown_sec);
-              ("proactive_count_total", `Int m.proactive_count_total);
-              ("last_proactive_ts", `Float m.last_proactive_ts);
+              ("proactive_enabled", `Bool m.proactive.enabled);
+              ("proactive_idle_sec", `Int m.proactive.idle_sec);
+              ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
+              ("proactive_count_total", `Int m.proactive.count_total);
+              ("last_proactive_ts", `Float m.proactive.last_ts);
               ("last_proactive_reason",
-                if String.trim m.last_proactive_reason = ""
+                if String.trim m.proactive.last_reason = ""
                 then `Null
-                else `String m.last_proactive_reason);
+                else `String m.proactive.last_reason);
 	              ("last_proactive_preview",
-	                if String.trim m.last_proactive_preview = ""
+	                if String.trim m.proactive.last_preview = ""
 	                then `Null
-	                else `String m.last_proactive_preview);
+	                else `String m.proactive.last_preview);
 	              ("skill_primary",
 	                match last_skill_primary with
 	                | Some s -> `String s
@@ -536,9 +536,9 @@ let keeper_config_json (config : Room.config) (name : string)
       in
       let proactive =
         `Assoc [
-          ("enabled", `Bool m.proactive_enabled);
-          ("idle_sec", `Int m.proactive_idle_sec);
-          ("cooldown_sec", `Int m.proactive_cooldown_sec);
+          ("enabled", `Bool m.proactive.enabled);
+          ("idle_sec", `Int m.proactive.idle_sec);
+          ("cooldown_sec", `Int m.proactive.cooldown_sec);
         ]
       in
       let defaults_snapshot = Keeper_types.keeper_default_source_snapshot m.name in

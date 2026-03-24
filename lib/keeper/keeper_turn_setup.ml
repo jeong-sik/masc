@@ -162,18 +162,24 @@ let ensure_keeper_exists
       generation = 0;
       presence_keepalive = true;
       presence_keepalive_sec = 30;
-      proactive_enabled =
-        Option.value
-          ~default:
-            (if
-               trigger_mode
-               |> Keeper_contract.trigger_mode_of_string
-               |> Keeper_contract.trigger_mode_is_explicit_only
-             then false
-             else default_proactive_enabled)
-          profile_defaults.proactive_enabled;
-      proactive_idle_sec = default_proactive_idle_sec;
-      proactive_cooldown_sec = default_proactive_cooldown_sec;
+      proactive = {
+        enabled =
+          Option.value
+            ~default:
+              (if
+                 trigger_mode
+                 |> Keeper_contract.trigger_mode_of_string
+                 |> Keeper_contract.trigger_mode_is_explicit_only
+               then false
+               else default_proactive_enabled)
+            profile_defaults.proactive_enabled;
+        idle_sec = default_proactive_idle_sec;
+        cooldown_sec = default_proactive_cooldown_sec;
+        count_total = 0;
+        last_ts = 0.0;
+        last_reason = "";
+        last_preview = "";
+      };
       compaction_profile = default_compaction_profile;
       compaction_ratio_gate = env_ratio_gate;
       compaction_message_gate = env_message_gate;
@@ -202,10 +208,6 @@ let ensure_keeper_exists
       last_compaction_after_tokens = 0;
       last_compaction_check_ts = now_ts;
       last_compaction_decision = "initialized";
-      proactive_count_total = 0;
-      last_proactive_ts = 0.0;
-      last_proactive_reason = "";
-      last_proactive_preview = "";
       last_continuity_update_ts = now_ts;
       continuity_summary = "";
       active_goal_ids = [];

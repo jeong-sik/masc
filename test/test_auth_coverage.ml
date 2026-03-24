@@ -465,30 +465,7 @@ let test_permission_for_tool_keeper_create_from_persona () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
-let test_permission_for_tool_keeper_policy_set () =
-  match Auth.permission_for_tool "masc_keeper_policy_set" with
-  | Some Types.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
-
-let test_permission_for_tool_keeper_feedback_record () =
-  match Auth.permission_for_tool "masc_keeper_feedback_record" with
-  | Some Types.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
-
-let test_permission_for_tool_keeper_dataset_export () =
-  match Auth.permission_for_tool "masc_keeper_dataset_export" with
-  | Some Types.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
-
-let test_permission_for_tool_keeper_action_explain () =
-  match Auth.permission_for_tool "masc_keeper_action_explain" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
-let test_permission_for_tool_keeper_eval_replay () =
-  match Auth.permission_for_tool "masc_keeper_eval_replay" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
+(* keeper policy auth tests removed — policy tools no longer registered in Auth *)
 
 let test_permission_for_tool_unknown () =
   match Auth.permission_for_tool "unknown_tool_xyz" with
@@ -598,16 +575,6 @@ let () =
         test_permission_for_tool_autoresearch_stop;
       test_case "keeper_create_from_persona" `Quick
         test_permission_for_tool_keeper_create_from_persona;
-      test_case "keeper_policy_set" `Quick
-        test_permission_for_tool_keeper_policy_set;
-      test_case "keeper_feedback_record" `Quick
-        test_permission_for_tool_keeper_feedback_record;
-      test_case "keeper_dataset_export" `Quick
-        test_permission_for_tool_keeper_dataset_export;
-      test_case "keeper_action_explain" `Quick
-        test_permission_for_tool_keeper_action_explain;
-      test_case "keeper_eval_replay" `Quick
-        test_permission_for_tool_keeper_eval_replay;
       test_case "unknown" `Quick test_permission_for_tool_unknown;
       test_case "empty" `Quick test_permission_for_tool_empty;
     ];

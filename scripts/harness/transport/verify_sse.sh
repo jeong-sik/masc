@@ -8,15 +8,16 @@
 #   4. Broadcast generates SSE events
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/harness/transport/common.sh
 source "${SCRIPT_DIR}/common.sh"
+# shellcheck disable=SC2034
 HARNESS_NAME="SSE"
 
 require_server
 
 # Test 1: Health check
 echo "--- SSE Transport E2E ---"
-health=$(curl -sf "${MASC_BASE_URL}/health" 2>&1)
-if [ $? -eq 0 ]; then
+if curl -sf "${MASC_BASE_URL}/health" >/dev/null 2>&1; then
   pass "health endpoint responds"
 else
   fail "health endpoint" "no response"
@@ -34,7 +35,7 @@ fi
 
 # Test 3: JSON-RPC initialize via Streamable HTTP (/mcp)
 MCP_ACCEPT="Accept: application/json, text/event-stream"
-init_req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"e2e-harness","version":"1.0"}}}'
+init_req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"e2e-harness","version":"1.0"}}}'
 init_resp=$(curl -sf -X POST "${MASC_BASE_URL}/mcp" \
   -H "Content-Type: application/json" \
   -H "${MCP_ACCEPT}" \

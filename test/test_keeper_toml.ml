@@ -199,7 +199,7 @@ policy_voice_enabled = false
       check int "models" 1 (List.length d.models);
       check int "allowed_models" 2 (List.length d.allowed_models);
       check (option string) "active_model" (Some "llama:qwen3.5-35b-a3b-ud-q4-xl") d.active_model;
-      check (option string) "room_scope" (Some "all") d.room_scope;
+      check (option string) "room_scope" (Some "current") d.room_scope;
       check (option string) "trigger_mode" (Some "explicit_only") d.trigger_mode;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;

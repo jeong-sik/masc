@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 SERVER_EXE="${SERVER_EXE:-${ROOT_DIR}/_build/default/bin/main_eio.exe}"
 PORT="${PORT:-}"
 BASE_PATH="${BASE_PATH:-}"
@@ -20,6 +20,7 @@ LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 SWARM_WORKER_BATCH_JSON="${SWARM_WORKER_BATCH_JSON:-}"
 SWARM_INTERVENTION_MODE="${SWARM_INTERVENTION_MODE:-default}"
 TEAM_SESSION_DURATION_SECONDS="${TEAM_SESSION_DURATION_SECONDS:-180}"
+MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required"
@@ -53,41 +54,13 @@ if [ -z "$BASE_PATH" ]; then
 fi
 
 if [ -z "$LOG_FILE" ]; then
-  LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/masc-supervisor-harness.XXXXXX")"
+  LOG_FILE="$(mcp_mktemp_file "masc-supervisor-harness")"
 fi
 
 MCP_URL="http://127.0.0.1:${PORT}/mcp"
 OPERATOR_URL="http://127.0.0.1:${PORT}/mcp/operator"
 
 SERVER_PID=""
-
-read_file() {
-  cat "$1"
-}
-
-jsonrpc_call() {
-  local url="$1"
-  local session_id="$2"
-  local token="$3"
-  local id="$4"
-  local method="$5"
-  local params="$6"
-  local body_file
-  body_file="$(mktemp "${TMPDIR:-/tmp}/masc-jsonrpc-body.XXXXXX.json")"
-  printf '{"jsonrpc":"2.0","id":%s,"method":"%s","params":%s}' "$id" "$method" "$params" >"$body_file"
-  local cmd=(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$url" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -H "Mcp-Session-Id: $session_id" \
-    --data-binary "@$body_file")
-  if [ -n "$token" ]; then
-    cmd+=( -H "Authorization: Bearer $token" )
-  fi
-  local response
-  response="$("${cmd[@]}")"
-  rm -f "$body_file"
-  jsonrpc_normalize_response "$response" "$id"
-}
 
 call_tool() {
   local url="$1"
@@ -96,27 +69,19 @@ call_tool() {
   local id="$4"
   local tool_name="$5"
   local args_json="$6"
-  jsonrpc_call "$url" "$session_id" "$token" "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
+  mcp_call_tool "$id" "$tool_name" "$args_json" "$session_id" "$token" "$url"
 }
 
 extract_tool_text() {
-  jq -r 'try (.result.content[0].text) catch empty'
+  mcp_extract_text
 }
 
 extract_tool_result() {
-  jq -c 'try (.result.content[0].text | fromjson | if has("result") and .result != null then .result else . end) catch empty'
+  mcp_extract_result
 }
 
 extract_confirm_token() {
   jq -r 'try (.result.content[0].text | fromjson | .result.confirm_token) catch empty'
-}
-
-extract_response_error() {
-  jq -r 'if (.error | type) == "object" and (.error.message | type) == "string" then .error.message else empty end'
-}
-
-extract_is_error() {
-  jq -r 'try (.result.isError) catch "false"'
 }
 
 team_session_status() {
@@ -220,35 +185,20 @@ normalized_worker_batch_json() {
 
 require_json() {
   local payload="$1"
-  if ! printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
-    echo "FAIL: invalid JSON payload"
-    printf '%s\n' "$payload"
-    exit 1
-  fi
+  local label="${2:-supervisor_team_session payload}"
+  mcp_require_json "$payload" "$label"
 }
 
 require_success_response() {
   local payload="$1"
-  require_json "$payload"
-  local err
-  err="$(printf '%s' "$payload" | extract_response_error)"
-  if [ -n "$err" ]; then
-    echo "FAIL: JSON-RPC error: $err"
-    printf '%s\n' "$payload"
-    exit 1
-  fi
+  local label="${2:-supervisor_team_session response}"
+  mcp_require_jsonrpc_ok "$payload" "$label"
 }
 
 require_tool_success() {
   local payload="$1"
-  require_success_response "$payload"
-  local is_error
-  is_error="$(printf '%s' "$payload" | extract_is_error)"
-  if [ "$is_error" = "true" ]; then
-    echo "FAIL: tool returned isError=true"
-    printf '%s\n' "$payload" | extract_tool_text
-    exit 1
-  fi
+  local label="${2:-supervisor_team_session tool}"
+  mcp_require_tool_ok "$payload" "$label"
 }
 
 parse_token_from_text() {
@@ -278,7 +228,7 @@ parse_nickname_from_text() {
 wait_for_health() {
   local deadline=$(( $(date +%s) + 20 ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    if curl -fsS --http2-prior-knowledge "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+    if curl -fsS --http1.1 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -325,8 +275,7 @@ join_with_token() {
 }
 
 spawn_llama_batch() {
-  local selection_note="$1"
-  local batch_json="$2"
+  local batch_json="$1"
   local raw
   raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 30 "masc_team_session_step" "$(jq -cn \
     --arg s "$TEAM_SESSION_ID" \

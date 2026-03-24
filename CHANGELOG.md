@@ -3,6 +3,27 @@
 
 ## [Unreleased]
 
+## [2.147.0] - 2026-03-24
+
+### Added
+- **Activity graph semantic weight** — node sizing by event importance (task.done=5x, joins=0.5x) instead of raw frequency (#2838)
+- **Activity graph click interaction** — click-to-select nodes with detail panel showing importance, frequency, and connected edges (#2838)
+- **Time window filter** — filter activity graph by 1h/6h/24h/7d time range (#2850)
+- **KPI sparklines** — 12-bucket trend lines under each stats card (#2850)
+- **Agent swimlane timeline** — Jaeger-style horizontal per-agent timeline showing concurrent task/operation/presence spans (#2850)
+- **Activity heatmap** — GitHub-style 7x24 grid (day-of-week x hour-of-day) showing event density (#2860)
+- **SSE real-time graph updates** — activity graph auto-refreshes on agent/task/broadcast events (2s debounce) (#2860)
+- **Bidirectional graph-swimlane selection** — clicking a swimlane span highlights the agent node, clicking a graph node highlights the swimlane lane (#2860)
+- **Swimlane time filter sync** — swimlane respects the same time range filter as the main graph (#2860)
+- **Graph legend** — inline node kind color reference below the force graph canvas (#2850)
+
+### Changed
+- **Edge colors aligned** — edge color mapping corrected to match actual 12 backend edge kinds (#2838)
+- **Leaderboard semantic sorting** — agent ranking by semantic weight instead of raw event count (#2838)
+
+### Fixed
+- **FE-BE data mapping** — corrected `active_agents` field name, `window` type, removed stray `type` fields (#2850)
+
 ## [2.146.0] - 2026-03-24
 
 ### Added

@@ -113,7 +113,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     title: 'Wallboard / dashboard',
     transport: 'SSE',
     endpoint: (data) => data.streamable_http.observer_stream,
-    description: '읽기 전용 현황판은 observer SSE가 가장 단순하고 안정적입니다. HTTP/2 multiplexing이 붙으면 브라우저 연결 한계도 피하기 쉽습니다.',
+    description: 'Observer SSE 읽기 전용 스트림.',
     live: (data) => `${data.sse.sessions_observer} observer · qmax ${data.sse.queue_max_depth}`,
   },
   {
@@ -121,7 +121,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     title: 'Agent fanout / heartbeat',
     transport: 'gRPC',
     endpoint: (data) => `:${data.grpc.port}`,
-    description: '양방향 스트림과 subscribe bridge가 필요한 agent control에는 gRPC가 맞습니다. heartbeat와 backlog replay가 이미 붙어 있습니다.',
+    description: '양방향 스트림. heartbeat, backlog replay 지원.',
     live: (data) => `${data.grpc.listening ? 'live' : 'down'} · ${data.grpc.subscribers} subs · ${data.grpc.active_streams} streams`,
   },
   {
@@ -129,7 +129,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     title: 'Duplex UI / browser bridge',
     transport: 'WebSocket',
     endpoint: (_data) => '/ws',
-    description: '브라우저나 operator UI가 request/response를 한 socket에서 주고받아야 하면 standalone WS가 더 낫습니다.',
+    description: '양방향 소켓. operator UI 제어용.',
     live: (data) => `${data.websocket.listening ? 'live' : 'down'} · ${data.websocket.sessions} sessions · port ${data.websocket.port}`,
   },
   {
@@ -137,7 +137,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     title: 'P2P fast lane',
     transport: 'WebRTC',
     endpoint: (_data) => '/webrtc/offer -> /webrtc/answer',
-    description: '서버 signaling 이후 DataChannel로 peer-to-peer 경로를 올립니다. 빠른 a2a messaging이나 edge peer 연결에 적합합니다.',
+    description: 'DataChannel P2P. signaling 후 직접 연결.',
     live: (data) => `${data.webrtc.connected_channels} channels · ${data.webrtc.active_peers} peers`,
   },
   {
@@ -145,7 +145,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     title: 'Stateless scripting / queue trigger',
     transport: 'Streamable HTTP',
     endpoint: (data) => data.streamable_http.endpoint,
-    description: 'curl, harness, worker bootstrap처럼 빠르게 치고 빠지는 제어면 POST /mcp가 기본 경로입니다. 세션 없이도 바로 호출 가능합니다.',
+    description: 'Stateless POST. 세션 불필요.',
     live: (data) => `${data.summary.recent_messages} recent msgs · ${data.cluster.active_operations} active ops`,
   },
 ]

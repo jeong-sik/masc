@@ -150,7 +150,6 @@ let resolve_allowed_models ~explicit_allowed_models ~seed_allowed_models ~models
     dedupe_keep_order models
 
 let canonical_room_scope = function
-  | "all" -> "all"
   | _ -> "current"
 
 let canonical_scope_kind = function
@@ -355,7 +354,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
          policy_shell_mode =
            str "policy_shell_mode"
            |> Option.map canonical_policy_shell_mode;
-         room_scope = str "room_scope";
+         room_scope =
+           str "room_scope"
+           |> Option.map canonical_room_scope;
          scope_kind = str "scope_kind";
          trigger_mode =
            str "trigger_mode"

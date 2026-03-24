@@ -120,7 +120,11 @@ let load_state ~base_path loop_id =
                path;
              None
          | `Assoc _
-           when not (has_required_string_field "loop_id") ->
+           when not (has_required_string_field "loop_id")
+                || Yojson.Safe.Util.member "goal" json = `Null
+                || Yojson.Safe.Util.member "metric_fn" json = `Null
+                || Yojson.Safe.Util.member "model_model" json = `Null
+                || Yojson.Safe.Util.member "target_file" json = `Null ->
              Log.Autoresearch.error
                "invalid autoresearch state schema for %s: missing required string fields"
                path;

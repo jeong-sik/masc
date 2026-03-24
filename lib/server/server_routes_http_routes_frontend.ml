@@ -11,6 +11,17 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
+let redirect_to_dashboard reqd =
+  let response =
+    Httpun.Response.create
+      ~headers:(Httpun.Headers.of_list [
+        ("location", "/dashboard");
+        ("content-length", "0");
+      ])
+      `Found
+  in
+  Httpun.Reqd.respond_with_string reqd response ""
+
 let is_dashboard_observer_stream request =
   match Server_utils.query_param request "sse_kind" with
   | Some raw ->
@@ -115,7 +126,7 @@ let add_routes ~port ~host router =
          in
          Http.Response.json json reqd
        ) request reqd)
-  |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
+  |> Http.Router.get "/" (fun _req reqd -> redirect_to_dashboard reqd)
   |> Http.Router.get "/static/css/middleware.css"
        (serve_playground_asset "static/css/middleware.css")
   |> Http.Router.get "/static/js/middleware.js"

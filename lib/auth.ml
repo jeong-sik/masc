@@ -257,10 +257,9 @@ let permission_for_tool = function
   | "masc_cost_report" | "masc_task_history" | "masc_operator_snapshot"
   | "masc_operator_digest"
   | "masc_persona_list"
-  | "masc_keeper_status" | "masc_keeper_list" | "masc_keeper_autonomy"
-  | "masc_keeper_goals" | "masc_keeper_trajectory" | "masc_keeper_eval"
+  | "masc_keeper_status" | "masc_keeper_list"
+  | "masc_keeper_trajectory" | "masc_keeper_eval"
   | "masc_persistent_agent_status" | "masc_persistent_agent_list"
-  | "masc_persistent_agent_autonomy" | "masc_persistent_agent_goals"
   | "masc_persistent_agent_trajectory" | "masc_persistent_agent_eval"
   | "masc_local_runtime_models" | "masc_llama_models"
   | "masc_local_runtime_status" | "masc_llama_runtime_status"
@@ -278,9 +277,6 @@ let permission_for_tool = function
   | "masc_claim_next" -> Some CanClaimTask
   | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" ->
       Some CanCompleteTask
-  | "masc_keeper_action_explain"
-  | "masc_keeper_eval_replay" ->
-      Some CanReadState
   | "masc_broadcast" | "masc_listen" | "masc_heartbeat"
   | "masc_webrtc_offer" | "masc_webrtc_answer"
   | "masc_register_capabilities" | "masc_find_by_capability"
@@ -292,12 +288,6 @@ let permission_for_tool = function
   | "masc_persistent_agent_msg"
   | "masc_keeper_model_set"
   | "masc_persistent_agent_model_set"
-  | "masc_keeper_policy_set"
-  | "masc_persistent_agent_policy_set"
-  | "masc_keeper_feedback_record"
-  | "masc_persistent_agent_feedback_record"
-  | "masc_keeper_dataset_export"
-  | "masc_persistent_agent_dataset_export"
   | "masc_voice_speak" | "masc_voice_session_start"
   | "masc_voice_session_end" | "masc_voice_conference_start"
   | "masc_voice_conference_end"

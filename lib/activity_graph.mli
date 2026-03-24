@@ -146,5 +146,6 @@ val agent_spans_json :
   Room_utils.config ->
   ?room_id:string ->
   ?limit:int ->
+  ?since_ms:int ->
   unit ->
   Yojson.Safe.t

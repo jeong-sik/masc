@@ -151,7 +151,9 @@ type policy_mode =
 
 type policy_action_budget = Conversation | Board
 type scope_kind = Local | Global
-type room_scope = Current | All
+type room_scope = Current
+
+`"all"` 입력은 deprecated compatibility alias로 받아들이지만 canonical stored value는 항상 `"current"`다.
 type trigger_mode = Legacy | Explicit_only
 ```
 

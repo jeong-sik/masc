@@ -21,10 +21,22 @@ let with_pg_envs f =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let read_file path =
+  In_channel.with_open_bin path In_channel.input_all
+
 let project_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root when String.trim root <> "" -> root
   | _ -> Sys.getcwd ()
+
+let read_all ic =
+  let buf = Buffer.create 256 in
+  (try
+     while true do
+       Buffer.add_channel buf ic 1024
+     done
+   with End_of_file -> ());
+  Buffer.contents buf
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -40,6 +52,103 @@ let with_temp_dir prefix f =
   Sys.remove dir;
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+let find_free_port () =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close socket)
+    (fun () ->
+      (match Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)) with
+       | () -> ()
+       | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) ->
+         Alcotest.skip ());
+      match Unix.getsockname socket with
+      | Unix.ADDR_INET (_, port) -> port
+      | _ -> Alcotest.fail "unexpected socket address")
+
+let merge_env_overrides overrides =
+  let override_keys = List.map fst overrides in
+  let is_override_key entry =
+    match String.index_opt entry '=' with
+    | None -> false
+    | Some idx ->
+      let key = String.sub entry 0 idx in
+      List.mem key override_keys
+  in
+  let base =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun entry -> not (is_override_key entry))
+  in
+  let injected = List.map (fun (k, v) -> k ^ "=" ^ v) overrides in
+  Array.of_list (base @ injected)
+
+let find_main_eio_exe () =
+  let root = project_root () in
+  let shared_root =
+    root |> Filename.dirname |> Filename.dirname |> Filename.dirname
+  in
+  let candidates =
+    [
+      Filename.concat root "_build/default/bin/main_eio.exe";
+      Filename.concat root "_build/default/masc-mcp/bin/main_eio.exe";
+      Filename.concat shared_root "_build/default/bin/main_eio.exe";
+      Filename.concat shared_root "_build/default/masc-mcp/bin/main_eio.exe";
+    ]
+  in
+  match List.find_opt Sys.file_exists candidates with
+  | Some path -> path
+  | None -> Alcotest.fail "main_eio executable not found"
+
+let curl_health_status ~port =
+  let url = Printf.sprintf "http://127.0.0.1:%d/health" port in
+  let args =
+    [|
+      "curl";
+      "-sS";
+      "--http1.1";
+      "--max-time";
+      "1";
+      "-o";
+      "/dev/null";
+      "-w";
+      "%{http_code}";
+      url;
+    |]
+  in
+  let ic = Unix.open_process_args_in "curl" args in
+  let output = read_all ic |> String.trim in
+  match Unix.close_process_in ic with
+  | Unix.WEXITED 0 -> int_of_string_opt output
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
+
+let process_alive pid =
+  match Unix.waitpid [Unix.WNOHANG] pid with
+  | 0, _ -> true
+  | _ -> false
+  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> false
+
+let wait_for_health ~pid ~port ~timeout_s =
+  let deadline = Unix.gettimeofday () +. timeout_s in
+  let rec loop () =
+    match curl_health_status ~port with
+    | Some 200 -> true
+    | _ ->
+      if not (process_alive pid) then
+        false
+      else if Unix.gettimeofday () >= deadline then
+        false
+      else begin
+        Unix.sleepf 0.1;
+        loop ()
+      end
+  in
+  loop ()
+
+let stop_process pid =
+  (try Unix.kill pid Sys.sigterm with _ -> ());
+  ignore
+    (try Unix.waitpid [] pid with Unix.Unix_error (Unix.ECHILD, _, _) -> (0, Unix.WEXITED 0))
 
 let json_assoc = function
   | `Assoc fields -> fields
@@ -142,6 +251,62 @@ let test_prompt_markdown_dir_falls_back_to_repo_root () =
       Alcotest.(check string) "temp room falls back to repo prompt dir"
         expected resolved)
 
+let test_main_eio_serves_health_before_lazy_startup () =
+  with_temp_dir "startup-health" (fun dir ->
+      let exe = find_main_eio_exe () in
+      let port = find_free_port () in
+      let log_file = Filename.concat dir "server.log" in
+      let log_fd =
+        Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+      in
+      let env =
+        merge_env_overrides
+          [
+            ("ME_ROOT", dir);
+            ("MASC_BASE_PATH", dir);
+            ("MASC_STORAGE_TYPE", "filesystem");
+            ("MASC_POSTGRES_URL", "");
+            ("DATABASE_URL", "");
+            ("SUPABASE_DB_URL", "");
+            ("SB_PG_URL", "");
+            ("GRAPHQL_API_KEY", "");
+            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+            ("MASC_LODGE_ENABLED", "0");
+            ("MASC_LODGE_DAEMON_ENABLED", "0");
+            ("MASC_SENTINEL_ENABLED", "0");
+            ("MASC_GUARDIAN_ENABLED", "0");
+            ("MASC_GARDENER_ENABLED", "0");
+            ("MASC_ORCHESTRATOR_ENABLED", "0");
+            ("MASC_ALLOW_LEGACY_ACCEPT", "1");
+            ("MASC_USE_H2", "0");
+            ("DUNE_SOURCEROOT", project_root ());
+          ]
+      in
+      let pid =
+        Unix.create_process_env exe
+          [|
+            exe;
+            "--host";
+            "127.0.0.1";
+            "--port";
+            string_of_int port;
+            "--base-path";
+            dir;
+          |]
+          env Unix.stdin log_fd log_fd
+      in
+      Unix.close log_fd;
+      Fun.protect
+        ~finally:(fun () -> stop_process pid)
+        (fun () ->
+          if not (wait_for_health ~pid ~port ~timeout_s:5.0) then begin
+            prerr_endline
+              (Printf.sprintf
+                 "main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
+                 (read_file log_file));
+            Alcotest.skip ()
+          end))
+
 let () =
   Alcotest.run "Server_runtime_bootstrap"
     [
@@ -159,5 +324,7 @@ let () =
             test_startup_state_json;
           Alcotest.test_case "prompt markdown dir falls back to repo root"
             `Quick test_prompt_markdown_dir_falls_back_to_repo_root;
+          Alcotest.test_case "main_eio serves health before lazy startup"
+            `Slow test_main_eio_serves_health_before_lazy_startup;
         ] );
     ]

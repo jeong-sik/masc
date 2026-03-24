@@ -24,6 +24,7 @@ let validate_name name =
   name <> "" && Str.string_match re name 0
 
 let default_soul_profile = "balanced"
+let default_execution_scope = "observe_only"
 let default_proactive_enabled = true
 let default_proactive_idle_sec = 900
 let default_proactive_cooldown_sec = 1800

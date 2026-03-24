@@ -129,27 +129,34 @@ let oas_provider_of_label = Worker_container.oas_provider_of_label
     Observe_only: strict allowlist (read-only tools), low budget.
     Limited_code_change: moderate budget, deny destructive bash.
     Autonomous: permissive, higher budget. *)
+(* Destructive operations denied in all non-autonomous scopes. *)
+let destructive_denied_tools =
+  [ "shell_exec_dangerous"; "git_push_force"; "rm_rf" ]
+
+(* Code mutation tools additionally denied in observe_only scope. *)
+let code_mutation_denied_tools =
+  [ "keeper_bash";
+    "masc_code_write"; "masc_code_edit"; "masc_code_delete";
+    "masc_code_shell"; "masc_code_git" ]
+
+(* Local model (Qwen3.5 Q4) — no cloud cost, so generous turn budget. *)
+let local_model_gate =
+  { Eval_gate.default_config with
+    destructive_check_enabled = true;
+    max_tool_calls_per_turn = 30;
+    max_cost_usd = 1.00;
+  }
+
 let gate_config_of_execution_scope
     (scope : Team_session_types.execution_scope) : Eval_gate.gate_config =
   match scope with
   | Observe_only ->
-      { Eval_gate.default_config with
-        allowlist_enabled = true;
-        allowed_tools = [
-          "file_read"; "shell_exec"; "list_dir"; "glob"; "grep";
-          "search"; "git_status"; "git_log"; "git_diff";
-        ];
-        max_tool_calls_per_turn = 8;
-        max_cost_usd = 0.05;
+      { local_model_gate with
+        denied_tools = destructive_denied_tools @ code_mutation_denied_tools;
       }
   | Limited_code_change ->
-      { Eval_gate.default_config with
-        destructive_check_enabled = true;
-        denied_tools = [
-          "shell_exec_dangerous"; "git_push_force"; "rm_rf";
-        ];
-        max_tool_calls_per_turn = 12;
-        max_cost_usd = 0.20;
+      { local_model_gate with
+        denied_tools = destructive_denied_tools;
       }
   | Autonomous ->
       { Eval_gate.default_config with

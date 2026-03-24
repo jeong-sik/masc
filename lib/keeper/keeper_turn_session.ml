@@ -174,7 +174,7 @@ let start_keeper_auto_team_session (ctx : _ context) (meta : keeper_meta)
       [
         ("goal", `String message);
         ("duration_seconds", `Int 3600);
-        ("execution_scope", `String "observe_only");
+        ("execution_scope", `String meta.execution_scope);
         ("checkpoint_interval_sec", `Int 60);
         ("min_agents", `Int 2);
         ("auto_resume", `Bool true);

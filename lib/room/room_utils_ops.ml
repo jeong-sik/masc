@@ -2,14 +2,6 @@ open Types
 open Room_utils_backend_setup
 open Room_utils_paths_backend
 
-let validate_agent_name name =
-  (* Delegate to Validation module for consistent security checks *)
-  Validation.Agent_id.validate name
-
-let validate_task_id id =
-  (* Delegate to Validation module for consistent security checks *)
-  Validation.Task_id.validate id
-
 let contains_substring haystack needle =
   let needle_len = String.length needle in
   let haystack_len = String.length haystack in
@@ -21,6 +13,27 @@ let contains_substring haystack needle =
       else check (i + 1)
     in
     check 0
+
+let validate_agent_name name =
+  (* Delegate to Validation module for consistent security checks *)
+  Validation.Agent_id.validate name
+
+let validate_task_id id =
+  (* Delegate to Validation module for consistent security checks *)
+  Validation.Task_id.validate id
+
+let validate_room_id room_id =
+  let room_id = String.trim room_id in
+  if room_id = "" then Error "Room id cannot be empty"
+  else if String.length room_id > 128 then Error "Room id too long (max 128 chars)"
+  else if room_id = "." || room_id = ".." then Error "Room id cannot be '.' or '..'"
+  else if contains_substring room_id "/" || contains_substring room_id "\\" then
+    Error "Room id cannot contain path separators"
+  else if contains_substring room_id ".." then
+    Error "Room id cannot contain traversal segments"
+  else if not (Str.string_match (Str.regexp "^[A-Za-z0-9._-]+$") room_id 0) then
+    Error "Room id may only contain letters, digits, dot, underscore, and hyphen"
+  else Ok room_id
 
 let validate_file_path path =
   (* Delegate to Validation module for consistent security checks *)

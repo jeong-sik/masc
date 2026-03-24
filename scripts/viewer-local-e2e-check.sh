@@ -297,16 +297,15 @@ step_viewer_build() {
 }
 
 step_game_view_contract() {
-  local rooms_raw rooms_text
-  rooms_raw="$(viewer_call_tool 2101 "masc_rooms_list" "{}")"
-  if [ "$(printf '%s' "$rooms_raw" | viewer_extract_is_error)" = "true" ]; then
-    printf '%s\n' "$rooms_raw"
+  local room_http_url room_json
+  room_http_url="${MCP_URL%/mcp}/api/v1/room/current"
+  if ! room_json="$(curl -fsS "$room_http_url")"; then
+    echo "GET $room_http_url failed"
     return 1
   fi
-  rooms_text="$(printf '%s' "$rooms_raw" | viewer_extract_text)"
-  if ! printf '%s\n' "$rooms_text" | rg -q '"current_room"'; then
-    echo "masc_rooms_list did not return current_room"
-    printf '%s\n' "$rooms_text"
+  if ! printf '%s' "$room_json" | jq -e '.ok == true and (.room_id | type == "string")' >/dev/null; then
+    echo "/api/v1/room/current returned unexpected payload"
+    printf '%s\n' "$room_json"
     return 1
   fi
 

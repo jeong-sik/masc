@@ -1,6 +1,6 @@
 (** Tool_room - Room management operations
 
-    Handles: status, reset, init, rooms_list, room_create, room_enter
+    Handles: status, reset, init, room_strategy, workflow_guide, check
 
     Note: join, leave, set_room, who require state/registry and remain in mcp_server_eio.ml
 *)
@@ -58,56 +58,6 @@ let handle_reset ctx args =
     (false, "⚠️ This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed.")
   else
     (true, Room.reset ctx.config)
-
-let handle_rooms_list ctx _args =
-  let result = Room.rooms_list ctx.config in
-  let open Yojson.Safe.Util in
-  let rooms = result |> member "rooms" |> to_list in
-  let current = result |> member "current_room" |> to_string_option in
-  let count = List.length rooms in
-  let buf = Buffer.create 256 in
-  Buffer.add_string buf (Printf.sprintf "Rooms: %d found" count);
-  (match current with
-   | Some r -> Buffer.add_string buf (Printf.sprintf " (current: %s)" r)
-   | None -> ());
-  Buffer.add_char buf '\n';
-  List.iter (fun room ->
-    let name = room |> member "name" |> to_string_option |> Option.value ~default:"?" in
-    let id = room |> member "id" |> to_string_option |> Option.value ~default:"?" in
-    Buffer.add_string buf (Printf.sprintf "  - %s (id: %s)\n" name id)
-  ) rooms;
-  Buffer.add_string buf "\n---\n";
-  Buffer.add_string buf (Yojson.Safe.pretty_to_string result);
-  (true, Buffer.contents buf)
-
-let handle_room_create ctx args =
-  let name = get_string args "name" "" in
-  if name = "" then
-    (false, "❌ Room name is required")
-  else
-    let description = match args |> member "description" with
-      | `String d -> Some d
-      | _ -> None
-    in
-    let result = Room.room_create ctx.config ~name ~description in
-    let success = match result with
-      | `Assoc fields -> not (List.mem_assoc "error" fields)
-      | _ -> false
-    in
-    (success, Yojson.Safe.pretty_to_string result)
-
-let handle_room_enter ctx args =
-  let room_id = get_string args "room_id" "" in
-  if room_id = "" then
-    (false, "❌ Room ID is required")
-  else
-    let agent_type = get_string args "agent_type" "claude" in
-    let result = Room.room_enter ctx.config ~room_id ~agent_type ~agent_name:ctx.agent_name () in
-    let success = match result with
-      | `Assoc fields -> not (List.mem_assoc "error" fields)
-      | _ -> false
-    in
-    (success, Yojson.Safe.pretty_to_string result)
 
 let handle_room_strategy_get ctx _args =
   (true, Yojson.Safe.pretty_to_string (room_strategy_json ctx.config))
@@ -299,9 +249,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_status" -> Some (handle_status ctx args)
   | "masc_init" -> Some (handle_init ctx args)
   | "masc_reset" -> Some (handle_reset ctx args)
-  | "masc_rooms_list" -> Some (handle_rooms_list ctx args)
-  | "masc_room_create" -> Some (handle_room_create ctx args)
-  | "masc_room_enter" -> Some (handle_room_enter ctx args)
   | "masc_room_strategy_get" -> Some (handle_room_strategy_get ctx args)
   | "masc_room_strategy_set" -> Some (handle_room_strategy_set ctx args)
   | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)

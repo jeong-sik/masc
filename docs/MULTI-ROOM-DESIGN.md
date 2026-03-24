@@ -6,8 +6,8 @@ Verification: implemented and exercised by `dune exec --root . test/test_multi_r
 This document predates the current implementation state. Named-room support exists, but it is not the canonical default public workflow.
 
 - Canonical default: repo-root room semantics via `masc_set_room`
-- Current role of named rooms: internal compatibility/helper surface
-- Public surface intent: `masc_room_*` is not part of the default `tools/list` workflow
+- Current implementation: named-room inventory/create/enter tools were removed; only `current_room` pointer compatibility and lazy per-room bootstrap remain
+- Public surface intent: `masc_room_*` no longer exists on the MCP surface
 - Historical command references below are retained for implementation context only; they are not the recommended operator workflow.
 
 ## Problem Statement
@@ -21,12 +21,12 @@ Historical problem statement retained for implementation context:
 
 ## Goals
 
-Historical design goals retained below. They are not the current default product surface.
+Historical design goals retained below. They are not the current implementation surface.
 
-1. **방 목록 조회**: `masc_rooms_list` - 사용 가능한 방 목록
-2. **방 생성**: `masc_room_create` - 새 방 만들기
-3. **방 입장**: `masc_room_enter` - 특정 방으로 전환
-4. **방 상태 유지**: 에이전트는 한 번에 하나의 방에만 존재
+1. **방 목록 조회**: historical only
+2. **방 생성**: historical only
+3. **방 입장**: historical only
+4. **방 상태 유지**: 현재 구현은 `current_room` pointer만 유지
 
 ## Architecture
 

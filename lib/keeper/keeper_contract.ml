@@ -76,12 +76,12 @@ let scope_kind_to_string = function
   | Global -> "global"
 
 let room_scope_of_string = function
-  | "all" -> All
+  | "all" -> Current
   | _ -> Current
 
 let parse_room_scope = function
   | "current" -> Some Current
-  | "all" -> Some All
+  | "all" -> Some Current
   | _ -> None
 
 let room_scope_to_string = function

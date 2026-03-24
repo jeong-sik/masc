@@ -17,6 +17,7 @@ let dummy_schema name : Types.tool_schema =
           ("type", `String "object");
           ("properties", `Assoc []);
         ];
+    visibility = Public;
   }
 
 let test_dedupe_schemas () =

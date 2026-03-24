@@ -360,6 +360,7 @@ let schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "agent_name" ]);
           ];
+    visibility = Public;
     };
   ]
 

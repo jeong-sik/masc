@@ -933,17 +933,9 @@ let test_masc_team_session_start_schema () =
 (* 17. Walph Tool Tests                                          *)
 (* ============================================================ *)
 
-let test_masc_walph_loop_schema () =
-  match find_tool "masc_walph_loop" with
-  | None -> Alcotest.fail "masc_walph_loop not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
-          Alcotest.(check bool) "has preset" true (List.mem_assoc "preset" props);
-          Alcotest.(check bool) "has max_consecutive_errors" true (List.mem_assoc "max_consecutive_errors" props);
-          Alcotest.(check bool) "has error_backoff_sec" true (List.mem_assoc "error_backoff_sec" props)
-      | None -> Alcotest.fail "masc_walph_loop missing properties"
+let test_masc_walph_loop_removed () =
+  Alcotest.(check bool) "masc_walph_loop removed" false
+    (Option.is_some (find_tool "masc_walph_loop"))
 
 let test_masc_walph_control_schema () =
   match find_tool "masc_walph_control" with
@@ -1206,7 +1198,7 @@ let () =
       Alcotest.test_case "observe_swarm" `Quick test_masc_observe_swarm_schema;
     ];
     "walph_tools", [
-      Alcotest.test_case "walph_loop" `Quick test_masc_walph_loop_schema;
+      Alcotest.test_case "walph_loop removed" `Quick test_masc_walph_loop_removed;
       Alcotest.test_case "walph_control" `Quick test_masc_walph_control_schema;
       Alcotest.test_case "walph_natural" `Quick test_masc_walph_natural_schema;
       Alcotest.test_case "walph_status" `Quick test_masc_walph_status_schema;

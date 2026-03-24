@@ -60,6 +60,7 @@ include Masc_mcp.Server_tts_proxy
 include Masc_mcp.Server_dashboard_http
 module Server_h2_gateway = Masc_mcp.Server_h2_gateway
 module Server_runtime_bootstrap = Masc_mcp.Server_runtime_bootstrap
+module Server_routes_http_runtime = Masc_mcp.Server_routes_http_runtime
 
 let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
 
@@ -147,29 +148,16 @@ let make_extended_handler routes =
         match request.meth, path with
         | `OPTIONS, _ -> options_handler request reqd
         | `GET, "/ws" ->
-          (* WebSocket runs on a separate standalone port (not HTTP upgrade).
-             This endpoint returns connection info or disabled status. *)
-          if Masc_mcp.Server_ws_standalone.is_enabled () then begin
-            let ws_port = Masc_mcp.Server_ws_standalone.configured_port () in
-            let body = Printf.sprintf
-              {|{"ws_port":%d,"message":"Connect to ws://localhost:%d/"}|}
-              ws_port ws_port
-            in
-            let headers = Httpun.Headers.of_list [
-              ("content-type", "application/json");
-              ("content-length", string_of_int (String.length body));
-            ] in
-            let response = Httpun.Response.create ~headers `OK in
-            Httpun.Reqd.respond_with_string reqd response body
-          end else begin
-            let body = {|{"error":"websocket_disabled","message":"WebSocket is disabled (MASC_WS_ENABLED=0)"}|} in
-            let headers = Httpun.Headers.of_list [
-              ("content-type", "application/json");
-              ("content-length", string_of_int (String.length body));
-            ] in
-            let response = Httpun.Response.create ~headers `Not_found in
-            Httpun.Reqd.respond_with_string reqd response body
-          end
+          let body =
+            Server_routes_http_runtime.websocket_discovery_json request
+            |> Yojson.Safe.to_string
+          in
+          let headers = Httpun.Headers.of_list [
+            ("content-type", "application/json");
+            ("content-length", string_of_int (String.length body));
+          ] in
+          let response = Httpun.Response.create ~headers `OK in
+          Httpun.Reqd.respond_with_string reqd response body
         | `POST, "/webrtc/offer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
           Http.Request.read_body_async reqd (fun body ->
             match Masc_mcp.Server_webrtc_transport.handle_offer_request body with
@@ -300,6 +288,7 @@ let run_cmd host port base_path =
 
   (* Enable Eio-aware locking in modules with dual-mode mutex guards *)
   Masc_mcp.Prometheus.enable_eio ();
+  Masc_mcp.Transport_metrics.init ();
   Masc_mcp.Chain_telemetry.enable_eio ();
   Masc_mcp.Generational_metrics.enable_eio ();
   Masc_mcp.Dashboard_cache.enable_eio ~clock:(Eio.Stdenv.clock env) ();

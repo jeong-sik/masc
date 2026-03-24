@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 COORD_AGENT="${COORD_AGENT:-team-session-real-spawn}"
@@ -18,6 +18,7 @@ MCP_SESSION_ID="${MCP_SESSION_ID:-team-session-harness-$(date +%s)-$RANDOM}"
 RUN_TAG="${RUN_TAG:-$(date +%s)-$RANDOM}"
 DEFAULT_PARTICIPANTS_CSV="proof-a-${RUN_TAG},proof-b-${RUN_TAG},proof-c-${RUN_TAG},proof-d-${RUN_TAG}"
 PARTICIPANTS_CSV="${PARTICIPANTS_CSV:-$DEFAULT_PARTICIPANTS_CSV}"
+MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http2-prior-knowledge}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required"
@@ -52,54 +53,25 @@ if [ "$EFFECTIVE_SESSION_DURATION_SEC" -lt "$required_duration_sec" ]; then
   EFFECTIVE_SESSION_DURATION_SEC="$required_duration_sec"
 fi
 
-jsonrpc_call() {
-  local id="$1"
-  local method="$2"
-  local params="$3"
-  local attempts=0
-  local max_attempts=4
-  local raw=""
-  while [ "$attempts" -lt "$max_attempts" ]; do
-    if raw="$(curl -sS --http2-prior-knowledge -m "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
-      -H 'Content-Type: application/json' \
-      -H 'Accept: application/json, text/event-stream' \
-      -H "mcp-session-id: $MCP_SESSION_ID" \
-      -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"$method\",\"params\":$params}" 2>/dev/null)"; then
-      jsonrpc_normalize_response "$raw" "$id"
-      return 0
-    fi
-    attempts=$((attempts + 1))
-    sleep 1
-  done
-  return 1
-}
-
 call_tool() {
   local id="$1"
   local tool_name="$2"
   local args_json="$3"
-  jsonrpc_call "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
+  mcp_call_tool "$id" "$tool_name" "$args_json"
 }
 
 extract_result() {
-  jq -c 'try (.result.content[0].text | fromjson | .result) catch empty'
+  mcp_extract_result
 }
 
 extract_text() {
-  jq -r 'try (.result.content[0].text) catch empty'
-}
-
-extract_is_error() {
-  jq -r 'try (.result.isError) catch "true"'
+  mcp_extract_text
 }
 
 require_json() {
   local payload="$1"
-  if ! printf "%s" "$payload" | jq -e . >/dev/null 2>&1; then
-    echo "FAIL: invalid payload"
-    printf "%s\n" "$payload"
-    exit 1
-  fi
+  local label="${2:-team_session_real_spawn}"
+  mcp_require_tool_ok "$payload" "$label"
 }
 
 cleanup() {
@@ -114,9 +86,9 @@ trap cleanup EXIT
 
 echo "[1/9] init + join coordinator"
 r1="$(call_tool 90001 "masc_init" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a}')")"
-require_json "$r1"
+require_json "$r1" "masc_init"
 r2="$(call_tool 90002 "masc_join" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a,capabilities:["team-session","proof-harness"]}')")"
-require_json "$r2"
+require_json "$r2" "masc_join"
 
 echo "[2/9] preflight cleanup"
 call_tool 90011 "masc_cleanup_zombies" "{}" >/dev/null 2>&1 || true
@@ -143,7 +115,7 @@ start_args="$(jq -cn \
      agents:$participants
    }')"
 start_raw="$(call_tool 90003 "masc_team_session_start" "$start_args")"
-require_json "$start_raw"
+require_json "$start_raw" "masc_team_session_start"
 SESSION_ID="$(printf "%s" "$start_raw" | extract_result | jq -r '.session_id // empty')"
 if [ -z "$SESSION_ID" ]; then
   echo "FAIL: session_id missing"
@@ -177,13 +149,7 @@ for i in "${!PARTICIPANTS[@]}"; do
     --argjson timeout "$SPAWN_TIMEOUT_SEC" \
     '{agent_name:$runtime,prompt:$prompt,timeout_seconds:$timeout,working_dir:$wd}')"
   spawn_raw="$(call_tool $((90100 + i)) "masc_spawn" "$spawn_args")"
-  require_json "$spawn_raw"
-  spawn_is_error="$(printf "%s" "$spawn_raw" | extract_is_error)"
-  if [ "$spawn_is_error" = "true" ]; then
-    echo "FAIL: spawned agent ${actor} returned isError=true"
-    printf "%s\n" "$spawn_raw"
-    exit 1
-  fi
+  require_json "$spawn_raw" "masc_spawn(${actor})"
   spawn_text="$(printf "%s" "$spawn_raw" | extract_text)"
   if ! printf "%s" "$spawn_text" | rg -q "✅ Agent completed|done:${actor}"; then
     echo "WARN: spawned agent ${actor} completion text did not match strict pattern"
@@ -192,11 +158,11 @@ done
 
 echo "[5/9] restore coordinator identity"
 restore_raw="$(call_tool 90012 "masc_join" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a,capabilities:["team-session","proof-harness"]}')")"
-require_json "$restore_raw"
+require_json "$restore_raw" "restore masc_join"
 
 echo "[6/9] verify team_turn actor diversity"
 events_raw="$(call_tool 90004 "masc_team_session_events" "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s,event_types:["team_turn"],limit:400}')")"
-require_json "$events_raw"
+require_json "$events_raw" "masc_team_session_events"
 events_result="$(printf "%s" "$events_raw" | extract_result)"
 team_turn_count="$(printf "%s" "$events_result" | jq -r '.count // 0')"
 unique_turn_actors="$(printf "%s" "$events_result" | jq -r '[.events[]? | .detail.actor // empty | select(. != "")] | unique | length')"
@@ -233,18 +199,12 @@ if [ "$unique_turn_actors" -lt "${#PARTICIPANTS[@]}" ]; then
         --argjson timeout "$SPAWN_TIMEOUT_SEC" \
         '{agent_name:$runtime,prompt:$prompt,timeout_seconds:$timeout,working_dir:$wd}')"
       recovery_raw="$(call_tool $((90200 + recovery_idx)) "masc_spawn" "$recovery_args")"
-      require_json "$recovery_raw"
-      recovery_is_error="$(printf "%s" "$recovery_raw" | extract_is_error)"
-      if [ "$recovery_is_error" = "true" ]; then
-        echo "FAIL: recovery spawn for ${actor} returned isError=true"
-        printf "%s\n" "$recovery_raw"
-        exit 1
-      fi
+      require_json "$recovery_raw" "recovery masc_spawn(${actor})"
       recovery_idx=$((recovery_idx + 1))
     done
 
     events_raw="$(call_tool 90013 "masc_team_session_events" "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s,event_types:["team_turn"],limit:600}')")"
-    require_json "$events_raw"
+    require_json "$events_raw" "recovery masc_team_session_events"
     events_result="$(printf "%s" "$events_raw" | extract_result)"
     team_turn_count="$(printf "%s" "$events_result" | jq -r '.count // 0')"
     unique_turn_actors="$(printf "%s" "$events_result" | jq -r '[.events[]? | .detail.actor // empty | select(. != "")] | unique | length')"
@@ -261,7 +221,7 @@ fi
 
 echo "[7/9] stop session + report"
 stop_raw="$(call_tool 90005 "masc_team_session_stop" "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s,reason:"real_spawn_harness_done",generate_report:true}')")"
-require_json "$stop_raw"
+require_json "$stop_raw" "masc_team_session_stop"
 stop_result="$(printf "%s" "$stop_raw" | extract_result)"
 if [ -z "$stop_result" ]; then
   echo "FAIL: stop_session did not return result payload"
@@ -271,7 +231,7 @@ fi
 stop_deadline=$(( $(date +%s) + STOP_WAIT_SEC ))
 while :; do
   stop_status_raw="$(call_tool 90008 "masc_team_session_status" "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s}')")"
-  require_json "$stop_status_raw"
+  require_json "$stop_status_raw" "stop poll masc_team_session_status"
   stop_status_result="$(printf "%s" "$stop_status_raw" | extract_result)"
   stop_status="$(printf "%s" "$stop_status_result" | jq -r '.session.status // empty')"
   if [ "$stop_status" != "running" ]; then
@@ -287,7 +247,7 @@ done
 
 echo "[8/9] generate proof"
 prove_raw="$(call_tool 90006 "masc_team_session_prove" "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s,generate_report_if_missing:true}')")"
-require_json "$prove_raw"
+require_json "$prove_raw" "masc_team_session_prove"
 prove_result="$(printf "%s" "$prove_raw" | extract_result)"
 verdict="$(printf "%s" "$prove_result" | jq -r '.proof.verdict // empty')"
 required_turn_actors="$(printf "%s" "$prove_result" | jq -r '.proof.evidence.required_turn_actors // 0')"
@@ -307,7 +267,7 @@ fi
 
 echo "[9/9] final status snapshot"
 status_raw="$(call_tool 90007 "masc_team_session_status" "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s}')")"
-require_json "$status_raw"
+require_json "$status_raw" "final masc_team_session_status"
 status_result="$(printf "%s" "$status_raw" | extract_result)"
 session_status="$(printf "%s" "$status_result" | jq -r '.session.status // empty')"
 model_cache_hits="$(printf "%s" "$status_result" | jq -r '.inference_cache_metrics.hits // 0')"

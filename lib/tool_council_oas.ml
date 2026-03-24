@@ -46,6 +46,10 @@ let ensure_room_ready (ctx : context) =
     ());
   config
 
+let petition_phase_compat (_status : GV2.case_status) = "active"
+
+let petition_collaboration_id_compat (case_id : string) = case_id
+
 (* ================================================================ *)
 (* Petition — persist directly via GV2                               *)
 (* ================================================================ *)
@@ -73,11 +77,16 @@ let handle_petition_submit ctx args =
       with
       | Error msg -> json_err msg
       | Ok submit_result ->
+        let status = submit_result.case_.status in
         json_ok (`Assoc [
           ("case_id", `String submit_result.case_.id);
-          ("collaboration_id", `Null);
-          ("status", `String (GV2.case_status_to_string submit_result.case_.status));
-          ("phase", `Null);
+          (* Legacy response shape stays populated during the compatibility
+             window, but the values are derived from Governance_v2 only. *)
+          ( "collaboration_id",
+            `String
+              (petition_collaboration_id_compat submit_result.case_.id) );
+          ("status", `String (GV2.case_status_to_string status));
+          ("phase", `String (petition_phase_compat status));
           ("merged", `Bool submit_result.merged);
         ])
   end
@@ -268,11 +277,7 @@ let handle_execute ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
-    let system_prompt =
-      "You are a governance deliberation agent for the MASC multi-agent system. \
-       Evaluate the following topic and produce a structured decision. \
-       Include: (1) your reasoning, (2) identified risks, (3) recommended action. \
-       Be concise and actionable." in
+    let system_prompt = Prompt_registry.get_prompt "governance.deliberation" in
     let agent_name = "council-deliberation" in
     let memory =
       Memory_oas_bridge.create_memory_full
@@ -298,11 +303,7 @@ let handle_execute_dry_run ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
-    let system_prompt =
-      "You are a governance analysis agent for the MASC multi-agent system (DRY RUN mode). \
-       Analyze the following topic WITHOUT committing any changes. \
-       Produce: (1) impact analysis, (2) risks and mitigations, (3) what WOULD happen if executed. \
-       This is analysis only — no actions will be taken." in
+    let system_prompt = Prompt_registry.get_prompt "governance.dry_run" in
     let agent_name = "council-dry-run" in
     let memory =
       Memory_oas_bridge.create_memory_full

@@ -362,6 +362,7 @@ let reap_dead_external_subscribers () =
     After SSE fan-out, external subscribers (gRPC streams, etc.) are
     also notified with the same formatted event string. *)
 let broadcast_impl target json =
+  let t0 = Time_compat.now () in
   let data = Yojson.Safe.to_string json in
   let current_event_id = Atomic.get event_counter + 1 in
   let event = format_event ~id:current_event_id ~event_type:"message" data in
@@ -389,6 +390,9 @@ let broadcast_impl target json =
   ) clients_snapshot;
   (* Remove failed connections *)
   List.iter (fun sid -> unregister sid) !failed;
+  (* Record broadcast duration for transport observability *)
+  let elapsed = Time_compat.now () -. t0 in
+  Transport_metrics.observe_broadcast_duration elapsed;
   (* Notify external subscribers (gRPC streams, etc.) *)
   notify_external_subscribers event
 
@@ -463,6 +467,12 @@ let try_pop session_id =
     Uses [Atomic.get] so it is safe to call from signal handlers. *)
 let client_count () =
   Atomic.get client_count_atomic
+
+(** Return list of session_ids for all connected clients.
+    Used by transport metrics to report session count by kind. *)
+let all_session_ids () =
+  with_registry_ro (fun () ->
+    Hashtbl.fold (fun sid _client acc -> sid :: acc) clients [])
 
 (** Close all SSE clients - for graceful shutdown.
     Returns the number of clients that were closed.

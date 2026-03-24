@@ -45,6 +45,10 @@ val register_pre_hook : pre_hook -> unit
 val register_post_hook : post_hook -> unit
 val clear_hooks : unit -> unit
 
+val run_pre_hooks : name:string -> args:Yojson.Safe.t -> Tool_result.t option
+(** Execute registered pre-hooks in order.
+    Returns the first short-circuit result, if any. *)
+
 val dispatch_structured : name:string -> args:Yojson.Safe.t -> Tool_result.t option
 (** Structured dispatch with hook support.
     Execution order: pre-hooks -> handler -> post-hooks. *)
@@ -85,6 +89,7 @@ type module_tag =
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper | Mod_compact | Mod_mdal
   | Mod_notifications | Mod_inline
+  | Mod_improve_loop
   | Mod_autoresearch
   | Mod_research
   | Mod_model_catalog

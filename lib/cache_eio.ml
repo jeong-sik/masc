@@ -91,8 +91,9 @@ let is_expired entry =
   | None -> false
   | Some exp -> Time_compat.now () > exp
 
-(** Timestamp of last batch eviction, used to throttle periodic checks. *)
-let last_batch_eviction = ref 0.0
+(** Timestamp of last batch eviction, used to throttle periodic checks.
+    Atomic to prevent eviction stampede under concurrent fiber access. *)
+let last_batch_eviction = Atomic.make 0.0
 
 (** Minimum interval between batch evictions (seconds). *)
 let batch_eviction_interval = 60.0
@@ -125,7 +126,11 @@ let evict_expired config =
     Returns number of evicted entries (0 if skipped). *)
 let maybe_evict_expired config =
   let now = Time_compat.now () in
-  if now -. !last_batch_eviction < batch_eviction_interval then 0
+  let old_val = Atomic.get last_batch_eviction in
+  if now -. old_val < batch_eviction_interval then 0
+  else if not (Atomic.compare_and_set last_batch_eviction old_val now) then
+    (* Another fiber already claimed this eviction window *)
+    0
   else begin
     let dir = cache_dir config in
     if not (Sys.file_exists dir) then 0
@@ -151,13 +156,10 @@ let maybe_evict_expired config =
               | _ -> acc
         ) 0 sample in
         let ratio = float_of_int expired_count /. float_of_int sample_size in
-        if ratio > 0.5 then begin
-          last_batch_eviction := now;
+        if ratio > 0.5 then
           evict_expired config
-        end else begin
-          last_batch_eviction := now;
+        else
           0
-        end
       end
   end
 

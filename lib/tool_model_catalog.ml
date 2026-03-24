@@ -144,5 +144,6 @@ let schemas : tool_schema list = [
         ]);
       ]);
     ];
+    visibility = Public;
   };
 ]

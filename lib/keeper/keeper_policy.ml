@@ -8,6 +8,7 @@ open Keeper_exec_persona
 type tool_result = Keeper_types.tool_result
 
 let handle_keeper_policy_set ctx args : tool_result =
+  Log.Keeper.warn "masc_keeper_policy_set is deprecated: mode categorization removed, all keepers get full tool access";
   let name = get_string args "name" "" in
   let policy_mode_raw = get_string args "policy_mode" "" |> String.trim in
   let action_budget_opt = get_string_opt args "action_budget" |> Option.map String.trim in

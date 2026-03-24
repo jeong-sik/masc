@@ -452,28 +452,6 @@ a:hover {
   &:focus { outline: none; border-color: rgba(71, 184, 255, 0.55); }
 }
 
-@utility control-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border: 1px solid rgba(71, 184, 255, 0.32);
-  border-radius: 8px;
-  background: rgba(71, 184, 255, 0.14);
-  color: var(--accent);
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-  white-space: nowrap;
-  &:hover { background: rgba(71, 184, 255, 0.27); }
-  &:disabled { opacity: 0.5; cursor: not-allowed; }
-  &.ghost { background: var(--white-4); border-color: var(--border-slate-16); color: var(--text-body); }
-  &.ghost:hover { background: var(--white-8); border-color: var(--border-slate-22); }
-  &.chat-stream-warning { border-color: rgba(251, 191, 36, 0.5); color: var(--warn); animation: chatWarnPulse 2s ease-in-out infinite; }
-  &.is-active .tool-surface-count { background: rgba(14, 165, 233, 0.25); color: #7dd3fc; }
-}
 
 @utility control-row {
   display: grid;
@@ -585,9 +563,6 @@ tbody tr:hover {
 
 /* ── Command Plane utilities (migrated from command.css) ──── */
 
-@utility cmd-plane-view {
-}
-
 @utility cmd-stat-card {
   &.highlight {
     border-color: rgba(34,211,238,0.34);
@@ -653,9 +628,6 @@ tbody tr:hover {
     color: rgba(226, 232, 240, 0.76);
     line-height: 1.6;
   }
-}
-
-@utility cmd-tree-node {
 }
 
 @utility cmd-guide-card {
@@ -915,10 +887,6 @@ tbody tr:hover {
   0%, 100% { transform: scale(1); opacity: 0.92; }
   50% { transform: scale(1.06); opacity: 1; }
 }
-@keyframes chatWarnPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
 @keyframes livePulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
   50% { box-shadow: 0 0 8px 2px var(--ok-12); }
@@ -974,14 +942,6 @@ tbody tr:hover {
 
 @utility keeper-field-search {
   &:focus { outline: none; border-color: var(--ok-40); }
-}
-@utility keeper-chat__msg--user {
-}
-
-@utility keeper-chat__msg--assistant {
-}
-
-@utility keeper-chat__msg--streaming {
 }
 
 @utility keeper-chat__cursor {
@@ -1072,7 +1032,6 @@ tbody tr:hover {
   background: linear-gradient(180deg, rgba(18, 42, 33, 0.55), rgba(10, 25, 20, 0.48));
 }
 
-/* control-btn.chat-stream-warning: folded into @utility control-btn above */
 
 /* ── Tools (merged from tools.css) ─────────────────────── */
 
@@ -1118,7 +1077,6 @@ tbody tr:hover {
   }
 }
 
-/* control-btn.is-active .tool-surface-count: folded into @utility control-btn above */
 
 @utility tool-metrics-summary {
   display: grid;
@@ -1328,11 +1286,6 @@ tbody tr:hover {
     min-width: 0;
     flex: 1;
   }
-  .planning-header,
-  .board-toolbar-actions .control-btn {
-    flex: 1;
-    min-width: 42px;
-  }
 }
 
 /* ── Roster (merged from roster.css) ───────────────────── */
@@ -1432,7 +1385,7 @@ tbody tr:hover {
 
 /* board-post content-visibility: folded into @utility board-post below */
 
-/* control-input/textarea :focus, control-btn :hover/:disabled: folded into @utility blocks above */
+/* control-input/textarea :focus: folded into @utility blocks above */
 
 /* ── Mission Status Dot ── */
 @utility mission-status-dot {
@@ -1829,6 +1782,7 @@ button.council-row.selected {
   .ff-plate {
     grid-template-columns: 1fr;
     text-align: center;
+  }
 }
 
 /* ── Keeper Rich Card (Overview) ──────────────────────────── */

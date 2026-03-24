@@ -17,6 +17,7 @@ export MCP_URL="${MCP_URL:-http://127.0.0.1:${PORT}/mcp}"
 export CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 export CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
 export CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-25}"
+export HARNESS_LOG_FILE="${HARNESS_LOG_FILE:-$LOG_FILE}"
 
 SERVER_PID=""
 
@@ -56,7 +57,8 @@ if ! harness_wait_for_health "$PORT" 25; then
   exit 1
 fi
 
-run_contract 1 2 "streamable_http_contract.sh"
-run_contract 2 2 "team_session_contract.sh"
+run_contract 1 3 "streamable_http_contract.sh"
+run_contract 2 3 "team_session_contract.sh"
+run_contract 3 3 "golden_path_1_contract.sh"
 
 echo "PASS: contract harness suite"

@@ -15,6 +15,7 @@ let resident_schemas : tool_schema list = [
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   {
@@ -82,6 +83,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "persona_name"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -237,6 +239,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -292,6 +295,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -404,6 +408,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"; `String "message"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -428,6 +433,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"; `String "model"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -457,6 +463,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"; `String "policy_mode"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -488,6 +495,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"; `String "action_id"; `String "verdict"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -511,6 +519,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -530,6 +539,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -549,6 +559,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -572,6 +583,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -590,6 +602,7 @@ let resident_schemas : tool_schema list = [
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   (* --- Phase 4: Keeper Autonomy MCP Tools --- *)
@@ -615,6 +628,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -639,6 +653,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -658,6 +673,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -677,6 +693,7 @@ let resident_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
 ]
 
@@ -724,6 +741,7 @@ let housekeep_schemas : tool_schema list = [
         ]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_housekeep_delete";
@@ -742,6 +760,7 @@ let housekeep_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "path"; `String "reason"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_housekeep_prune";
@@ -760,6 +779,7 @@ let housekeep_schemas : tool_schema list = [
       ]);
       ("required", `List [`String "store"]);
     ];
+    visibility = Public;
   };
 ]
 

@@ -48,8 +48,111 @@ let is_http_error_response = function
 (** Server start time for uptime calculation *)
 let server_start_time = Unix.gettimeofday ()
 
-(** Health check handler *)
-let health_handler _request reqd =
+let configured_http_port () =
+  let parse name =
+    match Sys.getenv_opt name with
+    | Some value -> int_of_string_opt (String.trim value)
+    | None -> None
+  in
+  match parse "MASC_HTTP_PORT" with
+  | Some port when port > 0 && port < 65536 -> port
+  | _ -> (
+      match parse "MASC_PORT" with
+      | Some port when port > 0 && port < 65536 -> port
+      | _ -> 8935)
+
+let configured_http_host () =
+  match Sys.getenv_opt "MASC_HOST" with
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then "127.0.0.1" else trimmed
+  | None -> "127.0.0.1"
+
+let advertised_host_port request =
+  parse_host_port
+    (Httpun.Headers.get request.Httpun.Request.headers "host")
+    (configured_http_host ()) (configured_http_port ())
+
+let websocket_discovery_json request =
+  let (host, _) = advertised_host_port request in
+  let enabled = Server_ws_standalone.is_enabled () in
+  let port = Server_ws_standalone.configured_port () in
+  let base_fields =
+    [
+      ("enabled", `Bool enabled);
+      ("mode", `String "standalone");
+      ("discovery_path", `String "/ws");
+      ("session_count", `Int (Server_mcp_transport_ws.session_count ()));
+    ]
+  in
+  let fields =
+    if enabled then
+      base_fields
+      @ [
+          ("ws_port", `Int port);
+          ("ws_url", `String (Printf.sprintf "ws://%s:%d/" host port));
+        ]
+    else
+      base_fields
+  in
+  `Assoc fields
+
+let transport_json request =
+  let (host, port) = advertised_host_port request in
+  let base_url = Printf.sprintf "http://%s:%d" host port in
+  let grpc_enabled = Masc_grpc_server.is_enabled () in
+  let grpc_port = Masc_grpc_server.configured_port () in
+  let webrtc_enabled = Server_webrtc_transport.is_enabled () in
+  `Assoc
+    [
+      ("streamable_http_default", `Bool true);
+      ("allow_legacy_accept", `Bool allow_legacy_accept);
+      ("legacy_endpoints_deprecated", `Bool true);
+      ( "http",
+        `Assoc
+          [
+            ("enabled", `Bool true);
+            ("base_url", `String base_url);
+            ("mcp_url", `String (base_url ^ "/mcp"));
+            ("sse_url", `String (base_url ^ "/sse"));
+          ] );
+      ( "grpc",
+        `Assoc
+          ([
+             ("enabled", `Bool grpc_enabled);
+             ("port", `Int grpc_port);
+             ("service", `String Masc_grpc_service.service_name);
+             ("health_service", `String Masc_grpc_server.health_service_name);
+           ]
+          @ if grpc_enabled then
+              [ ("url", `String (Printf.sprintf "grpc://%s:%d" host grpc_port)) ]
+            else
+              []) );
+      ("websocket", websocket_discovery_json request);
+      ( "webrtc",
+        `Assoc
+          ([
+             ("enabled", `Bool webrtc_enabled);
+             ("signaling_path", `String "/webrtc");
+             ("offer_path", `String "/webrtc/offer");
+             ("answer_path", `String "/webrtc/answer");
+             ( "ice_server_urls",
+               `List
+                 (List.map
+                    (fun url -> `String url)
+                    (Server_webrtc_transport.configured_ice_server_urls ())) );
+             ("pending_offers", `Int (Server_webrtc_transport.pending_offer_count ()));
+             ("active_peers", `Int (Server_webrtc_transport.active_peer_count ()));
+             ("live_connections", `Int (Server_webrtc_transport.live_webrtc_count ()));
+             ("connected_channels", `Int (Server_webrtc_transport.connected_channel_count ()));
+           ]
+          @ if webrtc_enabled then
+              [ ("signaling_url", `String (base_url ^ "/webrtc")) ]
+            else
+              []) );
+    ]
+
+let make_health_json ?(listener = "http/1.1") request =
   let uptime_secs = int_of_float (Unix.gettimeofday () -. server_start_time) in
   let uptime_str =
     if uptime_secs < 60 then Printf.sprintf "%ds" uptime_secs
@@ -57,7 +160,7 @@ let health_handler _request reqd =
     else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
   in
   let build = Build_identity.current () in
-  let health_json = `Assoc [
+  `Assoc [
     ("status", `String "ok");
     ("server", `String "masc-mcp");
     ("version", `String build.release_version);
@@ -67,16 +170,11 @@ let health_handler _request reqd =
       `Assoc
         [
           ("default", `String mcp_protocol_version_default);
+          ("listener", `String listener);
           ( "supported",
             `List (List.map (fun v -> `String v) mcp_protocol_versions) );
         ] );
-    ( "transport",
-      `Assoc
-        [
-          ("streamable_http_default", `Bool true);
-          ("allow_legacy_accept", `Bool allow_legacy_accept);
-          ("legacy_endpoints_deprecated", `Bool true);
-        ] );
+    ("transport", transport_json request);
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Sse.client_count ()));
     ("pg_pool", let max_size = Backend_core.configured_max_pool_size () in
@@ -87,8 +185,22 @@ let health_handler _request reqd =
         shared_pool_injected = shared;
       });
     ("subsystems", Subsystem_health.to_yojson ());
-  ] in
-  Http.Response.json (Yojson.Safe.to_string health_json) reqd
+    ("gc", let s = Gc.stat () in `Assoc [
+      ("minor_collections", `Int s.minor_collections);
+      ("major_collections", `Int s.major_collections);
+      ("compactions", `Int s.compactions);
+      ("heap_words", `Int s.heap_words);
+      ("live_words", `Int s.live_words);
+      ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
+    ]);
+    ("keeper_fibers", `Int (Keeper_keepalive.running_keepers ()));
+  ]
+
+(** Health check handler *)
+let health_handler request reqd =
+  Http.Response.json
+    (Yojson.Safe.to_string (make_health_json request))
+    reqd
 
 let board_post_detail_json ~response_format ~post_id =
   match Board_dispatch.get_post ~post_id with

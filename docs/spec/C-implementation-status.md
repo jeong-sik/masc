@@ -26,7 +26,7 @@
 | Command Plane | 06 | 38 | 2 | 0 | 0 | 95% | Intent 도구 사용 빈도 낮음 |
 | Team Session | 07 | 30 | 3 | 0 | 0 | 90% | Auto 모드는 OAS 위임, lossy projection |
 | Council/Governance | 08 | 28 | 0 | 0 | 0 | 100% | 거버넌스 24+ 호출 |
-| Server/Transport | 09 | 15 | 8 | 0 | 0 | 65% | H2/WS/gRPC/WebRTC 전부 미사용 |
+| Server/Transport | 09 | 18 | 5 | 0 | 0 | 78% | HTTP/1.1 canonical + gRPC/WS/WebRTC local harness verified |
 | Dashboard | 10 | 15 | 1 | 0 | 0 | 94% | MDAL surface만 미약 |
 | Board | 11 | 16 | 1 | 0 | 0 | 94% | Board Listener polling만 CODE |
 | Memory Systems | 12 | 44 | 0 | 0 | 0 | 100% | 4 시스템 전부 운용 |
@@ -46,10 +46,7 @@
 | 항목 | 서브시스템 | LOC | 판정 근거 |
 |------|----------|-----|---------|
 | **Chain Engine 전체** | 04 | 17K | chain_run_start 0건, orchestration_kind=chain_dsl 0건 |
-| **HTTP/2 (h2c)** | 09 | 740 | MASC_USE_H2=1 활성화 기록 없음 |
-| **WebSocket transport** | 09 | 160 | MASC_WS_ENABLED=1 기록 없음 |
-| **gRPC transport** | 09 | 1,143 | 텔레메트리 gRPC 호출 0건 |
-| **WebRTC transport** | 09 | 183 | 실험적, 사용 기록 없음 |
+| **HTTP/2 (h2c)** | 09 | 740 | opt-in 경로, canonical 기본값은 아님 |
 | **SSE rate limit guard** | 09 | ~50 | 모든 threshold 기본값 0 (비활성) |
 | **Board Listener (polling)** | 11 | ~100 | pg_notify 수신 코드, SSE relay 미확인 |
 | **Intent 도구 4종** | 06 | ~200 | 정의됨, 벤치마크에서 미사용 |
@@ -145,10 +142,10 @@
 | MCP JSON-RPC | **IMPL** | 전체 프로토콜 준수 |
 | SSE Event Streaming | **IMPL** | 매일 브로드캐스트 |
 | Auth/RBAC | **IMPL** | Bearer token + 3 role |
-| HTTP/2 (h2c) | **CODE** | 740 LOC, opt-in only, 활성화 기록 없음 |
-| WebSocket | **CODE** | 160 LOC, 활성화 기록 없음 |
-| gRPC | **CODE** | 1,143 LOC, 호출 0건 |
-| WebRTC | **CODE** | 183 LOC, 실험적, 미사용 |
+| HTTP/2 (h2c) | **CODE** | 740 LOC, opt-in only, canonical 아님 |
+| WebSocket | **IMPL** | standalone `/ws` discovery + WS frame harness 통과 |
+| gRPC | **IMPL** | Health/Reflection/Subscribe bridge harness 통과 |
+| WebRTC | **IMPL** | local signaling + peer establishment harness 통과, live interop은 `verify_webrtc_live_env.sh` / workflow dispatch로 env-gated |
 | SSE Rate Limit | **CODE** | 기본값 0 (비활성) |
 
 ### 10-Dashboard (94% IMPL)
@@ -190,12 +187,12 @@ env-gated 6종(PG/network/viewer)만 CODE.
 
 ### CODE 집중 영역 (빌드됨, 미사용)
 1. **Chain Engine** (17K LOC) → **Frozen** 판정, OAS superseded
-2. **대체 트랜스포트 4종** (2.2K LOC) → HTTP/1.1이 canonical, 나머지 opt-in 미활성
+2. **대체 트랜스포트 4종** (2.2K LOC) → HTTP/1.1이 canonical, H2만 opt-in, gRPC/WS/WebRTC는 local harness 기준 IMPL
 3. **Intent 도구** → 정의됨, 벤치마크 미사용
 
 ### 아키텍처 의사결정 필요
 1. Chain Engine 장기 방향 (현재 Frozen)
-2. H2/WS/gRPC/WebRTC 중 어느 것을 activate할지
+2. live ICE/TURN/browser interop proof를 어떤 env-gated lane으로 운영할지
 3. Team Session lossy projection(47→12) 해소 방법
 
 ---
@@ -208,4 +205,4 @@ env-gated 6종(PG/network/viewer)만 CODE.
 | 2 | Keeper: OAS Memory.t Long_term 백엔드 완성 | IMPL 96%→100% |
 | 3 | Team Session: lossy projection 해소 | 47→12 필드 축소가 OAS 측 정보 손실 유발 |
 | 4 | Chain Engine: Adapter+Mermaid 유틸리티 추출 후 본체 archive | 17K LOC 유지비 제거 |
-| 5 | Transport: gRPC 또는 WS 중 하나 선택, 나머지 archive | 4종 동시 유지 무의미 |
+| 5 | Transport: live ICE/TURN/browser interop 증빙 lane 추가 | local smoke는 확보됐고 internet-grade 증빙만 env-gated로 남음 |

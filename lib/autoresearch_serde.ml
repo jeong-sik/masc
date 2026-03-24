@@ -94,14 +94,20 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
 let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
   let open Yojson.Safe.Util in
   let str key ~default = json |> member key |> to_string_option |> Option.value ~default in
+  let required_str key =
+    match json |> member key |> to_string_option |> Option.map String.trim with
+    | Some value when value <> "" -> value
+    | _ ->
+        raise
+          (Invalid_argument
+             (Printf.sprintf
+                "missing required autoresearch state field: %s" key))
+  in
   let int_ key ~default = try json |> member key |> to_int with Type_error _ -> default in
   let float_ key ~default = try json |> member key |> to_float with Type_error _ -> default in
   {
-    loop_id = str "loop_id" ~default:"unknown";
-    status =
-      (json |> member "status" |> to_string_option
-       |> Option.map status_of_string |> Option.join)
-      |> Option.value ~default:Error;
+    loop_id = required_str "loop_id";
+    status = status_of_string (required_str "status") |> Option.value ~default:Error;
     current_cycle = int_ "current_cycle" ~default:0;
     baseline = float_ "baseline" ~default:0.0;
     best_score = float_ "best_score" ~default:0.0;

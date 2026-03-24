@@ -269,10 +269,37 @@ let default_runtime () =
     total_failure = 0;
   }
 
+let runtime_from_endpoint base_url =
+  {
+    id = runtime_id_of_base_url base_url;
+    base_url;
+    model = trim_opt (Sys.getenv_opt "LLAMA_SWARM_MODEL");
+    max_concurrency =
+      int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
+        ~default:default_parallel_hint;
+    active_slots = 0;
+    queue_depth = 0;
+    latency_ema_ms = None;
+    failure_streak = 0;
+    cooldown_until = None;
+    last_error = None;
+    total_started = 0;
+    total_success = 0;
+    total_failure = 0;
+  }
+
+let parse_llm_endpoints raw =
+  raw
+  |> String.split_on_char ','
+  |> List.filter_map (fun item -> trim_opt (Some item))
+  |> List.map runtime_from_endpoint
+
 let current_fingerprint () =
   String.concat "||"
     [
       String.concat "," (Llm_provider.Discovery.endpoints_from_env ());
+      Option.value ~default:"" (Sys.getenv_opt "MASC_LLAMA_RUNTIMES_JSON");
+      Option.value ~default:"" (Sys.getenv_opt "LLM_ENDPOINTS");
       Env_config.Llama.server_url;
       Option.value ~default:"" (Sys.getenv_opt "LLAMA_SWARM_MODEL");
       Option.value ~default:""
@@ -289,9 +316,41 @@ let load_runtimes_from_env () =
   match discovered with
   | _ :: _ -> (discovered, [])
   | [] ->
-      let endpoints = Llm_provider.Discovery.endpoints_from_env () in
-      let runtimes = List.map runtime_of_endpoint_url endpoints in
-      if runtimes = [] then ([ default_runtime () ], []) else (runtimes, [])
+      match trim_opt (Sys.getenv_opt "MASC_LLAMA_RUNTIMES_JSON") with
+      | Some raw -> (
+          try
+            match Yojson.Safe.from_string raw with
+            | `List items ->
+                let parsed, errors =
+                  List.fold_left
+                    (fun (acc, errs) item ->
+                      match normalize_runtime_json item with
+                      | Ok runtime -> (runtime :: acc, errs)
+                      | Error err -> (acc, err :: errs))
+                    ([], []) items
+                in
+                let runtimes = List.rev parsed in
+                if runtimes = [] then
+                  ([ default_runtime () ],
+                   "MASC_LLAMA_RUNTIMES_JSON produced no usable runtimes" :: errors)
+                else (runtimes, List.rev errors)
+            | _ ->
+                ([ default_runtime () ],
+                 [ "MASC_LLAMA_RUNTIMES_JSON must be a JSON array" ])
+          with Yojson.Json_error err ->
+            ([ default_runtime () ], [ "invalid MASC_LLAMA_RUNTIMES_JSON: " ^ err ]))
+      | None ->
+          let endpoints = Llm_provider.Discovery.endpoints_from_env () in
+          let runtimes = List.map runtime_of_endpoint_url endpoints in
+          if runtimes <> [] then (runtimes, [])
+          else
+            match trim_opt (Sys.getenv_opt "LLM_ENDPOINTS") with
+            | Some raw ->
+                let runtimes = parse_llm_endpoints raw in
+                if runtimes = [] then
+                  ([ default_runtime () ], [ "LLM_ENDPOINTS produced no usable runtimes" ])
+                else (runtimes, [])
+            | None -> ([ default_runtime () ], [])
 
 (* ensure_loaded: the only function that may yield (debug_log calls Eio.traceln).
    Yield happens AFTER the ref swap, so callers reading !pool after this

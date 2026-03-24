@@ -21,6 +21,7 @@ Pair with masc_operation_start to run operations on defined units.";
             ("policy", `Assoc [ ("type", `String "object") ]);
             ("budget", `Assoc [ ("type", `String "object") ]);
           ];
+      visibility = Public;
     };
     {
       name = "masc_unit_list";
@@ -29,6 +30,7 @@ Pair with masc_operation_start to run operations on defined units.";
 Use when inspecting the organizational hierarchy or verifying unit definitions. \
 Pair with masc_observe_topology for a richer view with health and operation counts.";
       input_schema = object_schema [];
+      visibility = Public;
     };
     {
       name = "masc_unit_reparent";
@@ -42,6 +44,7 @@ Pair with masc_unit_list to verify the new topology after reparenting.";
             ("unit_id", string_prop "Managed unit id.");
             ("parent_unit_id", string_prop "New parent unit id. Omit only for company roots.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_unit_reassign";
@@ -56,6 +59,7 @@ Pair with masc_observe_topology to verify roster changes took effect.";
             ("leader_id", string_prop "New leader agent id.");
             ("roster", string_array_prop "Replacement roster.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_intent_create";
@@ -76,6 +80,7 @@ Pair with masc_operation_start to attach operations under this intent.";
             ("current_focus", `Assoc [ ("type", `String "object") ]);
             ("checkpoint_ref", string_prop "Optional checkpoint reference.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_intent_status";
@@ -88,6 +93,7 @@ Pair with masc_intent_update to change focus or state, or masc_intent_forecast f
           [
             ("intent_id", string_prop "Intent id to filter.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_intent_update";
@@ -109,6 +115,7 @@ After masc_intent_status to review current state; pair with masc_intent_forecast
             ("current_focus", `Assoc [ ("type", `String "object") ]);
             ("checkpoint_ref", string_prop "Optional checkpoint reference.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_intent_forecast";
@@ -122,6 +129,7 @@ After masc_intent_status; pair with masc_operation_start to act on the forecast.
             ("intent_id", string_prop "Managed intent id.");
             ("limit", integer_prop ~default:3 "Maximum candidate next states.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_operation_start";
@@ -154,6 +162,7 @@ After masc_unit_define; follow with masc_dispatch_tick to materialize detachment
             ("chain_input", `Assoc [ ("type", `String "object"); ("description", `String "Optional JSON input forwarded to chain.run input.") ]);
             ("chain_checkpoint_enabled", boolean_prop ~default:true "Enable native checkpoint capture for chain.run.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_operation_status";
@@ -164,6 +173,7 @@ After masc_operation_start; pair with masc_observe_operations for a combined vie
       input_schema =
         object_schema
           [ ("operation_id", string_prop "Operation id to filter."); ];
+      visibility = Public;
     };
     {
       name = "masc_operation_checkpoint";
@@ -178,6 +188,7 @@ Pair with masc_operation_resume to restart from the saved checkpoint.";
             ("checkpoint_ref", string_prop "Checkpoint reference or durable resume pointer.");
             ("note", string_prop "Optional checkpoint note.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_operation_pause";
@@ -190,6 +201,7 @@ Pair with masc_operation_resume to continue or masc_operation_stop to cancel.";
             ("operation_id", string_prop "Managed operation id.");
             ("note", string_prop "Optional pause note.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_operation_resume";
@@ -202,6 +214,7 @@ After masc_operation_pause; pair with masc_dispatch_tick to re-materialize detac
             ("operation_id", string_prop "Managed operation id.");
             ("note", string_prop "Optional resume note.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_operation_stop";
@@ -214,6 +227,7 @@ Pair with masc_operation_status to verify the cancellation took effect.";
             ("operation_id", string_prop "Managed operation id.");
             ("note", string_prop "Optional stop reason.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_operation_finalize";
@@ -226,6 +240,7 @@ After the operation's detachments report completion; pair with masc_observe_trac
             ("operation_id", string_prop "Managed operation id.");
             ("note", string_prop "Optional completion note.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_chain_snapshot";
@@ -234,6 +249,7 @@ After the operation's detachments report completion; pair with masc_observe_trac
 Use when reviewing chain-backed operation execution or debugging chain runs. \
 Pair with masc_chain_run_get to fetch details of a specific run.";
       input_schema = object_schema [];
+      visibility = Public;
     };
     {
       name = "masc_chain_run_get";
@@ -246,6 +262,7 @@ After masc_chain_snapshot identifies the run_id.";
           [
             ("run_id", string_prop "Native chain run id from a chain-backed operation.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_dispatch_plan";
@@ -259,6 +276,7 @@ Before masc_dispatch_assign to act on the recommendation.";
             ("operation_id", string_prop "Optional operation id to route.");
             ("assigned_unit_id", string_prop "Optional current unit id when planning a new operation.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_dispatch_assign";
@@ -273,6 +291,7 @@ After masc_dispatch_plan; follow with masc_dispatch_tick to materialize.";
             ("target_unit_id", string_prop "Target unit id.");
             ("note", string_prop "Optional assignment note.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_dispatch_rebalance";
@@ -287,6 +306,7 @@ After masc_observe_capacity identifies overloaded units.";
             ("target_unit_id", string_prop "Target unit id.");
             ("note", string_prop "Optional rebalance note.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_dispatch_escalate";
@@ -301,6 +321,7 @@ Pair with masc_policy_approve if the escalation requires approval.";
             ("target_unit_id", string_prop "Optional explicit target unit id.");
             ("note", string_prop "Optional escalation note.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_dispatch_recall";
@@ -314,6 +335,7 @@ Pair with masc_operation_resume to re-activate when ready.";
             ("operation_id", string_prop "Managed operation id.");
             ("note", string_prop "Optional recall note.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_dispatch_tick";
@@ -327,6 +349,7 @@ After masc_operation_start or masc_dispatch_assign; run repeatedly until stable.
             ("operation_id", string_prop "Optional operation filter.");
             ("detachment_id", string_prop "Optional detachment filter.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_detachment_list";
@@ -340,6 +363,7 @@ After masc_dispatch_tick; pair with masc_detachment_status for per-detachment de
             ("operation_id", string_prop "Optional operation or trace filter.");
             ("detachment_id", string_prop "Optional detachment id filter.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_detachment_status";
@@ -352,6 +376,7 @@ After masc_detachment_list identifies the detachment_id.";
           [
             ("detachment_id", string_prop "Managed detachment id.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_policy_status";
@@ -360,6 +385,7 @@ After masc_detachment_list identifies the detachment_id.";
 Use when checking pending approvals or reviewing policy state before strict actions. \
 Pair with masc_policy_approve or masc_policy_deny to process pending decisions.";
       input_schema = object_schema [];
+      visibility = Public;
     };
     {
       name = "masc_policy_approve";
@@ -373,6 +399,7 @@ After masc_policy_status shows pending decisions.";
             ("decision_id", string_prop "Managed decision id.");
             ("reason", string_prop "Optional approval note.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_policy_deny";
@@ -386,6 +413,7 @@ After masc_policy_status shows pending decisions.";
             ("decision_id", string_prop "Managed decision id.");
             ("reason", string_prop "Optional denial note.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_policy_update";
@@ -400,6 +428,7 @@ Pair with masc_policy_status to review the updated configuration.";
             ("policy", `Assoc [ ("type", `String "object") ]);
             ("budget", `Assoc [ ("type", `String "object") ]);
           ];
+      visibility = Public;
     };
     {
       name = "masc_policy_freeze_unit";
@@ -413,6 +442,7 @@ Pair with masc_observe_capacity to check unit workload before/after freezing.";
             ("unit_id", string_prop "Managed unit id.");
             ("enabled", boolean_prop ~default:true "Set true to freeze, false to unfreeze.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_policy_kill_switch";
@@ -426,6 +456,7 @@ Pair with masc_policy_status to verify the kill-switch state.";
             ("unit_id", string_prop "Managed unit id.");
             ("enabled", boolean_prop ~default:true "Set true to enable, false to clear.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_observe_topology";
@@ -434,5 +465,6 @@ Pair with masc_policy_status to verify the kill-switch state.";
 Use when getting a birds-eye view of the organizational structure and its operational load. \
 Pair with masc_observe_capacity for per-unit budget utilization details.";
       input_schema = object_schema [];
+      visibility = Public;
     };
 ]

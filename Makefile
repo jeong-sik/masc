@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
 
 # Default target — OCaml + dashboard
 all: build-all
@@ -29,15 +29,22 @@ test-unit:
 test-contract:
 	bash scripts/harness/contract/run_all.sh
 
+# Transport harness (self-bootstrapping, hermetic local server)
+test-transport:
+	bash scripts/harness/transport/run_all.sh
+
+# Env-gated browser/STUN/TURN WebRTC interop proof
+test-webrtc-live-env:
+	bash scripts/harness/transport/verify_webrtc_live_env.sh
+
 # Contract harness against an already running server (default :8935)
 test-contract-live:
 	bash scripts/harness/contract/streamable_http_contract.sh
 	bash scripts/harness/contract/team_session_contract.sh
-	bash scripts/harness/contract/game_view_precondition.sh
-	bash scripts/harness/contract/trpg_session_contract.sh
+	bash scripts/harness/contract/golden_path_1_contract.sh
 
-# All tests: unit + contract
-test-all: test-unit test-contract
+# All tests: unit + contract + transport
+test-all: test-unit test-contract test-transport
 
 # Clean build artifacts
 clean:
@@ -90,7 +97,7 @@ health:
 	@echo "Health snapshot: .health/health-snapshot.json"
 
 # CI target (for GitHub Actions)
-ci: fmt-check test test-contract
+ci: fmt-check test test-contract test-transport
 	@echo "CI checks passed!"
 
 # Start the MCP server (local development)

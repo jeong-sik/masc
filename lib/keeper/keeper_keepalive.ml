@@ -48,7 +48,8 @@ let register_keepalive name entry =
   Hashtbl.replace keepalives name entry
 
 let unregister_keepalive name =
-  Hashtbl.remove keepalives name
+  Hashtbl.remove keepalives name;
+  Hashtbl.remove last_agent_counts name
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~2 s instead of waiting for the full 30-300 s interval. *)
@@ -98,20 +99,20 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               | Ok (Some latest) -> latest
               | _ -> m
             in
-            (try
-               let synced = ensure_keeper_room_presence ctx.config meta_current in
-               (match write_meta ctx.config synced with
-                | Ok () -> ()
-                | Error e -> Log.Keeper.warn "write_meta failed (heartbeat): %s" e)
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Keeper.error "room heartbeat failed: %s"
-                 (Printexc.to_string exn));
             let meta_current =
-              match read_meta ctx.config m.name with
-              | Ok (Some latest) -> latest
-              | _ -> meta_current
+              try
+                let synced = ensure_keeper_room_presence ctx.config meta_current in
+                (match write_meta ctx.config synced with
+                 | Ok () -> synced  (* use written value directly, no second read_meta *)
+                 | Error e ->
+                   Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
+                   synced)
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Keeper.error "room heartbeat failed: %s"
+                  (Printexc.to_string exn);
+                meta_current
             in
             let now_ts = Time_compat.now () in
             if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
@@ -411,6 +412,16 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               float_of_int
                 (max 30 (min 300 meta_after_proactive.presence_keepalive_sec))
             in
+            (try
+               Tool_improve_loop.maybe_tick_from_keepalive ~config:ctx.config
+                 ~agent_name:meta_after_proactive.agent_name
+                 ~keeper_name:meta_after_proactive.name
+                 ~sw:ctx.sw ~clock:ctx.clock ~proc_mgr:ctx.proc_mgr ()
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Keeper.warn "improve loop keepalive tick skipped: %s"
+                 (Printexc.to_string exn));
             let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
             interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
             if !stop then ()

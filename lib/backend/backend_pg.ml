@@ -42,7 +42,7 @@ let strip_namespace namespace key =
 
 (* Caqti 2.x query definitions using Infix operators
    Syntax: (param_type ->? row_type) "SQL" for static queries *)
-open Caqti_request.Infix
+open Pg_infix
 
 let get_q =
   (Caqti_type.string ->? Caqti_type.string)
@@ -75,6 +75,17 @@ let list_keys_q =
 let get_all_q =
   (Caqti_type.string ->* Caqti_type.(t2 string string))
   "SELECT key, value FROM masc_kv WHERE key LIKE $1 AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY key DESC LIMIT 200"
+
+let get_all_matching_recent_q =
+  (Caqti_type.(t4 string string float int) ->* Caqti_type.(t2 string string))
+  "SELECT key, value \
+   FROM masc_kv \
+   WHERE key LIKE $1 \
+     AND key LIKE $2 \
+     AND updated_at >= TO_TIMESTAMP($3) \
+     AND (expires_at IS NULL OR expires_at > NOW()) \
+   ORDER BY updated_at DESC, key DESC \
+   LIMIT $4"
 
 let set_if_not_exists_q =
   (Caqti_type.(t2 string string) ->. Caqti_type.unit)
@@ -221,12 +232,12 @@ let create_eio ~sw ~env (cfg : config) : (t, error) result =
   | None -> Error (ConnectionFailed "PostgreSQL URL not configured (set MASC_POSTGRES_URL)")
   | Some url ->
       let uri = Uri.of_string url in
-      (* Pool sizing: Supabase session pooler shares pool_size across all
-         clients. Keep low to avoid MaxClientsInSessionMode on restarts.
-         Rule: (CPU cores * 2) is overkill for a single app; 3 suffices. *)
+      (* Pool sizing: default 5, tunable via MASC_PG_POOL_SIZE (1-50).
+         12+ concurrent keepers need ~12 connections.
+         Supabase Pro supports 500+ max_connections. *)
       let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-        | Some s -> (try min (int_of_string s) 5 with _ -> 3)
-        | None -> 3
+        | Some s -> (try max 1 (min (int_of_string s) 50) with _ -> 5)
+        | None -> 5
       in
       let pool_config = Caqti_pool_config.create
           ~max_size:max_pool
@@ -353,6 +364,20 @@ let get_all t ~prefix =
   | Ok pairs ->
       Ok (List.map (fun (k, v) -> (strip_namespace t.namespace k, v)) pairs)
   | Error err -> Error (caqti_error_to_masc err)
+
+let get_all_matching_recent t ~prefix ~suffix ~updated_since ~limit =
+  if limit <= 0 then
+    Ok []
+  else
+    let nprefix = namespaced_key t.namespace prefix in
+    match Caqti_eio.Pool.use (fun conn ->
+      let module C = (val conn : Caqti_eio.CONNECTION) in
+      C.collect_list get_all_matching_recent_q
+        (nprefix ^ "%", "%" ^ suffix, updated_since, limit)
+    ) t.pool with
+    | Ok pairs ->
+        Ok (List.map (fun (k, v) -> (strip_namespace t.namespace k, v)) pairs)
+    | Error err -> Error (caqti_error_to_masc err)
 
 let set_if_not_exists t ~key ~value =
   let nkey = namespaced_key t.namespace key in

@@ -26,7 +26,7 @@ let caqti_err e = IoError (Caqti_error.show e)
 
 (** {1 Schema DDL} *)
 
-open Caqti_request.Infix
+open Pg_infix
 
 let create_tasks_table_q =
   (Caqti_type.unit ->. Caqti_type.unit)

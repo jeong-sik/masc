@@ -59,6 +59,7 @@ let snapshot_schema ~remote =
                 ("include_keepers", `Assoc [ ("type", `String "boolean") ]);
               ] );
         ];
+    visibility = Public;
   }
 
 let digest_target_type_enums = [ `String "room"; `String "team_session" ]
@@ -95,6 +96,7 @@ let digest_schema ~remote =
                 ("include_workers", `Assoc [ ("type", `String "boolean") ]);
               ] );
         ];
+    visibility = Public;
   }
 
 let action_schema ~remote =
@@ -133,6 +135,7 @@ let action_schema ~remote =
               ] );
             ("required", `List [ `String "action_type"; `String "payload" ]);
         ];
+    visibility = Public;
   }
 
 let confirm_schema =
@@ -158,6 +161,7 @@ let confirm_schema =
               ] );
           ("required", `List [ `String "confirm_token" ]);
         ];
+    visibility = Public;
   }
 
 let judgment_write_schema =
@@ -203,6 +207,7 @@ let judgment_write_schema =
               ] );
           ("required", `List [ `String "surface"; `String "target_type"; `String "summary" ]);
         ];
+    visibility = Public;
   }
 
 let judgment_latest_schema =
@@ -234,6 +239,7 @@ let judgment_latest_schema =
               ] );
           ("required", `List [ `String "surface"; `String "target_type" ]);
         ];
+    visibility = Public;
   }
 
 let json_string_of_result = function

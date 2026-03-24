@@ -134,6 +134,7 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
         "Get the current MASC room status including active agents and task backlog.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
+      visibility = Public;
     };
     {
       Types.name = "masc_tasks";
@@ -151,6 +152,7 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
                   ("include_cancelled", `Assoc [ ("type", `String "boolean") ]);
                 ] );
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_claim_next";
@@ -164,6 +166,7 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
               `Assoc [ ("agent_name", `Assoc [ ("type", `String "string") ]) ] );
             ("required", `List [ `String "agent_name" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_transition";
@@ -191,6 +194,7 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
                   `String "action";
                 ] );
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_add_task";
@@ -208,6 +212,7 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "title" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_broadcast";
@@ -225,6 +230,7 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "agent_name"; `String "message" ]);
           ];
+      visibility = Public;
     };
   ]
 
@@ -236,6 +242,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
         "Update the worker heartbeat timestamp so long-running local tasks are not reaped as zombies.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
+      visibility = Public;
     };
     {
       Types.name = "masc_team_session_status";
@@ -249,6 +256,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
               `Assoc [ ("session_id", `Assoc [ ("type", `String "string") ]) ] );
             ("required", `List [ `String "session_id" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_team_session_step";
@@ -271,6 +279,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "session_id"; `String "turn_kind" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_memento_mori";
@@ -291,6 +300,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "context_ratio" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "lodge_research";
@@ -307,6 +317,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "topic" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "lodge_profile";
@@ -319,6 +330,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
               `Assoc [ ("agent_name", `Assoc [ ("type", `String "string") ]) ] );
             ("required", `List [ `String "agent_name" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "lodge_search";
@@ -335,6 +347,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "query" ]);
           ];
+      visibility = Public;
     };
   ]
 
@@ -359,6 +372,7 @@ let local_worker_code_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "query" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_code_symbols";
@@ -372,6 +386,7 @@ let local_worker_code_schemas : Types.tool_schema list =
               `Assoc [ ("path", `Assoc [ ("type", `String "string") ]) ] );
             ("required", `List [ `String "path" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_code_read";
@@ -390,6 +405,7 @@ let local_worker_code_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "path" ]);
           ];
+      visibility = Public;
     };
   ]
 
@@ -411,6 +427,7 @@ let local_worker_worktree_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "agent_name"; `String "task_id" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_worktree_remove";
@@ -427,12 +444,14 @@ let local_worker_worktree_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "agent_name"; `String "task_id" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_worktree_list";
       description = "List all active worktrees in the project with agent and task mappings. Use when checking for stale worktrees or seeing who is working in parallel.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
+      visibility = Public;
     };
   ]
 
@@ -453,6 +472,7 @@ let local_worker_run_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "task_id"; `String "agent_name" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_run_plan";
@@ -469,6 +489,7 @@ let local_worker_run_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "task_id"; `String "plan" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_run_log";
@@ -485,6 +506,7 @@ let local_worker_run_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "task_id"; `String "note" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_run_deliverable";
@@ -501,6 +523,7 @@ let local_worker_run_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "task_id"; `String "deliverable" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_run_get";
@@ -513,12 +536,14 @@ let local_worker_run_schemas : Types.tool_schema list =
               `Assoc [ ("task_id", `Assoc [ ("type", `String "string") ]) ] );
             ("required", `List [ `String "task_id" ]);
           ];
+      visibility = Public;
     };
     {
       Types.name = "masc_run_list";
       description = "List all task runs with their current status (init, active, completed). Use when surveying execution state across tasks or finding abandoned runs to resume.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
+      visibility = Public;
     };
   ]
 
@@ -558,6 +583,7 @@ let local_worker_spawn_schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "agent_name"; `String "prompt" ]);
           ];
+      visibility = Public;
     };
   ]
 

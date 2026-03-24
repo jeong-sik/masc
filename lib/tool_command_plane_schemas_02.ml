@@ -9,6 +9,7 @@ let schemas : tool_schema list = [
 Use when you need a combined operations + detachments snapshot for quick assessment. \
 Pair with masc_observe_alerts for derived alerts on problematic units.";
       input_schema = object_schema [];
+      visibility = Public;
     };
     {
       name = "masc_observe_swarm";
@@ -22,6 +23,7 @@ Pair with masc_observe_alerts for a full picture.";
             ("run_id", string_prop "Swarm-live run id.");
             ("operation_id", string_prop "Optional managed operation id.");
           ];
+      visibility = Public;
     };
     {
       name = "masc_observe_alerts";
@@ -30,6 +32,7 @@ Pair with masc_observe_alerts for a full picture.";
 Use when scanning for problems across the command plane that need attention. \
 Pair with masc_dispatch_escalate or masc_dispatch_rebalance to address issues.";
       input_schema = object_schema [];
+      visibility = Public;
     };
     {
       name = "masc_observe_capacity";
@@ -38,6 +41,7 @@ Pair with masc_dispatch_escalate or masc_dispatch_rebalance to address issues.";
 Use when checking which units have available capacity or are overloaded. \
 Pair with masc_dispatch_rebalance to redistribute work from overloaded units.";
       input_schema = object_schema [];
+      visibility = Public;
     };
     {
       name = "masc_observe_traces";
@@ -51,5 +55,6 @@ Pair with masc_operation_status for the operation's current state.";
             ("operation_id", string_prop "Operation id.");
             ("limit", integer_prop ~default:25 "Maximum events to return.");
           ];
+      visibility = Public;
     };
 ]

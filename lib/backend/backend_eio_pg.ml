@@ -33,7 +33,7 @@ let strip_namespace namespace key =
   else key
 
 (* Caqti 2.x query definitions *)
-open Caqti_request.Infix
+open Pg_infix
 
 let get_q =
   (Caqti_type.string ->? Caqti_type.string)

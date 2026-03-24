@@ -25,6 +25,21 @@ type config = {
 (** Create a config targeting a different scope. Cheap record copy. *)
 let with_scope config scope = { config with scope }
 
+let _domain_local_pg_backend_created = Atomic.make 0
+let _domain_local_pg_backend_failed = Atomic.make 0
+let _domain_local_pg_backend_last_error = Atomic.make ""
+
+let domain_local_pg_backend_diagnostics_json () =
+  `Assoc
+    [
+      ("creations", `Int (Atomic.get _domain_local_pg_backend_created));
+      ("failures", `Int (Atomic.get _domain_local_pg_backend_failed));
+      ( "last_error",
+        match String.trim (Atomic.get _domain_local_pg_backend_last_error) with
+        | "" -> `Null
+        | value -> `String value );
+    ]
+
 (** Create a config with a domain-local PostgresNative backend.
     Use when running in a different Eio domain (e.g., Executor_pool)
     where the main domain's Caqti pool would crash due to Switch
@@ -43,8 +58,12 @@ let with_domain_local_pg_backend ~sw ~net ~clock ~mono_clock config =
       end
     in
     (match Backend.PostgresNative.create_eio_readonly ~sw ~env config.backend_config with
-    | Ok t -> Some { config with backend = PostgresNative t }
+    | Ok t ->
+      Atomic.fetch_and_add _domain_local_pg_backend_created 1 |> ignore;
+      Some { config with backend = PostgresNative t }
     | Error err ->
+      Atomic.fetch_and_add _domain_local_pg_backend_failed 1 |> ignore;
+      Atomic.set _domain_local_pg_backend_last_error (Backend.show_error err);
       Log.Room.warn "Domain-local PG backend failed: %s"
         (Backend.show_error err);
       None)
@@ -130,20 +149,31 @@ let resolve_masc_base_path path =
 (* Environment helpers                          *)
 (* ============================================ *)
 
+let is_unresolved_template value =
+  let v = String.trim value in
+  (String.length v >= 2 && v.[0] = '{' && v.[1] = '{')
+  || (String.length v >= 5 && String.sub v 0 5 = "op://")
+
 let env_opt name =
   match Sys.getenv_opt name with
-  | Some value when String.trim value <> "" -> Some value
+  | Some value when String.trim value <> "" ->
+      if is_unresolved_template value then begin
+        Log.Backend.warn
+          "%s contains unresolved 1Password template; skipping" name;
+        None
+      end else
+        Some value
   | _ -> None
 
 let normalize_postgres_url url =
   let uri = Uri.of_string url in
-  match Uri.host uri, Uri.port uri with
+  (match Uri.host uri, Uri.port uri with
   | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
-      let normalized = Uri.to_string (Uri.with_port uri (Some 5432)) in
       Log.Backend.info
-        "Supabase transaction pooler detected in PostgreSQL URL; using session pooler port 5432 for prepared-statement compatibility";
-      normalized
-  | _ -> url
+        "Supabase Transaction Pooler detected (port 6543 on %s); Pg_infix will use oneshot queries to avoid prepared-statement errors"
+        host
+  | _ -> ());
+  url
 
 let postgres_url_from_env () =
   let raw_url =

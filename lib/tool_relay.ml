@@ -57,7 +57,7 @@ let handle_relay_checkpoint _ctx args =
       ) items
     | _ -> []
   in
-  let cell = !(Mcp_server.current_cell) in
+  let cell = Mcp_server.get_cell () in
   let messages = get_int args "messages" cell.Mitosis.task_count in
   let tool_calls = get_int args "tool_calls" cell.Mitosis.tool_call_count in
   let metrics = Relay.estimate_context ~messages ~tool_calls ~model:"claude" in
@@ -172,6 +172,7 @@ let schemas : Types.tool_schema list = [
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   (* masc_relay_checkpoint *)
@@ -208,6 +209,7 @@ Pair with masc_relay_now to trigger handoff, or masc_relay_status to check if re
       ]);
       ("required", `List [`String "summary"]);
     ];
+    visibility = Public;
   };
 
   (* masc_relay_now *)
@@ -240,6 +242,7 @@ Call masc_relay_checkpoint first to save state. The successor continues where yo
       ]);
       ("required", `List [`String "summary"]);
     ];
+    visibility = Public;
   };
 
   (* masc_relay_smart_check *)
@@ -271,6 +274,7 @@ Returns relay recommendation before you commit. Pair with masc_relay_now if rela
       ]);
       ("required", `List [`String "task_hint"]);
     ];
+    visibility = Public;
   };
 
 ]

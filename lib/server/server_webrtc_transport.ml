@@ -22,6 +22,88 @@ let is_enabled () =
   | Some "0" | Some "false" -> false
   | _ -> true
 
+let trim_nonempty value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
+let getenv_nonempty name =
+  match Sys.getenv_opt name with
+  | Some value -> trim_nonempty value
+  | None -> None
+
+let split_csv value =
+  String.split_on_char ',' value |> List.filter_map trim_nonempty
+
+let ice_server_urls (server : Webrtc.Ice.ice_server) = server.Webrtc.Ice.urls
+
+let parse_ice_servers_json raw =
+  let open Yojson.Safe.Util in
+  let parse_server json =
+    let urls =
+      match member "urls" json with
+      | `String value -> split_csv value
+      | `List values ->
+        values
+        |> List.filter_map (fun value ->
+             try value |> to_string |> trim_nonempty
+             with Type_error _ -> None)
+      | _ -> []
+    in
+    if urls = [] then
+      None
+    else
+      let opt name =
+        match member name json |> to_string_option with
+        | Some value -> trim_nonempty value
+        | None -> None
+      in
+      Some
+        {
+          Webrtc.Ice.urls;
+          username = opt "username";
+          credential = opt "credential";
+          tls_ca = opt "tls_ca";
+        }
+  in
+  try
+    match Yojson.Safe.from_string raw with
+    | `List servers -> List.filter_map parse_server servers
+    | json -> List.filter_map parse_server [ json ]
+  with Yojson.Json_error _ -> []
+
+let configured_ice_servers () =
+  match getenv_nonempty "MASC_WEBRTC_ICE_SERVERS_JSON" with
+  | Some raw -> (
+      match parse_ice_servers_json raw with
+      | [] -> Webrtc.Webrtc_eio.default_ice_config.Webrtc.Ice.ice_servers
+      | servers -> servers)
+  | None -> (
+      match getenv_nonempty "MASC_WEBRTC_ICE_URLS" with
+      | Some raw ->
+        let urls = split_csv raw in
+        if urls = [] then
+          Webrtc.Webrtc_eio.default_ice_config.Webrtc.Ice.ice_servers
+        else
+          [
+            {
+              Webrtc.Ice.urls;
+              username = getenv_nonempty "MASC_WEBRTC_ICE_USERNAME";
+              credential = getenv_nonempty "MASC_WEBRTC_ICE_CREDENTIAL";
+              tls_ca = getenv_nonempty "MASC_WEBRTC_ICE_TLS_CA";
+            };
+          ]
+      | None -> Webrtc.Webrtc_eio.default_ice_config.Webrtc.Ice.ice_servers)
+
+let configured_ice_server_urls () =
+  configured_ice_servers () |> List.concat_map ice_server_urls
+
+let configured_ice_config ~role =
+  {
+    Webrtc.Webrtc_eio.default_ice_config with
+    Webrtc.Ice.role = role;
+    ice_servers = configured_ice_servers ();
+  }
+
 (** {1 Signaling State} *)
 
 (** Pending offer waiting for an answer. *)
@@ -91,6 +173,55 @@ let connection_starter : (string -> unit) ref =
     are in scope). *)
 let set_connection_starter f = connection_starter := f
 
+let normalize_candidate_string candidate_str =
+  let trimmed = String.trim candidate_str in
+  if String.starts_with ~prefix:"a=candidate:" trimmed then
+    String.sub trimmed 12 (String.length trimmed - 12)
+  else if String.starts_with ~prefix:"candidate:" trimmed then
+    String.sub trimmed 10 (String.length trimmed - 10)
+  else
+    trimmed
+
+let add_remote_ice_candidate webrtc candidate_str =
+  let normalized = normalize_candidate_string candidate_str in
+  let should_warn =
+    String.contains normalized ' ' || String.contains normalized ':'
+  in
+  if normalized = "" || normalized = "end-of-candidates" then
+    ()
+  else
+    match Webrtc.Ice.parse_candidate normalized with
+    | Ok candidate -> Webrtc.Webrtc_eio.add_ice_candidate webrtc candidate
+    | Error _ ->
+      if String.contains normalized ':' && not (String.contains normalized ' ') then
+        match String.split_on_char ':' normalized with
+        | [addr; port_s] -> (
+            match int_of_string_opt port_s with
+            | Some port ->
+              let candidate : Webrtc.Ice.candidate = {
+                foundation = "webrtc";
+                component = 1;
+                transport = Webrtc.Ice.UDP;
+                priority = 100;
+                address = addr;
+                port;
+                cand_type = Webrtc.Ice.Host;
+                base_address = None;
+                base_port = None;
+                related_address = None;
+                related_port = None;
+                extensions = [];
+              } in
+              Webrtc.Webrtc_eio.add_ice_candidate webrtc candidate
+            | None when should_warn ->
+              Log.Server.warn "Ignoring invalid WebRTC ICE candidate: %s" candidate_str
+            | None -> ())
+        | _ when should_warn ->
+          Log.Server.warn "Ignoring invalid WebRTC ICE candidate: %s" candidate_str
+        | _ -> ()
+      else if should_warn then
+        Log.Server.warn "Ignoring invalid WebRTC ICE candidate: %s" candidate_str
+
 (** {1 Signaling API} *)
 
 (** Create a signaling offer.
@@ -135,36 +266,10 @@ let accept_offer ~offer_id ~answerer_agent =
       } in
       Hashtbl.replace active_peers peer_id conn;
       (* Create server-side WebRTC peer *)
-      let ice_config =
-        { Webrtc.Webrtc_eio.default_ice_config with
-          Webrtc.Ice.role = Webrtc.Ice.Controlled }
-      in
+      let ice_config = configured_ice_config ~role:Webrtc.Ice.Controlled in
       let webrtc = Webrtc.Webrtc_eio.create ~ice_config ~role:Webrtc.Webrtc_eio.Server () in
       (* Feed remote ICE candidates from the offer *)
-      List.iter (fun cand_str ->
-        (* Parse "host:port" format from signaling payload *)
-        match String.split_on_char ':' cand_str with
-        | [addr; port_s] ->
-          (match int_of_string_opt port_s with
-           | Some port ->
-             let candidate : Webrtc.Ice.candidate = {
-               foundation = "webrtc";
-               component = 1;
-               transport = Webrtc.Ice.UDP;
-               priority = 100;
-               address = addr;
-               port;
-               cand_type = Webrtc.Ice.Host;
-               base_address = None;
-               base_port = None;
-               related_address = None;
-               related_port = None;
-               extensions = [];
-             } in
-             Webrtc.Webrtc_eio.add_ice_candidate webrtc candidate
-           | None -> ())
-        | _ -> ()
-      ) offer.ice_candidates;
+      List.iter (add_remote_ice_candidate webrtc) offer.ice_candidates;
       Hashtbl.replace peer_webrtc_map peer_id webrtc;
       Log.Server.info "WebRTC peer %s established: %s <-> %s"
         peer_id offer.from_agent answerer_agent;

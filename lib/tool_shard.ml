@@ -24,6 +24,7 @@ let base_tools : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   (* Context status *)
   {
@@ -33,6 +34,7 @@ let base_tools : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   (* Memory *)
   {
@@ -46,6 +48,7 @@ let base_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "query"]);
     ];
+    visibility = Public;
   };
 ]
 
@@ -60,6 +63,7 @@ let board_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "post_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_board_post";
@@ -73,6 +77,7 @@ let board_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "content"]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_board_list";
@@ -85,6 +90,7 @@ let board_tools : Types.tool_schema list = [
         ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort: recent (newest), hot (score+recency), updated (most active)")]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_board_comment";
@@ -97,6 +103,7 @@ let board_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "post_id"; `String "content"]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_board_vote";
@@ -109,6 +116,7 @@ let board_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "post_id"]);
     ];
+    visibility = Public;
   };
 ]
 
@@ -132,6 +140,7 @@ let filesystem_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "path"]);
     ];
+    visibility = Public;
   };
 ]
 
@@ -150,6 +159,7 @@ let shell_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "op"]);
     ];
+    visibility = Public;
   };
 ]
 
@@ -165,6 +175,7 @@ let coding_keeper_bridge_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "cmd"]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_github";
@@ -177,6 +188,7 @@ let coding_keeper_bridge_tools : Types.tool_schema list = [
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
       ]);
     ];
+    visibility = Public;
   };
 ]
 
@@ -206,6 +218,7 @@ let voice_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "message"]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_voice_agent";
@@ -214,6 +227,7 @@ let voice_tools : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_voice_sessions";
@@ -222,6 +236,7 @@ let voice_tools : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_voice_session_start";
@@ -232,6 +247,7 @@ let voice_tools : Types.tool_schema list = [
         ("session_name", `Assoc [("type", `String "string"); ("description", `String "Optional session name")]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_voice_session_end";
@@ -240,6 +256,7 @@ let voice_tools : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 ]
 
@@ -253,6 +270,7 @@ let weather_tools : Types.tool_schema list = [
         ("location", `Assoc [("type", `String "string")]);
       ]);
     ];
+    visibility = Public;
   };
 ]
 
@@ -267,6 +285,7 @@ let library_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "query"]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_library_read";
@@ -278,6 +297,7 @@ let library_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "topic"]);
     ];
+    visibility = Public;
   };
 ]
 
@@ -292,6 +312,7 @@ let taskboard_tools : Types.tool_schema list = [
         ("include_done", `Assoc [("type", `String "boolean"); ("description", `String "Include completed tasks (default: false)")]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_tasks_audit";
@@ -300,6 +321,7 @@ let taskboard_tools : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_task_force_release";
@@ -312,6 +334,7 @@ let taskboard_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "task_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_task_force_done";
@@ -324,6 +347,7 @@ let taskboard_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "task_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_broadcast";
@@ -335,6 +359,7 @@ let taskboard_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "message"]);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_task_claim";
@@ -343,6 +368,7 @@ let taskboard_tools : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   {
     name = "keeper_task_done";
@@ -355,6 +381,7 @@ let taskboard_tools : Types.tool_schema list = [
       ]);
       ("required", `List [`String "task_id"]);
     ];
+    visibility = Public;
   };
 ]
 
@@ -393,8 +420,7 @@ let shard_coding : shard = {
   tools = coding_tools;
   removable = true;
   description =
-    "Coding tools: github/shell bridge + worktree/code inspection \
-     (requires policy_shell_mode=coding)";
+    "Coding tools: github/shell bridge + worktree/code inspection";
 }
 
 let shard_weather : shard = {
@@ -464,8 +490,8 @@ let shard_autoresearch : shard = {
 let agent_shards : (string, string list) Hashtbl.t = Hashtbl.create 32
 
 (** Default shards for a new keeper.
-    Keep the default surface focused on coordination/governance. Voice,
-    weather, and coding are opt-in. *)
+    All keepers get all shards unconditionally. Safety is handled by
+    eval_gate deny lists, not by shard membership. *)
 let default_shard_names : string list = [
   "base";
   "board";
@@ -474,6 +500,9 @@ let default_shard_names : string list = [
   "library";
   "taskboard";
   "governance";
+  "coding";
+  "autoresearch";
+  "weather";
 ]
 
 let get_agent_shards (agent_name : string) : string list =
@@ -570,6 +599,7 @@ Shards: base (core), board, filesystem, shell, governance, weather, voice, taskb
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_tool_revoke";
@@ -589,6 +619,7 @@ Cannot revoke 'base' shard (always present).";
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_tool_list";
@@ -597,6 +628,7 @@ Cannot revoke 'base' shard (always present).";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 ]
 

@@ -57,28 +57,15 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
             | model :: _ -> model
             | [] -> "")
   in
-  let policy_mode =
-    first_some
-      p.policy_mode_opt
-      (first_some
-         (if String.trim old.policy_mode <> "" then Some old.policy_mode else None)
-         p.profile_defaults.policy_mode)
-    |> Option.value ~default:"heuristic"
-    |> canonical_policy_mode
-  in
+  (* Mode categorization removed: always use fixed values. *)
+  let policy_mode = canonical_policy_mode "heuristic" in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
       (first_some (Some old.policy_voice_enabled) p.profile_defaults.policy_voice_enabled)
     |> Option.value ~default:false
   in
-  let policy_shell_mode =
-    first_some
-      p.policy_shell_mode_opt
-      (first_some (Some old.policy_shell_mode) p.profile_defaults.policy_shell_mode)
-    |> Option.value ~default:"disabled"
-    |> canonical_policy_shell_mode
-  in
+  let policy_shell_mode = canonical_policy_shell_mode "coding" in
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in

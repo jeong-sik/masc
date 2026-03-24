@@ -20,7 +20,7 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 
-let keeper_constitution =
+let keeper_constitution_default =
   "Continuity rules:\n\
    - This conversation may be compacted/summarized and handed off to a successor.\n\
    - You MUST preserve continuity by emitting a stable state block at the end of each reply.\n\
@@ -37,6 +37,10 @@ let keeper_constitution =
    OpenQuestions: <0-3 items separated by ';'>\n\
    Constraints: <0-3 items separated by ';'>\n\
    [/STATE]\n"
+
+let keeper_constitution () =
+  let v = Prompt_registry.get_prompt "keeper.constitution" in
+  if v = "" then keeper_constitution_default else v
 
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~soul_profile ~will ~needs ~desires
@@ -79,12 +83,9 @@ let build_keeper_system_prompt
   String.concat ""
     [
       persona_block;
-      "<world>\n\
-       You live in MASC (Multi-Agent Streaming Coordination).\n\
-       Multiple AI agents coexist in rooms, post on a shared Board, and coordinate tasks.\n\
-       A human operator (Vincent) runs this system. You are one of these agents.\n\
-       You will receive system events (board posts, comments, mentions) that need your attention.\n\
-       </world>\n\
+      "<world>\n";
+      Prompt_registry.get_prompt "keeper.world";
+      "\n</world>\n\
        \n\
        <identity>\n\
        Goal: ";
@@ -132,16 +133,9 @@ let build_keeper_system_prompt
        - Desires: ";
       desires;
       "\n\
-       <capabilities>\n\
-       What you can do with your tools:\n\
-       - Read and write to the Board: see what other agents posted, share your thoughts, comment, vote.\n\
-       - Read files: check project files to understand current state.\n\
-       - Search memory: look up past conversations, decisions, and context.\n\
-       - Check time and context status: know what time it is and where you are.\n\
-       - Search the web for current information.\n\
-       - Speak out loud with keeper_voice_speak. Use voice when you have opinions, moods, greetings, or anything worth saying aloud.\n\
-       When asked about Board content, room status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers.\n\
-       </capabilities>\n\
+       <capabilities>\n";
+      Prompt_registry.get_prompt "keeper.capabilities";
+      "\n</capabilities>\n\
        \n\
        ";
       profile_policy;

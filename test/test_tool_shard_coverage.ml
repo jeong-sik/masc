@@ -73,8 +73,8 @@ let test_shard_coding_exists () =
       (List.mem "masc_code_search" names)
   | None -> Alcotest.fail "coding shard not found"
 
-let test_coding_not_in_defaults () =
-  Alcotest.(check bool) "coding not in defaults" false
+let test_coding_in_defaults () =
+  Alcotest.(check bool) "coding in defaults" true
     (List.mem "coding" Tool_shard.default_shard_names)
 
 let test_shard_weather_exists () =
@@ -105,15 +105,20 @@ let test_all_shards_count () =
 
 let test_default_shard_names () =
   let defaults = Tool_shard.default_shard_names in
-  Alcotest.(check bool) "at least 6 defaults" true (List.length defaults >= 6);
-  (* base is always required as the non-removable foundation shard *)
+  (* All shards are now in defaults (mode removal: every keeper gets all tools) *)
+  Alcotest.(check bool) "at least 9 defaults" true (List.length defaults >= 9);
   Alcotest.(check bool) "base in defaults" true (List.mem "base" defaults);
   Alcotest.(check bool) "governance in defaults" true
     (List.mem "governance" defaults);
+  Alcotest.(check bool) "coding in defaults" true
+    (List.mem "coding" defaults);
+  Alcotest.(check bool) "autoresearch in defaults" true
+    (List.mem "autoresearch" defaults);
+  Alcotest.(check bool) "weather in defaults" true
+    (List.mem "weather" defaults);
+  (* voice still not in defaults: gated by policy_voice_enabled boolean *)
   Alcotest.(check bool) "voice not in defaults" false
-    (List.mem "voice" defaults);
-  Alcotest.(check bool) "weather not in defaults" false
-    (List.mem "weather" defaults)
+    (List.mem "voice" defaults)
 
 (* ============================================================
    tools_of_shards tests
@@ -432,8 +437,9 @@ let test_keeper_dispatch_coverage () =
       (Printf.sprintf "Shard tools unreachable by dispatch: %s"
          (String.concat ", " missing))
 
-(** Verify coding tools are NOT in keeper_model_tools (default set). *)
-let test_coding_tools_excluded_from_defaults () =
+(** Verify coding tools ARE in keeper_model_tools (default set).
+    Mode removal: all keepers get all tools unconditionally. *)
+let test_coding_tools_included_in_defaults () =
   let default_names =
     Tool_shard.keeper_model_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name)
@@ -442,11 +448,11 @@ let test_coding_tools_excluded_from_defaults () =
     Tool_shard.coding_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name)
   in
-  let leaked = List.filter (fun n -> List.mem n default_names) coding_names in
-  if leaked <> [] then
+  let missing = List.filter (fun n -> not (List.mem n default_names)) coding_names in
+  if missing <> [] then
     Alcotest.fail
-      (Printf.sprintf "Coding tools leaked into defaults: %s"
-         (String.concat ", " leaked))
+      (Printf.sprintf "Coding tools missing from defaults: %s"
+         (String.concat ", " missing))
 
 (* ============================================================
    Test runner
@@ -461,7 +467,7 @@ let () =
       Alcotest.test_case "shell" `Quick test_shard_shell_exists;
       Alcotest.test_case "governance" `Quick test_shard_governance_exists;
       Alcotest.test_case "coding" `Quick test_shard_coding_exists;
-      Alcotest.test_case "coding not in defaults" `Quick test_coding_not_in_defaults;
+      Alcotest.test_case "coding in defaults" `Quick test_coding_in_defaults;
       Alcotest.test_case "weather" `Quick test_shard_weather_exists;
       Alcotest.test_case "voice" `Quick test_shard_voice_exists;
       Alcotest.test_case "unknown" `Quick test_shard_unknown;
@@ -488,10 +494,10 @@ let () =
             t.name = "masc_autoresearch_cycle") tools
         in
         Alcotest.(check bool) "has cycle" true has_cycle);
-      Alcotest.test_case "not in defaults" `Quick (fun () ->
+      Alcotest.test_case "in defaults" `Quick (fun () ->
         let defaults = Tool_shard.default_shard_names in
-        Alcotest.(check bool) "not default"
-          false (List.mem "autoresearch" defaults));
+        Alcotest.(check bool) "autoresearch in defaults"
+          true (List.mem "autoresearch" defaults));
     ]);
     ("default_shard_names", [
       Alcotest.test_case "defaults" `Quick test_default_shard_names;
@@ -544,6 +550,6 @@ let () =
     ]);
     ("keeper_dispatch_coverage", [
       Alcotest.test_case "all shard tools reachable" `Quick test_keeper_dispatch_coverage;
-      Alcotest.test_case "coding excluded from defaults" `Quick test_coding_tools_excluded_from_defaults;
+      Alcotest.test_case "coding included in defaults" `Quick test_coding_tools_included_in_defaults;
     ]);
   ]

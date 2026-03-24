@@ -377,7 +377,7 @@ export function ChatComposer({
   const streamLabel = streaming
     ? `응답 중${elapsed > 0 ? ` ${elapsed}s` : '...'}`
     : '보내기'
-  const warnClass = streaming && elapsed > 60 ? ' chat-stream-warning' : ''
+  const isStreamWarning = streaming && elapsed > 60
 
   return html`
     <div class="chat-composer flex flex-col gap-3">
@@ -408,7 +408,7 @@ export function ChatComposer({
         </div>
         <div class="flex gap-2 items-center">
         <${ActionButton}
-          variant=${warnClass ? 'danger' : 'primary'}
+          variant=${isStreamWarning ? 'danger' : 'primary'}
           onClick=${onSend}
           disabled=${disabled || streaming || draft.trim() === ''}
         >

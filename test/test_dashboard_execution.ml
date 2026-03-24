@@ -85,7 +85,11 @@ let test_dashboard_execution_fixture () =
           "Continuity pressure is high; handoff prep is underway"
           (continuity_briefs |> List.hd |> member "continuity_summary" |> to_string);
         check int "continuity allowed tool count" 3
-          (continuity_briefs |> List.hd |> member "allowed_tool_names" |> to_list |> List.length);
+          (continuity_briefs |> List.hd |> member "allowed_tool_count" |> to_int);
+        check (list string) "continuity allowed tool preview"
+          [ "masc_board_get"; "masc_board_post"; "masc_keeper_status" ]
+          (continuity_briefs |> List.hd |> member "allowed_tool_preview"
+         |> to_list |> List.map to_string);
         check bool "worker focus carried through" true
           (worker_briefs
            |> List.exists (fun row ->

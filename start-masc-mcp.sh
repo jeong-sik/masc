@@ -5,6 +5,10 @@
 
 set -e
 
+# OCaml GC: use defaults. Large minor heap (s=4194304) caused 10GB+ RSS
+# because Eio fibers share the domain heap and 360 tools + 12 keepers
+# amplify allocation pressure. The default 256KB minor heap is sufficient.
+
 # Optional: load OPAM environment if available (must never be fatal for MCP startup)
 if command -v opam >/dev/null 2>&1; then
     eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true
@@ -58,6 +62,22 @@ release_build_lock() {
     _masc_cleanup_lock
 }
 
+build_dashboard_spa() {
+    local dashboard_dir="$SCRIPT_DIR/dashboard"
+
+    if [ ! -f "$dashboard_dir/package.json" ]; then
+        return 0
+    fi
+
+    echo "[dashboard] Building SPA before server start..." >&2
+    if command -v npm >/dev/null 2>&1; then
+        (cd "$dashboard_dir" && npm install --prefer-offline --no-audit 2>&1 | tail -1 >&2 && npm run build 2>&1 | tail -3 >&2) || \
+            echo "[dashboard] Build failed (non-fatal, server will show fallback page)." >&2
+    else
+        echo "[dashboard] npm not found, skipping dashboard build." >&2
+    fi
+}
+
 resolve_repo_env_root() {
     if command -v git >/dev/null 2>&1; then
         local common_dir
@@ -81,7 +101,42 @@ load_env_file() {
     fi
 }
 
+preserve_env_override() {
+    local name="$1"
+    local flag_var="__PRESERVE_${name}_SET"
+    local value_var="__PRESERVE_${name}_VALUE"
+    if [ "${!name+x}" = "x" ]; then
+        printf -v "$flag_var" '%s' "1"
+        printf -v "$value_var" '%s' "${!name}"
+    fi
+}
+
+restore_env_override() {
+    local name="$1"
+    local flag_var="__PRESERVE_${name}_SET"
+    local value_var="__PRESERVE_${name}_VALUE"
+    if [ "${!flag_var:-}" = "1" ]; then
+        export "$name=${!value_var}"
+    fi
+}
+
 REPO_ENV_ROOT="$(resolve_repo_env_root)"
+
+# Caller-provided env must win over repo-local .env/.env.local files.
+# This keeps one-off overrides like MASC_STORAGE_TYPE=postgres effective
+# instead of being silently reset by checked-in defaults.
+for env_name in \
+    MASC_STORAGE_TYPE \
+    MASC_POSTGRES_URL \
+    DATABASE_URL \
+    SUPABASE_DB_URL \
+    SB_PG_URL \
+    MASC_MCP_PORT \
+    MASC_HOST \
+    MASC_BASE_PATH
+do
+    preserve_env_override "$env_name"
+done
 
 # Load secrets from the user profile; tracked plist files must not embed them.
 # NOTE: This intentionally sources ~/.zshenv which may set PATH and other vars.
@@ -96,6 +151,19 @@ if [ "$REPO_ENV_ROOT" != "$SCRIPT_DIR" ]; then
     load_env_file "$SCRIPT_DIR/.env"
     load_env_file "$SCRIPT_DIR/.env.local"
 fi
+
+for env_name in \
+    MASC_STORAGE_TYPE \
+    MASC_POSTGRES_URL \
+    DATABASE_URL \
+    SUPABASE_DB_URL \
+    SB_PG_URL \
+    MASC_MCP_PORT \
+    MASC_HOST \
+    MASC_BASE_PATH
+do
+    restore_env_override "$env_name"
+done
 
 raise_open_file_limit() {
     local desired="${MASC_NOFILE_TARGET:-4096}"
@@ -200,20 +268,8 @@ if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1 && [ "${MASC_ALLOW_PORT_RE
 fi
 
 # Dashboard SPA build (Vite) — assets/dashboard/ is no longer committed to git.
-# Build if missing or if source is newer than the build output.
-if [ -f "$SCRIPT_DIR/dashboard/package.json" ]; then
-    DASHBOARD_INDEX="$SCRIPT_DIR/assets/dashboard/index.html"
-    if [ ! -f "$DASHBOARD_INDEX" ] || \
-       find "$SCRIPT_DIR/dashboard/src" -type f -newer "$DASHBOARD_INDEX" 2>/dev/null | head -n 1 | grep -q .; then
-        echo "[dashboard] Building SPA..." >&2
-        if command -v npm >/dev/null 2>&1; then
-            (cd "$SCRIPT_DIR/dashboard" && npm install --prefer-offline --no-audit 2>&1 | tail -1 >&2 && npm run build 2>&1 | tail -3 >&2) || \
-                echo "[dashboard] Build failed (non-fatal, server will show fallback page)." >&2
-        else
-            echo "[dashboard] npm not found, skipping dashboard build." >&2
-        fi
-    fi
-fi
+# Always attempt the build before server startup so the served bundle matches current sources.
+build_dashboard_spa
 
 # Resolve executable path
 # Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download

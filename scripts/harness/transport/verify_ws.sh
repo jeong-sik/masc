@@ -2,13 +2,10 @@
 # E2E: Verify WebSocket transport.
 #
 # Tests:
-#   1. WebSocket upgrade attempt on /ws endpoint
-#   2. Feature gate: disabled when MASC_WS_ENABLED != 1
-#   3. WebSocket frame exchange (requires websocat)
-#
-# NOTE: TRANS-001 identifies a potential bug where the WebSocket I/O
-# loop may not be driven. This harness will expose the issue if
-# frame exchange fails while upgrade succeeds.
+#   1. /ws returns stable discovery JSON
+#   2. Standalone WS port performs a 101 handshake
+#   3. WS client receives a broadcast-delivered text frame
+#   4. Server remains healthy after the WS smoke
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
@@ -18,62 +15,134 @@ require_server
 
 echo "--- WebSocket Transport E2E ---"
 
-# Test 1: WebSocket standalone server connectivity
-# WebSocket runs on a separate port (default: 8937), not on the main HTTP port.
-# The main HTTP /ws endpoint returns a redirect JSON with the WS port.
-ws_port_resp=$(curl -sf "${MASC_BASE_URL}/ws" 2>&1 || echo "FAILED")
-if echo "$ws_port_resp" | grep -q "ws_port"; then
-  pass "WebSocket: /ws returns standalone port info"
+ws_discovery="$(curl -fsS "${MASC_BASE_URL}/ws" 2>&1 || true)"
+read -r ws_enabled ws_port ws_url <<EOF
+$(WS_DISCOVERY="$ws_discovery" python3 - <<'PY'
+import json, os
+payload = json.loads(os.environ["WS_DISCOVERY"])
+print(str(payload.get("enabled", False)).lower(), payload.get("ws_port", ""), payload.get("ws_url", ""))
+PY
+)
+EOF
+
+if [[ "$ws_enabled" = "true" && -n "$ws_port" && -n "$ws_url" ]]; then
+  pass "WebSocket: /ws returns discovery JSON"
 else
-  skip "WebSocket: /ws endpoint" "response: ${ws_port_resp:0:100}"
+  fail "WebSocket: /ws discovery" "unexpected response: ${ws_discovery:0:200}"
+  summary
+  exit 1
 fi
 
-# Test 1b: WebSocket upgrade on standalone port
-ws_resp=$(curl -sf -i -m 5 \
+ws_resp="$(curl -sf -i -m 5 \
   -H "Connection: Upgrade" \
   -H "Upgrade: websocket" \
   -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
   -H "Sec-WebSocket-Version: 13" \
-  "http://127.0.0.1:${MASC_WS_PORT}/" 2>&1 || echo "FAILED")
-
+  "http://127.0.0.1:${ws_port}/" 2>&1 || echo "FAILED")"
 if echo "$ws_resp" | grep -q "101"; then
-  pass "WebSocket upgrade on :${MASC_WS_PORT}: 101 Switching Protocols"
-elif echo "$ws_resp" | grep -q "FAILED"; then
-  fail "WebSocket upgrade on :${MASC_WS_PORT}" "connection failed (server may not expose standalone WS)"
+  pass "WebSocket handshake on :${ws_port}: 101 Switching Protocols"
+else
+  fail "WebSocket handshake on :${ws_port}" "${ws_resp:0:160}"
   summary
   exit 1
-else
-  skip "WebSocket upgrade on :${MASC_WS_PORT}" "response: ${ws_resp:0:100}"
 fi
 
-# Test 2: WebSocket frame exchange (if websocat available)
-if require_tool websocat; then
-  WS_OUTPUT=$(mktemp)
-  # Connect to standalone WS port
-  echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | \
-    timeout 5 websocat -1 "${MASC_WS_URL}/" \
-    >"${WS_OUTPUT}" 2>&1 || true
+ws_output="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws.XXXXXX")"
+MASC_WS_HOST="127.0.0.1" MASC_WS_PORT="$ws_port" WS_OUTPUT="$ws_output" \
+WS_EXPECT="ws-e2e-test-event" python3 - <<'PY' &
+import base64
+import os
+import socket
+import sys
 
-  if [ -s "${WS_OUTPUT}" ]; then
-    ws_data=$(cat "${WS_OUTPUT}")
-    if echo "$ws_data" | jq -e '.' >/dev/null 2>&1; then
-      pass "WebSocket: frame exchange works (received JSON response)"
-    else
-      # Any data received means I/O loop is driving
-      pass "WebSocket: received data (${#ws_data} bytes)"
-    fi
+host = os.environ["MASC_WS_HOST"]
+port = int(os.environ["MASC_WS_PORT"])
+output_path = os.environ["WS_OUTPUT"]
+expected = os.environ["WS_EXPECT"]
+
+sock = socket.create_connection((host, port), timeout=5)
+key = base64.b64encode(os.urandom(16)).decode()
+request = (
+    f"GET / HTTP/1.1\r\n"
+    f"Host: {host}:{port}\r\n"
+    "Upgrade: websocket\r\n"
+    "Connection: Upgrade\r\n"
+    f"Sec-WebSocket-Key: {key}\r\n"
+    "Sec-WebSocket-Version: 13\r\n\r\n"
+)
+sock.sendall(request.encode())
+
+buffer = b""
+while b"\r\n\r\n" not in buffer:
+    chunk = sock.recv(4096)
+    if not chunk:
+        raise SystemExit(1)
+    buffer += chunk
+
+status_line = buffer.split(b"\r\n", 1)[0]
+if b"101" not in status_line:
+    raise SystemExit(2)
+buffer = buffer.split(b"\r\n\r\n", 1)[1]
+sock.settimeout(6)
+
+def read_exact(n: int) -> bytes:
+    global buffer
+    data = b""
+    if buffer:
+        take = min(len(buffer), n)
+        data += buffer[:take]
+        buffer = buffer[take:]
+    while len(data) < n:
+        chunk = sock.recv(n - len(data))
+        if not chunk:
+            raise EOFError("unexpected websocket EOF")
+        data += chunk
+    return data
+
+for _ in range(16):
+    hdr = read_exact(2)
+    opcode = hdr[0] & 0x0F
+    masked = (hdr[1] & 0x80) != 0
+    length = hdr[1] & 0x7F
+    if length == 126:
+      length = int.from_bytes(read_exact(2), "big")
+    elif length == 127:
+      length = int.from_bytes(read_exact(8), "big")
+    mask = read_exact(4) if masked else b""
+    payload = read_exact(length)
+    if masked:
+      payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    if opcode == 0x1:
+      text = payload.decode("utf-8", errors="replace")
+      with open(output_path, "a", encoding="utf-8") as fh:
+        fh.write(text)
+        fh.write("\n")
+      if expected in text:
+        raise SystemExit(0)
+    if opcode == 0x8:
+      raise SystemExit(3)
+
+raise SystemExit(4)
+PY
+ws_client_pid=$!
+
+sleep 1
+session_id="$(mcp_initialize_session)"
+mcp_join_agent "$session_id" "transport-harness" >/dev/null
+mcp_broadcast "$session_id" "transport-harness" "ws-e2e-test-event" >/dev/null
+
+if wait "$ws_client_pid"; then
+  if grep -q "ws-e2e-test-event" "$ws_output"; then
+    pass "WebSocket: received broadcast-delivered text frame"
   else
-    fail "WebSocket: frame exchange" \
-      "TRANS-001: no data received (I/O loop may not be driven)"
+    fail "WebSocket frame delivery" "frame received but expected broadcast text missing"
   fi
-  rm -f "${WS_OUTPUT}"
 else
-  skip "WebSocket frame exchange" "websocat not installed (brew install websocat)"
+  fail "WebSocket frame delivery" "client did not receive a text frame"
 fi
+rm -f "$ws_output"
 
-# Test 3: Server stability after WebSocket test
-health_after=$(curl -sf "${MASC_BASE_URL}/health" 2>&1)
-if [ $? -eq 0 ]; then
+if curl -fsS "${MASC_BASE_URL}/health" >/dev/null 2>&1; then
   pass "server healthy after WebSocket test"
 else
   fail "server health" "health check failed after WebSocket test"

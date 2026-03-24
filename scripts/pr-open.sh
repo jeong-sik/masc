@@ -61,6 +61,15 @@ require_cmd git
 require_cmd gh
 require_cmd jq
 
+load_changed_files() {
+  local range="$1"
+  changed_files=()
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    changed_files+=("$file")
+  done < <(git diff --name-only "$range" 2>/dev/null || true)
+}
+
 branch="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$branch" == "main" || "$branch" == "master" ]]; then
   echo "refusing to open PR from branch '$branch'" >&2
@@ -92,9 +101,9 @@ else
   pr_number="$(gh pr view "$pr_url" --repo "$repo" --json number --jq .number)"
 fi
 
-mapfile -t changed_files < <(git diff --name-only "origin/$base...HEAD" 2>/dev/null || true)
+load_changed_files "origin/$base...HEAD"
 if [[ ${#changed_files[@]} -eq 0 ]]; then
-  mapfile -t changed_files < <(git diff --name-only "HEAD~1..HEAD" || true)
+  load_changed_files "HEAD~1..HEAD"
 fi
 
 docs_only=1

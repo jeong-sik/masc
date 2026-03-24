@@ -218,7 +218,8 @@ let room_recommendations ?command_plane_summary config =
   dedup_recommendations signal_recommendations
 
 let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
-    (ctx : 'a context) : (Yojson.Safe.t, string) result =
+    ?command_plane_summary ?swarm_status (ctx : 'a context) :
+    (Yojson.Safe.t, string) result =
   let config = ctx.config in
   if not (Room.is_initialized config) then
     Ok
@@ -258,18 +259,16 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
       | Some s -> s
       | None -> Team_session_store.list_sessions config
     in
-    (* Pass pre-loaded sessions to avoid redundant list_sessions calls.
-       Each function still builds its own snapshot_state internally, but
-       skips the session filesystem scan since sessions are provided. *)
-    let command_plane_snapshot_json =
-      Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
-    in
-    Eio.Fiber.yield ();
     let command_plane_digest_json =
-      Command_plane_v2.summary_json ~sessions:tracked_sessions config
+      match command_plane_summary with
+      | Some summary -> summary
+      | None -> Command_plane_v2.summary_json ~sessions:tracked_sessions config
     in
     let swarm_status_json =
-      Swarm_status.build_json_from_snapshot config command_plane_snapshot_json
+      match swarm_status with
+      | Some json -> json
+      | None ->
+          Swarm_status.build_json ~timeline_limit_override:6 config
     in
     match target_type with
     | "room" ->
@@ -282,13 +281,13 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
           sessions |> List.to_seq |> Seq.take room_digest_session_limit |> List.of_seq
         in
         let attention_items =
-          build_room_attention_items config
+          build_room_attention_items ~command_plane_summary:command_plane_digest_json config
           @ (limited_sessions |> List.concat_map (fun digest -> digest.attention_items))
           |> List.sort compare_attention
         in
         let recommended_actions =
           dedup_recommendations
-            (room_recommendations config
+            (room_recommendations ~command_plane_summary:command_plane_digest_json config
             @ (limited_sessions
               |> List.concat_map (fun digest -> digest.recommended_actions)))
         in

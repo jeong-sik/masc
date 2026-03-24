@@ -3,6 +3,7 @@
 import { signal } from '@preact/signals'
 import { html } from 'htm/preact'
 import { CARD_STANDARD } from '../common/card'
+import { ActionButton } from '../common/button'
 import {
   fetchAutoresearchStatus,
   injectAutoresearchHypothesis,
@@ -317,15 +318,15 @@ export function OpsSessionColumn() {
         ${linkedAutoresearch?.loop_id ? html`
           <label class="control-label" for="ops-autoresearch-hypothesis">Autoresearch 제어</label>
           <div class="control-row items-stretch">
-            <button type="button" class="control-btn ghost" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
+            <${ActionButton} variant="ghost" size="lg" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
               상태 새로고침
-            </button>
-            <button type="button" class="control-btn" onClick=${() => { void cycleAutoresearch() }} disabled=${busy}>
+            <//>
+            <${ActionButton} variant="primary" size="lg" onClick=${() => { void cycleAutoresearch() }} disabled=${busy}>
               1 cycle 실행
-            </button>
-            <button type="button" class="control-btn ghost" onClick=${() => { void stopAutoresearch() }} disabled=${busy}>
+            <//>
+            <${ActionButton} variant="ghost" size="lg" onClick=${() => { void stopAutoresearch() }} disabled=${busy}>
               loop 중지
-            </button>
+            <//>
           </div>
           <textarea
             id="ops-autoresearch-hypothesis"
@@ -337,9 +338,9 @@ export function OpsSessionColumn() {
             disabled=${busy}
           ></textarea>
           <div class="control-row items-stretch">
-            <button type="button" class="control-btn" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
+            <${ActionButton} variant="primary" size="lg" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
               hypothesis 주입
-            </button>
+            <//>
             <span class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
           </div>
           ${autoresearchError.value ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">${autoresearchError.value}</div>` : null}
@@ -359,9 +360,9 @@ export function OpsSessionColumn() {
             <option value="task">작업</option>
             <option value="worker_spawn_batch">worker 교체</option>
           </select>
-          <button type="button" class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSessionActionable}>
+          <${ActionButton} variant="primary" size="lg" onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSessionActionable}>
             적용
-          </button>
+          <//>
         </div>
         <div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">현재 선택: ${sessionActionLabel(teamTurnKind.value)}</div>
 
@@ -422,9 +423,9 @@ export function OpsSessionColumn() {
             onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
             disabled=${busy || !selectedSessionActionable}
           />
-          <button type="button" class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSessionActionable}>
+          <${ActionButton} variant="ghost" size="lg" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSessionActionable}>
             세션 중지
-          </button>
+          <//>
         </div>
       </section>
     </div>

@@ -15,6 +15,7 @@
    agent_tool_surfaces
    agent_neo4j
    agent_registry_eio
+   anti_rationalization
    auto_recall
    auto_responder
    auth
@@ -160,6 +161,7 @@
    worker_verification
    safe_parse
    prompt_registry
+   prompt_defaults
    prompt_composer
    chain_types
    chain_trace_types
@@ -314,6 +316,7 @@
    tool_schemas_control
    tool_schemas_a2a
    tool_schemas_misc
+   tool_improve_loop_schemas
    tool_plan
    tool_run
    tool_bridge
@@ -359,6 +362,7 @@
    tool_room
    workflow_guide
    tool_control
+   tool_improve_loop
    tool_verification
    tool_misc
    tool_agent_timeline
@@ -418,6 +422,7 @@
    social
    tool_social
    transport
+   transport_metrics
    ;; gRPC coordination transport (grpc-direct)
    masc_grpc_types
    masc_grpc_service

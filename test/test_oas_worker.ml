@@ -154,6 +154,7 @@ let make_mitosis_ctx ~base_path : Tool_mitosis_oas.context =
   { config; agent_name = "test-agent"; masc_tools = []; dispatch = noop_dispatch }
 
 let with_mitosis_base f =
+  Eio_main.run @@ fun _env ->
   let base_path = temp_dir "test_mitosis_oas" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -341,10 +342,10 @@ let test_petition_submit_creates_case () =
     let json = parse_json body in
     let case_id = json |> field "case_id" |> Yojson.Safe.Util.to_string in
     Alcotest.(check bool) "case_id non-empty" true (String.length case_id > 0);
-    Alcotest.(check bool) "collaboration_id null" true
-      (json |> field "collaboration_id" = `Null);
-    Alcotest.(check bool) "phase null" true
-      (json |> field "phase" = `Null);
+    Alcotest.(check string) "collaboration_id compatibility alias" case_id
+      (json |> field "collaboration_id" |> Yojson.Safe.Util.to_string);
+    Alcotest.(check string) "phase compatibility alias" "active"
+      (json |> field "phase" |> Yojson.Safe.Util.to_string);
     (match Council.Governance_v2.get_case_bundle base_path case_id with
      | Ok bundle ->
          let source_refs =
@@ -493,6 +494,9 @@ let test_case_brief_submit_accepts_evidence_refs_array () =
 (* ================================================================ *)
 (* Keeper checkpoint boundary tests                                  *)
 (* ================================================================ *)
+(* ================================================================ *)
+(* Keeper checkpoint boundary tests                                  *)
+(* ================================================================ *)
 
 let make_keeper_meta ?(name = "keeper-checkpoint-test")
     ?(trace_id = "trace-keeper-checkpoint") () =
@@ -508,6 +512,89 @@ let make_keeper_meta ?(name = "keeper-checkpoint-test")
   with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
+
+let make_oas_checkpoint
+    ?(session_id = "trace-keeper-checkpoint")
+    ?(created_at = 1000.0)
+    ?(system_prompt = Some "oas system")
+    ?(messages = [])
+    ?(working_context = None)
+    ?(max_total_tokens = Some 4096)
+    ()
+  : Agent_sdk.Checkpoint.t =
+  {
+    Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+    session_id;
+    agent_name = "keeper-checkpoint-test";
+    model = "llama:auto";
+    system_prompt;
+    messages;
+    usage = Agent_sdk.Types.empty_usage;
+    turn_count = List.length messages;
+    created_at;
+    tools = [];
+    tool_choice = None;
+    disable_parallel_tool_use = false;
+    temperature = None;
+    top_p = None;
+    top_k = None;
+    min_p = None;
+    enable_thinking = None;
+    response_format_json = false;
+    thinking_budget = None;
+    cache_system_prompt = false;
+    max_input_tokens = None;
+    max_total_tokens;
+    context = Agent_sdk.Context.create ();
+    mcp_sessions = [];
+    working_context;
+  }
+
+let test_keeper_checkpoint_store_oas_roundtrip () =
+  let base_dir = temp_dir "keeper_oas_store" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let session_dir = Filename.concat base_dir "trace-store" in
+      let sidecar = Some (`Assoc [("max_tokens", `Int 4096)]) in
+      let checkpoint =
+        make_oas_checkpoint ~session_id:"trace-store"
+          ~messages:[Agent_sdk.Types.user_msg "roundtrip"]
+          ~working_context:sidecar ()
+      in
+      Keeper_checkpoint_store.save_oas ~session_dir checkpoint;
+      match
+        Keeper_checkpoint_store.load_oas ~session_dir ~session_id:"trace-store"
+      with
+      | Some loaded ->
+          Alcotest.(check (float 0.000001)) "created_at preserved"
+            checkpoint.created_at
+            loaded.created_at;
+          Alcotest.(check int) "message count preserved" 1
+            (List.length loaded.messages);
+          let sidecar_max_tokens =
+            Option.bind loaded.working_context (fun json ->
+                Yojson.Safe.Util.(
+                  json |> member "max_tokens" |> to_int_option))
+          in
+          Alcotest.(check (option int)) "sidecar max_tokens preserved"
+            (Some 4096)
+            sidecar_max_tokens
+      | None -> Alcotest.fail "expected OAS checkpoint roundtrip")
+
+let test_keeper_checkpoint_store_oas_missing_returns_none () =
+  let base_dir = temp_dir "keeper_oas_store_missing" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let session_dir = Filename.concat base_dir "missing-session" in
+      Alcotest.(check (option string)) "missing checkpoint"
+        None
+        (Keeper_checkpoint_store.load_oas ~session_dir
+           ~session_id:"missing-session"
+         |> Option.map (fun (cp : Agent_sdk.Checkpoint.t) -> cp.session_id)))
 
 let test_keeper_checkpoint_prefers_oas_checkpoint () =
   let base_dir = temp_dir "keeper_oas_checkpoint" in
@@ -575,6 +662,41 @@ let test_keeper_checkpoint_legacy_fallback () =
           Alcotest.(check string) "legacy message restored" "legacy-only"
             (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
       | None -> Alcotest.fail "expected legacy fallback context")
+
+let test_keeper_checkpoint_prefers_newer_legacy_during_migration () =
+  let base_dir = temp_dir "keeper_checkpoint_migration" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let trace_id = "trace-migration-prefer-legacy" in
+      let session =
+        Keeper_exec_context.create_session ~session_id:trace_id ~base_dir
+      in
+      let old_oas =
+        make_oas_checkpoint ~session_id:trace_id ~created_at:10.0
+          ~system_prompt:(Some "old oas")
+          ~messages:[Agent_sdk.Types.user_msg "old-oas"]
+          ~working_context:(Some (`Assoc [("max_tokens", `Int 3000)])) ()
+      in
+      Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir old_oas;
+      let legacy_ctx =
+        Keeper_exec_context.create ~system_prompt:"new legacy" ~max_tokens:2048
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "new-legacy")
+      in
+      ignore (Keeper_exec_context.save_checkpoint session legacy_ctx ~generation:9);
+      let (_session, loaded_opt) =
+        Keeper_exec_context.load_context_from_checkpoint ~trace_id
+          ~primary_model_max_tokens:1024 ~base_dir
+      in
+      match loaded_opt with
+      | Some loaded ->
+          Alcotest.(check string) "newer legacy prompt restored" "new legacy"
+            loaded.system_prompt;
+          Alcotest.(check string) "newer legacy message restored" "new-legacy"
+            (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
+      | None -> Alcotest.fail "expected migration fallback context")
 
 (* ================================================================ *)
 (* Runner                                                           *)
@@ -653,5 +775,17 @@ let () =
         test_keeper_checkpoint_prefers_oas_checkpoint;
       Alcotest.test_case "legacy fallback still works" `Quick
         test_keeper_checkpoint_legacy_fallback;
+    ];
+    "keeper_checkpoint_store", [
+      Alcotest.test_case "OAS store roundtrip" `Quick
+        test_keeper_checkpoint_store_oas_roundtrip;
+      Alcotest.test_case "OAS store missing returns none" `Quick
+        test_keeper_checkpoint_store_oas_missing_returns_none;
+      Alcotest.test_case "prefers OAS checkpoint over legacy" `Quick
+        test_keeper_checkpoint_prefers_oas_checkpoint;
+      Alcotest.test_case "legacy fallback still works" `Quick
+        test_keeper_checkpoint_legacy_fallback;
+      Alcotest.test_case "prefers newer legacy during migration" `Quick
+        test_keeper_checkpoint_prefers_newer_legacy_during_migration;
     ];
   ]

@@ -34,6 +34,7 @@ Follow up with masc_convo_reply to add turns; end with masc_convo_conclude.";
       ]);
       ("required", `List [`String "topic"; `String "initiator"]);
     ];
+    visibility = Public;
   };
 
   (* masc_convo_reply *)
@@ -73,6 +74,7 @@ After masc_convo_start creates a thread; before masc_convo_conclude closes it.";
       ]);
       ("required", `List [`String "thread_id"; `String "speaker"; `String "content"]);
     ];
+    visibility = Public;
   };
 
   (* masc_convo_conclude *)
@@ -99,6 +101,7 @@ After masc_convo_reply turns are complete; pair with masc_convo_get to review th
       ]);
       ("required", `List [`String "thread_id"; `String "concluder"; `String "conclusion"]);
     ];
+    visibility = Public;
   };
 
   (* masc_convo_get *)
@@ -117,6 +120,7 @@ Pair with masc_convo_list to find thread IDs.";
       ]);
       ("required", `List [`String "thread_id"]);
     ];
+    visibility = Public;
   };
 
   (* masc_convo_list *)
@@ -129,5 +133,6 @@ Pair with masc_convo_get to read a specific thread.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 ]

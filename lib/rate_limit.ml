@@ -25,8 +25,8 @@ type t = {
 
 (** {1 Configuration} *)
 
-let default_rate = 20.0  (* Higher default for multi-agent coordination *)
-let default_burst = 50
+let default_rate = 60.0  (* 12+ concurrent keepers need higher throughput *)
+let default_burst = 150
 
 let rate_from_env () =
   Sys.getenv_opt "MASC_RATE_LIMIT"

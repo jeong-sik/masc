@@ -250,7 +250,7 @@ let handle_cancel_task ctx args =
   result_to_response result
 
 let transition_known_args =
-  ["task_id"; "action"; "notes"; "reason"; "expected_version"; "agent_name"]
+  ["task_id"; "action"; "notes"; "reason"; "expected_version"; "agent_name"; "force"]
 
 let handle_transition ctx args =
   let unknown = match args with
@@ -275,8 +275,31 @@ let handle_transition ctx args =
   let reason = get_string args "reason" "" in
   let expected_version = get_int_opt args "expected_version" in
   let action_lc = String.lowercase_ascii action in
+  let force = get_bool args "force" false in
   let tasks = Room.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
+  (* Anti-rationalization gate: verify completion notes before allowing "done" *)
+  let gate_rejection =
+    if action_lc = "done" && not force then
+      match task_opt with
+      | Some task ->
+        (match Anti_rationalization.review {
+           task_title = task.title;
+           task_description = task.description;
+           completion_notes = notes;
+           agent_name = ctx.agent_name;
+         } with
+         | Anti_rationalization.Reject reason -> Some reason
+         | Anti_rationalization.Approve -> None)
+      | None -> None
+    else None
+  in
+  match gate_rejection with
+  | Some reason ->
+    (false, Printf.sprintf "Completion rejected by anti-rationalization gate: %s\n\
+                             Revise your completion notes to describe actual work, then retry.\n\
+                             Use force=true to override (operator only)." reason)
+  | None ->
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
@@ -488,6 +511,7 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
       ]);
       ("required", `List [`String "title"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_batch_add_tasks";
@@ -524,6 +548,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
       ]);
       ("required", `List [`String "tasks"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_task_history";
@@ -543,6 +568,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
       ]);
       ("required", `List [`String "task_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_tasks";
@@ -570,6 +596,7 @@ Tip: Look for status='todo' tasks to claim.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_archive_view";
@@ -583,6 +610,7 @@ Tip: Look for status='todo' tasks to claim.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_claim_next";
@@ -597,6 +625,7 @@ Tip: Look for status='todo' tasks to claim.";
       ]);
       ("required", `List [`String "agent_name"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_update_priority";
@@ -617,6 +646,7 @@ Tip: Look for status='todo' tasks to claim.";
       ]);
       ("required", `List [`String "task_id"; `String "priority"]);
     ];
+    visibility = Public;
   };
 
   (* masc_transition *)
@@ -655,6 +685,7 @@ After masc_add_task or masc_claim_next; pair with masc_deliver before action='do
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"; `String "action"]);
     ];
+    visibility = Public;
   };
 
 ]

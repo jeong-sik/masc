@@ -6,6 +6,13 @@ module Http = Http_server_eio
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
+let pg_env_var_names =
+  [| "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" |]
+
+let force_jsonl_fallback_env () =
+  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
+  Array.iter (fun name -> Unix.putenv name "") pg_env_var_names
+
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in
   let mono_clock = Eio.Stdenv.mono_clock env in
@@ -45,6 +52,12 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
 let bootstrap_server_state (state : Mcp_server.server_state) =
   let (_init_msg : string) = Room.init state.room_config ~agent_name:None in
   Chain_native_eio.ensure_bootstrap state.room_config;
+  (* Initialize prompt registry with defaults and restore saved overrides *)
+  Prompt_defaults.init ();
+  (try Prompt_registry.restore_overrides state.room_config.base_path
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+     Log.Misc.error "prompt override restore failed: %s"
+       (Printexc.to_string exn));
   (try Tool_command_plane.backfill_chain_overlays state.room_config
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
@@ -459,8 +472,16 @@ let print_startup_banner ~(config : Http.config) ~resolved_base ~base_path
     "   POST /messages → legacy client->server messages (deprecated)\n%!";
   Printf.printf "   GET  /health → Health check\n%!";
   if Masc_grpc_server.is_enabled () then
-    Printf.printf "   gRPC /:%d → Coordination (MASC_GRPC_ENABLED=1)\n%!"
-      (Masc_grpc_server.configured_port ())
+    Printf.printf
+      "   gRPC :%d → Coordination + grpc.health.v1.Health + reflection\n%!"
+      (Masc_grpc_server.configured_port ());
+  if Server_ws_standalone.is_enabled () then
+    Printf.printf
+      "   GET  /ws → WebSocket discovery (standalone ws://127.0.0.1:%d/)\n%!"
+      (Server_ws_standalone.configured_port ());
+  if Server_webrtc_transport.is_enabled () then
+    Printf.printf
+      "   POST /webrtc/offer, /webrtc/answer → WebRTC signaling\n%!"
 
 let serve ~sw ~clock ~socket ~request_handler =
   let is_cancelled exn =
@@ -703,9 +724,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          |> String.lowercase_ascii
        in
        Governance_pipeline.install ~config:state.room_config ~governance_level);
-      (* Admin tool capability gate via dispatch_structured path.
-         execute_tool_eio tag-based dispatch bypasses pre-hooks;
-         full enforcement is a follow-up. *)
+      (* Admin tool capability gate via Tool_dispatch pre-hooks.
+         execute_tool_eio tag-based dispatch now runs the shared
+         pre-hook path before module dispatch. *)
       Tool_permissions.install ~get_agent_name:(fun () -> None);
       bootstrap_keepers ~sw ~clock state;
       init_task_backend ();
@@ -729,7 +750,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
              Log.Server.error
                "PG init timed out after %.0fs, retrying with JSONL fallback"
                pg_init_timeout;
-             Unix.putenv "MASC_POSTGRES_URL" "";
+             force_jsonl_fallback_env ();
              init_state ())
         else
           init_state ()
@@ -743,11 +764,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in
       Server_dashboard_http.set_executor_pool exec_pool;
       Log.Server.info "Executor_pool created (2 domains) for dashboard";
-      Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
-      Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
-      Server_dashboard_http.start_operator_refresh_loop ~state ~sw ~clock;
       Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
       Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
+      Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
+      Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
+      Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
+      Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
       (* Pre-warm shell cache so the first /dashboard load is instant.
          shell is the only room-truth component without a proactive refresh loop. *)
       Server_dashboard_http.warm_shell_cache state;

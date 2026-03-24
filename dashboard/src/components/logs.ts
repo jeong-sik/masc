@@ -178,33 +178,6 @@ export function LogViewer() {
 
   return html`
     <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
-      <section class="rounded-xl border border-[rgba(138,163,211,0.16)] bg-[linear-gradient(135deg,rgba(9,22,42,0.95),rgba(7,13,24,0.92))] px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div class="min-w-0 max-w-[760px]">
-            <div class="text-[10px] font-semibold uppercase tracking-[0.22em] text-[rgba(154,217,255,0.72)]">Observer</div>
-            <h2 class="mt-2 text-[26px] font-semibold tracking-[-0.04em] text-[var(--text-strong)]">Execution Log Stream</h2>
-            <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-muted)]">
-              structured logger를 기본으로 보고, 남아 있는 legacy stderr/traceln도 같은 ring buffer에서 함께 봅니다. 새 항목은 delta로만 가져와서 탭 비용을 줄였습니다.
-            </p>
-          </div>
-
-          <div class="grid min-w-[240px] gap-2 rounded-lg border border-[rgba(255,255,255,0.07)] bg-[rgba(255,255,255,0.04)] p-3">
-            <div class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
-              <span>현재 필터</span>
-              <strong class="text-[var(--text-strong)]">${levelFilter.value}+</strong>
-            </div>
-            <div class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
-              <span>buffer total</span>
-              <strong class="text-[var(--text-strong)] tabular-nums">${(logTotal.value ?? 0).toLocaleString()}</strong>
-            </div>
-            <div class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
-              <span>새로고침</span>
-              <strong class="${autoRefresh.value ? 'text-[#92f3b4]' : 'text-[var(--text-strong)]'}">${autoRefresh.value ? 'delta auto' : 'manual'}</strong>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]">
         <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
@@ -263,7 +236,7 @@ export function LogViewer() {
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-[11px] text-[color:var(--text-muted)]">
-            <span class="rounded-full border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-2.5 py-1 tabular-nums">${logEntries.value.length.toLocaleString()} shown</span>
+            <span class="rounded-full border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-2.5 py-1 tabular-nums">${logEntries.value.length.toLocaleString()} / ${(logTotal.value ?? 0).toLocaleString()}</span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <input
                 type="checkbox"

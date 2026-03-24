@@ -31,6 +31,25 @@ let test_parse_runtime_env () =
   Alcotest.(check bool) "contains local-a" true (List.mem "local-a" runtime_ids);
   Alcotest.(check bool) "contains local-b" true (List.mem "local-b" runtime_ids)
 
+let test_parse_llm_endpoints_env () =
+  Local_runtime_pool.reset ();
+  with_env "MASC_LLAMA_RUNTIMES_JSON" None @@ fun () ->
+  with_env "LLM_ENDPOINTS"
+    (Some "http://127.0.0.1:8085, http://127.0.0.1:8086")
+  @@ fun () ->
+  let snapshots = Local_runtime_pool.snapshots () in
+  Alcotest.(check int) "runtime count" 2 (List.length snapshots);
+  Alcotest.(check int) "configured capacity" 24
+    (Local_runtime_pool.configured_capacity ());
+  let runtime_ids =
+    snapshots
+    |> List.map (fun (runtime : Local_runtime_pool.runtime_snapshot) -> runtime.id)
+  in
+  Alcotest.(check bool) "contains local-8085" true
+    (List.mem "local-8085" runtime_ids);
+  Alcotest.(check bool) "contains local-8086" true
+    (List.mem "local-8086" runtime_ids)
+
 let test_acquire_and_release () =
   Local_runtime_pool.reset ();
   let json =
@@ -166,6 +185,8 @@ let () =
       ( "local_runtime_pool",
         [
           Alcotest.test_case "parse runtime env" `Quick test_parse_runtime_env;
+          Alcotest.test_case "parse LLM_ENDPOINTS env" `Quick
+            test_parse_llm_endpoints_env;
           Alcotest.test_case "acquire and release" `Quick test_acquire_and_release;
           Alcotest.test_case "acquire prefers exact model match" `Quick
             test_acquire_prefers_exact_model_match;

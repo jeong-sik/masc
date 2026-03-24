@@ -3,6 +3,106 @@ open Types
 open Server_utils
 open Server_auth
 
+type dashboard_compute_mode =
+  | Inline_shared
+  | Offloaded_readonly
+
+type cached_surface = {
+  mutable json : Yojson.Safe.t;
+  mutable last_success_at : string option;
+  mutable last_success_unix : float option;
+  mutable last_attempt_at : string option;
+  mutable last_attempt_unix : float option;
+  mutable last_error : string option;
+  mutable last_error_at : string option;
+  mutable last_error_unix : float option;
+}
+
+let create_cached_surface json =
+  {
+    json;
+    last_success_at = None;
+    last_success_unix = None;
+    last_attempt_at = None;
+    last_attempt_unix = None;
+    last_error = None;
+    last_error_at = None;
+    last_error_unix = None;
+  }
+
+let now_cache_stamp () =
+  let ts = Unix.gettimeofday () in
+  (ts, Types.now_iso ())
+
+let json_of_string_option = function
+  | Some value -> `String value
+  | None -> `Null
+
+let mark_cached_surface_attempt surface =
+  let ts, iso = now_cache_stamp () in
+  surface.last_attempt_unix <- Some ts;
+  surface.last_attempt_at <- Some iso
+
+let mark_cached_surface_success surface json =
+  let ts, iso = now_cache_stamp () in
+  surface.json <- json;
+  surface.last_success_unix <- Some ts;
+  surface.last_success_at <- Some iso;
+  surface.last_error <- None;
+  surface.last_error_at <- None;
+  surface.last_error_unix <- None
+
+let mark_cached_surface_error surface exn =
+  let ts, iso = now_cache_stamp () in
+  surface.last_error <- Some (Printexc.to_string exn);
+  surface.last_error_at <- Some iso;
+  surface.last_error_unix <- Some ts
+
+let upsert_assoc_field key value fields =
+  (key, value) :: List.remove_assoc key fields
+
+let extend_projection_diagnostics json extra_fields =
+  match json with
+  | `Assoc fields ->
+      let existing =
+        match List.assoc_opt "projection_diagnostics" fields with
+        | Some (`Assoc diagnostics) -> diagnostics
+        | _ -> []
+      in
+      let merged =
+        List.fold_left
+          (fun acc (key, value) -> upsert_assoc_field key value acc)
+          existing extra_fields
+      in
+      `Assoc
+        (upsert_assoc_field "projection_diagnostics" (`Assoc merged)
+           (List.remove_assoc "projection_diagnostics" fields))
+  | other -> other
+
+let cached_surface_json surface =
+  let now_ts = Unix.gettimeofday () in
+  let cache_state, stale_reason, stale_age_ms =
+    match surface.last_success_unix, surface.last_error_unix with
+    | None, _ -> ("initializing", surface.last_error, None)
+    | Some success_ts, Some error_ts when error_ts > success_ts ->
+        ( "stale",
+          surface.last_error,
+          Some (int_of_float ((now_ts -. success_ts) *. 1000.0)) )
+    | Some _, _ -> ("fresh", None, None)
+  in
+  extend_projection_diagnostics surface.json
+    [
+      ("cache_state", `String cache_state);
+      ("last_success_at", json_of_string_option surface.last_success_at);
+      ("last_attempt_at", json_of_string_option surface.last_attempt_at);
+      ("last_error_at", json_of_string_option surface.last_error_at);
+      ("stale_reason", json_of_string_option stale_reason);
+      ( "stale_age_ms",
+        match stale_age_ms with
+        | Some value -> `Int value
+        | None -> `Null );
+    ]
+
 (** Executor pool for CPU-heavy dashboard compute.  Parameterized dashboard
     requests can otherwise monopolize the main Eio domain long enough to
     starve unrelated MCP tool calls. *)
@@ -10,7 +110,8 @@ let _executor_pool : Eio.Executor_pool.t option ref = ref None
 
 let set_executor_pool pool = _executor_pool := Some pool
 
-let run_dashboard_compute ~sw ~clock ~(config : Room.config) compute =
+let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
+    ~(config : Room.config) compute =
   let fallback () = compute ~config ~sw in
   let run_in_pool pool_sw =
     match config.backend_config.Backend.backend_type with
@@ -26,25 +127,30 @@ let run_dashboard_compute ~sw ~clock ~(config : Room.config) compute =
     | Backend.Memory | Backend.FileSystem ->
         `Done (compute ~config ~sw:pool_sw)
   in
-  match !_executor_pool with
-  | Some pool ->
-      (try
-         match
-           Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
-             Eio.Switch.run run_in_pool)
+  let offloaded () =
+    match !_executor_pool with
+    | Some pool ->
+        (try
+           match
+             Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
+               Eio.Switch.run run_in_pool)
+           with
+           | `Done value -> value
+           | `Fallback ->
+               Log.Dashboard.warn
+                 "dashboard offload fallback: domain-local backend unavailable";
+               fallback ()
          with
-         | `Done value -> value
-         | `Fallback ->
-             Log.Dashboard.warn
-               "dashboard offload fallback: domain-local backend unavailable";
-             fallback ()
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Dashboard.warn "dashboard offload failed, using inline compute: %s"
-             (Printexc.to_string exn);
-           fallback ())
-  | None -> fallback ()
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Log.Dashboard.warn "dashboard offload failed, using inline compute: %s"
+               (Printexc.to_string exn);
+             fallback ())
+    | None -> fallback ()
+  in
+  match mode with
+  | Inline_shared -> fallback ()
+  | Offloaded_readonly -> offloaded ()
 
 (* ================================================================ *)
 (* Dashboard Data (Batch API)                                       *)
@@ -77,6 +183,47 @@ let dashboard_active_or_recent_sessions config =
          | Running | Paused -> true
          | _ -> session.updated_at_iso >= cutoff_iso)
 
+let attach_projection_diagnostics json diagnostics =
+  match json with
+  | `Assoc fields -> `Assoc (("projection_diagnostics", diagnostics) :: fields)
+  | other -> other
+
+let projection_diagnostics_json ~surface ~started_at ~extra json =
+  let build_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
+  let payload_bytes = String.length (Yojson.Safe.to_string json) in
+  `Assoc
+    ([
+       ("surface", `String surface);
+       ("build_ms", `Int build_ms);
+       ("payload_bytes", `Int payload_bytes);
+       ("generated_at", `String (Types.now_iso ()));
+     ]
+    @ extra)
+
+let with_projection_diagnostics ~surface ~started_at ~extra json =
+  attach_projection_diagnostics json
+    (projection_diagnostics_json ~surface ~started_at ~extra json)
+
+let initialized_json_opt = function
+  | `Assoc fields as json -> (
+      match List.assoc_opt "status" fields with
+      | Some (`String "initializing") -> None
+      | _ -> Some json)
+  | _ -> None
+
+let command_plane_summary_cache_parts ~state =
+  match
+    Server_command_plane_http_support.command_plane_summary_http_json ~state
+    |> initialized_json_opt
+  with
+  | Some (`Assoc fields) ->
+      let swarm_status =
+        match List.assoc_opt "swarm_status" fields with
+        | Some (`Assoc _ as json) -> Some json
+        | _ -> None
+      in
+      (Some (`Assoc (List.remove_assoc "swarm_status" fields)), swarm_status)
+  | _ -> (None, None)
 let dashboard_semantics_http_json () =
   Dashboard_semantics.json ()
 
@@ -251,11 +398,13 @@ let operator_actor_hint request =
    Interval: 10s (was 120s). Even if compute takes ~8s, the ref is updated
    every ~18s worst-case, which is acceptable for dashboard SSE polling. *)
 
-let _operator_snapshot_ref : Yojson.Safe.t ref =
-  ref (`Assoc [("status", `String "initializing"); ("generated_at", `String (Types.now_iso ()))])
+let _operator_snapshot_cache =
+  create_cached_surface
+    (`Assoc [ ("status", `String "initializing"); ("generated_at", `String (Types.now_iso ())) ])
 
-let _operator_digest_ref : Yojson.Safe.t ref =
-  ref (`Assoc [("health", `String "initializing"); ("generated_at", `String (Types.now_iso ()))])
+let _operator_digest_cache =
+  create_cached_surface
+    (`Assoc [ ("health", `String "initializing"); ("generated_at", `String (Types.now_iso ())) ])
 
 let _operator_refresh_interval_s =
   float_of_env_default
@@ -264,60 +413,102 @@ let _operator_refresh_interval_s =
     ~min_v:2.0
     ~max_v:600.0
 
-let start_operator_refresh_loop ~state ~sw ~clock =
+let operator_snapshot_extra sessions =
+  [
+    ("session_count", `Int (List.length sessions));
+    ("session_list", Team_session_store.session_list_diagnostics_json ());
+    ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+  ]
+
+let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let compute () =
-    let ctx : _ Operator_control.context =
-      { config; agent_name = "dashboard"; sw; clock; proc_mgr; mcp_session_id = None }
-    in
-    let sessions =
-      if Room.is_initialized config then dashboard_active_or_recent_sessions config
-      else []
-    in
-    let snapshot =
-      Operator_control.snapshot_json ~actor:"dashboard"
+    mark_cached_surface_attempt _operator_snapshot_cache;
+    let started_at = Unix.gettimeofday () in
+    try
+      let sessions =
+        if Room.is_initialized config then
+          dashboard_active_or_recent_sessions config
+        else
+          []
+      in
+      let ctx : _ Operator_control.context =
+        { config; agent_name = "dashboard"; sw; clock; proc_mgr; mcp_session_id = None }
+      in
+      Operator_control.snapshot_json ~actor:"dashboard" ~view:"summary"
         ~include_messages:true ~include_sessions:true ~include_keepers:true
-        ~sessions ctx
-    in
-    let digest =
-      match Operator_control.digest_json ~actor:"dashboard" ~sessions ctx with
-      | Ok json -> json
-      | Error _ -> !_operator_digest_ref
-    in
-    (snapshot, digest)
+        ~include_command_plane:false ~sessions ctx
+      |> with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
+           ~extra:(operator_snapshot_extra sessions)
+    with exn ->
+      mark_cached_surface_error _operator_snapshot_cache exn;
+      raise exn
   in
   Proactive_refresh.start ~sw ~clock
     ~config:{ (Proactive_refresh.default_config
-                 ~label:"operator"
+                 ~label:"operator_snapshot"
                  ~interval_s:_operator_refresh_interval_s)
               with timeout_s = 30.0 }
     ~compute
-    ~on_result:(fun (snapshot, digest) ->
-      _operator_snapshot_ref := snapshot;
-      _operator_digest_ref := digest)
+    ~on_result:(mark_cached_surface_success _operator_snapshot_cache)
+
+let start_operator_digest_refresh_loop ~state ~sw ~clock =
+  let config = state.Mcp_server.room_config in
+  let proc_mgr = state.Mcp_server.proc_mgr in
+  let compute () =
+    mark_cached_surface_attempt _operator_digest_cache;
+    let started_at = Unix.gettimeofday () in
+    try
+      let sessions =
+        if Room.is_initialized config then
+          Team_session_store.list_sessions ~limit:50 config
+        else
+          []
+      in
+      let command_plane_summary, swarm_status =
+        command_plane_summary_cache_parts ~state
+      in
+      let ctx : _ Operator_control.context =
+        { config; agent_name = "dashboard"; sw; clock; proc_mgr; mcp_session_id = None }
+      in
+      match
+        Operator_control.digest_json ~actor:"dashboard" ~target_type:"room"
+          ~sessions ?command_plane_summary ?swarm_status ctx
+      with
+      | Ok json ->
+          with_projection_diagnostics ~surface:"operator_digest" ~started_at
+            ~extra:(operator_snapshot_extra sessions) json
+      | Error err -> failwith err
+    with exn ->
+      mark_cached_surface_error _operator_digest_cache exn;
+      raise exn
+  in
+  Proactive_refresh.start ~sw ~clock
+    ~config:{ (Proactive_refresh.default_config
+                 ~label:"operator_digest"
+                 ~interval_s:_operator_refresh_interval_s)
+              with timeout_s = 30.0 }
+    ~compute
+    ~on_result:(mark_cached_surface_success _operator_digest_cache)
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
-  let has_params =
-    actor <> None
-    || query_param request "include_messages" <> None
-    || query_param request "include_sessions" <> None
-    || query_param request "include_keepers" <> None
+  let view = query_param request "view" in
+  let default_summary_request =
+    actor = None
+    && query_param request "include_messages" = None
+    && query_param request "include_sessions" = None
+    && query_param request "include_keepers" = None
+    &&
+    match view with
+    | None -> true
+    | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
   in
-  if not has_params then
-    !_operator_snapshot_ref
+  if default_summary_request then
+    cached_surface_json _operator_snapshot_cache
   else begin
-    let ctx : _ Operator_control.context =
-      {
-        config = state.Mcp_server.room_config;
-        agent_name = Option.value ~default:"dashboard" actor;
-        sw;
-        clock;
-        proc_mgr = state.Mcp_server.proc_mgr;
-        mcp_session_id = None;
-      }
-    in
+    let started_at = Unix.gettimeofday () in
     let include_messages =
       match query_param request "include_messages" with
       | Some ("0" | "false" | "no") -> false
@@ -333,11 +524,42 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       | Some ("0" | "false" | "no") -> false
       | _ -> true
     in
+    let include_command_plane =
+      match view with
+      | Some raw -> not (String.equal (String.lowercase_ascii (String.trim raw)) "summary")
+      | None -> true
+    in
+    let mode =
+      if include_command_plane then Offloaded_readonly else Inline_shared
+    in
     match Eio.Time.with_timeout clock 30.0 (fun () ->
-      Ok (Operator_control.snapshot_json ?actor
-        ~include_messages ~include_sessions ~include_keepers ctx)
+      Ok
+        (run_dashboard_compute ~mode ~sw ~clock
+           ~config:state.Mcp_server.room_config
+           (fun ~config ~sw ->
+             let ctx : _ Operator_control.context =
+               {
+                 config;
+                 agent_name = Option.value ~default:"dashboard" actor;
+                 sw;
+                 clock;
+                 proc_mgr = state.Mcp_server.proc_mgr;
+                 mcp_session_id = None;
+               }
+             in
+             Operator_control.snapshot_json ?actor ?view
+               ~include_messages ~include_sessions ~include_keepers
+               ~include_command_plane ctx))
     ) with
-    | Ok v -> v
+    | Ok json ->
+        let extra =
+          [
+            ("session_list", Team_session_store.session_list_diagnostics_json ());
+            ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+          ]
+        in
+        with_projection_diagnostics ~surface:"operator_snapshot" ~started_at ~extra
+          json
     | Error `Timeout ->
         `Assoc [
           ("error", `String "timeout");
@@ -350,30 +572,85 @@ let operator_digest_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
   let target_type = query_param request "target_type" in
   let target_id = query_param request "target_id" in
-  let has_params =
-    actor <> None || target_type <> None || target_id <> None
-    || query_param request "include_workers" <> None
+  let include_workers =
+    match query_param request "include_workers" with
+    | Some ("0" | "false" | "no") -> Some false
+    | Some ("1" | "true" | "yes") -> Some true
+    | _ -> None
   in
-  if not has_params then
-    Ok !_operator_digest_ref
+  let default_room_request =
+    actor = None
+    && target_id = None
+    && include_workers = None
+    &&
+    match target_type with
+    | None -> true
+    | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "room"
+  in
+  if default_room_request then
+    Ok (cached_surface_json _operator_digest_cache)
   else
-    let ctx : _ Operator_control.context =
-      {
-        config = state.Mcp_server.room_config;
-        agent_name = Option.value ~default:"dashboard" actor;
-        sw;
-        clock;
-        proc_mgr = state.Mcp_server.proc_mgr;
-        mcp_session_id = None;
-      }
+    let started_at = Unix.gettimeofday () in
+    let effective_target_type =
+      Option.value ~default:"room" target_type
     in
-    let include_workers =
-      match query_param request "include_workers" with
-      | Some ("0" | "false" | "no") -> Some false
-      | Some ("1" | "true" | "yes") -> Some true
-      | _ -> None
+    let mode =
+      if String.equal effective_target_type "room" then Inline_shared
+      else Offloaded_readonly
     in
-    Operator_control.digest_json ?actor ?target_type ?target_id ?include_workers ctx
+    match Eio.Time.with_timeout clock 30.0 (fun () ->
+      Ok
+        (run_dashboard_compute ~mode ~sw ~clock
+           ~config:state.Mcp_server.room_config
+           (fun ~config ~sw ->
+             let ctx : _ Operator_control.context =
+               {
+                 config;
+                 agent_name = Option.value ~default:"dashboard" actor;
+                 sw;
+                 clock;
+                 proc_mgr = state.Mcp_server.proc_mgr;
+                 mcp_session_id = None;
+               }
+             in
+             let command_plane_summary, swarm_status =
+               if String.equal effective_target_type "room" then
+                 command_plane_summary_cache_parts ~state
+               else
+                 (None, None)
+             in
+             match
+               Operator_control.digest_json ?actor ~target_type:effective_target_type
+                 ?target_id ?include_workers ?command_plane_summary ?swarm_status
+                 ctx
+             with
+             | Ok json -> json
+             | Error err ->
+                 `Assoc
+                   [
+                     ("error", `String "validation_error");
+                     ("message", `String err);
+                     ("generated_at", `String (Types.now_iso ()));
+                   ]))
+    ) with
+    | Ok json ->
+        let extra =
+          [
+            ("session_list", Team_session_store.session_list_diagnostics_json ());
+            ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+          ]
+        in
+        Ok
+          (with_projection_diagnostics ~surface:"operator_digest" ~started_at
+             ~extra json)
+    | Error `Timeout ->
+        Ok
+          (`Assoc
+            [
+              ("error", `String "timeout");
+              ("message", `String "Operator digest timed out after 30s");
+              ("generated_at", `String (Types.now_iso ()));
+            ])
 
 (* --- Mission proactive refresh ----------------------------------------
    A background fiber recomputes the mission snapshot periodically.
@@ -381,34 +658,41 @@ let operator_digest_http_json ~state ~sw ~clock request =
    Actor-parameterized requests fall back to on-demand compute with
    SWR cache. *)
 
-let _mission_json_ref : Yojson.Safe.t ref =
-  ref (`Assoc [
-    ("generated_at", `String (Types.now_iso ()));
-    ("summary", `Assoc [("room_health", `String "initializing")]);
-    ("incidents", `List []);
-    ("recommended_actions", `List []);
-    ("command_focus", `Assoc []);
-    ("operator_targets", `Assoc []);
-    ("attention_queue", `List []);
-    ("sessions", `List []);
-    ("session_briefs", `List []);
-    ("agent_briefs", `List []);
-    ("keeper_briefs", `List []);
-    ("internal_signals", `List []);
-  ])
+let _mission_cache =
+  create_cached_surface
+    (`Assoc
+      [
+        ("generated_at", `String (Types.now_iso ()));
+        ("summary", `Assoc [("room_health", `String "initializing")]);
+        ("incidents", `List []);
+        ("recommended_actions", `List []);
+        ("command_focus", `Assoc []);
+        ("operator_targets", `Assoc []);
+        ("attention_queue", `List []);
+        ("sessions", `List []);
+        ("session_briefs", `List []);
+        ("agent_briefs", `List []);
+        ("keeper_briefs", `List []);
+        ("internal_signals", `List []);
+      ])
 
 let start_mission_refresh_loop ~state ~sw ~clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let compute () =
-    run_dashboard_compute ~sw ~clock ~config:room_config
-      (fun ~config ~sw -> Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ())
+    mark_cached_surface_attempt _mission_cache;
+    try
+      run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config:room_config
+        (fun ~config ~sw -> Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ())
+    with exn ->
+      mark_cached_surface_error _mission_cache exn;
+      raise exn
   in
   Proactive_refresh.start ~sw ~clock
     ~config:{ (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0)
               with timeout_s = 120.0 }
     ~compute
-    ~on_result:(fun json -> _mission_json_ref := json)
+    ~on_result:(mark_cached_surface_success _mission_cache)
 
 (* Trim a full mission JSON to a lightweight snapshot:
    summary, session_briefs (goal/elapsed/blocker only), attention_queue (top 5), counts.
@@ -467,7 +751,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
     match actor with
     | None ->
       (* Default: return proactively cached value immediately (0ms). *)
-      !_mission_json_ref
+      cached_surface_json _mission_cache
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
@@ -475,7 +759,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
       in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
         ~clock ~timeout_sec:120.0 (fun () ->
-        run_dashboard_compute ~sw ~clock
+        run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
           ~config:state.Mcp_server.room_config
           (fun ~config ~sw ->
             Dashboard_mission.json ?actor

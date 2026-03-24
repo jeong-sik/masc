@@ -99,6 +99,36 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
   },
 }
 
+function matchesKeeperFilter(
+  agentName: string,
+  keeperList: Keeper[],
+  keeperBriefs: DashboardMissionKeeperBrief[],
+  keeperFilter: KeeperFilterMode,
+): boolean {
+  if (keeperFilter === 'all') return true
+  const isKeeper = findKeeper(agentName, keeperList, keeperBriefs) != null
+  return keeperFilter === 'keeper-only' ? isKeeper : !isKeeper
+}
+
+export function scopeAgentsByKeeperFilter(
+  agentList: Agent[],
+  keeperList: Keeper[],
+  keeperBriefs: DashboardMissionKeeperBrief[],
+  keeperFilter: KeeperFilterMode,
+): Agent[] {
+  return agentList.filter((agent: Agent) =>
+    matchesKeeperFilter(agent.name, keeperList, keeperBriefs, keeperFilter))
+}
+
+export function countAgentsByStatus(agentList: Agent[]): Record<StatusFilter, number> {
+  return {
+    all: agentList.length,
+    active: agentList.filter((agent: Agent) => statusCategory(agent.status) === 'active').length,
+    idle: agentList.filter((agent: Agent) => statusCategory(agent.status) === 'idle').length,
+    offline: agentList.filter((agent: Agent) => statusCategory(agent.status) === 'offline').length,
+  }
+}
+
 export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFilterMode } = {}) {
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
@@ -110,6 +140,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   const briefMap = new Map(briefs.map(b => [b.agent_name, b]))
   const hasKeeperRuntime = keeperFilter !== 'agent-only' && (keeperList.length > 0 || keeperBriefs.length > 0)
+  const scopedAgents = scopeAgentsByKeeperFilter(agentList, keeperList, keeperBriefs, keeperFilter)
   const pageTitle = keeperFilter === 'keeper-only'
     ? '키퍼 런타임'
     : keeperFilter === 'agent-only'
@@ -121,16 +152,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       ? '키퍼가 연결되지 않은 일반 에이전트만 보여줍니다.'
       : '등록된 모든 런타임을 보여줍니다. 키퍼는 장기 컨텍스트를 유지하는 상주 런타임입니다.'
 
-  const filtered = agentList
+  const filtered = scopedAgents
     .filter((a: Agent) => {
       if (filter !== 'all' && statusCategory(a.status) !== filter) return false
       if (search && !a.name.toLowerCase().includes(search.toLowerCase())) return false
-      // Keeper filter from parent chip
-      if (keeperFilter !== 'all') {
-        const isKeeper = findKeeper(a.name, keeperList, keeperBriefs) != null
-        if (keeperFilter === 'keeper-only' && !isKeeper) return false
-        if (keeperFilter === 'agent-only' && isKeeper) return false
-      }
       return true
     })
     .sort((a: Agent, b: Agent) => {
@@ -146,19 +171,17 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       return a.name.localeCompare(b.name)
     })
 
-  const counts = {
-    all: agentList.length,
-    active: agentList.filter((a: Agent) => statusCategory(a.status) === 'active').length,
-    idle: agentList.filter((a: Agent) => statusCategory(a.status) === 'idle').length,
-    offline: agentList.filter((a: Agent) => statusCategory(a.status) === 'offline').length,
-  }
+  const counts = countAgentsByStatus(scopedAgents)
+  const resultCountLabel = filtered.length === scopedAgents.length
+    ? `${filtered.length}개 표시 중`
+    : `${filtered.length} / ${scopedAgents.length}개 표시 중`
 
   return html`
     <div class="p-[var(--space-lg,24px)] max-w-[1200px] agent-page">
       <div class="mb-6">
         <div class="flex flex-wrap items-center gap-3 mb-[var(--space-md,16px)]">
           <h2 class="m-0 text-[20px] font-semibold text-[var(--ff-gold-bright)] tracking-[0.5px] [text-shadow:0_1px_4px_rgba(212,169,75,0.2)]">${pageTitle}</h2>
-          <span class="inline-flex items-center rounded-full border border-[rgba(200,168,78,0.22)] bg-[rgba(200,168,78,0.12)] px-2.5 py-1 text-[11px] font-medium text-[#e8d48b]">${filtered.length}개 표시 중</span>
+          <span class="inline-flex items-center rounded-full border border-[rgba(200,168,78,0.22)] bg-[rgba(200,168,78,0.12)] px-2.5 py-1 text-[11px] font-medium text-[#e8d48b]">${resultCountLabel}</span>
         </div>
         <p class="text-[13px] text-[var(--white-30)] mt-1">${pageDescription}</p>
         <div class="flex gap-4 items-center flex-wrap">

@@ -102,11 +102,15 @@ let initiative_surface_json ?(meta : keeper_meta option) (defaults : keeper_prof
         match defaults.initiative_scope with
         | Some v -> `String v | None -> `Null);
       ("idle_sec",
-        match defaults.initiative_idle_sec with
-        | Some v -> `Int v | None -> `Null);
+        match meta with
+        | Some m when m.initiative_idle_sec > 0 -> `Int m.initiative_idle_sec
+        | _ -> (match defaults.initiative_idle_sec with
+                | Some v -> `Int v | None -> `Null));
       ("cooldown_sec",
-        match defaults.initiative_cooldown_sec with
-        | Some v -> `Int v | None -> `Null);
+        match meta with
+        | Some m when m.initiative_cooldown_sec > 0 -> `Int m.initiative_cooldown_sec
+        | _ -> (match defaults.initiative_cooldown_sec with
+                | Some v -> `Int v | None -> `Null));
       ("context_mode",
         match defaults.initiative_context_mode with
         | Some v -> `String v | None -> `Null);

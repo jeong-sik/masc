@@ -177,12 +177,7 @@ let queue_pressure max_queue_depth =
   else "steady"
 
 let ws_enabled () =
-  match Sys.getenv_opt "MASC_WS_ENABLED" with
-  | Some raw -> (
-      match String.trim raw |> String.lowercase_ascii with
-      | "0" | "false" -> false
-      | _ -> true)
-  | None -> true
+  Server_ws_standalone.is_enabled ()
 
 let ws_port () =
   match Sys.getenv_opt "MASC_WS_PORT" with

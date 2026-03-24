@@ -124,6 +124,18 @@ let update_state config f =
     write_state config st';
     st')
 
+let delete_goal config ~goal_id =
+  let before = read_state config in
+  if not (List.exists (fun g -> g.id = goal_id) before.goals) then
+    Error "Goal not found"
+  else begin
+    ignore (update_state config (fun st ->
+      { st with
+        goals = List.filter (fun g -> g.id <> goal_id) st.goals;
+        updated_at = Types.now_iso () }));
+    Ok ()
+  end
+
 let sort_goals goals =
   let horizon_rank = function
     | "short" -> 0

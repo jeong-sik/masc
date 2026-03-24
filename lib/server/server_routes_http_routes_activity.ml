@@ -311,3 +311,65 @@ let add_routes router =
          ] in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
+
+  (* Prompt Registry API *)
+  |> Http.Router.get "/api/v1/prompts" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let json = Prompt_registry.prompts_json () in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/prompts" (fun request reqd ->
+       with_tool_auth ~tool_name:"prompt_override"
+         (fun state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             let key = Yojson.Safe.Util.(member "key" args |> to_string_option)
+               |> Option.value ~default:"" in
+             let action = Yojson.Safe.Util.(member "action" args |> to_string_option)
+               |> Option.value ~default:"set" in
+             if key = "" then
+               respond_json_with_cors ~status:`Bad_request request reqd
+                 (Yojson.Safe.to_string (`Assoc [
+                   ("ok", `Bool false); ("error", `String "key is required")
+                 ]))
+             else begin
+               let result = match action with
+                 | "clear" ->
+                   Prompt_registry.clear_prompt_override key;
+                   Ok "override cleared"
+                 | "set" | _ ->
+                   let value = Yojson.Safe.Util.(member "value" args |> to_string_option)
+                     |> Option.value ~default:"" in
+                   match Prompt_registry.set_override key value with
+                   | Ok () ->
+                     (try Prompt_registry.persist_overrides
+                            state.Mcp_server.room_config.base_path
+                      with _ -> ());
+                     Ok "override set"
+                   | Error msg -> Error msg
+               in
+               match result with
+               | Ok msg ->
+                 respond_json_with_cors request reqd
+                   (Yojson.Safe.to_string (`Assoc [
+                     ("ok", `Bool true);
+                     ("message", `String msg);
+                     ("key", `String key);
+                     ("source", `String (Prompt_registry.prompt_source key));
+                   ]))
+               | Error msg ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (`Assoc [
+                     ("ok", `Bool false); ("error", `String msg)
+                   ]))
+             end
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool false);
+                 ("error", `String (Printexc.to_string exn))
+               ]))
+         )
+       ) request reqd)

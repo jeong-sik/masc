@@ -4,7 +4,9 @@
 
 val exact_direct_mention_present : targets:string list -> string -> bool
 
-val keeper_constitution : string
+val keeper_constitution_default : string
+
+val keeper_constitution : unit -> string
 
 val build_keeper_system_prompt :
   goal:string ->

@@ -52,6 +52,12 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
 let bootstrap_server_state (state : Mcp_server.server_state) =
   let (_init_msg : string) = Room.init state.room_config ~agent_name:None in
   Chain_native_eio.ensure_bootstrap state.room_config;
+  (* Initialize prompt registry with defaults and restore saved overrides *)
+  Prompt_defaults.init ();
+  (try Prompt_registry.restore_overrides state.room_config.base_path
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+     Log.Misc.error "prompt override restore failed: %s"
+       (Printexc.to_string exn));
   (try Tool_command_plane.backfill_chain_overlays state.room_config
    with
    | Eio.Cancel.Cancelled _ as e -> raise e

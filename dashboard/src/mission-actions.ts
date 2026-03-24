@@ -22,17 +22,24 @@ import {
   normalizeMissionBriefing,
 } from './mission-normalizers'
 
+let inflightMissionSnapshotRefresh: Promise<void> | null = null
+
 export async function refreshMissionSnapshot(): Promise<void> {
+  if (inflightMissionSnapshotRefresh) return inflightMissionSnapshotRefresh
   missionLoading.value = true
   missionError.value = null
-  try {
-    const raw = await fetchDashboardMission()
-    missionSnapshot.value = normalizeMission(raw)
-  } catch (err) {
-    missionError.value = err instanceof Error ? err.message : 'Failed to load mission snapshot'
-  } finally {
-    missionLoading.value = false
-  }
+  inflightMissionSnapshotRefresh = (async () => {
+    try {
+      const raw = await fetchDashboardMission()
+      missionSnapshot.value = normalizeMission(raw)
+    } catch (err) {
+      missionError.value = err instanceof Error ? err.message : 'Failed to load mission snapshot'
+    } finally {
+      missionLoading.value = false
+      inflightMissionSnapshotRefresh = null
+    }
+  })()
+  return inflightMissionSnapshotRefresh
 }
 
 export async function refreshMissionSessionDetail(sessionId: string | null | undefined): Promise<void> {

@@ -107,6 +107,11 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
                    ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
                  ]))
 
+let dashboard_transport_health_http_json ~state =
+  Dashboard_cache.get_or_compute "transport_health" ~ttl:10.0 (fun () ->
+    Transport_metrics.transport_health_json
+      ~config:state.Mcp_server.room_config)
+
 let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =
     json_assoc_field "recommendation_summary" operator_digest_json

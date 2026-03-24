@@ -166,10 +166,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json =
-           Transport_metrics.transport_health_json
-             ~config:state.Mcp_server.room_config
-         in
+         let json = dashboard_transport_health_http_json ~state in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 

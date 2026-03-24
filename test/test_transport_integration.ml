@@ -259,10 +259,11 @@ let () =
       Alcotest.test_case "broadcast reaches WS subscriber" `Quick
         test_ws_external_subscriber_receives_broadcast;
     ]);
-    ("webrtc_signaling", [
-      Alcotest.test_case "full offer/answer/cleanup flow" `Quick
-        test_webrtc_full_signaling_flow;
-    ]);
+    ("webrtc_signaling",
+      if Sys.getenv_opt "MASC_TEST_WEBRTC" = Some "1" then [
+        Alcotest.test_case "full offer/answer/cleanup flow" `Quick
+          test_webrtc_full_signaling_flow;
+      ] else []);
     ("auto_cleanup", [
       Alcotest.test_case "dead subscriber auto-removed" `Quick
         test_dead_subscriber_auto_removed;

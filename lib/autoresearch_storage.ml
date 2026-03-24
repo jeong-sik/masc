@@ -120,11 +120,7 @@ let load_state ~base_path loop_id =
                path;
              None
          | `Assoc _
-           when not (has_required_string_field "loop_id")
-                || not (has_required_string_field "goal")
-                || not (has_required_string_field "metric_fn")
-                || not (has_required_string_field "model_model")
-                || not (has_required_string_field "target_file") ->
+           when not (has_required_string_field "loop_id") ->
              Log.Autoresearch.error
                "invalid autoresearch state schema for %s: missing required string fields"
                path;

@@ -119,7 +119,8 @@ let stream_native_chain_events_http ~deps ~request reqd =
                     (Printexc.to_string exn))
                ())
      else
-       ()
+       close_stream ~context:"prime" ~level:Error
+         ~reason:"initial stream write failed" ()
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
@@ -240,7 +241,8 @@ let stream_native_chain_events_h2 ~deps ~request h2_reqd =
                     (Printexc.to_string exn))
                ())
      else
-       ()
+       close_stream ~context:"prime" ~level:Error
+         ~reason:"initial stream write failed" ()
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->

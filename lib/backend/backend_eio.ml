@@ -201,13 +201,14 @@ module FileSystem = struct
                collect_keys_under ~requested_prefix ~logical_prefix:child_prefix
                  Eio.Path.(path / name) acc)
              acc
-    | _ ->
+    | `Regular_file ->
         if requested_prefix = ""
            || starts_with ~prefix:requested_prefix logical_prefix
         then
           logical_prefix :: acc
         else
           acc
+    | _ -> acc
 
   let list_keys t ~prefix =
     let scan_prefix = normalize_prefix_for_scan prefix in

@@ -249,6 +249,28 @@ let test_masc_operator_digest_schema () =
             (List.mem_assoc "include_workers" props)
       | None -> Alcotest.fail "masc_operator_digest missing properties"
 
+let test_masc_surface_audit_schema () =
+  match find_tool "masc_surface_audit" with
+  | None -> Alcotest.fail "masc_surface_audit not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has surface_id" true
+            (List.mem_assoc "surface_id" props)
+      | None -> Alcotest.fail "masc_surface_audit missing properties"
+
+let test_masc_collaboration_evidence_schema () =
+  match find_tool "masc_collaboration_evidence" with
+  | None -> Alcotest.fail "masc_collaboration_evidence not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has session_id" true
+            (List.mem_assoc "session_id" props);
+          Alcotest.(check bool) "has room_id" true
+            (List.mem_assoc "room_id" props)
+      | None -> Alcotest.fail "masc_collaboration_evidence missing properties"
+
 let test_masc_operator_action_schema () =
   match find_tool "masc_operator_action" with
   | None -> Alcotest.fail "masc_operator_action not found"
@@ -1099,6 +1121,9 @@ let () =
       Alcotest.test_case "masc_add_task" `Quick test_masc_add_task_schema;
       Alcotest.test_case "masc_operator_snapshot" `Quick test_masc_operator_snapshot_schema;
       Alcotest.test_case "masc_operator_digest" `Quick test_masc_operator_digest_schema;
+      Alcotest.test_case "masc_surface_audit" `Quick test_masc_surface_audit_schema;
+      Alcotest.test_case "masc_collaboration_evidence" `Quick
+        test_masc_collaboration_evidence_schema;
       Alcotest.test_case "masc_operator_action" `Quick test_masc_operator_action_schema;
       Alcotest.test_case "remote_operator_action_strict" `Quick
         test_remote_operator_action_schema_is_strict;

@@ -53,7 +53,7 @@ export function OperationBriefsBody({ operationRows }: { operationRows: Dashboar
   return html`
     <div class="mb-4">
       <h2 class="monitor-headline">영향받는 작전</h2>
-      <p class="monitor-subheadline">지휘 평면 작전의 막힘과 다음 도구만 얇게 보여주고, 자세한 근거는 원인 화면으로 넘깁니다.</p>
+      <p class="monitor-subheadline">관제 평면 작전의 막힘과 다음 도구만 얇게 보여주고, 자세한 근거는 원인 화면으로 넘깁니다.</p>
     </div>
     <div class="flex flex-col gap-3">
       ${hasActive

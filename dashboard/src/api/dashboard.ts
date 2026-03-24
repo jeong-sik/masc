@@ -258,6 +258,103 @@ export function fetchDashboardMissionSession(sessionId: string): Promise<Dashboa
   return get(`/api/v1/dashboard/session${query}`)
 }
 
+export interface DashboardVerificationRef {
+  kind: string
+  label: string
+  value: string
+}
+
+export interface DashboardSurfaceReadinessItem {
+  id: string
+  label: string
+  exposure_status: 'main' | 'lab' | 'hidden' | string
+  hidden_from_nav: boolean
+  meets_main_gate: boolean
+  proof_bar: string
+  rationale: string
+  route_hash: string | null
+  verification_refs: DashboardVerificationRef[]
+}
+
+export interface DashboardSurfaceReadinessResponse {
+  generated_at: string
+  proof_bar: string
+  surfaces: DashboardSurfaceReadinessItem[]
+}
+
+export function fetchDashboardSurfaceReadiness(
+  surfaceId?: string | null,
+): Promise<DashboardSurfaceReadinessResponse> {
+  const query = surfaceId
+    ? `?surface_id=${encodeURIComponent(surfaceId)}`
+    : ''
+  return get(`/api/v1/dashboard/surface-readiness${query}`)
+}
+
+export interface DashboardCollaborationEvidenceArtifactRef {
+  kind: string
+  path: string
+  exists: boolean
+}
+
+export interface DashboardCollaborationEvidenceRef {
+  kind: string
+  label: string
+  value: string
+}
+
+export interface DashboardCollaborationEvidenceResponse {
+  generated_at: string
+  evidence_status: 'strong' | 'partial' | 'missing' | string
+  headline: string
+  detail: string
+  session: {
+    session_id: string
+    goal: string
+    status: string
+    room_id: string
+    communication_mode: string
+  } | null
+  room_id: string
+  counts: {
+    team_turn_count: number
+    session_broadcast_count: number
+    portal_count: number
+    message_broadcast_count: number
+    mention_count: number
+    board_interaction_count: number
+    interaction_event_count: number
+    unique_actor_count: number
+  }
+  proof: {
+    available: boolean
+    verdict: string | null
+  }
+  relation_backend: {
+    source: string
+    status: string
+  }
+  refs: DashboardCollaborationEvidenceRef[]
+  artifacts: DashboardCollaborationEvidenceArtifactRef[]
+  recent_events: Array<{
+    ts_iso: string | null
+    event_type: string
+    actor: string | null
+    summary: string
+  }>
+}
+
+export function fetchDashboardCollaborationEvidence(opts?: {
+  sessionId?: string | null
+  roomId?: string | null
+}): Promise<DashboardCollaborationEvidenceResponse> {
+  const params = new URLSearchParams()
+  if (opts?.sessionId) params.set('session_id', opts.sessionId)
+  if (opts?.roomId) params.set('room_id', opts.roomId)
+  const query = params.toString()
+  return get(`/api/v1/dashboard/collaboration-evidence${query ? `?${query}` : ''}`)
+}
+
 export function fetchDashboardMissionBriefing(force = false): Promise<DashboardMissionBriefingResponse> {
   const query = force ? '?force=1' : ''
   return get(`/api/v1/dashboard/mission/briefing${query}`)

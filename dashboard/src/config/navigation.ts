@@ -49,6 +49,7 @@ export interface DashboardSectionNavItem {
   label: string
   description: string
   params: Record<string, string>
+  hidden?: boolean
 }
 
 export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
@@ -71,9 +72,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   },
   {
     id: 'command',
-    label: '지휘 통제',
+    label: '운영 개입',
     icon: '🎛️',
-    description: '실시간 개입, 워룸, 거버넌스 제어',
+    description: '실시간 개입과 운영 제어',
     defaultTab: 'command',
     defaultParams: { section: 'intervene' },
     tabs: ['command'],
@@ -125,7 +126,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'agents',
       label: '에이전트 & 키퍼',
-      description: '일반 에이전트, 키퍼 런타임, 세션/실행 뷰를 나눠 봅니다.',
+      description: '일반 에이전트와 키퍼 런타임을 나눠 봅니다.',
       params: { section: 'agents' },
     },
     {
@@ -144,9 +145,10 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'warroom',
-      label: '지휘면',
-      description: '오케스트라, 스웜, 체인, 제어 표면입니다.',
+      label: '관제면',
+      description: '오케스트라, 스웜, 체인, 제어 실험 표면입니다.',
       params: { section: 'warroom' },
+      hidden: true,
     },
     {
       id: 'governance',
@@ -220,6 +222,10 @@ export function defaultParamsForTab(tabId: TabId): Record<string, string> {
 export function sectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {
   if (tabId === 'overview' || tabId === 'logs') return []
   return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId]
+}
+
+export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {
+  return sectionItemsForTab(tabId).filter(item => item.hidden !== true)
 }
 
 export function surfaceForTab(tabId: TabId): SurfaceId {

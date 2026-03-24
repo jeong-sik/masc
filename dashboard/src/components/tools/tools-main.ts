@@ -14,6 +14,7 @@ import {
 import { ToolSummaryView } from './tool-summary-view'
 import { FullInventoryView } from './tool-full-inventory'
 import { PromptRegistryPanel } from './prompt-registry-panel'
+import { SurfaceReadinessPanel } from './surface-readiness-panel'
 
 export function Tools() {
   const data = toolsData.value
@@ -30,6 +31,10 @@ export function Tools() {
 
   return html`
     <div>
+      <${Card} title="Surface Readiness" class="section mb-4">
+        <${SurfaceReadinessPanel} />
+      <//>
+
       <${Card} title="시스템 도구 목록" class="section mb-4">
         <div class="mb-4">
           <p class="text-[12px] text-[var(--text-muted)] leading-relaxed">

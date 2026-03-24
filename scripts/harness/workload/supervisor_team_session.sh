@@ -15,6 +15,7 @@ SUPERVISOR_OP_SESSION_ID="supervisor-ops"
 SUPERVISOR_AGENT="supervisor-root"
 HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-60}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-30}"
+HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-30}"
 TEAM_GOAL="${TEAM_GOAL:-Demonstrate a full llama worker team supervised over /mcp and /mcp/operator}"
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 SWARM_WORKER_BATCH_JSON="${SWARM_WORKER_BATCH_JSON:-}"
@@ -226,9 +227,11 @@ parse_nickname_from_text() {
 }
 
 wait_for_health() {
-  local deadline=$(( $(date +%s) + 20 ))
+  local deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SEC ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    if curl -fsS --http1.1 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+    local health_json
+    health_json="$(curl -fsS --http1.1 --max-time 2 "http://127.0.0.1:${PORT}/health" 2>/dev/null || true)"
+    if [ -n "$health_json" ] && printf '%s' "$health_json" | jq -e '.startup.state_ready == true' >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -298,8 +301,6 @@ fi
 printf '[2/10] bootstrap room and tokens before auth\n'
 init_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "" 1 "masc_init" "$(jq -cn --arg a "$SUPERVISOR_AGENT" '{agent_name:$a}')")"
 require_tool_success "$init_raw"
-switch_mode_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "" 2 "masc_switch_mode" '{"mode":"full"}')"
-require_tool_success "$switch_mode_raw"
 
 SUPERVISOR_IDENTITY="$(create_agent_token "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_AGENT" "admin" '["supervisor","operator"]')"
 SUPERVISOR_NICKNAME="${SUPERVISOR_IDENTITY%%|*}"

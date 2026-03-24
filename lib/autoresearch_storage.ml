@@ -48,6 +48,7 @@ let append_cycle ~base_path loop_id record =
 let save_state ~base_path (state : Autoresearch_types.loop_state) =
   let dir = results_dir ~base_path state.loop_id in
   Fs_compat.mkdir_p dir;
+  state.updated_at <- Time_compat.now ();
   let path = state_file ~base_path state.loop_id in
   let json = Yojson.Safe.pretty_to_string (Autoresearch_serde.state_to_yojson state) in
   Fs_compat.save_file path json
@@ -97,6 +98,10 @@ let load_swarm_link_by_session ~base_path session_id =
 
 let load_state ~base_path loop_id =
   let path = state_file ~base_path loop_id in
+  let file_mtime_opt () =
+    try Some ((Unix.stat path).Unix.st_mtime)
+    with Unix.Unix_error _ -> None
+  in
   match load_json_file path with
   | None -> None
   | Some json ->
@@ -124,7 +129,12 @@ let load_state ~base_path loop_id =
                "invalid autoresearch state schema for %s: missing required string fields"
                path;
              None
-         | _ -> Some (Autoresearch_serde.state_of_yojson json)
+         | _ ->
+             let summary = Autoresearch_serde.state_of_yojson json in
+             Some
+               (match summary.updated_at with
+               | Some _ -> summary
+               | None -> { summary with updated_at = file_mtime_opt () })
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

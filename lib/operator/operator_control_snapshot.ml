@@ -224,10 +224,10 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
                   ("agent", agent_json);
                   ("diagnostic", diagnostic);
                   ("generation", `Int meta.generation);
-                  ("turn_count", `Int meta.total_turns);
+                  ("turn_count", `Int meta.usage.total_turns);
                   ("context_ratio", `Null);
-                  ("context_tokens", `Int meta.last_total_tokens);
-                  ("last_model_used", `String meta.last_model_used);
+                  ("context_tokens", `Int meta.usage.last_total_tokens);
+                  ("last_model_used", `String meta.usage.last_model_used);
                   ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                   ("keepalive_running", `Bool keepalive_running);
                   ( "next_model_hint",
@@ -300,10 +300,10 @@ let persistent_agents_json ?keeper_names config =
                   ("long_goal", `String meta.long_goal);
                   ("status", `String agent_status);
                   ("generation", `Int meta.generation);
-                  ("turn_count", `Int meta.total_turns);
+                  ("turn_count", `Int meta.usage.total_turns);
                   ("context_ratio", `Null);
-                  ("context_tokens", `Int meta.last_total_tokens);
-                  ("last_model_used", `String meta.last_model_used);
+                  ("context_tokens", `Int meta.usage.last_total_tokens);
+                  ("last_model_used", `String meta.usage.last_model_used);
                   ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                   ("next_model_hint", string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta));
                   ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));

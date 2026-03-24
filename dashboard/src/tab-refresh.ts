@@ -16,6 +16,11 @@ async function refreshActivityGraphSurface(): Promise<void> {
   await refreshActivityGraph()
 }
 
+async function refreshAutoresearchLabSurface(): Promise<void> {
+  const { refreshAutoresearchSurface } = await import('./components/autoresearch')
+  await refreshAutoresearchSurface()
+}
+
 export type RefreshTask =
   | 'roomTruth'
   | 'missionSnapshot'
@@ -23,6 +28,7 @@ export type RefreshTask =
   | 'activityGraph'
   | 'board'
   | 'goals'
+  | 'autoresearch'
   | 'commandCurrentSurface'
   | 'commandChainSummary'
   | 'commandSwarm'
@@ -76,6 +82,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'avatars') {
         return ['execution']
       }
+      if (routeState.params.section === 'autoresearch') {
+        return ['autoresearch']
+      }
       if (routeState.params.section === 'overview') {
         return ['roomTruth']
       }
@@ -93,6 +102,7 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
   activityGraph: () => { void refreshActivityGraphSurface() },
   board: () => { void refreshBoard() },
   goals: () => { void refreshGoals() },
+  autoresearch: () => { void refreshAutoresearchLabSurface() },
   commandCurrentSurface: () => { void refreshCommandPlaneCurrentSurface({ force: true }) },
   commandChainSummary: () => { void refreshCommandPlaneChainSummary({ force: true }) },
   commandSwarm: () => { void refreshCommandPlaneSwarm(undefined, undefined, { force: true }) },

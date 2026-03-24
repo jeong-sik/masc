@@ -162,58 +162,61 @@ let ensure_keeper_exists
       generation = 0;
       presence_keepalive = true;
       presence_keepalive_sec = 30;
-      proactive_enabled =
-        Option.value
-          ~default:
-            (if
-               trigger_mode
-               |> Keeper_contract.trigger_mode_of_string
-               |> Keeper_contract.trigger_mode_is_explicit_only
-             then false
-             else default_proactive_enabled)
-          profile_defaults.proactive_enabled;
-      proactive_idle_sec = default_proactive_idle_sec;
-      proactive_cooldown_sec = default_proactive_cooldown_sec;
-      compaction_profile = default_compaction_profile;
-      compaction_ratio_gate = env_ratio_gate;
-      compaction_message_gate = env_message_gate;
-      compaction_token_gate = env_token_gate;
-      continuity_compaction_cooldown_sec;
+      proactive = {
+        enabled =
+          Option.value
+            ~default:
+              (if
+                 trigger_mode
+                 |> Keeper_contract.trigger_mode_of_string
+                 |> Keeper_contract.trigger_mode_is_explicit_only
+               then false
+               else default_proactive_enabled)
+            profile_defaults.proactive_enabled;
+        idle_sec = default_proactive_idle_sec;
+        cooldown_sec = default_proactive_cooldown_sec;
+        count_total = 0;
+        last_ts = 0.0;
+        last_reason = "";
+        last_preview = "";
+      };
+      compaction = {
+        profile = default_compaction_profile;
+        ratio_gate = env_ratio_gate;
+        message_gate = env_message_gate;
+        token_gate = env_token_gate;
+        cooldown_sec = continuity_compaction_cooldown_sec;
+        count = 0;
+        last_ts = 0.0;
+        last_before_tokens = 0;
+        last_after_tokens = 0;
+        last_check_ts = now_ts;
+        last_decision = "initialized";
+      };
       auto_handoff = true;
       handoff_threshold = 0.85;
       handoff_cooldown_sec = 300;
       last_handoff_ts = 0.0;
       created_at = now_iso ();
       updated_at = now_iso ();
-      total_turns = 0;
-      total_input_tokens = 0;
-      total_output_tokens = 0;
-      total_tokens = 0;
-      total_cost_usd = 0.0;
-      last_turn_ts = 0.0;
-      last_model_used = "";
-      last_input_tokens = 0;
-      last_output_tokens = 0;
-      last_total_tokens = 0;
-      last_latency_ms = 0;
-      compaction_count = 0;
-      last_compaction_ts = 0.0;
-      last_compaction_before_tokens = 0;
-      last_compaction_after_tokens = 0;
-      last_compaction_check_ts = now_ts;
-      last_compaction_decision = "initialized";
-      proactive_count_total = 0;
-      last_proactive_ts = 0.0;
-      last_proactive_reason = "";
-      last_proactive_preview = "";
+      usage = {
+        total_turns = 0;
+        total_input_tokens = 0;
+        total_output_tokens = 0;
+        total_tokens = 0;
+        total_cost_usd = 0.0;
+        last_turn_ts = 0.0;
+        last_model_used = "";
+        last_input_tokens = 0;
+        last_output_tokens = 0;
+        last_total_tokens = 0;
+        last_latency_ms = 0;
+      };
       last_continuity_update_ts = now_ts;
       continuity_summary = "";
       active_goal_ids = [];
       last_autonomous_action_at = "";
       autonomous_action_count = 0;
-      deliberation_count = 0;
-      deliberation_cost_total_usd = 0.0;
-      last_deliberation_ts = 0.0;
       last_triage_triggers = "";
       active_team_session_id = None;
       last_team_session_started_at = "";

@@ -80,6 +80,7 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
     ("workdir", `String s.workdir);
     ("source_workdir", `String s.source_workdir);
     ("elapsed_s", `Float (Time_compat.now () -. s.start_time));
+    ("updated_at", `Float s.updated_at);
     ("history_count", `Int (List.length s.history));
     ("insights_count", `Int (List.length s.insights));
     ( "program_note",
@@ -124,6 +125,10 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
     max_cycles = int_ "max_cycles" ~default:10;
     error_message = json |> member "error" |> to_string_option;
     elapsed_s = float_ "elapsed_s" ~default:0.0;
+    updated_at = (
+      try Some (json |> member "updated_at" |> to_float)
+      with Type_error _ -> None
+    );
     source_workdir =
       json |> member "source_workdir" |> to_string_option
       |> Option.value ~default:(str "workdir" ~default:".");

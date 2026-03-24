@@ -114,6 +114,12 @@ const KEEPER_LIFECYCLE_EVENTS = new Set([
   'masc/keeper_handoff', 'masc/keeper_compaction', 'masc/keeper_guardrail', 'masc/keeper_turn_complete',
 ])
 
+const AUTORESEARCH_EVENTS = new Set([
+  'autoresearch_cycle',
+  'autoresearch_started',
+  'autoresearch_stopped',
+])
+
 function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void {
   if (!event.name) return
   const newTs = event.ts_unix ? event.ts_unix * 1000 : Date.now()
@@ -166,6 +172,10 @@ async function refreshActiveRoute(): Promise<void> {
     _refreshOperatorFn?.()
     _refreshMissionFn?.()
   }
+}
+
+function activeAutoresearchRoute(): boolean {
+  return route.value.tab === 'lab' && route.value.params.section === 'autoresearch'
 }
 
 // --- SSE reconnection handler ---
@@ -243,6 +253,12 @@ export function setupSSEReaction(): () => void {
     // 5. Keeper lifecycle — additional operator refresh + thread hydration
     if (KEEPER_LIFECYCLE_EVENTS.has(event.type)) {
       handleKeeperLifecycle(event)
+    }
+
+    if (AUTORESEARCH_EVENTS.has(event.type) && activeAutoresearchRoute()) {
+      scheduleRefresh('autoresearch_route', () => {
+        void refreshActiveRoute()
+      }, 350)
     }
 
     // 6. Governance events

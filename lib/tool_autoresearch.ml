@@ -104,6 +104,17 @@ let broadcast_cycle_result (state : Autoresearch.loop_state) (record : Autoresea
   ]) with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Autoresearch.warn "broadcast_cycle_result failed: %s" (Printexc.to_string exn)
 
+let broadcast_loop_lifecycle event_type (state : Autoresearch.loop_state) =
+  try Sse.broadcast_to Coordinators (`Assoc [
+    ("type", `String event_type);
+    ("loop_id", `String state.loop_id);
+    ("status", `String (Autoresearch.status_to_string state.status));
+    ("current_cycle", `Int state.current_cycle);
+    ("best_score", `Float state.best_score);
+    ("target_file", `String state.target_file);
+  ]) with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+    Log.Autoresearch.warn "broadcast_loop_lifecycle failed: %s" (Printexc.to_string exn)
+
 (* ================================================================ *)
 (* Handlers                                                         *)
 (* ================================================================ *)
@@ -311,6 +322,7 @@ let handle_start ctx args =
       match setup_running_loop ctx params with
       | Error message -> `Assoc [ ("error", `String message) ]
       | Ok state ->
+      broadcast_loop_lifecycle "autoresearch_started" state;
       `Assoc [
         ("loop_id", `String state.loop_id);
         ("status", `String "running");
@@ -350,6 +362,7 @@ let handle_swarm_start ctx args =
           | Error message -> `Assoc [ ("error", `String message) ]
           | Ok state ->
           state.program_note <- program_note;
+          broadcast_loop_lifecycle "autoresearch_started" state;
           let warnings = ref state.warnings in
           let operation_id =
             match ctx.start_operation with
@@ -452,6 +465,7 @@ let handle_stop ctx args =
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->
         let config = Room.default_config ctx.base_path |> Room.config_with_resolved_scope in
+        broadcast_loop_lifecycle "autoresearch_stopped" state;
         (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
         | Some link ->
             (try

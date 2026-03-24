@@ -45,6 +45,10 @@ val register_pre_hook : pre_hook -> unit
 val register_post_hook : post_hook -> unit
 val clear_hooks : unit -> unit
 
+val run_pre_hooks : name:string -> args:Yojson.Safe.t -> Tool_result.t option
+(** Execute registered pre-hooks in order.
+    Returns the first short-circuit result, if any. *)
+
 val dispatch_structured : name:string -> args:Yojson.Safe.t -> Tool_result.t option
 (** Structured dispatch with hook support.
     Execution order: pre-hooks -> handler -> post-hooks. *)

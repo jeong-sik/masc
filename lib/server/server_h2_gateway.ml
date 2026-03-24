@@ -83,6 +83,18 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
     H2.Body.Writer.close writer
   in
 
+  let h2_respond_redirect ?(status = `Found) ?(extra_headers = []) h2_reqd location =
+    let headers =
+      H2.Headers.of_list ([
+        ("location", location);
+        ("content-length", "0");
+      ] @ extra_headers)
+    in
+    let response = H2.Response.create ~headers status in
+    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+    H2.Body.Writer.close writer
+  in
+
   (* Read H2 request body asynchronously *)
   let h2_read_body h2_reqd callback =
     let body = H2.Reqd.request_body h2_reqd in
@@ -226,7 +238,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           H2.Body.Writer.close writer
 
       | `GET, "/" ->
-          h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors
+          h2_respond_redirect h2_reqd "/dashboard" ~extra_headers:cors
 
       | `GET, "/favicon.ico" | `GET, "/favicon.svg" ->
           h2_respond_bytes

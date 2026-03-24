@@ -138,6 +138,8 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      DUNE_CACHE: disabled
 
     steps:
       - name: Checkout

@@ -72,9 +72,63 @@ type run_record = {
 let bench_root ~base_path =
   Filename.concat base_path ".masc/repo-synthesis-benchmarks"
 
-let run_dir ~base_path run_id = Filename.concat (bench_root ~base_path) run_id
-let run_json_path ~base_path run_id = Filename.concat (run_dir ~base_path run_id) "run.json"
-let score_json_path ~base_path run_id = Filename.concat (run_dir ~base_path run_id) "score.json"
+let contains_substring haystack needle =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then true
+  else if needle_len > haystack_len then false
+  else
+    let rec loop idx =
+      if idx + needle_len > haystack_len then false
+      else if String.sub haystack idx needle_len = needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+
+let validate_run_id run_id =
+  let run_id = String.trim run_id in
+  if run_id = "" then
+    Error "benchmark run id cannot be empty"
+  else if String.length run_id > 128 then
+    Error "benchmark run id too long (max 128 chars)"
+  else if String.contains run_id '/' || String.contains run_id '\\' then
+    Error "benchmark run id cannot contain path separators"
+  else if contains_substring run_id ".." then
+    Error "benchmark run id cannot contain traversal segments"
+  else if
+    not
+      (String.for_all
+         (function
+           | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '.' | '_' | '-' -> true
+           | _ -> false)
+         run_id)
+  then
+    Error
+      "benchmark run id may only contain letters, digits, dot, underscore, and hyphen"
+  else
+    Ok run_id
+
+let run_dir_unchecked ~base_path run_id = Filename.concat (bench_root ~base_path) run_id
+let run_json_path_unchecked ~base_path run_id =
+  Filename.concat (run_dir_unchecked ~base_path run_id) "run.json"
+
+let score_json_path_unchecked ~base_path run_id =
+  Filename.concat (run_dir_unchecked ~base_path run_id) "score.json"
+
+let run_dir ~base_path run_id =
+  match validate_run_id run_id with
+  | Ok run_id -> run_dir_unchecked ~base_path run_id
+  | Error msg -> invalid_arg msg
+
+let run_json_path ~base_path run_id =
+  match validate_run_id run_id with
+  | Ok run_id -> run_json_path_unchecked ~base_path run_id
+  | Error msg -> invalid_arg msg
+
+let score_json_path ~base_path run_id =
+  match validate_run_id run_id with
+  | Ok run_id -> score_json_path_unchecked ~base_path run_id
+  | Error msg -> invalid_arg msg
 
 let default_question_set_path ~repo_root =
   Filename.concat repo_root "benchmark/repo_synthesis_question_set.json"
@@ -337,19 +391,35 @@ let make_run_id () =
   Printf.sprintf "rsb-%d-%04x" ms suffix
 
 let save_run ~base_path (run : run_record) =
-  write_json_file (run_json_path ~base_path run.benchmark_run_id) (run_record_to_yojson run)
+  match validate_run_id run.benchmark_run_id with
+  | Ok run_id ->
+      write_json_file (run_json_path_unchecked ~base_path run_id)
+        (run_record_to_yojson run)
+  | Error msg ->
+      invalid_arg msg
 
 let save_score ~base_path ~run_id (score : score_summary) =
-  write_json_file (score_json_path ~base_path run_id) (score_summary_to_yojson score)
+  match validate_run_id run_id with
+  | Ok run_id ->
+      write_json_file (score_json_path_unchecked ~base_path run_id)
+        (score_summary_to_yojson score)
+  | Error msg ->
+      invalid_arg msg
 
 let load_run ~base_path run_id =
-  match read_json_file_opt (run_json_path ~base_path run_id) with
-  | Some json -> run_record_of_yojson json
-  | None -> None
+  match validate_run_id run_id with
+  | Error _ -> None
+  | Ok run_id -> (
+      match read_json_file_opt (run_json_path_unchecked ~base_path run_id) with
+      | Some json -> run_record_of_yojson json
+      | None -> None)
 
 let load_score ~base_path run_id =
-  read_json_file_opt (score_json_path ~base_path run_id)
-  |> Option.map score_summary_of_yojson
+  match validate_run_id run_id with
+  | Error _ -> None
+  | Ok run_id ->
+      read_json_file_opt (score_json_path_unchecked ~base_path run_id)
+      |> Option.map score_summary_of_yojson
 
 let scan_run_ids ~base_path =
   let root = bench_root ~base_path in
@@ -515,7 +585,11 @@ let bench_summary_json ~base_path ?(limit = 20) () =
     ]
 
 let bench_detail_json ~base_path ~run_id =
-  match load_run ~base_path run_id with
-  | None -> Error (Printf.sprintf "repo synthesis benchmark run not found: %s" run_id)
-  | Some run ->
-      Ok (run_summary_json ~base_path run (load_score ~base_path run_id))
+  match validate_run_id run_id with
+  | Error msg ->
+      Error (Printf.sprintf "invalid repo synthesis benchmark run id: %s" msg)
+  | Ok run_id -> (
+      match load_run ~base_path run_id with
+      | None -> Error (Printf.sprintf "repo synthesis benchmark run not found: %s" run_id)
+      | Some run ->
+          Ok (run_summary_json ~base_path run (load_score ~base_path run_id)))

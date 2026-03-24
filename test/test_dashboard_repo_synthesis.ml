@@ -104,6 +104,17 @@ let test_dashboard_detail_reads_saved_run () =
         Yojson.Safe.Util.(
           json |> member "run" |> member "session_id" |> to_string)
 
+let test_dashboard_detail_rejects_invalid_run_id () =
+  with_temp_base @@ fun base_path ->
+  match
+    Lib.Dashboard_http_repo_synthesis.repo_synthesis_benchmark_detail_json
+      ~base_path ~run_id:"../../etc/passwd"
+  with
+  | Ok _ -> fail "expected invalid run id to be rejected"
+  | Error msg ->
+      check bool "invalid run id error" true
+        (String.starts_with ~prefix:"invalid repo synthesis benchmark run id:" msg)
+
 let () =
   run "dashboard_repo_synthesis"
     [
@@ -111,5 +122,7 @@ let () =
        [
          test_case "lists run with score" `Quick test_dashboard_lists_run_with_score;
          test_case "detail reads run" `Quick test_dashboard_detail_reads_saved_run;
+         test_case "detail rejects invalid run id" `Quick
+           test_dashboard_detail_rejects_invalid_run_id;
        ]);
     ]

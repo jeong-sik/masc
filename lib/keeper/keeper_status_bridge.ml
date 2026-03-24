@@ -4,7 +4,7 @@ open Keeper_types
 
 let string_list_to_json values =
   `List (List.map (fun value -> `String value) values)
-let auto_team_session_enabled (_meta : keeper_meta) = true
+let auto_team_session_enabled (_meta : keeper_meta) = false
 let linked_team_session config (meta : keeper_meta) =
   match meta.active_team_session_id with
   | Some session_id -> Team_session_store.load_session config session_id

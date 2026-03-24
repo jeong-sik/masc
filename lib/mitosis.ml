@@ -218,7 +218,7 @@ let bounded_handoff_dna ~config ~parent_cell ~full_context =
 let extract_delta ~config ~full_context ~since_len =
   let current_len = String.length full_context in
   if current_len < config.min_context_for_delta then begin
-    Printf.printf "[MITOSIS/DELTA] Short session (%d < %d chars), skipping delta\n%!"
+    Log.Mitosis_log.debug "short session (%d < %d chars), skipping delta"
       current_len config.min_context_for_delta;
     ""
   end
@@ -228,7 +228,7 @@ let extract_delta ~config ~full_context ~since_len =
     let raw_delta = safe_sub full_context since_len (current_len - since_len) in
     let compressed = compress_to_dna ~ratio:config.dna_compression_ratio ~context:raw_delta in
     if String.length compressed < config.min_delta_len then begin
-      Printf.printf "[MITOSIS/DELTA] Delta too short (%d < %d chars), treating as noise\n%!"
+      Log.Mitosis_log.debug "delta too short (%d < %d chars), treating as noise"
         (String.length compressed) config.min_delta_len;
       ""
     end
@@ -295,7 +295,7 @@ let perform_mitosis ~config ~pool ~parent ~full_context =
     | ReadyForHandoff prepared_dna ->
         let delta = extract_delta ~config ~full_context ~since_len:parent.prepare_context_len in
         let merged = merge_dna_with_delta ~prepared_dna ~delta in
-        Printf.printf "[MITOSIS/DELTA] Merged DNA: prepared=%d chars + delta=%d chars\n%!"
+        Log.Mitosis_log.info "merged DNA: prepared=%d chars + delta=%d chars"
           (String.length prepared_dna) (String.length delta);
         merged
     | Idle -> bounded_handoff_dna ~config ~parent_cell:parent ~full_context
@@ -332,7 +332,7 @@ let execute_mitosis ~config ~pool ~parent ~full_context ~spawn_fn =
   let prompt = build_mitosis_prompt ~child ~dna in
   let spawn_result = spawn_fn ~prompt in
   let _ = complete_apoptosis dying_parent in
-  Printf.printf "[MITOSIS] Cell %s (gen %d) -> Cell %s (gen %d)\n%!"
+  Log.Mitosis_log.info "cell %s (gen %d) -> cell %s (gen %d)"
     parent.id parent.generation child.id child.generation;
   (spawn_result, child, new_pool, dna)
 let record_activity ~cell ~task_done ~tool_called =
@@ -351,7 +351,7 @@ type mitosis_check_result =
 
 let auto_mitosis_check_2phase ~config ~pool ~cell ~context_ratio ~full_context ~spawn_fn =
   if should_handoff ~config ~cell ~context_ratio then begin
-    Printf.printf "[MITOSIS/HANDOFF] Threshold %.0f%% reached for cell %s (gen %d), executing handoff...\n%!"
+    Log.Mitosis_log.info "threshold %.0f%% reached for cell %s (gen %d), executing handoff"
       (config.handoff_threshold *. 100.0) cell.id cell.generation;
     let (spawn_result, child, new_pool, dna) =
       execute_mitosis ~config ~pool ~parent:cell ~full_context ~spawn_fn in
@@ -366,7 +366,7 @@ let auto_mitosis_check_2phase ~config ~pool ~cell ~context_ratio ~full_context ~
 
 let auto_mitosis_check ~config ~pool ~cell ~context_ratio ~full_context ~spawn_fn =
   if should_divide ~config ~cell ~context_ratio then begin
-    Printf.printf "[MITOSIS/AUTO] Trigger met for cell %s (gen %d), dividing...\n%!"
+    Log.Mitosis_log.info "auto trigger met for cell %s (gen %d), dividing"
       cell.id cell.generation;
     Some (execute_mitosis ~config ~pool ~parent:cell ~full_context ~spawn_fn)
   end

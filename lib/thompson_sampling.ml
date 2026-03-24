@@ -264,7 +264,7 @@ let load_stats () =
         | None ->
             Log.Thompson.error "Failed to parse stats line"
       ) entries;
-      Printf.printf "[thompson_sampling] Loaded stats for %d agents\n%!"
+      Log.Metrics.debug "thompson sampling loaded stats for %d agents"
         (Hashtbl.length stats_table)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -282,7 +282,7 @@ let save_stats () =
       ) stats_table ""
     in
     Fs_compat.save_file path content;
-    Printf.printf "[thompson_sampling] Saved stats for %d agents\n%!"
+    Log.Metrics.debug "thompson sampling saved stats for %d agents"
       (Hashtbl.length stats_table)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -429,7 +429,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
       if List.mem name !selected_names then None
       else if not (is_trigger_eligible ~agent_name:name Thompson) then begin
         (* Unhealthy agents excluded from Thompson selection *)
-        Printf.printf "[thompson_sampling] Skipping %s (unhealthy) from Thompson pool\n%!" name;
+        Log.Metrics.info "thompson sampling skipping %s (unhealthy)" name;
         None
       end
       else begin

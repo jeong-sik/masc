@@ -436,7 +436,7 @@ let string_of_event = function
 
 (** Create a console logging handler *)
 let console_handler ?(prefix="[CHAIN]") event =
-  Printf.printf "%s %s\n%!" prefix (string_of_event event)
+  Log.Telemetry.info "%s %s" prefix (string_of_event event)
 
 (** Subscribe console logger *)
 let enable_console_logging ?(prefix="[CHAIN]") () =

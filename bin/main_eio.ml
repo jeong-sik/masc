@@ -219,7 +219,7 @@ let run_server ~sw ~env ~host ~port ~base_path =
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Log.Server.warn "[main] keeper bootstrap failed (continuing without keepers): %s" (Printexc.to_string exn)
+    Log.Server.error "[main] keeper bootstrap failed (continuing without keepers): %s" (Printexc.to_string exn)
 
 (** CLI options *)
 let port =

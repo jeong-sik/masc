@@ -146,6 +146,9 @@ let run_turn
   let user_msg = Agent_sdk.Types.user_msg user_message in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
+  let checkpoint_sidecar =
+    Keeper_exec_context.checkpoint_sidecar_json ~generation ctx_work
+  in
   (* 7. Set up agent *)
   let ctx_ref = ref ctx_work in
   let agent_name = Printf.sprintf "keeper-%s" meta.name in
@@ -195,10 +198,24 @@ let run_turn
       ?on_event
       ~agent_ref
       ~allowed_paths:meta.allowed_paths
+      ~working_context:checkpoint_sidecar
       ()
   with
   | Error e -> Error e
   | Ok result ->
+    (match result.checkpoint with
+     | Some checkpoint -> (
+         try
+           Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir
+             checkpoint
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+             Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s"
+               meta.name (Printexc.to_string exn))
+     | None ->
+         Log.Keeper.warn "keeper:%s missing OAS checkpoint after run"
+           meta.name);
     let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
     let text = Agent_sdk.Types.text_of_content result.response.content in
     let model = result.response.model in

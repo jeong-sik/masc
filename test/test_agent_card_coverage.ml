@@ -456,10 +456,13 @@ let test_masc_skills_have_names () =
   check bool "all have names" true all_have_names
 
 let test_masc_skills_expected_count () =
-  (* Dynamic skills: one per Mode.category with tools (excluding Unknown) *)
   let count = List.length (dynamic_skills ()) in
-  check bool "skill count > 8 (was hardcoded 8, now dynamic from categories)"
-    true (count >= 8)
+  check int "single masc skill" 1 count
+
+let test_masc_skill_id_is_masc () =
+  match dynamic_skills () with
+  | [ skill ] -> check string "skill id" "masc" skill.id
+  | _ -> fail "expected one masc skill"
 
 let test_masc_skills_mime_types () =
   let all_mime = List.for_all (fun (s : Agent_card.skill) ->
@@ -620,6 +623,7 @@ let () =
       test_case "unique ids" `Quick test_masc_skills_unique_ids;
       test_case "have names" `Quick test_masc_skills_have_names;
       test_case "expected count" `Quick test_masc_skills_expected_count;
+      test_case "skill id is masc" `Quick test_masc_skill_id_is_masc;
       test_case "MIME types" `Quick test_masc_skills_mime_types;
       test_case "have tags" `Quick test_masc_skills_have_tags;
       test_case "have tool_count" `Quick test_masc_skills_have_tool_count;

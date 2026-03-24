@@ -33,7 +33,7 @@ let keeper_read_tool_names =
   ]
 
 let keeper_coordination_tool_names =
-  [ "keeper_tasks_list"; "keeper_broadcast" ]
+  [ "keeper_tasks_list"; "keeper_task_claim"; "keeper_task_done"; "keeper_broadcast" ]
 
 let keeper_board_tool_names =
   [
@@ -49,6 +49,10 @@ let keeper_voice_tool_names =
     "keeper_voice_session_start"; "keeper_voice_session_end" ]
 
 let keeper_shell_readonly_tool_names = [ "keeper_shell_readonly" ]
+
+let keeper_governance_tool_names =
+  Tool_shard.governance_tools
+  |> List.map (fun (t : Types.tool_schema) -> t.name)
 
 let keeper_coding_shard_tool_names =
   Tool_shard.coding_tools
@@ -67,9 +71,15 @@ let is_research_profile (meta : keeper_meta) =
 
 let keeper_coding_tool_names = Tool_code_write.tool_names
 
+let keeper_voice_tool_schemas =
+  match Tool_shard.get_shard "voice" with
+  | Some shard -> shard.tools
+  | None -> []
+
 (** Curated masc_* bridge for keepers.
     Schema list is injected at server init to avoid cyclic dependency on Tools.
-    Keep raw masc_* passthrough minimal and prefer keeper_* wrappers elsewhere. *)
+    Keep raw masc_* passthrough minimal and move keeper-visible workflows into
+    dedicated shards whenever possible. *)
 
 let keeper_passthrough_masc_tool_names =
   [
@@ -100,6 +110,19 @@ let keeper_masc_tool_schemas (_meta : keeper_meta) : Types.tool_schema list =
 let dedupe_tool_names names =
   dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)
 
+let keeper_default_tool_names (meta : keeper_meta) : string list =
+  let base_names = keeper_model_tools |> List.map (fun tool -> tool.Types.name) in
+  if meta.policy_voice_enabled then
+    dedupe_tool_names (keeper_voice_tool_names @ base_names)
+  else
+    base_names
+
+let keeper_default_model_tools (meta : keeper_meta) : Types.tool_schema list =
+  if meta.policy_voice_enabled then
+    keeper_model_tools @ keeper_voice_tool_schemas
+  else
+    keeper_model_tools
+
 let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     string list =
   if write_done then
@@ -115,10 +138,12 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
         keeper_shell_readonly_tool_names @ with_voice
       else with_voice
     in
+    let with_governance = keeper_governance_tool_names @ with_shell in
     let with_research =
       if is_research_profile meta then
-        keeper_research_loop_tool_names @ keeper_autoresearch_tool_names @ with_shell
-      else with_shell
+        keeper_research_loop_tool_names @ keeper_autoresearch_tool_names
+        @ with_governance
+      else with_governance
     in
     let with_coding =
       if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
@@ -127,7 +152,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     in
     dedupe_tool_names (keeper_masc_tool_names meta @ keeper_board_tool_names @ with_coding)
   else
-    let base_names = keeper_model_tools |> List.map (fun tool -> tool.Types.name) in
+    let base_names = keeper_default_tool_names meta in
     let with_research =
       if is_research_profile meta then
         keeper_research_loop_tool_names @ keeper_autoresearch_tool_names @ base_names
@@ -146,7 +171,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
   if allowed = [] then
     []
   else
-    let base = keeper_model_tools in
+    let base = keeper_default_model_tools meta in
     let with_research =
       if is_research_profile meta then
         base @ Tool_research.schemas @ Tool_shard.autoresearch_keeper_tools

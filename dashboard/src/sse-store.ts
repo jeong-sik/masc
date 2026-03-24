@@ -10,7 +10,6 @@ import {
   keeperHeartbeats,
   invalidateDashboardCache,
   isDashboardRefreshEvent,
-  refreshDashboard,
   refreshExecution,
   refreshBoard,
   refreshMdal,
@@ -18,6 +17,7 @@ import {
 import { refreshRoomTruth } from './room-truth-store'
 import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 import { showToast } from './components/common/toast'
+import { route } from './router'
 
 // --- Refresh function registration (avoids circular imports) ---
 
@@ -144,9 +144,8 @@ function handleDashboardRefresh(): void {
   invalidateDashboardCache()
   if (!_fetchDebounce) {
     _fetchDebounce = setTimeout(() => {
-      void refreshDashboard({ force: true })
-      _refreshCommandPlaneFn?.()
-      _refreshOperatorFn?.()
+      void refreshRoomTruth({ force: true })
+      void refreshActiveRoute()
       _fetchDebounce = null
     }, 500)
   }
@@ -156,6 +155,17 @@ async function handleGovernance(): Promise<void> {
   _refreshGovernanceFn?.()
   const { loadRuntimeParams } = await import('./components/governance')
   loadRuntimeParams()
+}
+
+async function refreshActiveRoute(): Promise<void> {
+  try {
+    const { refreshForRoute } = await import('./tab-refresh')
+    refreshForRoute(route.value)
+  } catch {
+    _refreshCommandPlaneFn?.()
+    _refreshOperatorFn?.()
+    _refreshMissionFn?.()
+  }
 }
 
 // --- SSE reconnection handler ---
@@ -177,22 +187,13 @@ function handleReconnect(): void {
 
 async function hydrateAfterReconnect(): Promise<void> {
   try {
-    await Promise.all([
-      refreshRoomTruth({ force: true }),
-      refreshDashboard({ force: true }),
-      refreshExecution({ force: true }),
-      refreshBoard(),
-    ])
-    _refreshCommandPlaneFn?.()
-    _refreshOperatorFn?.()
-    _refreshMissionFn?.()
+    await refreshRoomTruth({ force: true })
+    await refreshActiveRoute()
   } catch {
     // First attempt failed (server may still be warming up) — retry once.
     setTimeout(() => {
       void refreshRoomTruth({ force: true })
-      void refreshDashboard({ force: true })
-      void refreshExecution({ force: true })
-      _refreshOperatorFn?.()
+      void refreshActiveRoute()
     }, 3000)
   }
 }
@@ -276,8 +277,8 @@ export function startPeriodicRefresh(): void {
     if (!connected.value) {
       invalidateDashboardCache()
     }
-    void refreshDashboard()
-    _refreshMissionFn?.()
+    void refreshRoomTruth()
+    void refreshActiveRoute()
   }, PERIODIC_REFRESH_MS)
 }
 

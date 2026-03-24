@@ -1,13 +1,8 @@
-(** Tool_council_oas — OAS Collaboration-based governance handlers.
+(** Tool_council_oas — governance handlers using the OAS-aligned tool surface.
 
-    Replaces [Tool_council] with OAS [Collaboration.t] for petition lifecycle.
-    Delegates file-based persistence to [Council.Governance_v2].
-
-    Key changes from legacy:
-    - Petition lifecycle tracked via [Collaboration.t] phases
-    - Vote collection via [Collaboration.vote] type
-    - ID generation via [Collaboration.generate_id] (no Random.int)
-    - Simpler handler code (delegate to Governance_v2 for file ops)
+    Governance persistence and lifecycle live in [Council.Governance_v2].
+    This module keeps the OAS-facing tool endpoints but does not create
+    decorative [Collaboration.t] records for petitions.
 
     @since Phase 1 — MASC->OAS migration *)
 
@@ -51,33 +46,20 @@ let ensure_room_ready (ctx : context) =
     ());
   config
 
-(** Deterministic ID generation using Collaboration.generate_id.
-    Replaces Random.int-based gen_id from legacy Tool_council. *)
-let _gen_case_id () =
-  let collab = Oas.Collaboration.create ~goal:"" () in
-  String.sub collab.id 0 (min 20 (String.length collab.id))
-
 (* ================================================================ *)
-(* Petition — create via Collaboration.t + persist via GV2           *)
+(* Petition — persist directly via GV2                               *)
 (* ================================================================ *)
 
 let handle_petition_submit ctx args =
   let title = get_string args "title" "" in
-  let subject = get_string args "subject" "" in
+  let subject =
+    let by_schema = get_string args "subject_type" "" in
+    if by_schema <> "" then by_schema else get_string args "subject" ""
+  in
   let risk = get_string args "risk_class" "low" in
   let _config = ensure_room_ready ctx in
   if title = "" then json_err "title is required"
   else begin
-    (* Create OAS Collaboration for this petition *)
-    let collab = Oas.Collaboration.create
-      ~goal:(Printf.sprintf "Governance petition: %s" title) () in
-    let collab = Oas.Collaboration.add_participant collab
-      { name = ctx.agent_name; role = Some "petitioner";
-        state = Oas.Collaboration.Working;
-        joined_at = Some (Unix.gettimeofday ());
-        finished_at = None; summary = Some title } in
-    let collab = Oas.Collaboration.set_phase collab Oas.Collaboration.Active in
-    (* Persist via Governance_v2 *)
     match GV2.risk_class_of_string risk with
     | Error msg -> json_err msg
     | Ok risk_class ->
@@ -86,16 +68,16 @@ let handle_petition_submit ctx args =
         ~subject_type:subject
         ~risk_class
         ~requested_action:None
-        ~source_refs:[collab.id]
+        ~source_refs:[]
         ~created_by:ctx.agent_name
       with
       | Error msg -> json_err msg
       | Ok submit_result ->
         json_ok (`Assoc [
           ("case_id", `String submit_result.case_.id);
-          ("collaboration_id", `String collab.id);
+          ("collaboration_id", `Null);
           ("status", `String (GV2.case_status_to_string submit_result.case_.status));
-          ("phase", `String (Oas.Collaboration.show_phase collab.phase));
+          ("phase", `Null);
           ("merged", `Bool submit_result.merged);
         ])
   end
@@ -108,7 +90,16 @@ let handle_case_brief_submit ctx args =
   let case_id = get_string args "case_id" "" in
   let stance = get_string args "stance" "neutral" in
   let summary = get_string args "summary" "" in
-  let evidence = get_string args "evidence_refs" "" in
+  let evidence_refs =
+    match member "evidence_refs" args with
+    | `List items ->
+        items
+        |> List.filter_map (function
+             | `String value when String.trim value <> "" -> Some value
+             | _ -> None)
+    | `String value when String.trim value <> "" -> [ value ]
+    | _ -> []
+  in
   if case_id = "" then json_err "case_id is required"
   else begin
     match GV2.brief_stance_of_string stance with
@@ -118,7 +109,7 @@ let handle_case_brief_submit ctx args =
         ~case_id ~author:ctx.agent_name
         ~stance:stance_val
         ~summary
-        ~evidence_refs:(if evidence = "" then [] else [evidence])
+        ~evidence_refs
       in
       match brief_result with
       | Error msg -> json_err msg

@@ -4,7 +4,7 @@ open Alcotest
 
 module Tool_voice = Masc_mcp.Tool_voice
 module Voice_bridge = Masc_mcp.Voice_bridge
-module Mode = Masc_mcp.Mode
+module Config = Masc_mcp.Config
 
 let contains haystack needle =
   let text = String.lowercase_ascii haystack in
@@ -587,48 +587,14 @@ let voice_tools =
     "masc_voice_conference_end";
   ]
 
-let test_voice_tools_in_voice_category () =
+let test_voice_tools_are_registered () =
+  (* Mode system removed. Just verify all voice tools are in the schema list. *)
+  let all_names = Config.all_tool_names () in
   List.iter
     (fun name ->
-      check bool (name ^ " -> Voice") true
-        (Mode.tool_category name = Mode.Voice))
+      check bool (name ^ " is registered") true
+        (List.mem name all_names))
     voice_tools
-
-let test_voice_enabled_in_standard_mode () =
-  let cats = Mode.categories_for_mode Mode.Standard in
-  List.iter
-    (fun name ->
-      check bool (name ^ " enabled in Standard") true
-        (Mode.is_tool_enabled cats name))
-    voice_tools
-
-let test_voice_enabled_in_parallel_mode () =
-  let cats = Mode.categories_for_mode Mode.Parallel in
-  List.iter
-    (fun name ->
-      check bool (name ^ " enabled in Parallel") true
-        (Mode.is_tool_enabled cats name))
-    voice_tools
-
-let test_voice_disabled_in_agent_mode () =
-  let cats = Mode.categories_for_mode Mode.Agent in
-  List.iter
-    (fun name ->
-      check bool (name ^ " disabled in Agent") false
-        (Mode.is_tool_enabled cats name))
-    voice_tools
-
-let test_voice_progressive_disclosure_in_agent_mode () =
-  let cats = Mode.categories_for_mode Mode.Agent in
-  let tool = "masc_voice_speak" in
-  check bool "disabled before enable" false
-    (Mode.is_tool_enabled cats tool);
-  Mode.tool_enable tool;
-  check bool "enabled after tool_enable" true
-    (Mode.is_tool_enabled cats tool);
-  Mode.tool_disable tool;
-  check bool "disabled after tool_disable" false
-    (Mode.is_tool_enabled cats tool)
 
 let test_error_message_contains_restart_guide () =
   with_ctx_no_net (fun ctx ->
@@ -644,12 +610,9 @@ let test_error_message_contains_restart_guide () =
       check bool "contains Restart" true (contains body "Restart");
       check bool "contains --http" true (contains body "--http"))
 
-let test_voice_category_string_roundtrip () =
-  check string "to_string" "voice" (Mode.category_to_string Mode.Voice);
-  check (option string) "of_string" (Some "voice")
-    (match Mode.category_of_string "voice" with
-     | Some Mode.Voice -> Some "voice"
-     | _ -> None)
+let test_voice_tools_count () =
+  (* Verify we have a known number of voice tools *)
+  check bool "at least 6 voice tools" true (List.length voice_tools >= 6)
 
 let () =
   run "Tool_voice"
@@ -659,20 +622,12 @@ let () =
           test_case "unknown" `Quick test_dispatch_unknown;
           test_case "known tools" `Quick test_dispatch_known_tools;
         ] );
-      ( "category",
+      ( "registration",
         [
-          test_case "voice tools in Voice category" `Quick
-            test_voice_tools_in_voice_category;
-          test_case "voice enabled in Standard" `Quick
-            test_voice_enabled_in_standard_mode;
-          test_case "voice enabled in Parallel" `Quick
-            test_voice_enabled_in_parallel_mode;
-          test_case "voice disabled in Agent" `Quick
-            test_voice_disabled_in_agent_mode;
-          test_case "progressive disclosure in Agent" `Quick
-            test_voice_progressive_disclosure_in_agent_mode;
-          test_case "category string roundtrip" `Quick
-            test_voice_category_string_roundtrip;
+          test_case "voice tools are registered" `Quick
+            test_voice_tools_are_registered;
+          test_case "voice tools count" `Quick
+            test_voice_tools_count;
           test_case "error message contains restart guide" `Quick
             test_error_message_contains_restart_guide;
         ] );

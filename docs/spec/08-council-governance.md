@@ -341,9 +341,6 @@ Remote 모드에서는 judgment_write/latest를 제외한 4개 도구만 노출.
 |-------|------|
 | `masc_pause` / `masc_resume` | 룸 일시정지/재개 |
 | `masc_pause_status` | 일시정지 상태 조회 |
-| `masc_switch_mode` | 도구 모드 전환 (minimal/standard/parallel/coding/full/solo/custom) |
-| `masc_get_config` | 현재 모드/설정 조회 |
-| `masc_tool_enable` / `masc_tool_disable` | 개별 도구 또는 카테고리 단위 활성/비활성화 |
 
 ---
 

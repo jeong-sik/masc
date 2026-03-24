@@ -111,17 +111,10 @@ export function Proof() {
 
   return html`
     <section class="flex flex-col gap-6">
-      <!-- Header -->
-      <div class="flex items-start justify-between gap-5 flex-wrap px-1">
-        <div class="max-w-2xl">
-          <h2 class="text-xl font-bold text-text-strong tracking-wide mb-2">근거 <span class="text-text-muted font-normal text-sm ml-2">Evidence & Context</span></h2>
-          <p class="text-[13px] text-text-muted leading-relaxed">이 세션이 실제로 여러 참여자의 흔적, 상호작용, 산출물, 실행 backing을 남겼는지 읽는 표면입니다.</p>
-        </div>
-        <div class="flex gap-2 flex-wrap items-center pt-1">
-          <span class="px-3 py-1.5 rounded-full text-[11px] font-bold border shadow-sm ${verdictTone(verdict)}">${verdictChipLabel(verdict)}</span>
-          ${snapshot?.session_id ? html`<span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-text-muted text-[11px] font-mono shadow-sm">${snapshot.session_id}</span>` : null}
-          ${snapshot?.generated_at ? html`<span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-text-muted text-[11px] font-mono shadow-sm">${relativeTime(snapshot.generated_at)}</span>` : null}
-        </div>
+      <div class="flex items-center justify-end gap-2 flex-wrap px-1">
+        <span class="px-3 py-1.5 rounded-full text-[11px] font-bold border shadow-sm ${verdictTone(verdict)}">${verdictChipLabel(verdict)}</span>
+        ${snapshot?.session_id ? html`<span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-text-muted text-[11px] font-mono shadow-sm">${snapshot.session_id}</span>` : null}
+        ${snapshot?.generated_at ? html`<span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-text-muted text-[11px] font-mono shadow-sm">${relativeTime(snapshot.generated_at)}</span>` : null}
       </div>
 
       ${proofError.value

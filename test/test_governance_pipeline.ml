@@ -5,6 +5,14 @@ module Room = Masc_mcp.Room
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Masc_mcp.Tool_result
 
+let explicit_claim_tool = "masc_claim_next"
+let managed_claim_tool = "masc_claim_task"
+let generic_transition_tool = "masc_transition"
+let transition_claim_input = `Assoc [("action", `String "claim")]
+let transition_start_input = `Assoc [("action", `String "start")]
+let transition_done_input = `Assoc [("action", `String "done")]
+let no_args = `Null
+
 (* ── Helpers ────────────────────────────────────────────────── *)
 
 let make_tmpdir () =
@@ -30,139 +38,170 @@ let cleanup_tmpdir dir =
 (* ── Risk Assessment Tests ──────────────────────────────────── *)
 
 let test_risk_critical_delete () =
-  let risk = Gp.assess_risk ~tool_name:"masc_delete_room" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_delete_room" ~input:no_args in
   Alcotest.(check string) "delete is critical"
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_critical_force () =
-  let risk = Gp.assess_risk ~tool_name:"masc_force_push" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_force_push" ~input:no_args in
   Alcotest.(check string) "force is critical"
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_critical_drop () =
-  let risk = Gp.assess_risk ~tool_name:"masc_drop_task" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_drop_task" ~input:no_args in
   Alcotest.(check string) "drop is critical"
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_critical_kill () =
-  let risk = Gp.assess_risk ~tool_name:"masc_kill_session" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_kill_session" ~input:no_args in
   Alcotest.(check string) "kill is critical"
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_critical_reset () =
-  let risk = Gp.assess_risk ~tool_name:"masc_reset_state" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_reset_state" ~input:no_args in
   Alcotest.(check string) "reset is critical"
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_critical_remove () =
-  let risk = Gp.assess_risk ~tool_name:"masc_remove_agent" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_remove_agent" ~input:no_args in
   Alcotest.(check string) "remove is critical"
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_critical_destroy () =
-  let risk = Gp.assess_risk ~tool_name:"masc_destroy_room" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_destroy_room" ~input:no_args in
   Alcotest.(check string) "destroy is critical"
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_critical_purge () =
-  let risk = Gp.assess_risk ~tool_name:"masc_purge_logs" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_purge_logs" ~input:no_args in
   Alcotest.(check string) "purge is critical"
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_high_create () =
-  let risk = Gp.assess_risk ~tool_name:"masc_create_room" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_create_room" ~input:no_args in
   Alcotest.(check string) "create is high"
     "high" (Gp.risk_level_to_string risk)
 
 let test_risk_high_update () =
-  let risk = Gp.assess_risk ~tool_name:"masc_update_task" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_update_task" ~input:no_args in
   Alcotest.(check string) "update is high"
     "high" (Gp.risk_level_to_string risk)
 
 let test_risk_high_deploy () =
-  let risk = Gp.assess_risk ~tool_name:"masc_deploy_worker" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_deploy_worker" ~input:no_args in
   Alcotest.(check string) "deploy is high"
     "high" (Gp.risk_level_to_string risk)
 
 let test_risk_high_push () =
-  let risk = Gp.assess_risk ~tool_name:"masc_push_config" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_push_config" ~input:no_args in
   Alcotest.(check string) "push is high"
     "high" (Gp.risk_level_to_string risk)
 
 let test_risk_high_merge () =
-  let risk = Gp.assess_risk ~tool_name:"masc_merge_branch" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_merge_branch" ~input:no_args in
   Alcotest.(check string) "merge is high"
     "high" (Gp.risk_level_to_string risk)
 
 let test_risk_high_send () =
-  let risk = Gp.assess_risk ~tool_name:"masc_send_message" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_send_message" ~input:no_args in
   Alcotest.(check string) "send is high"
     "high" (Gp.risk_level_to_string risk)
 
 let test_risk_high_spawn () =
-  let risk = Gp.assess_risk ~tool_name:"masc_spawn_worker" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_spawn_worker" ~input:no_args in
   Alcotest.(check string) "spawn is high"
     "high" (Gp.risk_level_to_string risk)
 
-let test_risk_medium_claim () =
-  let risk = Gp.assess_risk ~tool_name:"masc_transition" ~input:`Null in
-  Alcotest.(check string) "claim is medium"
+let test_risk_medium_claim_next () =
+  let risk = Gp.assess_risk ~tool_name:explicit_claim_tool ~input:no_args in
+  Alcotest.(check string) "claim_next is medium"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_risk_medium_claim_task () =
+  let risk = Gp.assess_risk ~tool_name:managed_claim_tool ~input:no_args in
+  Alcotest.(check string) "claim_task is medium"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_risk_medium_transition_claim () =
+  let risk =
+    Gp.assess_risk ~tool_name:generic_transition_tool ~input:transition_claim_input
+  in
+  Alcotest.(check string) "transition claim is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_join () =
-  let risk = Gp.assess_risk ~tool_name:"masc_join" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_join" ~input:no_args in
   Alcotest.(check string) "join is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_leave () =
-  let risk = Gp.assess_risk ~tool_name:"masc_leave" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_leave" ~input:no_args in
   Alcotest.(check string) "leave is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_start () =
-  let risk = Gp.assess_risk ~tool_name:"masc_start_session" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_start_session" ~input:no_args in
   Alcotest.(check string) "start is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_stop () =
-  let risk = Gp.assess_risk ~tool_name:"masc_stop_session" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_stop_session" ~input:no_args in
   Alcotest.(check string) "stop is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_pause () =
-  let risk = Gp.assess_risk ~tool_name:"masc_pause_room" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_pause_room" ~input:no_args in
   Alcotest.(check string) "pause is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_resume () =
-  let risk = Gp.assess_risk ~tool_name:"masc_resume_room" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_resume_room" ~input:no_args in
   Alcotest.(check string) "resume is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_low_status () =
-  let risk = Gp.assess_risk ~tool_name:"masc_status" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_status" ~input:no_args in
   Alcotest.(check string) "status is low"
     "low" (Gp.risk_level_to_string risk)
 
 let test_risk_low_list () =
-  let risk = Gp.assess_risk ~tool_name:"masc_list_tasks" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_list_tasks" ~input:no_args in
   Alcotest.(check string) "list is low"
     "low" (Gp.risk_level_to_string risk)
 
 let test_risk_low_query () =
-  let risk = Gp.assess_risk ~tool_name:"masc_query_agents" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_query_agents" ~input:no_args in
   Alcotest.(check string) "query is low"
     "low" (Gp.risk_level_to_string risk)
 
+let test_risk_low_transition () =
+  let risk = Gp.assess_risk ~tool_name:generic_transition_tool ~input:no_args in
+  Alcotest.(check string) "transition without action is low"
+    "low" (Gp.risk_level_to_string risk)
+
+let test_risk_low_transition_done () =
+  let risk =
+    Gp.assess_risk ~tool_name:generic_transition_tool ~input:transition_done_input
+  in
+  Alcotest.(check string) "transition done is low"
+    "low" (Gp.risk_level_to_string risk)
+
+let test_risk_medium_transition_start () =
+  let risk =
+    Gp.assess_risk ~tool_name:generic_transition_tool ~input:transition_start_input
+  in
+  Alcotest.(check string) "transition start is medium"
+    "medium" (Gp.risk_level_to_string risk)
+
 let test_risk_low_unknown () =
-  let risk = Gp.assess_risk ~tool_name:"masc_foobar" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_foobar" ~input:no_args in
   Alcotest.(check string) "unknown is low"
     "low" (Gp.risk_level_to_string risk)
 
 (* Critical > High precedence: "force_create" has both "force" (Critical)
    and "create" (High). Critical patterns are checked first. *)
 let test_risk_precedence_critical_over_high () =
-  let risk = Gp.assess_risk ~tool_name:"masc_force_create" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"masc_force_create" ~input:no_args in
   Alcotest.(check string) "force_create is critical (force wins)"
     "critical" (Gp.risk_level_to_string risk)
 
@@ -383,7 +422,7 @@ let test_blocked_response_structure () =
   let tmpdir = make_tmpdir () in
   let config = Room.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
-  let result = hook ~name:"masc_transition" ~args:`Null in
+  let result = hook ~name:generic_transition_tool ~args:transition_claim_input in
   (match result with
    | Some r ->
        let module U = Yojson.Safe.Util in
@@ -396,8 +435,25 @@ let test_blocked_response_structure () =
        let _tool = data |> U.member "tool_name" |> U.to_string in
        Alcotest.(check string) "governance_level" "paranoid" _gov;
        Alcotest.(check string) "risk_level" "medium" _risk;
-       Alcotest.(check string) "tool_name" "masc_transition" _tool
+       Alcotest.(check string) "tool_name" generic_transition_tool _tool
    | None -> Alcotest.fail "paranoid should block medium");
+  cleanup_tmpdir tmpdir
+
+let test_blocked_response_structure_claim_next () =
+  Eio_main.run @@ fun _env ->
+  let tmpdir = make_tmpdir () in
+  let config = Room.default_config tmpdir in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
+  let result = hook ~name:explicit_claim_tool ~args:`Null in
+  (match result with
+   | Some r ->
+       let module U = Yojson.Safe.Util in
+       let data = r.Tool_result.data in
+       let _risk = data |> U.member "risk_level" |> U.to_string in
+       let _tool = data |> U.member "tool_name" |> U.to_string in
+       Alcotest.(check string) "risk_level" "medium" _risk;
+       Alcotest.(check string) "tool_name" explicit_claim_tool _tool
+   | None -> Alcotest.fail "paranoid should block claim_next");
   cleanup_tmpdir tmpdir
 
 (* ── Unknown governance level defaults to development ──────── *)
@@ -436,13 +492,20 @@ let () =
       Alcotest.test_case "high: merge" `Quick test_risk_high_merge;
       Alcotest.test_case "high: send" `Quick test_risk_high_send;
       Alcotest.test_case "high: spawn" `Quick test_risk_high_spawn;
-      Alcotest.test_case "medium: claim" `Quick test_risk_medium_claim;
+      Alcotest.test_case "medium: claim_next" `Quick test_risk_medium_claim_next;
+      Alcotest.test_case "medium: claim_task" `Quick test_risk_medium_claim_task;
+      Alcotest.test_case "medium: transition claim" `Quick
+        test_risk_medium_transition_claim;
       Alcotest.test_case "medium: join" `Quick test_risk_medium_join;
       Alcotest.test_case "medium: leave" `Quick test_risk_medium_leave;
       Alcotest.test_case "medium: start" `Quick test_risk_medium_start;
       Alcotest.test_case "medium: stop" `Quick test_risk_medium_stop;
       Alcotest.test_case "medium: pause" `Quick test_risk_medium_pause;
       Alcotest.test_case "medium: resume" `Quick test_risk_medium_resume;
+      Alcotest.test_case "medium: transition start" `Quick
+        test_risk_medium_transition_start;
+      Alcotest.test_case "low: transition" `Quick test_risk_low_transition;
+      Alcotest.test_case "low: transition done" `Quick test_risk_low_transition_done;
       Alcotest.test_case "low: status" `Quick test_risk_low_status;
       Alcotest.test_case "low: list" `Quick test_risk_low_list;
       Alcotest.test_case "low: query" `Quick test_risk_low_query;
@@ -500,5 +563,7 @@ let () =
         test_hook_paranoid_blocks_medium;
       Alcotest.test_case "blocked response structure" `Quick
         test_blocked_response_structure;
+      Alcotest.test_case "blocked response structure: claim_next" `Quick
+        test_blocked_response_structure_claim_next;
     ];
   ]

@@ -428,7 +428,6 @@ let dispatch (ctx : context) ~(name : string) : result option =
           `Assoc [
             ("name", `String schema.name);
             ("description", `String schema.description);
-            ("category", `String (Mode.category_to_string (Mode.tool_category schema.name)));
             ("tier", `String (Tool_catalog.tier_to_string (Tool_catalog.tool_tier schema.name)));
           ]
         ) matches in

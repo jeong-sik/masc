@@ -11,6 +11,14 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
+let is_dashboard_observer_stream request =
+  match Server_utils.query_param request "sse_kind" with
+  | Some raw ->
+      let normalized = String.trim raw |> String.lowercase_ascii in
+      String.equal normalized "observer"
+      || String.equal normalized "dashboard"
+  | None -> false
+
 let add_routes ~port ~host router =
   router
   |> Http.Router.get "/health" health_handler
@@ -95,7 +103,12 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/graphiql/react-dom.production.min.js"
        (serve_graphiql_asset "react-dom.production.min.js")
   |> Http.Router.get "/mcp" (fun request reqd ->
-       with_read_auth (fun _state req reqd -> handle_get_mcp req reqd) request reqd)
+       if is_dashboard_observer_stream request then
+         with_public_read (fun _state req reqd ->
+           handle_get_mcp ~sse_kind:Sse.Observer req reqd
+         ) request reqd
+       else
+         with_read_auth (fun _state req reqd -> handle_get_mcp req reqd) request reqd)
   |> Http.Router.get "/mcp/operator" handle_get_operator_mcp
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp

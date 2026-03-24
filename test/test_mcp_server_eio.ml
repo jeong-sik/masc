@@ -7,7 +7,8 @@
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Mcp = Masc_mcp.Mcp_server
 module Config = Masc_mcp.Config
-module Mode = Masc_mcp.Mode
+module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Tool_result = Masc_mcp.Tool_result
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
@@ -516,10 +517,6 @@ let test_handle_request_tools_list_mdal_descriptions () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  (* MDAL tools are Ecosystem category — not in Standard mode.
-     Switch to Full so the names filter can find them. *)
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   let tools =
     tools_list_all ~clock ~sw state
     |> List.filter
@@ -1114,8 +1111,6 @@ let test_handle_request_tools_list_hides_team_session_turn_by_default () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   let tools = tools_list_all ~clock ~sw state in
   Alcotest.(check bool) "step still visible" true
     (List.exists
@@ -1167,10 +1162,6 @@ let _test_execute_tool_trpg_flow () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  (* TRPG tools are in TRPG category — switch to Full mode to pass mode gate *)
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
-
   let (ok_roll, roll_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock state
       ~name:"masc_trpg_dice_roll"
@@ -1241,9 +1232,6 @@ let test_execute_tool_coding_mode_allows_governance_status () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Coding in
-
   let (ok, msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock state
       ~name:"masc_governance_status"
@@ -1266,8 +1254,6 @@ let test_execute_tool_hidden_active_utility_direct_call () =
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   ignore (Masc_mcp.Room.init state.room_config ~agent_name:(Some "test-agent"));
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   (* Room.init required: vote_create calls ensure_initialized *)
   ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
 
@@ -1311,8 +1297,6 @@ let test_execute_tool_team_session_step_direct_call () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   let sid = "hidden-deprecated-team-turn" in
 
   let (ok_init, _init_msg) =
@@ -1375,10 +1359,6 @@ let _test_execute_tool_trpg_validation () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  (* TRPG tools are in TRPG category — switch to Full mode to pass mode gate *)
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
-
   let (ok_missing, msg_missing) =
     Mcp_eio.execute_tool_eio ~sw ~clock state
       ~name:"masc_trpg_turn_advance"
@@ -1569,9 +1549,6 @@ let test_convo_start_uses_current_room () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  (* Convo tools are Consensus category — switch to Full mode to pass mode gate *)
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   let sid = "mcp-convo-room-regression" in
   let room_id = "convo-proof-room" in
 
@@ -1599,11 +1576,7 @@ let test_convo_start_uses_current_room () =
   in
   Alcotest.(check bool) "room enter success" true ok_enter;
 
-  (* After entering a new room, its mode defaults to Full, so convo tools are
-     immediately available. *)
-  let new_room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let mode_config = Config.load new_room_path in
-  Alcotest.(check bool) "new room defaults to full" true (mode_config.mode = Mode.Full);
+  (* After entering a new room, convo tools are immediately available. *)
 
   let (ok_start, start_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -2376,8 +2349,6 @@ let test_execute_tool_help_tool () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
   let ok, msg =
     Mcp_eio.execute_tool_eio ~sw ~clock state ~name:"masc_tool_help"
       ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
@@ -2387,6 +2358,39 @@ let test_execute_tool_help_tool () =
   Alcotest.(check string) "help tool echoes name" "masc_status"
     Yojson.Safe.Util.(json |> member "name" |> to_string);
   cleanup_dir base_path
+
+let test_execute_tool_tag_dispatch_respects_pre_hooks () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Tool_dispatch.clear_hooks ();
+      cleanup_dir base_path)
+    (fun () ->
+      Tool_dispatch.clear_hooks ();
+      Tool_dispatch.register_pre_hook
+        (fun ~name ~args:_ ->
+          if String.equal name "masc_tool_help" then
+            Some
+              {
+                Tool_result.success = false;
+                data = `String "blocked-by-pre-hook";
+                tool_name = name;
+                duration_ms = 0.0;
+              }
+          else None);
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let _room_path = Masc_mcp.Room.masc_dir state.room_config in
+      let ok, msg =
+        Mcp_eio.execute_tool_eio ~sw ~clock state ~name:"masc_tool_help"
+          ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
+      in
+      Alcotest.(check bool) "pre-hook blocks tagged dispatch" false ok;
+      Alcotest.(check string) "blocked message returned" "blocked-by-pre-hook" msg)
 
 (* ===== Test Suites ===== *)
 
@@ -2440,6 +2444,8 @@ let eio_tests = [
   "handle resources/subscribe roundtrip", `Quick,
     test_handle_request_resources_subscribe_roundtrip;
   "execute masc_tool_help", `Quick, test_execute_tool_help_tool;
+  "execute tag dispatch respects pre-hooks", `Quick,
+    test_execute_tool_tag_dispatch_respects_pre_hooks;
   "handle tools/list mdal descriptions", `Quick,
     test_handle_request_tools_list_mdal_descriptions;
   "handle tools/list filters requested names", `Quick,

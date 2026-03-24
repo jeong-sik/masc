@@ -312,7 +312,12 @@ Heuristic 분류는 ~80% 정확도를 보인다 (개발자 추정).
 |--------|------|
 | `Masc_cache` | 공유 컨텍스트 스토어 |
 | `Recent_broadcasts` | 방 내 최근 N개 broadcast |
-| `File_context` | 최근 수정 파일 (미구현, TODO) |
+| `File_context` | 최근 수정 파일 (mtime scan 기반 구현 완료) |
+
+Keeper turn path는 이것과 별도로 `git status --porcelain` delta를 추적한다.
+즉:
+- `File_context` = 최근 파일 내용을 recall source로 가져오는 것
+- live worktree delta = 지난 keeper turn 이후 바뀐 파일 목록을 다음 turn에 직접 주입하는 것
 
 ### 8.3 Configuration
 

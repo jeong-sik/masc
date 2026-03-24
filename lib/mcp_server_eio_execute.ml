@@ -109,9 +109,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> auth_token
   in
 
-  let room_path = Room.masc_dir config in
-  let _mode_config = Config.load room_path in
-
   let mode_gate_error =
     if not (Tool_catalog.allow_direct_call name) then
       Some
@@ -403,7 +400,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   (* Dispatch a single module by tag — creates only that module's context *)
   let dispatch_by_tag (tag : Tool_dispatch.module_tag) : (bool * string) option =
-    match tag with
+    match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
+    | Some blocked -> Some (Tool_result.to_legacy blocked)
+    | None -> match tag with
     | Mod_plan ->
         Tool_plan.dispatch { config } ~name ~args:arguments
     | Mod_run ->
@@ -519,6 +518,16 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args:arguments
     | Mod_control ->
         Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:arguments
+    | Mod_improve_loop ->
+        Tool_improve_loop.dispatch
+          {
+            Tool_improve_loop.config;
+            agent_name;
+            sw = Some sw;
+            clock = Some clock;
+            proc_mgr = state.Mcp_server.proc_mgr;
+          }
+          ~name ~args:arguments
     | Mod_agent_timeline ->
         Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name } ~name ~args:arguments
     | Mod_misc ->
@@ -581,4 +590,3 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
     (false, Printf.sprintf "Unknown tool: %s" name)
-

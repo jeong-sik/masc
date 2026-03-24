@@ -231,7 +231,7 @@ let run_server ~sw ~env ~host ~port ~base_path =
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Log.Server.error "[main] keeper bootstrap failed (continuing without keepers): %s" (Printexc.to_string exn)
+    Log.Server.warn "[main] keeper bootstrap failed (continuing without keepers): %s" (Printexc.to_string exn)
 
 (** CLI options *)
 let port =
@@ -273,14 +273,19 @@ let acquire_pid_lock port =
      (match int_of_string_opt pid_str with
       | Some pid ->
         (try Unix.kill pid 0;
-           Printf.eprintf
-             "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it first: kill %d\n%!"
-             pid port pid;
+           Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+             (Printf.sprintf
+                "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it first: kill %d"
+                pid port pid);
            exit 1
          with Unix.Unix_error (Unix.ESRCH, _, _) ->
-           Printf.eprintf "[WARN] Removing stale PID file (PID %d no longer running)\n%!" pid)
+           Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
+             (Printf.sprintf
+                "[WARN] Removing stale PID file (PID %d no longer running)"
+                pid))
       | None ->
-        Printf.eprintf "[WARN] Invalid PID file contents, overwriting\n%!")
+        Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
+          "[WARN] Invalid PID file contents, overwriting")
    | None -> ());
   let oc = open_out path in
   Printf.fprintf oc "%d\n" (Unix.getpid ());
@@ -295,6 +300,7 @@ let run_cmd host port base_path =
 
   (* Enable Eio-aware locking in modules with dual-mode mutex guards *)
   Masc_mcp.Prometheus.enable_eio ();
+  Masc_mcp.Transport_metrics.init ();
   Masc_mcp.Chain_telemetry.enable_eio ();
   Masc_mcp.Generational_metrics.enable_eio ();
   Masc_mcp.Dashboard_cache.enable_eio ~clock:(Eio.Stdenv.clock env) ();

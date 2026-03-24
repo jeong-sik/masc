@@ -216,6 +216,15 @@ let command_plane_summary_cache_parts ~state =
       (Some (`Assoc (List.remove_assoc "swarm_status" fields)), swarm_status)
   | _ -> (None, None)
 
+let dashboard_active_or_recent_sessions config =
+  let cutoff_unix = Time_compat.now () -. 86400.0 in
+  let cutoff_iso = Dashboard_utils.iso_of_unix cutoff_unix in
+  Team_session_store.list_sessions ~since_unix:cutoff_unix config
+  |> List.filter (fun (session : Team_session_types.session) ->
+         match session.status with
+         | Running | Paused -> true
+         | _ -> session.updated_at_iso >= cutoff_iso)
+
 let dashboard_semantics_http_json () =
   Dashboard_semantics.json ()
 
@@ -421,7 +430,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     try
       let sessions =
         if Room.is_initialized config then
-          Team_session_store.list_sessions ~limit:50 config
+          dashboard_active_or_recent_sessions config
         else
           []
       in
@@ -454,7 +463,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     try
       let sessions =
         if Room.is_initialized config then
-          Team_session_store.list_sessions ~limit:50 config
+          dashboard_active_or_recent_sessions config
         else
           []
       in

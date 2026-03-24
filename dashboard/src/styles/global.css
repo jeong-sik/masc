@@ -452,28 +452,6 @@ a:hover {
   &:focus { outline: none; border-color: rgba(71, 184, 255, 0.55); }
 }
 
-@utility control-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border: 1px solid rgba(71, 184, 255, 0.32);
-  border-radius: 8px;
-  background: rgba(71, 184, 255, 0.14);
-  color: var(--accent);
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-  white-space: nowrap;
-  &:hover { background: rgba(71, 184, 255, 0.27); }
-  &:disabled { opacity: 0.5; cursor: not-allowed; }
-  &.ghost { background: var(--white-4); border-color: var(--border-slate-16); color: var(--text-body); }
-  &.ghost:hover { background: var(--white-8); border-color: var(--border-slate-22); }
-  &.chat-stream-warning { border-color: rgba(251, 191, 36, 0.5); color: var(--warn); animation: chatWarnPulse 2s ease-in-out infinite; }
-  &.is-active .tool-surface-count { background: rgba(14, 165, 233, 0.25); color: #7dd3fc; }
-}
 
 @utility control-row {
   display: grid;
@@ -585,16 +563,6 @@ tbody tr:hover {
 
 /* ── Command Plane utilities (migrated from command.css) ──── */
 
-@utility cmd-plane-view {
-  &.wallboard {
-    background:
-      radial-gradient(circle at top left, var(--cyan-12), transparent 22%),
-      radial-gradient(circle at top right, var(--ok-10), transparent 24%),
-      linear-gradient(180deg, rgba(3,7,18,0.98), rgba(8,14,28,0.96));
-    box-shadow: inset 0 1px 0 var(--white-5);
-  }
-}
-
 @utility cmd-stat-card {
   &.highlight {
     border-color: rgba(34,211,238,0.34);
@@ -660,10 +628,6 @@ tbody tr:hover {
     color: rgba(226, 232, 240, 0.76);
     line-height: 1.6;
   }
-}
-
-@utility cmd-tree-node {
-  &.depth-3 { background: var(--white-3); }
 }
 
 @utility cmd-guide-card {
@@ -830,24 +794,12 @@ tbody tr:hover {
 /* Word-break safety for guide/readiness/swarm text */
 .cmd-guide-card p,
 .cmd-readiness-row p,
-.swarm-event-node,
-.swarm-event-body {
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
 /* ── Command responsive breakpoints ───────────────────────── */
 
 @media (max-width: 1450px) {
-  .cmd-hero-summary {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 1100px) {
-  .cmd-hero-summary {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 @keyframes fadeSlide {
@@ -860,22 +812,12 @@ tbody tr:hover {
 }
 
 @media (max-width: 1200px) {
-  .dashboard-layout { grid-template-columns: 1fr; gap: 14px; }
-  .dashboard-rail {
-    position: static; display: grid; grid-template-columns: 1fr;
-    gap: 10px; max-height: none; overflow-y: visible; padding-right: 0;
-  }
-  .rail-tab-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 880px) {
   :root { --header-h: 86px; }
   .stats-grid { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
-  .rail-tab-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {
-  .dashboard-rail { grid-template-columns: 1fr; }
-  .rail-inline-actions { grid-template-columns: 1fr; }
-  .rail-tab-list { grid-template-columns: 1fr; }
 }
 
 /* prefers-reduced-motion handled by Tailwind motion-reduce: */
@@ -945,10 +887,6 @@ tbody tr:hover {
   0%, 100% { transform: scale(1); opacity: 0.92; }
   50% { transform: scale(1.06); opacity: 1; }
 }
-@keyframes chatWarnPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
 @keyframes livePulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
   50% { box-shadow: 0 0 8px 2px var(--ok-12); }
@@ -1006,61 +944,10 @@ tbody tr:hover {
   &:focus { outline: none; border-color: var(--ok-40); }
 }
 
-.keeper-comms-diagnostics-toggle::-webkit-details-marker {
-  display: none;
-}
-
-.keeper-comms-diagnostics-toggle::before {
-  content: ">";
-  display: inline-block;
-  margin-right: 8px;
-  transition: transform 0.15s ease;
-  font-size: var(--fs-xs);
-}
-
-.keeper-comms-diagnostics[open] > .keeper-comms-diagnostics-toggle::before {
-  transform: rotate(90deg);
-}
-
-@utility keeper-chat__msg--user {
-  & .keeper-chat__role { text-align: right; }
-  & .keeper-chat__text {
-    background: var(--accent-12);
-    border: 1px solid var(--accent-20);
-    color: var(--text-body, var(--text-body));
-  }
-}
-
-@utility keeper-chat__msg--assistant {
-  & .keeper-chat__text {
-    background: var(--ff-gold-8);
-    border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-    color: var(--text-body, var(--text-body));
-  }
-}
-
-@utility keeper-chat__msg--streaming {
-  & .keeper-chat__text { border-color: var(--ff-gold-dim); }
-}
-
 @utility keeper-chat__cursor {
   animation: keeper-blink 0.8s step-end infinite;
   color: var(--ff-gold, var(--ff-gold));
 }
-
-.keeper-chat__messages::-webkit-scrollbar {
-  width: 4px;
-}
-
-.keeper-chat__messages::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.keeper-chat__messages::-webkit-scrollbar-thumb {
-  background: var(--ff-gold-20);
-  border-radius: 2px;
-}
-
 /* ── Chat (merged from chat.css) ───────────────────────── */
 
 @utility chat-transcript {
@@ -1145,7 +1032,6 @@ tbody tr:hover {
   background: linear-gradient(180deg, rgba(18, 42, 33, 0.55), rgba(10, 25, 20, 0.48));
 }
 
-/* control-btn.chat-stream-warning: folded into @utility control-btn above */
 
 /* ── Tools (merged from tools.css) ─────────────────────── */
 
@@ -1191,7 +1077,6 @@ tbody tr:hover {
   }
 }
 
-/* control-btn.is-active .tool-surface-count: folded into @utility control-btn above */
 
 @utility tool-metrics-summary {
   display: grid;
@@ -1214,14 +1099,6 @@ tbody tr:hover {
 }
 
 @media (max-width: 880px) {
-  .tool-inventory-summary {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .tool-metrics-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .tool-metrics-sections {
     grid-template-columns: 1fr;
   }
@@ -1376,17 +1253,6 @@ tbody tr:hover {
 /* ops-stat tone variants: folded into @utility ops-stat above */
 
 .ops-control-summary::-webkit-details-marker,
-.ops-archive-summary::-webkit-details-marker {
-  display: none;
-}
-
-.ops-archive-summary::before {
-  content: '\25B8';
-  display: inline-block;
-  margin-right: 6px;
-  transition: transform 120ms ease;
-}
-
 .ops-archive-panel[open] .ops-archive-summary::before {
   transform: rotate(90deg);
 }
@@ -1410,85 +1276,20 @@ tbody tr:hover {
 }
 
 @media (max-width: 1200px) {
-  .command-entry-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .ops-workbench {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 880px) {
-  .command-entry-strip {
-    grid-template-columns: 1fr;
-  }
   .ops-actor-input {
     min-width: 0;
     flex: 1;
-  }
-  .planning-header,
-  .board-toolbar,
-  .post-title-row {
-    flex-direction: column;
-  }
-  .board-toolbar-actions {
-    width: 100%;
-  }
-  .board-toolbar-actions .control-btn {
-    flex: 1;
-  }
-  .vote-column {
-    min-width: 42px;
   }
 }
 
 /* ── Roster (merged from roster.css) ───────────────────── */
 /* roster-card: pseudo-elements (::before/::after) require raw CSS */
-
-.roster-card::before,
-.roster-card::after {
-  content: '';
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  border-color: var(--ff-gold);
-  opacity: 0.5;
-  transition: opacity 0.2s;
-}
-
-.roster-card::before {
-  top: -1px;
-  left: -1px;
-  border-top: 2px solid;
-  border-left: 2px solid;
-}
-
-.roster-card::after {
-  bottom: -1px;
-  right: -1px;
-  border-bottom: 2px solid;
-  border-right: 2px solid;
-}
-
-.roster-card:hover {
-  background: #122040;
-  border-color: var(--ff-gold);
-  box-shadow: 0 0 12px rgba(212, 169, 75, 0.1);
-}
-
-.roster-card:hover::before,
-.roster-card:hover::after {
-  opacity: 1;
-}
-
-.roster-card__avatar::after {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border: 1px solid var(--ff-border-subtle);
-  border-radius: 14px;
-  pointer-events: none;
-}
 
 @utility roster-filter-btn {
   transition: all 0.15s;
@@ -1512,22 +1313,6 @@ tbody tr:hover {
   background: rgba(100, 100, 120, 0.1);
   color: #667;
   border: 1px solid rgba(100, 100, 120, 0.15);
-}
-
-/* roster-card--keeper: pseudo-element overrides require raw CSS */
-.roster-card--keeper {
-  border-left: 3px solid #4a9ef5;
-  border-color: rgba(74, 158, 245, 0.25);
-}
-
-.roster-card--keeper:hover {
-  border-color: rgba(74, 158, 245, 0.4);
-  box-shadow: 0 0 12px rgba(74, 158, 245, 0.08);
-}
-
-.roster-card--keeper::before,
-.roster-card--keeper::after {
-  border-color: #4a9ef5;
 }
 
 @utility roster-card__gauge-bar {
@@ -1600,7 +1385,7 @@ tbody tr:hover {
 
 /* board-post content-visibility: folded into @utility board-post below */
 
-/* control-input/textarea :focus, control-btn :hover/:disabled: folded into @utility blocks above */
+/* control-input/textarea :focus: folded into @utility blocks above */
 
 /* ── Mission Status Dot ── */
 @utility mission-status-dot {
@@ -1696,16 +1481,11 @@ tbody tr:hover {
 
 /* ── Responsive (layout) ── */
 @media (max-width: 960px) {
-  .keeper-kpis { grid-template-columns: repeat(2, 1fr); }
-  .agent-detail-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 880px) {
-  .council-create { grid-template-columns: 1fr; }
   .control-row { grid-template-columns: 1fr; }
-  .agent-mention-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
-  .keeper-kpis { grid-template-columns: 1fr; }
   .metric-tip-pop {
     left: 0;
     transform: none;
@@ -1747,14 +1527,6 @@ tbody tr:hover {
   transform: translateY(-4px) scale(1.01);
   border-color: var(--accent);
   box-shadow: 0 4px 12px rgba(0, 240, 255, 0.1);
-}
-
-/* ── Logs (compound selectors and pseudo-elements, kept as raw CSS) ── */
-.logs-table thead {
-  position: sticky;
-  top: 0;
-  background: var(--card);
-  z-index: 1;
 }
 
 .logs-module-input::placeholder {
@@ -1823,12 +1595,6 @@ tbody tr:hover {
 .mission-crew-card.is-selected {
   box-shadow: 0 0 0 1px rgba(71,184,255,0.45);
   background: linear-gradient(180deg, var(--accent-14), var(--white-4));
-}
-
-/* proof-* rules still referenced by proof-sections components */
-.proof-timeline-row .semantic-tag-row {
-  margin-top: 6px;
-  margin-bottom: 0;
 }
 
 .proof-artifact-row .command-meta-line span {
@@ -1940,11 +1706,6 @@ button.monitor-row {
   content-visibility: auto;
   contain-intrinsic-size: auto 48px;
 }
-
-button.council-row:hover {
-  background: var(--white-8);
-}
-
 button.council-row.selected {
   border-color: rgba(71, 184, 255, 0.5);
   background: var(--accent-14);
@@ -2022,11 +1783,6 @@ button.council-row.selected {
     grid-template-columns: 1fr;
     text-align: center;
   }
-  .ff-plate__portrait { justify-self: center; }
-  .ff-plate__stats { grid-template-columns: repeat(4, 1fr); justify-self: stretch; }
-  .ff-plate__name-row { justify-content: center; }
-  .ff-plate__badges { justify-content: center; }
-  .ff-profile__grid { grid-template-columns: 1fr; }
 }
 
 /* ── Keeper Rich Card (Overview) ──────────────────────────── */
@@ -2053,15 +1809,6 @@ button.council-row.selected {
 }
 
 /* ── Activity Timeline (case-grouped) ────────────────────── */
-/* compound selector, kept as raw CSS */
-.governance-case-events .governance-activity-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 0 2px 8px;
-  font-size: var(--fs-sm);
-}
-
 /* ── Lifecycle progress indicator ────────────────────────── */
 @utility lifecycle-done { color: rgba(74, 222, 128, 0.7); background: var(--ok-8); }
 @utility lifecycle-current { color: rgba(96, 165, 250, 0.9); background: rgba(96, 165, 250, 0.12); font-weight: 600; }
@@ -2150,12 +1897,6 @@ button.council-row.selected {
 
 /* ── Pipeline stage badge variants ── */
 @utility pipeline-stage-badge {
-  &.stage-idle { color: rgba(148, 163, 184, 0.85); background: var(--slate-gray-12); border-color: var(--slate-gray-20); }
-  &.stage-thinking { color: rgba(96, 165, 250, 0.95); background: rgba(96, 165, 250, 0.14); border-color: rgba(96, 165, 250, 0.25); animation: pipeline-badge-pulse 1.5s ease-in-out infinite; }
-  &.stage-tool_use { color: rgba(251, 146, 60, 0.95); background: rgba(251, 146, 60, 0.14); border-color: rgba(251, 146, 60, 0.25); }
-  &.stage-compacting { color: rgba(250, 204, 21, 0.95); background: rgba(250, 204, 21, 0.14); border-color: rgba(250, 204, 21, 0.25); }
-  &.stage-handoff { color: rgba(168, 85, 247, 0.95); background: rgba(168, 85, 247, 0.14); border-color: rgba(168, 85, 247, 0.25); }
-  &.stage-proactive { color: rgba(74, 222, 128, 0.95); background: rgba(74, 222, 128, 0.14); border-color: var(--ok-25); }
   &.stage-offline { color: rgba(100, 100, 110, 0.85); background: rgba(100, 100, 110, 0.12); border-color: rgba(100, 100, 110, 0.2); }
 }
 
@@ -2417,7 +2158,6 @@ button.council-row.selected {
 
 @media (prefers-reduced-motion: reduce) {
   .pixel-avatar[data-status] { animation: none; }
-  .pixel-avatar-particle { display: none; }
   .pixel-avatar--has-blocker {
     animation: none;
     box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.6);

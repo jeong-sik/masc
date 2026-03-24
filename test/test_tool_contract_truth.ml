@@ -2,7 +2,6 @@ open Alcotest
 
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Config = Masc_mcp.Config
-module Mode = Masc_mcp.Mode
 module Room = Masc_mcp.Room
 
 let temp_dir () =
@@ -88,8 +87,6 @@ let test_hidden_tools_report_contract_status () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let room_path = Room.masc_dir state.room_config in
-      ignore (Config.switch_mode room_path Mode.Full);
       let tools =
         tools_list_response ~clock ~sw ~include_hidden:true
           ~names:

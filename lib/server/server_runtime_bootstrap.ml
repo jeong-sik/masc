@@ -710,9 +710,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          |> String.lowercase_ascii
        in
        Governance_pipeline.install ~config:state.room_config ~governance_level);
-      (* Admin tool capability gate via dispatch_structured path.
-         execute_tool_eio tag-based dispatch bypasses pre-hooks;
-         full enforcement is a follow-up. *)
+      (* Admin tool capability gate via Tool_dispatch pre-hooks.
+         execute_tool_eio tag-based dispatch now runs the shared
+         pre-hook path before module dispatch. *)
       Tool_permissions.install ~get_agent_name:(fun () -> None);
       bootstrap_keepers ~sw ~clock state;
       init_task_backend ();

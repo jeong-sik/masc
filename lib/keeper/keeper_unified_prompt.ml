@@ -132,6 +132,12 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     Buffer.add_string ubuf "\n### Continuity\n";
     Buffer.add_string ubuf observation.continuity_summary;
     Buffer.add_string ubuf "\n");
+  (match observation.worktree_change_summary with
+   | Some summary when String.trim summary <> "" ->
+       Buffer.add_string ubuf "\n### Live Worktree Delta\n";
+       Buffer.add_string ubuf summary;
+       Buffer.add_string ubuf "\n"
+   | _ -> ());
   (* Triage triggers *)
   let tt = String.trim observation.triage_triggers in
   if tt <> "" && not (String.length tt >= 5 && String.sub tt 0 5 = "skip:")

@@ -56,6 +56,9 @@ let get_tasks_raw_in_room config room_id =
     let backlog = read_backlog_in_room config room_id in
     backlog.tasks
 
+let safe_yield () =
+  try Eio.Fiber.yield () with _ -> ()
+
 (** Get raw agent list (for orchestrator) *)
 let get_agents_raw config =
   ensure_initialized config;
@@ -66,6 +69,7 @@ let get_agents_raw config =
     |> Array.to_list
     |> List.filter (fun name -> Filename.check_suffix name ".json")
     |> List.filter_map (fun name ->
+        safe_yield ();
         let path = Filename.concat agents_path name in
         let json = read_json config path in
         match agent_of_yojson json with
@@ -83,6 +87,7 @@ let get_agents_raw_in_room config room_id =
       |> Array.to_list
       |> List.filter (fun name -> Filename.check_suffix name ".json")
       |> List.filter_map (fun name ->
+          safe_yield ();
           let path = Filename.concat agents_path name in
           let json = read_json config path in
           match agent_of_yojson json with
@@ -103,6 +108,7 @@ let get_all_agents_in_room config room_id =
       |> Array.to_list
       |> List.filter (fun name -> Filename.check_suffix name ".json")
       |> List.filter_map (fun name ->
+          safe_yield ();
           let path = Filename.concat agents_path name in
           let json = read_json config path in
           match agent_of_yojson json with
@@ -124,6 +130,7 @@ let audit_orphan_tasks config : (Types.task * string) list =
         |> Array.to_list
         |> List.filter (fun name -> Filename.check_suffix name ".json")
         |> List.filter_map (fun name ->
+            safe_yield ();
             let path = Filename.concat agents_path name in
             let json = read_json config path in
             match agent_of_yojson json with
@@ -206,6 +213,7 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
     | _ when remaining <= 0 -> List.rev acc
     | [] -> List.rev acc
     | name :: rest ->
+        safe_yield ();
         if extract_seq_from_filename name <= since_seq then List.rev acc
         else
           let path = Filename.concat msgs_path name in
@@ -216,7 +224,9 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
                | _ -> loop remaining acc rest)
           | exception (Eio.Cancel.Cancelled _ as e) -> raise e
           | exception e ->
-              Eio.traceln "[WARN] Failed to read %s %s: %s" warn_label name (Printexc.to_string e);
+              Log.legacy_traceln ~level:Log.Warn ~module_name:"Room"
+                (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
+                   name (Printexc.to_string e));
               loop remaining acc rest
   in
   loop limit [] names
@@ -329,4 +339,3 @@ let get_messages config ~since_seq ~limit =
     Buffer.add_string buf "(no new messages)\n";
 
   Buffer.contents buf
-

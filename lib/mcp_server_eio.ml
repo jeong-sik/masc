@@ -22,7 +22,6 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
-  | Role_filtered of Mode.mode
 
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
@@ -92,7 +91,8 @@ let read_only_tools =
    "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report";
    "masc_team_session_list"; "masc_team_session_compare";
    "masc_team_session_events"; "masc_team_session_prove";
-   "masc_operator_snapshot"; "masc_operator_digest"]
+   "masc_operator_snapshot"; "masc_operator_digest";
+   "masc_improve_loop_status"]
 
 let requires_join_tools = [
   "masc_add_task"; "masc_claim_next"; "masc_transition";
@@ -103,6 +103,8 @@ let requires_join_tools = [
   "masc_vote_cast"; "masc_vote_revoke";
   "masc_register_capabilities"; "masc_suspend"; "masc_leave";
   "masc_operator_action"; "masc_operator_confirm";
+  "masc_improve_loop_start"; "masc_improve_loop_pause";
+  "masc_improve_loop_resume"; "masc_improve_loop_tick";
   "masc_code_swarm_plan"; "masc_code_swarm_verify"; "masc_code_swarm_merge";
 ]
 
@@ -136,6 +138,7 @@ let () =
   register_module_tag ~schemas:Tool_keeper.schemas ~tag:Mod_keeper;
   register_module_tag ~schemas:Tool_compact.schemas ~tag:Mod_compact;
   register_module_tag ~schemas:Tool_mdal.schemas ~tag:Mod_mdal;
+  register_module_tag ~schemas:Tool_improve_loop.schemas ~tag:Mod_improve_loop;
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
   register_module_tag ~schemas:Tool_research.schemas ~tag:Mod_research;
   register_module_tag ~schemas:Tool_model_catalog.schemas ~tag:Mod_model_catalog;

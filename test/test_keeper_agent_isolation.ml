@@ -54,32 +54,46 @@ let has_keeper_prefix name =
     Derived from actual module exports — no prefix guessing. *)
 let known_non_keeper_tool_names : string list =
   List.concat [
+    Tool_shard.governance_tools
+    |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_shard.autoresearch_keeper_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_research.schemas
+    |> List.map (fun (t : Types.tool_schema) -> t.name);
+    Tool_shard.coding_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_code_write.tool_names;
   ]
   |> List.sort_uniq String.compare
 
+let known_shared_agent_keeper_tool_names : string list =
+  [ "masc_worktree_create"; "masc_worktree_list" ]
+
 (* ============================================================
-   Invariant 1: Non-research keepers only get keeper_* tools
+   Invariant 1: Non-research keepers only get keeper_* tools plus
+   curated canonical masc_* keeper workflows
    ============================================================ *)
 
 let test_heuristic_only_keeper_prefixed () =
   let meta = make_meta ~policy_mode:"Heuristic" () in
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
+  let unexpected =
+    List.filter (fun n -> not (List.mem n known_non_keeper_tool_names)) non_keeper
+  in
   Alcotest.(check (list string))
-    "heuristic keeper only has keeper_* tools" [] non_keeper
+    "heuristic keeper only has keeper_* or curated masc_* tools" [] unexpected
 
 let test_learned_only_keeper_prefixed () =
   let meta = make_meta ~policy_mode:"Learned_offline_v1"
       ~policy_shell_mode:"readonly" ~policy_voice_enabled:true () in
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
+  let unexpected =
+    List.filter (fun n -> not (List.mem n known_non_keeper_tool_names)) non_keeper
+  in
   Alcotest.(check (list string))
-    "learned keeper only has keeper_* tools" [] non_keeper
+    "learned keeper only has keeper_* or curated masc_* tools" [] unexpected
 
 (* ============================================================
    Invariant 2: Research keepers only add research/autoresearch tools
@@ -134,9 +148,16 @@ let test_no_overlap_research_vs_agent () =
       ~soul_profile:"research" () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
-  let overlap = List.filter (fun n -> List.mem n agent_names) keeper_names in
+  let overlap =
+    List.filter
+      (fun n ->
+        List.mem n agent_names
+        && not (List.mem n known_shared_agent_keeper_tool_names))
+      keeper_names
+  in
   Alcotest.(check (list string))
-    "research keeper disjoint from agent coordination" [] overlap
+    "research keeper only shares approved worktree tools with agent surface"
+    [] overlap
 
 let test_shard_tools_disjoint_from_agent () =
   let keeper_tools = Tool_shard.keeper_model_tools

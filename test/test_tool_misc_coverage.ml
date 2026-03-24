@@ -153,13 +153,13 @@ let () = test "dispatch_tool_admin_snapshot" (fun () ->
       let json = parse_json result in
       assert (Yojson.Safe.Util.member "tool_inventory" json <> `Null);
       assert (Yojson.Safe.Util.member "auth" json <> `Null);
-      assert (Yojson.Safe.Util.member "mode" json <> `Null);
+      assert (Yojson.Safe.Util.member "mode" json = `Null);
       assert (Yojson.Safe.Util.member "keeper_policies" json <> `Null);
       assert (Yojson.Safe.Util.member "command_plane" json <> `Null)
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_tool_admin_update_mode" (fun () ->
+let () = test "dispatch_tool_admin_update_rejects_mode" (fun () ->
   let ctx = make_test_ctx () in
   let args =
     `Assoc
@@ -169,12 +169,8 @@ let () = test "dispatch_tool_admin_update_mode" (fun () ->
       ]
   in
   match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
-  | Some (success, result) ->
-      assert success;
-      let json = parse_json result in
-      assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "mode");
-      let cfg = Config.load (Room.masc_dir ctx.config) in
-      assert (cfg.mode = Mode.Full)
+  | Some (success, _result) ->
+      assert (not success)
   | None -> failwith "dispatch returned None"
 )
 

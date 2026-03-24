@@ -275,24 +275,27 @@ let append_keeper_auto_team_session_note (ctx : _ context) (meta : keeper_meta)
 let maybe_handle_auto_team_session (ctx : _ context) (meta : keeper_meta)
     (message : string) :
     ((tool_result option * keeper_meta), string) result =
-  let linked_meta, running_session = running_session_for_keeper ctx.config meta in
-  match running_session with
-  | Some session -> (
-      match append_keeper_auto_team_session_note ctx linked_meta session message with
-      | Error err -> Error err
-      | Ok session' ->
-          let json =
-            keeper_auto_team_session_response_json
-              ~meta:linked_meta ~session:session' ~created:false ~reused:true ()
-          in
-          Ok (Some (true, Yojson.Safe.pretty_to_string json), linked_meta))
-  | None -> (
-      match start_keeper_auto_team_session ctx linked_meta message with
-      | Error err -> Error err
-      | Ok (updated_meta, session, spawn_error) ->
-          let json =
-            keeper_auto_team_session_response_json
-              ~meta:updated_meta ~session ~created:true ~reused:false
-              ?spawn_error ()
-          in
-          Ok (Some (true, Yojson.Safe.pretty_to_string json), updated_meta))
+  if not (Keeper_status_bridge.auto_team_session_enabled meta) then
+    Ok (None, meta)
+  else
+    let linked_meta, running_session = running_session_for_keeper ctx.config meta in
+    match running_session with
+    | Some session -> (
+        match append_keeper_auto_team_session_note ctx linked_meta session message with
+        | Error err -> Error err
+        | Ok session' ->
+            let json =
+              keeper_auto_team_session_response_json
+                ~meta:linked_meta ~session:session' ~created:false ~reused:true ()
+            in
+            Ok (Some (true, Yojson.Safe.pretty_to_string json), linked_meta))
+    | None -> (
+        match start_keeper_auto_team_session ctx linked_meta message with
+        | Error err -> Error err
+        | Ok (updated_meta, session, spawn_error) ->
+            let json =
+              keeper_auto_team_session_response_json
+                ~meta:updated_meta ~session ~created:true ~reused:false
+                ?spawn_error ()
+            in
+            Ok (Some (true, Yojson.Safe.pretty_to_string json), updated_meta))

@@ -222,7 +222,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
           in
           let auth_result =
             match profile with
-            | Mcp_eio.Full | Mcp_eio.Managed_agent | Mcp_eio.Role_filtered _ ->
+            | Mcp_eio.Full | Mcp_eio.Managed_agent ->
                 verify_mcp_auth ~base_path httpun_request
             | Mcp_eio.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
@@ -318,7 +318,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
           in
           let auth_result =
             match profile with
-            | Mcp_eio.Full | Mcp_eio.Managed_agent | Mcp_eio.Role_filtered _ -> Ok None
+            | Mcp_eio.Full | Mcp_eio.Managed_agent -> Ok None
             | Mcp_eio.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
           in
@@ -472,6 +472,10 @@ let make_request_handler ~sw ~clock ~server_start_time =
       | `GET, "/api/v1/dashboard/proof" ->
           let state = get_server_state () in
           let json = dashboard_proof_http_json ~state httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/transport-health" ->
+          let json = Transport_metrics.transport_health_json () in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/mdal/loops" ->

@@ -101,7 +101,7 @@ function normalizeAttentionItem(raw: unknown): OperatorAttentionItem | null {
   if (!kind || !summary || !targetType) return null
   return {
     kind,
-    severity: asString(raw.severity) ?? 'warn',
+    severity: asString(raw.severity) ?? 'unknown',
     summary,
     target_type: targetType,
     target_id: asString(raw.target_id) ?? null,
@@ -120,7 +120,7 @@ function normalizeRecommendedAction(raw: unknown): OperatorRecommendedAction | n
     action_type: actionType,
     target_type: targetType,
     target_id: asString(raw.target_id) ?? null,
-    severity: asString(raw.severity) ?? 'warn',
+    severity: asString(raw.severity) ?? 'unknown',
     reason,
     confirm_required: asBoolean(raw.confirm_required),
     suggested_payload: raw.suggested_payload,

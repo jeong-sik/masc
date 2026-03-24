@@ -32,7 +32,12 @@ let test_shard_filesystem_exists () =
   match Tool_shard.get_shard "filesystem" with
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
-    Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1)
+    Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1);
+    let names = List.map (fun (t : Types.tool_schema) -> t.name) s.tools in
+    Alcotest.(check bool) "contains fs_read" true
+      (List.mem "keeper_fs_read" names);
+    Alcotest.(check bool) "excludes fs_edit" false
+      (List.mem "keeper_fs_edit" names)
   | None -> Alcotest.fail "filesystem shard not found"
 
 let test_shard_shell_exists () =
@@ -42,6 +47,18 @@ let test_shard_shell_exists () =
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1)
   | None -> Alcotest.fail "shell shard not found"
 
+let test_shard_governance_exists () =
+  match Tool_shard.get_shard "governance" with
+  | Some s ->
+    Alcotest.(check bool) "removable" true s.Tool_shard.removable;
+    Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1);
+    let names = List.map (fun (t : Types.tool_schema) -> t.name) s.tools in
+    Alcotest.(check bool) "contains petition_submit" true
+      (List.mem "masc_petition_submit" names);
+    Alcotest.(check bool) "contains case_brief_submit" true
+      (List.mem "masc_case_brief_submit" names)
+  | None -> Alcotest.fail "governance shard not found"
+
 let test_shard_coding_exists () =
   match Tool_shard.get_shard "coding" with
   | Some s ->
@@ -49,7 +66,11 @@ let test_shard_coding_exists () =
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1);
     let names = List.map (fun (t : Types.tool_schema) -> t.name) s.tools in
     Alcotest.(check bool) "contains keeper_bash" true (List.mem "keeper_bash" names);
-    Alcotest.(check bool) "contains keeper_github" true (List.mem "keeper_github" names)
+    Alcotest.(check bool) "contains keeper_github" true (List.mem "keeper_github" names);
+    Alcotest.(check bool) "contains worktree_create" true
+      (List.mem "masc_worktree_create" names);
+    Alcotest.(check bool) "contains code_search" true
+      (List.mem "masc_code_search" names)
   | None -> Alcotest.fail "coding shard not found"
 
 let test_coding_not_in_defaults () =
@@ -86,7 +107,13 @@ let test_default_shard_names () =
   let defaults = Tool_shard.default_shard_names in
   Alcotest.(check bool) "at least 6 defaults" true (List.length defaults >= 6);
   (* base is always required as the non-removable foundation shard *)
-  Alcotest.(check bool) "base in defaults" true (List.mem "base" defaults)
+  Alcotest.(check bool) "base in defaults" true (List.mem "base" defaults);
+  Alcotest.(check bool) "governance in defaults" true
+    (List.mem "governance" defaults);
+  Alcotest.(check bool) "voice not in defaults" false
+    (List.mem "voice" defaults);
+  Alcotest.(check bool) "weather not in defaults" false
+    (List.mem "weather" defaults)
 
 (* ============================================================
    tools_of_shards tests
@@ -302,6 +329,15 @@ let test_board_tools_names () =
   Alcotest.(check bool) "has board_comment" true (List.mem "keeper_board_comment" names);
   Alcotest.(check bool) "has board_vote" true (List.mem "keeper_board_vote" names)
 
+let test_governance_tools_names () =
+  let names = List.map (fun (t : Types.tool_schema) -> t.name)
+    Tool_shard.governance_tools in
+  Alcotest.(check bool) "has cases" true (List.mem "masc_cases" names);
+  Alcotest.(check bool) "has governance_status" true
+    (List.mem "masc_governance_status" names);
+  Alcotest.(check bool) "has brief submit" true
+    (List.mem "masc_case_brief_submit" names)
+
 (* ============================================================
    Voice tools content tests (#3: all 5 voice tools present)
    ============================================================ *)
@@ -317,21 +353,20 @@ let test_voice_tools_names () =
   Alcotest.(check bool) "has voice_session_start" true (List.mem "keeper_voice_session_start" names);
   Alcotest.(check bool) "has voice_session_end" true (List.mem "keeper_voice_session_end" names)
 
-let test_keeper_model_has_voice_tools () =
+let test_keeper_model_excludes_voice_tools () =
   let names = List.map (fun (t : Types.tool_schema) -> t.name)
     Tool_shard.keeper_model_tools in
-  Alcotest.(check bool) "keeper_model has voice_speak" true (List.mem "keeper_voice_speak" names);
-  Alcotest.(check bool) "keeper_model has voice_agent" true (List.mem "keeper_voice_agent" names);
-  Alcotest.(check bool) "keeper_model has voice_sessions" true (List.mem "keeper_voice_sessions" names);
-  Alcotest.(check bool) "keeper_model has voice_session_start" true (List.mem "keeper_voice_session_start" names);
-  Alcotest.(check bool) "keeper_model has voice_session_end" true (List.mem "keeper_voice_session_end" names)
+  Alcotest.(check bool) "keeper_model no voice_speak" false
+    (List.mem "keeper_voice_speak" names);
+  Alcotest.(check bool) "keeper_model has governance_status" true
+    (List.mem "masc_governance_status" names)
 
 (* ============================================================
    Shard revoke voice (#6: revoke removes all 5 voice tools)
    ============================================================ *)
 
 let test_revoke_voice_removes_all_tools () =
-  let all_shards = Tool_shard.default_shard_names in
+  let all_shards = Tool_shard.default_shard_names @ [ "voice" ] in
   let tools_before = Tool_shard.tools_of_shards all_shards in
   let voice_before = List.filter (fun (t : Types.tool_schema) ->
     let n = t.name in
@@ -368,15 +403,24 @@ let all_keeper_shard_tool_names () : string list =
   |> List.sort_uniq String.compare
 
 (** Verify that every keeper_ tool in any shard also appears in
-    keeper_model_tools (default) or coding_tools. This ensures no
+    one of the effective keeper shard bundles. This ensures no
     tool schema is orphaned from the dispatch pipeline. *)
 let test_keeper_dispatch_coverage () =
   let names = all_keeper_shard_tool_names () in
   Alcotest.(check bool) "at least 25 keeper tools" true (List.length names >= 25);
+  let shard_tool_names shard_name =
+    match Tool_shard.get_shard shard_name with
+    | Some shard ->
+      shard.Tool_shard.tools
+      |> List.map (fun (t : Types.tool_schema) -> t.name)
+    | None -> []
+  in
   let reachable =
     List.concat [
       (Tool_shard.keeper_model_tools
        |> List.map (fun (t : Types.tool_schema) -> t.name));
+      shard_tool_names "voice";
+      shard_tool_names "weather";
       (Tool_shard.coding_tools
        |> List.map (fun (t : Types.tool_schema) -> t.name));
     ]
@@ -415,6 +459,7 @@ let () =
       Alcotest.test_case "board" `Quick test_shard_board_exists;
       Alcotest.test_case "filesystem" `Quick test_shard_filesystem_exists;
       Alcotest.test_case "shell" `Quick test_shard_shell_exists;
+      Alcotest.test_case "governance" `Quick test_shard_governance_exists;
       Alcotest.test_case "coding" `Quick test_shard_coding_exists;
       Alcotest.test_case "coding not in defaults" `Quick test_coding_not_in_defaults;
       Alcotest.test_case "weather" `Quick test_shard_weather_exists;
@@ -489,8 +534,10 @@ let () =
     ("tool_content", [
       Alcotest.test_case "base tools" `Quick test_base_tools_names;
       Alcotest.test_case "board tools" `Quick test_board_tools_names;
+      Alcotest.test_case "governance tools" `Quick test_governance_tools_names;
       Alcotest.test_case "voice tools" `Quick test_voice_tools_names;
-      Alcotest.test_case "keeper_model has voice" `Quick test_keeper_model_has_voice_tools;
+      Alcotest.test_case "keeper_model excludes voice" `Quick
+        test_keeper_model_excludes_voice_tools;
     ]);
     ("voice_shard_revoke", [
       Alcotest.test_case "revoke removes all voice tools" `Quick test_revoke_voice_removes_all_tools;

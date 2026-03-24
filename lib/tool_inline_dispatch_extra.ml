@@ -220,6 +220,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
              ()
            in
            let result = Auto_recall.fetch_context_eio ~sw ~env ~clock config ~config:recall_config ~query () in
+           let grep_projection =
+             Auto_recall.format_for_injection result
+           in
            let response = `Assoc [
              ("success", `Bool true);
              ("query", `String query);
@@ -236,6 +239,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
              ) result.items));
              ("total_tokens", `Int result.total_tokens);
              ("truncated", `Bool result.truncated);
+             ("grep_projection", `String grep_projection);
              ("message", `String (Printf.sprintf "Found %d relevant items for query: %s"
                (List.length result.items) query));
            ] in

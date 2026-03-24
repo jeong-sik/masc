@@ -108,7 +108,7 @@ Pair with masc_tool_stats to discover which tools exist.";
   };
   {
     name = "masc_tool_admin_snapshot";
-    description = "Return a unified admin snapshot of tool inventory, auth/RBAC, mode gates, keeper policy, and command-plane surfaces. \
+    description = "Return a unified admin snapshot of tool inventory, auth/RBAC, keeper policy, and command-plane surfaces. \
 Use when auditing the full server configuration or diagnosing tool visibility issues. \
 Pair with masc_tool_admin_update to apply changes based on the snapshot.";
     input_schema = `Assoc [
@@ -129,24 +129,15 @@ Pair with masc_tool_admin_update to apply changes based on the snapshot.";
   };
   {
     name = "masc_tool_admin_update";
-    description = "Apply mode, auth, unit-policy, or keeper-policy updates through a single admin entrypoint. \
-Use when changing server mode, toggling auth, or updating unit/keeper policies. \
+    description = "Apply auth, unit-policy, or keeper-policy updates through a single admin entrypoint. \
+Use when toggling auth or updating unit/keeper policies. \
 After masc_tool_admin_snapshot to review current state before making changes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("section", `Assoc [
           ("type", `String "string");
-          ("description", `String "One of: mode, auth, unit_policy, keeper_policy, persistent_agent_policy");
-        ]);
-        ("mode", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Preset mode to switch to for section=mode");
-        ]);
-        ("enabled_categories", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Custom category set for section=mode");
+          ("description", `String "One of: auth, unit_policy, keeper_policy, persistent_agent_policy");
         ]);
         ("enabled", `Assoc [
           ("type", `String "boolean");
@@ -200,7 +191,7 @@ After masc_tool_admin_snapshot to review current state before making changes.";
     name = "masc_keeper_tool_catalog";
     description = "List all visible masc_* tools alongside keeper-internal wrapper coverage, with optional tier/hidden/deprecated filters. \
 Use when auditing which tools the keeper can wrap or checking tool visibility by tier. \
-Pair with masc_tool_admin_snapshot for a broader admin view including auth and mode gates.";
+Pair with masc_tool_admin_snapshot for a broader admin view including auth and command-plane surfaces.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

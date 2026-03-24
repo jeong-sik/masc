@@ -148,6 +148,7 @@
    level2_config
    level4_config
    local_runtime_pool
+   retrieval_projection
    sdk_tool_contract
    worker_oas
    worker_runtime
@@ -238,7 +239,6 @@
    mitosis_defaults
    mitosis_dna
    mitosis_metrics
-   mode
    operator_approval
    operator_pending_confirm
    operator_digest
@@ -314,6 +314,7 @@
    tool_schemas_control
    tool_schemas_a2a
    tool_schemas_misc
+   tool_improve_loop_schemas
    tool_plan
    tool_run
    tool_bridge
@@ -330,6 +331,7 @@
    tool_a2a
    tool_handover
    tool_relay
+   worktree_live_context
    tool_goals
    tool_operator
    tool_team_session_support
@@ -358,6 +360,7 @@
    tool_room
    workflow_guide
    tool_control
+   tool_improve_loop
    tool_verification
    tool_misc
    tool_agent_timeline
@@ -417,6 +420,7 @@
    social
    tool_social
    transport
+   transport_metrics
    ;; gRPC coordination transport (grpc-direct)
    masc_grpc_types
    masc_grpc_service

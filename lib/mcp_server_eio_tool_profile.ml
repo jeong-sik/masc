@@ -9,7 +9,6 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
-  | Role_filtered of Mode.mode
 
 let operator_remote_instructions =
   "MASC remote operator profile exposes only four control-plane tools: \
@@ -81,25 +80,11 @@ let apply_budget_filter ?budget_tokens schemas =
         ~tool_schemas:schemas
 
 let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = false)
-    ?mode_override ?budget_tokens state profile =
+    ?budget_tokens _state profile =
   let schemas =
     match profile with
     | Full ->
-        let categories =
-          match mode_override with
-          | Some mode_str ->
-              (match Mode.mode_of_string (String.lowercase_ascii mode_str) with
-               | Some mode -> Mode.categories_for_mode mode
-               | None ->
-                   let room_path = Room.masc_dir state.Mcp_server.room_config in
-                   let config = Config.load room_path in
-                   config.Config.enabled_categories)
-          | None ->
-              let room_path = Room.masc_dir state.Mcp_server.room_config in
-              let config = Config.load room_path in
-              config.Config.enabled_categories
-        in
-        Config.enabled_tool_schemas ~include_hidden ~include_deprecated categories
+        Config.visible_tool_schemas ~include_hidden ~include_deprecated ()
     | Managed_agent ->
         let passthrough =
           Config.visible_tool_schemas ~include_hidden:false ~include_deprecated:false ()
@@ -110,9 +95,6 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
         dedupe_tool_schemas_by_name
           (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
     | Operator_remote -> Tool_operator.remote_schemas
-    | Role_filtered mode ->
-        let categories = Mode.categories_for_mode mode in
-        Config.enabled_tool_schemas ~include_hidden ~include_deprecated categories
   in
   apply_budget_filter ?budget_tokens schemas
 
@@ -127,8 +109,6 @@ let tool_allowed_in_profile state profile tool_name =
       |> List.exists (fun (schema : Types.tool_schema) ->
              String.equal schema.name tool_name)
   | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
-  | Role_filtered mode ->
-      Mode.is_tool_enabled (Mode.categories_for_mode mode) tool_name
 
 let is_destructive_tool_name name =
   let lowered = String.lowercase_ascii name in
@@ -239,7 +219,6 @@ let tool_output_schema_field = function
   | _ -> None
 
 let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
-  let category_str = Mode.category_to_string (Mode.tool_category schema.name) in
   let tier_str = Tool_catalog.tier_to_string (Tool_catalog.tool_tier schema.name) in
   let base =
     [
@@ -250,7 +229,6 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
         `List
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
-      ("x-category", `String category_str);
       ("x-tier", `String tier_str);
     ]
     @ Tool_catalog.metadata_to_fields schema.name
@@ -272,7 +250,6 @@ type tools_list_params = {
   include_hidden : bool;
   include_deprecated : bool;
   include_usage : bool;
-  mode : string option;
   tier : string option;
   cursor : string option;
 }
@@ -347,88 +324,70 @@ let cursor_only_params params =
   | Some (`Assoc _ as payload) -> cursor_param payload
   | Some _ -> Error "Invalid params: expected object"
 
-let requested_tool_list_params params =
-  let open Yojson.Safe.Util in
-  match params with
-  | None ->
-      Ok {
-        names = None;
-        include_hidden = false;
-        include_deprecated = false;
-        include_usage = false;
-        mode = None;
-        tier = None;
-        cursor = None;
-      }
-  | Some (`Assoc _ as payload) -> (
-      let names_result =
-        match payload |> member "names" with
-        | `Null -> Ok None
-        | `List items ->
-            items
-            |> List.fold_left
-                 (fun acc item ->
-                   match (acc, item) with
-                   | Error _ as err, _ -> err
-                   | Ok names, `String value -> Ok (value :: names)
-                   | Ok _, _ ->
-                       Error "Invalid params: names must be an array of strings")
-                 (Ok [])
-            |> Result.map (fun names -> Some (List.rev names))
-        | _ -> Error "Invalid params: names must be an array of strings"
-      in
-      let mode_result =
-        match payload |> member "mode" with
-        | `Null -> Ok None
-        | `String s -> Ok (Some s)
-        | _ -> Error "Invalid params: mode must be a string"
-      in
-      let tier_result =
-        match payload |> member "tier" with
-        | `Null -> Ok None
-        | `String s -> (
-            match Tool_catalog.tier_of_string (String.lowercase_ascii s) with
-            | Some _ -> Ok (Some s)
-            | None -> Error "Invalid params: tier must be one of: essential, standard, full")
-        | _ -> Error "Invalid params: tier must be a string"
-      in
-      match names_result with
-      | Error _ as err -> err
-      | Ok names -> (
-          match cursor_param payload with
-          | Error _ as err -> err
-          | Ok cursor -> (
-          match mode_result with
-          | Error _ as err -> err
-          | Ok mode -> (
-          match tier_result with
-          | Error _ as err -> err
-          | Ok tier -> (
-          match bool_param payload "include_hidden" with
-          | Error _ as err -> err
-          | Ok include_hidden -> (
-              match bool_param payload "include_deprecated" with
-              | Error _ as err -> err
-              | Ok include_deprecated -> (
-                  match bool_param payload "include_usage" with
-                  | Error _ as err -> err
-                  | Ok include_usage ->
-                      Ok {
-                        names;
-                        include_hidden;
-                        include_deprecated;
-                        include_usage;
-                        mode;
-                        tier;
-                        cursor;
-                      })))))))
-  | Some _ -> Error "Invalid params: expected object"
-
 let validate_optional_meta payload =
   match Yojson.Safe.Util.member "_meta" payload with
   | `Null
   | `Assoc _ -> Ok ()
   | _ -> Error "Invalid params: _meta must be an object"
+
+let requested_tool_list_params params =
+  let open Yojson.Safe.Util in
+  let* fields = strict_assoc_params params in
+  let allowed =
+    [ "_meta"; "names"; "include_hidden"; "include_deprecated"; "include_usage";
+      "tier"; "cursor" ]
+  in
+  let unknown =
+    fields
+    |> List.filter_map (fun (key, _value) ->
+           if List.mem key allowed then None else Some key)
+  in
+  if unknown <> [] then
+    Error
+      (Printf.sprintf "Invalid params: unsupported field(s): %s"
+         (String.concat ", " unknown))
+  else
+    let payload = `Assoc fields in
+    let* () = validate_optional_meta payload in
+    let* names =
+      match payload |> member "names" with
+      | `Null -> Ok None
+      | `List items ->
+          items
+          |> List.fold_left
+               (fun acc item ->
+                 match (acc, item) with
+                 | Error _ as err, _ -> err
+                 | Ok names, `String value -> Ok (value :: names)
+                 | Ok _, _ ->
+                     Error "Invalid params: names must be an array of strings")
+               (Ok [])
+          |> Result.map (fun names -> Some (List.rev names))
+      | _ -> Error "Invalid params: names must be an array of strings"
+    in
+    let* cursor = cursor_param payload in
+    let* tier =
+      match payload |> member "tier" with
+      | `Null -> Ok None
+      | `String s -> (
+          match Tool_catalog.tier_of_string (String.lowercase_ascii s) with
+          | Some _ -> Ok (Some s)
+          | None ->
+              Error "Invalid params: tier must be one of: essential, standard, full")
+      | _ -> Error "Invalid params: tier must be a string"
+    in
+    let* include_hidden = bool_param payload "include_hidden" in
+    let* include_deprecated = bool_param payload "include_deprecated" in
+    let* include_usage = bool_param payload "include_usage" in
+    Ok
+      {
+        names;
+        include_hidden;
+        include_deprecated;
+        include_usage;
+        tier;
+        cursor;
+      }
 
 let parse_cursor_only_params params =
   let open Yojson.Safe.Util in

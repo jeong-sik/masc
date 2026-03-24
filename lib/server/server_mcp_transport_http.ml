@@ -22,6 +22,11 @@ let env_int_or ~name ~default =
   | Some raw -> (
       try int_of_string raw with _ -> default)
 
+let post_sse_keepalive_interval_s =
+  env_float_or ~name:"MASC_POST_SSE_KEEPALIVE_SEC"
+    ~default:sse_ping_interval_s
+  |> Float.max 0.1
+
 let sse_reconnect_min_interval_s =
   env_float_or ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S" ~default:0.0
   |> Float.max 0.0
@@ -37,6 +42,23 @@ let get_last_event_id (request : Httpun.Request.t) =
   | Some id -> (
       try Some (int_of_string id) with Failure _ -> None)
   | None -> None
+
+let body_jsonrpc_method body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc fields -> (
+        match List.assoc_opt "method" fields with
+        | Some (`String method_) -> Some (method_, List.mem_assoc "id" fields)
+        | _ -> None)
+    | _ -> None
+  with Yojson.Json_error _ -> None
+
+let body_jsonrpc_id body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc fields -> List.assoc_opt "id" fields
+    | _ -> None
+  with Yojson.Json_error _ -> None
 
 let mcp_headers session_id protocol_version =
   [ ("mcp-session-id", session_id); ("mcp-protocol-version", protocol_version) ]
@@ -254,6 +276,86 @@ let send_raw info data =
       close_sse_conn info;
       false
 
+let make_inline_sse_conn ~session_id writer =
+  {
+    session_id;
+    client_id = -1;
+    writer;
+    mutex = Eio.Mutex.create ();
+    stop = ref false;
+    closed = false;
+  }
+
+let stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version
+    ~accept_warn_headers =
+  Httpun.Headers.of_list
+    (accept_warn_headers
+    @ [
+        ("content-type", Http_negotiation.sse_content_type);
+        ("cache-control", "no-cache");
+        ("connection", "close");
+        ("x-accel-buffering", "no");
+        session_cookie_header session_id;
+      ]
+      @ mcp_headers session_id protocol_version
+      @ deps.cors_headers origin)
+
+let stream_post_sse_start ~deps ~origin ~session_id ~protocol_version
+    ~accept_warn_headers reqd =
+  let headers =
+    stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version
+      ~accept_warn_headers
+  in
+  let response = Httpun.Response.create ~headers `OK in
+  let writer = Httpun.Reqd.respond_with_streaming reqd response in
+  let info = make_inline_sse_conn ~session_id writer in
+  ignore (send_raw info (sse_prime_event ()));
+  info
+
+let spawn_post_sse_keepalive ~sw ~clock info =
+  Eio.Fiber.fork ~sw (fun () ->
+      let rec loop () =
+        if not !(info.stop) then (
+          (try
+             Eio.Time.sleep clock post_sse_keepalive_interval_s
+           with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | _ -> ());
+          if info.closed then
+            close_sse_conn info
+          else if not !(info.stop) then
+            ignore (send_raw info ": keepalive\n\n");
+          loop ())
+      in
+      try loop ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> close_sse_conn info)
+
+let stream_post_sse_finish info = close_sse_conn info
+
+let stream_post_sse_json info (json : Yojson.Safe.t) =
+  ignore
+    (send_raw info
+       (Sse.format_event ~event_type:"message" (Yojson.Safe.to_string json)))
+
+let mcp_internal_error_json ?id msg =
+  `Assoc
+    [
+      ("jsonrpc", `String "2.0");
+      ("id", Option.value ~default:`Null id);
+      ("error", `Assoc [ ("code", `Int (-32603)); ("message", `String msg) ]);
+    ]
+
+let should_stream_post_tools_call request body_str accept_mode =
+  should_use_sse_for_body request body_str accept_mode
+  && not force_json_response
+  && not (request_force_json_response request)
+  &&
+  match body_jsonrpc_method body_str with
+  | Some ("tools/call", true) -> true
+  | _ -> false
+
 let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   let session_id_opt = get_session_id_any request in
   let session_was_provided = Option.is_some session_id_opt in
@@ -272,7 +374,7 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   in
   let auth_result =
     match profile with
-    | Mcp_eio.Full | Mcp_eio.Managed_agent | Mcp_eio.Role_filtered _ ->
+    | Mcp_eio.Full | Mcp_eio.Managed_agent ->
         deps.verify_mcp_auth ~base_path request
     | Mcp_eio.Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
@@ -293,22 +395,6 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
       Httpun.Reqd.respond_with_string reqd response body
   | Ok () ->
       match validate_protocol_version_continuity ~session_id request with
-      | Error msg ->
-          let body =
-            Printf.sprintf
-              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-              (Yojson.Safe.to_string (`String msg))
-          in
-          let headers =
-            Httpun.Headers.of_list
-              (("content-length", string_of_int (String.length body))
-              :: json_headers ~deps session_id protocol_version origin)
-          in
-          let response = Httpun.Response.create ~headers `Bad_request in
-          Httpun.Reqd.respond_with_string reqd response body
-      | Ok () ->
-          remember_mcp_profile session_id profile;
-          match auth_result with
       | Error msg ->
           let body =
             Printf.sprintf
@@ -389,109 +475,158 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                           (* Fork a fiber so Eio I/O in handle_request does not
                              block httpun's schedule_read callback chain. *)
                           Eio.Fiber.fork ~sw (fun () ->
-                          try
-                            let response_json =
-                              Mcp_eio.handle_request ~clock ~sw ~profile
-                                ~mcp_session_id:session_id ?auth_token state body_str
+                            let response_protocol_version =
+                              match protocol_version_from_body body_str with
+                              | Some v ->
+                                  remember_protocol_version session_id v;
+                                  v
+                              | None ->
+                                  get_protocol_version_for_session ~session_id request
                             in
-                            (match protocol_version_from_body body_str with
-                            | Some v -> remember_protocol_version session_id v
-                            | None -> ());
-                            let protocol_version =
-                              get_protocol_version_for_session ~session_id request
+                            let wants_streaming_post =
+                              should_stream_post_tools_call request body_str
+                                accept_mode
                             in
-                            let wants_sse =
-                              should_use_sse_for_body request body_str accept_mode
-                              && not force_json_response
-                              && not (request_force_json_response request)
-                            in
-                            if wants_sse then
-                              match response_json with
-                              | `Null ->
-                                  let headers =
-                                    Httpun.Headers.of_list
-                                      ( ("content-length", "0")
-                                      :: accept_warn_headers
-                                      @ mcp_headers session_id protocol_version )
-                                  in
-                                  let response =
-                                    Httpun.Response.create ~headers `Accepted
-                                  in
-                                  Httpun.Reqd.respond_with_string reqd response ""
-                              | json when is_http_error_response json ->
-                                  let body = Yojson.Safe.to_string json in
-                                  let headers =
-                                    Httpun.Headers.of_list
-                                      ( ("content-length", string_of_int (String.length body))
-                                      :: accept_warn_headers
-                                      @ json_headers ~deps session_id protocol_version
-                                          origin )
-                                  in
-                                  let response =
-                                    Httpun.Response.create ~headers `Bad_request
-                                  in
-                                  Httpun.Reqd.respond_with_string reqd response body
-                              | json ->
-                                  let event =
-                                    Sse.format_event ~event_type:"message"
-                                      (Yojson.Safe.to_string json)
-                                  in
-                                  let body = sse_prime_event () ^ event in
-                                  let headers =
-                                    Httpun.Headers.of_list
-                                      ( ("content-length", string_of_int (String.length body))
-                                      :: accept_warn_headers
-                                      @ sse_headers ~deps session_id protocol_version
-                                          origin )
-                                  in
-                                  let response = Httpun.Response.create ~headers `OK in
-                                  Httpun.Reqd.respond_with_string reqd response body
-                            else
-                              match response_json with
-                              | `Null ->
-                                  let headers =
-                                    Httpun.Headers.of_list
-                                      ( ("content-length", "0")
-                                      :: accept_warn_headers
-                                      @ mcp_headers session_id protocol_version )
-                                  in
-                                  let response =
-                                    Httpun.Response.create ~headers `Accepted
-                                  in
-                                  Httpun.Reqd.respond_with_string reqd response ""
-                              | json when is_http_error_response json ->
-                                  let body = Yojson.Safe.to_string json in
-                                  let headers =
-                                    Httpun.Headers.of_list
-                                      ( ("content-length", string_of_int (String.length body))
-                                      :: accept_warn_headers
-                                      @ json_headers ~deps session_id protocol_version
-                                          origin )
-                                  in
-                                  let response =
-                                    Httpun.Response.create ~headers `Bad_request
-                                  in
-                                  Httpun.Reqd.respond_with_string reqd response body
-                              | json ->
-                                  let body = Yojson.Safe.to_string json in
-                                  let headers =
-                                    Httpun.Headers.of_list
-                                      ( ("content-length", string_of_int (String.length body))
-                                      :: accept_warn_headers
-                                      @ json_headers ~deps session_id protocol_version
-                                          origin )
-                                  in
-                                  let response = Httpun.Response.create ~headers `OK in
-                                  Httpun.Reqd.respond_with_string reqd response body
-                      with
-                      | Eio.Cancel.Cancelled _ as e -> raise e
-                      | exn ->
-                        let protocol_version =
-                          get_protocol_version_for_session ~session_id request
-                        in
-                        respond_mcp_internal_error ~deps request reqd ~session_id
-                          ~protocol_version
-                          ("Internal error: " ^ Printexc.to_string exn)))
+                            let response_id = body_jsonrpc_id body_str in
+                            let inline_sse : sse_conn_info option ref = ref None in
+                            try
+                              if wants_streaming_post then (
+                                let info =
+                                  stream_post_sse_start ~deps ~origin ~session_id
+                                    ~protocol_version:response_protocol_version
+                                    ~accept_warn_headers reqd
+                                in
+                                inline_sse := Some info;
+                                spawn_post_sse_keepalive ~sw ~clock info);
+                              let response_json =
+                                Mcp_eio.handle_request ~clock ~sw ~profile
+                                  ~mcp_session_id:session_id ?auth_token state
+                                  body_str
+                              in
+                              let protocol_version =
+                                get_protocol_version_for_session ~session_id request
+                              in
+                              let wants_sse =
+                                should_use_sse_for_body request body_str accept_mode
+                                && not force_json_response
+                                && not (request_force_json_response request)
+                              in
+                              if wants_streaming_post then
+                                match !inline_sse with
+                                | Some info ->
+                                    if response_json <> `Null then
+                                      stream_post_sse_json info response_json;
+                                    stream_post_sse_finish info
+                                | None -> ()
+                              else if wants_sse then
+                                match response_json with
+                                | `Null ->
+                                    let headers =
+                                      Httpun.Headers.of_list
+                                        (("content-length", "0")
+                                        :: accept_warn_headers
+                                        @ mcp_headers session_id protocol_version)
+                                    in
+                                    let response =
+                                      Httpun.Response.create ~headers `Accepted
+                                    in
+                                    Httpun.Reqd.respond_with_string reqd response ""
+                                | json when is_http_error_response json ->
+                                    let body = Yojson.Safe.to_string json in
+                                    let headers =
+                                      Httpun.Headers.of_list
+                                        (("content-length",
+                                          string_of_int (String.length body))
+                                        :: accept_warn_headers
+                                        @ json_headers ~deps session_id
+                                            protocol_version origin)
+                                    in
+                                    let response =
+                                      Httpun.Response.create ~headers `Bad_request
+                                    in
+                                    Httpun.Reqd.respond_with_string reqd response
+                                      body
+                                | json ->
+                                    let event =
+                                      Sse.format_event ~event_type:"message"
+                                        (Yojson.Safe.to_string json)
+                                    in
+                                    let body = sse_prime_event () ^ event in
+                                    let headers =
+                                      Httpun.Headers.of_list
+                                        (("content-length",
+                                          string_of_int (String.length body))
+                                        :: accept_warn_headers
+                                        @ sse_headers ~deps session_id
+                                            protocol_version origin)
+                                    in
+                                    let response =
+                                      Httpun.Response.create ~headers `OK
+                                    in
+                                    Httpun.Reqd.respond_with_string reqd response
+                                      body
+                              else
+                                match response_json with
+                                | `Null ->
+                                    let headers =
+                                      Httpun.Headers.of_list
+                                        (("content-length", "0")
+                                        :: accept_warn_headers
+                                        @ mcp_headers session_id protocol_version)
+                                    in
+                                    let response =
+                                      Httpun.Response.create ~headers `Accepted
+                                    in
+                                    Httpun.Reqd.respond_with_string reqd response ""
+                                | json when is_http_error_response json ->
+                                    let body = Yojson.Safe.to_string json in
+                                    let headers =
+                                      Httpun.Headers.of_list
+                                        (("content-length",
+                                          string_of_int (String.length body))
+                                        :: accept_warn_headers
+                                        @ json_headers ~deps session_id
+                                            protocol_version origin)
+                                    in
+                                    let response =
+                                      Httpun.Response.create ~headers `Bad_request
+                                    in
+                                    Httpun.Reqd.respond_with_string reqd response
+                                      body
+                                | json ->
+                                    let body = Yojson.Safe.to_string json in
+                                    let headers =
+                                      Httpun.Headers.of_list
+                                        (("content-length",
+                                          string_of_int (String.length body))
+                                        :: accept_warn_headers
+                                        @ json_headers ~deps session_id
+                                            protocol_version origin)
+                                    in
+                                    let response =
+                                      Httpun.Response.create ~headers `OK
+                                    in
+                                    Httpun.Reqd.respond_with_string reqd response
+                                      body
+                            with
+                            | Eio.Cancel.Cancelled _ as e -> raise e
+                            | exn ->
+                                (match !inline_sse with
+                                | Some info ->
+                                    stream_post_sse_json info
+                                      (mcp_internal_error_json ?id:response_id
+                                         ("Internal error: "
+                                        ^ Printexc.to_string exn));
+                                    stream_post_sse_finish info
+                                | None ->
+                                    let protocol_version =
+                                      get_protocol_version_for_session ~session_id
+                                        request
+                                    in
+                                    respond_mcp_internal_error ~deps request reqd
+                                      ~session_id ~protocol_version
+                                      ("Internal error: "
+                                     ^ Printexc.to_string exn))))
 
 let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
     ?(sse_kind = Sse.Coordinator) request reqd =
@@ -742,7 +877,7 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   in
   let auth_result =
     match profile with
-    | Mcp_eio.Full | Mcp_eio.Managed_agent | Mcp_eio.Role_filtered _ -> Ok ()
+    | Mcp_eio.Full | Mcp_eio.Managed_agent -> Ok ()
     | Mcp_eio.Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in

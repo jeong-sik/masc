@@ -93,30 +93,40 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
 
 let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
   let open Yojson.Safe.Util in
+  let str key ~default = json |> member key |> to_string_option |> Option.value ~default in
+  let required_str key =
+    match json |> member key |> to_string_option |> Option.map String.trim with
+    | Some value when value <> "" -> value
+    | _ ->
+        raise
+          (Invalid_argument
+             (Printf.sprintf
+                "missing required autoresearch state field: %s" key))
+  in
+  let int_ key ~default = try json |> member key |> to_int with Type_error _ -> default in
+  let float_ key ~default = try json |> member key |> to_float with Type_error _ -> default in
   {
-    loop_id = json |> member "loop_id" |> to_string;
-    status =
-      (json |> member "status" |> to_string |> status_of_string)
-      |> Option.value ~default:Error;
-    current_cycle = json |> member "current_cycle" |> to_int;
-    baseline = json |> member "baseline" |> to_float;
-    best_score = json |> member "best_score" |> to_float;
-    best_cycle = json |> member "best_cycle" |> to_int;
+    loop_id = required_str "loop_id";
+    status = status_of_string (required_str "status") |> Option.value ~default:Error;
+    current_cycle = int_ "current_cycle" ~default:0;
+    baseline = float_ "baseline" ~default:0.0;
+    best_score = float_ "best_score" ~default:0.0;
+    best_cycle = int_ "best_cycle" ~default:0;
     queued_hypothesis = json |> member "queued_hypothesis" |> to_string_option;
-    total_keeps = json |> member "total_keeps" |> to_int;
-    total_discards = json |> member "total_discards" |> to_int;
-    goal = json |> member "goal" |> to_string;
-    metric_fn = json |> member "metric_fn" |> to_string;
-    model_model = json |> member "model_model" |> to_string;
-    target_file = json |> member "target_file" |> to_string;
-    workdir = json |> member "workdir" |> to_string;
-    cycle_timeout_s = json |> member "cycle_timeout_s" |> to_float;
-    max_cycles = json |> member "max_cycles" |> to_int;
+    total_keeps = int_ "total_keeps" ~default:0;
+    total_discards = int_ "total_discards" ~default:0;
+    goal = required_str "goal";
+    metric_fn = required_str "metric_fn";
+    model_model = required_str "model_model";
+    target_file = required_str "target_file";
+    workdir = str "workdir" ~default:".";
+    cycle_timeout_s = float_ "cycle_timeout_s" ~default:300.0;
+    max_cycles = int_ "max_cycles" ~default:10;
     error_message = json |> member "error" |> to_string_option;
-    elapsed_s = json |> member "elapsed_s" |> to_float;
+    elapsed_s = float_ "elapsed_s" ~default:0.0;
     source_workdir =
       json |> member "source_workdir" |> to_string_option
-      |> Option.value ~default:(json |> member "workdir" |> to_string);
+      |> Option.value ~default:(str "workdir" ~default:".");
     program_note = json |> member "program_note" |> to_string_option;
     warnings =
       match json |> member "warnings" with

@@ -3,7 +3,7 @@
     Tests for smaller utility modules:
     - Compression_dict: zstd compression for small messages
     - Log: logging utilities
-    - Config: configuration handling
+    - Config: schema registry helpers
     - Env_config: environment configuration
 *)
 
@@ -13,7 +13,6 @@ module Compression_dict = Compression_dict
 module Log = Log
 module Config = Masc_mcp.Config
 module Env_config = Masc_mcp.Env_config
-module Mode = Masc_mcp.Mode
 
 (* ============================================================
    Compression_dict Tests
@@ -159,41 +158,22 @@ let test_log_timestamp () =
    ============================================================ *)
 
 let test_config_default () =
-  let c = Config.default in
-  check bool "mode is Full" true (c.mode = Mode.Full)
+  check bool "schemas exist" true (List.length Config.all_tool_schemas > 0)
 
 let test_config_to_json () =
-  let c = Config.default in
-  let json = Config.to_json c in
-  match json with
-  | `Assoc fields ->
-    check bool "has mode" true (List.mem_assoc "mode" fields);
-    check bool "has enabled_categories" true (List.mem_assoc "enabled_categories" fields)
-  | _ -> fail "expected object"
+  let names = Config.all_tool_names () in
+  check bool "pause in names" true (List.mem "masc_pause" names)
 
 let test_config_of_json () =
-  let json = `Assoc [
-    ("mode", `String "standard");
-  ] in
-  let c = Config.of_json json in
-  check bool "always Full" true (c.mode = Mode.Full)
+  let visible = Config.visible_tool_schemas () in
+  check bool "visible non-empty" true (List.length visible > 0)
 
 let test_config_of_json_custom () =
-  let json = `Assoc [
-    ("mode", `String "custom");
-    ("enabled_categories", `List [`String "room"; `String "task"]);
-  ] in
-  let c = Config.of_json json in
-  check bool "always Full" true (c.mode = Mode.Full)
+  let names = Config.all_tool_names () in
+  check bool "mode tools removed" false (List.mem "masc_switch_mode" names)
 
 let test_config_of_json_invalid () =
-  let json = `String "invalid" in
-  let c = Config.of_json json in
-  (* Should return default on invalid input *)
-  check bool "mode is Full" true (c.mode = Mode.Full)
-
-let test_config_filename () =
-  check string "config filename" "config.json" Config.config_filename
+  check bool "pause visible" true (Config.is_tool_visible "masc_pause")
 
 (* ============================================================
    Env_config Tests
@@ -324,7 +304,6 @@ let () =
       test_case "of_json" `Quick test_config_of_json;
       test_case "of_json custom" `Quick test_config_of_json_custom;
       test_case "of_json invalid" `Quick test_config_of_json_invalid;
-      test_case "filename" `Quick test_config_filename;
     ];
     "env_config.zombie", [
       test_case "threshold" `Quick test_env_zombie_threshold;

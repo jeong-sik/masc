@@ -178,9 +178,9 @@ let test_safe_empty () =
 (* ================================================================ *)
 
 (* Note on canonical_policy_shell_mode:
-   "readonly" -> "readonly", "sandboxed" -> "sandboxed", everything else -> "disabled".
-   So "coding" maps to "disabled" — coding tools are never granted through canonical path.
-   Tests verify the ACTUAL code behavior. *)
+   "readonly", "sandboxed", and "coding" are preserved; everything else
+   normalizes to "disabled". Tool grants treat "readonly" and "coding"
+   differently, so the assertions below check the actual policy behavior. *)
 
 let test_write_done_kills_all () =
   let meta = make_meta ~policy_shell_mode:"readonly"
@@ -189,7 +189,7 @@ let test_write_done_kills_all () =
   check (list string) "write_done returns empty" [] tools
 
 let test_learned_disabled_mode () =
-  (* learned + disabled: read tools + board tools only *)
+  (* learned + disabled: read + coordination + board + governance *)
   let meta = make_meta ~policy_shell_mode:"disabled"
     ~policy_mode:"learned_offline_v1" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in

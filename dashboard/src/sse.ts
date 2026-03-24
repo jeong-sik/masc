@@ -8,9 +8,12 @@ import {
   updateOasKeeperSnapshot,
   oasLastKeeperTick,
   oasTotalEvents,
-  refreshDashboard,
 } from './store'
-import { refreshRoomTruth } from './room-truth-store'
+import {
+  defaultJournalSeverity,
+  normalizeJournalSeverity,
+  normalizeJournalSource,
+} from './journal-entry'
 import type { OasKeeperSnapshot } from './types/oas'
 
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
@@ -104,9 +107,23 @@ function addTypedJournalEntry(
   text: string,
   kind: JournalEntry['kind'],
   eventType: JournalEventType,
-  extra: Partial<JournalEntry> = {},
+  extra: (Omit<Partial<JournalEntry>, 'severity' | 'source'> & {
+    severity?: string
+    source?: string
+  }) = {},
 ): void {
-  addJournalEntry(agent, text, kind, { eventType, ...extra })
+  const explicitSeverity = normalizeJournalSeverity(
+    typeof extra.severity === 'string' ? extra.severity : undefined,
+  )
+  addJournalEntry(agent, text, kind, {
+    ...extra,
+    source: normalizeJournalSource(extra.source),
+    severity:
+      explicitSeverity === 'unknown'
+        ? defaultJournalSeverity(eventType)
+        : explicitSeverity,
+    eventType,
+  })
 }
 
 // --- SSE Manager ---
@@ -114,6 +131,18 @@ function addTypedJournalEntry(
 let source: EventSource | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempts = 0
+
+export function buildDashboardSseUrl(sessionId: string, locationSearch = window.location.search): string {
+  const urlParams = new URLSearchParams(locationSearch)
+  const sseParams = new URLSearchParams()
+  const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
+  const token = urlParams.get('token')
+  if (agent) sseParams.set('agent', agent)
+  if (token) sseParams.set('token', token)
+  sseParams.set('session_id', sessionId)
+  sseParams.set('sse_kind', 'observer')
+  return `/mcp?${sseParams.toString()}`
+}
 
 function clearReconnectTimer(): void {
   if (reconnectTimer) {
@@ -140,15 +169,7 @@ export function connectSSE(): void {
     source = null
   }
 
-  const urlParams = new URLSearchParams(window.location.search)
-  const sseParams = new URLSearchParams()
-  const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
-  const token = urlParams.get('token')
-  if (agent) sseParams.set('agent', agent)
-  if (token) sseParams.set('token', token)
-  sseParams.set('session_id', getOrCreateSessionId())
-
-  const sseUrl = sseParams.toString() ? `/sse?${sseParams.toString()}` : '/sse'
+  const sseUrl = buildDashboardSseUrl(getOrCreateSessionId())
   const es = new EventSource(sseUrl)
   source = es
 
@@ -159,9 +180,6 @@ export function connectSSE(): void {
     connected.value = true
     if (wasDisconnected) {
       reconnectCount.value++
-      // Refetch all data after reconnection so counts don't stay at 0
-      void refreshDashboard({ force: true }).catch(() => {})
-      void refreshRoomTruth({ force: true }).catch(() => {})
     }
   }
 
@@ -220,6 +238,8 @@ function handleEvent(event: SSEEvent): void {
         'system',
         'broadcast',
         {
+          severity: event.severity,
+          source: event.source,
           narrativeText: `${actorLabel(agent)}가 공지/메시지를 보냈습니다${quotePreview(event.message ?? event.content)}`,
         },
       )
@@ -231,6 +251,8 @@ function handleEvent(event: SSEEvent): void {
         'tasks',
         'task_update',
         {
+          severity: event.severity,
+          source: event.source,
           narrativeText: formatTaskNarrative(agent, event.task_id, event.status),
         },
       )
@@ -244,6 +266,8 @@ function handleEvent(event: SSEEvent): void {
         'board_post',
         {
           author: event.author ?? agent,
+          severity: event.severity,
+          source: event.source,
           narrativeText: formatBoardNarrative('게시글', event.author ?? agent, event.content ?? event.message),
           preview: normalizePreview(event.content ?? event.message),
           postId: event.post_id,
@@ -259,6 +283,8 @@ function handleEvent(event: SSEEvent): void {
         'board_comment',
         {
           author: event.author ?? agent,
+          severity: event.severity,
+          source: event.source,
           narrativeText: formatBoardNarrative('댓글', event.author ?? agent, event.content ?? event.message),
           preview: normalizePreview(event.content ?? event.message),
           postId: event.post_id,
@@ -272,6 +298,8 @@ function handleEvent(event: SSEEvent): void {
         'keepers',
         'keeper_heartbeat',
         {
+          severity: event.severity,
+          source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)}가 하트비트를 보냈습니다`
             + ` (gen ${event.generation ?? '?'}, ctx ${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'})`,
@@ -285,6 +313,8 @@ function handleEvent(event: SSEEvent): void {
         'keepers',
         'keeper_handoff',
         {
+          severity: event.severity,
+          source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)}가 keeper handoff를 수행했습니다`
             + ` (gen ${event.from_generation ?? '?'} → ${event.to_generation ?? '?'}, ${event.to_model ?? '?'})`,
@@ -298,6 +328,8 @@ function handleEvent(event: SSEEvent): void {
         'keepers',
         'keeper_compaction',
         {
+          severity: event.severity,
+          source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)}가 context compaction을 수행했습니다`
             + ` (${event.saved_tokens ?? '?'} tokens, ${event.trigger ?? '?'})`,
@@ -311,6 +343,8 @@ function handleEvent(event: SSEEvent): void {
         'keepers',
         'keeper_guardrail',
         {
+          severity: event.severity ?? 'error',
+          source: event.source,
           narrativeText: `${actorLabel(event.name ?? agent)}가 guardrail에 의해 중단되었습니다: ${event.reason ?? 'stopped'}`,
         },
       )
@@ -376,6 +410,8 @@ function handleEvent(event: SSEEvent): void {
         'oas',
         'oas_keeper_snapshot',
         {
+          severity: event.severity,
+          source: event.source,
           narrativeText:
             `${actorLabel(snap.keeper_name)}의 keeper snapshot이 갱신되었습니다`
             + ` (gen ${snap.generation}, ctx ${Math.round(snap.context_ratio * 100)}%)`,
@@ -404,6 +440,8 @@ function handleEvent(event: SSEEvent): void {
         'oas',
         'oas_event',
         {
+          severity: event.severity,
+          source: event.source,
           narrativeText:
             `${actorLabel(agentName)} resident lifecycle 이벤트`
             + ([lifecycleEvent, detail].filter(Boolean).length > 0

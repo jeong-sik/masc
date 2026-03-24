@@ -29,20 +29,6 @@ let int_arg_opt args key =
   | `Intlit raw -> Some (Safe_ops.int_of_string_with_default ~default:0 raw)
   | _ -> None
 
-let category_list_arg_opt args key =
-  match U.member key args with
-  | `Null -> None
-  | `List items ->
-      let categories =
-        items
-        |> List.filter_map (function
-             | `String raw ->
-                 Mode.category_of_string (String.lowercase_ascii (String.trim raw))
-             | _ -> None)
-      in
-      Some categories
-  | _ -> None
-
 let permission_to_json tool_name =
   match Auth.permission_for_tool tool_name with
   | Some permission -> `String (Types.show_permission permission)
@@ -72,30 +58,6 @@ let auth_snapshot_json ctx =
       ("tool_auth_strict", `Bool (Auth.is_tool_auth_strict_enabled ()));
       ("credential_count", `Int (List.length credentials));
       ("credentials", `List credentials);
-    ]
-
-let mode_snapshot_json ctx =
-  let room_path = Room.masc_dir ctx.config in
-  let cfg = Config.load room_path in
-  let categories =
-    Mode.all_categories
-    |> List.map (fun category ->
-           let enabled = List.mem category cfg.enabled_categories in
-           `Assoc
-             [
-               ("name", `String (Mode.category_to_string category));
-               ("description", `String (Mode.category_description category));
-               ("enabled", `Bool enabled);
-             ])
-  in
-  `Assoc
-    [
-      ("mode", `String (Mode.mode_to_string cfg.mode));
-      ("mode_description", `String (Mode.mode_description cfg.mode));
-      ("enabled_tool_count", `Int (List.length (Config.enabled_tool_schemas cfg.enabled_categories)));
-      ("registered_tool_count", `Int (Tool_dispatch.registered_count ()));
-      ("categories", `List categories);
-      ("config_summary", Config.get_config_summary room_path);
     ]
 
 (** Flat default keeper gate config. No autonomy level dispatch. *)
@@ -182,9 +144,7 @@ let keeper_policies_json ctx =
       ("persistent_agents", `List persistent_rows);
     ]
 
-let tool_inventory_json ctx ~include_hidden ~include_deprecated =
-  let room_path = Room.masc_dir ctx.config in
-  let cfg = Config.load room_path in
+let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
   (* Build reverse index: tool_name -> surface string list.
      Also index by backend_tool_name so keeper/privileged surfaces
      are attached to the public tool name they dispatch to. *)
@@ -211,14 +171,11 @@ let tool_inventory_json ctx ~include_hidden ~include_deprecated =
     schemas
     |> List.map (fun (schema : Types.tool_schema) ->
            let help_entry = Tool_help_registry.entry_of_schema schema in
-           let category = Mode.tool_category schema.name in
            `Assoc
              ([
                 ("name", `String schema.name);
                 ("description", `String help_entry.short_description);
-                ("category", `String (Mode.category_to_string category));
-                ("category_description", `String (Mode.category_description category));
-                ("enabled_in_current_mode", `Bool (Mode.is_tool_enabled cfg.enabled_categories schema.name));
+                ("enabled", `Bool true);
                 ("direct_call_allowed", `Bool (Tool_catalog.allow_direct_call schema.name));
                 ("required_permission", permission_to_json schema.name);
                 ("doc_refs", `List (List.map (fun value -> `String value) help_entry.doc_refs));
@@ -242,14 +199,6 @@ let tool_inventory_json ctx ~include_hidden ~include_deprecated =
 let enforcement_summary_json () =
   `List
     [
-      `Assoc
-        [
-          ("surface", `String "room.mode_categories");
-          ("status", `String "enforced");
-          ("reason",
-           `String
-             "Tool dispatch blocks tools whose category is disabled in the current room mode.");
-        ];
       `Assoc
         [
           ("surface", `String "room.auth.permission_map");
@@ -316,7 +265,6 @@ let handle_tool_admin_snapshot ctx args =
       [
         ("status", `String "ok");
         ("generated_at", `String (Types.now_iso ()));
-        ("mode", mode_snapshot_json ctx);
         ("auth", auth_snapshot_json ctx);
         ( "command_plane",
           `Assoc
@@ -427,45 +375,7 @@ let handle_tool_admin_update ctx args =
   let section =
     get_string args "section" "" |> String.trim |> String.lowercase_ascii
   in
-  let room_path = Room.masc_dir ctx.config in
   match section with
-  | "mode" ->
-      let categories_opt = category_list_arg_opt args "enabled_categories" in
-      let mode_opt =
-        get_string_opt args "mode"
-        |> Option.map (fun raw -> String.lowercase_ascii (String.trim raw))
-      in
-      let result =
-        match categories_opt, mode_opt with
-        | Some categories, _ ->
-            let config =
-              Config.set_categories ~actor:ctx.agent_name
-                ~source:"masc_tool_admin_update:mode" room_path categories
-            in
-            Ok config
-        | None, Some "custom" ->
-            Error "mode=custom requires enabled_categories"
-        | None, Some raw -> (
-            match Mode.mode_of_string raw with
-            | Some mode ->
-                Ok
-                  (Config.switch_mode ~actor:ctx.agent_name
-                     ~source:"masc_tool_admin_update:mode" room_path mode)
-            | None -> Error (Printf.sprintf "unknown mode: %s" raw))
-        | None, None -> Error "mode or enabled_categories is required"
-      in
-      (match result with
-      | Error err -> (false, "❌ " ^ err)
-      | Ok _ ->
-          let payload =
-            `Assoc
-              [
-                ("status", `String "ok");
-                ("section", `String "mode");
-                ("result", mode_snapshot_json ctx);
-              ]
-          in
-          (true, Yojson.Safe.pretty_to_string payload))
   | "auth" ->
       let current = Auth.load_auth_config ctx.config.base_path in
       let require_token =
@@ -577,7 +487,7 @@ let handle_tool_admin_update ctx args =
           (true, Yojson.Safe.pretty_to_string (`Assoc [ ("status", `String "ok"); ("section", `String "persistent_agent_policy"); ("result", json) ]))
       | Error err -> (false, "❌ " ^ err))
   | _ ->
-      (false, "❌ section must be one of: mode | auth | unit_policy | keeper_policy | persistent_agent_policy")
+      (false, "❌ section must be one of: auth | unit_policy | keeper_policy | persistent_agent_policy")
 
 (* Handlers *)
 

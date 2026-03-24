@@ -26,7 +26,7 @@ export function normalizeAttentionQueueItem(raw: unknown): DashboardMissionAtten
   return {
     id,
     kind,
-    severity: asString(raw.severity) ?? 'warn',
+    severity: asString(raw.severity) ?? 'unknown',
     summary,
     target_type: targetType,
     target_id: asString(raw.target_id) ?? null,
@@ -219,7 +219,7 @@ export function normalizeInternalSignal(raw: unknown): DashboardMissionInternalS
   return {
     id,
     signal_type: normalizedType,
-    severity: asString(raw.severity) ?? 'warn',
+    severity: asString(raw.severity) ?? 'unknown',
     summary,
     target_type: targetType,
     target_id: asString(raw.target_id) ?? null,

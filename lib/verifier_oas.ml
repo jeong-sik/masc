@@ -165,7 +165,7 @@ let verify (req : verification_request) : verdict =
     | Ok result ->
       parse_verdict (Oas_response.text_of_response result.response)
     | Error message ->
-      Log.Verifier.error "OAS run failed: %s (defaulting to WARN)" message;
+      Log.Verifier.warn "OAS run failed: %s (defaulting to WARN)" message;
       Warn ("verifier_unavailable: " ^ message)
 
 (* ================================================================ *)

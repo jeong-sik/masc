@@ -32,13 +32,21 @@
       "output_key": "search_results"
     },
     {
+      "id": "search-results-grep",
+      "type": "adapter",
+      "input_ref": "search_results",
+      "transform": { "type": "custom", "name": "grep_projection" },
+      "depends_on": ["web-search"],
+      "output_key": "search_results_grep"
+    },
+    {
       "id": "extract-facts",
       "type": "model",
       "model": {
         "model": "claude-cli",
-        "prompt": "Extract key facts from these search results. For each fact, note the source.\n\nSearch Results:\n{{search_results}}\n\nOutput as JSON: {\"facts\": [{\"claim\": \"...\", \"source\": \"...\", \"confidence\": 0.0-1.0}]}"
+        "prompt": "Extract key facts from these grep-like search result lines. For each fact, note the exact source/location line that supports it.\n\nSearch Results:\n{{search_results_grep}}\n\nOutput as JSON: {\"facts\": [{\"claim\": \"...\", \"source\": \"...\", \"confidence\": 0.0-1.0}]}"
       },
-      "depends_on": ["web-search"],
+      "depends_on": ["search-results-grep"],
       "output_key": "extracted_facts"
     },
     {

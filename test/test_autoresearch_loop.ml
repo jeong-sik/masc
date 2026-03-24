@@ -122,6 +122,7 @@ let test_start_runs_to_completion_via_manual_cycle () =
         | Some result -> result
         | None -> fail "cycle dispatch returned None"
       in
+      if not cycle_ok then failf "cycle failed: %s" cycle_payload;
       check bool "cycle succeeds" true cycle_ok;
       let cycle_json = Yojson.Safe.from_string cycle_payload in
       check string "cycle decision" "keep"
@@ -134,6 +135,7 @@ let test_start_runs_to_completion_via_manual_cycle () =
         | Some result -> result
         | None -> fail "completion dispatch returned None"
       in
+      if not completion_ok then failf "completion failed: %s" completion_payload;
       check bool "completion succeeds" true completion_ok;
       let completion_json = Yojson.Safe.from_string completion_payload in
       check string "completion status" "completed"

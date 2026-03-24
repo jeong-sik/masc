@@ -57,7 +57,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   ignore (arg_get_string, arg_get_int, arg_get_float, arg_get_bool, arg_get_string_list, arg_get_string_opt, arg_get_float_opt);
   match (name : string) with
   | "masc_self_introspect" ->
-      let cell = !(Mcp_server.current_cell) in
+      let cell = Mcp_server.get_cell () in
       let generation = cell.Mitosis.generation in
       let tool_calls = cell.Mitosis.tool_call_count in
       let task_count = cell.Mitosis.task_count in
@@ -126,7 +126,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       let summary = arg_get_string "summary" "" in
       let current_task = arg_get_string "current_task" "" in
       let target_agent = arg_get_string "target_agent" "claude" in
-      let cell = !(Mcp_server.current_cell) in
+      let cell = Mcp_server.get_cell () in
       let mitosis_config = Mitosis.default_config in
       let should_prepare_now = Mitosis.should_prepare ~config:mitosis_config ~cell ~context_ratio in
       let should_handoff_now = Mitosis.should_handoff ~config:mitosis_config ~cell ~context_ratio in
@@ -148,7 +148,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           Some (false, "full_context required when context_ratio > 50%")
         else begin
           let prepared_cell = Mitosis.prepare_for_division ~config:mitosis_config ~cell ~full_context in
-          Mcp_server.current_cell := prepared_cell;
+          Mcp_server.set_cell prepared_cell;
           let response = `Assoc [
             ("status", `String "prepared");
             ("context_ratio", `Float context_ratio);
@@ -176,15 +176,16 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
               let spawn_fn ~prompt =
                 Spawn.spawn ~agent_name:target_agent
                   ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds () in
+              let pool = Mcp_server.get_pool () in
               let (spawn_result, new_cell, new_pool, _handoff_dna) =
                 Mitosis.execute_mitosis ~config:mitosis_config
-                  ~pool:!(Mcp_server.stem_pool) ~parent:cell
+                  ~pool ~parent:cell
                   ~full_context:(Printf.sprintf "Summary: %s\n\nCurrent Task: %s\n\nContext:\n%s"
                       (if summary = "" then "Memento mori - context limit reached" else summary)
                       current_task full_context)
                   ~spawn_fn in
-              Mcp_server.current_cell := new_cell;
-              Mcp_server.stem_pool := new_pool;
+              Mcp_server.set_cell new_cell;
+              Mcp_server.set_pool new_pool;
               let response = `Assoc [
                 ("status", `String "divided");
                 ("context_ratio", `Float context_ratio);

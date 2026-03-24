@@ -288,6 +288,20 @@ export function GraphView({ data }: GraphViewProps) {
         </div>
       ` : null}
     </div>
+    <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
+      ${[
+        { label: '에이전트', color: '#22d3ee' },
+        { label: '작업', color: '#fbbf24' },
+        { label: '결정', color: '#a78bfa' },
+        { label: '작전', color: '#4ade80' },
+        { label: '게시글', color: '#f472b6' },
+      ].map(({ label, color }) => html`
+        <div class="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]" key=${label}>
+          <span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${color}"></span>
+          ${label}
+        </div>
+      `)}
+    </div>
 
     ${selectedNode ? html`
       <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 mt-2">

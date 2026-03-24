@@ -280,4 +280,22 @@ export interface ActivityGraphResponse {
   timeline: ActivityGraphTimelineEvent[]
   generated_at: string
   window: { start: number; end: number; limit: number; room_id: string }
+  stats_history?: Array<{ bucket: number; events: number; agents_active: number; tasks_done: number }>
+}
+
+// --- Swimlane types ---
+
+export interface AgentSpan {
+  agent: string
+  start_ms: number
+  end_ms: number
+  kind: string
+  label: string
+  status: string
+}
+
+export interface SwimlaneResponse {
+  agents: string[]
+  spans: AgentSpan[]
+  time_range: { min_ms: number; max_ms: number }
 }

@@ -110,7 +110,22 @@ let load_state ~base_path loop_id =
                path;
              None
          | `Assoc fields ->
-             let required_fields = [ "loop_id"; "status" ]
+             let required_fields =
+               [
+                 "loop_id";
+                 "status";
+                 "current_cycle";
+                 "baseline";
+                 "best_score";
+                 "best_cycle";
+                 "goal";
+                 "metric_fn";
+                 "model_model";
+                 "target_file";
+                 "workdir";
+                 "cycle_timeout_s";
+                 "max_cycles";
+               ]
              in
              let missing_fields =
                List.filter

@@ -903,6 +903,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
                     [
                       ("task_id", `String "task-001");
                       ("action", `String "done");
+                      ("notes", `String "Completed task and verified output");
                     ] );
               ] );
         ])
@@ -1481,14 +1482,17 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~description:""
   in
 
-  let transition action =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_transition"
-      ~arguments:(`Assoc [
+  let transition ?(extra = []) action =
+    let base_args =
+      [
         ("task_id", `String "task-001");
         ("action", `String action);
         ("agent_name", `String "alpha-agent");
-      ])
+      ]
+    in
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_transition"
+      ~arguments:(`Assoc (extra @ base_args))
   in
 
   let (ok_claim, claim_msg) = transition "claim" in
@@ -1500,14 +1504,13 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
   Alcotest.(check bool) "start message has in_progress" true (contains_substring start_msg "in_progress");
 
   let (ok_done, done_msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_transition"
-      ~arguments:(`Assoc [
-        ("task_id", `String "task-001");
-        ("action", `String "done");
-        ("agent_name", `String "alpha-agent");
-        ("force", `Bool true);
-      ])
+    transition
+      ~extra:
+        [
+          ("notes", `String "Completed alias-reuse-task implementation and verified");
+          ("force", `Bool true);
+        ]
+      "done"
   in
   Alcotest.(check bool) "done success with same explicit alias" true ok_done;
   Alcotest.(check bool) "done message has done" true (contains_substring done_msg "done");

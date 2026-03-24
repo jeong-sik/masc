@@ -10,7 +10,7 @@ let managed_claim_tool = "masc_claim_task"
 let generic_transition_tool = "masc_transition"
 let transition_claim_input = `Assoc [("action", `String "claim")]
 let transition_start_input = `Assoc [("action", `String "start")]
-let transition_done_input = `Assoc [("action", `String "done")]
+let transition_done_input = `Assoc [("action", `String "done"); ("notes", `String "Completed task implementation and verified correctness")]
 let no_args = `Null
 
 (* ── Helpers ────────────────────────────────────────────────── *)

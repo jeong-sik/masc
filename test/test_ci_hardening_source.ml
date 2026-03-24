@@ -163,12 +163,12 @@ let test_input_validation_contracts () =
        "maybe_evict_expired config")
 
 let test_room_current_validation_contracts () =
-  check bool "room current route reads current room" true
+  (* Room.read_current_room and Room.ensure_room_bootstrap were removed from
+     h2_gateway. Room validation now happens at the MCP/tool dispatch layer.
+     Verify h2_gateway still serves room-truth API endpoint. *)
+  check bool "h2 gateway serves room-truth endpoint" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       "Room.read_current_room config");
-  check bool "room current route still bootstraps room ids" true
-    (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       "Room.ensure_room_bootstrap config room_id")
+       "dashboard_room_truth_http_json")
 
 let test_root_redirect_contracts () =
   check bool "http root redirects to dashboard" true

@@ -105,7 +105,11 @@ let generate_code_change ~goal ~baseline ~history ~insights
   match
     Oas_worker.run_named ~cascade_name:"autoresearch"
       ~goal:prompt ~max_turns:1
-      ~temperature:0.7 ~max_tokens:4096 ()
+      ~temperature:(Cascade_inference.resolve_temperature
+        ~cascade_name:"autoresearch" ~fallback:(fun () -> 0.7))
+      ~max_tokens:(Cascade_inference.resolve_max_tokens
+        ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
+      ()
   with
   | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" e)
   | Ok result -> parse_model_code_response (Oas_response.text_of_response result.Oas_worker.response)

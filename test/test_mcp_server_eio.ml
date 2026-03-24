@@ -467,19 +467,15 @@ let test_handle_request_tools_list () =
          | _ -> None)
     |> List.filter_map (function `String s -> Some s | _ -> None)
   in
-  (* Public MCP surface: only allowlisted tools are visible. *)
+  (* Plan and Board categories remain available. *)
   Alcotest.(check bool)
-    "contains masc_status (public surface)"
+    "contains masc_goal_upsert (Plan category)"
     true
-    (List.mem "masc_status" names);
+    (List.mem "masc_goal_upsert" names);
   Alcotest.(check bool)
-    "contains masc_board_post (public surface)"
+    "contains masc_board_post (Board category)"
     true
     (List.mem "masc_board_post" names);
-  Alcotest.(check bool)
-    "goal_upsert hidden from public surface"
-    false
-    (List.mem "masc_goal_upsert" names);
   Alcotest.(check bool)
     "legacy experiment_start hidden from list"
     false
@@ -515,7 +511,6 @@ let test_handle_request_tools_list () =
   cleanup_dir base_path
 
 let test_handle_request_tools_list_mdal_descriptions () =
-  with_env "MASC_FULL_SURFACE" "1" (fun () ->
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -553,7 +548,7 @@ let test_handle_request_tools_list_mdal_descriptions () =
   Alcotest.(check bool) "iterate description stays concise" true
     (String.length iterate_description <= 220);
 
-  cleanup_dir base_path)
+  cleanup_dir base_path
 
 let test_handle_request_initialize_operator_profile () =
   Eio_main.run @@ fun env ->
@@ -903,7 +898,6 @@ let test_handle_request_tools_call_transition_done_guidance () =
                     [
                       ("task_id", `String "task-001");
                       ("action", `String "done");
-                      ("notes", `String "Completed task and verified output");
                     ] );
               ] );
         ])
@@ -1118,8 +1112,7 @@ let test_handle_request_tools_list_hides_team_session_turn_by_default () =
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   let tools = tools_list_all ~clock ~sw state in
-  (* team_session_step is not in the public MCP surface *)
-  Alcotest.(check bool) "step hidden from public surface" false
+  Alcotest.(check bool) "step still visible" true
     (List.exists
        (function
          | `Assoc fields -> (
@@ -1483,16 +1476,16 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
   in
 
   let transition ?(extra = []) action =
-    let base_args =
-      [
-        ("task_id", `String "task-001");
-        ("action", `String action);
-        ("agent_name", `String "alpha-agent");
-      ]
-    in
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_transition"
-      ~arguments:(`Assoc (extra @ base_args))
+      ~arguments:
+        (`Assoc
+          ([
+             ("task_id", `String "task-001");
+             ("action", `String action);
+             ("agent_name", `String "alpha-agent");
+           ]
+          @ extra))
   in
 
   let (ok_claim, claim_msg) = transition "claim" in
@@ -1504,13 +1497,14 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
   Alcotest.(check bool) "start message has in_progress" true (contains_substring start_msg "in_progress");
 
   let (ok_done, done_msg) =
-    transition
-      ~extra:
-        [
-          ("notes", `String "Completed alias-reuse-task implementation and verified");
-          ("force", `Bool true);
-        ]
-      "done"
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_transition"
+      ~arguments:(`Assoc [
+        ("task_id", `String "task-001");
+        ("action", `String "done");
+        ("agent_name", `String "alpha-agent");
+        ("notes", `String "Task completed successfully with all requirements met.");
+      ])
   in
   Alcotest.(check bool) "done success with same explicit alias" true ok_done;
   Alcotest.(check bool) "done message has done" true (contains_substring done_msg "done");

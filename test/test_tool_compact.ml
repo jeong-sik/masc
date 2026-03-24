@@ -153,15 +153,31 @@ let test_context_ratio () =
 let test_system_prompt_token_counting () =
   let messages = [("user", "Hello")] in
   let sys = "You are a helpful assistant." in
-  let args = make_args ~strategy:"all" ~system_prompt:sys messages in
-  match TC.dispatch ~name:"masc_compact_context" ~args with
+  let base_args = make_args ~strategy:"all" messages in
+  let args_with_sys = make_args ~strategy:"all" ~system_prompt:sys messages in
+  let parse_tokens = function
+    | None -> fail "dispatch returned None"
+    | Some result ->
+      let json = parse_result result in
+      let open Yojson.Safe.Util in
+      json |> member "tokens_before" |> to_int
+  in
+  let tokens_without_sys =
+    TC.dispatch ~name:"masc_compact_context" ~args:base_args |> parse_tokens
+  in
+  let tokens_with_sys =
+    TC.dispatch ~name:"masc_compact_context" ~args:args_with_sys |> parse_tokens
+  in
+  match TC.dispatch ~name:"masc_compact_context" ~args:args_with_sys with
   | None -> fail "dispatch returned None"
   | Some result ->
     let json = parse_result result in
     let open Yojson.Safe.Util in
     let tokens = json |> member "tokens_before" |> to_int in
-    (* System prompt tokens should be included *)
-    check bool "tokens include system prompt" true (tokens > 10)
+    check int "reported tokens match with-sys path" tokens_with_sys tokens;
+    (* System prompt tokens should increase the estimated budget relative to the
+       same message set without a system prompt, regardless of estimator shape. *)
+    check bool "tokens include system prompt" true (tokens_with_sys > tokens_without_sys)
 
 (* ================================================================ *)
 (* Test for fs_compat backend types                                 *)

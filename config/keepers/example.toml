@@ -37,9 +37,7 @@ proactive_enabled = true
 presence_keepalive = true
 presence_keepalive_sec = 30
 
-# Policy (policy_mode defaults to "heuristic", rarely needs override)
 policy_action_budget = "board"
-policy_shell_mode = "readonly"
 
 # Initiative (autonomous posting)
 initiative_enabled = true

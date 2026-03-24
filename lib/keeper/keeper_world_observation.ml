@@ -145,14 +145,23 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
       let trimmed = String.trim meta.continuity_summary in
       if trimmed = "" then "No continuity snapshot available." else trimmed
 
-(** Collect recent board activity within the keeper's heartbeat window.
+(** Per-keeper cursor for board event collection.
+    Tracks the last check timestamp so no posts are missed between heartbeats.
+    In-memory only — first run after restart uses a 300s bootstrap window. *)
+let board_cursors : (string, float) Hashtbl.t = Hashtbl.create 8
+
+let reset_board_cursor name = Hashtbl.remove board_cursors name [@@warning "-32"]
+
+(** Collect recent board activity using cursor-based tracking.
     Returns (event summaries, new post count, mention count). *)
 let collect_board_events ~(meta : keeper_meta) : string list * int * int =
   try
-    let window_sec =
-      float_of_int (max 30 (min 300 meta.presence_keepalive_sec)) *. 1.5
+    let since_ts =
+      match Hashtbl.find_opt board_cursors meta.name with
+      | Some ts -> ts
+      | None -> Time_compat.now () -. 300.0
     in
-    let since_ts = Time_compat.now () -. window_sec in
+    Hashtbl.replace board_cursors meta.name (Time_compat.now ());
     let posts =
       Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:20 ()
     in

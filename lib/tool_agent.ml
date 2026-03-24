@@ -85,8 +85,47 @@ let max_collabs metrics_list =
   |> List.map (fun (_, m) -> List.length m.Metrics_store_eio.unique_collaborators)
   |> List.fold_left max 0
 
-(** Score function for fitness calculation *)
-let score_for ~min_avg ~max_collabs metrics =
+(** Fitness scoring weights.
+
+    Rationale for default values:
+    - completion (0.35): Task completion is the primary signal of agent utility.
+      An agent that starts but never finishes is worse than a slow finisher.
+    - reliability (0.25): Low error rate is the second priority.
+      Agents that crash or produce errors create cascading failures in multi-agent workflows.
+    - speed (0.15): Faster completion is desirable but secondary to correctness.
+      Speed is normalized relative to the fastest agent in the pool to avoid
+      penalizing agents working on inherently longer tasks.
+    - handoff (0.15): Successful handoffs indicate cooperative capability.
+      Equal weight to speed because coordination is as valuable as individual performance
+      in multi-agent systems.
+    - collaboration (0.10): Number of unique collaborators relative to pool max.
+      Lowest weight because this is a volume metric, not a quality metric.
+
+    These weights are configurable via [fitness_weights]. The defaults were chosen
+    to prioritize "finishes correctly" over "finishes fast" based on observed MASC
+    usage patterns where incomplete tasks cause more rework than slow tasks.
+
+    TODO: Validate empirically — track selection outcomes vs task success rate
+    to determine if the current weighting produces better team compositions. *)
+type fitness_weights = {
+  w_completion : float;
+  w_reliability : float;
+  w_speed : float;
+  w_handoff : float;
+  w_collaboration : float;
+}
+
+let default_fitness_weights : fitness_weights = {
+  w_completion = 0.35;
+  w_reliability = 0.25;
+  w_speed = 0.15;
+  w_handoff = 0.15;
+  w_collaboration = 0.10;
+}
+
+(** Score function for fitness calculation.
+    @param weights Optional custom weights (defaults to [default_fitness_weights]) *)
+let score_for ?(weights = default_fitness_weights) ~min_avg ~max_collabs metrics =
   let has_data = metrics.Metrics_store_eio.total_tasks > 0 in
   let completion = metrics.Metrics_store_eio.task_completion_rate in
   let reliability = if has_data then 1.0 -. metrics.Metrics_store_eio.error_rate else 0.0 in
@@ -102,8 +141,11 @@ let score_for ~min_avg ~max_collabs metrics =
     else float_of_int collab_count /. float_of_int max_collabs
   in
   let score =
-    (0.35 *. completion) +. (0.25 *. reliability) +. (0.15 *. speed)
-    +. (0.15 *. handoff) +. (0.10 *. collaboration)
+    (weights.w_completion *. completion)
+    +. (weights.w_reliability *. reliability)
+    +. (weights.w_speed *. speed)
+    +. (weights.w_handoff *. handoff)
+    +. (weights.w_collaboration *. collaboration)
   in
   (score, completion, reliability, speed, handoff, collaboration)
 

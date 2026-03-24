@@ -268,8 +268,10 @@ let test_grpc_server_registers_health_service () =
           let services = Grpc_eio.Server.list_services server in
           Alcotest.(check bool) "coordination service registered" true
             (List.mem Masc_mcp.Masc_grpc_service.service_name services);
-          Alcotest.(check bool) "reflection service registered" true
+          Alcotest.(check bool) "reflection v1 service registered" true
             (List.mem "grpc.reflection.v1.ServerReflection" services);
+          Alcotest.(check bool) "reflection v1alpha service registered" true
+            (List.mem "grpc.reflection.v1alpha.ServerReflection" services);
           Alcotest.(check bool) "health service registered" true
             (List.mem "grpc.health.v1.Health" services)))
 

@@ -34,11 +34,11 @@ function keeperNameSet(): Set<string> {
   return names
 }
 
-const CHIPS: { id: AgentsView; label: string }[] = [
-  { id: 'all', label: '전체' },
-  { id: 'agents', label: '에이전트' },
-  { id: 'keepers', label: '키퍼' },
-  { id: 'sessions', label: '실행' },
+const CHIPS: { id: AgentsView; label: string; description: string }[] = [
+  { id: 'all', label: '전체 보기', description: '등록된 모든 런타임을 함께 봅니다.' },
+  { id: 'agents', label: '일반 에이전트', description: '키퍼가 연결되지 않은 일반 에이전트만 봅니다.' },
+  { id: 'keepers', label: '키퍼 런타임', description: '장기 컨텍스트를 유지하는 상주 런타임만 봅니다.' },
+  { id: 'sessions', label: '세션/실행', description: '세션, 작전, 실행 흐름을 별도 화면으로 봅니다.' },
 ]
 
 export function AgentsUnified() {
@@ -71,6 +71,11 @@ export function AgentsUnified() {
   const keeperCountFallback = Math.max(keepers.value.length, missionKeeperBriefs.value.length)
   const keeperCount = totalCount > 0 ? keeperCountFromAgents : keeperCountFallback
   const agentOnlyCount = totalCount > 0 ? totalCount - keeperCountFromAgents : 0
+  const currentViewMeta = CHIPS.find(chip => chip.id === currentView) ?? {
+    id: 'all' as const,
+    label: '전체 보기',
+    description: '등록된 모든 런타임을 함께 봅니다.',
+  }
 
   function chipCount(id: AgentsView): number | null {
     if (id === 'all') return totalCount
@@ -79,6 +84,15 @@ export function AgentsUnified() {
     return null
   }
 
+  const currentViewSummary =
+    currentView === 'all'
+      ? `일반 에이전트 ${agentOnlyCount}개와 키퍼 런타임 ${keeperCount}개를 함께 보여줍니다.`
+      : currentView === 'agents'
+        ? `지속 실행용 키퍼가 없는 일반 에이전트 ${agentOnlyCount}개만 표시합니다.`
+        : currentView === 'keepers'
+          ? `장기 컨텍스트를 유지하는 키퍼 런타임 ${keeperCount}개만 표시합니다.`
+          : '세션, 작전, 연속성, 개입 대기 등 실행 흐름을 따로 봅니다.'
+
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex gap-1 p-1 bg-[var(--white-3)] rounded-lg w-fit">
@@ -86,6 +100,7 @@ export function AgentsUnified() {
           <button type="button"
             key=${c.id}
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer border-0 ${currentView === c.id ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-body)]'}"
+            title=${c.description}
             onClick=${() => {
               activeView.value = c.id
               navigate('status', c.id === 'all' ? { section: 'agents' } : { section: 'agents', view: c.id })
@@ -95,6 +110,10 @@ export function AgentsUnified() {
             ${chipCount(c.id) != null ? html`<${CountBadge}>${chipCount(c.id)}<//>` : null}
           </button>
         `)}
+      </div>
+      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-4 py-3 text-[12px] leading-[1.5] text-[var(--text-muted)]">
+        <strong class="mr-2 text-[var(--text-strong)]">${currentViewMeta.label}</strong>
+        <span>${currentViewMeta.description} ${currentViewSummary}</span>
       </div>
 
       ${currentView === 'sessions'

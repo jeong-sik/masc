@@ -107,10 +107,10 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~ratio_opt:p.compaction_ratio_gate_opt
       ~message_opt:p.compaction_message_gate_opt
       ~token_opt:p.compaction_token_gate_opt
-      ~fallback_profile:old.compaction_profile
-      ~fallback_ratio:old.compaction_ratio_gate
-      ~fallback_message:old.compaction_message_gate
-      ~fallback_token:old.compaction_token_gate
+      ~fallback_profile:old.compaction.profile
+      ~fallback_ratio:old.compaction.ratio_gate
+      ~fallback_message:old.compaction.message_gate
+      ~fallback_token:old.compaction.token_gate
   in
   let updated = { old with
     goal;
@@ -184,25 +184,29 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
              ~default:old.presence_keepalive_sec
              p.profile_defaults.presence_keepalive_sec)
         p.presence_keepalive_sec_opt;
-    proactive_enabled =
-      Option.value
-        ~default:old.proactive_enabled
-        p.proactive_enabled_opt;
-    proactive_idle_sec =
-      Option.value ~default:old.proactive_idle_sec p.proactive_idle_sec_opt
-      |> normalize_proactive_idle_sec;
-    proactive_cooldown_sec =
-      Option.value ~default:old.proactive_cooldown_sec p.proactive_cooldown_sec_opt
-      |> normalize_proactive_cooldown_sec;
-    compaction_profile;
-    compaction_ratio_gate;
-    compaction_message_gate;
-    compaction_token_gate;
-    continuity_compaction_cooldown_sec =
-      Option.value
-        ~default:old.continuity_compaction_cooldown_sec
-        p.continuity_compaction_cooldown_sec_opt
-      |> normalize_continuity_compaction_cooldown_sec;
+    proactive = { old.proactive with
+      enabled =
+        Option.value
+          ~default:old.proactive.enabled
+          p.proactive_enabled_opt;
+      idle_sec =
+        Option.value ~default:old.proactive.idle_sec p.proactive_idle_sec_opt
+        |> normalize_proactive_idle_sec;
+      cooldown_sec =
+        Option.value ~default:old.proactive.cooldown_sec p.proactive_cooldown_sec_opt
+        |> normalize_proactive_cooldown_sec;
+    };
+    compaction = { old.compaction with
+      profile = compaction_profile;
+      ratio_gate = compaction_ratio_gate;
+      message_gate = compaction_message_gate;
+      token_gate = compaction_token_gate;
+      cooldown_sec =
+        Option.value
+          ~default:old.compaction.cooldown_sec
+          p.continuity_compaction_cooldown_sec_opt
+        |> normalize_continuity_compaction_cooldown_sec;
+    };
     auto_handoff = Option.value ~default:old.auto_handoff p.auto_handoff_opt;
     handoff_threshold = Option.value ~default:old.handoff_threshold p.handoff_threshold_opt;
     handoff_cooldown_sec = Option.value ~default:old.handoff_cooldown_sec p.handoff_cooldown_sec_opt;

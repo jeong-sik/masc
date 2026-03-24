@@ -181,7 +181,7 @@ let keeper_policy_observation_of_room_message
     if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
   in
   let last_turn_ago_s =
-    if meta.last_turn_ts <= 0.0 then 0.0 else max 0.0 (now_ts -. meta.last_turn_ts)
+    if meta.usage.last_turn_ts <= 0.0 then 0.0 else max 0.0 (now_ts -. meta.usage.last_turn_ts)
   in
   {
     source_kind = "room_message";
@@ -191,7 +191,7 @@ let keeper_policy_observation_of_room_message
     direct_mention = Mention.any_mentioned ~targets:mention_targets msg.content;
     has_question = observation_has_question msg.content;
     message_chars = String.length msg.content;
-    total_turns = meta.total_turns;
+    total_turns = meta.usage.total_turns;
     active_goal_count = List.length meta.active_goal_ids;
     joined_room_count = List.length meta.joined_room_ids;
     room_scope = Keeper_contract.room_scope_of_string meta.room_scope;

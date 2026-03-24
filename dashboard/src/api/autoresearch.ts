@@ -31,6 +31,8 @@ export interface AutoresearchLoopSummary {
   total_keeps: number
   total_discards: number
   elapsed_s: number
+  updated_at: number | null
+  live: boolean
   workdir: string
   source_workdir: string
   program_note: string | null

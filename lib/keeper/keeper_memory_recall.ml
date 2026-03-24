@@ -343,9 +343,9 @@ let evaluate_keeper_auto_rules
     ~(repetition_risk : float)
     ~(goal_alignment : float)
     ~(response_alignment : float) : keeper_auto_rule_eval =
-  let ratio_gate = meta.compaction_ratio_gate in
-  let message_gate = meta.compaction_message_gate in
-  let token_gate = meta.compaction_token_gate in
+  let ratio_gate = meta.compaction.ratio_gate in
+  let message_gate = meta.compaction.message_gate in
+  let token_gate = meta.compaction.token_gate in
   let reflect_threshold = keeper_rule_reflect_repetition_threshold () in
   let plan_goal_alignment_threshold = keeper_rule_plan_goal_alignment_threshold () in
   let plan_response_alignment_threshold = keeper_rule_plan_response_alignment_threshold () in
@@ -499,9 +499,9 @@ let learned_policy_auto_rules
     ~(repetition_risk : float)
     ~(goal_alignment : float)
     ~(response_alignment : float) : keeper_auto_rule_eval =
-  let ratio_gate = meta.compaction_ratio_gate in
-  let message_gate = meta.compaction_message_gate in
-  let token_gate = meta.compaction_token_gate in
+  let ratio_gate = meta.compaction.ratio_gate in
+  let message_gate = meta.compaction.message_gate in
+  let token_gate = meta.compaction.token_gate in
   let goal_drift =
     1.0 -. max 0.0 (min 1.0 (max goal_alignment response_alignment))
     |> max 0.0

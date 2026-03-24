@@ -6,6 +6,44 @@
 include Keeper_types_profile
 
 
+type compaction_state = {
+  profile: string;
+  ratio_gate: float;
+  message_gate: int;
+  token_gate: int;
+  cooldown_sec: int;
+  count: int;
+  last_ts: float;
+  last_before_tokens: int;
+  last_after_tokens: int;
+  last_check_ts: float;
+  last_decision: string;
+}
+
+type usage_metrics = {
+  total_turns: int;
+  total_input_tokens: int;
+  total_output_tokens: int;
+  total_tokens: int;
+  total_cost_usd: float;
+  last_turn_ts: float;
+  last_model_used: string;
+  last_input_tokens: int;
+  last_output_tokens: int;
+  last_total_tokens: int;
+  last_latency_ms: int;
+}
+
+type proactive_config = {
+  enabled: bool;
+  idle_sec: int;
+  cooldown_sec: int;
+  count_total: int;
+  last_ts: float;
+  last_reason: string;
+  last_preview: string;
+}
+
 type keeper_meta = {
   name: string;
   agent_name: string;
@@ -38,14 +76,8 @@ type keeper_meta = {
   generation: int;
   presence_keepalive: bool;
   presence_keepalive_sec: int;
-  proactive_enabled: bool;
-  proactive_idle_sec: int;
-  proactive_cooldown_sec: int;
-  compaction_profile: string;
-  compaction_ratio_gate: float;
-  compaction_message_gate: int;
-  compaction_token_gate: int;
-  continuity_compaction_cooldown_sec: int;
+  proactive: proactive_config;
+  compaction: compaction_state;
   auto_handoff: bool;
   handoff_threshold: float;
   handoff_cooldown_sec: int;
@@ -55,27 +87,8 @@ type keeper_meta = {
   last_handoff_ts: float;
   created_at: string;
   updated_at: string;
-  total_turns: int;
-  total_input_tokens: int;
-  total_output_tokens: int;
-  total_tokens: int;
-  total_cost_usd: float;
-  last_turn_ts: float;
-  last_model_used: string;
-  last_input_tokens: int;
-  last_output_tokens: int;
-  last_total_tokens: int;
-  last_latency_ms: int;
-  compaction_count: int;
-  last_compaction_ts: float;
-  last_compaction_before_tokens: int;
-  last_compaction_after_tokens: int;
-  proactive_count_total: int;
-  last_proactive_ts: float;
-  last_proactive_reason: string;
-  last_proactive_preview: string;
-  last_compaction_check_ts: float;
-  last_compaction_decision: string;
+  usage: usage_metrics;
+
   last_continuity_update_ts: float;
   continuity_summary: string;
   active_goal_ids: string list;
@@ -84,9 +97,6 @@ type keeper_meta = {
   team_session_start_count_total: int;
   last_autonomous_action_at: string;
   autonomous_action_count: int;
-  deliberation_count: int;
-  deliberation_cost_total_usd: float;
-  last_deliberation_ts: float;
   last_triage_triggers: string;
   paused: bool;
 }
@@ -127,14 +137,14 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("generation", `Int m.generation);
       ("presence_keepalive", `Bool m.presence_keepalive);
       ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
-      ("proactive_enabled", `Bool m.proactive_enabled);
-      ("proactive_idle_sec", `Int m.proactive_idle_sec);
-      ("proactive_cooldown_sec", `Int m.proactive_cooldown_sec);
-      ("compaction_profile", `String m.compaction_profile);
-      ("compaction_ratio_gate", `Float m.compaction_ratio_gate);
-      ("compaction_message_gate", `Int m.compaction_message_gate);
-      ("compaction_token_gate", `Int m.compaction_token_gate);
-      ("continuity_compaction_cooldown_sec", `Int m.continuity_compaction_cooldown_sec);
+      ("proactive_enabled", `Bool m.proactive.enabled);
+      ("proactive_idle_sec", `Int m.proactive.idle_sec);
+      ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
+      ("compaction_profile", `String m.compaction.profile);
+      ("compaction_ratio_gate", `Float m.compaction.ratio_gate);
+      ("compaction_message_gate", `Int m.compaction.message_gate);
+      ("compaction_token_gate", `Int m.compaction.token_gate);
+      ("continuity_compaction_cooldown_sec", `Int m.compaction.cooldown_sec);
       ("auto_handoff", `Bool m.auto_handoff);
       ("handoff_threshold", `Float m.handoff_threshold);
       ("handoff_cooldown_sec", `Int m.handoff_cooldown_sec);
@@ -144,27 +154,27 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("last_handoff_ts", `Float m.last_handoff_ts);
       ("created_at", `String m.created_at);
       ("updated_at", `String m.updated_at);
-      ("total_turns", `Int m.total_turns);
-      ("total_input_tokens", `Int m.total_input_tokens);
-      ("total_output_tokens", `Int m.total_output_tokens);
-      ("total_tokens", `Int m.total_tokens);
-      ("total_cost_usd", `Float m.total_cost_usd);
-      ("last_turn_ts", `Float m.last_turn_ts);
-      ("last_model_used", `String m.last_model_used);
-      ("last_input_tokens", `Int m.last_input_tokens);
-      ("last_output_tokens", `Int m.last_output_tokens);
-      ("last_total_tokens", `Int m.last_total_tokens);
-      ("last_latency_ms", `Int m.last_latency_ms);
-      ("compaction_count", `Int m.compaction_count);
-      ("last_compaction_ts", `Float m.last_compaction_ts);
-      ("last_compaction_before_tokens", `Int m.last_compaction_before_tokens);
-      ("last_compaction_after_tokens", `Int m.last_compaction_after_tokens);
-      ("proactive_count_total", `Int m.proactive_count_total);
-      ("last_proactive_ts", `Float m.last_proactive_ts);
-      ("last_proactive_reason", `String m.last_proactive_reason);
-      ("last_proactive_preview", `String m.last_proactive_preview);
-      ("last_compaction_check_ts", `Float m.last_compaction_check_ts);
-      ("last_compaction_decision", `String m.last_compaction_decision);
+      ("total_turns", `Int m.usage.total_turns);
+      ("total_input_tokens", `Int m.usage.total_input_tokens);
+      ("total_output_tokens", `Int m.usage.total_output_tokens);
+      ("total_tokens", `Int m.usage.total_tokens);
+      ("total_cost_usd", `Float m.usage.total_cost_usd);
+      ("last_turn_ts", `Float m.usage.last_turn_ts);
+      ("last_model_used", `String m.usage.last_model_used);
+      ("last_input_tokens", `Int m.usage.last_input_tokens);
+      ("last_output_tokens", `Int m.usage.last_output_tokens);
+      ("last_total_tokens", `Int m.usage.last_total_tokens);
+      ("last_latency_ms", `Int m.usage.last_latency_ms);
+      ("compaction_count", `Int m.compaction.count);
+      ("last_compaction_ts", `Float m.compaction.last_ts);
+      ("last_compaction_before_tokens", `Int m.compaction.last_before_tokens);
+      ("last_compaction_after_tokens", `Int m.compaction.last_after_tokens);
+      ("proactive_count_total", `Int m.proactive.count_total);
+      ("last_proactive_ts", `Float m.proactive.last_ts);
+      ("last_proactive_reason", `String m.proactive.last_reason);
+      ("last_proactive_preview", `String m.proactive.last_preview);
+      ("last_compaction_check_ts", `Float m.compaction.last_check_ts);
+      ("last_compaction_decision", `String m.compaction.last_decision);
       ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
       ("continuity_summary", `String m.continuity_summary);
       ("active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids));
@@ -176,9 +186,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("team_session_start_count_total", `Int m.team_session_start_count_total);
       ("last_autonomous_action_at", `String m.last_autonomous_action_at);
       ("autonomous_action_count", `Int m.autonomous_action_count);
-      ("deliberation_count", `Int m.deliberation_count);
-      ("deliberation_cost_total_usd", `Float m.deliberation_cost_total_usd);
-      ("last_deliberation_ts", `Float m.last_deliberation_ts);
       ("last_triage_triggers", `String m.last_triage_triggers);
       ("paused", `Bool m.paused);
     ]
@@ -381,15 +388,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let autonomous_action_count =
       Safe_ops.json_int ~default:0 "autonomous_action_count" json
     in
-    let deliberation_count =
-      Safe_ops.json_int ~default:0 "deliberation_count" json
-    in
-    let deliberation_cost_total_usd =
-      Safe_ops.json_float ~default:0.0 "deliberation_cost_total_usd" json
-    in
-    let last_deliberation_ts =
-      Safe_ops.json_float ~default:0.0 "last_deliberation_ts" json
-    in
     let last_triage_triggers =
       Safe_ops.json_string ~default:"" "last_triage_triggers" json
     in
@@ -434,14 +432,28 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           generation;
           presence_keepalive;
           presence_keepalive_sec;
-          proactive_enabled;
-          proactive_idle_sec;
-          proactive_cooldown_sec;
-          compaction_profile;
-          compaction_ratio_gate;
-          compaction_message_gate;
-          compaction_token_gate;
-          continuity_compaction_cooldown_sec;
+          proactive = {
+            enabled = proactive_enabled;
+            idle_sec = proactive_idle_sec;
+            cooldown_sec = proactive_cooldown_sec;
+            count_total = proactive_count_total;
+            last_ts = last_proactive_ts;
+            last_reason = last_proactive_reason;
+            last_preview = last_proactive_preview;
+          };
+          compaction = {
+            profile = compaction_profile;
+            ratio_gate = compaction_ratio_gate;
+            message_gate = compaction_message_gate;
+            token_gate = compaction_token_gate;
+            cooldown_sec = continuity_compaction_cooldown_sec;
+            count = compaction_count;
+            last_ts = last_compaction_ts;
+            last_before_tokens = last_compaction_before_tokens;
+            last_after_tokens = last_compaction_after_tokens;
+            last_check_ts = last_compaction_check_ts;
+            last_decision = last_compaction_decision;
+          };
           auto_handoff;
           handoff_threshold;
           handoff_cooldown_sec;
@@ -451,27 +463,19 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           last_handoff_ts;
           created_at = if created_at = "" then now_iso () else created_at;
           updated_at = if updated_at = "" then now_iso () else updated_at;
-          total_turns;
-          total_input_tokens;
-          total_output_tokens;
-          total_tokens;
-          total_cost_usd;
-          last_turn_ts;
-          last_model_used;
-          last_input_tokens;
-          last_output_tokens;
-          last_total_tokens;
-          last_latency_ms;
-          compaction_count;
-          last_compaction_ts;
-          last_compaction_before_tokens;
-          last_compaction_after_tokens;
-          proactive_count_total;
-          last_proactive_ts;
-          last_proactive_reason;
-          last_proactive_preview;
-          last_compaction_check_ts;
-          last_compaction_decision;
+          usage = {
+            total_turns;
+            total_input_tokens;
+            total_output_tokens;
+            total_tokens;
+            total_cost_usd;
+            last_turn_ts;
+            last_model_used;
+            last_input_tokens;
+            last_output_tokens;
+            last_total_tokens;
+            last_latency_ms;
+          };
           last_continuity_update_ts;
           continuity_summary;
           active_goal_ids;
@@ -480,9 +484,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           team_session_start_count_total;
           last_autonomous_action_at;
           autonomous_action_count;
-          deliberation_count;
-          deliberation_cost_total_usd;
-          last_deliberation_ts;
           last_triage_triggers;
           paused;
         }

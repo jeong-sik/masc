@@ -186,22 +186,19 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
               Buffer.contents buf)
         with
         | Eio.Time.Timeout ->
-            Log.legacy_traceln ~level:Log.Warn ~module_name:"Process_eio"
-              (Printf.sprintf "[Process_eio] Timeout after %.0fs: %s"
-                 timeout_sec label);
+            Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
+              timeout_sec label;
             ""
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
-              Log.legacy_traceln ~level:Log.Warn ~module_name:"Process_eio"
-                (Printf.sprintf
-                   "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
-                   label (Printexc.to_string exn));
+              Log.Misc.warn
+                "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                label (Printexc.to_string exn);
               run_unix_argv_fallback ?env argv
             ) else (
-              Log.legacy_traceln ~level:Log.Error ~module_name:"Process_eio"
-                (Printf.sprintf "[Process_eio] argv error: %s — %s" label
-                   (Printexc.to_string exn));
+              Log.Misc.error "[Process_eio] argv error: %s — %s" label
+                (Printexc.to_string exn);
               "")
 
 let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (argv : string list) : string =
@@ -223,22 +220,19 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
               Buffer.contents buf)
         with
         | Eio.Time.Timeout ->
-            Log.legacy_traceln ~level:Log.Warn ~module_name:"Process_eio"
-              (Printf.sprintf "[Process_eio] Timeout after %.0fs: %s"
-                 timeout_sec label);
+            Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
+              timeout_sec label;
             ""
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
-              Log.legacy_traceln ~level:Log.Warn ~module_name:"Process_eio"
-                (Printf.sprintf
-                   "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
-                   label (Printexc.to_string exn));
+              Log.Misc.warn
+                "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                label (Printexc.to_string exn);
               run_unix_argv_with_stdin_fallback ?env ~stdin_content argv
             ) else (
-              Log.legacy_traceln ~level:Log.Error ~module_name:"Process_eio"
-                (Printf.sprintf "[Process_eio] argv error: %s — %s" label
-                   (Printexc.to_string exn));
+              Log.Misc.error "[Process_eio] argv error: %s — %s" label
+                (Printexc.to_string exn);
               "")
 
 let run_argv_with_stdin_and_status
@@ -273,23 +267,20 @@ let run_argv_with_stdin_and_status
                   (unix_status, Buffer.contents buf)))
         with
         | Eio.Time.Timeout ->
-            Log.legacy_traceln ~level:Log.Warn ~module_name:"Process_eio"
-              (Printf.sprintf "[Process_eio] Timeout after %.0fs: %s"
-                 timeout_sec label);
+            Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
+              timeout_sec label;
             (Unix.WSIGNALED Sys.sigterm, Buffer.contents buf)
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
-              Log.legacy_traceln ~level:Log.Warn ~module_name:"Process_eio"
-                (Printf.sprintf
-                   "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
-                   label (Printexc.to_string exn));
+              Log.Misc.warn
+                "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                label (Printexc.to_string exn);
               run_unix_argv_with_stdin_and_status_fallback ?env ~stdin_content
                 argv
             ) else (
-              Log.legacy_traceln ~level:Log.Error ~module_name:"Process_eio"
-                (Printf.sprintf "[Process_eio] argv error: %s — %s" label
-                   (Printexc.to_string exn));
+              Log.Misc.error "[Process_eio] argv error: %s — %s" label
+                (Printexc.to_string exn);
               (Unix.WEXITED 1, ""))
 
 let run_argv_with_status ?(timeout_sec = 60.0) ?env (argv : string list) : Unix.process_status * string =
@@ -318,20 +309,17 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env (argv : string list) : Unix.
                   (unix_status, Buffer.contents buf)))
         with
         | Eio.Time.Timeout ->
-            Log.legacy_traceln ~level:Log.Warn ~module_name:"Process_eio"
-              (Printf.sprintf "[Process_eio] Timeout after %.0fs: %s"
-                 timeout_sec label);
+            Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
+              timeout_sec label;
             (Unix.WSIGNALED Sys.sigterm, Buffer.contents buf)
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
-              Log.legacy_traceln ~level:Log.Warn ~module_name:"Process_eio"
-                (Printf.sprintf
-                   "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
-                   label (Printexc.to_string exn));
+              Log.Misc.warn
+                "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                label (Printexc.to_string exn);
               run_unix_argv_with_status_fallback ?env argv
             ) else (
-              Log.legacy_traceln ~level:Log.Error ~module_name:"Process_eio"
-                (Printf.sprintf "[Process_eio] argv error: %s — %s" label
-                   (Printexc.to_string exn));
+              Log.Misc.error "[Process_eio] argv error: %s — %s" label
+                (Printexc.to_string exn);
               (Unix.WEXITED 1, ""))

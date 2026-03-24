@@ -89,7 +89,8 @@ let cleanup_zombies
                   in
                   Resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
               zombie_entries := (agent.name, path) :: !zombie_entries
-          | _ -> ()
+          | Ok _ -> () (* not a zombie, skip *)
+          | Error err -> Log.Gc.warn "skipping agent %s: parse error: %s" name err
         end
       )
     ) scan_paths;
@@ -109,8 +110,8 @@ let cleanup_zombies
           | Ok agent ->
               let updated = { agent with status = Inactive; last_seen = now_iso () } in
               write_json config path (agent_to_yojson updated)
-          | Error _ -> ()
-        with Sys_error _ -> ());
+          | Error err -> Log.Gc.warn "gc status update parse error for %s: %s" name err
+        with Sys_error msg -> Log.Gc.warn "gc status update I/O error for %s: %s" name msg);
         let _stopped = Heartbeat.stop_by_agent ~agent_name:name in
         ()
       ) !zombie_entries;

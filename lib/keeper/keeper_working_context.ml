@@ -91,11 +91,12 @@ let ensure_dir path =
 (* Token Estimation                                                  *)
 (* ================================================================ *)
 
-let msg_tokens (m : Agent_sdk.Types.message) =
-  (String.length (text_of_message m) / 4) + 4
+(** CJK-aware token estimate delegated to OAS Context_reducer. *)
+let msg_tokens : Agent_sdk.Types.message -> int =
+  Agent_sdk.Context_reducer.estimate_message_tokens
 
 let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
-  let sys_tokens = (String.length system_prompt / 4) + 4 in
+  let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
   List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
 
 (* ================================================================ *)
@@ -114,7 +115,7 @@ let exceeds_threshold ctx threshold =
 (* ================================================================ *)
 
 let create ~system_prompt ~max_tokens =
-  let token_count = (String.length system_prompt / 4) + 4 in
+  let token_count = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
   let oas_context = Agent_sdk.Context.create () in
   { system_prompt; messages = []; token_count; max_tokens;
     importance_scores = []; oas_context }

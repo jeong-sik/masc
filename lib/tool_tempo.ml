@@ -63,7 +63,6 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
 
   (* masc_tempo_get *)
@@ -76,7 +75,6 @@ Pair with masc_tempo_set to change interval or masc_tempo_adjust for auto-tuning
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
 
   (* masc_tempo_set *)
@@ -99,7 +97,6 @@ Check current value with masc_tempo_get first. Use masc_tempo_reset to return to
       ]);
       ("required", `List [`String "interval_seconds"]);
     ];
-    visibility = Public;
   };
 
   (* masc_tempo_adjust *)
@@ -112,7 +109,6 @@ Pair with masc_tempo_get to see the resulting interval after adjustment.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
 
   (* masc_tempo *)
@@ -141,7 +137,6 @@ For finer control, use masc_tempo_set (exact interval) or masc_tempo_adjust (aut
       ]);
       ("required", `List [`String "action"]);
     ];
-    visibility = Public;
   };
 
 ]

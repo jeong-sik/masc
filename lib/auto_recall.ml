@@ -69,9 +69,9 @@ let make_config
 
 (** {1 Token Estimation} *)
 
-(** Approximate token count for a string (rough: ~4 chars per token) *)
-let estimate_tokens s =
-  (String.length s + 3) / 4
+(** CJK-aware token estimate delegated to OAS Context_reducer. *)
+let estimate_tokens (s : string) : int =
+  if s = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens s
 
 (** {1 Source Fetchers} *)
 

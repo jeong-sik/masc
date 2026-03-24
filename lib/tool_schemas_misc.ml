@@ -22,7 +22,6 @@ Pair with masc_agents for agent details, masc_run_list for task details.";
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_verify_handoff";
@@ -48,7 +47,6 @@ Pair with masc_handover_get for the original context, masc_handover_claim for th
       ]);
       ("required", `List [`String "original"; `String "received"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_gc";
@@ -65,7 +63,6 @@ Pair with masc_archive_view to inspect what was archived or masc_cleanup_zombies
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_cleanup_zombies";
@@ -76,7 +73,6 @@ Pair with masc_gc for full room maintenance including old tasks and messages.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_tool_stats";
@@ -93,7 +89,6 @@ Pair with masc_tool_help for details on specific tools. Data resets on server re
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_tool_help";
@@ -110,7 +105,6 @@ Pair with masc_tool_stats to discover which tools exist.";
       ]);
       ("required", `List [`String "tool_name"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_tool_admin_snapshot";
@@ -132,7 +126,6 @@ Pair with masc_tool_admin_update to apply changes based on the snapshot.";
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_tool_admin_update";
@@ -193,7 +186,6 @@ After masc_tool_admin_snapshot to review current state before making changes.";
       ]);
       ("required", `List [`String "section"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_keeper_tool_catalog";
@@ -225,6 +217,5 @@ Pair with masc_tool_admin_snapshot for a broader admin view including auth and c
         ]);
       ]);
     ];
-    visibility = Public;
   };
 ]

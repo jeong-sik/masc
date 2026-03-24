@@ -4,7 +4,7 @@ module Tool_budget = Masc_mcp.Tool_budget
 module Tool_catalog = Masc_mcp.Tool_catalog
 
 let mk_schema name desc : Types.tool_schema =
-  { name; description = desc; input_schema = `Assoc []; visibility = Public }
+  { name; description = desc; input_schema = `Assoc [] }
 
 (* Helper: always returns 0 usage *)
 let no_usage _ = 0
@@ -26,8 +26,8 @@ let () =
     [
       ( "estimate_tokens",
         [
-          test_case "empty string returns 1" `Quick (fun () ->
-              check int "min 1" 1 (Tool_budget.estimate_tokens ""));
+          test_case "empty string returns 0" `Quick (fun () ->
+              check int "empty" 0 (Tool_budget.estimate_tokens ""));
           test_case "4 chars = 1 token" `Quick (fun () ->
               check int "4 chars" 1 (Tool_budget.estimate_tokens "abcd"));
           test_case "5 chars = 2 tokens" `Quick (fun () ->

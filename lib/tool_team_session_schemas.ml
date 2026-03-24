@@ -189,7 +189,6 @@ Pair with masc_team_session_step to record turns and masc_team_session_finalize 
                 ] );
             ("required", `List [ `String "goal" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_team_session_status";
@@ -205,7 +204,6 @@ After masc_team_session_start; pair with masc_team_session_events for detailed t
             );
             ("required", `List [ `String "session_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_team_session_step";
@@ -506,7 +504,6 @@ After masc_team_session_start; the primary write path for all session activity."
                 ] );
             ("required", `List [ `String "session_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_team_session_finalize";
@@ -535,7 +532,6 @@ Alternative to calling masc_team_session_stop then masc_team_session_report sepa
                 ] );
             ("required", `List [ `String "session_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_team_session_stop";
@@ -556,7 +552,6 @@ After masc_team_session_step turns are complete; follow with masc_team_session_p
                 ] );
             ("required", `List [ `String "session_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_team_session_report";
@@ -575,7 +570,6 @@ After masc_team_session_stop; pair with masc_team_session_prove for verifiable p
                 ] );
             ("required", `List [ `String "session_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_team_session_list";
@@ -599,7 +593,6 @@ Pair with masc_team_session_compare to diff two sessions.";
                       ] );
                 ] );
           ];
-      visibility = Public;
     };
     {
       name = "masc_team_session_compare";
@@ -619,7 +612,6 @@ After masc_team_session_list identifies the two session IDs.";
                 ] );
             ("required", `List [ `String "base_session_id"; `String "target_session_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_team_session_events";
@@ -646,7 +638,6 @@ After masc_team_session_start; the most-called session tool for progress monitor
                 ] );
             ("required", `List [ `String "session_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_team_session_prove";
@@ -673,7 +664,6 @@ After masc_team_session_stop or masc_team_session_report.";
                 ] );
             ("required", `List [ `String "session_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_team_session_verify_trace";
@@ -693,6 +683,5 @@ After masc_team_session_prove; the final verification step in the proof chain.";
                 ] );
             ("required", `List [ `String "session_id" ]);
           ];
-      visibility = Public;
     };
   ]

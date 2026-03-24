@@ -49,7 +49,6 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "title"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_case_brief_submit";
@@ -78,7 +77,6 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "case_id"; `String "summary"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_cases";
@@ -96,7 +94,6 @@ let schemas : Types.tool_schema list = [
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_case_status";
@@ -111,7 +108,6 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "case_id"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_ruling_status";
@@ -126,7 +122,6 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "case_id"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_execution_orders";
@@ -145,7 +140,6 @@ let schemas : Types.tool_schema list = [
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_governance_status";
@@ -154,7 +148,6 @@ let schemas : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_route";
@@ -175,7 +168,6 @@ Pair with masc_dispatch_assign to actually assign work to the selected agents.";
       ]);
       ("required", `List [`String "query"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_execute";
@@ -197,7 +189,6 @@ Call masc_execute_dry_run first to preview. Pair with masc_execution_orders for 
       ]);
       ("required", `List [`String "topic"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_execute_dry_run";
@@ -218,7 +209,6 @@ Pair with masc_execute to run the action after confirming the dry-run output.";
       ]);
       ("required", `List [`String "topic"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_governance_feed";
@@ -237,7 +227,6 @@ Pair with masc_execute to run the action after confirming the dry-run output.";
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_runtime_params";
@@ -246,7 +235,6 @@ Pair with masc_execute to run the action after confirming the dry-run output.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_set_param";
@@ -268,6 +256,5 @@ Pair with masc_execute to run the action after confirming the dry-run output.";
       ]);
       ("required", `List [`String "param_key"; `String "value"]);
     ];
-    visibility = Public;
   };
 ]

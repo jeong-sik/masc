@@ -198,7 +198,6 @@ let model_tool_defs_of_json = function
                      Types.name = tool_name;
                      description;
                      input_schema = parameters;
-                     visibility = Public;
                    })
   | Some _ -> []
 

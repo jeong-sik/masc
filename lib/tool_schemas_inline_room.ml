@@ -17,7 +17,6 @@ let schemas : tool_schema list = [
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_set_room";
@@ -32,7 +31,6 @@ let schemas : tool_schema list = [
       ]);
       ("required", `List [`String "path"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_join";
@@ -52,7 +50,6 @@ let schemas : tool_schema list = [
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_leave";
@@ -71,7 +68,6 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_lock";
@@ -90,7 +86,6 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
       ]);
       ("required", `List [`String "agent_name"; `String "file"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_unlock";
@@ -109,7 +104,6 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
       ]);
       ("required", `List [`String "agent_name"; `String "file"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_broadcast";
@@ -134,7 +128,6 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
       ]);
       ("required", `List [`String "agent_name"; `String "message"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_messages";
@@ -158,7 +151,6 @@ Tip: Search for '@your-name' in results to find mentions.";
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_listen";
@@ -178,7 +170,6 @@ Tip: Search for '@your-name' in results to find mentions.";
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_who";
@@ -191,7 +182,6 @@ Tip: Use capabilities to find the right agent for @mentions.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_interrupt";
@@ -222,7 +212,6 @@ Tip: Use capabilities to find the right agent for @mentions.";
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"; `String "step"; `String "action"; `String "message"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_approve";
@@ -237,7 +226,6 @@ Tip: Use capabilities to find the right agent for @mentions.";
       ]);
       ("required", `List [`String "task_id"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_reject";
@@ -256,7 +244,6 @@ Tip: Use capabilities to find the right agent for @mentions.";
       ]);
       ("required", `List [`String "task_id"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_pending_interrupts";
@@ -265,7 +252,6 @@ Tip: Use capabilities to find the right agent for @mentions.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_branch";
@@ -292,6 +278,5 @@ Tip: Use capabilities to find the right agent for @mentions.";
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"; `String "source_step"; `String "branch_name"]);
     ];
-    visibility = Public;
   };
 ]

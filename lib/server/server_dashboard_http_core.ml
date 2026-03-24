@@ -441,22 +441,31 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     mark_cached_surface_attempt _operator_snapshot_cache;
     let started_at = Unix.gettimeofday () in
     try
-      let sessions =
-        if Room.is_initialized config then
-          dashboard_active_or_recent_sessions ~clock config
-        else
-          []
-      in
-      let ctx : _ Operator_control.context =
-        { config; agent_name = "dashboard"; sw; clock; proc_mgr; mcp_session_id = None }
-      in
-      Operator_control.snapshot_json ~actor:"dashboard" ~view:"summary"
-        ~include_messages:true ~include_sessions:true ~include_keepers:true
-        ~include_summary_fields:false
-        ~lightweight_summary:true
-        ~include_command_plane:false ~sessions ctx
-      |> with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
-           ~extra:(operator_snapshot_extra sessions)
+      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config
+        (fun ~config ~sw ->
+          let sessions =
+            if Room.is_initialized config then
+              dashboard_active_or_recent_sessions ~clock config
+            else
+              []
+          in
+          let ctx : _ Operator_control.context =
+            {
+              config;
+              agent_name = "dashboard";
+              sw;
+              clock;
+              proc_mgr;
+              mcp_session_id = None;
+            }
+          in
+          Operator_control.snapshot_json ~actor:"dashboard" ~view:"summary"
+            ~include_messages:true ~include_sessions:true ~include_keepers:true
+            ~include_summary_fields:false
+            ~lightweight_summary:true
+            ~include_command_plane:false ~sessions ctx
+          |> with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
+               ~extra:(operator_snapshot_extra sessions))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -485,19 +494,28 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
           []
       in
       let command_plane_summary, swarm_status =
-        command_plane_summary_cache_parts ~allow_initializing:true ~state
+        command_plane_summary_cache_parts ~allow_initializing:false ~state
       in
-      let ctx : _ Operator_control.context =
-        { config; agent_name = "dashboard"; sw; clock; proc_mgr; mcp_session_id = None }
-      in
-      match
-        Operator_control.digest_json ~actor:"dashboard" ~target_type:"room"
-          ~sessions ?command_plane_summary ?swarm_status ctx
-      with
-      | Ok json ->
-          with_projection_diagnostics ~surface:"operator_digest" ~started_at
-            ~extra:(operator_snapshot_extra sessions) json
-      | Error err -> failwith err
+      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config
+        (fun ~config ~sw ->
+          let ctx : _ Operator_control.context =
+            {
+              config;
+              agent_name = "dashboard";
+              sw;
+              clock;
+              proc_mgr;
+              mcp_session_id = None;
+            }
+          in
+          match
+            Operator_control.digest_json ~actor:"dashboard" ~target_type:"room"
+              ~sessions ?command_plane_summary ?swarm_status ctx
+          with
+          | Ok json ->
+              with_projection_diagnostics ~surface:"operator_digest" ~started_at
+                ~extra:(operator_snapshot_extra sessions) json
+          | Error err -> failwith err)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -508,7 +526,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     ~config:{ (Proactive_refresh.default_config
                  ~label:"operator_digest"
                  ~interval_s:_operator_refresh_interval_s)
-              with timeout_s = 15.0 }
+              with timeout_s = 30.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _operator_digest_cache)
 
@@ -637,7 +655,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
              in
              let command_plane_summary, swarm_status =
                if String.equal effective_target_type "room" then
-                 command_plane_summary_cache_parts ~allow_initializing:true ~state
+                 command_plane_summary_cache_parts ~allow_initializing:false ~state
                else
                  (None, None)
              in
@@ -704,8 +722,13 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   let compute () =
     mark_cached_surface_attempt _mission_cache;
     try
-      run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config:room_config
-        (fun ~config ~sw -> Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ())
+      let command_plane_summary, swarm_status =
+        command_plane_summary_cache_parts ~allow_initializing:false ~state
+      in
+      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
+        (fun ~config ~sw ->
+          Dashboard_mission.json ?command_plane_summary ?swarm_status ~config ~sw
+            ~clock ~proc_mgr ())
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -714,7 +737,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   in
   Proactive_refresh.start ~sw ~clock
     ~config:{ (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0)
-              with timeout_s = 15.0 }
+              with timeout_s = 30.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _mission_cache)
 
@@ -781,12 +804,15 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
       let cache_key =
         Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
       in
+      let command_plane_summary, swarm_status =
+        command_plane_summary_cache_parts ~allow_initializing:false ~state
+      in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
         ~clock ~timeout_sec:120.0 (fun () ->
         run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
           ~config:state.Mcp_server.room_config
           (fun ~config ~sw ->
-            Dashboard_mission.json ?actor
+            Dashboard_mission.json ?actor ?command_plane_summary ?swarm_status
               ~config ~sw ~clock
               ~proc_mgr:state.Mcp_server.proc_mgr ()))
   in
@@ -797,7 +823,11 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
   | Some session_id when String.trim session_id <> "" ->
+      let command_plane_summary, swarm_status =
+        command_plane_summary_cache_parts ~allow_initializing:false ~state
+      in
       Dashboard_mission.session_json ?actor:(operator_actor_hint request)
+        ?command_plane_summary ?swarm_status
         ~session_id:(String.trim session_id)
         ~config:state.Mcp_server.room_config ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr ()

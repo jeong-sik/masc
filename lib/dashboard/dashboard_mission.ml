@@ -552,7 +552,8 @@ type mission_projection = {
   internal_signals : Yojson.Safe.t list;
 }
 
-let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
+let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock
+    ~proc_mgr () =
   let actor_name =
     match actor with
     | Some value when String.trim value <> "" -> String.trim value
@@ -582,15 +583,28 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
           ~include_messages:false
           ~include_sessions:true
           ~include_keepers:true
+          ~include_summary_fields:false
+          ~include_command_plane:false
+          ~lightweight_summary:true
           ~sessions:tracked_sessions
           ctx)
+  in
+  let command_json =
+    Dashboard_cache.get_or_compute
+      (Printf.sprintf "command_projection:%s" actor_name)
+      ~ttl:3.0
+      (fun () ->
+        Command_plane_v2.dashboard_projection_json ~sessions:tracked_sessions config)
   in
   let digest_json =
     Dashboard_cache.get_or_compute
       (Printf.sprintf "digest:%s" actor_name)
       ~ttl:5.0
       (fun () ->
-        match Operator_control.digest_json ~actor:actor_name ~sessions:tracked_sessions ctx with
+        match
+          Operator_control.digest_json ~actor:actor_name ~sessions:tracked_sessions
+            ?command_plane_summary ?swarm_status ctx
+        with
         | Ok json -> json
         | Error message ->
             `Assoc
@@ -605,7 +619,6 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
               ])
   in
   let room_json = member_assoc "room" snapshot_json in
-  let command_json = member_assoc "command_plane" snapshot_json in
   let incidents =
     list_field "attention_items" digest_json
     |> List.sort (fun left right ->
@@ -649,8 +662,12 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
     internal_signals;
   }
 
-let json ?actor ~config ~sw ~clock ~proc_mgr () =
-  let projection = build_projection ?actor ~config ~sw ~clock ~proc_mgr () in
+let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mgr
+    () =
+  let projection =
+    build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw
+      ~clock ~proc_mgr ()
+  in
   let operations_summary =
     member_assoc "operations" projection.command_json |> member_assoc "summary"
   in
@@ -710,8 +727,12 @@ let json ?actor ~config ~sw ~clock ~proc_mgr () =
       ("internal_signals", `List projection.internal_signals);
     ]
 
-let session_json ?actor ~session_id ~config ~sw ~clock ~proc_mgr () =
-  let projection = build_projection ?actor ~config ~sw ~clock ~proc_mgr () in
+let session_json ?actor ?command_plane_summary ?swarm_status ~session_id ~config ~sw
+    ~clock ~proc_mgr () =
+  let projection =
+    build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw
+      ~clock ~proc_mgr ()
+  in
   let session_row_json =
     Dashboard_mission_assembly.build_sessions projection.sessions projection.attention_queue projection.agent_briefs
       projection.keeper_briefs projection.command_json

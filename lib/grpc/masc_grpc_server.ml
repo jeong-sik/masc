@@ -189,10 +189,14 @@ module Reflection_bridge = struct
       shift := !shift + 7;
       if byte land 0x80 = 0 then done_ := true
     done;
+    if not !done_ then
+      invalid_arg "reflection truncated varint";
     !result
 
   let encode_varint (n : int) : string =
-    if n = 0 then
+    if n < 0 then
+      invalid_arg "reflection negative varint"
+    else if n = 0 then
       "\x00"
     else
       let buf = Buffer.create 10 in
@@ -240,8 +244,17 @@ module Reflection_bridge = struct
         | 0 ->
             let _ = decode_varint data pos in
             ()
+        | 1 ->
+            if !pos + 8 > String.length data then
+              invalid_arg "reflection truncated fixed64 field";
+            pos := !pos + 8
         | _ ->
-            pos := String.length data
+            if wire_type = 5 then begin
+              if !pos + 4 > String.length data then
+                invalid_arg "reflection truncated fixed32 field";
+              pos := !pos + 4
+            end else
+              pos := String.length data
       done;
       !result
 

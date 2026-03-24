@@ -474,10 +474,10 @@ let handle_keeper_status ctx args : tool_result =
            ]);
            ("initiative", initiative_surface_json defaults_snapshot.defaults);
            ("auto_team_session", auto_team_session_surface_json ());
-           ("auto_team_session_enabled", `Bool (auto_team_session_enabled m));
+           ("auto_team_session_enabled", `Bool false);
            ("initiative", initiative_surface_json defaults_snapshot.defaults);
            ("auto_team_session", auto_team_session_surface_json ());
-           ("auto_team_session_enabled", `Bool (auto_team_session_enabled m));
+           ("auto_team_session_enabled", `Bool false);
            ("active_team_session_id",
              match m.active_team_session_id with
              | Some session_id -> `String session_id

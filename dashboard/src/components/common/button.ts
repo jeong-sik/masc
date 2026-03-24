@@ -5,11 +5,12 @@ import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
 type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle'
-type ButtonSize = 'sm' | 'md'
+type ButtonSize = 'sm' | 'md' | 'lg'
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
   sm: 'py-1 px-2 text-[10px]',
   md: 'py-1.5 px-2.5 text-[11px]',
+  lg: 'py-2 px-4 text-sm',
 }
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {

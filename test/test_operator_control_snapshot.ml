@@ -105,6 +105,16 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
         (List.exists
            (fun row ->
              Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "room_pause")
+           confirm_required_actions);
+      Alcotest.(check bool) "team stop listed" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "team_stop")
+           confirm_required_actions);
+      Alcotest.(check bool) "task inject not listed" false
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "task_inject")
            confirm_required_actions))
 
 let test_snapshot_caps_session_recent_events () =

@@ -375,7 +375,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            str "policy_shell_mode"
            |> Option.map canonical_policy_shell_mode;
          room_scope =
-           str "room_scope";
+           str "room_scope"
+           |> Option.map canonical_room_scope;
          scope_kind = str "scope_kind";
          trigger_mode =
            str "trigger_mode"

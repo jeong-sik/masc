@@ -153,7 +153,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
         Yojson.Safe.Util.(diagnostic |> member "next_action_path" |> to_string);
       Alcotest.(check bool) "recoverable true" true
         Yojson.Safe.Util.(diagnostic |> member "recoverable" |> to_bool);
-      Alcotest.(check string) "auto team session wired" "wired"
+      Alcotest.(check string) "auto team session removed" "removed"
         Yojson.Safe.Util.(
           status_json |> member "auto_team_session" |> member "status" |> to_string);
       Alcotest.(check bool) "summary present" true
@@ -254,7 +254,7 @@ initiative_post_ttl_hours = 24
         (json |> member "sources" |> member "default_source_kind" |> to_string);
       Alcotest.(check bool) "live override flagged" true
         (json |> member "sources" |> member "has_live_override" |> to_bool);
-      Alcotest.(check string) "auto team session wired" "wired"
+      Alcotest.(check string) "auto team session removed" "removed"
         (json |> member "auto_team_session" |> member "status" |> to_string);
       let override_fields =
         json |> member "sources" |> member "override_fields" |> to_list
@@ -262,9 +262,9 @@ initiative_post_ttl_hours = 24
       in
       Alcotest.(check bool) "trigger_mode canonicalized so not flagged as override" false
         (List.mem "coordination.trigger_mode" override_fields);
-      (* room_scope "all" removed: canonical_room_scope always returns "current",
-         so TOML "all" is canonicalized to "current" matching live meta. *)
-      Alcotest.(check bool) "room_scope canonicalized so not flagged" false
+      (* room_scope compares authored source text to live meta, so legacy TOML
+         values like "all" remain visible as live overrides. *)
+      Alcotest.(check bool) "room_scope override remains visible" true
         (List.mem "coordination.room_scope" override_fields);
       Alcotest.(check bool) "override field proactive" true
         (List.mem "proactive.enabled" override_fields);
@@ -494,9 +494,9 @@ let test_keeper_msg_auto_team_session_bridge () =
         in
         Alcotest.(check bool) "keeper status ok" true status_ok;
         let status_json = parse_json_exn status_body in
-        Alcotest.(check string) "status exposes auto team session wiring" "wired"
+        Alcotest.(check string) "status exposes auto team session removal" "removed"
           Yojson.Safe.Util.(status_json |> member "auto_team_session" |> member "status" |> to_string);
-        Alcotest.(check bool) "status exposes auto team session enabled" true
+        Alcotest.(check bool) "status exposes auto team session disabled" false
           Yojson.Safe.Util.(status_json |> member "auto_team_session_enabled" |> to_bool);
         Alcotest.(check string) "status exposes running bridge" "running"
           Yojson.Safe.Util.(status_json |> member "team_session_state" |> to_string);

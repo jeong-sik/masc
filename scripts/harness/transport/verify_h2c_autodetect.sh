@@ -37,9 +37,9 @@ else
 fi
 
 # Test 3: MCP POST over h2c (the actual production path)
-h2_mcp_code=$(curl -sf --http2-prior-knowledge -X POST "${MASC_BASE_URL}/mcp" \
+h2_mcp_code=$(curl -sf --max-time 5 --http2-prior-knowledge -X POST "${MASC_BASE_URL}/mcp" \
   -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
+  -H 'Accept: application/json' \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"h2c-harness","version":"1.0"}},"id":1}' \
   -o /dev/null -w '%{http_code}' 2>&1 || echo "0")
 if [ "$h2_mcp_code" = "200" ]; then

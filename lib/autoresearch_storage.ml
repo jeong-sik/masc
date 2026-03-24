@@ -109,6 +109,36 @@ let load_state ~base_path loop_id =
                "unsupported legacy autoresearch state schema for %s: found llm_model; expected model_model"
                path;
              None
+         | `Assoc fields ->
+             let required_fields =
+               [
+                 "loop_id";
+                 "status";
+                 "current_cycle";
+                 "baseline";
+                 "best_score";
+                 "best_cycle";
+                 "goal";
+                 "metric_fn";
+                 "model_model";
+                 "target_file";
+                 "workdir";
+                 "cycle_timeout_s";
+                 "max_cycles";
+               ]
+             in
+             let missing_fields =
+               List.filter
+                 (fun key -> not (List.mem_assoc key fields))
+                 required_fields
+             in
+             if missing_fields <> [] then (
+               Log.Autoresearch.error
+                 "invalid autoresearch state schema for %s: missing [%s]"
+                 path (String.concat ", " missing_fields);
+               None
+             ) else
+               Some (Autoresearch_serde.state_of_yojson json)
          | _ -> Some (Autoresearch_serde.state_of_yojson json)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

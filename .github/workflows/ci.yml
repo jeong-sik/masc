@@ -170,6 +170,19 @@ jobs:
       - name: Refresh system package index
         run: sudo apt-get update -qq
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install transport harness OS dependencies
+        run: sudo apt-get install -y jq
+
+      - name: Install grpcurl
+        run: |
+          GOBIN="$HOME/go/bin" go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
       - name: Install dependencies
         run: |
           for attempt in 1 2 3; do
@@ -209,6 +222,23 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_sse_storm_e2e.exe"
 
+      - name: Run transport harness suite
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_TIMEOUT_SEC: 900
+          CI_TEST_HEARTBEAT_SEC: 15
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          chmod +x scripts/harness/transport/run_all.sh
+          chmod +x scripts/harness/transport/verify_sse.sh
+          chmod +x scripts/harness/transport/verify_grpc_subscribe.sh
+          chmod +x scripts/harness/transport/verify_h2c_autodetect.sh
+          chmod +x scripts/harness/transport/verify_ws.sh
+          chmod +x scripts/harness/transport/verify_webrtc_signaling.sh
+          chmod +x scripts/harness/lib/server_bootstrap.sh
+          scripts/ci-run-tests.sh "bash scripts/harness/transport/run_all.sh"
+
       - name: Check formatting
         run: |
           opam exec -- dune fmt 2>&1 || true
@@ -216,8 +246,8 @@ jobs:
 
       - name: Verification matrix summary
         run: |
-          echo "::notice::Required CI gates: dune test, test_sse_storm_e2e, contract harness suite"
-          echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN, viewer-local-e2e-check, swarm/team-session workload harnesses"
+          echo "::notice::Required CI gates: dune test, test_sse_storm_e2e, transport harness suite, contract harness suite"
+          echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN/TURN/browser interop, viewer-local-e2e-check, swarm/team-session workload harnesses"
 
   contract:
     name: Contract Harness

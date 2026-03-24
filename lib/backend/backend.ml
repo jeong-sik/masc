@@ -184,9 +184,17 @@ module FileSystemBackend : BACKEND = struct
     else
       prefix
 
+  let strip_trailing_sep s =
+    let len = String.length s in
+    if len > 0 && s.[len - 1] = Filename.dir_sep.[0] then
+      String.sub s 0 (len - 1)
+    else
+      s
+
   let key_of_path t path =
-    let base = t.base_path ^ Filename.dir_sep in
-    if path = t.base_path then
+    let normalized = strip_trailing_sep t.base_path in
+    let base = normalized ^ Filename.dir_sep in
+    if path = normalized || path = t.base_path then
       Some ""
     else if starts_with ~prefix:base path then
       let rel =

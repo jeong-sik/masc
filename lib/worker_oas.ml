@@ -133,34 +133,29 @@ let gate_config_of_execution_scope
     (scope : Team_session_types.execution_scope) : Eval_gate.gate_config =
   match scope with
   | Observe_only ->
+      (* No code modification, but coordination and read ops are unrestricted.
+         Local model (Qwen3.5 Q4) — no cloud cost, so generous turn budget. *)
       { Eval_gate.default_config with
-        allowlist_enabled = true;
-        allowed_tools = [
-          (* read-only filesystem *)
-          "file_read"; "shell_exec"; "list_dir"; "glob"; "grep";
-          "search"; "git_status"; "git_log"; "git_diff";
-          "keeper_shell_readonly";
-          (* coordination — any keeper should coordinate *)
-          "keeper_tasks_list"; "keeper_task_claim";
-          "keeper_task_done"; "keeper_broadcast";
-          (* board — social interaction *)
-          "keeper_board_get"; "keeper_board_post";
-          "keeper_board_comment"; "keeper_board_vote";
-          "keeper_board_list";
-          (* masc status *)
-          "masc_status"; "masc_who"; "masc_messages";
+        destructive_check_enabled = true;
+        denied_tools = [
+          "shell_exec_dangerous"; "git_push_force"; "rm_rf";
+          "keeper_bash";
+          "masc_code_write"; "masc_code_edit"; "masc_code_delete";
+          "masc_code_shell"; "masc_code_git";
         ];
-        max_tool_calls_per_turn = 12;
-        max_cost_usd = 0.10;
+        max_tool_calls_per_turn = 30;
+        max_cost_usd = 1.00;
       }
   | Limited_code_change ->
+      (* Code modification allowed, destructive ops blocked.
+         Local model — generous budget. *)
       { Eval_gate.default_config with
         destructive_check_enabled = true;
         denied_tools = [
           "shell_exec_dangerous"; "git_push_force"; "rm_rf";
         ];
-        max_tool_calls_per_turn = 12;
-        max_cost_usd = 0.20;
+        max_tool_calls_per_turn = 30;
+        max_cost_usd = 1.00;
       }
   | Autonomous ->
       { Eval_gate.default_config with

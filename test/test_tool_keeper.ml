@@ -1026,11 +1026,10 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
             ])
       in
       check bool "resident autonomy set removed" false ok;
-      let ok, goals_body =
+      let ok, _goals_body =
         dispatch "masc_keeper_goals" (`Assoc [ ("name", `String "resident-demo") ])
       in
-      check bool "resident goals ok" true ok;
-      check bool "goals body non-empty" true (String.length goals_body > 0);
+      check bool "resident goals removed" false ok;
       let ok, trajectory_body =
         dispatch "masc_keeper_trajectory"
           (`Assoc [ ("name", `String "resident-demo"); ("limit", `Int 5) ])
@@ -1219,7 +1218,7 @@ let test_keeper_policy_tools_roundtrip () =
             ])
       in
       check bool "keeper up ok" true ok;
-      let ok, policy_body =
+      let ok, _policy_body =
         dispatch "masc_keeper_policy_set"
           (`Assoc
             [
@@ -1229,11 +1228,8 @@ let test_keeper_policy_tools_roundtrip () =
               ("reward_model_path", `String reward_model_path);
             ])
       in
-      check bool "policy set ok" true ok;
-      let policy_json = Yojson.Safe.from_string policy_body in
-      check string "policy mode updated" "learned_offline_v1"
-        Yojson.Safe.Util.(policy_json |> member "policy_mode" |> to_string);
-      (* policy_voice_enabled / policy_shell_mode removed from schema in #2607 *)
+      check bool "policy set removed" false ok;
+      (* policy_set tool is removed — skip JSON parsing *)
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc
@@ -1290,7 +1286,7 @@ let test_keeper_policy_tools_roundtrip () =
                   ("last_turn_ago_s", `Float 0.0);
                 ]);
           ]);
-      let ok, explain_body =
+      let ok, _explain_body =
         dispatch "masc_keeper_action_explain"
           (`Assoc
             [
@@ -1298,10 +1294,7 @@ let test_keeper_policy_tools_roundtrip () =
               ("action_id", `String "act-1");
             ])
       in
-      check bool "action explain ok" true ok;
-      let explain_json = Yojson.Safe.from_string explain_body in
-      check string "action explain chosen action" "reply_in_room"
-        Yojson.Safe.Util.(explain_json |> member "chosen_action" |> to_string);
+      check bool "action explain removed" false ok;
       let ok, _ =
         dispatch "masc_keeper_feedback_record"
           (`Assoc
@@ -1312,24 +1305,16 @@ let test_keeper_policy_tools_roundtrip () =
               ("score", `Float 1.0);
             ])
       in
-      check bool "feedback record ok" true ok;
-      let export_path = Filename.concat base_dir "dataset.json" in
-      let ok, export_body =
+      check bool "feedback record removed" false ok;
+      let ok, _ =
         dispatch "masc_keeper_dataset_export"
           (`Assoc
             [
               ("name", `String "sangsu");
-              ("output_path", `String export_path);
+              ("output_path", `String (Filename.concat base_dir "dataset.json"));
             ])
       in
-      check bool "dataset export ok" true ok;
-      let export_json = Yojson.Safe.from_string export_body in
-      check string "dataset export path" export_path
-        Yojson.Safe.Util.(export_json |> member "output_path" |> to_string);
-      check bool "dataset file exists" true (Sys.file_exists export_path)
-      (* eval_replay skipped: handle_keeper_eval_replay passes "" as
-         reward_model_path instead of reading it from keeper meta.
-         This is a known code bug tracked separately. *))
+      check bool "dataset export removed" false ok)
 
 let test_keeper_policy_set_rejects_invalid_mode () =
   Eio_main.run @@ fun env ->
@@ -1370,10 +1355,10 @@ let test_keeper_policy_set_rejects_invalid_mode () =
               ("policy_mode", `String "learned_offline_v9");
             ])
       in
-      check bool "policy set rejected" false ok;
-      check bool "error mentions invalid mode" true
+      check bool "policy set rejected (tool removed)" false ok;
+      check bool "error mentions removal" true
         (try
-           let _ = Str.search_forward (Str.regexp_string "invalid policy_mode") body 0 in
+           let _ = Str.search_forward (Str.regexp_string "policy_mode system has been removed") body 0 in
            true
          with Not_found -> false))
 
@@ -1660,7 +1645,7 @@ let test_keeper_policy_set_accepts_explicit_event_v1 () =
             ])
       in
       check bool "keeper up ok" true ok;
-      let ok, body =
+      let ok, _body =
         dispatch "masc_keeper_policy_set"
           (`Assoc
             [
@@ -1668,10 +1653,7 @@ let test_keeper_policy_set_accepts_explicit_event_v1 () =
               ("policy_mode", `String "explicit_event_v1");
             ])
       in
-      check bool "policy set ok" true ok;
-      let json = Yojson.Safe.from_string body in
-      check string "policy mode updated" "explicit_event_v1"
-        Yojson.Safe.Util.(json |> member "policy_mode" |> to_string))
+      check bool "policy set removed" false ok)
 
 let test_resident_bootstrap_marks_stale_explicit_keeper () =
   Eio_main.run @@ fun env ->

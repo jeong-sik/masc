@@ -129,7 +129,7 @@ let handle_broadcast (room_config : Room_utils_backend_setup.config) (bytes : st
       in
       T.BroadcastResponse.{ success = true; seq = now_ms () }
     with exn ->
-      ignore (Printexc.to_string exn);
+      Log.Transport.error "gRPC broadcast failed: %s" (Printexc.to_string exn);
       T.BroadcastResponse.{ success = false; seq = 0L }
   in
   T.BroadcastResponse.to_bytes result

@@ -239,11 +239,15 @@ export interface ActivityGraphNode {
   label: string
   type: string
   weight: number
+  semantic_weight?: number
   kind: string
   status: string
+  last_event_at?: string
+  meta?: Record<string, unknown>
 }
 
 export interface ActivityGraphEdge {
+  id?: string
   source: string
   target: string
   type: string

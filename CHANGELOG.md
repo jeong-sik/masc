@@ -3,6 +3,28 @@
 
 ## [Unreleased]
 
+## [2.144.0] - 2026-03-24
+
+### Added
+- **Transport observability metrics** — Prometheus text format metrics for SSE/gRPC/agent-health, transport health dashboard panel with 15s polling (#2750)
+- **Keeper tool bridge** — bridge 329 masc_* tools to keeper via dispatch registry (#2675)
+- **Keeper improve loop** — keeper-driven iterative improvement loop (#2722)
+- **Repeated-failure guardrail** — prevents keeper tool retry loops (#2694)
+- **Destructive pattern normalization** — harness capability matrix for tool safety (#2689)
+- **4-Protocol transport** — WebSocket enabled by default, runtime discovery and interop (#2630, #2634, #2668, #2683, #2768)
+
+### Changed
+- **Mode removal** — removed mode-based tool categorization; all keepers get all tools unconditionally, safety handled by eval_gate deny lists (#2762)
+- **Dashboard CSS cleanup** — migrated control-btn to ActionButton, removed dead CSS (-77 lines) (#2751)
+- **Dashboard compact UI** — reduced padding to cloud console density (#2664)
+- **OAS checkpoints canonical** — keeper checkpoints delegated to OAS (#2734)
+
+### Fixed
+- **Relay checkpoint cap** — capped in-memory checkpoint list at 500 entries to prevent unbounded memory growth (#2743)
+- **Eio safety** — protect shared mutable state with Atomic and Eio.Mutex, replace blocking Unix I/O with Eio-native operations (#2769, #2767)
+- **Dashboard stability** — stabilize cached PG paths, prevent Eio loop starvation (#2765, #2761, #2763)
+- **Governance** — classify transition risk from action args, restore medium risk for masc_transition (#2720, #2711)
+
 ## [2.138.0] - 2026-03-23
 
 ### Added

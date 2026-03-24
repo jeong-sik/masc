@@ -180,7 +180,12 @@ let get_event config ~seq =
 let get_recent_events config ~limit =
   let current_seq = match Backend_eio.FileSystem.atomic_get config.backend event_seq_key with
     | Ok n -> n
-    | Error _ -> 0
+    | Error (Backend_eio.NotFound _) -> 0
+    | Error e ->
+        Log.Room.debug "get_recent_events: event seq read failed: %s"
+          (match e with Backend_eio.IOError m -> m
+           | _ -> "unexpected backend error");
+        0
   in
   let start_seq = max 0 (current_seq - limit) in
   let rec collect acc seq =
@@ -281,7 +286,9 @@ let atomic_update_state config ~f =
             let json = Yojson.Safe.from_string json_str in
             match room_state_of_json json with
             | Ok s -> s
-            | Error _ -> default_room_state ()
+            | Error e ->
+                Log.Room.warn "update_state: state deserialization failed, resetting: %s" e;
+                default_room_state ()
           with Eio.Io _ | Yojson.Json_error _ -> default_room_state ())
     in
     let new_state = f current_state in
@@ -585,7 +592,9 @@ let broadcast config ~from_agent ~content =
 
       (* Notify keepers about the mention *)
       (try !on_broadcast_mention msg.mention
-       with _ -> ());
+       with exn ->
+         Log.Room.warn "on_broadcast_mention callback failed: %s"
+           (Printexc.to_string exn));
       Ok msg
   | Error e ->
       Error (match e with

@@ -21,11 +21,11 @@ export function GoalRow({ goal }: { goal: Goal }) {
   return html`
     <div class="goal-row flex justify-between items-start gap-4 p-4 rounded-xl border border-card-border/50 bg-card/40 backdrop-blur-md transition-all duration-200 hover:bg-card/60 hover:border-accent/30 shadow-sm hover:shadow-md hover:-translate-y-0.5 group">
       <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 mb-1.5">
-          <span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md bg-white/5 border border-white/10" style="color:${horizonColor(goal.horizon)}">
+        <div class="flex items-center gap-2 mb-1.5 min-w-0">
+          <span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md bg-white/5 border border-white/10 shrink-0" style="color:${horizonColor(goal.horizon)}">
             ${horizonLabel(goal.horizon)}
           </span>
-          <span class="text-[15px] font-bold text-text-strong group-hover:text-accent transition-colors tracking-wide">${goal.title}</span>
+          <span class="text-[15px] font-bold text-text-strong group-hover:text-accent transition-colors tracking-wide truncate">${goal.title}</span>
         </div>
         <div class="flex gap-3 flex-wrap items-center mt-2.5 text-[11px] font-medium text-text-muted/90">
           <span class="text-amber-500 tracking-[1px] text-[13px] drop-shadow-sm" title="Priority ${goal.priority}">${priorityStars(goal.priority)}</span>

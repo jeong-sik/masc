@@ -625,7 +625,13 @@ let operator_digest_http_json ~state ~sw ~clock request =
                  ctx
              with
              | Ok json -> json
-             | Error err -> failwith err))
+             | Error err ->
+                 `Assoc
+                   [
+                     ("error", `String "validation_error");
+                     ("message", `String err);
+                     ("generated_at", `String (Types.now_iso ()));
+                   ]))
     ) with
     | Ok json ->
         let extra =

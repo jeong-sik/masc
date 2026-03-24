@@ -75,6 +75,7 @@ type persisted_summary = {
   max_cycles : int;
   error_message : string option;
   elapsed_s : float;
+  updated_at : float option;
   source_workdir : string;
   program_note : string option;
   warnings : string list;

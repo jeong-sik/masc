@@ -8,6 +8,10 @@
 let cycle_record_json (r : Autoresearch_types.cycle_record) : Yojson.Safe.t =
   Autoresearch_serde.cycle_to_yojson r
 
+let updated_at_json = function
+  | Some ts -> `Float ts
+  | None -> `Null
+
 let loop_summary_json (base_path : string)
     (state : Autoresearch_types.loop_state) : Yojson.Safe.t =
   let recent_cycles =
@@ -39,6 +43,8 @@ let loop_summary_json (base_path : string)
       ("total_keeps", `Int state.total_keeps);
       ("total_discards", `Int state.total_discards);
       ("elapsed_s", `Float (Time_compat.now () -. state.start_time));
+      ("updated_at", `Float state.updated_at);
+      ("live", `Bool true);
       ("workdir", `String state.workdir);
       ("source_workdir", `String state.source_workdir);
       ( "program_note",
@@ -77,6 +83,8 @@ let persisted_to_loop_summary_json (base_path : string)
       ("total_keeps", `Int p.total_keeps);
       ("total_discards", `Int p.total_discards);
       ("elapsed_s", `Float p.elapsed_s);
+      ("updated_at", updated_at_json p.updated_at);
+      ("live", `Bool false);
       ("workdir", `String p.workdir);
       ("source_workdir", `String p.source_workdir);
       ( "program_note",
@@ -94,8 +102,12 @@ let persisted_to_loop_summary_json (base_path : string)
         | None -> `Null );
     ]
 
-(** Sort key: (status_rank, negative_elapsed) for running-first, newest-first ordering. *)
-type sort_key = { status_rank : int; neg_elapsed : float }
+(** Sort key: live loops first, then running loops, then most recently updated. *)
+type sort_key = {
+  live_rank : int;
+  status_rank : int;
+  neg_updated_at : float;
+}
 
 let safe_active_entry_json ~(base_path : string)
     (state : Autoresearch_types.loop_state) =
@@ -103,9 +115,10 @@ let safe_active_entry_json ~(base_path : string)
     let json = loop_summary_json base_path state in
     let sk =
       {
+        live_rank = 0;
         status_rank =
           (match state.status with Running -> 0 | _ -> 1);
-        neg_elapsed = -. (Time_compat.now () -. state.start_time);
+        neg_updated_at = -. state.updated_at;
       }
     in
     Some (state.loop_id, sk, json)
@@ -123,9 +136,11 @@ let safe_persisted_entry_json ~(base_path : string)
     let json = persisted_to_loop_summary_json base_path summary in
     let sk =
       {
+        live_rank = 1;
         status_rank =
           (match summary.status with Running -> 0 | _ -> 1);
-        neg_elapsed = -. summary.elapsed_s;
+        neg_updated_at =
+          -. Option.value ~default:0.0 summary.updated_at;
       }
     in
     Some (summary.loop_id, sk, json)
@@ -173,9 +188,12 @@ let autoresearch_loops_json ~(base_path : string) : Yojson.Safe.t =
   let sorted =
     List.sort
       (fun (_, a, _) (_, b, _) ->
+        let by_live = Int.compare a.live_rank b.live_rank in
+        if by_live <> 0 then by_live
+        else
         let by_status = Int.compare a.status_rank b.status_rank in
         if by_status <> 0 then by_status
-        else Float.compare a.neg_elapsed b.neg_elapsed)
+        else Float.compare a.neg_updated_at b.neg_updated_at)
       all
   in
   `Assoc

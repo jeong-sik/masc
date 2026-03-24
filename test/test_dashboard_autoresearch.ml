@@ -86,6 +86,44 @@ let legacy_state_json ?(loop_id = "legacy-loop") ?(model = "glm:legacy") () =
 |}
     loop_id model
 
+let persisted_state_json ?(loop_id = "persisted-loop") ?updated_at
+    ?(status = "running") ?(current_cycle = 0) ?(best_score = 0.75)
+    ?(best_cycle = 0) ?(elapsed_s = 0.5) () =
+  let updated_at_field =
+    match updated_at with
+    | Some ts -> Printf.sprintf ",\n  \"updated_at\": %.6f" ts
+    | None -> ""
+  in
+  Printf.sprintf
+    {|
+{
+  "loop_id": "%s",
+  "goal": "Improve code quality",
+  "metric_fn": "echo 0.75",
+  "model_model": "glm",
+  "target_file": "README.md",
+  "status": "%s",
+  "current_cycle": %d,
+  "baseline": 0.75,
+  "best_score": %.2f,
+  "best_cycle": %d,
+  "queued_hypothesis": null,
+  "total_keeps": 0,
+  "total_discards": 0,
+  "max_cycles": 3,
+  "cycle_timeout_s": 30.0,
+  "workdir": "/tmp/autoresearch/worktree",
+  "source_workdir": "/tmp/autoresearch",
+  "elapsed_s": %.3f%s,
+  "history_count": 0,
+  "insights_count": 0,
+  "program_note": null,
+  "warnings": [],
+  "error": null
+}
+|}
+    loop_id status current_cycle best_score best_cycle elapsed_s updated_at_field
+
 let test_loops_json_skips_invalid_persisted_state () =
   with_eio_test @@ fun () ->
   with_clean_loops @@ fun () ->
@@ -154,6 +192,68 @@ let test_loops_json_tolerates_invalid_swarm_link_for_active_loop () =
   check bool "session id falls back to null" true
     Yojson.Safe.Util.(json |> member "loops" |> index 0 |> member "session_id" = `Null)
 
+let test_loops_json_orders_live_then_recent () =
+  with_eio_test @@ fun () ->
+  with_clean_loops @@ fun () ->
+  with_temp_base @@ fun base_path ->
+  let active =
+    Lib.Autoresearch.create_state
+      ~goal:"active loop"
+      ~metric_fn:"echo 1"
+      ~model_model:"glm:test"
+      ~target_file:"README.md"
+      ~cycle_timeout_s:10.0
+      ~max_cycles:3
+      ~workdir:base_path
+      ()
+  in
+  active.updated_at <- 10.0;
+  Lib.Autoresearch.with_loops_rw (fun () ->
+    Hashtbl.replace Lib.Autoresearch.active_loops active.loop_id active);
+  let newer_persisted_path =
+    Filename.concat base_path ".masc/autoresearch/persisted-new/state.json"
+  in
+  write_file newer_persisted_path
+    (persisted_state_json ~loop_id:"persisted-new" ~updated_at:300.0 ());
+  let older_persisted_path =
+    Filename.concat base_path ".masc/autoresearch/persisted-old/state.json"
+  in
+  write_file older_persisted_path
+    (persisted_state_json ~loop_id:"persisted-old" ~updated_at:100.0 ());
+  let json =
+    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+  in
+  let loops = Yojson.Safe.Util.(json |> member "loops" |> to_list) in
+  check int "three loops" 3 (List.length loops);
+  check string "live loop first" active.loop_id
+    Yojson.Safe.Util.(List.nth loops 0 |> member "loop_id" |> to_string);
+  check bool "first loop is live" true
+    Yojson.Safe.Util.(List.nth loops 0 |> member "live" |> to_bool);
+  check string "newer persisted second" "persisted-new"
+    Yojson.Safe.Util.(List.nth loops 1 |> member "loop_id" |> to_string);
+  check bool "persisted loop marked not live" false
+    Yojson.Safe.Util.(List.nth loops 1 |> member "live" |> to_bool)
+
+let test_loops_json_uses_state_file_mtime_for_updated_at () =
+  with_eio_test @@ fun () ->
+  with_clean_loops @@ fun () ->
+  with_temp_base @@ fun base_path ->
+  let loop_id = "mtime-loop" in
+  let state_path =
+    Filename.concat base_path (Printf.sprintf ".masc/autoresearch/%s/state.json" loop_id)
+  in
+  write_file state_path (persisted_state_json ~loop_id ());
+  let expected_mtime = 1_717_171_717.0 in
+  Unix.utimes state_path expected_mtime expected_mtime;
+  let json =
+    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+  in
+  let updated_at =
+    Yojson.Safe.Util.(json |> member "loops" |> index 0 |> member "updated_at" |> to_float)
+  in
+  check bool "updated_at falls back to state file mtime" true
+    (abs_float (updated_at -. expected_mtime) < 0.001)
+
 let () =
   run "dashboard_autoresearch"
     [
@@ -165,5 +265,9 @@ let () =
             test_loops_json_skips_legacy_persisted_state;
           test_case "tolerates invalid swarm link for active loop" `Quick
             test_loops_json_tolerates_invalid_swarm_link_for_active_loop;
+          test_case "orders live then recent" `Quick
+            test_loops_json_orders_live_then_recent;
+          test_case "uses state file mtime for updated_at" `Quick
+            test_loops_json_uses_state_file_mtime_for_updated_at;
         ] );
     ]

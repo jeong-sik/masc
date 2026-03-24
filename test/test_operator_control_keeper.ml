@@ -223,7 +223,7 @@ initiative_post_ttl_hours = 24
         json |> member "sources" |> member "override_fields" |> to_list
         |> List.map to_string
       in
-      Alcotest.(check bool) "override field trigger_mode" true
+      Alcotest.(check bool) "trigger_mode canonicalized with source" false
         (List.mem "coordination.trigger_mode" override_fields);
       Alcotest.(check bool) "override field room_scope" true
         (List.mem "coordination.room_scope" override_fields);

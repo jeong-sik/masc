@@ -24,6 +24,15 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let with_storage_type value f =
+  let saved = Sys.getenv_opt "MASC_STORAGE_TYPE" in
+  Unix.putenv "MASC_STORAGE_TYPE" value;
+  Fun.protect ~finally:(fun () ->
+      match saved with
+      | Some prior -> Unix.putenv "MASC_STORAGE_TYPE" prior
+      | None -> Unix.putenv "MASC_STORAGE_TYPE" "")
+    f
+
 (* ── Gap B: checkpoint roundtrip ─────────────────────────────── *)
 
 let sample_checkpoint : Team_session_types.checkpoint =
@@ -148,6 +157,139 @@ let test_read_recent_events_capped () =
       let last = List.nth events 4 in
       Alcotest.(check string) "last is evt_10" "evt_10" last.event_type)
 
+let sample_session config ~session_id ~started_at ~updated_at_iso =
+  {
+    Team_session_types.session_id;
+    goal = "recency sort";
+    created_by = "tester";
+    origin_kind = Team_session_types.Origin_human;
+    room_id = "default";
+    operation_id = None;
+    status = Team_session_types.Running;
+    duration_seconds = 60;
+    execution_scope = Team_session_types.Observe_only;
+    checkpoint_interval_sec = 10;
+    min_agents = 1;
+    orchestration_mode = Team_session_types.Assist;
+    communication_mode = Team_session_types.Comm_broadcast;
+    scale_profile = Team_session_types.Scale_standard;
+    control_profile = Team_session_types.Control_flat;
+    model_cascade = [ "glm:glm-5" ];
+    fallback_policy = Team_session_types.Fallback_cascade_then_task;
+    instruction_profile = Team_session_types.Profile_standard;
+    alert_channel = Team_session_types.Alert_both;
+    auto_resume = false;
+    report_formats = [ Team_session_types.Markdown; Team_session_types.Json ];
+    turn_count = 0;
+    agent_names = [ "tester" ];
+    planned_workers = [];
+    broadcast_count = 0;
+    portal_count = 0;
+    cascade_attempted = 0;
+    cascade_success = 0;
+    cascade_failed = 0;
+    fallback_task_created = 0;
+    min_agents_violation_streak = 0;
+    policy_violations = [];
+    baseline_done_counts = [];
+    final_done_delta_total = None;
+    final_done_delta_by_agent = None;
+    started_at;
+    planned_end_at = started_at +. 60.0;
+    stopped_at = None;
+    last_checkpoint_at = None;
+    last_event_at = None;
+    last_turn_at = None;
+    stop_reason = None;
+    generated_report = false;
+    artifacts_dir = Team_session_store.session_dir config session_id;
+    created_at_iso = updated_at_iso;
+    updated_at_iso;
+  }
+
+let test_list_sessions_uses_recency_order_for_limit () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      let config = Room.default_config base in
+      ignore (Room.init config ~agent_name:(Some "tester"));
+      let sessions =
+        [
+          sample_session config ~session_id:"sess-old" ~started_at:10.0
+            ~updated_at_iso:"2026-03-24T10:00:00Z";
+          sample_session config ~session_id:"sess-mid" ~started_at:20.0
+            ~updated_at_iso:"2026-03-24T10:05:00Z";
+          sample_session config ~session_id:"sess-new" ~started_at:30.0
+            ~updated_at_iso:"2026-03-24T10:10:00Z";
+        ]
+      in
+      List.iter (Team_session_store.save_session config) sessions;
+      let listed = Team_session_store.list_sessions ~limit:2 config in
+      Alcotest.(check (list string)) "limit keeps newest sessions"
+        [ "sess-new"; "sess-mid" ]
+        (List.map (fun (session : Team_session_types.session) -> session.session_id) listed))
+
+let test_list_sessions_records_fallback_diagnostics () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      let config = Room.default_config base in
+      ignore (Room.init config ~agent_name:(Some "tester"));
+      Team_session_store.save_session config
+        (sample_session config ~session_id:"sess-one" ~started_at:10.0
+           ~updated_at_iso:"2026-03-24T10:00:00Z");
+      ignore (Team_session_store.list_sessions ~since_unix:1.0 ~limit:1 config);
+      let diagnostics = Team_session_store.session_list_diagnostics_json () in
+      Alcotest.(check string) "fallback source" "filesystem"
+        Yojson.Safe.Util.(diagnostics |> member "source" |> to_string);
+      Alcotest.(check bool) "pg recent not attempted" false
+        Yojson.Safe.Util.(diagnostics |> member "pg_recent_attempted" |> to_bool);
+      Alcotest.(check string) "fallback reason" "filesystem_scan"
+        Yojson.Safe.Util.(diagnostics |> member "fallback_reason" |> to_string);
+      Alcotest.(check bool) "last error mentions pg recent" true
+        (String.length Yojson.Safe.Util.(diagnostics |> member "last_error" |> to_string) > 0);
+      Alcotest.(check int) "limit recorded" 1
+        Yojson.Safe.Util.(diagnostics |> member "limit" |> to_int))
+
+let test_list_sessions_named_scope_uses_scoped_prefix () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      let config = Room.with_scope (Room.default_config base) (Room.Named "alpha-room") in
+      Team_session_store.save_session config
+        (sample_session config ~session_id:"sess-room" ~started_at:10.0
+           ~updated_at_iso:"2026-03-24T10:00:00Z");
+      let listed = Team_session_store.list_sessions ~limit:1 config in
+      Alcotest.(check (list string)) "named room session listed"
+        [ "sess-room" ]
+        (List.map (fun (session : Team_session_types.session) -> session.session_id) listed);
+      let diagnostics = Team_session_store.session_list_diagnostics_json () in
+      let expected_prefix =
+        match Room.key_of_path config (Team_session_store.sessions_root config) with
+        | Some key -> key ^ ":"
+        | None -> Alcotest.fail "expected scoped backend key"
+      in
+      Alcotest.(check string) "query prefix tracks scoped room path" expected_prefix
+        Yojson.Safe.Util.(diagnostics |> member "query_prefix" |> to_string))
+
+let test_list_sessions_memory_backend_uses_project_prefix () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      with_storage_type "memory" (fun () ->
+          let config = Room.default_config base in
+          Team_session_store.save_session config
+            (sample_session config ~session_id:"sess-memory" ~started_at:10.0
+               ~updated_at_iso:"2026-03-24T10:00:00Z");
+          let listed = Team_session_store.list_sessions ~limit:1 config in
+          Alcotest.(check (list string)) "memory backend session listed"
+            [ "sess-memory" ]
+            (List.map (fun (session : Team_session_types.session) -> session.session_id) listed);
+          let diagnostics = Team_session_store.session_list_diagnostics_json () in
+          let expected_prefix =
+            match Room.key_of_path config (Team_session_store.sessions_root config) with
+            | Some key -> key ^ ":"
+            | None -> Alcotest.fail "expected project-prefixed backend key"
+          in
+          Alcotest.(check string) "query prefix includes project key prefix" expected_prefix
+            Yojson.Safe.Util.(diagnostics |> member "query_prefix" |> to_string)))
+
 (* ── Runner ──────────────────────────────────────────────────── *)
 
 let () =
@@ -175,5 +317,13 @@ let () =
           Alcotest.test_case "empty → []" `Quick test_read_recent_events_empty;
           Alcotest.test_case "capped at max_count" `Quick
             test_read_recent_events_capped;
+          Alcotest.test_case "list_sessions limit prefers newest" `Quick
+            test_list_sessions_uses_recency_order_for_limit;
+          Alcotest.test_case "list_sessions diagnostics record fallback"
+            `Quick test_list_sessions_records_fallback_diagnostics;
+          Alcotest.test_case "list_sessions named scope uses scoped prefix"
+            `Quick test_list_sessions_named_scope_uses_scoped_prefix;
+          Alcotest.test_case "list_sessions memory backend uses project prefix"
+            `Quick test_list_sessions_memory_backend_uses_project_prefix;
         ] );
     ]

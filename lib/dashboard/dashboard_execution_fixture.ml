@@ -329,7 +329,8 @@ let execution_smoke_fixture_json () =
                 ("recent_input_preview", `String "Player asked to continue the next scene without breaking continuity");
                 ("recent_output_preview", `String "Prepared the next scene transition and handoff summary");
                 ("recent_tool_names", `List [ `String "masc_keeper_status"; `String "masc_board_post" ]);
-                ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_post"; `String "masc_keeper_status" ]);
+                ("allowed_tool_count", `Int 3);
+                ("allowed_tool_preview", `List [ `String "masc_board_get"; `String "masc_board_post"; `String "masc_keeper_status" ]);
                 ("latest_tool_names", `List [ `String "masc_board_post" ]);
                 ("latest_tool_call_count", `Int 1);
                 ("tool_audit_source", `String "heartbeat_result");

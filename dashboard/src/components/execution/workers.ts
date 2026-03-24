@@ -94,7 +94,8 @@ export function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief 
     recentInput: row.recent_input_preview ?? null,
     recentOutput: row.recent_output_preview ?? null,
     recentTools: row.recent_tool_names ?? [],
-    allowedTools: row.allowed_tool_names ?? [],
+    allowedToolsPreview: row.allowed_tool_preview ?? [],
+    allowedToolsCount: row.allowed_tool_count ?? null,
     routeSummary: row.skill_route_summary ?? null,
     auditSource: row.tool_audit_source ?? null,
     auditAt: row.tool_audit_at ?? null,
@@ -108,4 +109,3 @@ export function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief 
     testId="execution.continuity-card"
   />`
 }
-

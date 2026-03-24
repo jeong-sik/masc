@@ -227,7 +227,8 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   in
   let recent_tool_names =
     let keeper_tools = string_list_of_field "recent_tool_names" keeper in
-    if keeper_tools <> [] then keeper_tools else audit.latest_tool_names
+    (if keeper_tools <> [] then keeper_tools else audit.latest_tool_names)
+    |> cap_string_list
   in
   let allowed_tool_names =
     let keeper_tools = string_list_of_field "allowed_tool_names" keeper in
@@ -235,7 +236,8 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   in
   let latest_tool_names =
     let keeper_tools = string_list_of_field "latest_tool_names" keeper in
-    if keeper_tools <> [] then keeper_tools else audit.latest_tool_names
+    (if keeper_tools <> [] then keeper_tools else audit.latest_tool_names)
+    |> cap_string_list
   in
   let skill_route_summary = skill_route_summary_of_keeper keeper in
   let (emoji, korean_name) = get_agent_identity name in
@@ -245,53 +247,55 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     related_session_id;
     json =
       `Assoc
-        [
-          ("name", `String name);
-          ("agent_name", member_assoc "agent_name" keeper);
-          ("status", `String status);
-          ("tone", `String tone);
-          ("state", `String state);
-          ("note", `String note);
-          ("focus", `String focus);
-          ("last_signal_at", json_string_option last_signal_at);
-          ("last_autonomous_action_at", json_string_option last_signal_at);
-          ("generation", member_assoc "generation" keeper);
-          ("turn_count", member_assoc "turn_count" keeper);
-          ("context_ratio", option_to_json (fun value -> `Float value) context_ratio);
-          ("continuity", `String continuity);
-          ("lifecycle", `String lifecycle);
-          ("related_session_id", json_string_option related_session_id);
-          ("recent_input_preview", json_string_option recent_input_preview);
-          ("recent_output_preview", json_string_option recent_output_preview);
-          ("recent_tool_names", string_list_json recent_tool_names);
-          ("allowed_tool_names", string_list_json allowed_tool_names);
-          ("latest_tool_names", string_list_json latest_tool_names);
-          ("latest_tool_call_count", option_to_json (fun value -> `Int value) audit.latest_tool_call_count);
-          ("tool_audit_source", json_string_option audit.tool_audit_source);
-          ("tool_audit_at", json_string_option audit.tool_audit_at);
-          ("autonomous_action_count", `Int autonomous_action_count);
-          ("last_heartbeat_at", json_string_option last_heartbeat_at);
-          ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
-          ("continuity_summary", `String (
-            match trim_to_option (string_field "continuity_summary" keeper) with
-            | Some s -> s
-            | None ->
-              if autonomous_action_count = 0 && turn_count = 0 then
-                "아직 활동 기록이 없습니다"
-              else if autonomous_action_count = 0 then
-                Printf.sprintf "대기 중 (턴 %d회, 자율 행동 0회)" turn_count
-              else
-                Printf.sprintf "행동 %d회, 턴 %d회, 세대 %d"
-                  autonomous_action_count turn_count generation));
-          ("skill_route_summary", json_string_option skill_route_summary);
-          ( "model",
-            match trim_to_option (string_field "active_model" keeper) with
-            | Some value -> `String value
-            | None -> `Null );
-          ("emoji", `String emoji);
-          ("korean_name", `String korean_name);
-          ("skill_reason", json_string_option (trim_to_option (string_field "goal" keeper)));
-        ];
+        ([
+           ("name", `String name);
+           ("agent_name", member_assoc "agent_name" keeper);
+           ("status", `String status);
+           ("tone", `String tone);
+           ("state", `String state);
+           ("note", `String note);
+           ("focus", `String focus);
+           ("last_signal_at", json_string_option last_signal_at);
+           ("last_autonomous_action_at", json_string_option last_signal_at);
+           ("generation", member_assoc "generation" keeper);
+           ("turn_count", member_assoc "turn_count" keeper);
+           ("context_ratio", option_to_json (fun value -> `Float value) context_ratio);
+           ("continuity", `String continuity);
+           ("lifecycle", `String lifecycle);
+           ("related_session_id", json_string_option related_session_id);
+           ("recent_input_preview", json_string_option recent_input_preview);
+           ("recent_output_preview", json_string_option recent_output_preview);
+           ("recent_tool_names", string_list_json recent_tool_names);
+           ("latest_tool_names", string_list_json latest_tool_names);
+         ]
+        @ tool_preview_fields "allowed_tool" allowed_tool_names
+        @ [
+            ("latest_tool_call_count", option_to_json (fun value -> `Int value) audit.latest_tool_call_count);
+            ("tool_audit_source", json_string_option audit.tool_audit_source);
+            ("tool_audit_at", json_string_option audit.tool_audit_at);
+            ("autonomous_action_count", `Int autonomous_action_count);
+            ("last_heartbeat_at", json_string_option last_heartbeat_at);
+            ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
+            ("continuity_summary", `String (
+              match trim_to_option (string_field "continuity_summary" keeper) with
+              | Some s -> s
+              | None ->
+                if autonomous_action_count = 0 && turn_count = 0 then
+                  "아직 활동 기록이 없습니다"
+                else if autonomous_action_count = 0 then
+                  Printf.sprintf "대기 중 (턴 %d회, 자율 행동 0회)" turn_count
+                else
+                  Printf.sprintf "행동 %d회, 턴 %d회, 세대 %d"
+                    autonomous_action_count turn_count generation));
+            ("skill_route_summary", json_string_option skill_route_summary);
+            ( "model",
+              match trim_to_option (string_field "active_model" keeper) with
+              | Some value -> `String value
+              | None -> `Null );
+            ("emoji", `String emoji);
+            ("korean_name", `String korean_name);
+            ("skill_reason", json_string_option (trim_to_option (string_field "goal" keeper)));
+          ]);
   }
 
 let detachment_index command_plane_json =

@@ -132,6 +132,18 @@ let string_list_json values =
 let string_list_of_field key json =
   member_assoc key json |> string_list_of_json
 
+let execution_tool_preview_limit = 8
+
+let cap_string_list ?(limit = execution_tool_preview_limit) values =
+  take limit values
+
+let tool_preview_fields ?(limit = execution_tool_preview_limit) field values =
+  let preview = cap_string_list ~limit values in
+  [
+    (field ^ "_count", `Int (List.length values));
+    (field ^ "_preview", string_list_json preview);
+  ]
+
 let tool_audit_snapshot agent_name =
   let task_snapshot = A2a_tools.latest_heartbeat_task agent_name in
   let result_snapshot = A2a_tools.latest_heartbeat_result agent_name in

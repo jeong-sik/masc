@@ -314,6 +314,8 @@ let persistent_agents_json ?keeper_names config =
   in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
+let _session_recent_event_limit = 3
+
 let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) config sessions =
   let ordered_sessions =
     sessions
@@ -324,8 +326,9 @@ let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) con
     List.map
       (fun (session : Team_session_types.session) ->
         let recent_events =
-          Team_session_store.read_events ~max_events:5 config session.session_id
-          |> Team_session_engine_eio.take_last 5
+          Team_session_store.read_events ~max_events:_session_recent_event_limit
+            config session.session_id
+          |> Team_session_engine_eio.take_last _session_recent_event_limit
         in
         let status =
           match status_cache with
@@ -408,12 +411,13 @@ let _snapshot_ttl_s =
 let invalidate_snapshot_cache () = _snapshot_cache := None
 
 let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
-    ?(include_keepers = true) ?sessions (ctx : 'a context) : Yojson.Safe.t =
+    ?(include_keepers = true) ?(include_command_plane = true) ?sessions
+    (ctx : 'a context) : Yojson.Safe.t =
   let cache_key =
-    Printf.sprintf "%s|%s|%b|%b|%b"
+    Printf.sprintf "%s|%s|%b|%b|%b|%b"
       (Option.value ~default:"" actor)
       (Option.value ~default:"" view)
-      include_messages include_sessions include_keepers
+      include_messages include_sessions include_keepers include_command_plane
   in
   let now = Time_compat.now () in
   (match !_snapshot_cache with
@@ -476,7 +480,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   let command_plane_summary =
     if initialized then
       timed "command_plane_summary" (fun () ->
-        Some (Command_plane_v2.summary_json config))
+        Some (Command_plane_v2.summary_json ~sessions:tracked_sessions config))
     else None
   in
   let summary_fields = timed "summary_fields" (fun () ->
@@ -505,13 +509,16 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     else [])
   in
   let command_plane_json = timed "command_plane_json" (fun () ->
-    if initialized then Command_plane_v2.snapshot_json config else `Assoc [])
+    if initialized && include_command_plane then
+      Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
+    else
+      `Null)
   in
   let swarm_status_json =
-    if initialized then
+    if initialized && include_command_plane then
       Swarm_status.build_json_from_snapshot config command_plane_json
     else
-      Swarm_status.empty_json
+      `Null
   in
   let keeper_names =
     if initialized && include_keepers then

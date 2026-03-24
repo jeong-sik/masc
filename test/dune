@@ -224,7 +224,7 @@
 (test
  (name test_tool_local_runtime_verify)
  (modules test_tool_local_runtime_verify)
- (libraries masc_mcp alcotest yojson))
+ (libraries masc_mcp alcotest yojson eio eio_main))
 
 ; Voice tool wrapper tests
 (test

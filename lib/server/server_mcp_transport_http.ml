@@ -1045,15 +1045,21 @@ let handle_ag_ui_events ~deps request reqd =
               let rec loop () =
                 if not !(info.stop) then (
                   (try Eio.Time.sleep clock sse_ping_interval_s
-                   with Eio.Cancel.Cancelled _ as exn -> raise exn | _ -> ());
+                   with Eio.Cancel.Cancelled _ as exn -> raise exn
+                      | exn -> Log.Server.debug "SSE ping sleep interrupted: %s" (Printexc.to_string exn));
                   (try
                      if info.closed then
                        stop_sse_session info.session_id
                      else if not !(info.stop) then
                        ignore (send_raw info ": ping\n\n")
                    with Eio.Cancel.Cancelled _ as exn -> raise exn
-                      | _ -> stop_sse_session info.session_id);
+                      | exn ->
+                          Log.Server.warn "SSE ping send failed for session %s: %s" info.session_id (Printexc.to_string exn);
+                          stop_sse_session info.session_id);
                   loop ())
               in
-              try loop () with Eio.Cancel.Cancelled _ as exn -> raise exn | _ -> ())
+              try loop () with Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn ->
+                    Log.Server.error "SSE ping loop exited for session %s: %s" info.session_id (Printexc.to_string exn);
+                    stop_sse_session info.session_id)
       | _ -> ())

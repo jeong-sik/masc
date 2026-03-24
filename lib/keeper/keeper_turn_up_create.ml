@@ -234,6 +234,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            policy_mode;
            policy_voice_enabled;
            policy_shell_mode;
+           execution_scope = default_execution_scope;
            allowed_paths;
            scope_kind;
            room_scope;

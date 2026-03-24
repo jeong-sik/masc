@@ -72,7 +72,8 @@ elif [ -n "${LLAMA_MODEL_PATH:-}" ] && [ -z "${LLM_ENDPOINTS:-}" ]; then
 fi
 
 if [ "$need_pool_start" = "true" ]; then
-  export LLM_ENDPOINTS="$("$ROOT_DIR/scripts/llama-runtime-pool.sh" start --target-shards "$POOL_SHARDS" --seed-port "$SEED_PORT")"
+  LLM_ENDPOINTS="$("$ROOT_DIR/scripts/llama-runtime-pool.sh" start --target-shards "$POOL_SHARDS" --seed-port "$SEED_PORT")"
+  export LLM_ENDPOINTS
   POOL_STARTED="true"
 fi
 

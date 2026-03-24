@@ -60,6 +60,35 @@ let test_empty_governance_structure () =
       let pending = json |> member "pending_actions" |> to_list in
       check int "pending_actions empty" 0 (List.length pending))
 
+let test_governance_dir_created_before_read () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let masc = Filename.concat dir ".masc" in
+      let gov = Filename.concat masc "governance" in
+      let judgments = Filename.concat gov "judgments" in
+      (* Before ensure_dir: directories do not exist *)
+      check bool ".masc/governance does not exist yet" false (Sys.file_exists gov);
+      (* Simulate what start() now does: ensure_dir calls Fs_compat.mkdir_p *)
+      Unix.mkdir masc 0o755;
+      Unix.mkdir gov 0o755;
+      Unix.mkdir judgments 0o755;
+      check bool ".masc/governance exists" true (Sys.file_exists gov && Sys.is_directory gov);
+      check bool ".masc/governance/judgments exists" true
+        (Sys.file_exists judgments && Sys.is_directory judgments);
+      (* read_recent on empty dir returns [] — dashboard_json should still work *)
+      Eio_main.run @@ fun _env ->
+      let config = Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
+      let json =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+          ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      let items = json |> member "items" |> to_list in
+      check int "items empty after dir init" 0 (List.length items))
+
 let () =
   run "dashboard_governance"
     [
@@ -67,5 +96,10 @@ let () =
         [
           test_case "empty governance structure" `Quick
             test_empty_governance_structure;
+        ] );
+      ( "init",
+        [
+          test_case "governance dirs created before read" `Quick
+            test_governance_dir_created_before_read;
         ] );
     ]

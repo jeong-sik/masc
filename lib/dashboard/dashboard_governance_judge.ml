@@ -355,6 +355,9 @@ let start ~sw ~clock ~base_path
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts () =
+  (* Ensure governance directories exist before first read/write *)
+  ensure_dir (governance_dir base_path);
+  ensure_dir (Filename.concat (governance_dir base_path) "judgments");
   let st = get_state base_path in
   let should_start =
     with_lock st (fun () ->

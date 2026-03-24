@@ -8,7 +8,8 @@ module Trace = Masc_mcp.Trace
 let setup () =
   D.clear_hooks ();
   M.clear ();
-  Trace.clear ()
+  Trace.clear ();
+  Masc_mcp.Server_startup_state.reset ()
 
 let test_all_checks_run () =
   setup ();
@@ -25,12 +26,13 @@ let test_score_zero_when_empty () =
   setup ();
   let checks = H.all_checks () in
   let score = H.health_score checks in
-  (* Some checks are always healthy (permissions, sse_filter) *)
-  Alcotest.(check bool) "score between 0 and 1"
-    true (score >= 0.0 && score <= 1.0)
+  Alcotest.(check (float 0.0001)) "score is zero without startup/runtime signals"
+    0.0 score
 
 let test_score_improves_with_hooks () =
   setup ();
+  Masc_mcp.Server_startup_state.reset ~backend_mode:"filesystem" ();
+  Masc_mcp.Server_startup_state.mark_state_ready ~backend_mode:"filesystem";
   (* Install hooks and generate some data *)
   Masc_mcp.Tool_metrics.install ();
   D.register ~tool_name:"__health_test"

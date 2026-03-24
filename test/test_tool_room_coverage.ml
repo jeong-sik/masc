@@ -115,52 +115,12 @@ let () = test "dispatch_reset_with_confirm" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test dispatch rooms_list *)
-let () = test "dispatch_rooms_list" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
-  let args = `Assoc [] in
-  match Tool_room.dispatch ctx ~name:"masc_rooms_list" ~args with
-  | Some (success, _result) -> assert success
-  | None -> failwith "dispatch returned None"
-)
-
-(* Test dispatch room_create *)
-let () = test "dispatch_room_create" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
-  let args = `Assoc [("name", `String "test-room")] in
-  match Tool_room.dispatch ctx ~name:"masc_room_create" ~args with
-  | Some (_success, _result) -> () (* May fail depending on room state *)
-  | None -> failwith "dispatch returned None"
-)
-
-(* Test dispatch room_create without name *)
-let () = test "dispatch_room_create_no_name" (fun () ->
+let () = test "dispatch_removed_named_room_tools" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
-  match Tool_room.dispatch ctx ~name:"masc_room_create" ~args with
-  | Some (success, _result) -> assert (not success) (* Should fail without name *)
-  | None -> failwith "dispatch returned None"
-)
-
-(* Test dispatch room_enter *)
-let () = test "dispatch_room_enter" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
-  let args = `Assoc [("room_id", `String "test-room-id")] in
-  match Tool_room.dispatch ctx ~name:"masc_room_enter" ~args with
-  | Some (_success, _result) -> () (* May fail if room doesn't exist *)
-  | None -> failwith "dispatch returned None"
-)
-
-(* Test dispatch room_enter without room_id *)
-let () = test "dispatch_room_enter_no_id" (fun () ->
-  let ctx = make_test_ctx () in
-  let args = `Assoc [] in
-  match Tool_room.dispatch ctx ~name:"masc_room_enter" ~args with
-  | Some (success, _result) -> assert (not success) (* Should fail without room_id *)
-  | None -> failwith "dispatch returned None"
+  assert (Tool_room.dispatch ctx ~name:"masc_rooms_list" ~args = None);
+  assert (Tool_room.dispatch ctx ~name:"masc_room_create" ~args = None);
+  assert (Tool_room.dispatch ctx ~name:"masc_room_enter" ~args = None)
 )
 
 let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->

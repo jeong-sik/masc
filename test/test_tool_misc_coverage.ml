@@ -69,17 +69,18 @@ let () = test "dispatch_unknown_tool" (fun () ->
 let () = test "dispatch_dashboard" (fun () ->
   let ctx = make_test_ctx () in
   ignore (Room.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
-  ignore (Room.room_create ctx.config ~name:"Second Room" ~description:None);
-  ignore (Room.room_enter ctx.config ~room_id:"second-room" ~agent_type:"claude" ~agent_name:ctx.agent_name ());
-  ignore (Room.add_task ctx.config ~title:"second task" ~priority:1 ~description:"");
+  Room.write_current_room ctx.config "second-room";
+  Room.ensure_room_bootstrap ctx.config "second-room";
+  let second_room = Room.config_with_resolved_scope ctx.config in
+  ignore (Room.add_task second_room ~title:"second task" ~priority:1 ~description:"");
   let args = `Assoc [] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some (success, result) ->
       assert success;
       assert (str_contains result "MASC Dashboard");
-      (* Header shows current room; after room_enter it is second-room *)
+      (* Header follows the current_room pointer. *)
       assert (str_contains result "Room: second-room");
-      assert (str_contains result "2 room");
+      assert (not (str_contains result "2 room"));
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
@@ -101,14 +102,14 @@ let () = test "dispatch_dashboard_compact" (fun () ->
 
 let () = test "dispatch_dashboard_current_scope" (fun () ->
   let ctx = make_test_ctx () in
-  ignore (Room.room_create ctx.config ~name:"Focus Room" ~description:None);
-  ignore (Room.room_enter ctx.config ~room_id:"focus-room" ~agent_type:"claude" ~agent_name:ctx.agent_name ());
-  ignore (Room.add_task ctx.config ~title:"focus task" ~priority:2 ~description:"");
+  Room.write_current_room ctx.config "focus-room";
+  Room.ensure_room_bootstrap ctx.config "focus-room";
+  let focused = Room.config_with_resolved_scope ctx.config in
+  ignore (Room.add_task focused ~title:"focus task" ~priority:2 ~description:"");
   let args = `Assoc [("scope", `String "current")] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some (success, result) ->
       assert success;
-      (* scope=current: header still shows all room count but current room name *)
       assert (str_contains result "MASC Dashboard");
       assert (str_contains result "Room: focus-room")
   | None -> failwith "dispatch returned None"

@@ -877,8 +877,12 @@ let span_end_status = function
   | "keeper.autonomy_completed" -> "completed"
   | _ -> "ended"
 
-let agent_spans_json config ?room_id ?(limit = 500) () =
+let agent_spans_json config ?room_id ?(limit = 500) ?since_ms () =
   let events = list_events config ?room_id ~kinds:[] ~after_seq:0 ~limit () in
+  let events = match since_ms with
+    | Some ms -> List.filter (fun e -> e.ts_ms >= ms) events
+    | None -> events
+  in
   let now_ms = now_ts_ms () in
   (* open_spans keyed by (agent_id, subject_id option) *)
   let open_spans : (string * string option, int * string * string) Hashtbl.t =

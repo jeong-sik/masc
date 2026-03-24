@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 COORD_AGENT="${COORD_AGENT:-team-session-local64-smoke}"
@@ -31,6 +31,7 @@ if [ "$default_final_turn_timeout" -lt 300 ]; then
   default_final_turn_timeout=300
 fi
 FINAL_TURN_TIMEOUT_SEC="${FINAL_TURN_TIMEOUT_SEC:-$default_final_turn_timeout}"
+MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required"
@@ -44,38 +45,21 @@ fi
 
 SESSION_ID=""
 CALL_ID=91008
-SPAWN_RESULTS_FILE="$(mktemp "${TMPDIR:-/tmp}/local64-smoke-spawn-results.XXXXXX.jsonl")"
-
-jsonrpc_call() {
-  local id="$1"
-  local method="$2"
-  local params="$3"
-  local raw
-  raw="$(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -H "mcp-session-id: $MCP_SESSION_ID" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"$method\",\"params\":$params}")"
-  jsonrpc_normalize_response "$raw" "$id"
-}
+SPAWN_RESULTS_FILE="$(mcp_mktemp_file "local64-smoke-spawn-results" ".jsonl")"
 
 call_tool() {
   local id="$1"
   local tool_name="$2"
   local args_json="$3"
-  jsonrpc_call "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
+  mcp_call_tool "$id" "$tool_name" "$args_json"
 }
 
 extract_text() {
-  jq -r 'try (.result.content[0].text) catch empty'
+  mcp_extract_text
 }
 
 extract_result() {
-  jq -c 'try (.result.content[0].text | fromjson | if has("result") and .result != null then .result else . end) catch empty'
-}
-
-extract_is_error() {
-  jq -r 'try (.result.isError) catch "true"'
+  mcp_extract_result
 }
 
 next_call_id() {
@@ -85,11 +69,8 @@ next_call_id() {
 
 require_json() {
   local payload="$1"
-  if ! printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
-    echo "FAIL: invalid payload"
-    printf '%s\n' "$payload"
-    exit 1
-  fi
+  local label="${2:-team_session_local64_smoke payload}"
+  mcp_require_json "$payload" "$label"
 }
 
 session_status_result() {
@@ -168,14 +149,8 @@ wait_for_session_progress() {
 
 require_tool_success() {
   local payload="$1"
-  require_json "$payload"
-  local is_error
-  is_error="$(printf '%s' "$payload" | extract_is_error)"
-  if [ "$is_error" = "true" ]; then
-    echo "FAIL: tool returned isError=true"
-    printf '%s\n' "$payload" | extract_text
-    exit 1
-  fi
+  local label="${2:-team_session_local64_smoke tool}"
+  mcp_require_tool_ok "$payload" "$label"
 }
 
 require_result_condition() {
@@ -214,12 +189,11 @@ cleanup() {
 trap cleanup EXIT
 
 build_spawn_batch() {
-  local session_id="$1"
-  local start_idx="$2"
-  local end_idx="$3"
-  local model="$4"
+  local start_idx="$1"
+  local end_idx="$2"
+  local model="$3"
   local tmp_file
-  tmp_file="$(mktemp "${TMPDIR:-/tmp}/local64-smoke-batch.XXXXXX.json")"
+  tmp_file="$(mcp_mktemp_file "local64-smoke-batch" ".json")"
   : >"$tmp_file"
 
   local idx="$start_idx"
@@ -372,7 +346,7 @@ run_spawn_wave() {
   local expected_count=$((end_idx - start_idx + 1))
   echo "[4/8] spawn ${wave_name} (${start_idx}-${end_idx}, count=${expected_count})"
   local spawn_batch_json step_args step_raw wave_success
-  spawn_batch_json="$(build_spawn_batch "$SESSION_ID" "$start_idx" "$end_idx" "$LLAMA_SWARM_MODEL")"
+  spawn_batch_json="$(build_spawn_batch "$start_idx" "$end_idx" "$LLAMA_SWARM_MODEL")"
   step_args="$(jq -cn --arg s "$SESSION_ID" --arg a "$COORD_AGENT" --argjson batch "$spawn_batch_json" --argjson timeout "$SPAWN_TIMEOUT_SEC" \
     '{session_id:$s,actor:$a,wait_mode:"background",spawn_batch:$batch,spawn_timeout_seconds:$timeout}')"
   step_raw="$(call_tool "$(next_call_id)" "masc_team_session_step" "$step_args")"

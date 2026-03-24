@@ -23,7 +23,7 @@ let read_file_safe path =
     really_input ic s 0 n;
     close_in ic;
     Bytes.to_string s
-  with _ -> ""
+  with exn -> Log.Transport.warn "read_file_safe failed for %s: %s" path (Printexc.to_string exn); ""
 
 (** Safe filename: replace non-alphanumeric chars with underscores. *)
 let safe_filename name =
@@ -75,7 +75,7 @@ let handle_join (room_config : Room_utils_backend_setup.config) (bytes : string)
                     Option.value ~default:"" agent.current_task;
                 } : T.agent_info)
               | _ -> None
-            with _ -> None)
+            with exn -> Log.Transport.debug "agent parse skip: %s" (Printexc.to_string exn); None)
         else []
       in
       T.JoinResponse.{
@@ -181,7 +181,7 @@ let handle_get_status (room_config : Room_utils_backend_setup.config) (_bytes : 
             assigned_to = json |> member "assigned_to" |> to_string_option |> Option.value ~default:"";
             priority = (try json |> member "priority" |> to_int with _ -> 0);
           } : T.task_info)
-        with _ -> None)
+        with exn -> Log.Transport.debug "task parse skip: %s" (Printexc.to_string exn); None)
     else []
   in
   T.StatusResponse.(to_bytes {
@@ -264,7 +264,7 @@ let handle_heartbeat
               close_out oc
             | Error _ -> ()
           end
-        with _ -> ());
+        with exn -> Log.Transport.error "gRPC heartbeat update failed: %s" (Printexc.to_string exn));
         (* Count active agents and pending tasks *)
         let masc_dir = Filename.concat room_config.base_path ".masc" in
         let agents_dir = Filename.concat masc_dir "agents" in

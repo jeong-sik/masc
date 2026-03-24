@@ -1764,7 +1764,8 @@ use mcp_rpc::{mcp_tool_call, parse_embedded_tool_payload};
 mod room_hub;
 #[cfg(target_arch = "wasm32")]
 use room_hub::{
-    bind_room_controls, refresh_rooms_from_server, remember_recent_room, sync_room_controls,
+    bind_room_controls, candidate_room_ids, load_known_rooms, refresh_rooms_from_server,
+    remember_recent_room, sync_room_controls,
 };
 
 #[path = "../../../archive/trpg/viewer/trpg_controls.rs"]
@@ -1868,34 +1869,24 @@ async fn seed_monitor_snapshot(doc: web_sys::Document) -> Result<(), String> {
     };
     set_element_text(&doc, "monitor-agent-list", &keepers_text);
 
-    let rooms_payload = mcp_tool_call("masc_rooms_list", json!({})).await?;
-    let rooms = rooms_payload
-        .get("rooms")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let room_count = rooms.len();
-    let agent_total: i64 = rooms
-        .iter()
-        .map(|row| row.get("agent_count").and_then(Value::as_i64).unwrap_or(0))
-        .sum();
-    let task_total: i64 = rooms
-        .iter()
-        .map(|row| row.get("task_count").and_then(Value::as_i64).unwrap_or(0))
-        .sum();
+    let current_room = crate::config::current_room_id();
+    let tracked_rooms = candidate_room_ids();
+    let known_room_count = load_known_rooms().len();
+    let room_count = tracked_rooms.len();
     set_element_text(
         &doc,
         "monitor-task-list",
         &format!(
-            "활성 room: {}개\nagent: {} · task: {}",
-            room_count, agent_total, task_total
+            "현재 room: {}\n추적 room: {}개 (known {}개)",
+            current_room, room_count, known_room_count
         ),
     );
     set_or_prepend_line(
         &doc,
         "monitor-events",
         &format!(
-            "[snapshot] room {}개 / keeper {}명 초기 상태 로드",
+            "[snapshot] current room {} / tracked rooms {}개 / keeper {}명 초기 상태 로드",
+            current_room,
             room_count, keeper_count
         ),
         &["Waiting for events...", "No events yet"],

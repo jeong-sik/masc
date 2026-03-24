@@ -697,7 +697,6 @@ let test_validate_room_id_rejects_path_traversal () =
 let test_validate_room_id_rejects_invalid_chars () =
   let room_result = Room_utils.validate_room_id "room id" in
   check bool "invalid chars" true (is_error room_result)
-
 let test_validate_file_path_valid () =
   let result = Room_utils.validate_file_path "src/main.ml" in
   check bool "valid" true (is_ok result)

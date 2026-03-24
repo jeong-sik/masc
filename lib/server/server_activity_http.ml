@@ -94,6 +94,25 @@ let graph_http_json ~deps ~state request =
   Activity_graph.graph_json state.Mcp_server.room_config ?room_id ~kinds ~limit
     ~timeline_limit ?since_ms ()
 
+let swimlane_http_json ~deps ~state request =
+  let room_id = room_filter deps request in
+  let limit =
+    deps.int_query_param request "limit" ~default:500
+    |> clamp ~min_v:1 ~max_v:2000
+  in
+  let since_ms =
+    match deps.query_param request "since" with
+    | Some raw ->
+        (match parse_since_ms raw with
+         | Some delta_ms ->
+             let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
+             Some (now_ms - delta_ms)
+         | None -> None)
+    | None -> None
+  in
+  Activity_graph.agent_spans_json state.Mcp_server.room_config ?room_id ~limit
+    ?since_ms ()
+
 let stream_headers ~deps origin =
   Httpun.Headers.of_list
     ([

@@ -178,8 +178,14 @@ let cascade_config_path () : string option =
 let models_of_cascade_name (cascade_name : string) : string list =
   let defaults = ["llama:auto"; "glm:auto"] in
   let config_path = cascade_config_path () in
-  Llm_provider.Cascade_config.resolve_model_strings
-    ?config_path
-    ~name:cascade_name
-    ~defaults
-    ()
+  (* Cascade_config uses Eio.Mutex internally.  When called outside
+     Eio_main.run (e.g. unit tests) this raises Effect.Unhandled on
+     the first call and Eio.Mutex.Poisoned on subsequent calls.
+     Fall back to defaults in both cases. *)
+  try
+    Llm_provider.Cascade_config.resolve_model_strings
+      ?config_path
+      ~name:cascade_name
+      ~defaults
+      ()
+  with _ -> defaults

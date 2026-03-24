@@ -75,10 +75,12 @@ ensure_server() {
 
   local server_exe
   server_exe="$(harness_find_server_exe "$ROOT_DIR" "${SERVER_EXE:-}")"
-  TRANSPORT_SERVER_BASE_PATH="$(mktemp -d "${TMPDIR:-/tmp}/masc-transport-room.XXXXXX")"
-  TRANSPORT_SERVER_LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/masc-transport-server.XXXXXX.log")"
+  TRANSPORT_SERVER_BASE_PATH="$(harness_mktemp_dir "masc-transport-room")"
+  TRANSPORT_SERVER_LOG_FILE="$(harness_mktemp_file "masc-transport-server" ".log")"
 
+  # shellcheck disable=SC2031
   export ME_ROOT="${TRANSPORT_SERVER_BASE_PATH}"
+  # shellcheck disable=SC2031
   export MASC_BASE_PATH="${TRANSPORT_SERVER_BASE_PATH}"
   export MASC_GRPC_ENABLED="${MASC_GRPC_ENABLED:-1}"
   export MASC_GRPC_PORT
@@ -120,9 +122,9 @@ require_tool() {
 
 mcp_initialize_session() {
   local headers body payload session_id
-  headers="$(mktemp "${TMPDIR:-/tmp}/masc-transport-init-header.XXXXXX")"
-  body="$(mktemp "${TMPDIR:-/tmp}/masc-transport-init-body.XXXXXX")"
-  payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"transport-harness","version":"1.0"}}}'
+  headers="$(harness_mktemp_file "masc-transport-init-header")"
+  body="$(harness_mktemp_file "masc-transport-init-body")"
+  payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"transport-harness","version":"1.0"}}}'
   if ! curl -fsS -D "$headers" -o "$body" -X POST "${MASC_BASE_URL}/mcp" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \

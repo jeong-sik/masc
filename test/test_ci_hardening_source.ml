@@ -162,6 +162,25 @@ let test_input_validation_contracts () =
     (file_contains_pattern "lib/cache_eio.ml"
        "maybe_evict_expired config")
 
+let test_room_current_validation_contracts () =
+  check bool "room current route validates room id before bootstrap" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "match Room.validate_room_id raw_room_id with");
+  check bool "room current route still bootstraps validated room ids" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "Room.ensure_room_bootstrap config room_id")
+
+let test_root_redirect_contracts () =
+  check bool "http root redirects to dashboard" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
+       {|Http.Router.get "/" (fun _req reqd -> redirect_to_dashboard reqd)|});
+  check bool "http redirect sets dashboard location" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
+       {|("location", "/dashboard")|});
+  check bool "h2 root redirects to dashboard" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|h2_respond_redirect h2_reqd "/dashboard" ~extra_headers:cors|})
+
 let test_dashboard_component_split_contracts () =
   check bool "proof view imports proof helpers" true
     (file_contains_pattern "dashboard/src/components/proof.ts"
@@ -342,6 +361,24 @@ let test_transport_health_contracts () =
   check bool "standalone ws reuses transport metrics env parser" true
     (file_contains_pattern "lib/server/server_ws_standalone.ml"
        {|Transport_metrics.ws_enabled ()|})
+
+let test_dashboard_timeout_guard_contracts () =
+  check bool "http transport health route uses cached dashboard helper" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       {|let json = dashboard_transport_health_http_json ~state in|});
+  check bool "h2 transport health route uses cached dashboard helper" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|let json = dashboard_transport_health_http_json ~state in|});
+  check bool "server dashboard transport health helper uses dashboard cache" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       {|Dashboard_cache.get_or_compute "transport_health" ~ttl:10.0|});
+  check bool "mission refresh dedupes inflight fetches" true
+    (file_contains_pattern "dashboard/src/mission-actions.ts"
+       "let inflightMissionSnapshotRefresh: Promise<void> | null = null");
+  check bool "transport health panel dedupes inflight fetches" true
+    (file_contains_pattern "dashboard/src/components/transport-health.ts"
+       "let inflightTransportHealthRefresh: Promise<void> | null = null")
+
 let test_mermaid_xss_contracts () =
   check bool "mermaid securityLevel is strict (not loose)" true
     (file_contains_pattern "dashboard/src/components/command/helpers.ts"
@@ -363,6 +400,9 @@ let () =
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;
            test_case "input validation contracts" `Quick test_input_validation_contracts;
+           test_case "room current validation contracts" `Quick
+             test_room_current_validation_contracts;
+           test_case "root redirect contracts" `Quick test_root_redirect_contracts;
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;
            test_case "local review script contracts" `Quick test_local_review_script_contracts;
@@ -373,6 +413,8 @@ let () =
              test_transport_route_contracts;
            test_case "transport health contracts" `Quick
              test_transport_health_contracts;
+           test_case "dashboard timeout guard contracts" `Quick
+             test_dashboard_timeout_guard_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
          ]);
     ]

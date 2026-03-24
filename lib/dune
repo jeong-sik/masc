@@ -9,11 +9,9 @@
    ag_ui
    agent_card
    agent_economy
-   agent_ecosystem
    agent_health
    agent_identity
    agent_tool_surfaces
-   agent_neo4j
    agent_registry_eio
    anti_rationalization
    auto_recall
@@ -495,7 +493,7 @@
    keeper_status_detail
    keeper_status
    keeper_status_bridge
-   keeper_policy
+
    keeper_persona
    ;; Context management (used by keeper agents)
    masc_eio_env
@@ -536,8 +534,6 @@
    research_metric
    research_loop
    tool_research
-   ;; Anti-Fake Test Quality Scoring (harness P2)
-   anti_fake
    ;; godsplit-phase1: type/schema sub-modules
    team_session_types_enums
    tool_schemas_room_core

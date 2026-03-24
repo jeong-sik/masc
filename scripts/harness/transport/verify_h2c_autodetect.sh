@@ -11,7 +11,9 @@
 #   3. Both protocols on same port (if serve_auto is active)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/harness/transport/common.sh
 source "${SCRIPT_DIR}/common.sh"
+# shellcheck disable=SC2034
 HARNESS_NAME="h2c-autodetect"
 
 require_server
@@ -19,8 +21,7 @@ require_server
 echo "--- h2c Auto-detect E2E ---"
 
 # Test 1: HTTP/1.1 always works
-h1_resp=$(curl -sf --http1.1 "${MASC_BASE_URL}/health" 2>&1)
-if [ $? -eq 0 ]; then
+if curl -sf --http1.1 "${MASC_BASE_URL}/health" >/dev/null 2>&1; then
   pass "HTTP/1.1 health check"
 else
   fail "HTTP/1.1 health check" "failed"
@@ -40,7 +41,7 @@ fi
 h2_mcp_code=$(curl -sf --max-time 5 --http2-prior-knowledge -X POST "${MASC_BASE_URL}/mcp" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
-  -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"h2c-harness","version":"1.0"}},"id":1}' \
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"h2c-harness","version":"1.0"}},"id":1}' \
   -o /dev/null -w '%{http_code}' 2>&1 || echo "0")
 if [ "$h2_mcp_code" = "200" ]; then
   pass "MCP initialize over h2c (status: ${h2_mcp_code})"
@@ -59,7 +60,7 @@ fi
 # Test 5: Concurrent connections (HTTP/1.1 while h2c might be active)
 pids=()
 success=0
-for i in 1 2 3 4; do
+for _ in 1 2 3 4; do
   curl -sf --http1.1 "${MASC_BASE_URL}/health" >/dev/null 2>&1 &
   pids+=($!)
 done

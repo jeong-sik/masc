@@ -139,14 +139,15 @@ let test_task_priority_defaults () =
       ~title:"Default priority task"
       ~priority:3
       ~description:"Fire-and-forget task" in
-    (* Verify task exists and priority is reflected in status *)
+    (* Verify task exists in status output *)
     let status = Room.status config in
     check bool "task title in status" true
       (try ignore (Str.search_forward (Str.regexp_string "Default priority task") status 0); true
        with Not_found -> false);
-    check bool "priority value in status" true
-      (try ignore (Str.search_forward (Str.regexp_string "3") status 0); true
-       with Not_found -> false)
+    (* Verify priority is persisted in backlog (status output does not include priority) *)
+    let backlog = Room.read_backlog config in
+    check bool "task has correct priority" true
+      (List.exists (fun (t : Types_core.task) -> t.title = "Default priority task" && t.priority = 3) backlog.tasks)
   )
 
 (* ============================================================

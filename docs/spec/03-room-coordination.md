@@ -453,7 +453,7 @@ type sandbox = {
 
 **작업 흐름**:
 ```
-rooms_list -> room_create(name, description) -> room_enter(room_id)
+set_room(path) -> write/read current_room -> current-room-scoped task/agent/message operations
 ```
 
 ### 10.2 Portal (A2A, `room_portal`)
@@ -551,13 +551,14 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | `masc_status` | 현재 room 상태 조회 |
 | `masc_init` | Room 초기화 (.masc/ 생성) |
 | `masc_reset` | Room 리셋 (.masc/ 삭제, confirm 필수) |
-| `masc_rooms_list` | 모든 room 목록 (agent/task count 포함) |
-| `masc_room_create` | 새 room 생성 |
-| `masc_room_enter` | room 전환 (current_room 변경) |
 | `masc_room_strategy_get` | 검색 전략 조회 |
 | `masc_room_strategy_set` | 검색 전략 설정 (best_first_v1, legacy) |
 | `masc_workflow_guide` | 워크플로우 가이드 출력 |
 | `masc_check` | room 건강 상태 점검 |
+
+참고:
+- named-room inventory/create/enter surface는 제거되었다.
+- 현재는 `current_room` pointer와 per-room lazy bootstrap만 compatibility layer로 남아 있다.
 
 ### 14.2 Task Operations (`tool_task`)
 
@@ -646,7 +647,7 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | INV-ROOM-009 | claim_next는 현재 보유 태스크를 자동 해제한 후 새 태스크를 할당한다 | `room_task_schedule.claim_next_r` (BUG-004) |
 | INV-ROOM-010 | 닉네임은 동일 agent_type에 대해 세션 내 재사용된다 (identity drift 방지) | `room_lifecycle.join` |
 | INV-ROOM-011 | Worktree 경로는 반드시 `.worktrees/` 하위에 생성된다 (경로 탈출 방지) | `room_worktree.ensure_worktree_path` |
-| INV-ROOM-012 | `"default"` room은 삭제/재생성이 불가능하다 (reserved) | `room_rooms.room_create` |
+| INV-ROOM-012 | historical: `"default"` room은 named-room registry에서 reserved였다 | removed named-room registry |
 | INV-ROOM-013 | 투표에서 각 에이전트는 1회만 투표할 수 있다 | `room_vote.vote_cast` |
 | INV-ROOM-014 | Portal은 양방향이다 (reverse portal 자동 생성) | `room_portal.portal_open_r` |
 | INV-ROOM-015 | GC 시 open task를 참조하는 메시지는 보존된다 | `room_gc.gc` (mentions_open_task) |

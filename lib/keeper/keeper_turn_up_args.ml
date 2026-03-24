@@ -108,7 +108,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
         "SOUL.md"
     in
     let soul_content =
-      match Safe_ops.read_file_safe soul_path with Ok c -> c | Error _ -> ""
+      match Safe_ops.read_file_safe soul_path with
+      | Ok c -> c
+      | Error e ->
+          Log.Keeper.warn "SOUL.md read failed for %s (%s): %s" name soul_path e;
+          ""
     in
     let base_instructions_opt =
       match instructions_arg with

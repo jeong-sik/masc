@@ -603,7 +603,9 @@ let run_proactive_generation
             ~max_turns:(Keeper_config.keeper_unified_max_turns ())
             ~temperature ~max_tokens ()) in
       match agent_result with
-      | Error _ -> None
+      | Error e ->
+          Log.Keeper.warn "keeper turn OAS worker failed: %s" e;
+          None
       | Ok result ->
           let resp = result.Oas_worker.response in
           let model_used_raw = resp.model in

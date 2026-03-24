@@ -67,7 +67,8 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
         |> List.iter (fun f ->
                let name = Filename.remove_extension f in
                if validate_name name then maybe_promote_live_persistent_keeper ctx.config name)
-    | Error _ -> ());
+    | Error e ->
+        Log.Keeper.warn "bootstrap: failed to scan persistent keepers dir: %s" e);
     let now_ts = Time_compat.now () in
     let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
     let stale_turn_sec =

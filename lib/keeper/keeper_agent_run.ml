@@ -192,6 +192,7 @@ let run_turn
       ~context_reducer:reducer
       ~memory
       ~max_turns
+      ~max_idle_turns:5
       ~temperature
       ~max_tokens
       ?guardrails

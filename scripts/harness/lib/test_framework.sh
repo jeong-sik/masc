@@ -100,6 +100,12 @@ call_tool() {
   jsonrpc_normalize_response "$raw" "$id"
 }
 
+# Extract raw text from MCP tool response content.
+# Usage: echo "$response" | extract_text
+extract_text() {
+  jq -r 'try (.result.content[0].text) catch empty'
+}
+
 # Extract .result from MCP tool response content.
 # Usage: echo "$response" | extract_result
 extract_result() {

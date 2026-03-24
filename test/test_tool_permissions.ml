@@ -24,13 +24,13 @@ let test_admin_tools_classified () =
     true (Tool_permissions.requires_admin "masc_tool_admin_snapshot");
   Alcotest.(check bool) "operator_confirm is admin"
     true (Tool_permissions.requires_admin "masc_operator_confirm");
-  Alcotest.(check bool) "team_session_stop is admin"
-    true (Tool_permissions.requires_admin "masc_team_session_stop");
   Alcotest.(check bool) "team_session_finalize is admin"
     true (Tool_permissions.requires_admin "masc_team_session_finalize");
   Alcotest.(check bool) "operator_snapshot is admin"
     true (Tool_permissions.requires_admin "masc_operator_snapshot");
   (* Non-admin tools remain non-admin *)
+  Alcotest.(check bool) "team_session_stop is not admin"
+    false (Tool_permissions.requires_admin "masc_team_session_stop");
   Alcotest.(check bool) "status is not admin"
     false (Tool_permissions.requires_admin "masc_status");
   Alcotest.(check bool) "heartbeat is not admin"

@@ -20,7 +20,6 @@ let admin_tools =
     "masc_operator_confirm";
     "masc_operator_snapshot";
     "masc_team_session_finalize";
-    "masc_team_session_stop";
     "masc_tool_admin_snapshot";
   ]
 

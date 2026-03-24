@@ -1,7 +1,7 @@
 # MASC-MCP OAS Utilization Audit
 
 Date: 2026-03-24
-OAS Version: 0.88.0+main (CI/runtime pin on `jeong-sik/oas@cda9f343891a8b408b6566fbe340f0247340ddc5`, base tag `v0.88.0`)
+OAS Version: 0.89.0 (CI/runtime pin on `jeong-sik/oas@7319cf6d09d971079d1b9018d8c485f294feed5f`, aligned with tag `v0.89.0`)
 Snapshot: `main` audit aligned to the current upstream `agent_sdk.opam`; drift is checked against upstream `refs/heads/main`, not GitHub releases
 
 ## Current Read
@@ -15,7 +15,7 @@ The main remaining problems are no longer “missing migration” at large. They
 
 ## Pin Policy
 
-`masc-mcp` now tracks the current upstream `main` SHA, not the latest tag, because the required llama `LLM_ENDPOINTS` round-robin provider feature landed immediately after `v0.88.0`.
+`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the latest tagged SDK version. As of this audit, `refs/heads/main` and `v0.89.0` resolve to the same SHA.
 
 ## Status by Area
 

@@ -9,7 +9,7 @@ import { SectionHeader } from './section-header'
 export const CARD_BASE = 'card'
 export const CARD_STANDARD = `${CARD_BASE}`
 export const CARD_LIGHT = `${CARD_BASE} !bg-transparent !backdrop-blur-none`
-export const CARD_COMPACT = `${CARD_BASE} !p-4`
+export const CARD_COMPACT = `${CARD_BASE} !p-3.5 !shadow-[0_1px_2px_rgba(0,0,0,0.14)]`
 
 type CardVariant = 'standard' | 'light' | 'compact'
 
@@ -73,19 +73,20 @@ interface ClickableCardProps {
 interface CardProps {
   title?: ComponentChildren
   class?: string
+  variant?: CardVariant
   testId?: string
   children: ComponentChildren
 }
 
-export function Card({ title, class: cx, testId, children }: CardProps) {
+export function Card({ title, class: cx, variant = 'standard', testId, children }: CardProps) {
   if (title) {
     return html`
-      <${SectionCard} label=${title} class=${cx ?? ''} variant="standard">
+      <${SectionCard} label=${title} class=${cx ?? ''} variant=${variant}>
         ${children}
       <//>
     `
   }
-  return html`<${SurfaceCard} class=${cx} testId=${testId}>${children}<//>`
+  return html`<${SurfaceCard} variant=${variant} class=${cx} testId=${testId}>${children}<//>`
 }
 
 export function ClickableCard({

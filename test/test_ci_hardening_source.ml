@@ -51,6 +51,20 @@ let test_health_and_ci_runner_diagnostics () =
   check bool "ci runner tracks active build dir for diagnostics" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "ACTIVE_TEST_BUILD_DIR")
 
+let test_contract_harness_and_team_session_authz_contracts () =
+  check bool "contract harness exposes extract_text helper" true
+    (file_contains_pattern "scripts/harness/lib/test_framework.sh"
+       "extract_text()");
+  check bool "golden path harness uses extract_text helper" true
+    (file_contains_pattern "scripts/harness/contract/golden_path_1_contract.sh"
+       "| extract_text)");
+  check bool "team session stop unauthorized path covered" true
+    (file_contains_pattern "test/test_tool_team_session_misc.ml"
+       "unauthorized stop denied");
+  check bool "team session stop owner path covered" true
+    (file_contains_pattern "test/test_tool_team_session_misc.ml"
+       "owner stop allowed")
+
 let test_route_auth_contracts () =
   check bool "http command-plane units use tool auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_command_plane_write.ml"
@@ -304,6 +318,8 @@ let () =
     [
       ("source_guard", [
            test_case "sync and asset contracts" `Quick test_ci_sync_and_asset_contracts;
+           test_case "contract harness and team session authz contracts" `Quick
+             test_contract_harness_and_team_session_authz_contracts;
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;

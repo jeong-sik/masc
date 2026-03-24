@@ -43,8 +43,8 @@ export function GuardrailPane({
   const ruling = detail?.ruling
   const order = detail?.execution_order
   return html`
-    <div class="flex flex-col gap-6">
-      <${Card} title="판정 / 집행" class="section mb-2">
+    <div class="flex flex-col gap-4">
+      <${Card} title="판정 / 집행" class="section" variant="compact">
         ${!item || !detail
           ? html`<${EmptyState} message="사건을 고르면 판정과 집행 경로가 보입니다." compact />`
           : html`
@@ -59,29 +59,29 @@ export function GuardrailPane({
                   ${ruling?.generated_at ? html`<span class="px-2 py-0.5 rounded-md bg-white/5 border border-white/10"><${TimeAgo} timestamp=${ruling.generated_at} /></span>` : null}
                 </div>
                 ${ruling?.summary
-                  ? html`<div class="mt-2 mb-4 border border-accent/20 rounded-xl bg-accent/10 text-text-strong p-4 leading-relaxed text-[13px] shadow-sm">${ruling.summary}</div>`
-                  : html`<div class="mt-2 text-text-muted text-[13px] italic bg-card/40 p-4 rounded-xl border border-card-border/50 text-center">아직 판정이 생성되지 않았습니다.</div>`}
-                <div class="flex gap-2 flex-wrap mb-2">
-                  ${item.provenance ? html`<span class="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-medium border border-white/10 bg-white/5 text-text-muted shadow-sm">${item.provenance}</span>` : null}
-                  ${item.risk_class ? html`<span class="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-medium border border-bad/20 bg-bad/10 text-bad shadow-sm">${item.risk_class}</span>` : null}
-                  ${item.subject_type ? html`<span class="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-medium border border-white/10 bg-white/5 text-text-dim shadow-sm">${item.subject_type}</span>` : null}
+                  ? html`<div class="mb-3.5 mt-1.5 rounded-xl border border-accent/20 bg-accent/10 p-3.5 text-[13px] leading-relaxed text-text-strong shadow-sm">${ruling.summary}</div>`
+                  : html`<div class="mt-1.5 rounded-xl border border-card-border/50 bg-card/34 p-3.5 text-center text-[13px] italic text-text-muted">아직 판정이 생성되지 않았습니다.</div>`}
+                <div class="mb-1.5 flex flex-wrap gap-1.5">
+                  ${item.provenance ? html`<span class="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-text-muted">${item.provenance}</span>` : null}
+                  ${item.risk_class ? html`<span class="inline-flex items-center rounded-lg border border-bad/20 bg-bad/10 px-2 py-0.5 text-[10px] font-medium text-bad">${item.risk_class}</span>` : null}
+                  ${item.subject_type ? html`<span class="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-text-dim">${item.subject_type}</span>` : null}
                 </div>
               </div>
               
-              <div class="mt-4 pt-4 border-t border-card-border/50">
+              <div class="mt-3.5 border-t border-card-border/50 pt-3.5">
                 <${ActionRequestCard} order=${order} />
               </div>
               
               ${order?.status === 'needs_human_gate'
                 ? html`
-                    <div class="flex flex-col gap-3 mt-5 p-5 border border-warn/30 bg-warn/10 rounded-xl shadow-inner">
+                    <div class="mt-4 flex flex-col gap-3 rounded-xl border border-warn/30 bg-warn/10 p-4 shadow-inner">
                       <h4 class="text-[12px] font-bold text-warn uppercase tracking-wider">⚠️ 관리자 승인 대기</h4>
                       <div class="text-text-strong text-[13px] leading-relaxed">이 집행 명령은 고위험 작업으로 분류되어 승인이 필요합니다.</div>
-                      <div class="flex gap-3 mt-2">
-                        <button type="button" class="px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all duration-200 shadow-sm shadow-black/20 disabled:opacity-50 border border-ok/30 bg-ok/20 text-ok hover:bg-ok/30" onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>
+                      <div class="mt-1.5 flex gap-2.5">
+                        <button type="button" class="rounded-xl border border-ok/30 bg-ok/20 px-4 py-2 text-[13px] font-semibold text-ok transition-all duration-200 hover:bg-ok/30 disabled:opacity-50 shadow-sm shadow-black/15" onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>
                           ${governanceActing.value ? '처리 중...' : '명령 승인'}
                         </button>
-                        <button type="button" class="px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all duration-200 shadow-sm shadow-black/20 disabled:opacity-50 border border-bad/30 bg-bad/20 text-bad hover:bg-bad/30" onClick=${() => respondToExecutionOrder('deny')} disabled=${governanceActing.value}>
+                        <button type="button" class="rounded-xl border border-bad/30 bg-bad/20 px-4 py-2 text-[13px] font-semibold text-bad transition-all duration-200 hover:bg-bad/30 disabled:opacity-50 shadow-sm shadow-black/15" onClick=${() => respondToExecutionOrder('deny')} disabled=${governanceActing.value}>
                           ${governanceActing.value ? '처리 중...' : '집행 거부'}
                         </button>
                       </div>
@@ -91,15 +91,15 @@ export function GuardrailPane({
             `}
       <//>
       
-      <${Card} title="심의 의견 제출" class="section mb-4">
+      <${Card} title="심의 의견 제출" class="section" variant="compact">
         ${!item
           ? html`<${EmptyState} message="사건을 선택한 뒤 의견을 추가하세요." compact />`
           : html`
               <div class="flex flex-col gap-4">
-                <div class="flex flex-wrap gap-2 p-1.5 bg-card/40 backdrop-blur-md rounded-xl border border-card-border/50 w-fit">
+                <div class="flex w-fit flex-wrap gap-1.5 rounded-xl border border-card-border/50 bg-card/32 p-1">
                   ${(['support', 'oppose', 'neutral'] as const).map(stance => html`
                     <button type="button"
-                      class="px-4 py-2 rounded-lg text-[12px] font-bold transition-all duration-200 border cursor-pointer
+                      class="rounded-lg border px-3 py-1.5 text-[12px] font-bold cursor-pointer transition-all duration-200
                         ${governanceBriefStance.value === stance
                           ? 'bg-accent/20 text-accent border-accent/30 shadow-sm'
                           : 'bg-transparent text-text-muted border-transparent hover:bg-white/5 hover:text-text-body'
@@ -147,7 +147,7 @@ export function ActionRequestCard({ order }: { order: GovernanceExecutionOrder |
       </div>
       ${request.target_type ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">대상 ${request.target_type}${request.target_id ? `:${request.target_id}` : ''}</div>` : null}
       ${request.reason ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">${request.reason}</div>` : null}
-      ${request.payload_preview ? html`<pre class="whitespace-pre-wrap border border-[var(--card-border)] rounded-[9px] bg-[rgba(0,0,0,0.28)] text-[#d3e3ff] p-3 text-[13px] leading-[1.5] font-mono mt-0 text-[11px] max-h-[180px] overflow-auto">${serializePreview(request.payload_preview)}</pre>` : null}
+      ${request.payload_preview ? html`<pre class="mt-0 max-h-[180px] overflow-auto whitespace-pre-wrap rounded-[9px] border border-[var(--card-border)] bg-[rgba(0,0,0,0.26)] p-2.5 text-[11px] leading-[1.5] text-[#d3e3ff] font-mono">${serializePreview(request.payload_preview)}</pre>` : null}
       ${order.execution_ref ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">결과 참조 ${order.execution_ref}</div>` : null}
       ${order.result_summary ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">${order.result_summary}</div>` : null}
     </div>

@@ -3,6 +3,17 @@
 
 ## [Unreleased]
 
+## [2.145.0] - 2026-03-24
+
+### Added
+- **Dashboard delete actions** — delete board posts, goals, and tasks from the dashboard UI with confirm dialog (#2813)
+
+### Fixed
+- **Board filter toggle** — hideAutomationPosts toggle now calls refreshBoard(), default changed to show all posts (#2813)
+- **Board UX overhaul** — visibility badges localized (internal→내부), comment expand uses signal state instead of DOM manipulation, operations section paginated, preview text extended to 250 chars (#2813)
+- **Navigation** — author name links use direct monitoring tab instead of legacy status redirect (#2813)
+- **Flaky tests** — correct operator auth status 400→401, fix SSE reconnect cooldown race condition (#2813)
+
 ## [2.144.0] - 2026-03-24
 
 ### Added

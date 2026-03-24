@@ -270,9 +270,17 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  Log.Keeper.error "heartbeat snapshot write failed: %s"
                    (Printexc.to_string exn));
               last_snapshot_ts := now_ts);
-            (* Deliberation triage: run when initiative is enabled (default: all keepers) *)
+            (* Deliberation triage: run when initiative is enabled (default: all keepers).
+               Initiative cooldown: skip triage if last proactive action was within cooldown_sec. *)
             let meta_after_triage =
-              if meta_current.initiative_enabled then (
+              let cooldown_sec = meta_current.initiative_cooldown_sec in
+              let cooldown_elapsed =
+                cooldown_sec <= 0
+                || (let last_action_ts = meta_current.proactive.last_ts in
+                    last_action_ts <= 0.0
+                    || now_ts -. last_action_ts >= float_of_int cooldown_sec)
+              in
+              if meta_current.initiative_enabled && cooldown_elapsed then (
                 let obs =
                   Keeper_deliberation.empty_world_observation
                     ~keeper_name:meta_current.name
@@ -350,7 +358,10 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                        in
                        if activity_ts <= 0.0 then 0
                        else int_of_float (max 0.0 (now_ts -. activity_ts)));
-                    idle_gate = meta_current.proactive.idle_sec;
+                    idle_gate =
+                      (if meta_current.initiative_idle_sec > 0
+                       then meta_current.initiative_idle_sec
+                       else meta_current.proactive.idle_sec);
                     unclaimed_task_count = unclaimed_count;
                     failed_task_count = failed_count;
                     active_agent_count = current_agent_count;

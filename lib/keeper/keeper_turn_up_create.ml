@@ -296,6 +296,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_triage_triggers = "";
             initiative_enabled =
               Option.value ~default:true p.profile_defaults.initiative_enabled;
+            initiative_idle_sec =
+              Option.value ~default:0 p.profile_defaults.initiative_idle_sec;
+            initiative_cooldown_sec =
+              Option.value ~default:0 p.profile_defaults.initiative_cooldown_sec;
             active_team_session_id = None;
             last_team_session_started_at = "";
             team_session_start_count_total = 0;

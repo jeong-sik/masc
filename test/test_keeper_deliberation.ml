@@ -797,6 +797,37 @@ let test_initiative_enabled_roundtrip_false () =
     check bool "roundtrip preserves false" false ie
   | Error e -> fail ("parse failed: " ^ e)
 
+let test_initiative_idle_sec_overrides_idle_gate () =
+  (* When initiative_idle_sec > 0, triage uses it instead of proactive.idle_sec.
+     We verify this by creating an obs with idle_seconds > initiative_idle_sec but
+     < default idle_gate — triggers should fire because initiative_idle_sec is the gate. *)
+  let obs = { base_obs with
+    active_goal_count = 1;
+    idle_seconds = 120;  (* above initiative_idle_sec=60 *)
+    idle_gate = 60;      (* initiative_idle_sec override *)
+  } in
+  match D.triage obs with
+  | D.Skip _ -> fail "should trigger IdleTimeout with custom idle_gate=60"
+  | D.Triggered triggers ->
+    check bool "has idle_timeout" true
+      (List.exists (fun t -> t = D.IdleTimeout) triggers)
+
+let test_initiative_cooldown_sec_roundtrip () =
+  let json_str = {|{"name":"test","initiative_enabled":true,"initiative_idle_sec":120,"initiative_cooldown_sec":30,"policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t4","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Keeper_types.meta_of_json json with
+  | Ok m ->
+    check int "initiative_idle_sec" 120 m.initiative_idle_sec;
+    check int "initiative_cooldown_sec" 30 m.initiative_cooldown_sec;
+    let re_json = Keeper_types.meta_to_json m in
+    let idle = Yojson.Safe.Util.member "initiative_idle_sec" re_json
+               |> Yojson.Safe.Util.to_int in
+    let cool = Yojson.Safe.Util.member "initiative_cooldown_sec" re_json
+               |> Yojson.Safe.Util.to_int in
+    check int "roundtrip idle_sec" 120 idle;
+    check int "roundtrip cooldown_sec" 30 cool
+  | Error e -> fail ("parse failed: " ^ e)
+
 let test_initiative_enabled_missing_defaults_true () =
   (* When JSON omits initiative_enabled, defaults to true (backward compat) *)
   let json_str = {|{"name":"test","policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t3","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
@@ -974,5 +1005,9 @@ let () =
             test_initiative_enabled_roundtrip_false;
           test_case "missing field defaults to true" `Quick
             test_initiative_enabled_missing_defaults_true;
+          test_case "idle_sec overrides triage idle_gate" `Quick
+            test_initiative_idle_sec_overrides_idle_gate;
+          test_case "cooldown_sec JSON roundtrip" `Quick
+            test_initiative_cooldown_sec_roundtrip;
         ] );
     ]

@@ -714,6 +714,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   (* Initialize Eio environment for MODEL HTTP calls (cohttp-eio via OAS Provider) *)
   Masc_eio_env.init ~sw ~net ~clock ();
   Discovery_cache.set_env ~sw ~net;
+  (* Refresh llama endpoint list: auto-scan ports 8085-8090 if LLM_ENDPOINTS unset *)
+  let llama_endpoints =
+    Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ()
+  in
+  Log.Server.info "[MASC] Llama endpoints: %s"
+    (String.concat ", " llama_endpoints);
 
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = make_http_config ~host ~port in
@@ -851,7 +857,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       Masc_grpc_server.start ~sw ~env ~room_config:state.room_config
         ~tool_dispatcher;
-      (* Standalone WebSocket transport (opt-in via MASC_WS_ENABLED=1) *)
+      (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
       Server_ws_standalone.start ~sw ~env
         ~on_message:(fun ws_session_id body_str ->
           Eio.Fiber.fork ~sw (fun () ->
@@ -867,7 +873,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn)));
-      (* WebRTC DataChannel transport (opt-in via MASC_WEBRTC_ENABLED=1) *)
+      (* WebRTC DataChannel transport (enabled by default, opt-out via MASC_WEBRTC_ENABLED=0) *)
       if Server_webrtc_transport.is_enabled () then (
         Log.Server.info "WebRTC DataChannel transport enabled";
         Server_webrtc_transport.set_message_handler

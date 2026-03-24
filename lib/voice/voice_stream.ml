@@ -303,7 +303,7 @@ let stop t =
    | Some (Listening_socket socket) ->
      t.server_socket <- None;
      (try Eio.Resource.close socket
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Eio.traceln "[WARN] socket close: %s" (Printexc.to_string exn))
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Transport.warn "socket close: %s" (Printexc.to_string exn))
    | None -> ());
   let clients = Hashtbl.fold (fun _ ic acc -> ic :: acc) t.clients [] in
   List.iter (fun ic -> safe_close_client t ic) clients;

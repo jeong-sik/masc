@@ -124,9 +124,50 @@ let test_default_model_strings_unknown () =
   let models = Oas_worker.default_model_strings ~cascade_name:"nonexistent_cascade_xyz" in
   Alcotest.(check bool) "unknown cascade has fallback" true (models <> [])
 
+(** Test default_config_path with a controlled fixture so the result
+    is deterministic regardless of CWD or ME_ROOT.
+    Creates a temp directory with config/cascade.json, sets ME_ROOT
+    to point there, and verifies the function finds the file. *)
 let test_default_config_path () =
-  let _path = Oas_worker.default_config_path () in
-  Alcotest.(check pass) "default_config_path does not raise" () ()
+  let base = temp_dir "test_config_path" in
+  (* Build the nested directory tree *)
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      Unix.mkdir dir 0o755
+    end
+  in
+  let masc_config_dir = Filename.concat
+    (Filename.concat base "workspace/yousleepwhen/masc-mcp")
+    "config"
+  in
+  mkdir_p masc_config_dir;
+  let cascade_path = Filename.concat masc_config_dir "cascade.json" in
+  let oc = open_out cascade_path in
+  output_string oc "{}";
+  close_out oc;
+  (* Save and override ME_ROOT *)
+  let old_me_root = Sys.getenv_opt "ME_ROOT" in
+  Unix.putenv "ME_ROOT" base;
+  Fun.protect
+    ~finally:(fun () ->
+      (match old_me_root with
+       | Some v -> Unix.putenv "ME_ROOT" v
+       | None ->
+           (* OCaml stdlib has no unsetenv; set to empty string
+              which env_opt treats as absent. *)
+           Unix.putenv "ME_ROOT" "");
+      cleanup_dir base)
+    (fun () ->
+      match Oas_worker.default_config_path () with
+      | Some path ->
+        Alcotest.(check bool) "non-empty path" true (String.length path > 0);
+        Alcotest.(check bool) "path contains separator" true
+          (String.contains path '/');
+        Alcotest.(check bool) "file exists" true (Sys.file_exists path)
+      | None ->
+        Alcotest.fail
+          "default_config_path returned None despite fixture at ME_ROOT")
 
 let test_cascade_names_produce_models () =
   let cascades = [

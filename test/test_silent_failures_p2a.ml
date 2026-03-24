@@ -230,6 +230,36 @@ let test_source_keeper_log_parse () =
     true (file_contains_pattern "lib/dashboard/dashboard_http_keeper_metrics.ml"
       {|keeper log parse:|})
 
+let test_source_native_chain_stream_logging () =
+  check bool "command plane native chain stream has transport logging"
+    true
+    (file_contains_pattern "lib/server/server_command_plane_http_stream.ml"
+       {|native chain stream[%s] session=%s context=%s: %s|}
+     && file_contains_pattern "lib/server/server_command_plane_http_stream.ml"
+          {|context:"telemetry-event"|}
+     && file_contains_pattern "lib/server/server_command_plane_http_stream.ml"
+          {|context:"keepalive-loop"|}
+     && file_contains_pattern "lib/server/server_command_plane_http_stream.ml"
+          {|context:"subscription-setup"|})
+
+let test_source_ws_transport_logging () =
+  check bool "shared websocket transport has send/drop logging"
+    true
+    (file_contains_pattern "lib/server/server_mcp_transport_ws.ml"
+       {|WS %s not delivered for session=%s|}
+     && file_contains_pattern "lib/server/server_mcp_transport_ws.ml"
+          {|WS text send failed for session=%s:|}
+     && file_contains_pattern "lib/server/server_mcp_transport_ws.ml"
+          {|context:"sse-forward"|})
+
+let test_source_ws_standalone_logging () =
+  check bool "standalone websocket transport logs backoff failures"
+    true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|WS standalone backoff sleep failed on port %d|}
+     && file_contains_pattern "lib/server/server_ws_standalone.ml"
+          {|context:"sse-forward"|})
+
 let test_source_trpg_npc_heal () =
   (* trpg_round_fallback.ml archived to archive/trpg/ *)
   check bool "trpg_round_fallback.ml has npc heal logging (archived)"
@@ -266,6 +296,12 @@ let () =
         `Quick test_source_board_pg_vote_migration;
       test_case "MA-M5: keeper log parse logging present"
         `Quick test_source_keeper_log_parse;
+      test_case "MA-M6: native chain stream logging present"
+        `Quick test_source_native_chain_stream_logging;
+      test_case "MA-M6b: websocket transport logging present"
+        `Quick test_source_ws_transport_logging;
+      test_case "MA-M6c: standalone websocket logging present"
+        `Quick test_source_ws_standalone_logging;
       test_case "MA-M7: trpg npc heal logging present"
         `Quick test_source_trpg_npc_heal;
     ];

@@ -181,6 +181,9 @@ let public_mcp_tools =
     "masc_board_comment"; "masc_board_vote";
     (* Agent discovery *)
     "masc_agents"; "masc_dashboard"; "masc_agent_card";
+    (* Transport *)
+    "masc_transport_status"; "masc_websocket_discovery";
+    "masc_webrtc_offer"; "masc_webrtc_answer";
     (* Utility *)
     "masc_tool_help"; "masc_check";
   ]

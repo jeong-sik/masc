@@ -29,6 +29,7 @@ type graph_node = {
   label : string;
   status : string;
   weight : int;
+  semantic_weight : float;
   last_event_at : string;
   meta : Yojson.Safe.t;
 }

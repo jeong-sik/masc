@@ -271,7 +271,7 @@ let get_worker_diff ~base_path (worker : worker_plan) =
       try Process_eio.run_argv ~timeout_sec:15.0 argv
       with
       | Eio.Io _ | Unix.Unix_error _ | Failure _ as exn ->
-        Eio.traceln "code_swarm_plan: git diff --stat failed: %s"
+        Log.CodeSwarm.warn "git diff --stat failed: %s"
           (Printexc.to_string exn);
         ""
     in
@@ -282,7 +282,7 @@ let get_worker_diff ~base_path (worker : worker_plan) =
       try Process_eio.run_argv ~timeout_sec:15.0 argv_full
       with
       | Eio.Io _ | Unix.Unix_error _ | Failure _ as exn ->
-        Eio.traceln "code_swarm_plan: git diff failed: %s"
+        Log.CodeSwarm.warn "git diff failed: %s"
           (Printexc.to_string exn);
         ""
     in
@@ -480,8 +480,8 @@ let merge_workers ~base_path ~plan_id ~strategy ~auto_pr ~build_verify
                         (Process_eio.run_argv ~timeout_sec:10.0 commit_argv)
                     with
                     | Eio.Io _ | Unix.Unix_error _ | Failure _ as exn ->
-                      Eio.traceln
-                        "code_swarm_plan: git rev-parse failed for %s: %s"
+                      Log.CodeSwarm.warn
+                        "git rev-parse failed for %s: %s"
                         worker.worker_id (Printexc.to_string exn);
                       worker.worktree_branch
                   in

@@ -74,6 +74,8 @@ export function App() {
             <div class="flex items-center gap-4">
               <button type="button"
                 class="hidden max-[768px]:flex size-10 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] text-[var(--text-body)] cursor-pointer hover:bg-[rgba(255,255,255,0.1)]"
+                aria-expanded=${mobileMenuOpen.value}
+                aria-label=${mobileMenuOpen.value ? '탐색 메뉴 닫기' : '탐색 메뉴 열기'}
                 onClick=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }}
               >
                 ${mobileMenuOpen.value ? '\u2715' : '\u2630'}
@@ -103,7 +105,7 @@ export function App() {
       </header>
 
       <div class="flex flex-1 gap-2.5 overflow-hidden p-2.5 max-[1100px]:flex-col max-[1100px]:gap-2 max-[1100px]:p-2">
-        <aside class="${sidebarCollapsed.value ? 'w-14' : 'w-[220px]'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[300px] ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+        <aside id="dashboard-side-rail" class="${sidebarCollapsed.value ? 'w-14' : 'w-[220px]'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[300px] ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
           <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
         </aside>
 

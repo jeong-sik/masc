@@ -31,9 +31,7 @@ let configured_port () =
 (** Check whether standalone WS is enabled (default: enabled).
     Disable with MASC_WS_ENABLED=0 or MASC_WS_ENABLED=false. *)
 let is_enabled () =
-  match Sys.getenv_opt "MASC_WS_ENABLED" with
-  | Some "0" | Some "false" -> false
-  | _ -> true
+  Transport_metrics.ws_enabled ()
 
 (** WebSocket handler factory.
 
@@ -48,13 +46,20 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
   in
   Server_mcp_transport_ws.with_sessions_rw (fun () ->
     Hashtbl.replace Server_mcp_transport_ws.sessions session_id session);
+  Transport_metrics.set_ws_sessions
+    (Server_mcp_transport_ws.with_sessions_rw (fun () ->
+       Hashtbl.length Server_mcp_transport_ws.sessions));
   (* Register as SSE external subscriber for broadcast events *)
   Sse.subscribe_external ~id:session_id
     ~is_alive:(fun () ->
       not session.closed && not (Ws.Wsd.is_closed session.wsd))
     ~callback:(fun sse_event ->
-      if not session.closed then
-        ignore (Server_mcp_transport_ws.send_text session sse_event))
+      if not session.closed
+         && not
+              (Server_mcp_transport_ws.send_text_checked ~context:"sse-forward"
+                 session sse_event)
+      then
+        Server_mcp_transport_ws.cleanup_session session_id)
     ();
   Log.Server.info "WebSocket session %s connected (standalone port)" session_id;
   let buf = Buffer.create 4096 in
@@ -133,7 +138,10 @@ let start
           (* Backoff to avoid tight error loops *)
           (try Eio.Time.sleep (Eio.Stdenv.clock env) backoff_s
            with Eio.Cancel.Cancelled _ as e -> raise e
-              | _ -> ());
+              | exn ->
+                  Log.Server.warn
+                    "WS standalone backoff sleep failed on port %d (backoff=%.2fs): %s"
+                    port backoff_s (Printexc.to_string exn));
           let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
           accept_loop next_backoff
       in

@@ -81,6 +81,9 @@ function GovernanceToolbar() {
             <input
               class="w-full rounded-xl border border-card-border bg-card/48 px-3.5 py-2 text-[13px] font-sans text-text-strong placeholder:text-text-dim transition-all duration-200 focus:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50"
               type="text"
+              name="petition_topic"
+              aria-label="청원 제목"
+              autocomplete="off"
               placeholder="청원 제목을 입력하세요..."
               value=${governanceTopicInput.value}
               onInput=${(event: Event) => {

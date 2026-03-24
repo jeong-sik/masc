@@ -600,7 +600,7 @@ let is_voice_server_available ~sw ~clock ~net =
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
-            Eio.traceln "[WARN] voice server check failed: %s"
+            Log.Transport.warn "voice server check failed: %s"
               (Printexc.to_string exn);
             voice_server_available := Some false;
             Ok false

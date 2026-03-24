@@ -188,6 +188,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <input
             type="text"
             class="py-1.5 px-3 border border-[var(--ff-border-subtle)] bg-[var(--ff-navy)] text-[var(--white-90)] text-base w-[200px] rounded transition-colors duration-200 focus:outline-none focus:border-[var(--ff-gold)] focus:shadow-[0_0_0_2px_var(--ff-gold-dim)] placeholder:text-[var(--white-25)]"
+            name="agent_search"
+            aria-label="에이전트 이름 검색"
+            autocomplete="off"
             placeholder="에이전트 이름으로 찾기"
             value=${search}
             onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
@@ -241,12 +244,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           const lastActivityLabel = lastActivity != null ? `${formatDuration(lastActivity)} 전` : '활동 기록 없음'
 
           return html`
-            <div
-              class="group flex flex-col gap-4 p-5 bg-[var(--bg-1)] border border-[var(--card-border)] rounded-2xl hover:border-[var(--accent-soft)] hover:bg-[var(--bg-0)] transition-all duration-200 shadow-sm cursor-pointer"
+            <button type="button"
+              class="group flex w-full flex-col gap-4 p-5 bg-[var(--bg-1)] border border-[var(--card-border)] rounded-2xl hover:border-[var(--accent-soft)] hover:bg-[var(--bg-0)] transition-all duration-200 shadow-sm cursor-pointer text-left"
               key=${agent.name}
+              aria-label=${`${agent.name} 상세 보기`}
               onClick=${() => openAgentDetail(agent.name)}
-              role="button"
-              tabindex="0"
             >
               <div class="flex items-start gap-4">
                 <div class="shrink-0 relative">
@@ -307,7 +309,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </div>
                 ` : null}
               </div>
-            </div>
+            </button>
           `
         })}
         ${filtered.length === 0 ? html`

@@ -125,6 +125,9 @@ export function FullInventoryView({
         <input
           class="w-full px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] focus:border-[var(--accent)]/50 outline-none max-w-[320px]"
           type="text"
+          name="tool_inventory_query"
+          aria-label="도구 인벤토리 검색"
+          autocomplete="off"
           placeholder="도구, 문서, 권한, 대체 도구 검색..."
           value=${searchQuery.value}
           onInput=${(e: Event) => {
@@ -133,6 +136,8 @@ export function FullInventoryView({
         />
         <select
           class="px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] focus:border-[var(--accent)]/50 outline-none"
+          name="tool_inventory_category"
+          aria-label="도구 카테고리 필터"
           value=${categoryFilter.value}
           onChange=${(e: Event) => {
             categoryFilter.value = (e.target as HTMLSelectElement).value
@@ -208,6 +213,7 @@ export function FullInventoryView({
     <button type="button"
       class=${`tool-back-to-top${showBackToTop.value ? ' visible' : ''}`}
       onClick=${scrollToTop}
+      aria-label="목록 맨 위로 이동"
       title="맨 위로"
     >
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none">

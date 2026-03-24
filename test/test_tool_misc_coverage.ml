@@ -32,6 +32,21 @@ let test name f =
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
     exit 1
 
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      (match value_opt with
+      | Some value -> Unix.putenv name value
+      | None -> Unix.putenv name "");
+      f ())
+
 (* Create test context *)
 let test_counter = ref 0
 let make_test_ctx () =
@@ -143,6 +158,121 @@ let () = test "dispatch_cleanup_zombies" (fun () ->
       assert (String.length result > 0)
   | None -> failwith "dispatch returned None"
 )
+
+let () = test "dispatch_transport_status" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [] in
+  match Tool_misc.dispatch ctx ~name:"masc_transport_status" ~args with
+  | Some (success, result) ->
+      assert success;
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.member "http" json <> `Null);
+      assert (Yojson.Safe.Util.member "websocket" json <> `Null);
+      assert (Yojson.Safe.Util.member "webrtc" json <> `Null)
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_websocket_discovery" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [] in
+  match Tool_misc.dispatch ctx ~name:"masc_websocket_discovery" ~args with
+  | Some (success, result) ->
+      assert success;
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.member "enabled" json <> `Null);
+      assert (Yojson.Safe.Util.member "mode" json <> `Null);
+      assert (Yojson.Safe.Util.member "session_count" json <> `Null)
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_webrtc_offer" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc
+      [
+        ("agent_name", `String "offer-agent");
+        ("ice_candidates", `List [ `String "candidate:127.0.0.1:5000" ]);
+        ("dtls_fingerprint", `String "sha-256:AA:BB:CC");
+      ]
+  in
+  match Tool_misc.dispatch ctx ~name:"masc_webrtc_offer" ~args with
+  | Some (success, result) ->
+      assert success;
+      let json = parse_json result in
+      let offer_id = Yojson.Safe.Util.(json |> member "offer_id" |> to_string) in
+      assert (String.length offer_id > 0);
+      ignore (Server_webrtc_transport.cleanup_expired_offers ~max_age_s:0.0 ())
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_webrtc_answer" (fun () ->
+  let ctx = make_test_ctx () in
+  let offer_args =
+    `Assoc
+      [
+        ("agent_name", `String "offer-agent");
+        ("ice_candidates", `List [ `String "candidate:127.0.0.1:5001" ]);
+      ]
+  in
+  let offer_result =
+    match Tool_misc.dispatch ctx ~name:"masc_webrtc_offer" ~args:offer_args with
+    | Some (true, result) -> parse_json result
+    | Some (false, result) -> failwith result
+    | None -> failwith "offer dispatch returned None"
+  in
+  let offer_id =
+    Yojson.Safe.Util.(offer_result |> member "offer_id" |> to_string)
+  in
+  let answer_args =
+    `Assoc
+      [
+        ("offer_id", `String offer_id);
+        ("agent_name", `String "answer-agent");
+        ("ice_candidates", `List [ `String "candidate:127.0.0.1:5002" ]);
+      ]
+  in
+  match Tool_misc.dispatch ctx ~name:"masc_webrtc_answer" ~args:answer_args with
+  | Some (success, result) ->
+      assert success;
+      let json = parse_json result in
+      let peer_id = Yojson.Safe.Util.(json |> member "peer_id" |> to_string) in
+      assert (String.length peer_id > 0);
+      Server_webrtc_transport.remove_peer peer_id
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_webrtc_offer_disabled" (fun () ->
+  with_env "MASC_WEBRTC_ENABLED" (Some "0") (fun () ->
+    let ctx = make_test_ctx () in
+    let args =
+      `Assoc
+        [
+          ("agent_name", `String "offer-agent");
+          ("ice_candidates", `List [ `String "candidate:127.0.0.1:5000" ]);
+        ]
+    in
+    match Tool_misc.dispatch ctx ~name:"masc_webrtc_offer" ~args with
+    | Some (success, result) ->
+        assert (not success);
+        assert (str_contains result "webrtc transport disabled")
+    | None -> failwith "dispatch returned None"))
+
+let () = test "dispatch_webrtc_answer_disabled" (fun () ->
+  with_env "MASC_WEBRTC_ENABLED" (Some "0") (fun () ->
+    let ctx = make_test_ctx () in
+    let args =
+      `Assoc
+        [
+          ("offer_id", `String "offer-1");
+          ("agent_name", `String "answer-agent");
+          ("ice_candidates", `List [ `String "candidate:127.0.0.1:5002" ]);
+        ]
+    in
+    match Tool_misc.dispatch ctx ~name:"masc_webrtc_answer" ~args with
+    | Some (success, result) ->
+        assert (not success);
+        assert (str_contains result "webrtc transport disabled")
+    | None -> failwith "dispatch returned None"))
 
 let () = test "dispatch_tool_admin_snapshot" (fun () ->
   let ctx = make_test_ctx () in

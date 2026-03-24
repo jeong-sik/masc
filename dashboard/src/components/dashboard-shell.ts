@@ -136,6 +136,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         ` : null}
         <button type="button"
           class="flex size-7 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.08)] hover:text-white cursor-pointer transition-all duration-200"
+          aria-label=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
         >

@@ -98,7 +98,7 @@ let test_list_empty () =
   with_temp_home (fun ctx ->
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_list" ~args:(`Assoc []) in
     Alcotest.(check bool) "list ok" true ok;
-    Alcotest.(check bool) "has response" true (String.length msg > 0)
+    Alcotest.(check bool) "response mentions library" true (msg_contains ~needle:"librar" msg)
   )
 
 let test_list_with_candidates () =
@@ -106,7 +106,7 @@ let test_list_with_candidates () =
     let args = `Assoc [("include_candidates", `Bool true)] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_list" ~args in
     Alcotest.(check bool) "list with candidates ok" true ok;
-    Alcotest.(check bool) "has response" true (String.length msg > 0)
+    Alcotest.(check bool) "response mentions library" true (msg_contains ~needle:"librar" msg)
   )
 
 (* ============================================================
@@ -117,7 +117,7 @@ let test_read_empty_topic () =
   with_temp_home (fun ctx ->
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_read" ~args:(`Assoc []) in
     Alcotest.(check bool) "empty topic fails" false ok;
-    Alcotest.(check bool) "has error msg" true (String.length msg > 0)
+    Alcotest.(check bool) "error mentions topic" true (msg_contains ~needle:"topic" msg)
   )
 
 let test_read_nonexistent_topic () =
@@ -125,7 +125,8 @@ let test_read_nonexistent_topic () =
     let args = `Assoc [("topic", `String "nonexistent_topic")] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_read" ~args in
     Alcotest.(check bool) "nonexistent fails" false ok;
-    Alcotest.(check bool) "has error msg" true (String.length msg > 0)
+    Alcotest.(check bool) "error mentions not found" true
+      (msg_contains ~needle:"not found" msg || msg_contains ~needle:"no" msg)
   )
 
 (* ============================================================
@@ -137,7 +138,7 @@ let test_add_missing_title () =
     let args = `Assoc [("content", `String "some content")] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
     Alcotest.(check bool) "missing title fails" false ok;
-    Alcotest.(check bool) "has error msg" true (String.length msg > 0)
+    Alcotest.(check bool) "error mentions title" true (msg_contains ~needle:"title" msg)
   )
 
 let test_add_missing_content () =
@@ -145,7 +146,7 @@ let test_add_missing_content () =
     let args = `Assoc [("title", `String "test doc")] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
     Alcotest.(check bool) "missing content fails" false ok;
-    Alcotest.(check bool) "has error msg" true (String.length msg > 0)
+    Alcotest.(check bool) "error mentions content" true (msg_contains ~needle:"content" msg)
   )
 
 let test_add_invalid_source () =
@@ -170,7 +171,7 @@ let test_add_success () =
     ] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
     Alcotest.(check bool) "add succeeds" true ok;
-    Alcotest.(check bool) "has response" true (String.length msg > 0)
+    Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"librar" msg)
   )
 
 let test_add_low_confidence () =
@@ -182,7 +183,7 @@ let test_add_low_confidence () =
     ] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
     Alcotest.(check bool) "low confidence accepted" true ok;
-    Alcotest.(check bool) "has response" true (String.length msg > 0)
+    Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"librar" msg)
   )
 
 let test_add_with_tags () =
@@ -194,7 +195,7 @@ let test_add_with_tags () =
     ] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
     Alcotest.(check bool) "add with tags" true ok;
-    Alcotest.(check bool) "has response" true (String.length msg > 0)
+    Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"librar" msg)
   )
 
 (* ============================================================
@@ -205,7 +206,7 @@ let test_search_empty_query () =
   with_temp_home (fun ctx ->
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_search" ~args:(`Assoc []) in
     Alcotest.(check bool) "empty query fails" false ok;
-    Alcotest.(check bool) "has error msg" true (String.length msg > 0)
+    Alcotest.(check bool) "error mentions query" true (msg_contains ~needle:"query" msg)
   )
 
 let test_search_with_query () =
@@ -214,7 +215,7 @@ let test_search_with_query () =
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_search" ~args in
     (* Succeeds even with no results *)
     Alcotest.(check bool) "search ok" true ok;
-    Alcotest.(check bool) "has response" true (String.length msg > 0)
+    Alcotest.(check bool) "response is substantive" true (String.length msg > 5)
   )
 
 (* ============================================================
@@ -225,7 +226,7 @@ let test_promote_empty_topic () =
   with_temp_home (fun ctx ->
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_promote" ~args:(`Assoc []) in
     Alcotest.(check bool) "empty topic fails" false ok;
-    Alcotest.(check bool) "has error msg" true (String.length msg > 0)
+    Alcotest.(check bool) "error mentions topic" true (msg_contains ~needle:"topic" msg)
   )
 
 let test_promote_nonexistent () =
@@ -236,7 +237,8 @@ let test_promote_nonexistent () =
     ] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_promote" ~args in
     Alcotest.(check bool) "nonexistent fails" false ok;
-    Alcotest.(check bool) "has error msg" true (String.length msg > 0)
+    Alcotest.(check bool) "error mentions not found" true
+      (msg_contains ~needle:"not found" msg || msg_contains ~needle:"no" msg)
   )
 
 (* ============================================================

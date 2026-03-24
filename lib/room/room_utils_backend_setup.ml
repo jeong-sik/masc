@@ -167,13 +167,13 @@ let env_opt name =
 
 let normalize_postgres_url url =
   let uri = Uri.of_string url in
-  (match Uri.host uri, Uri.port uri with
+  match Uri.host uri, Uri.port uri with
   | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
       Log.Backend.info
-        "Supabase Transaction Pooler detected (port 6543 on %s); Pg_infix will use oneshot queries to avoid prepared-statement errors"
-        host
-  | _ -> ());
-  url
+        "Supabase Transaction Pooler detected (port 6543 on %s); rewriting to Session Pooler port 5432"
+        host;
+      Uri.with_port uri (Some 5432) |> Uri.to_string
+  | _ -> url
 
 let postgres_url_from_env () =
   let raw_url =

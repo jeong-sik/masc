@@ -1292,7 +1292,8 @@ tbody tr:hover {
 /* roster-card: pseudo-elements (::before/::after) require raw CSS */
 
 @utility roster-filter-btn {
-  transition: all 0.15s;
+  transition-property: background-color, color, border-color;
+  transition-duration: 0.15s;
   &:hover { background: var(--ff-gold-dim); color: var(--ff-gold-bright); border-color: var(--color-ff-border); }
   &.active { background: var(--ff-gold-dim); color: var(--ff-gold-bright); border-color: var(--ff-gold); }
 }
@@ -1425,7 +1426,9 @@ tbody tr:hover {
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition-property: background-color, color;
+  transition-duration: 0.15s;
+  transition-timing-function: ease;
   border: none;
   background: transparent;
   white-space: nowrap;
@@ -1509,7 +1512,9 @@ tbody tr:hover {
 
 /* ── Kanban (pseudo-elements require raw CSS) ── */
 .kanban-card {
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition-property: transform, box-shadow, border-color;
+  transition-duration: 0.3s;
+  transition-timing-function: cubic-bezier(0.25, 0.8, 0.25, 1);
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 .kanban-card::before {
@@ -1571,7 +1576,8 @@ tbody tr:hover {
 /* ── Goals ────────────────────────────────────── */
 
 @utility goal-filter-btn {
-  transition: all 0.15s;
+  transition-property: background-color, color, border-color;
+  transition-duration: 0.15s;
   &:hover { background: var(--white-10); color: var(--text-near-white); }
   &.active { background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.4); color: #818cf8; }
 }
@@ -1666,7 +1672,8 @@ button.monitor-row {
 
 /* ── Agents Unified Tab (chip toggle) ────────── */
 @utility agents-chip {
-  transition: all 0.15s;
+  transition-property: color, border-color;
+  transition-duration: 0.15s;
   &:hover { border-color: var(--accent); color: var(--text-strong); }
 }
 

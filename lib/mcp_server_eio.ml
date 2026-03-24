@@ -72,6 +72,7 @@ let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
 let read_only_tools =
   ["masc_status"; "masc_tasks"; "masc_who"; "masc_agents";
    "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
+   "masc_transport_status"; "masc_websocket_discovery";
    "masc_worktree_list"; "masc_pending_interrupts";
    "masc_cost_report"; "masc_portal_status";
    "masc_verify_handoff"; "masc_tool_help";

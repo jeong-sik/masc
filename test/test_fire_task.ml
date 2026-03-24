@@ -139,10 +139,13 @@ let test_task_priority_defaults () =
       ~title:"Default priority task"
       ~priority:3
       ~description:"Fire-and-forget task" in
-    (* Just verify creation succeeds with priority 3 *)
+    (* Verify task exists and priority is reflected in status *)
     let status = Room.status config in
-    check bool "task exists" true
+    check bool "task title in status" true
       (try ignore (Str.search_forward (Str.regexp_string "Default priority task") status 0); true
+       with Not_found -> false);
+    check bool "priority value in status" true
+      (try ignore (Str.search_forward (Str.regexp_string "3") status 0); true
        with Not_found -> false)
   )
 

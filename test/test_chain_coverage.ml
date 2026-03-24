@@ -510,7 +510,13 @@ let test_node_type_to_id_all_types () =
   ] in
   List.iter (fun nt ->
     let id = Chain_mermaid_parser.node_type_to_id nt "fallback" in
-    check bool "non-empty id" true (String.length id > 0)
+    check bool "non-empty id" true (String.length id > 0);
+    (* Verify id contains only valid mermaid node characters *)
+    String.iter (fun c ->
+      let valid = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                  || (c >= '0' && c <= '9') || c = '_' || c = '-' || c = '.' in
+      check bool (Printf.sprintf "valid char '%c' in id %s" c id) true valid
+    ) id
   ) types
 
 (* ============================================================
@@ -536,7 +542,9 @@ let test_escape_truncation () =
 
 let test_node_type_to_text_model () =
   let t = Chain_mermaid_parser.node_type_to_text (Model { model = "m"; system = None; prompt = "p"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false }) in
-  check bool "contains MODEL" true (String.length t > 0)
+  check bool "contains MODEL" true
+    (try ignore (Str.search_forward (Str.regexp_string "MODEL") t 0); true
+     with Not_found -> false)
 
 let test_node_type_to_text_tool_empty () =
   let t = Chain_mermaid_parser.node_type_to_text (Tool { name = "t"; args = `Assoc [] }) in
@@ -544,12 +552,17 @@ let test_node_type_to_text_tool_empty () =
 
 let test_node_type_to_text_tool_args () =
   let t = Chain_mermaid_parser.node_type_to_text (Tool { name = "t"; args = `Assoc [("k", `String "v")] }) in
-  check bool "has base64" true (String.length t > 6)
+  check bool "contains Tool prefix" true
+    (try ignore (Str.search_forward (Str.regexp_string "Tool:") t 0); true
+     with Not_found -> false);
+  check bool "non-trivial output" true (String.length t > 6)
 
 let test_node_type_to_text_model_with_tools () =
   let tools = Some (`List [`String "tool1"; `String "tool2"]) in
   let t = Chain_mermaid_parser.node_type_to_text (Model { model = "m"; system = None; prompt = "p"; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false }) in
-  check bool "has +tools" true (String.length t > 0)
+  check bool "contains tools marker" true
+    (try ignore (Str.search_forward (Str.regexp "tool") t 0); true
+     with Not_found -> false)
 
 (* ============================================================
    11. node_type_to_shape — all variants

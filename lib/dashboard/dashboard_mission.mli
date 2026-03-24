@@ -1,5 +1,7 @@
 val json :
   ?actor:string ->
+  ?command_plane_summary:Yojson.Safe.t ->
+  ?swarm_status:Yojson.Safe.t ->
   config:Room.config ->
   sw:Eio.Switch.t ->
   clock:'a Eio.Time.clock ->
@@ -9,6 +11,8 @@ val json :
 
 val session_json :
   ?actor:string ->
+  ?command_plane_summary:Yojson.Safe.t ->
+  ?swarm_status:Yojson.Safe.t ->
   session_id:string ->
   config:Room.config ->
   sw:Eio.Switch.t ->

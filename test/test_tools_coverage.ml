@@ -60,6 +60,7 @@ let test_schema_has_required_fields () =
     | _ -> Alcotest.fail (Printf.sprintf "%s input_schema is not an object" schema.name)
   ) all_schemas
 
+(* TODO: activate after fixing duplicate schema names in tool registry *)
 let _test_schema_names_are_unique () =
   let names = List.map (fun s -> s.name) all_schemas in
   let unique_names = List.sort_uniq String.compare names in
@@ -988,6 +989,40 @@ let test_masc_get_metrics_schema () =
   | None -> Alcotest.fail "masc_get_metrics not found"
   | Some _ -> ()
 
+let test_masc_transport_status_schema () =
+  match find_tool "masc_transport_status" with
+  | None -> Alcotest.fail "masc_transport_status not found"
+  | Some _ -> ()
+
+let test_masc_websocket_discovery_schema () =
+  match find_tool "masc_websocket_discovery" with
+  | None -> Alcotest.fail "masc_websocket_discovery not found"
+  | Some _ -> ()
+
+let test_masc_webrtc_offer_schema () =
+  match find_tool "masc_webrtc_offer" with
+  | None -> Alcotest.fail "masc_webrtc_offer not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has agent_name" true
+            (List.mem_assoc "agent_name" props);
+          Alcotest.(check bool) "has ice_candidates" true
+            (List.mem_assoc "ice_candidates" props)
+      | None -> Alcotest.fail "masc_webrtc_offer missing properties"
+
+let test_masc_webrtc_answer_schema () =
+  match find_tool "masc_webrtc_answer" with
+  | None -> Alcotest.fail "masc_webrtc_answer not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has offer_id" true
+            (List.mem_assoc "offer_id" props);
+          Alcotest.(check bool) "has agent_name" true
+            (List.mem_assoc "agent_name" props)
+      | None -> Alcotest.fail "masc_webrtc_answer missing properties"
+
 (* ============================================================ *)
 (* 21. Edge Case Tests                                           *)
 (* ============================================================ *)
@@ -1180,6 +1215,12 @@ let () =
       Alcotest.test_case "dashboard" `Quick test_masc_dashboard_schema;
       Alcotest.test_case "agent_fitness" `Quick test_masc_agent_fitness_schema;
       Alcotest.test_case "get_metrics" `Quick test_masc_get_metrics_schema;
+    ];
+    "transport_tools", [
+      Alcotest.test_case "transport_status" `Quick test_masc_transport_status_schema;
+      Alcotest.test_case "websocket_discovery" `Quick test_masc_websocket_discovery_schema;
+      Alcotest.test_case "webrtc_offer" `Quick test_masc_webrtc_offer_schema;
+      Alcotest.test_case "webrtc_answer" `Quick test_masc_webrtc_answer_schema;
     ];
     "edge_cases", [
       Alcotest.test_case "description_not_short" `Quick test_description_not_too_short;

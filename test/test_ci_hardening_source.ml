@@ -290,7 +290,7 @@ let test_dashboard_executor_pool_contracts () =
        "Eio.Executor_pool.submit_exn");
   check bool "mission refresh loop uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config:room_config");
+       "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config");
   check bool "mission actor path uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "run_dashboard_compute ~mode ~sw ~clock");
@@ -304,6 +304,44 @@ let test_dashboard_executor_pool_contracts () =
     (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
        "Server_dashboard_http.set_executor_pool exec_pool")
 
+let test_transport_route_contracts () =
+  check bool "frontend exposes ws discovery route" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
+       {|Http.Router.get "/ws" websocket_discovery_handler|});
+  check bool "frontend exposes webrtc offer route" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
+       {|Http.Router.post "/webrtc/offer"|});
+  check bool "frontend exposes webrtc answer route" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
+       {|Http.Router.post "/webrtc/answer"|});
+  check bool "frontend webrtc routes require tool auth" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
+       "let webrtc_signaling_handler ~tool_name signaling_fn request reqd =\n  with_tool_auth ~tool_name");
+  check bool "h2 gateway exposes webrtc offer route" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|`POST, "/webrtc/offer"|});
+  check bool "h2 gateway exposes webrtc answer route" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|`POST, "/webrtc/answer"|});
+  check bool "h2 gateway webrtc routes enforce tool auth" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|authorize_tool_request
+                ~base_path:state.Mcp_server.room_config.base_path
+                ~tool_name:"masc_webrtc_offer"|});
+  check bool "h2 gateway respects webrtc disabled state" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|Server_webrtc_transport.is_enabled ()|})
+
+let test_transport_health_contracts () =
+  check bool "standalone ws updates transport metrics on connect" true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|Transport_metrics.set_ws_sessions|});
+  check bool "transport metrics ws env parse matches runtime server" true
+    (file_contains_pattern "lib/transport_metrics.ml"
+       {| | "0" | "false" -> false|});
+  check bool "standalone ws reuses transport metrics env parser" true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|Transport_metrics.ws_enabled ()|})
 let test_mermaid_xss_contracts () =
   check bool "mermaid securityLevel is strict (not loose)" true
     (file_contains_pattern "dashboard/src/components/command/helpers.ts"
@@ -331,6 +369,10 @@ let () =
            test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;
            test_case "dashboard executor pool contracts" `Quick
              test_dashboard_executor_pool_contracts;
+           test_case "transport route contracts" `Quick
+             test_transport_route_contracts;
+           test_case "transport health contracts" `Quick
+             test_transport_health_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
          ]);
     ]

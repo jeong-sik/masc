@@ -66,10 +66,13 @@ let current_month_file config agent_id =
   Filename.concat (agent_metrics_dir config agent_id) filename
 
 (** Generate unique metric ID *)
+let metric_counter = Atomic.make 0
+
 let generate_id () =
-  let timestamp = Time_compat.now () in
-  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
-  Printf.sprintf "metric-%d-%05x" (int_of_float (timestamp *. 1000.)) hash
+  Atomic.incr metric_counter;
+  let timestamp_ms = int_of_float (Time_compat.now () *. 1000.) in
+  let sequence = Atomic.get metric_counter in
+  Printf.sprintf "metric-%d-%06d" timestamp_ms sequence
 
 (* Mutex protecting concurrent metric writes within this process.
    Replaces Unix.lockf which blocks the Eio scheduler. *)

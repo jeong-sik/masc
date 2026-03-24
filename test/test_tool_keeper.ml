@@ -367,9 +367,6 @@ let write_jsonl_lines path lines =
    policy_shell_mode, initiative_* removed in #2607. *)
 
 let test_keeper_shell_tool_policy_gates () =
-  (* Mode removal: all keepers get all shell tools unconditionally.
-     keeper_bash is NOT in allowed_tool_names (it's in the denied list via eval_gate).
-     keeper_shell_readonly IS always available. *)
   let heuristic = make_keeper_exec_meta () in
   let learned_disabled =
     make_keeper_exec_meta ~name:"learned-disabled"
@@ -388,17 +385,16 @@ let test_keeper_shell_tool_policy_gates () =
     make_keeper_exec_meta ~name:"deliberation"
       ~policy_mode:"model_deliberation" ()
   in
-  (* All modes produce same result: shell_readonly=true, bash available via shard *)
   check_keeper_shell_tool_presence "heuristic" heuristic
-    ~expect_bash:true ~expect_shell_readonly:true;
+    ~expect_bash:false ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "learned disabled" learned_disabled
-    ~expect_bash:true ~expect_shell_readonly:true;
+    ~expect_bash:false ~expect_shell_readonly:false;
   check_keeper_shell_tool_presence "learned readonly" learned_readonly
-    ~expect_bash:true ~expect_shell_readonly:true;
+    ~expect_bash:false ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "explicit event" explicit_event
-    ~expect_bash:true ~expect_shell_readonly:true;
+    ~expect_bash:false ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "model deliberation" deliberation
-    ~expect_bash:true ~expect_shell_readonly:true
+    ~expect_bash:false ~expect_shell_readonly:true
 
 let test_keeper_shell_readonly_enforces_allowed_paths () =
   Eio_main.run @@ fun _env ->
@@ -548,12 +544,16 @@ let test_keeper_fs_read_enforces_allowed_paths_and_truncation () =
         (contains_substring blocked_error "path_not_in_allowed_paths"))
 
 let test_keeper_bash_requires_cmd_and_runs () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
+      Process_eio.init
+        ~cwd_default:(Eio.Stdenv.fs env)
+        ~proc_mgr:(Eio.Stdenv.process_mgr env)
+        ~clock:(Eio.Stdenv.clock env);
       let meta =
         make_keeper_exec_meta ~policy_mode:"learned_offline_v1"
           ~policy_shell_mode:"coding" ()
@@ -611,19 +611,41 @@ let test_keeper_bash_requires_cmd_and_runs () =
           code <> 0))
 
 let test_keeper_fs_edit_policy_gates () =
-  (* keeper_fs_edit was removed from filesystem shard in #2723 rebalance.
-     It remains as a dispatch-only tool (handled in execute_keeper_tool_call)
-     but is NOT in any shard, so it does NOT appear in allowed_tool_names
-     or allowed_model_tools. Safety is enforced through eval_gate denied_tools. *)
   let heuristic_disabled = make_keeper_exec_meta () in
+  let heuristic_coding =
+    make_keeper_exec_meta ~name:"fs-edit-heuristic"
+      ~policy_shell_mode:"coding" ()
+  in
+  let learned_disabled =
+    make_keeper_exec_meta ~name:"fs-edit-learned-disabled"
+      ~policy_mode:"learned_offline_v1" ()
+  in
   let learned_coding =
     make_keeper_exec_meta ~name:"fs-edit-learned-coding"
       ~policy_mode:"learned_offline_v1"
       ~policy_shell_mode:"coding" ()
   in
-  check_keeper_exec_tool_presence "heuristic fs_edit" heuristic_disabled
+  let explicit_event_coding =
+    make_keeper_exec_meta ~name:"fs-edit-explicit"
+      ~policy_mode:"explicit_event_v1"
+      ~policy_shell_mode:"coding" ()
+  in
+  let deliberation_coding =
+    make_keeper_exec_meta ~name:"fs-edit-deliberation"
+      ~policy_mode:"model_deliberation"
+      ~policy_shell_mode:"coding" ()
+  in
+  check_keeper_exec_tool_presence "heuristic fs_edit default" heuristic_disabled
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
+  check_keeper_exec_tool_presence "heuristic fs_edit coding" heuristic_coding
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
+  check_keeper_exec_tool_presence "learned fs_edit disabled" learned_disabled
     ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
   check_keeper_exec_tool_presence "learned fs_edit coding" learned_coding
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
+  check_keeper_exec_tool_presence "explicit event fs_edit coding" explicit_event_coding
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
+  check_keeper_exec_tool_presence "model deliberation fs_edit coding" deliberation_coding
     ~tool_name:"keeper_fs_edit" ~expect_allowed:false
 
 let test_keeper_fs_edit_enforces_allowed_paths_and_modes () =
@@ -1206,11 +1228,9 @@ let test_keeper_policy_tools_roundtrip () =
       in
       check bool "policy set ok" true ok;
       let policy_json = Yojson.Safe.from_string policy_body in
-      (* Mode removal: canonical_policy_mode always returns "heuristic".
-         The policy_set tool may store the raw value, but status canonicalizes it. *)
-      let _policy_mode_raw =
-        Yojson.Safe.Util.(policy_json |> member "policy_mode" |> to_string) in
-      check bool "policy set returned a mode" true (String.length _policy_mode_raw > 0);
+      check string "policy mode updated" "learned_offline_v1"
+        Yojson.Safe.Util.(policy_json |> member "policy_mode" |> to_string);
+      (* policy_voice_enabled / policy_shell_mode removed from schema in #2607 *)
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc
@@ -1226,7 +1246,7 @@ let test_keeper_policy_tools_roundtrip () =
       in
       check bool "status after policy set ok" true ok;
       let status_json = Yojson.Safe.from_string status_body in
-      check string "status policy mode" "heuristic"
+      check string "status policy mode" "learned_offline_v1"
         Yojson.Safe.Util.(status_json |> member "policy" |> member "mode" |> to_string);
       Masc_mcp.Keeper_types.append_jsonl_line
         (Masc_mcp.Keeper_types.keeper_policy_log_path config "sangsu")
@@ -1388,16 +1408,16 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
          Test checks whichever mode is active. *)
       let voice_enabled =
         Yojson.Safe.Util.(json |> member "voice_enabled" |> to_bool) in
-      (* Mode removal: canonical_policy_mode always returns "heuristic"
-         regardless of voice config. Voice channel is still set correctly. *)
-      check string "policy mode" "heuristic"
-        Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
       if voice_enabled then begin
+        check string "policy mode" "explicit_event_v1"
+          Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
         check string "voice channel" "voice_text"
           Yojson.Safe.Util.(json |> member "voice_channel" |> to_string);
         check string "voice agent id" "sangsu"
           Yojson.Safe.Util.(json |> member "voice_agent_id" |> to_string)
       end else begin
+        check string "policy mode" "heuristic"
+          Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
         check string "voice channel" "text_only"
           Yojson.Safe.Util.(json |> member "voice_channel" |> to_string)
       end;

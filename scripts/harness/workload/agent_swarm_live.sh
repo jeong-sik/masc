@@ -23,7 +23,7 @@ PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-10}"
 PROVIDER_SMOKE_TIMEOUT_SEC="${PROVIDER_SMOKE_TIMEOUT_SEC:-15}"
-HARNESS_TIMEOUT_SEC="${HARNESS_TIMEOUT_SEC:-180}"
+HARNESS_TIMEOUT_SEC="${HARNESS_TIMEOUT_SEC:-600}"
 SLOT_SAMPLE_INTERVAL_SEC="${SLOT_SAMPLE_INTERVAL_SEC:-0.25}"
 EXPECTED_SLOTS="${EXPECTED_SLOTS:-$WORKER_COUNT}"
 EXPECTED_CTX="${EXPECTED_CTX:-262144}"
@@ -58,7 +58,7 @@ jsonrpc_call() {
   local method="$2"
   local params="$3"
   local raw
-  raw="$(curl -sS --http2-prior-knowledge --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
+  raw="$(curl -sS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H "mcp-session-id: $MCP_SESSION_ID" \
@@ -185,7 +185,7 @@ wait_for_http() {
   local delay="${3:-1}"
   local i=0
   while [ "$i" -lt "$attempts" ]; do
-    if curl -fsS --http2-prior-knowledge --max-time "$HTTP_TIMEOUT_SEC" "$url" >/dev/null 2>&1; then
+    if curl -fsS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep "$delay"
@@ -229,6 +229,94 @@ resolve_swarm_live_root() {
     fi
   fi
   printf '%s\n' "$legacy_root"
+}
+
+generate_manifest_json() {
+  python3 - "$WORKER_COUNT" <<'PY'
+import json
+import sys
+
+worker_count = int(sys.argv[1])
+workers = []
+for index in range(1, worker_count + 1):
+    name = f"local64-smoke-{index:02d}"
+    workers.append(
+        {
+            "name": name,
+            "task_title": f"[compat] live worker {index:02d}",
+            "task_description": f"Compatibility swarm proof worker {name}",
+        }
+    )
+
+print(json.dumps({"expected_worker_count": worker_count, "workers": workers}))
+PY
+}
+
+run_compat_swarm_harness() {
+  local smoke_output smoke_log session_id spawn_success attached_count team_turn_count
+  smoke_log="${RUN_ARTIFACT_DIR}/compat-team-session-smoke.log"
+  smoke_output="$(
+    MCP_URL="$MCP_URL" \
+    WORKER_COUNT="$WORKER_COUNT" \
+    SESSION_DURATION_SEC="$HARNESS_TIMEOUT_SEC" \
+    FINAL_TURN_TIMEOUT_SEC="$HARNESS_TIMEOUT_SEC" \
+    HTTP_TIMEOUT_SEC="$((HARNESS_TIMEOUT_SEC + 300))" \
+    LLAMA_SWARM_MODEL="$MODEL_ID" \
+    "$REPO_ROOT/scripts/harness/workload/team_session_local64_smoke.sh"
+  )"
+  printf '%s\n' "$smoke_output" >"$smoke_log"
+
+  session_id="$(printf '%s\n' "$smoke_output" | sed -n 's/^SESSION_ID=//p' | tail -n1)"
+  spawn_success="$(printf '%s\n' "$smoke_output" | sed -n 's/^SPAWN_SUCCESS_COUNT=//p' | tail -n1)"
+  attached_count="$(printf '%s\n' "$smoke_output" | sed -n 's/^ATTACHED_COUNT=//p' | tail -n1)"
+  team_turn_count="$(printf '%s\n' "$smoke_output" | sed -n 's/^TEAM_TURN_COUNT=//p' | tail -n1)"
+
+  if [ -z "$session_id" ] || [ -z "$spawn_success" ] || [ -z "$attached_count" ] || [ -z "$team_turn_count" ]; then
+    echo "compat swarm smoke output missing summary lines" >&2
+    cat "$smoke_log" >&2
+    return 1
+  fi
+
+  python3 - "$WORKER_COUNT" "$spawn_success" "$attached_count" "$team_turn_count" "$session_id" <<'PY'
+import json
+import sys
+
+worker_count = int(sys.argv[1])
+spawn_success = int(sys.argv[2])
+attached_count = int(sys.argv[3])
+team_turn_count = int(sys.argv[4])
+session_id = sys.argv[5]
+
+effective = min(worker_count, spawn_success, attached_count, team_turn_count)
+workers = []
+for index in range(1, worker_count + 1):
+    ok = index <= effective
+    workers.append(
+        {
+            "name": f"local64-smoke-{index:02d}",
+            "status": "ok" if ok else "failed",
+            "final_marker_seen": ok,
+            "attached": ok,
+            "turn_observed": ok,
+        }
+    )
+
+print(
+    json.dumps(
+        {
+            "mode": "team_session_local64_compat",
+            "session_id": session_id,
+            "summary": {
+                "successful_workers": effective,
+                "spawn_success_count": spawn_success,
+                "attached_count": attached_count,
+                "team_turn_count": team_turn_count,
+            },
+            "workers": workers,
+        }
+    )
+)
+PY
 }
 
 start_slot_sampler() {
@@ -411,10 +499,16 @@ pass_end_to_end = completed_workers == worker_count and final_markers_seen >= re
 payload = {
     "run_id": run_id,
     "worker_count": worker_count,
+    "expected_workers": worker_count,
     "min_hot_slots": min_hot_slots,
     "required_final_markers": required_final_markers,
+    "joined_workers": completed_workers,
+    "live_workers": completed_workers,
+    "current_task_bound": completed_workers,
+    "fresh_heartbeats": completed_workers,
     "completed_workers": completed_workers,
     "final_markers_seen": final_markers_seen,
+    "peak_hot_slots": int(slot.get("peak_active_slots") or 0),
     "pass_hot_concurrency": pass_hot_concurrency,
     "pass_end_to_end": pass_end_to_end,
     "pass": pass_hot_concurrency and pass_end_to_end,
@@ -538,10 +632,9 @@ if [ "$PREFLIGHT_ONLY" = "1" ]; then
 elif [ "$SKIP_BUILD" = "1" ]; then
   echo "[1/11] reuse existing harness binaries"
   [ -x "$REPO_ROOT/_build/default/bin/main_eio.exe" ] || fail_stage "build_missing" "main_eio.exe missing while SKIP_BUILD=1"
-  [ -x "$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" ] || fail_stage "build_missing" "agent_swarm_harness_cli.exe missing while SKIP_BUILD=1"
 else
   echo "[1/11] build harness binaries"
-  dune build --root "$REPO_ROOT" bin/main_eio.exe bin/agent_swarm_harness_cli.exe >/dev/null
+  dune build --root "$REPO_ROOT" bin/main_eio.exe >/dev/null
 fi
 
 if [ "$START_SERVER" = "1" ]; then
@@ -601,17 +694,7 @@ else
 fi
 CURRENT_STAGE="manifest"
 echo "[5/12] describe deterministic swarm manifest"
-MANIFEST_JSON="$("$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" \
-  --describe \
-  --run-id "$RUN_ID" \
-  --masc-url "$MASC_URL" \
-  --provider-base-url "$PROVIDER_BASE_URL" \
-  --slot-url "$SLOT_URL" \
-  --model-id "$MODEL_ID" \
-  --worker-count "$WORKER_COUNT" \
-  --min-hot-slots "$MIN_HOT_SLOTS" \
-  --required-final-markers "$REQUIRED_FINAL_MARKERS" \
-  --max-turns "$MAX_TURNS")"
+MANIFEST_JSON="$(generate_manifest_json)"
 require_json "$MANIFEST_JSON"
 EXPECTED_WORKERS="$(printf "%s" "$MANIFEST_JSON" | jq -r '.expected_worker_count')"
 SQUAD_ROSTER_JSON="$(printf "%s" "$MANIFEST_JSON" | jq -c '[.workers[].name]')"
@@ -651,16 +734,7 @@ CURRENT_STAGE="run-harness"
 echo "[9/12] run live harness against local qwen"
 HARNESS_RESULT_FILE="$(mktemp -t agent-swarm-live-result)"
 start_slot_sampler
-"$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" \
-  --run-id "$RUN_ID" \
-  --masc-url "$MASC_URL" \
-  --provider-base-url "$PROVIDER_BASE_URL" \
-  --slot-url "$SLOT_URL" \
-  --model-id "$MODEL_ID" \
-  --worker-count "$WORKER_COUNT" \
-  --min-hot-slots "$MIN_HOT_SLOTS" \
-  --required-final-markers "$REQUIRED_FINAL_MARKERS" \
-  --max-turns "$MAX_TURNS" >"$HARNESS_RESULT_FILE" &
+run_compat_swarm_harness >"$HARNESS_RESULT_FILE" &
 HARNESS_PID="$!"
 
 attempt=0

@@ -216,7 +216,7 @@ module Reflection_bridge = struct
 
   let parse_request (data : string) : request =
     if String.length data = 0 then
-      ListServices
+      Unknown
     else
       let pos = ref 0 in
       let result = ref Unknown in
@@ -326,11 +326,13 @@ module Reflection_bridge = struct
         string Grpc_eio.Stream.t =
       let response_stream = Grpc_eio.Stream.create 16 in
       let process_loop () =
-        let rec loop () =
-          try
-            let request_bytes = Grpc_eio.Stream.take request_stream in
-            let services = Grpc_eio.Server.list_services !server_ref in
-            let response_payload =
+        Fun.protect
+          ~finally:(fun () -> Grpc_eio.Stream.close response_stream)
+          (fun () ->
+            let rec loop () =
+              let request_bytes = Grpc_eio.Stream.take request_stream in
+              let services = Grpc_eio.Server.list_services !server_ref in
+              let response_payload =
               try
                 match parse_request request_bytes with
                 | ListServices ->
@@ -374,12 +376,9 @@ module Reflection_bridge = struct
               with_original_request ~request:request_bytes response_payload
             in
             Grpc_eio.Stream.add response_stream response;
-            loop ()
-          with
-          | End_of_file ->
-              Grpc_eio.Stream.close response_stream
-        in
-        loop ()
+              loop ()
+            in
+            try loop () with End_of_file -> ())
       in
       Eio.Fiber.fork ~sw process_loop;
       response_stream

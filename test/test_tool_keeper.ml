@@ -447,6 +447,102 @@ let test_keeper_shell_readonly_enforces_allowed_paths () =
       check bool "blocked path rejected" true
         (contains_substring error_text "path_not_in_allowed_paths"))
 
+let test_keeper_fs_read_policy_gates () =
+  let heuristic = make_keeper_exec_meta () in
+  let learned_offline =
+    make_keeper_exec_meta ~name:"fs-read-learned"
+      ~policy_mode:"learned_offline_v1" ()
+  in
+  let explicit_event =
+    make_keeper_exec_meta ~name:"fs-read-explicit"
+      ~policy_mode:"explicit_event_v1" ()
+  in
+  let deliberation =
+    make_keeper_exec_meta ~name:"fs-read-deliberation"
+      ~policy_mode:"model_deliberation" ()
+  in
+  check_keeper_exec_tool_presence "heuristic fs_read" heuristic
+    ~tool_name:"keeper_fs_read" ~expect_allowed:true;
+  check_keeper_exec_tool_presence "learned fs_read" learned_offline
+    ~tool_name:"keeper_fs_read" ~expect_allowed:true;
+  check_keeper_exec_tool_presence "explicit event fs_read" explicit_event
+    ~tool_name:"keeper_fs_read" ~expect_allowed:true;
+  check_keeper_exec_tool_presence "model deliberation fs_read" deliberation
+    ~tool_name:"keeper_fs_read" ~expect_allowed:true
+
+let test_keeper_fs_read_enforces_allowed_paths_and_truncation () =
+  Eio_main.run @@ fun _env ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let root_dir =
+        Masc_mcp.Keeper_alerting_path.project_root_of_config config
+        |> Unix.realpath
+      in
+      let allowed_rel = "allowed/note.txt" in
+      let blocked_rel = "blocked/secret.txt" in
+      let allowed_path = Filename.concat root_dir allowed_rel in
+      let blocked_path = Filename.concat root_dir blocked_rel in
+      write_file allowed_path "alpha\nbeta\ngamma\n";
+      write_file blocked_path "should-not-read\n";
+      let meta = make_keeper_exec_meta ~allowed_paths:[ "allowed" ] () in
+      let ctx_work =
+        Masc_mcp.Keeper_exec_context.create ~system_prompt:"test"
+          ~max_tokens:4000
+      in
+      let allowed_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_fs_read"
+          ~input:
+            (`Assoc
+              [
+                ("path", `String allowed_path);
+                ("max_bytes", `Int 512);
+              ])
+        |> parse_json_exn
+      in
+      check bool "fs_read ok" true
+        (require_json_bool_field allowed_json "ok");
+      check bool "fs_read path stays under allowed root" true
+        Yojson.Safe.Util.(
+          allowed_json |> member "path" |> to_string |> fun path ->
+          contains_substring path allowed_rel);
+      check int "fs_read bytes counts full file" 17
+        Yojson.Safe.Util.(allowed_json |> member "bytes" |> to_int);
+      check bool "fs_read not truncated at minimum clamp" false
+        Yojson.Safe.Util.(allowed_json |> member "truncated" |> to_bool);
+      check string "fs_read content preserved" "alpha\nbeta\ngamma\n"
+        Yojson.Safe.Util.(allowed_json |> member "content" |> to_string);
+      let truncated_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_fs_read"
+          ~input:
+            (`Assoc
+              [
+                ("path", `String allowed_path);
+                ("max_bytes", `Int 8);
+              ])
+        |> parse_json_exn
+      in
+      check bool "fs_read truncation clamps to minimum size" false
+        Yojson.Safe.Util.(truncated_json |> member "truncated" |> to_bool);
+      let blocked_json =
+        Masc_mcp.Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work
+          ~name:"keeper_fs_read"
+          ~input:(`Assoc [ ("path", `String blocked_path) ])
+        |> parse_json_exn
+      in
+      let blocked_error =
+        Yojson.Safe.Util.(blocked_json |> member "error" |> to_string)
+      in
+      check bool "fs_read blocked path rejected" true
+        (contains_substring blocked_error "path_not_in_allowed_paths"))
+
 let test_keeper_bash_requires_cmd_and_runs () =
   Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
@@ -1679,6 +1775,10 @@ let () =
            test_keeper_shell_tool_policy_gates;
          test_case "shell readonly enforces allowed paths" `Quick
            test_keeper_shell_readonly_enforces_allowed_paths;
+         test_case "fs_read policy gates" `Quick
+           test_keeper_fs_read_policy_gates;
+         test_case "fs_read enforces allowed paths and truncation" `Quick
+           test_keeper_fs_read_enforces_allowed_paths_and_truncation;
          test_case "keeper bash requires cmd and runs" `Quick
            test_keeper_bash_requires_cmd_and_runs;
          test_case "fs_edit policy gates" `Quick

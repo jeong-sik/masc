@@ -121,11 +121,17 @@ let has_pattern patterns query =
     - 0.50: Default for ambiguous short queries — lowest confidence, routes to Light
       retrieval as a safe middle ground.
 
-    Length thresholds:
-    - <3 chars: Single-word inputs like "hi", "ok", "ㅇㅋ" — conversational by nature.
-    - >50 chars: Empirically, queries above ~50 chars in MASC rooms are usually
+    Length thresholds (byte-based, not character-based):
+    - <3 bytes: ASCII inputs like "hi", "ok", "y" — conversational by nature.
+      Note: Korean jamo like "ㅇㅋ" are 6 bytes in UTF-8, so they bypass this
+      check and fall to pattern matching or the default case.
+    - >50 bytes: Empirically, queries above ~50 bytes in MASC rooms are usually
       asking about procedures, bugs, or domain knowledge rather than issuing commands.
-      This is the weakest heuristic (0.6 confidence reflects that). *)
+      This is the weakest heuristic (0.6 confidence reflects that).
+
+    Known limitation: String.length counts bytes, not Unicode code points.
+    Korean single-syllable inputs (3 bytes each) need at least pattern matching
+    to be classified correctly. See conversational_patterns for Korean coverage. *)
 let classify_intent_heuristic (query : string) : query_intent * float =
   let q = String.trim query in
   let len = String.length q in

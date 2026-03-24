@@ -220,6 +220,38 @@ let test_filesystem_backend_basic () =
       | Ok _ -> ()
       | Error e -> fail (Backend.show_error e))
 
+let test_filesystem_backend_recursive_prefix_get_all () =
+  let cfg = { Backend.default_config with base_path = "/tmp/masc-test-fs-prefix" } in
+  match Backend.FileSystemBackend.create cfg with
+  | Error _ -> fail "Failed to create"
+  | Ok backend ->
+      let writes =
+        [
+          ("team-sessions:ts-1:session.json", "s1");
+          ("team-sessions:ts-1:events.jsonl", "e1");
+          ("team-sessions:ts-2:session.json", "s2");
+          ("mitosis:node-1", "m1");
+        ]
+      in
+      List.iter
+        (fun (key, value) ->
+          match Backend.FileSystemBackend.set backend ~key ~value with
+          | Ok () -> ()
+          | Error e -> fail (Backend.show_error e))
+        writes;
+      (match Backend.FileSystemBackend.list_keys backend ~prefix:"team-sessions:" with
+      | Ok keys ->
+          check int "recursive session keys" 3 (List.length keys);
+          check bool "session key present" true
+            (List.mem "team-sessions:ts-1:session.json" keys)
+      | Error e -> fail (Backend.show_error e));
+      (match Backend.FileSystemBackend.get_all backend ~prefix:"team-sessions:" with
+      | Ok pairs ->
+          check int "recursive session rows" 3 (List.length pairs);
+          check bool "events row present" true
+            (List.mem ("team-sessions:ts-1:events.jsonl", "e1") pairs)
+      | Error e -> fail (Backend.show_error e))
+
 (* Test: error messages *)
 let test_error_messages () =
   check bool "ConnectionFailed" true
@@ -395,6 +427,8 @@ let () =
     "filesystem", [
       test_case "create" `Quick test_filesystem_backend_create;
       test_case "basic ops" `Quick test_filesystem_backend_basic;
+      test_case "recursive prefix get_all" `Quick
+        test_filesystem_backend_recursive_prefix_get_all;
       test_case "atomic set_if_not_exists" `Quick test_filesystem_atomic_set;
       test_case "locking" `Quick test_filesystem_locking;
     ];

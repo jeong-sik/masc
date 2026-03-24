@@ -209,31 +209,91 @@ let append_event config session_id ~(event_type : string) ~(detail : Yojson.Safe
   with_file_lock config path (fun () -> append_text_file path line);
   emit_activity_event config ~session_id ~event_type ~detail
 
+let take_last n lst =
+  if n <= 0 then []
+  else
+    let total = List.length lst in
+    if total <= n then lst
+    else lst |> List.filteri (fun i _ -> i >= total - n)
+
+let parse_event_lines lines =
+  List.filter_map
+    (fun line ->
+      let trimmed = String.trim line in
+      if trimmed = "" then None
+      else
+        match Safe_ops.parse_json_safe ~context:"team_session.events" trimmed with
+        | Ok json -> Some json
+        | Error _ -> None)
+    lines
+
+let read_tail_lines path ~max_bytes ~max_lines =
+  if max_lines <= 0 || max_bytes <= 0 || not (Fs_compat.file_exists path) then
+    []
+  else
+    try
+      let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
+      Fun.protect
+        ~finally:(fun () -> Unix.close fd)
+        (fun () ->
+          let stats = Unix.fstat fd in
+          let file_size = stats.Unix.st_size in
+          if file_size <= 0 then []
+          else
+            let bytes_to_read = min file_size max_bytes in
+            let start_pos = max 0 (file_size - bytes_to_read) in
+            ignore (Unix.lseek fd start_pos Unix.SEEK_SET);
+            let buf = Bytes.create bytes_to_read in
+            let rec read_loop offset remaining =
+              if remaining <= 0 then offset
+              else
+                match Unix.read fd buf offset remaining with
+                | 0 -> offset
+                | n -> read_loop (offset + n) (remaining - n)
+            in
+            let read_len = read_loop 0 bytes_to_read in
+            if read_len <= 0 then []
+            else
+              let chunk = Bytes.sub_string buf 0 read_len in
+              let normalized =
+                if start_pos = 0 then chunk
+                else
+                  match String.index_opt chunk '\n' with
+                  | Some idx ->
+                      String.sub chunk (idx + 1) (String.length chunk - idx - 1)
+                  | None -> ""
+              in
+              normalized
+              |> String.split_on_char '\n'
+              |> List.filter (fun line -> String.trim line <> "")
+              |> take_last max_lines)
+    with
+    | Unix.Unix_error _ | Sys_error _ -> []
+
 let read_events ?max_events config session_id : Yojson.Safe.t list =
   let path = events_jsonl_path config session_id in
   if not (path_exists config path) then
     []
   else
-    (* Read-only: no lock needed. Append-only JSONL is safe for concurrent reads. *)
-    let content = Fs_compat.load_file path in
-    let all_lines = String.split_on_char '\n' content in
-    let parsed =
-      List.filter_map (fun line ->
-        let trimmed = String.trim line in
-        if trimmed = "" then None
-        else
-          match Safe_ops.parse_json_safe ~context:"team_session.events" trimmed with
-          | Ok json -> Some json
-          | Error _ -> None
-      ) all_lines
-    in
     match max_events with
     | Some n when n > 0 ->
-        let total = List.length parsed in
-        if total <= n then parsed
+        let tail_lines =
+          read_tail_lines path
+            ~max_bytes:(max 262_144 (n * 4096))
+            ~max_lines:(n * 3)
+        in
+        let tail_parsed = parse_event_lines tail_lines in
+        if List.length tail_parsed >= n then
+          take_last n tail_parsed
         else
-          parsed |> List.filteri (fun i _ -> i >= total - n)
-    | _ -> parsed
+          (* Fallback for unusually large JSON lines or sparse parseable rows. *)
+          let content = Fs_compat.load_file path in
+          let all_lines = String.split_on_char '\n' content in
+          parse_event_lines all_lines |> take_last n
+    | _ ->
+        let content = Fs_compat.load_file path in
+        let all_lines = String.split_on_char '\n' content in
+        parse_event_lines all_lines
 
 let write_checkpoint config session_id (checkpoint : Team_session_types.checkpoint) =
   let filename = Printf.sprintf "%Ld.json" (Int64.of_float (checkpoint.ts *. 1000.0)) in

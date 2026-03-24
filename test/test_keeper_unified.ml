@@ -89,6 +89,25 @@ let test_prompt_contains_goal () =
        with Not_found -> false
      in has_goal)
 
+let test_prompt_mentions_extend_turns_guidance () =
+  let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
+  check bool "mentions extend_turns" true
+    (let found =
+       try
+         ignore
+           (Str.search_forward (Str.regexp_string "extend_turns") sys 0);
+         true
+       with Not_found -> false
+     in found);
+  check bool "mentions early extension guidance" true
+    (let found =
+       try
+         ignore
+           (Str.search_forward (Str.regexp_string "call extend_turns early") sys 0);
+         true
+       with Not_found -> false
+     in found)
+
 let test_prompt_omits_empty_sections () =
   let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
   check bool "no mention section" true
@@ -255,7 +274,7 @@ let test_unified_turn_runtime_defaults () =
       (KC.keeper_unified_temperature ());
     check int "unified max_tokens default" 2048
       (KC.keeper_unified_max_tokens ());
-    check int "unified max_turns default" 12
+    check int "unified max_turns default" 20
       (KC.keeper_unified_max_turns ()))))
 
 (* ---------- Metrics observation tests ---------- *)
@@ -425,6 +444,8 @@ let () =
         [
           test_case "contains identity" `Quick test_prompt_contains_identity;
           test_case "contains goal" `Quick test_prompt_contains_goal;
+          test_case "mentions extend_turns guidance" `Quick
+            test_prompt_mentions_extend_turns_guidance;
           test_case "omits empty sections" `Quick test_prompt_omits_empty_sections;
           test_case "includes mentions" `Quick test_prompt_includes_mentions_section;
           test_case "includes goals" `Quick test_prompt_includes_goals_section;

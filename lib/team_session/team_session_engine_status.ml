@@ -17,7 +17,7 @@ let generate_and_mark_report ~(config : Room.config)
         ~event_type:"report_generation_failed"
         ~detail:(`Assoc [ ("error", `String e); ("ts_iso", `String (now_iso ())) ])
 
-let summary_json_of_session (config : Room.config)
+let summary_json_of_session ?events (config : Room.config)
     (session : Team_session_types.session) =
   let now = Time_compat.now () in
   let end_time = Option.value session.stopped_at ~default:now in
@@ -31,7 +31,7 @@ let summary_json_of_session (config : Room.config)
   in
   let deltas, done_total = done_delta_metrics config session in
   let seen_agents, active_agents =
-    session_seen_and_live_agent_names config session ~now
+    session_seen_and_live_agent_names ?events config session ~now
   in
   let planned_runtime_actors = Team_session_types.planned_worker_actor_names session in
   let planned_participants = Team_session_types.planned_participant_names session in
@@ -110,10 +110,10 @@ let summary_json_of_session (config : Room.config)
       ( "routing_reason_summary",
         `List (List.map (fun reason -> `String reason) routing_reason_summary) );
       ("controller_tree", controller_tree_json_of_session session);
-      ("lane_health", lane_health_json config session);
+      ("lane_health", lane_health_json ?events config session);
       ("confidence_heatmap", confidence_heatmap_json session);
       ("context_pressure_by_lane", context_pressure_by_lane_json session);
-      ("intervention_counters", controller_intervention_counts config session.session_id);
+      ("intervention_counters", controller_intervention_counts ?events config session.session_id);
       ("room_active_agents", `List (List.map (fun a -> `String a) room_active_agents));
       ( "last_checkpoint_at",
         Option.fold ~none:`Null ~some:(fun v -> `Float v)
@@ -178,11 +178,16 @@ let worker_run_status_json (json : Yojson.Safe.t) =
       ("ts_iso", member "ts_iso" json);
     ]
 
-let status_sections (config : Room.config) (session : Team_session_types.session) =
-  let summary = summary_json_of_session config session in
+let status_sections ?events (config : Room.config) (session : Team_session_types.session) =
+  let events =
+    match events with
+    | Some rows -> rows
+    | None -> Team_session_store.read_events ~max_events:2000 config session.session_id
+  in
+  let summary = summary_json_of_session ~events config session in
   let active_agents =
     let now = Time_compat.now () in
-    session_active_agent_names config session ~now
+    session_active_agent_names ~events config session ~now
   in
   let team_health = team_health_json session active_agents in
   let communication_metrics = communication_metrics_json session in
@@ -191,8 +196,9 @@ let status_sections (config : Room.config) (session : Team_session_types.session
   (summary, team_health, communication_metrics, orchestration_state, cascade_metrics)
 
 let session_status_json (config : Room.config) (session : Team_session_types.session) =
+  let events = Team_session_store.read_events ~max_events:2000 config session.session_id in
   let worker_run_summary =
-    let snapshot = worker_run_event_snapshot config session in
+    let snapshot = worker_run_event_snapshot ~events config session in
     let recent_runs =
       recent_worker_run_meta_jsons config session.session_id
       |> List.fold_left
@@ -232,7 +238,7 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
   in
   let summary, team_health, communication_metrics, orchestration_state,
       cascade_metrics =
-    status_sections config session
+    status_sections ~events config session
   in
   let linked_autoresearch = `Null in
   `Assoc

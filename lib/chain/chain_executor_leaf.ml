@@ -149,8 +149,10 @@ let execute_model_node ctx ~clock ~(exec_fn : exec_fn) ~(node : node) (model : n
             Error (Printf.sprintf "MODEL returned empty response after %d retries" max_empty_retries)
         | Ok output ->
             (* Valid non-empty response *)
-            let prompt_tokens = (String.length prompt_to_use + (match final_system with Some s -> String.length s | None -> 0)) / 4 in
-            let completion_tokens = String.length output / 4 in
+            let prompt_tokens =
+              Agent_sdk.Context_reducer.estimate_char_tokens prompt_to_use
+              + (match final_system with Some s -> Agent_sdk.Context_reducer.estimate_char_tokens s | None -> 0) in
+            let completion_tokens = Agent_sdk.Context_reducer.estimate_char_tokens output in
             let node_tokens = {
               Chain_category.prompt_tokens;
               completion_tokens;

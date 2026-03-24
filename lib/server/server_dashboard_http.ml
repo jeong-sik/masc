@@ -30,12 +30,14 @@ let warm_shell_cache (state : Mcp_server.server_state) =
      Log.Dashboard.warn "shell cache pre-warm failed: %s"
        (Printexc.to_string exn))
 
-let _execution_json_ref : Yojson.Safe.t ref =
-  ref (`Assoc [
-    ("status", `String "initializing");
-    ("generated_at", `String (Types.now_iso ()));
-    ("message", `String "Execution data is being computed. Refresh in a few seconds.");
-  ])
+let _execution_cache =
+  create_cached_surface
+    (`Assoc
+      [
+        ("status", `String "initializing");
+        ("generated_at", `String (Types.now_iso ()));
+        ("message", `String "Execution data is being computed. Refresh in a few seconds.");
+      ])
 
 (** Start the proactive execution refresh loop.  When an Executor_pool
     is available, each refresh runs in a pool domain with a domain-local
@@ -47,14 +49,26 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
   ignore net;
   ignore mono_clock;
   let compute () =
-    run_dashboard_compute ~sw ~clock ~config:room_config
-      (fun ~config ~sw ->
-        Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ())
+    mark_cached_surface_attempt _execution_cache;
+    let started_at = Unix.gettimeofday () in
+    try
+      run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config:room_config
+        (fun ~config ~sw ->
+          Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
+          |> with_projection_diagnostics ~surface:"execution" ~started_at
+               ~extra:
+                 [
+                   ("session_list", Team_session_store.session_list_diagnostics_json ());
+                   ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+                 ])
+    with exn ->
+      mark_cached_surface_error _execution_cache exn;
+      raise exn
   in
   Proactive_refresh.start ~sw ~clock
     ~config:(Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0)
     ~compute
-    ~on_result:(fun json -> _execution_json_ref := json)
+    ~on_result:(mark_cached_surface_success _execution_cache)
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let fixture = query_param request "fixture" in
@@ -64,7 +78,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
   match fixture, actor, full_mode with
   | None, None, false ->
     (* Default light mode: return proactively cached value immediately (0ms). *)
-    !_execution_json_ref
+    cached_surface_json _execution_cache
   | _ ->
     (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
        These are rare (test fixtures, actor-specific views, full mode). *)
@@ -76,12 +90,19 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
       ~clock ~timeout_sec:120.0 (fun () ->
-      run_dashboard_compute ~sw ~clock
+      let started_at = Unix.gettimeofday () in
+      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
         ~config:state.Mcp_server.room_config
         (fun ~config ~sw ->
           Dashboard_execution.json ?actor ?fixture ~light
             ~config ~sw ~clock
-            ~proc_mgr:state.Mcp_server.proc_mgr ()))
+            ~proc_mgr:state.Mcp_server.proc_mgr ()
+          |> with_projection_diagnostics ~surface:"execution" ~started_at
+               ~extra:
+                 [
+                   ("session_list", Team_session_store.session_list_diagnostics_json ());
+                   ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+                 ]))
 
 let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =

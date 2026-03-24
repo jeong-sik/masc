@@ -61,6 +61,56 @@ let proof_json_path config session_id =
 
 let now_iso () = Types.now_iso ()
 
+let _session_list_last_source = Atomic.make "idle"
+let _session_list_last_rows_scanned = Atomic.make 0
+let _session_list_last_rows_parsed = Atomic.make 0
+let _session_list_last_rows_returned = Atomic.make 0
+let _session_list_total_invocations = Atomic.make 0
+let _session_list_last_pg_recent_attempted = Atomic.make false
+let _session_list_last_fallback_reason = Atomic.make ""
+let _session_list_last_error = Atomic.make ""
+let _session_list_last_since_unix = Atomic.make 0.0
+let _session_list_last_limit = Atomic.make 0
+let _session_list_last_query_prefix = Atomic.make ""
+
+let record_session_list_diagnostics ~pg_recent_attempted ~fallback_reason
+    ~last_error ~since_unix ~limit ~query_prefix ~source ~rows_scanned ~rows_parsed
+    ~rows_returned =
+  Atomic.set _session_list_last_source source;
+  Atomic.set _session_list_last_rows_scanned rows_scanned;
+  Atomic.set _session_list_last_rows_parsed rows_parsed;
+  Atomic.set _session_list_last_rows_returned rows_returned;
+  Atomic.set _session_list_last_pg_recent_attempted pg_recent_attempted;
+  Atomic.set _session_list_last_fallback_reason
+    (Option.value ~default:"" fallback_reason);
+  Atomic.set _session_list_last_error (Option.value ~default:"" last_error);
+  Atomic.set _session_list_last_since_unix since_unix;
+  Atomic.set _session_list_last_limit limit;
+  Atomic.set _session_list_last_query_prefix query_prefix;
+  Atomic.fetch_and_add _session_list_total_invocations 1 |> ignore
+
+let session_list_diagnostics_json () =
+  `Assoc
+    [
+      ("source", `String (Atomic.get _session_list_last_source));
+      ("rows_scanned", `Int (Atomic.get _session_list_last_rows_scanned));
+      ("rows_parsed", `Int (Atomic.get _session_list_last_rows_parsed));
+      ("rows_returned", `Int (Atomic.get _session_list_last_rows_returned));
+      ("pg_recent_attempted", `Bool (Atomic.get _session_list_last_pg_recent_attempted));
+      ( "fallback_reason",
+        match String.trim (Atomic.get _session_list_last_fallback_reason) with
+        | "" -> `Null
+        | value -> `String value );
+      ( "last_error",
+        match String.trim (Atomic.get _session_list_last_error) with
+        | "" -> `Null
+        | value -> `String value );
+      ("since_unix", `Float (Atomic.get _session_list_last_since_unix));
+      ("limit", `Int (Atomic.get _session_list_last_limit));
+      ("query_prefix", `String (Atomic.get _session_list_last_query_prefix));
+      ("total_invocations", `Int (Atomic.get _session_list_total_invocations));
+    ]
+
 let ensure_session_dirs config session_id =
   mkdir_p (session_dir config session_id);
   mkdir_p (checkpoints_dir config session_id);
@@ -253,11 +303,37 @@ let read_recent_events config session_id ~max_count :
       session_id (Printexc.to_string exn);
     []
 
+let session_recency_ts (session : Team_session_types.session) =
+  match Resilience.Time.parse_iso8601_opt session.updated_at_iso with
+  | Some ts -> ts
+  | None -> session.started_at
+
+let sort_sessions_by_recency sessions =
+  List.sort
+    (fun (left : Team_session_types.session) (right : Team_session_types.session) ->
+      Float.compare (session_recency_ts right) (session_recency_ts left))
+    sessions
+
+let parse_session_row ~context value =
+  let trimmed = String.trim value in
+  if trimmed = "" then
+    None
+  else
+    match Safe_ops.parse_json_safe ~context trimmed with
+    | Ok json -> Team_session_types.session_of_yojson json
+    | Error _ -> None
+
+let session_query_prefix config =
+  match key_of_path config (sessions_root config) with
+  | Some key when String.trim key <> "" -> key ^ ":"
+  | _ -> "team-sessions:"
+
 (** List sessions, optionally filtering by mtime to avoid loading stale history.
     [~since_unix] skips directories whose mtime is older than the given Unix timestamp.
     [~limit] caps the number of returned sessions (0 = unlimited).
     This turns a 1448-file full scan into loading only active/recent sessions. *)
 let list_sessions ?(since_unix = 0.0) ?(limit = 0) config : Team_session_types.session list =
+  let query_prefix = session_query_prefix config in
   let take_limit lst =
     if limit <= 0 then lst
     else
@@ -268,22 +344,68 @@ let list_sessions ?(since_unix = 0.0) ?(limit = 0) config : Team_session_types.s
       in
       aux [] limit lst
   in
-  match backend_get_all config ~prefix:"team-sessions:" with
-  | Ok pairs ->
-      pairs
+  let pg_recent_attempted, pg_recent_result =
+    match config.backend with
+    | PostgresNative backend when since_unix > 0.0 || limit > 0 ->
+        let row_limit =
+          if limit > 0 then limit
+          else 1000
+        in
+        ( true,
+          Backend.PostgresNative.get_all_matching_recent backend
+            ~prefix:query_prefix ~suffix:":session.json"
+            ~updated_since:(max 0.0 since_unix) ~limit:row_limit )
+    | _ -> (false, Error (Backend.BackendNotSupported "pg recent path unavailable"))
+  in
+  let fallback_reason = ref None in
+  let last_error = ref None in
+  let set_fallback reason err =
+    fallback_reason := Some reason;
+    last_error := Some (Backend.show_error err)
+  in
+  match
+    match pg_recent_result with
+    | Ok rows -> Ok ("pg_recent", rows)
+    | Error err -> (
+        if pg_recent_attempted then
+          Log.Session.warn "list_sessions PG recent fallback: %s"
+            (Backend.show_error err);
+        set_fallback
+          (if pg_recent_attempted then "pg_recent_failed"
+           else "pg_recent_unavailable")
+          err;
+        match backend_get_all config ~prefix:query_prefix with
+        | Ok rows -> Ok ("backend_get_all", rows)
+        | Error err ->
+            set_fallback "backend_get_all_failed" err;
+            Error err)
+  with
+  | Ok (source, pairs) ->
+      let parsed =
+        pairs
       |> List.filter_map (fun (key, value) ->
              if not (String.ends_with ~suffix:":session.json" key) then None
-             else
-               let trimmed = String.trim value in
-               if trimmed = "" then None
-               else
-                 match Safe_ops.parse_json_safe ~context:"list_sessions" trimmed with
-                 | Ok json -> Team_session_types.session_of_yojson json
-                 | Error _ -> None)
-      |> take_limit
-  | Error _ ->
+             else parse_session_row ~context:"list_sessions" value)
+      in
+      let limited =
+        parsed |> sort_sessions_by_recency |> take_limit
+      in
+      record_session_list_diagnostics ~pg_recent_attempted
+        ~fallback_reason:!fallback_reason ~last_error:!last_error ~since_unix ~query_prefix
+        ~limit ~source
+        ~rows_scanned:(List.length pairs)
+        ~rows_parsed:(List.length parsed)
+        ~rows_returned:(List.length limited);
+      limited
+  | Error err ->
+      set_fallback "filesystem_scan" err;
       let root = sessions_root config in
-      if not (path_exists config root) then []
+      if not (path_exists config root) then (
+        record_session_list_diagnostics
+          ~pg_recent_attempted ~fallback_reason:!fallback_reason
+          ~last_error:!last_error ~since_unix ~limit ~query_prefix ~source:"filesystem"
+          ~rows_scanned:0 ~rows_parsed:0 ~rows_returned:0;
+        [])
       else
         let dirs = Sys.readdir root |> Array.to_list in
         let filtered =
@@ -320,13 +442,24 @@ let list_sessions ?(since_unix = 0.0) ?(limit = 0) config : Team_session_types.s
                         !found
                     in
                     has_sub snippet {|"Running"|}
-                    || has_sub snippet {|"Paused"|}
+                || has_sub snippet {|"Paused"|}
                   with Sys_error _ | End_of_file | Eio.Io _ -> false)
               with Unix.Unix_error _ -> true
             ) dirs
         in
-        List.filter_map (fun session_id -> load_session config session_id) filtered
-        |> take_limit
+        let parsed =
+          List.filter_map (fun session_id -> load_session config session_id) filtered
+        in
+        let limited =
+          parsed |> sort_sessions_by_recency |> take_limit
+        in
+        record_session_list_diagnostics ~pg_recent_attempted
+          ~fallback_reason:!fallback_reason ~last_error:!last_error ~since_unix ~query_prefix
+          ~limit ~source:"filesystem"
+          ~rows_scanned:(List.length filtered)
+          ~rows_parsed:(List.length parsed)
+          ~rows_returned:(List.length limited);
+        limited
 
 let update_session config session_id f =
   let path = session_json_path config session_id in

@@ -6,6 +6,13 @@ module Http = Http_server_eio
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
+let pg_env_var_names =
+  [| "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" |]
+
+let force_jsonl_fallback_env () =
+  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
+  Array.iter (fun name -> Unix.putenv name "") pg_env_var_names
+
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in
   let mono_clock = Eio.Stdenv.mono_clock env in
@@ -729,7 +736,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
              Log.Server.error
                "PG init timed out after %.0fs, retrying with JSONL fallback"
                pg_init_timeout;
-             Unix.putenv "MASC_POSTGRES_URL" "";
+             force_jsonl_fallback_env ();
              init_state ())
         else
           init_state ()
@@ -743,11 +750,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in
       Server_dashboard_http.set_executor_pool exec_pool;
       Log.Server.info "Executor_pool created (2 domains) for dashboard";
-      Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
-      Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
-      Server_dashboard_http.start_operator_refresh_loop ~state ~sw ~clock;
       Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
       Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
+      Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
+      Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
+      Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
+      Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
       (* Pre-warm shell cache so the first /dashboard load is instant.
          shell is the only room-truth component without a proactive refresh loop. *)
       Server_dashboard_http.warm_shell_cache state;

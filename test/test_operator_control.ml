@@ -9,6 +9,12 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_snapshot_pending_confirm_summary_tracks_actor_scope;
+          Alcotest.test_case "snapshot caps session recent events" `Quick
+            Test_operator_control_snapshot.test_snapshot_caps_session_recent_events;
+          Alcotest.test_case "snapshot summary view can omit command plane"
+            `Quick
+            Test_operator_control_snapshot
+            .test_snapshot_summary_view_can_omit_command_plane;
           Alcotest.test_case "orchestra room core shape" `Quick
             Test_operator_control_snapshot.test_orchestra_room_core_shape;
           Alcotest.test_case "orchestra session edge and pending signal" `Quick

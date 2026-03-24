@@ -25,6 +25,21 @@ type config = {
 (** Create a config targeting a different scope. Cheap record copy. *)
 let with_scope config scope = { config with scope }
 
+let _domain_local_pg_backend_created = Atomic.make 0
+let _domain_local_pg_backend_failed = Atomic.make 0
+let _domain_local_pg_backend_last_error = Atomic.make ""
+
+let domain_local_pg_backend_diagnostics_json () =
+  `Assoc
+    [
+      ("creations", `Int (Atomic.get _domain_local_pg_backend_created));
+      ("failures", `Int (Atomic.get _domain_local_pg_backend_failed));
+      ( "last_error",
+        match String.trim (Atomic.get _domain_local_pg_backend_last_error) with
+        | "" -> `Null
+        | value -> `String value );
+    ]
+
 (** Create a config with a domain-local PostgresNative backend.
     Use when running in a different Eio domain (e.g., Executor_pool)
     where the main domain's Caqti pool would crash due to Switch
@@ -43,8 +58,12 @@ let with_domain_local_pg_backend ~sw ~net ~clock ~mono_clock config =
       end
     in
     (match Backend.PostgresNative.create_eio_readonly ~sw ~env config.backend_config with
-    | Ok t -> Some { config with backend = PostgresNative t }
+    | Ok t ->
+      Atomic.fetch_and_add _domain_local_pg_backend_created 1 |> ignore;
+      Some { config with backend = PostgresNative t }
     | Error err ->
+      Atomic.fetch_and_add _domain_local_pg_backend_failed 1 |> ignore;
+      Atomic.set _domain_local_pg_backend_last_error (Backend.show_error err);
       Log.Room.warn "Domain-local PG backend failed: %s"
         (Backend.show_error err);
       None)

@@ -164,11 +164,14 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let cwd = Sys.getcwd () in
+  let prompts_dir = Filename.concat cwd "config/prompts" in
   Fun.protect
     ~finally:(fun () ->
       Unix.chdir cwd;
       cleanup_dir base_dir)
     (fun () ->
+      Masc_mcp.Prompt_registry.set_markdown_dir prompts_dir;
+      Masc_mcp.Prompt_defaults.init ();
       Unix.chdir base_dir;
       let keepers_dir = Filename.concat (Filename.concat base_dir "config") "keepers" in
       Fs_compat.mkdir_p keepers_dir;
@@ -282,13 +285,9 @@ initiative_post_ttl_hours = 24
       Alcotest.(check (option (float 0.001))) "last output tokens per sec surfaced"
         (Some 20.0)
         (json |> member "metrics" |> member "last_output_tokens_per_sec" |> to_float_option);
-      (* Prompt registry is empty in test env; source is "missing" not "default" *)
-      let prompt_source =
-        json |> member "prompt" |> member "system_prompt_blocks"
-        |> member "world" |> member "source" |> to_string
-      in
-      Alcotest.(check bool) "prompt block source surfaced" true
-        (prompt_source = "default" || prompt_source = "missing");
+      Alcotest.(check string) "prompt block source surfaced" "file"
+        (json |> member "prompt" |> member "system_prompt_blocks"
+         |> member "world" |> member "source" |> to_string);
       let effective_system_prompt =
         json |> member "prompt" |> member "effective_system_prompt" |> to_string
       in

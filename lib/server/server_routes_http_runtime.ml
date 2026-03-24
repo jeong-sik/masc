@@ -75,18 +75,21 @@ let advertised_host_port request =
 
 let websocket_discovery_json request =
   let (host, _) = advertised_host_port request in
-  let enabled = Server_ws_standalone.is_enabled () in
+  let configured = Server_ws_standalone.is_enabled () in
   let port = Server_ws_standalone.configured_port () in
+  let listening = configured && Mitosis_spawn.port_listening port in
   let base_fields =
     [
-      ("enabled", `Bool enabled);
+      ("enabled", `Bool configured);
+      ("configured", `Bool configured);
+      ("listening", `Bool listening);
       ("mode", `String "standalone");
       ("discovery_path", `String "/ws");
       ("session_count", `Int (Server_mcp_transport_ws.session_count ()));
     ]
   in
   let fields =
-    if enabled then
+    if configured then
       base_fields
       @ [
           ("ws_port", `Int port);
@@ -102,6 +105,9 @@ let transport_json request =
   let base_url = Printf.sprintf "http://%s:%d" host port in
   let grpc_enabled = Masc_grpc_server.is_enabled () in
   let grpc_port = Masc_grpc_server.configured_port () in
+  let grpc_listening =
+    grpc_enabled && Mitosis_spawn.port_listening grpc_port
+  in
   let webrtc_enabled = Server_webrtc_transport.is_enabled () in
   `Assoc
     [
@@ -120,6 +126,8 @@ let transport_json request =
         `Assoc
           ([
              ("enabled", `Bool grpc_enabled);
+             ("configured", `Bool grpc_enabled);
+             ("listening", `Bool grpc_listening);
              ("port", `Int grpc_port);
              ("service", `String Masc_grpc_service.service_name);
              ("health_service", `String Masc_grpc_server.health_service_name);

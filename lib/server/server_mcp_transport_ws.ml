@@ -76,6 +76,8 @@ let cleanup_session session_id =
       session.closed <- true;
       (try Httpun_ws.Wsd.close session.wsd with _ -> ());
       Hashtbl.remove sessions session_id);
+  Transport_metrics.set_ws_sessions
+    (with_sessions_rw (fun () -> Hashtbl.length sessions));
   Sse.unsubscribe_external session_id;
   Log.Server.info "WebSocket session %s closed" session_id
 
@@ -106,6 +108,8 @@ let upgrade_connection
           let session = { id = session_id; wsd; closed = false } in
           with_sessions_rw (fun () ->
             Hashtbl.replace sessions session_id session);
+          Transport_metrics.set_ws_sessions
+            (with_sessions_rw (fun () -> Hashtbl.length sessions));
           (* Register as SSE external subscriber for broadcast events *)
           Sse.subscribe_external ~id:session_id
             ~is_alive:(fun () ->
@@ -182,4 +186,5 @@ let close_all () =
       Hashtbl.fold (fun k _ acc -> k :: acc) sessions [])
   in
   List.iter cleanup_session ids;
+  Transport_metrics.set_ws_sessions 0;
   List.length ids

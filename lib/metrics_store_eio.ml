@@ -65,24 +65,14 @@ let current_month_file config agent_id =
     (tm.Unix.tm_mon + 1) in
   Filename.concat (agent_metrics_dir config agent_id) filename
 
-(** Generate unique metric ID.
-    Use microseconds plus a process-local counter to avoid collisions in
-    tight test loops where time-based hashes can repeat. *)
-let generate_id_counter = Atomic.make 0
-
-let next_generate_id_counter () =
-  let rec loop () =
-    let current = Atomic.get generate_id_counter in
-    let next = if current >= 0xFFFFFF then 0 else current + 1 in
-    if Atomic.compare_and_set generate_id_counter current next then current
-    else loop ()
-  in
-  loop ()
+(** Generate unique metric ID *)
+let metric_counter = Atomic.make 0
 
 let generate_id () =
-  let timestamp_us = Int64.of_float (Unix.gettimeofday () *. 1_000_000.) in
-  let counter = next_generate_id_counter () in
-  Printf.sprintf "metric-%Ld-%06x" timestamp_us counter
+  Atomic.incr metric_counter;
+  let timestamp_ms = int_of_float (Time_compat.now () *. 1000.) in
+  let sequence = Atomic.get metric_counter in
+  Printf.sprintf "metric-%d-%06d" timestamp_ms sequence
 
 (* Mutex protecting concurrent metric writes within this process.
    Replaces Unix.lockf which blocks the Eio scheduler. *)

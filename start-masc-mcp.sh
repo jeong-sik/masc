@@ -5,6 +5,11 @@
 
 set -e
 
+# OCaml GC tuning for multi-keeper concurrency.
+# s=4194304: minor heap 4MB (default 256KB), reduces minor GC frequency ~16x.
+# o=80: major heap overhead 80% (default 120), reduces compaction frequency.
+export OCAMLRUNPARAM="${OCAMLRUNPARAM:-s=4194304,o=80}"
+
 # Optional: load OPAM environment if available (must never be fatal for MCP startup)
 if command -v opam >/dev/null 2>&1; then
     eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true

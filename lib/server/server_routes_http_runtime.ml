@@ -185,6 +185,15 @@ let make_health_json ?(listener = "http/1.1") request =
         shared_pool_injected = shared;
       });
     ("subsystems", Subsystem_health.to_yojson ());
+    ("gc", let s = Gc.stat () in `Assoc [
+      ("minor_collections", `Int s.minor_collections);
+      ("major_collections", `Int s.major_collections);
+      ("compactions", `Int s.compactions);
+      ("heap_words", `Int s.heap_words);
+      ("live_words", `Int s.live_words);
+      ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
+    ]);
+    ("keeper_fibers", `Int (Keeper_keepalive.running_keepers ()));
   ]
 
 (** Health check handler *)

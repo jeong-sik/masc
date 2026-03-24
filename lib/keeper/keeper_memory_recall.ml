@@ -526,7 +526,7 @@ let learned_policy_auto_rules
     guardrail_reason = None;
     reasons =
       [
-        "policy_mode=learned_offline_v1";
+        "policy_mode=heuristic";
         (if compact then "compact_safety_gate=true" else "compact_safety_gate=false");
         (if handoff then "handoff_safety_gate=true" else "handoff_safety_gate=false");
       ];

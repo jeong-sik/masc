@@ -104,10 +104,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       in
       let effective_models =
         if
-          (meta.trigger_mode
+          meta.trigger_mode
            |> Keeper_contract.trigger_mode_of_string
-           |> Keeper_contract.trigger_mode_is_explicit_only)
-          || keeper_policy_mode_is_learned meta
+           |> Keeper_contract.trigger_mode_is_explicit_only
         then
           effective_models
         else maybe_append_keeper_fallback_models effective_models
@@ -119,22 +118,11 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
            Oas_model_resolve.resolve_primary_max_context effective_models
          in
             let base_dir = session_base_dir ctx.config in
-            let policy_mode_learned = keeper_policy_mode_is_learned meta in
-            let effective_no_skill_route = no_skill_route || policy_mode_learned in
+            let effective_no_skill_route = no_skill_route in
             let fallback_skill_route =
-              if policy_mode_learned then
-                {
-                  primary_skill = "policy";
-                  secondary_skills = [];
-                  reason = "learned_offline_v1";
-                }
-              else
-                route_keeper_skill ~soul_profile:meta.soul_profile ~message
+              route_keeper_skill ~soul_profile:meta.soul_profile ~message
             in
-            let skill_selection_mode =
-              if policy_mode_learned then SkillSelectHeuristic
-              else keeper_skill_selection_mode ()
-            in
+            let skill_selection_mode = keeper_skill_selection_mode () in
             let live_worktree_change =
               Worktree_live_context.capture_change_block
                 ~base_path:ctx.config.base_path ~actor_key:meta.name

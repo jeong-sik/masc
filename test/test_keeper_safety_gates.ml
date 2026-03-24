@@ -174,13 +174,12 @@ let test_safe_empty () =
   assert_safe ~msg:"empty string" ""
 
 (* ================================================================ *)
-(* Group 2: Policy Mode Tool Grants                                  *)
+(* Group 2: Mode-free tool grants (mode removal)                     *)
 (* ================================================================ *)
 
-(* Note on canonical_policy_shell_mode:
-   "readonly", "sandboxed", and "coding" are preserved; everything else
-   normalizes to "disabled". Tool grants treat "readonly" and "coding"
-   differently, so the assertions below check the actual policy behavior. *)
+(* Mode removal: all keepers get all tools unconditionally.
+   Only voice (policy_voice_enabled) and write_done remain as gates.
+   Safety is enforced through eval_gate deny lists. *)
 
 let test_write_done_kills_all () =
   let meta = make_meta ~policy_shell_mode:"readonly"
@@ -188,8 +187,8 @@ let test_write_done_kills_all () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names ~write_done:true meta in
   check (list string) "write_done returns empty" [] tools
 
-let test_learned_disabled_mode () =
-  (* learned + disabled: read + coordination + board + governance *)
+let test_all_keepers_get_full_toolset () =
+  (* Any keeper (regardless of mode/shell/profile) gets all tools *)
   let meta = make_meta ~policy_shell_mode:"disabled"
     ~policy_mode:"learned_offline_v1" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
@@ -197,40 +196,27 @@ let test_learned_disabled_mode () =
   check bool "has keeper_read" true (List.mem "keeper_read" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
-  check bool "no keeper_bash" false (List.mem "keeper_bash" tools);
-  check bool "no keeper_fs_edit" false (List.mem "keeper_fs_edit" tools);
-  check bool "no keeper_shell_readonly" false (List.mem "keeper_shell_readonly" tools);
-  check bool "no keeper_voice_speak" false (List.mem "keeper_voice_speak" tools)
-
-let test_learned_readonly_mode () =
-  let meta = make_meta ~policy_shell_mode:"readonly"
-    ~policy_mode:"learned_offline_v1" () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools);
-  check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
-  check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
-  check bool "no keeper_bash" false (List.mem "keeper_bash" tools);
-  check bool "no keeper_fs_edit" false (List.mem "keeper_fs_edit" tools)
+  (* Voice still gated by policy_voice_enabled *)
+  check bool "no keeper_voice_speak (voice disabled)" false
+    (List.mem "keeper_voice_speak" tools)
 
-let test_learned_voice_enabled () =
-  let meta = make_meta ~policy_voice_enabled:true
-    ~policy_mode:"learned_offline_v1" () in
+let test_voice_enabled () =
+  let meta = make_meta ~policy_voice_enabled:true () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_voice_speak" true (List.mem "keeper_voice_speak" tools);
   check bool "has keeper_voice_agent" true (List.mem "keeper_voice_agent" tools)
 
-let test_learned_voice_disabled () =
-  let meta = make_meta ~policy_voice_enabled:false
-    ~policy_mode:"learned_offline_v1" () in
+let test_voice_disabled () =
+  let meta = make_meta ~policy_voice_enabled:false () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "no keeper_voice_speak" false (List.mem "keeper_voice_speak" tools);
   check bool "no keeper_voice_agent" false (List.mem "keeper_voice_agent" tools)
 
-let test_learned_research_profile () =
-  let meta = make_meta ~soul_profile:"research"
-    ~policy_mode:"learned_offline_v1" () in
+let test_all_keepers_have_research_tools () =
+  (* Mode removal: research tools available to all keepers *)
+  let meta = make_meta ~soul_profile:"default" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  (* Research profile adds autoresearch and research_loop tools *)
   let has_any_research = List.exists (fun t ->
     String.length t > 5 &&
     (try ignore (Str.search_forward (Str.regexp_string "research") t 0); true
@@ -238,51 +224,33 @@ let test_learned_research_profile () =
   ) tools in
   check bool "has research tools" true has_any_research
 
-let test_learned_non_research_profile () =
-  let meta = make_meta ~soul_profile:"default"
-    ~policy_mode:"learned_offline_v1" () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  (* Non-research should not have autoresearch tools *)
-  let has_autoresearch = List.exists (fun t ->
-    try ignore (Str.search_forward (Str.regexp_string "autoresearch") t 0); true
-    with Not_found -> false
-  ) tools in
-  check bool "no autoresearch tools" false has_autoresearch
-
 let test_heuristic_mode_tools () =
-  (* Non-learned mode (heuristic) uses keeper_model_tools as base *)
   let meta = make_meta ~policy_mode:"heuristic" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "heuristic returns nonempty tools" true (List.length tools > 0)
 
-let test_learned_readonly_combined_voice () =
-  (* readonly + voice: both shell_readonly and voice tools present *)
-  let meta = make_meta ~policy_shell_mode:"readonly"
-    ~policy_voice_enabled:true ~policy_mode:"learned_offline_v1" () in
+let test_voice_plus_other_tools () =
+  let meta = make_meta ~policy_voice_enabled:true () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has shell_readonly" true (List.mem "keeper_shell_readonly" tools);
   check bool "has voice_speak" true (List.mem "keeper_voice_speak" tools);
   check bool "has board tools" true (List.mem "keeper_board_post" tools)
 
-let test_coding_mode_grants_tools () =
-  (* canonical_policy_shell_mode now recognizes "coding" — grants
-     coding tools plus all lower-tier tools *)
-  let meta = make_meta ~policy_shell_mode:"coding"
-    ~policy_mode:"learned_offline_v1" () in
+let test_all_keepers_have_shell_and_coding () =
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "keeper_shell_readonly included" true (List.mem "keeper_shell_readonly" tools);
   check bool "keeper_fs_read included" true (List.mem "keeper_fs_read" tools);
   check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
 
-let test_sandboxed_mode () =
-  (* "sandboxed" is preserved by canonical but treated same as disabled for tool grants *)
-  let meta = make_meta ~policy_shell_mode:"sandboxed"
-    ~policy_mode:"learned_offline_v1" () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  (* sandboxed != readonly, so no shell_readonly *)
-  check bool "no keeper_shell_readonly" false (List.mem "keeper_shell_readonly" tools);
-  (* sandboxed != coding, so no coding tools *)
-  check bool "no masc_code_write" false (List.mem "masc_code_write" tools)
+let test_all_modes_produce_same_tools () =
+  (* Mode removal: canonical_policy_shell_mode always returns "coding",
+     canonical_policy_mode always returns "heuristic" *)
+  let meta_a = make_meta ~policy_shell_mode:"sandboxed" () in
+  let meta_b = make_meta ~policy_shell_mode:"coding" () in
+  let tools_a = Keeper_exec_tools.keeper_allowed_tool_names meta_a in
+  let tools_b = Keeper_exec_tools.keeper_allowed_tool_names meta_b in
+  check int "same tool count" (List.length tools_a) (List.length tools_b)
 
 (* ================================================================ *)
 (* Group 3: Hooks extract_command_from_input                         *)
@@ -435,16 +403,14 @@ let () =
     ]);
     ("policy_mode_tool_grants", [
       test_case "write_done kills all tools" `Quick test_write_done_kills_all;
-      test_case "learned disabled mode" `Quick test_learned_disabled_mode;
-      test_case "learned readonly mode" `Quick test_learned_readonly_mode;
-      test_case "learned voice enabled" `Quick test_learned_voice_enabled;
-      test_case "learned voice disabled" `Quick test_learned_voice_disabled;
-      test_case "learned research profile" `Quick test_learned_research_profile;
-      test_case "learned non-research profile" `Quick test_learned_non_research_profile;
+      test_case "all keepers get full toolset" `Quick test_all_keepers_get_full_toolset;
+      test_case "voice enabled" `Quick test_voice_enabled;
+      test_case "voice disabled" `Quick test_voice_disabled;
+      test_case "all keepers have research tools" `Quick test_all_keepers_have_research_tools;
       test_case "heuristic mode" `Quick test_heuristic_mode_tools;
-      test_case "readonly + voice combined" `Quick test_learned_readonly_combined_voice;
-      test_case "coding mode grants tools" `Quick test_coding_mode_grants_tools;
-      test_case "sandboxed mode" `Quick test_sandboxed_mode;
+      test_case "voice plus other tools" `Quick test_voice_plus_other_tools;
+      test_case "all keepers have shell and coding" `Quick test_all_keepers_have_shell_and_coding;
+      test_case "all modes produce same tools" `Quick test_all_modes_produce_same_tools;
     ]);
     ("extract_command_from_input", [
       test_case "command key" `Quick test_extract_command_key;

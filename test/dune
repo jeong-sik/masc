@@ -274,6 +274,7 @@
 (test
  (name test_oas_worker)
  (modules test_oas_worker)
+ (ocamlopt_flags (:standard -w -32))
  (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
 
 ; Team Session OAS Bridge tests (Phase C-1: planned_worker -> agent_entry)

@@ -235,10 +235,12 @@ let test_verify_skips_readonly () =
 let test_default_gate_roundtrip () =
   let gate = Tool_misc.keeper_default_gate_config () in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
-  Alcotest.(check bool) "default -> AllowList (strict)"
+  (* Mode removal: allowlist_enabled=false. Safety via denied_tools list.
+     eval_gate_to_oas_guardrails produces DenyList when denied_tools is non-empty. *)
+  Alcotest.(check bool) "default -> DenyList (safety)"
     true
     (match g.tool_filter with
-     | Oas.Guardrails.AllowList names -> List.length names > 0
+     | Oas.Guardrails.DenyList names -> List.length names > 0
      | _ -> false);
   Alcotest.(check (option int)) "default max_tool_calls = 5"
     (Some 5) g.max_tool_calls_per_turn

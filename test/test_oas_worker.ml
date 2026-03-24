@@ -508,7 +508,6 @@ let make_keeper_meta ?(name = "keeper-checkpoint-test")
   with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
-
 let make_oas_checkpoint
     ?(session_id = "trace-keeper-checkpoint")
     ?(created_at = 1000.0)

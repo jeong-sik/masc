@@ -75,6 +75,7 @@ let cleanup_zombies
     let zombie_entries = ref [] in (* (name, path) list *)
     List.iter (fun agents_path ->
       Sys.readdir agents_path |> Array.iter (fun name ->
+        Room_query.safe_yield ();
         if Filename.check_suffix name ".json" then begin
           let path = Filename.concat agents_path name in
           let json = read_json config path in
@@ -249,6 +250,7 @@ let gc config ?(days=7) () =
 
   if Sys.file_exists messages_path then begin
     Sys.readdir messages_path |> Array.iter (fun name ->
+        Room_query.safe_yield ();
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat messages_path name in
         let json = read_json config path in
@@ -360,6 +362,7 @@ let gc config ?(days=7) () =
     let archive_ts_dir = Filename.concat
       (Filename.concat (Filename.concat config.base_path ".masc") "archive") "team-sessions" in
     Sys.readdir ts_root |> Array.iter (fun session_id ->
+        Room_query.safe_yield ();
       let sdir = Filename.concat ts_root session_id in
       if Sys.is_directory sdir then begin
         let sjson = Filename.concat sdir "session.json" in
@@ -447,6 +450,7 @@ let gc config ?(days=7) () =
     let now_f = Time_compat.now () in
     let threshold_sec = float_of_int days *. 86400.0 in
     Sys.readdir rooms_root |> Array.iter (fun room_id ->
+        Room_query.safe_yield ();
       let room_dir = Filename.concat rooms_root room_id in
       if Sys.is_directory room_dir then begin
         (* Find most recent mtime across all files in the room *)
@@ -454,6 +458,7 @@ let gc config ?(days=7) () =
         let rec scan dir =
           (try
             Sys.readdir dir |> Array.iter (fun name ->
+              Room_query.safe_yield ();
               let path = Filename.concat dir name in
               if Sys.is_directory path then scan path
               else

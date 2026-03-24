@@ -174,6 +174,15 @@ let with_dashboard_timeout ~clock compute =
         ("generated_at", `String (Types.now_iso ()));
       ]
 
+let dashboard_active_or_recent_sessions config =
+  let cutoff_unix = Time_compat.now () -. 86400.0 in
+  let cutoff_iso = Dashboard_utils.iso_of_unix cutoff_unix in
+  Team_session_store.list_sessions ~since_unix:cutoff_unix config
+  |> List.filter (fun (session : Team_session_types.session) ->
+         match session.status with
+         | Running | Paused -> true
+         | _ -> session.updated_at_iso >= cutoff_iso)
+
 let attach_projection_diagnostics json diagnostics =
   match json with
   | `Assoc fields -> `Assoc (("projection_diagnostics", diagnostics) :: fields)
@@ -215,16 +224,6 @@ let command_plane_summary_cache_parts ~state =
       in
       (Some (`Assoc (List.remove_assoc "swarm_status" fields)), swarm_status)
   | _ -> (None, None)
-
-let dashboard_active_or_recent_sessions config =
-  let cutoff_unix = Time_compat.now () -. 86400.0 in
-  let cutoff_iso = Dashboard_utils.iso_of_unix cutoff_unix in
-  Team_session_store.list_sessions ~since_unix:cutoff_unix config
-  |> List.filter (fun (session : Team_session_types.session) ->
-         match session.status with
-         | Running | Paused -> true
-         | _ -> session.updated_at_iso >= cutoff_iso)
-
 let dashboard_semantics_http_json () =
   Dashboard_semantics.json ()
 

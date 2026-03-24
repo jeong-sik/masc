@@ -509,20 +509,16 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     else [])
   in
   let command_plane_json = timed "command_plane_json" (fun () ->
-    if not include_command_plane then
-      `Null
-    else if initialized then
+    if initialized && include_command_plane then
       Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
     else
-      `Assoc [])
+      `Null)
   in
   let swarm_status_json =
-    if not include_command_plane then
-      `Null
-    else if initialized then
+    if initialized && include_command_plane then
       Swarm_status.build_json_from_snapshot config command_plane_json
     else
-      Swarm_status.empty_json
+      `Null
   in
   let keeper_names =
     if initialized && include_keepers then

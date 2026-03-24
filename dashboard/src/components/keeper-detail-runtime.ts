@@ -110,16 +110,12 @@ function ToolSection({ title, description, tools, fallback }: { title: string; d
 export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
   const mw = keeper.metrics_window
 
+  // Quality/rate metrics only — raw counts (handoffs, compactions, k2k, etc.)
+  // are authoritative in KpiGrid to avoid duplication.
   const rows: Array<{ label: string; value: string | number }> = [
     { label: 'Model fallback', value: formatPct(typeof mw?.model_fallback_rate === 'number' ? mw.model_fallback_rate : undefined) },
     { label: 'Proactive fallback', value: formatPct(typeof mw?.proactive_fallback_rate === 'number' ? mw.proactive_fallback_rate : undefined) },
     { label: 'Memory pass rate', value: formatPct(typeof mw?.memory_pass_rate === 'number' ? mw.memory_pass_rate : undefined) },
-    { label: 'Handoffs', value: typeof mw?.handoff_count === 'number' ? mw.handoff_count : keeper.handoff_count_total ?? '-' },
-    { label: 'Compactions', value: typeof mw?.compaction_events === 'number' ? mw.compaction_events : keeper.compaction_count ?? '-' },
-    { label: 'Saved tokens', value: typeof mw?.compaction_saved_tokens === 'number' ? mw.compaction_saved_tokens : keeper.last_compaction_saved_tokens ?? '-' },
-    { label: 'K2K events', value: keeper.k2k_count ?? '-' },
-    { label: 'Conv tail', value: keeper.conversation_tail_count ?? '-' },
-    { label: 'Tool calls', value: typeof mw?.tool_call_count === 'number' ? mw.tool_call_count : '-' },
     { label: 'Preview similarity', value: typeof mw?.proactive_preview_similarity_avg === 'number' ? `${(mw.proactive_preview_similarity_avg * 100).toFixed(1)}%` : '-' },
     { label: 'Memory avg score', value: typeof mw?.memory_avg_score === 'number' ? mw.memory_avg_score.toFixed(3) : '-' },
     { label: 'Fallback rate', value: typeof mw?.fallback_rate === 'number' ? `${(mw.fallback_rate * 100).toFixed(1)}%` : '-' },
@@ -186,6 +182,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${SignalRow} label="Cluster" value=${cluster} />
       <${SignalRow} label="Current task" value=${currentTaskLabel} />
       <${SignalRow} label="Skill route" value=${skillRouteLabel} />
+      <${SignalRow} label="Context source" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
 
       <div class="flex justify-end mt-1">
         <button type="button"

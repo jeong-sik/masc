@@ -121,6 +121,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         <${KpiCard}
           label="Tokens"
           value=${formatTokens(keeper.context_tokens)}
+          hint=${keeper.context_max ? `/ ${formatTokens(keeper.context_max)}` : undefined}
         />
         <${KpiCard}
           label="Handoffs"
@@ -183,11 +184,13 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
     </div>`
 }
 
-// ── Field Dictionary ─────────────────────────────────────
+// ── Raw Data (Debug) ─────────────────────────────────────
+// Collapsed-by-default debug dump of all keeper fields.
+// Primary display is handled by Header, KpiGrid, Profile, and Config sections.
 
 const fieldSearch = signal('')
 
-export function FieldDictionary({ keeper }: { keeper: Keeper }) {
+export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   const filter = fieldSearch.value.toLowerCase()
 
   const fields: { title: string; key: string; value: string }[] = [

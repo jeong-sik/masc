@@ -358,8 +358,10 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${PromptBlock} title="Constitution" block=${c.prompt.system_prompt_blocks.constitution} />
     <${PromptBlock} title="World" block=${c.prompt.system_prompt_blocks.world} />
     <${PromptBlock} title="Capabilities" block=${c.prompt.system_prompt_blocks.capabilities} />
-    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-3 mb-0.5">Effective system prompt</div>
-    <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
+    <details class="mt-3">
+      <summary class="cursor-pointer py-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors">View compiled system prompt</summary>
+      <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
+    </details>
   `
 
   return html`
@@ -368,8 +370,8 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${toolbar}
 
       ${'' /* --- Execution (read-only) --- */}
+      ${'' /* Active model is shown in the header badge — not duplicated here */}
       <${SectionHeader} title="Execution" />
-      <${ConfigRow} label="Active model" value=${c.execution.active_model || '--'} />
       <${ConfigRow} label="Shell mode" value=${c.execution.policy_shell_mode || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">Verify</span>
@@ -379,7 +381,10 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Models</div>
         <${ModelList} models=${c.execution.models} />
       </div>
-      ${c.execution.allowed_models.length > 0 ? html`
+      ${'' /* Show allowed_models only when it differs from models */}
+      ${c.execution.allowed_models.length > 0
+        && JSON.stringify(c.execution.allowed_models.slice().sort()) !== JSON.stringify(c.execution.models.slice().sort())
+        ? html`
         <div class="mt-1.5">
           <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Allowed models</div>
           <${ModelList} models=${c.execution.allowed_models} />
@@ -492,14 +497,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="Threshold" value=${(c.handoff.threshold * 100).toFixed(0) + '%'} />
       <${ConfigRow} label="Cooldown" value=${c.handoff.cooldown_sec + 's'} />
 
-      ${'' /* --- Metrics (read-only) --- */}
-      <${SectionHeader} title="Metrics" />
-      <${ConfigRow} label="Generation" value=${String(c.metrics.generation)} />
-      <${ConfigRow} label="Total turns" value=${String(c.metrics.total_turns)} />
+      ${'' /* --- Last Call Performance (read-only) --- */}
+      ${'' /* Totals (generation, turns, tokens, cost, compactions) are in KpiGrid */}
+      <${SectionHeader} title="Last Call Performance" />
       <${ConfigRow} label="Total input tokens" value=${formatTokens(c.metrics.total_input_tokens)} />
       <${ConfigRow} label="Total output tokens" value=${formatTokens(c.metrics.total_output_tokens)} />
-      <${ConfigRow} label="Total tokens" value=${formatTokens(c.metrics.total_tokens)} />
-      <${ConfigRow} label="Total cost" value=${'$' + c.metrics.total_cost_usd.toFixed(4)} />
       <${ConfigRow} label="Last model" value=${c.metrics.last_model_used || '--'} />
       <${ConfigRow} label="Last input tokens" value=${formatTokens(c.metrics.last_input_tokens)} />
       <${ConfigRow} label="Last output tokens" value=${formatTokens(c.metrics.last_output_tokens)} />
@@ -507,7 +509,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="Last latency" value=${formatMaybeNumber(c.metrics.last_latency_ms, 'ms')} />
       <${ConfigRow} label="Last throughput" value=${formatMaybeFloat(c.metrics.last_total_tokens_per_sec, 1, ' tok/s')} />
       <${ConfigRow} label="Last output throughput" value=${formatMaybeFloat(c.metrics.last_output_tokens_per_sec, 1, ' tok/s')} />
-      <${ConfigRow} label="Compactions" value=${String(c.metrics.compaction_count)} />
 
       ${'' /* --- Sources (read-only) --- */}
       <${SectionHeader} title="Sources" />

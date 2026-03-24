@@ -1712,7 +1712,7 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
           policy_mode = "explicit_event_v1";
           presence_keepalive = true;
           proactive = { meta.proactive with enabled = false };
-          last_turn_ts = 0.0;
+          usage = { meta.usage with last_turn_ts = 0.0 };
         }
       in
       (match Masc_mcp.Keeper_types.write_meta config stale_meta with

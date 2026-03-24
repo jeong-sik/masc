@@ -189,7 +189,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                            ("agent_name", `String meta_current.agent_name);
                            ("trace_id", `String meta_current.trace_id);
                            ("generation", `Int meta_current.generation);
-                           ("model_used", `String meta_current.last_model_used);
+                           ("model_used", `String meta_current.usage.last_model_used);
                            ( "usage",
                              `Assoc
                                [
@@ -348,7 +348,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                     active_goal_count = List.length meta_current.active_goal_ids;
                     idle_seconds =
                       (let activity_ts =
-                         max meta_current.last_turn_ts
+                         max meta_current.usage.last_turn_ts
                            meta_current.proactive.last_ts
                        in
                        if activity_ts <= 0.0 then 0

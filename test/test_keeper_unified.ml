@@ -279,13 +279,13 @@ let test_metrics_text_response () =
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:200 result
   in
-  check int "total_turns +1" (minimal_meta.total_turns + 1) updated.total_turns;
+  check int "total_turns +1" (minimal_meta.usage.total_turns + 1) updated.usage.total_turns;
   check int "proactive_count +1"
     (minimal_meta.proactive.count_total + 1) updated.proactive.count_total;
   check int "no autonomous action" minimal_meta.autonomous_action_count
     updated.autonomous_action_count;
-  check int "input tokens" (minimal_meta.total_input_tokens + 100) updated.total_input_tokens;
-  check int "output tokens" (minimal_meta.total_output_tokens + 50) updated.total_output_tokens
+  check int "input tokens" (minimal_meta.usage.total_input_tokens + 100) updated.usage.total_input_tokens;
+  check int "output tokens" (minimal_meta.usage.total_output_tokens + 50) updated.usage.total_output_tokens
 
 let test_metrics_tool_response () =
   let result =
@@ -299,7 +299,7 @@ let test_metrics_tool_response () =
     updated.proactive.count_total;
   check int "autonomous_action +2" (minimal_meta.autonomous_action_count + 2)
     updated.autonomous_action_count;
-  check int "latency_ms" 500 updated.last_latency_ms
+  check int "latency_ms" 500 updated.usage.last_latency_ms
 
 let test_metrics_noop_response () =
   let result =
@@ -313,16 +313,16 @@ let test_metrics_noop_response () =
     updated.proactive.count_total;
   check int "autonomous unchanged" minimal_meta.autonomous_action_count
     updated.autonomous_action_count;
-  check int "total_turns +1" (minimal_meta.total_turns + 1) updated.total_turns
+  check int "total_turns +1" (minimal_meta.usage.total_turns + 1) updated.usage.total_turns
 
 let test_metrics_failure_response () =
   let reason = "Agent run failed: Max turns exceeded (turn 10, limit 10)" in
   let updated =
     UT.update_metrics_from_failure minimal_meta ~latency_ms:250 ~reason
   in
-  check int "total_turns +1" (minimal_meta.total_turns + 1) updated.total_turns;
-  check int "latency recorded" 250 updated.last_latency_ms;
-  check bool "last_turn_ts updated" true (updated.last_turn_ts > 0.0);
+  check int "total_turns +1" (minimal_meta.usage.total_turns + 1) updated.usage.total_turns;
+  check int "latency recorded" 250 updated.usage.last_latency_ms;
+  check bool "last_turn_ts updated" true (updated.usage.last_turn_ts > 0.0);
   check int "proactive count unchanged" minimal_meta.proactive.count_total
     updated.proactive.count_total;
   check bool "failure reason tagged" true

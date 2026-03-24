@@ -6,7 +6,7 @@ open Keeper_types
 
 let active_model_of_meta (m : keeper_meta) : string =
   if String.trim m.active_model <> "" then m.active_model
-  else if m.last_model_used <> "" then m.last_model_used
+  else if m.usage.last_model_used <> "" then m.usage.last_model_used
   else
     let pool = m.allowed_models @ m.models in
     match pool with
@@ -211,7 +211,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     || agent_status_text = "offline"
     || agent_status_text = "inactive"
   then Some "disabled"
-  else if meta.total_turns = 0 && meta.proactive.count_total = 0 then
+  else if meta.usage.total_turns = 0 && meta.proactive.count_total = 0 then
     let keeper_age_s =
       match Resilience.Time.parse_iso8601_opt meta.created_at with
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
@@ -232,8 +232,8 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     | Some _ -> Some "unknown"
     | None ->
         let last_turn_ago_s =
-          if meta.last_turn_ts <= 0.0 then None
-          else Some (max 0.0 (now_ts -. meta.last_turn_ts))
+          if meta.usage.last_turn_ts <= 0.0 then None
+          else Some (max 0.0 (now_ts -. meta.usage.last_turn_ts))
         in
         let last_proactive_ago_s =
           if meta.proactive.last_ts <= 0.0 then None
@@ -271,8 +271,8 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     float_of_int (max 120 (meta.presence_keepalive_sec * 4))
   in
   let last_turn_ago_s =
-    if meta.last_turn_ts <= 0.0 then max_float
-    else max 0.0 (now_ts -. meta.last_turn_ts)
+    if meta.usage.last_turn_ts <= 0.0 then max_float
+    else max 0.0 (now_ts -. meta.usage.last_turn_ts)
   in
   if not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive"
   then "offline"
@@ -285,7 +285,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     match quiet_reason with
     | Some "graphql_error" | Some "model_error" -> "degraded"
     | _ ->
-        if meta.total_turns = 0 && meta.proactive.count_total = 0 then "idle"
+        if meta.usage.total_turns = 0 && meta.proactive.count_total = 0 then "idle"
         else if last_turn_ago_s > float_of_int (max meta.proactive.idle_sec 900)
         then "idle"
         else "healthy"
@@ -481,12 +481,12 @@ let derive_pipeline_stage
   else
     let recency_threshold = 30.0 in
     let turn_ago =
-      if meta.last_turn_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.last_turn_ts
+      if meta.usage.last_turn_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.usage.last_turn_ts
     in
     let compaction_ago =
-      if meta.last_compaction_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.last_compaction_ts
+      if meta.compaction.last_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.compaction.last_ts
     in
     let handoff_ago =
       if meta.last_handoff_ts <= 0.0 then Float.infinity

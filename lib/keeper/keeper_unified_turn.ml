@@ -42,18 +42,20 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   {
     meta with
     updated_at = now_iso ();
-    total_turns = meta.total_turns + 1;
-    total_input_tokens = meta.total_input_tokens + result.usage.input_tokens;
-    total_output_tokens = meta.total_output_tokens + result.usage.output_tokens;
-    total_tokens =
-      meta.total_tokens + Keeper_exec_context.total_tokens result.usage;
-    total_cost_usd = meta.total_cost_usd +. turn_cost;
-    last_turn_ts = now_ts;
-    last_model_used = result.model_used;
-    last_input_tokens = result.usage.input_tokens;
-    last_output_tokens = result.usage.output_tokens;
-    last_total_tokens = Keeper_exec_context.total_tokens result.usage;
-    last_latency_ms = latency_ms;
+    usage = {
+      total_turns = meta.usage.total_turns + 1;
+      total_input_tokens = meta.usage.total_input_tokens + result.usage.input_tokens;
+      total_output_tokens = meta.usage.total_output_tokens + result.usage.output_tokens;
+      total_tokens =
+        meta.usage.total_tokens + Keeper_exec_context.total_tokens result.usage;
+      total_cost_usd = meta.usage.total_cost_usd +. turn_cost;
+      last_turn_ts = now_ts;
+      last_model_used = result.model_used;
+      last_input_tokens = result.usage.input_tokens;
+      last_output_tokens = result.usage.output_tokens;
+      last_total_tokens = Keeper_exec_context.total_tokens result.usage;
+      last_latency_ms = latency_ms;
+    };
     (* Proactive count: any turn that produced text or tools *)
     proactive = { meta.proactive with
       count_total =
@@ -90,9 +92,11 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   {
     meta with
     updated_at = now_iso ();
-    total_turns = meta.total_turns + 1;
-    last_turn_ts = now_ts;
-    last_latency_ms = latency_ms;
+    usage = { meta.usage with
+      total_turns = meta.usage.total_turns + 1;
+      last_turn_ts = now_ts;
+      last_latency_ms = latency_ms;
+    };
     proactive = { meta.proactive with
       last_reason = "unified:error:" ^ String.trim reason;
       last_preview = preview;

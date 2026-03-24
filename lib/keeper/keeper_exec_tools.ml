@@ -222,7 +222,7 @@ let execute_keeper_tool_call
             ("context_tokens", `Int ctx_work.token_count);
             ("context_max", `Int ctx_work.max_tokens);
             ("message_count", `Int (List.length ctx_work.messages));
-            ("last_model_used", `String meta.last_model_used);
+            ("last_model_used", `String meta.usage.last_model_used);
             ( "continuity_state",
               match continuity with
               | None -> `Null

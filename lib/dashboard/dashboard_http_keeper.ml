@@ -37,12 +37,12 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             |> Option.value ~default:0.0
           in
           let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
-          let last_turn_ago_s = if m.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.last_turn_ts in
+          let last_turn_ago_s = if m.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.usage.last_turn_ts in
           let last_handoff_ago_s =
             if m.last_handoff_ts <= 0.0 then 0.0 else now_ts -. m.last_handoff_ts
           in
           let last_compaction_ago_s =
-            if m.last_compaction_ts <= 0.0 then 0.0 else now_ts -. m.last_compaction_ts
+            if m.compaction.last_ts <= 0.0 then 0.0 else now_ts -. m.compaction.last_ts
           in
           let last_proactive_ago_s =
             if m.proactive.last_ts <= 0.0 then 0.0 else now_ts -. m.proactive.last_ts
@@ -51,8 +51,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
              to avoid showing misleading staleness when agent is actually active *)
           let last_activity_ts =
             List.fold_left max 0.0
-              [ m.last_turn_ts; m.proactive.last_ts; m.last_handoff_ts;
-                m.last_compaction_ts; created_ts ]
+              [ m.usage.last_turn_ts; m.proactive.last_ts; m.last_handoff_ts;
+                m.compaction.last_ts; created_ts ]
           in
           let last_activity_ago_s =
             if last_activity_ts <= 0.0 then 0.0 else now_ts -. last_activity_ts
@@ -70,7 +70,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           in
           let primary_model_norm = normalize_model_name primary_model in
           let last_compaction_saved_tokens =
-            max 0 (m.last_compaction_before_tokens - m.last_compaction_after_tokens)
+            max 0 (m.compaction.last_before_tokens - m.compaction.last_after_tokens)
           in
 
           let metrics_store = Keeper_types.keeper_metrics_store config m.name in
@@ -277,9 +277,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 	            | _ -> `Null
 	          in
 	          let summary =
-	            let compact_ratio_gate = m.compaction_ratio_gate in
-	            let compact_message_gate = m.compaction_message_gate in
-	            let compact_token_gate = m.compaction_token_gate in
+	            let compact_ratio_gate = m.compaction.ratio_gate in
+	            let compact_message_gate = m.compaction.message_gate in
+	            let compact_token_gate = m.compaction.token_gate in
               let recent_tool_names =
                 match metrics_window_summary with
                 | `Assoc fields -> (
@@ -385,21 +385,21 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("last_proactive_ago_s", `Float last_proactive_ago_s);
               ("last_activity_ago_s", `Float last_activity_ago_s);
               ("handoff_count_total", `Int trace_history_count);
-              ("total_turns", `Int m.total_turns);
-              ("total_input_tokens", `Int m.total_input_tokens);
-              ("total_output_tokens", `Int m.total_output_tokens);
-              ("total_tokens", `Int m.total_tokens);
-              ("total_cost_usd", `Float m.total_cost_usd);
-              ("last_model_used", `String m.last_model_used);
+              ("total_turns", `Int m.usage.total_turns);
+              ("total_input_tokens", `Int m.usage.total_input_tokens);
+              ("total_output_tokens", `Int m.usage.total_output_tokens);
+              ("total_tokens", `Int m.usage.total_tokens);
+              ("total_cost_usd", `Float m.usage.total_cost_usd);
+              ("last_model_used", `String m.usage.last_model_used);
               ("last_usage", `Assoc [
-                ("input_tokens", `Int m.last_input_tokens);
-                ("output_tokens", `Int m.last_output_tokens);
-                ("total_tokens", `Int m.last_total_tokens);
+                ("input_tokens", `Int m.usage.last_input_tokens);
+                ("output_tokens", `Int m.usage.last_output_tokens);
+                ("total_tokens", `Int m.usage.last_total_tokens);
               ]);
-              ("last_latency_ms", `Int m.last_latency_ms);
-              ("compaction_count", `Int m.compaction_count);
+              ("last_latency_ms", `Int m.usage.last_latency_ms);
+              ("compaction_count", `Int m.compaction.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
-              ("compaction_profile", `String m.compaction_profile);
+              ("compaction_profile", `String m.compaction.profile);
               ("compaction_ratio_gate", `Float compact_ratio_gate);
               ("compaction_message_gate", `Int compact_message_gate);
               ("compaction_token_gate", `Int compact_token_gate);
@@ -527,11 +527,11 @@ let keeper_config_json (config : Room.config) (name : string)
       in
       let compaction =
         `Assoc [
-          ("profile", `String m.compaction_profile);
-          ("ratio_gate", `Float m.compaction_ratio_gate);
-          ("message_gate", `Int m.compaction_message_gate);
-          ("token_gate", `Int m.compaction_token_gate);
-          ("cooldown_sec", `Int m.continuity_compaction_cooldown_sec);
+          ("profile", `String m.compaction.profile);
+          ("ratio_gate", `Float m.compaction.ratio_gate);
+          ("message_gate", `Int m.compaction.message_gate);
+          ("token_gate", `Int m.compaction.token_gate);
+          ("cooldown_sec", `Int m.compaction.cooldown_sec);
         ]
       in
       let proactive =
@@ -554,10 +554,10 @@ let keeper_config_json (config : Room.config) (name : string)
       let metrics =
         `Assoc [
           ("generation", `Int m.generation);
-          ("total_turns", `Int m.total_turns);
-          ("total_tokens", `Int m.total_tokens);
-          ("total_cost_usd", `Float m.total_cost_usd);
-          ("compaction_count", `Int m.compaction_count);
+          ("total_turns", `Int m.usage.total_turns);
+          ("total_tokens", `Int m.usage.total_tokens);
+          ("total_cost_usd", `Float m.usage.total_cost_usd);
+          ("compaction_count", `Int m.compaction.count);
         ]
       in
       let now_ts = Time_compat.now () in

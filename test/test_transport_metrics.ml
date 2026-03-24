@@ -5,6 +5,23 @@ open Alcotest
 
 module TM = Masc_mcp.Transport_metrics
 module Prometheus = Masc_mcp.Prometheus
+module U = Yojson.Safe.Util
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_transport_metrics_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else Unix.unlink path
+  in
+  try rm dir with _ -> ()
 
 (* ============================================================
    Initialization
@@ -102,6 +119,13 @@ let test_grpc_events_delivered () =
     "masc_grpc_events_delivered_total" () in
   check (float 0.01) "grpc events delta" 5.0 (after -. before)
 
+let test_ws_sessions () =
+  TM.init ();
+  TM.set_ws_sessions 4;
+  let v = Prometheus.metric_value_or_zero
+    "masc_ws_sessions_total" () in
+  check (float 0.01) "ws sessions" 4.0 v
+
 (* ============================================================
    Agent Health Metrics
    ============================================================ *)
@@ -129,27 +153,54 @@ let test_agent_stale_counter () =
    ============================================================ *)
 
 let test_transport_health_json () =
+  Eio_main.run @@ fun _env ->
   TM.init ();
-  TM.set_sse_sessions ~kind:"observer" 3;
+  ignore (Masc_mcp.Sse.close_all_clients ());
+  let base_dir = temp_dir () in
+  let config = Masc_mcp.Room.default_config base_dir in
+  ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+  ignore
+    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer "observer-session"
+       ~push:(fun _ -> ()) ~last_event_id:0);
+  ignore
+    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator "coordinator-session"
+       ~push:(fun _ -> ()) ~last_event_id:0);
   TM.set_grpc_active_streams 1;
-  let json = TM.transport_health_json () in
-  let s = Yojson.Safe.to_string json in
-  check bool "contains sse section" true
-    (try
-       let _ = Str.search_forward (Str.regexp_string "\"sse\"") s 0 in true
-     with Not_found -> false);
-  check bool "contains grpc section" true
-    (try
-       let _ = Str.search_forward (Str.regexp_string "\"grpc\"") s 0 in true
-     with Not_found -> false);
-  check bool "contains agent_health section" true
-    (try
-       let _ = Str.search_forward (Str.regexp_string "\"agent_health\"") s 0 in true
-     with Not_found -> false);
-  check bool "contains generated_at" true
-    (try
-       let _ = Str.search_forward (Str.regexp_string "\"generated_at\"") s 0 in true
-     with Not_found -> false)
+  TM.set_grpc_subscribers 2;
+  Masc_mcp.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
+  let json = TM.transport_health_json ~config in
+  let sse_json = json |> U.member "sse" in
+  let grpc_json = json |> U.member "grpc" in
+  let ws_json = json |> U.member "websocket" in
+  let webrtc_json = json |> U.member "webrtc" in
+  let cluster_json = json |> U.member "cluster" in
+  let summary_json = json |> U.member "summary" in
+  check int "observer sessions" 1
+    (sse_json |> U.member "sessions_observer" |> U.to_int);
+  check int "coordinator sessions" 1
+    (sse_json |> U.member "sessions_coordinator" |> U.to_int);
+  check bool "queue depth reflects queued event" true
+    ((sse_json |> U.member "queue_max_depth" |> U.to_int) > 0);
+  check bool "hot sessions are reported" true
+    ((sse_json |> U.member "hot_sessions" |> U.to_list |> List.length) > 0);
+  check int "grpc active streams" 1
+    (grpc_json |> U.member "active_streams" |> U.to_int);
+  check int "grpc subscribers" 2
+    (grpc_json |> U.member "subscribers" |> U.to_int);
+  check bool "grpc listening field exists" true
+    (match grpc_json |> U.member "listening" with `Bool _ -> true | _ -> false);
+  check bool "websocket listening field exists" true
+    (match ws_json |> U.member "listening" with `Bool _ -> true | _ -> false);
+  check bool "websocket section exists" true
+    (match ws_json with `Assoc _ -> true | _ -> false);
+  check bool "webrtc section exists" true
+    (match webrtc_json with `Assoc _ -> true | _ -> false);
+  check string "room id" "default"
+    (cluster_json |> U.member "room_id" |> U.to_string);
+  check bool "summary primary path exists" true
+    (String.length (summary_json |> U.member "primary_path" |> U.to_string) > 0);
+  ignore (Masc_mcp.Sse.close_all_clients ());
+  cleanup_dir base_dir
 
 (* ============================================================
    Test Runner
@@ -170,6 +221,9 @@ let () =
       test_case "observe_grpc_heartbeat_latency" `Quick test_grpc_heartbeat_latency;
       test_case "set_grpc_subscribers" `Quick test_grpc_subscribers;
       test_case "inc_grpc_events_delivered" `Quick test_grpc_events_delivered;
+    ]);
+    ("websocket", [
+      test_case "set_ws_sessions" `Quick test_ws_sessions;
     ]);
     ("agent_health", [
       test_case "set_agent_heartbeat_age" `Quick test_agent_heartbeat_age;

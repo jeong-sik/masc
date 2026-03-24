@@ -85,6 +85,84 @@ let with_registry_ro f =
   try Eio.Mutex.use_ro registry_mutex f
   with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
+type session_snapshot = {
+  session_id : string;
+  kind : session_kind;
+  queue_depth : int;
+  last_event_id : int;
+  idle_seconds : float;
+}
+
+let session_kind_to_string = function
+  | Observer -> "observer"
+  | Coordinator -> "coordinator"
+
+let take n xs =
+  let rec loop acc remaining items =
+    match (remaining, items) with
+    | remaining, _ when remaining <= 0 -> List.rev acc
+    | _, [] -> List.rev acc
+    | remaining, x :: rest -> loop (x :: acc) (remaining - 1) rest
+  in
+  loop [] n xs
+
+let sync_transport_snapshot () =
+  let now = Time_compat.now () in
+  let snapshot =
+    with_registry_ro (fun () ->
+      Hashtbl.fold (fun sid client acc -> (sid, client) :: acc) clients [])
+  in
+  let observer = ref 0 in
+  let coordinator = ref 0 in
+  let queue_sum = ref 0 in
+  let max_queue_depth = ref 0 in
+  let sessions =
+    List.map
+      (fun (session_id, client) ->
+        let queue_depth = Eio.Stream.length client.event_stream in
+        queue_sum := !queue_sum + queue_depth;
+        max_queue_depth := max !max_queue_depth queue_depth;
+        (match client.kind with
+         | Observer -> incr observer
+         | Coordinator -> incr coordinator);
+        {
+          session_id;
+          kind = client.kind;
+          queue_depth;
+          last_event_id = client.last_event_id;
+          idle_seconds = max 0.0 (now -. client.last_seen_at);
+        })
+      snapshot
+  in
+  let total_sessions = List.length sessions in
+  let avg_depth =
+    if total_sessions = 0 then 0.0
+    else float_of_int !queue_sum /. float_of_int total_sessions
+  in
+  let hot_sessions =
+    sessions
+    |> List.sort (fun left right ->
+         let by_queue = compare right.queue_depth left.queue_depth in
+         if by_queue <> 0 then by_queue
+         else
+           let by_idle = Float.compare right.idle_seconds left.idle_seconds in
+           if by_idle <> 0 then by_idle
+           else String.compare left.session_id right.session_id)
+    |> take 3
+    |> List.map (fun (session : session_snapshot) ->
+         {
+           Transport_metrics.session_id = session.session_id;
+           kind = session_kind_to_string session.kind;
+           queue_depth = session.queue_depth;
+           last_event_id = session.last_event_id;
+           idle_seconds = session.idle_seconds;
+         })
+  in
+  Transport_metrics.set_sse_sessions ~kind:"observer" !observer;
+  Transport_metrics.set_sse_sessions ~kind:"coordinator" !coordinator;
+  Transport_metrics.set_sse_queue_snapshot ~avg_depth
+    ~max_depth:!max_queue_depth ~hot_sessions
+
 let mark_seen (client : client) =
   client.last_seen_at <- Time_compat.now ()
 
@@ -155,7 +233,8 @@ let next_id () =
     capacity.  ID generation + add are atomic under [registry_mutex].
     [kind] defaults to [Coordinator] for backward compatibility. *)
 let register ?(kind = Coordinator) session_id ~push ~last_event_id =
-  with_registry_rw (fun () ->
+  let result =
+    with_registry_rw (fun () ->
     (* Evict oldest if at capacity *)
     let evicted =
       if Hashtbl.length clients >= max_clients then
@@ -190,25 +269,37 @@ let register ?(kind = Coordinator) session_id ~push ~last_event_id =
     Hashtbl.replace clients session_id client;
     if not was_present then Atomic.incr client_count_atomic;
     (client.id, client.event_stream, evicted))
+  in
+  sync_transport_snapshot ();
+  result
 
 (** Unregister an SSE client *)
 let unregister session_id =
-  with_registry_rw (fun () ->
+  let removed =
+    with_registry_rw (fun () ->
     if Hashtbl.mem clients session_id then begin
       Hashtbl.remove clients session_id;
-      Atomic.decr client_count_atomic
-    end)
+      Atomic.decr client_count_atomic;
+      true
+    end else
+      false)
+  in
+  if removed then sync_transport_snapshot ()
 
 (** Unregister only if the current client matches the given client_id.
     Prevents an old connection's cleanup from unregistering a newer connection
     that re-used the same session_id. *)
 let unregister_if_current session_id client_id =
-  with_registry_rw (fun () ->
+  let removed =
+    with_registry_rw (fun () ->
     match Hashtbl.find_opt clients session_id with
     | Some client when client.id = client_id ->
         Hashtbl.remove clients session_id;
-        Atomic.decr client_count_atomic
-    | _ -> ())
+        Atomic.decr client_count_atomic;
+        true
+    | _ -> false)
+  in
+  if removed then sync_transport_snapshot ()
 
 (** Check if client exists *)
 let exists session_id =
@@ -275,6 +366,9 @@ let with_ext_sub_ro f =
   try Eio.Mutex.use_ro ext_sub_mutex f
   with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
+let current_external_subscriber_count () =
+  with_ext_sub_ro (fun () -> Hashtbl.length external_subscribers)
+
 (** Register an external subscriber that receives formatted SSE events
     on every broadcast.  The [callback] must not block (use best-effort).
 
@@ -285,17 +379,18 @@ let subscribe_external ~id ~callback ?(is_alive = fun () -> true) () =
   with_ext_sub_rw (fun () ->
     if Hashtbl.mem external_subscribers id then
       Log.Misc.warn "External subscriber %s replaced (duplicate ID)" id;
-    Hashtbl.replace external_subscribers id { sub_id = id; callback; is_alive })
+    Hashtbl.replace external_subscribers id { sub_id = id; callback; is_alive });
+  Transport_metrics.set_sse_external_subscribers (current_external_subscriber_count ())
 
 (** Remove a previously registered external subscriber. *)
 let unsubscribe_external id =
   with_ext_sub_rw (fun () ->
-    Hashtbl.remove external_subscribers id)
+    Hashtbl.remove external_subscribers id);
+  Transport_metrics.set_sse_external_subscribers (current_external_subscriber_count ())
 
 (** Number of external subscribers (for diagnostics). *)
 let external_subscriber_count () =
-  with_ext_sub_ro (fun () ->
-    Hashtbl.length external_subscribers)
+  current_external_subscriber_count ()
 
 (** Fan out an event string to all external subscribers.
     Dead subscribers (where [is_alive] returns [false]) are automatically
@@ -323,7 +418,8 @@ let notify_external_subscribers event =
     List.iter (fun id ->
       with_ext_sub_rw (fun () -> Hashtbl.remove external_subscribers id);
       Log.Misc.info "Auto-removed dead external subscriber: %s" id
-    ) !dead
+    ) !dead;
+    Transport_metrics.set_sse_external_subscribers (current_external_subscriber_count ())
   end
 
 (** Actively reap dead external subscribers.
@@ -346,6 +442,8 @@ let reap_dead_external_subscribers () =
       with_ext_sub_rw (fun () -> Hashtbl.remove external_subscribers id);
       Log.Misc.info "Reaped dead external subscriber: %s" id
     ) !dead;
+  if !dead <> [] then
+    Transport_metrics.set_sse_external_subscribers (current_external_subscriber_count ());
   List.length !dead
 
 (** Internal broadcast implementation shared by [broadcast] and [broadcast_to].
@@ -393,6 +491,7 @@ let broadcast_impl target json =
   (* Record broadcast duration for transport observability *)
   let elapsed = Time_compat.now () -. t0 in
   Transport_metrics.observe_broadcast_duration elapsed;
+  sync_transport_snapshot ();
   (* Notify external subscribers (gRPC streams, etc.) *)
   notify_external_subscribers event
 
@@ -422,7 +521,8 @@ let send_to session_id json =
       (try
         Eio.Stream.add client.event_stream event;
         client.last_event_id <- current_event_id;
-        client.last_seen_at <- Time_compat.now ()
+        client.last_seen_at <- Time_compat.now ();
+        sync_transport_snapshot ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | e ->
@@ -485,6 +585,7 @@ let close_all_clients () =
       Atomic.set client_count_atomic 0;
       ss)
   in
+  sync_transport_snapshot ();
   List.length sessions
 
 (** Remove clients idle longer than max_age_s (default 30 min).

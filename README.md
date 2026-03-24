@@ -369,6 +369,7 @@ MCP 표면, 내부 prompt plane, operator surface의 경계는 [MCP-SURFACE-AUDI
 | `docs/TRPG-KEEPER-SPECTATOR-QUICKSTART.md` | keeper 자동 진행 관전 Quickstart |
 | `docs/TRPG-EXPERIMENT-PLAYBOOK.md` | 사회실험 템플릿 3종 실행 가이드 |
 | `docs/TRPG-DEVELOPMENT-PLAN.md` | TRPG MVP 단계별 개발 계획 |
+| `docs/TRANSPORT-PRACTICAL-PLAYBOOK.md` | gRPC / WS / WebRTC / SSE / h2c 실사용 경로와 운영 예시 |
 | `docs/MCP-TEMPLATE.md` | MCP 설정 템플릿 |
 | `docs/GLOSSARY.md` | 용어 정리 |
 
@@ -382,6 +383,7 @@ MCP 표면, 내부 prompt plane, operator surface의 경계는 [MCP-SURFACE-AUDI
 - 자동 시작은 환경별로 선택
 - 로그는 실행 방식에 따라 다름 (stdout/stderr 확인)
 - MCP SSE를 별도 터미널에서 모니터링하면 디버깅이 쉽습니다: `curl -N -H 'Accept: application/json, text/event-stream' http://127.0.0.1:8935/mcp`
+- transport 상태는 `GET /api/v1/dashboard/transport-health` 또는 `/dashboard#/overview`에서 즉시 확인할 수 있습니다.
 - Viewer는 URL query의 `token`/`auth_token`/`masc_token`을 초기 읽기 후 주소창에서 제거하고 로컬스토리지에 저장하지 않습니다.
 - auth strict 플래그는 운영 중 동적 토글보다 프로세스 재시작과 함께 고정 적용을 권장합니다.
 

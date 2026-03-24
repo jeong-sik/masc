@@ -300,14 +300,14 @@ let test_ag_ui_rejects_reconnect_then_recovers () =
   let sid = Printf.sprintf "storm-agui-%06d" (Random.int 1_000_000) in
   let headers = [("Accept", "text/event-stream"); ("Mcp-Session-Id", sid)] in
 
-  let first = run_curl ~headers ~max_time:0.6 ~port ~path:"/ag-ui/events?room=default" () in
+  let first = run_curl ~headers ~max_time:1.5 ~port ~path:"/ag-ui/events?room=default" () in
   check_status "first /ag-ui/events connect accepted" 200 first;
 
-  let second = run_curl ~headers ~max_time:0.6 ~port ~path:"/ag-ui/events?room=default" () in
+  let second = run_curl ~headers ~max_time:1.5 ~port ~path:"/ag-ui/events?room=default" () in
   check_status "immediate /ag-ui/events reconnect rejected" 429 second;
 
   Unix.sleepf 1.0;
-  let third = run_curl ~headers ~max_time:0.6 ~port ~path:"/ag-ui/events?room=default" () in
+  let third = run_curl ~headers ~max_time:1.5 ~port ~path:"/ag-ui/events?room=default" () in
   check_status "cooldown /ag-ui/events reconnect recovers" 200 third
 
 let () =

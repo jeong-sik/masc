@@ -826,7 +826,7 @@ let test_mcp_requires_auth_when_bound_non_loopback () =
     run_curl_json ~port ~path:"/mcp" ~session_id:"strict-remote"
       ~payload:(tools_list_payload ~id:1) ()
   in
-  Alcotest.(check (option int)) "returns unauthorized" (Some 400) result.status;
+  Alcotest.(check (option int)) "returns unauthorized" (Some 401) result.status;
   check bool "strict auth message" true
     (contains_substr "requires room auth enabled with require_token=true"
        result.body)

@@ -160,44 +160,12 @@ let build_recommended_action ~actor ~target_type ~target_id json =
   | _ -> None
 
 let prompt_for_facts facts_json =
-  Printf.sprintf
-    "You are the resident operator judge for a MASC control room.\n\
-     Read only the factual operator snapshot JSON below.\n\
-     Produce concise, operational judgments for the room and any team sessions that need attention.\n\
-     Do not repeat raw facts. Do not invent evidence, ids, or actions. Omit entries when you are not confident.\n\
-     Allowed action_type values: broadcast, room_pause, room_resume, social_sweep, team_note, team_broadcast, team_task_inject, team_worker_spawn_batch, team_stop, keeper_message, keeper_probe, keeper_recover.\n\
-     Output strict JSON only with this shape:\n\
-     {\n\
-       \"room\": {\n\
-         \"summary\": string,\n\
-         \"confidence\": number,\n\
-         \"evidence_refs\": string[],\n\
-         \"disagreement_with_truth\": boolean,\n\
-         \"recommended_action\": {\n\
-           \"action_type\": string,\n\
-           \"severity\": \"warn\"|\"bad\",\n\
-           \"reason\": string,\n\
-           \"suggested_payload\": object\n\
-         } | null\n\
-       } | null,\n\
-       \"sessions\": [\n\
-         {\n\
-           \"session_id\": string,\n\
-           \"summary\": string,\n\
-           \"confidence\": number,\n\
-           \"evidence_refs\": string[],\n\
-           \"disagreement_with_truth\": boolean,\n\
-           \"recommended_action\": {\n\
-             \"action_type\": string,\n\
-             \"severity\": \"warn\"|\"bad\",\n\
-             \"reason\": string,\n\
-             \"suggested_payload\": object\n\
-           } | null\n\
-         }\n\
-       ]\n\
-     }\n\n\
-     Facts:\n%s"
-    (Yojson.Safe.to_string facts_json)
+  match
+    Prompt_registry.render_prompt_template "dashboard.operator_judge"
+      [ ("facts_json", Yojson.Safe.to_string facts_json) ]
+  with
+  | Ok value -> value
+  | Error _ -> Prompt_registry.get_prompt "dashboard.operator_judge"
 
 let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used json =
   match json with

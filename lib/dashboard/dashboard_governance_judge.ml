@@ -275,39 +275,12 @@ let parse_item_judgment ~generated_at ~expires_at ~model_used json =
           ])
 
 let prompt_for_facts facts_json =
-  Printf.sprintf
-    "You are the resident governance judge for a MASC supervisor dashboard.\n\
-     Read only the factual snapshot JSON below.\n\
-     Do not invent links, evidence, or actions.\n\
-     If evidence is insufficient, omit the item from output.\n\
-     You are not a heuristic generator. Only produce judgments you can justify directly from the facts.\n\
-     Output strict JSON only with this shape:\n\
-     {\n\
-       \"items\": [\n\
-         {\n\
-           \"kind\": \"debate|consensus\",\n\
-           \"id\": string,\n\
-           \"summary\": string,\n\
-           \"confidence\": number,\n\
-           \"evidence_refs\": string[],\n\
-           \"recommended_action\": {\n\
-             \"action_kind\": string,\n\
-             \"resolved_tool\": string,\n\
-             \"target_type\": string,\n\
-             \"target_id\": string|null,\n\
-             \"reason\": string,\n\
-             \"payload_preview\": object\n\
-           } | null,\n\
-           \"guardrail_state\": {\n\
-             \"requires_human_gate\": boolean,\n\
-             \"pending_confirm_token\": string|null,\n\
-             \"ready_to_execute\": boolean\n\
-           }\n\
-         }\n\
-       ]\n\
-     }\n\n\
-     Facts:\n%s"
-    (Yojson.Safe.to_string facts_json)
+  match
+    Prompt_registry.render_prompt_template "dashboard.governance_judge"
+      [ ("facts_json", Yojson.Safe.to_string facts_json) ]
+  with
+  | Ok value -> value
+  | Error _ -> Prompt_registry.get_prompt "dashboard.governance_judge"
 
 let compute_judgments
     ~(masc_tools : Types.tool_schema list)

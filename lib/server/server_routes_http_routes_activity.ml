@@ -338,6 +338,9 @@ let add_routes router =
                let result = match action with
                  | "clear" ->
                    Prompt_registry.clear_prompt_override key;
+                   (try Prompt_registry.persist_overrides
+                          state.Mcp_server.room_config.base_path
+                    with _ -> ());
                    Ok "override cleared"
                  | "set" | _ ->
                    let value = Yojson.Safe.Util.(member "value" args |> to_string_option)
@@ -358,6 +361,7 @@ let add_routes router =
                      ("message", `String msg);
                      ("key", `String key);
                      ("source", `String (Prompt_registry.prompt_source key));
+                     ("effective", `String (Prompt_registry.get_prompt key));
                    ]))
                | Error msg ->
                  respond_json_with_cors ~status:`Bad_request request reqd

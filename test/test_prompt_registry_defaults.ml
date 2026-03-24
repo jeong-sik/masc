@@ -1,170 +1,209 @@
-(** Tests for prompt registry defaults and override API. *)
+(** Tests for prompt registry markdown sources and override API. *)
 
 module Lib = Masc_mcp
 
-let () =
-  (* Clear registry state before tests *)
-  Lib.Prompt_registry.clear ();
-  (* Initialize defaults *)
-  Lib.Prompt_defaults.init ();
-  let open Alcotest in
-  run "Prompt_registry_defaults" [
-    ("registration", [
-      test_case "all 5 Tier-1 prompts are registered" `Quick (fun () ->
-        let keys = [
-          "keeper.constitution";
-          "keeper.world";
-          "keeper.capabilities";
-          "governance.deliberation";
-          "governance.dry_run";
-        ] in
-        List.iter (fun key ->
-          let v = Lib.Prompt_registry.get_prompt key in
-          check bool (Printf.sprintf "%s should not be empty" key) true (v <> "")
-        ) keys
-      );
+let test_dir () =
+  let tmp = Filename.temp_file "masc_prompt_registry" "" in
+  Sys.remove tmp;
+  Unix.mkdir tmp 0o755;
+  tmp
 
-      test_case "keeper.constitution matches keeper_prompt default" `Quick (fun () ->
-        let from_registry = Lib.Prompt_registry.get_prompt "keeper.constitution" in
-        let from_module = Lib.Keeper_prompt.keeper_constitution_default in
-        check string "keeper.constitution content" from_module from_registry
-      );
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun f -> rm (Filename.concat path f));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  rm dir
 
-      test_case "keeper.world contains MASC" `Quick (fun () ->
-        let v = Lib.Prompt_registry.get_prompt "keeper.world" in
-        check bool "contains MASC" true
-          (String.length v > 0
-           && (try ignore (Str.search_forward (Str.regexp_string "MASC") v 0); true
-               with Not_found -> false))
-      );
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc content)
 
-      test_case "governance.deliberation contains governance" `Quick (fun () ->
-        let v = Lib.Prompt_registry.get_prompt "governance.deliberation" in
-        check bool "contains governance" true
-          (try ignore (Str.search_forward (Str.regexp_string "governance") v 0); true
-           with Not_found -> false)
-      );
-
-      test_case "governance.dry_run contains DRY RUN" `Quick (fun () ->
-        let v = Lib.Prompt_registry.get_prompt "governance.dry_run" in
-        check bool "contains DRY RUN" true
-          (try ignore (Str.search_forward (Str.regexp_string "DRY RUN") v 0); true
-           with Not_found -> false)
-      );
-    ]);
-
-    ("list_prompts", [
-      test_case "list_prompts returns all 5 entries" `Quick (fun () ->
-        let prompts = Lib.Prompt_registry.list_prompts () in
-        check int "5 registered prompts" 5 (List.length prompts)
-      );
-
-      test_case "list_prompts entries have correct keys" `Quick (fun () ->
-        let prompts = Lib.Prompt_registry.list_prompts () in
-        let keys = List.filter_map (fun j ->
-          match j with
-          | `Assoc l -> (match List.assoc "key" l with `String s -> Some s | _ -> None)
-          | _ -> None
-        ) prompts in
-        check bool "has keeper.constitution" true
-          (List.mem "keeper.constitution" keys);
-        check bool "has governance.dry_run" true
-          (List.mem "governance.dry_run" keys)
-      );
-
-      test_case "list_prompts sorted by key" `Quick (fun () ->
-        let prompts = Lib.Prompt_registry.list_prompts () in
-        let keys = List.filter_map (fun j ->
-          match j with
-          | `Assoc l -> (match List.assoc "key" l with `String s -> Some s | _ -> None)
-          | _ -> None
-        ) prompts in
-        let sorted = List.sort String.compare keys in
-        check (list string) "keys are sorted" sorted keys
-      );
-    ]);
-
-    ("override", [
-      test_case "set_override replaces default" `Quick (fun () ->
-        let key = "keeper.constitution" in
-        let original = Lib.Prompt_registry.get_prompt key in
-        let override_text = "Custom constitution text for testing" in
-        (match Lib.Prompt_registry.set_override key override_text with
-         | Ok () -> ()
-         | Error msg -> fail msg);
-        let current = Lib.Prompt_registry.get_prompt key in
-        check string "override applied" override_text current;
-        check bool "different from original" true (current <> original);
-        (* Check source *)
-        check string "source is override" "override"
-          (Lib.Prompt_registry.prompt_source key);
-        (* Cleanup *)
-        Lib.Prompt_registry.clear_prompt_override key
-      );
-
-      test_case "clear_override reverts to default" `Quick (fun () ->
-        let key = "keeper.world" in
-        let original = Lib.Prompt_registry.get_prompt key in
-        (match Lib.Prompt_registry.set_override key "temporary override" with
-         | Ok () -> ()
-         | Error msg -> fail msg);
-        Lib.Prompt_registry.clear_prompt_override key;
-        let reverted = Lib.Prompt_registry.get_prompt key in
-        check string "reverted to default" original reverted;
-        check string "source is default" "default"
-          (Lib.Prompt_registry.prompt_source key)
-      );
-
-      test_case "set_override rejects empty value" `Quick (fun () ->
-        match Lib.Prompt_registry.set_override "keeper.world" "" with
-        | Error _ -> ()
-        | Ok () -> fail "should reject empty value"
-      );
-
-      test_case "set_override rejects whitespace-only value" `Quick (fun () ->
-        match Lib.Prompt_registry.set_override "keeper.world" "   \n  " with
-        | Error _ -> ()
-        | Ok () -> fail "should reject whitespace-only value"
-      );
-
-      test_case "set_override rejects oversized value" `Quick (fun () ->
-        let long = String.make 10001 'x' in
-        match Lib.Prompt_registry.set_override "keeper.world" long with
-        | Error msg ->
-          check bool "mentions max" true
-            (try ignore (Str.search_forward (Str.regexp_string "10000") msg 0); true
-             with Not_found -> false)
-        | Ok () -> fail "should reject oversized value"
-      );
-    ]);
-
-    ("keeper_prompt_integration", [
-      test_case "keeper_constitution() uses registry" `Quick (fun () ->
-        let from_fn = Lib.Keeper_prompt.keeper_constitution () in
-        let from_default = Lib.Keeper_prompt.keeper_constitution_default in
-        (* Before any override, function should return the default *)
-        check string "matches default" from_default from_fn
-      );
-
-      test_case "keeper_constitution() reflects override" `Quick (fun () ->
-        let override_text = "Overridden constitution for test" in
-        (match Lib.Prompt_registry.set_override "keeper.constitution" override_text with
-         | Ok () -> ()
-         | Error msg -> fail msg);
-        let from_fn = Lib.Keeper_prompt.keeper_constitution () in
-        check string "override applied via function" override_text from_fn;
-        (* Cleanup *)
-        Lib.Prompt_registry.clear_prompt_override "keeper.constitution"
-      );
-    ]);
-
-    ("prompts_json", [
-      test_case "prompts_json returns valid structure" `Quick (fun () ->
-        let json = Lib.Prompt_registry.prompts_json () in
-        match json with
-        | `Assoc [("prompts", `List items)] ->
-          check bool "has entries" true (List.length items > 0)
-        | _ -> fail "unexpected JSON structure"
-      );
-    ]);
+let fixtures =
+  [
+    ("keeper.constitution", "Continuity rules from file");
+    ("keeper.world", "MASC world from markdown");
+    ("keeper.capabilities", "Capabilities from markdown");
+    ( "keeper.proactive_turn",
+      "Turn {{idle_seconds}} {{profile}} {{goal}} {{last_preview}} {{continuity_snapshot}} {{seed}}" );
+    ("keeper.proactive_retry", "Retry {{attempt_phrase}} {{reason}} {{directive}}");
+    ("keeper.unified.system", "{{identity_header}}\n{{trait_lines}}{{instructions_block}}{{goal_lines}}");
+    ("keeper.deliberation", "Keeper {{keeper_name}} {{soul_profile}} {{goal}} {{triggers}} {{world_state}}");
+    ("governance.deliberation", "governance deliberation prompt");
+    ("governance.dry_run", "DRY RUN governance prompt");
+    ("dashboard.operator_judge", "operator facts {{facts_json}}");
+    ("dashboard.governance_judge", "governance facts {{facts_json}}");
   ]
+
+let with_registry f =
+  let dir = test_dir () in
+  let prompts_dir = Filename.concat dir "prompts" in
+  Unix.mkdir prompts_dir 0o755;
+  List.iter
+    (fun (key, content) ->
+      write_file (Filename.concat prompts_dir (key ^ ".md")) content)
+    fixtures;
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Prompt_registry.clear ();
+      cleanup_dir dir)
+    (fun () ->
+      Lib.Prompt_registry.clear ();
+      Lib.Prompt_registry.set_markdown_dir prompts_dir;
+      Lib.Prompt_defaults.init ();
+      f ~dir ~prompts_dir)
+
+let fixture key =
+  match List.assoc_opt key fixtures with
+  | Some value -> value
+  | None -> failwith ("missing fixture: " ^ key)
+
+let get_string_field field = function
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`String value) -> Some value
+      | _ -> None)
+  | _ -> None
+
+let get_bool_field field = function
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`Bool value) -> Some value
+      | _ -> None)
+  | _ -> None
+
+let () =
+  let open Alcotest in
+  run "Prompt_registry_defaults"
+    [
+      ( "registration",
+        [
+          test_case "all markdown-backed prompts are registered" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              let prompts = Lib.Prompt_registry.list_prompts () in
+              check int "registered prompt count" 11 (List.length prompts));
+          test_case "get_prompt resolves markdown content" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              check string "keeper.constitution"
+                (fixture "keeper.constitution")
+                (Lib.Prompt_registry.get_prompt "keeper.constitution");
+              check string "governance.dry_run"
+                (fixture "governance.dry_run")
+                (Lib.Prompt_registry.get_prompt "governance.dry_run"));
+          test_case "prompt_source reports file" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              check string "file source" "file"
+                (Lib.Prompt_registry.prompt_source "keeper.world"));
+          test_case "validate_required_prompt_files detects missing file" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir ->
+              Sys.remove
+                (Filename.concat prompts_dir "dashboard.governance_judge.md");
+              let missing = Lib.Prompt_registry.validate_required_prompt_files () in
+              check bool "missing file found" true
+                (List.mem_assoc "dashboard.governance_judge" missing));
+        ] );
+      ( "rendering",
+        [
+          test_case "render_prompt_template uses markdown template" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Lib.Prompt_registry.render_prompt_template "keeper.proactive_retry"
+                  [
+                    ("attempt_phrase", "previous attempt");
+                    ("reason", "timeout");
+                    ("directive", "now");
+                  ]
+              with
+              | Ok rendered ->
+                  check string "rendered markdown template"
+                    "Retry previous attempt timeout now"
+                    rendered
+              | Error msg -> fail msg);
+        ] );
+      ( "override",
+        [
+          test_case "set_override replaces file content" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              let override_text = "override constitution" in
+              (match
+                 Lib.Prompt_registry.set_override "keeper.constitution"
+                   override_text
+               with
+              | Ok () -> ()
+              | Error msg -> fail msg);
+              check string "override value" override_text
+                (Lib.Prompt_registry.get_prompt "keeper.constitution");
+              check string "override source" "override"
+                (Lib.Prompt_registry.prompt_source "keeper.constitution"));
+          test_case "clear_override reverts to file" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              (match
+                 Lib.Prompt_registry.set_override "keeper.world"
+                   "temporary override"
+               with
+              | Ok () -> ()
+              | Error msg -> fail msg);
+              Lib.Prompt_registry.clear_prompt_override "keeper.world";
+              check string "back to file baseline" (fixture "keeper.world")
+                (Lib.Prompt_registry.get_prompt "keeper.world");
+              check string "source is file" "file"
+                (Lib.Prompt_registry.prompt_source "keeper.world"));
+          test_case "set_override rejects unknown key" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match Lib.Prompt_registry.set_override "unknown.prompt" "x" with
+              | Error _ -> ()
+              | Ok () -> fail "should reject unknown prompt key");
+        ] );
+      ( "integration",
+        [
+          test_case "keeper_constitution reads markdown-backed registry" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              check string "keeper constitution function"
+                (fixture "keeper.constitution")
+                (Lib.Keeper_prompt.keeper_constitution ()));
+        ] );
+      ( "prompts_json",
+        [
+          test_case "prompts_json exposes effective file and override fields" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              (match
+                 Lib.Prompt_registry.set_override "keeper.capabilities"
+                   "runtime override"
+               with
+              | Ok () -> ()
+              | Error msg -> fail msg);
+              let json = Lib.Prompt_registry.prompts_json () in
+              let open Yojson.Safe.Util in
+              let prompts = json |> member "prompts" |> to_list in
+              let keeper_capabilities =
+                prompts
+                |> List.find (fun item ->
+                       get_string_field "key" item = Some "keeper.capabilities")
+              in
+              check (option string) "effective value"
+                (Some "runtime override")
+                (get_string_field "effective" keeper_capabilities);
+              check (option string) "file value"
+                (Some (fixture "keeper.capabilities"))
+                (get_string_field "file_value" keeper_capabilities);
+              check (option string) "override value"
+                (Some "runtime override")
+                (get_string_field "override_value" keeper_capabilities);
+              check (option string) "source"
+                (Some "override")
+                (get_string_field "source" keeper_capabilities);
+              check (option bool) "required_file"
+                (Some true)
+                (get_bool_field "required_file" keeper_capabilities));
+        ] );
+    ]

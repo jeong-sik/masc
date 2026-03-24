@@ -81,7 +81,15 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
 let bootstrap_chain_state (state : Mcp_server.server_state) =
   Chain_native_eio.ensure_bootstrap state.room_config;
   (* Initialize prompt registry with defaults and restore saved overrides *)
+  Prompt_registry.set_markdown_dir
+    (Filename.concat state.room_config.base_path "config/prompts");
   Prompt_defaults.init ();
+  let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
+  if missing_prompt_files <> [] then
+    Log.Misc.error "required prompt files missing: %s"
+      (missing_prompt_files
+      |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
+      |> String.concat ", ");
   (try Prompt_registry.restore_overrides state.room_config.base_path
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.error "prompt override restore failed: %s"

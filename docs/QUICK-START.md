@@ -21,8 +21,21 @@ masc_claim_next()
 
 ## Tool Surface
 
-The public MCP surface is no longer mode-gated. Tool visibility now comes from
-the canonical catalog, profile, auth, and lifecycle metadata only.
+`tools/list` returns ~33 agent-communication tools by default (room, task,
+board, keeper, planning). All registered tools remain callable via `tools/call`.
+
+```bash
+# Add specific tools to the public surface
+MASC_PUBLIC_TOOLS_EXTRA=masc_goal_upsert,masc_pause
+
+# Restore the full inventory (debugging)
+MASC_FULL_SURFACE=1
+
+# Query all tools via API
+{"method": "tools/list", "params": {"include_hidden": true}}
+```
+
+Allowlist: `lib/tool_catalog.ml` > `public_mcp_tools`.
 
 ## Error Recovery
 

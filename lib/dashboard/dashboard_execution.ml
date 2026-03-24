@@ -90,8 +90,13 @@ let message_json (message : Types.message) =
 
 
 (** Maximum wall-clock time for a single dashboard render.
-    Prevents unbounded waits when PG connections drop mid-render. *)
-let render_timeout_s = 30.0
+    Keep a real guard for PG stalls, but allow slow cold-start projections
+    to finish at least once so cached surfaces can hydrate. *)
+let render_timeout_s =
+  Dashboard_http_helpers.float_of_env_default
+    "MASC_DASHBOARD_EXECUTION_RENDER_TIMEOUT_S"
+    ~default:60.0 ~min_v:10.0 ~max_v:300.0
+
 let session_list_timeout_s = 5.0
 
 let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =

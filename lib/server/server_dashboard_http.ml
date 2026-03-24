@@ -46,6 +46,10 @@ let _execution_cache =
 let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
+  let execution_refresh_timeout_s =
+    float_of_env_default "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
+      ~default:75.0 ~min_v:30.0 ~max_v:300.0
+  in
   ignore net;
   ignore mono_clock;
   let compute () =
@@ -69,7 +73,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
   in
   Proactive_refresh.start ~sw ~clock
     ~config:{ (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0)
-              with timeout_s = 30.0 }
+              with timeout_s = execution_refresh_timeout_s }
     ~compute
     ~on_result:(mark_cached_surface_success _execution_cache)
 
@@ -78,10 +82,30 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
   let full_mode = bool_query_param request "full" ~default:false in
   let light = not full_mode in
+  let compute ?actor ?fixture ~light () =
+    let started_at = Unix.gettimeofday () in
+    run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
+      ~config:state.Mcp_server.room_config
+      (fun ~config ~sw ->
+        Dashboard_execution.json ?actor ?fixture ~light
+          ~config ~sw ~clock
+          ~proc_mgr:state.Mcp_server.proc_mgr ()
+        |> with_projection_diagnostics ~surface:"execution" ~started_at
+             ~extra:
+               [
+                 ("session_list", Team_session_store.session_list_diagnostics_json ());
+                 ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+               ])
+  in
   match fixture, actor, full_mode with
   | None, None, false ->
-    (* Default light mode: return proactively cached value immediately (0ms). *)
-    cached_surface_json _execution_cache
+    (* Default light mode: stay instant after first success, but avoid
+       serving the empty initializing payload forever when proactive warm-up
+       misses its first build window. *)
+    cached_surface_or_first_success_json _execution_cache
+      ~cache_key:"execution:default:light" ~ttl:120.0 ~clock
+      ~timeout_sec:120.0
+      (compute ~light:true)
   | _ ->
     (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
        These are rare (test fixtures, actor-specific views, full mode). *)
@@ -92,20 +116,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
         (if full_mode then "full" else "light")
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-      ~clock ~timeout_sec:120.0 (fun () ->
-      let started_at = Unix.gettimeofday () in
-      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
-        ~config:state.Mcp_server.room_config
-        (fun ~config ~sw ->
-          Dashboard_execution.json ?actor ?fixture ~light
-            ~config ~sw ~clock
-            ~proc_mgr:state.Mcp_server.proc_mgr ()
-          |> with_projection_diagnostics ~surface:"execution" ~started_at
-               ~extra:
-                 [
-                   ("session_list", Team_session_store.session_list_diagnostics_json ());
-                   ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
-                 ]))
+      ~clock ~timeout_sec:120.0 (compute ?actor ?fixture ~light)
 
 let dashboard_transport_health_http_json ~state =
   Dashboard_cache.get_or_compute "transport_health" ~ttl:10.0 (fun () ->
@@ -282,22 +293,26 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let shell_ref = ref (`Assoc []) in
   let execution_ref = ref (`Assoc []) in
   let command_ref = ref (`Assoc []) in
-  let fiber_with_timeout label f fallback =
+  let fiber_with_timeout ?(timeout_s = 5.0) label f fallback =
     try
-      match Eio.Time.with_timeout clock 5.0 (fun () -> Ok (f ())) with
+      match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
       | Ok v -> v
       | Error `Timeout ->
-        Log.Dashboard.warn "room-truth fiber %s timed out (5s)" label;
+        Log.Dashboard.warn "room-truth fiber %s timed out (%.0fs)" label timeout_s;
         fallback
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Dashboard.warn "room-truth fiber %s failed: %s" label (Printexc.to_string exn);
       fallback
   in
+  let execution_timeout_s =
+    if cached_surface_has_success _execution_cache then 5.0 else 20.0
+  in
   Eio.Fiber.all [
     (fun () -> shell_ref := fiber_with_timeout "shell"
       (fun () -> dashboard_shell_http_json config) (`Assoc []));
-    (fun () -> execution_ref := fiber_with_timeout "execution"
-      (fun () -> dashboard_execution_http_json ~state ~sw ~clock request) (`Assoc []));
+    (fun () -> execution_ref := fiber_with_timeout ~timeout_s:execution_timeout_s "execution"
+      (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
+      (cached_surface_json _execution_cache));
     (fun () ->
       command_ref := fiber_with_timeout "command"
         (fun () ->
@@ -312,6 +327,20 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let command_summary_json = !command_ref in
   let parallel_ms = (Time_compat.now () -. t0) *. 1000.0 in
   Log.Dashboard.info "room-truth parallel fetch: %.0fms" parallel_ms;
+  let execution_cache_state =
+    json_assoc_field "projection_diagnostics" execution_json
+    |> json_string_field_opt "cache_state"
+  in
+  if execution_cache_state = Some "initializing" then
+    `Assoc
+      [
+        ("status", `String "initializing");
+        ("generated_at", `String (Types.now_iso ()));
+        ( "message",
+          `String
+            "Execution snapshot is still warming up. The dashboard will retry automatically." );
+      ]
+  else
   (* Derive digest fields from execution_json to avoid duplicate
      Operator_control.digest_json call (saves ~3s).
      execution_json already calls digest_json internally. *)

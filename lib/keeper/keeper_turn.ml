@@ -55,6 +55,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     let inline_will = parse_self_model_opt args "will" in
     let inline_needs = parse_self_model_opt args "needs" in
     let inline_desires = parse_self_model_opt args "desires" in
+    let _direct_reply = get_bool args "direct_reply" false in
     let inline_soul_profile_res = parse_soul_profile_opt args "soul_profile" in
     let new_soul_profile_res = parse_soul_profile_opt args "new_soul_profile" in
     let new_short_goal = parse_goal_horizon_opt args "new_short_goal" in
@@ -85,6 +86,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
          slots, starving the synchronous run_turn call (Issue #2610). *)
+      (* auto_team_session interception removed in #2908 *)
       (* === Harness: trajectory accumulator + eval gate config === *)
       let masc_root = Filename.concat ctx.config.base_path ".masc" in
       let trajectory_acc =

@@ -103,6 +103,33 @@ let cached_surface_json surface =
         | None -> `Null );
     ]
 
+let cached_surface_has_success surface =
+  Option.is_some surface.last_success_unix
+
+let cached_surface_or_first_success_json surface ~cache_key ~ttl ~clock
+    ~timeout_sec compute =
+  if cached_surface_has_success surface then
+    cached_surface_json surface
+  else
+    let compute_and_track () =
+      mark_cached_surface_attempt surface;
+      try
+        let json = compute () in
+        mark_cached_surface_success surface json;
+        json
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          mark_cached_surface_error surface exn;
+          raise exn
+    in
+    let json =
+      Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl ~clock
+        ~timeout_sec compute_and_track
+    in
+    if cached_surface_has_success surface then cached_surface_json surface
+    else json
+
 (** Executor pool for CPU-heavy dashboard compute.  Parameterized dashboard
     requests can otherwise monopolize the main Eio domain long enough to
     starve unrelated MCP tool calls. *)
@@ -719,6 +746,10 @@ let _mission_cache =
 let start_mission_refresh_loop ~state ~sw ~clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
+  let mission_refresh_timeout_s =
+    float_of_env_default "MASC_DASHBOARD_MISSION_REFRESH_TIMEOUT_S"
+      ~default:60.0 ~min_v:30.0 ~max_v:300.0
+  in
   let compute () =
     mark_cached_surface_attempt _mission_cache;
     try
@@ -737,7 +768,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   in
   Proactive_refresh.start ~sw ~clock
     ~config:{ (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0)
-              with timeout_s = 30.0 }
+              with timeout_s = mission_refresh_timeout_s }
     ~compute
     ~on_result:(mark_cached_surface_success _mission_cache)
 
@@ -794,27 +825,33 @@ let mission_snapshot_of_full (full : Yojson.Safe.t) : Yojson.Safe.t =
 let dashboard_mission_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
   let mode = query_param request "mode" in
+  let compute ?actor () =
+    let command_plane_summary, swarm_status =
+      command_plane_summary_cache_parts ~allow_initializing:false ~state
+    in
+    run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
+      ~config:state.Mcp_server.room_config
+      (fun ~config ~sw ->
+        Dashboard_mission.json ?actor ?command_plane_summary ?swarm_status
+          ~config ~sw ~clock
+          ~proc_mgr:state.Mcp_server.proc_mgr ())
+  in
   let full_json =
     match actor with
     | None ->
-      (* Default: return proactively cached value immediately (0ms). *)
-      cached_surface_json _mission_cache
+      (* Default: stay instant after first success, but don't pin the UI to
+         the empty bootstrap payload when the proactive refresh loop has not
+         landed yet. *)
+      cached_surface_or_first_success_json _mission_cache
+        ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:120.0
+        compute
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
         Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
       in
-      let command_plane_summary, swarm_status =
-        command_plane_summary_cache_parts ~allow_initializing:false ~state
-      in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-        ~clock ~timeout_sec:120.0 (fun () ->
-        run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
-          ~config:state.Mcp_server.room_config
-          (fun ~config ~sw ->
-            Dashboard_mission.json ?actor ?command_plane_summary ?swarm_status
-              ~config ~sw ~clock
-              ~proc_mgr:state.Mcp_server.proc_mgr ()))
+        ~clock ~timeout_sec:120.0 (compute ?actor)
   in
   match mode with
   | Some "snapshot" -> mission_snapshot_of_full full_json

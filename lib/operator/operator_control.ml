@@ -453,12 +453,28 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                    | _ -> None)
         | _ -> []
       in
+      let direct_reply =
+        match request.payload |> U.member "direct_reply" with
+        | `Bool value -> value
+        | _ -> false
+      in
+      let timeout_sec =
+        match request.payload |> U.member "timeout_sec" with
+        | `Int value when value > 0 -> Some value
+        | `Float value when value > 0.0 -> Some (int_of_float (Float.ceil value))
+        | _ -> None
+      in
       let args =
         `Assoc
-          ([
-             ("name", `String name);
-             ("message", `String message);
-           ]
+          (([
+              ("name", `String name);
+              ("message", `String message);
+            ]
+            @ if direct_reply then [ ("direct_reply", `Bool true) ] else [])
+           @
+           match timeout_sec with
+           | Some value -> [ ("timeout_sec", `Int value) ]
+           | None -> []
           @ if models = [] then [] else [ ("models", `List models) ])
       in
       let keeper_ctx : _ Tool_keeper.context =

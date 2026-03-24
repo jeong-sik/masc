@@ -13,8 +13,6 @@ export type SurfaceSectionId =
   | 'intervene'
   | 'warroom'
   | 'tools'
-  | 'trpg'
-  | 'avatars'
   | 'autoresearch'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
@@ -195,18 +193,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '오토리서치',
       description: '자율 실험 루프 상태와 이력을 봅니다.',
       params: { section: 'autoresearch' },
-    },
-    {
-      id: 'trpg',
-      label: 'TRPG',
-      description: 'TRPG 실험 기능을 분리해 둔 화면입니다.',
-      params: { section: 'trpg' },
-    },
-    {
-      id: 'avatars',
-      label: '아바타',
-      description: '아바타 갤러리와 표현 실험을 봅니다.',
-      params: { section: 'avatars' },
     },
   ],
 }

@@ -88,9 +88,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       return []
     case 'lab':
-      if (routeState.params.section === 'avatars') {
-        return ['execution']
-      }
       if (routeState.params.section === 'autoresearch') {
         return ['autoresearch']
       }

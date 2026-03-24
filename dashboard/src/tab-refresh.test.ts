@@ -51,11 +51,6 @@ describe('refreshPlanForRoute', () => {
 
     expect(refreshPlanForRoute({
       tab: 'lab',
-      params: { section: 'avatars' },
-    })).toEqual(['execution'])
-
-    expect(refreshPlanForRoute({
-      tab: 'lab',
       params: { section: 'autoresearch' },
     })).toEqual(['autoresearch'])
 

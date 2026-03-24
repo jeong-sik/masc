@@ -68,6 +68,41 @@ module Reflection_bridge = struct
   let grpc_reflection_v1alpha_descriptor_b64 =
     "ChhyZWZsZWN0aW9uX3YxYWxwaGEucHJvdG8SF2dycGMucmVmbGVjdGlvbi52MWFscGhhIvgCChdTZXJ2ZXJSZWZsZWN0aW9uUmVxdWVzdBISCgRob3N0GAEgASgJUgRob3N0EioKEGZpbGVfYnlfZmlsZW5hbWUYAyABKAlIAFIOZmlsZUJ5RmlsZW5hbWUSNgoWZmlsZV9jb250YWluaW5nX3N5bWJvbBgEIAEoCUgAUhRmaWxlQ29udGFpbmluZ1N5bWJvbBJnChlmaWxlX2NvbnRhaW5pbmdfZXh0ZW5zaW9uGAUgASgLMikuZ3JwYy5yZWZsZWN0aW9uLnYxYWxwaGEuRXh0ZW5zaW9uUmVxdWVzdEgAUhdmaWxlQ29udGFpbmluZ0V4dGVuc2lvbhJCCh1hbGxfZXh0ZW5zaW9uX251bWJlcnNfb2ZfdHlwZRgGIAEoCUgAUhlhbGxFeHRlbnNpb25OdW1iZXJzT2ZUeXBlEiUKDWxpc3Rfc2VydmljZXMYByABKAlIAFIMbGlzdFNlcnZpY2VzQhEKD21lc3NhZ2VfcmVxdWVzdCJmChBFeHRlbnNpb25SZXF1ZXN0EicKD2NvbnRhaW5pbmdfdHlwZRgBIAEoCVIOY29udGFpbmluZ1R5cGUSKQoQZXh0ZW5zaW9uX251bWJlchgCIAEoBVIPZXh0ZW5zaW9uTnVtYmVyIscEChhTZXJ2ZXJSZWZsZWN0aW9uUmVzcG9uc2USHQoKdmFsaWRfaG9zdBgBIAEoCVIJdmFsaWRIb3N0ElsKEG9yaWdpbmFsX3JlcXVlc3QYAiABKAsyMC5ncnBjLnJlZmxlY3Rpb24udjFhbHBoYS5TZXJ2ZXJSZWZsZWN0aW9uUmVxdWVzdFIPb3JpZ2luYWxSZXF1ZXN0EmsKGGZpbGVfZGVzY3JpcHRvcl9yZXNwb25zZRgEIAEoCzIvLmdycGMucmVmbGVjdGlvbi52MWFscGhhLkZpbGVEZXNjcmlwdG9yUmVzcG9uc2VIAFIWZmlsZURlc2NyaXB0b3JSZXNwb25zZRJ3Ch5hbGxfZXh0ZW5zaW9uX251bWJlcnNfcmVzcG9uc2UYBSABKAsyMC5ncnBjLnJlZmxlY3Rpb24udjFhbHBoYS5FeHRlbnNpb25OdW1iZXJSZXNwb25zZUgAUhthbGxFeHRlbnNpb25OdW1iZXJzUmVzcG9uc2USZAoWbGlzdF9zZXJ2aWNlc19yZXNwb25zZRgGIAEoCzIsLmdycGMucmVmbGVjdGlvbi52MWFscGhhLkxpc3RTZXJ2aWNlUmVzcG9uc2VIAFIUbGlzdFNlcnZpY2VzUmVzcG9uc2USTwoOZXJyb3JfcmVzcG9uc2UYByABKAsyJi5ncnBjLnJlZmxlY3Rpb24udjFhbHBoYS5FcnJvclJlc3BvbnNlSABSDWVycm9yUmVzcG9uc2VCEgoQbWVzc2FnZV9yZXNwb25zZSJMChZGaWxlRGVzY3JpcHRvclJlc3BvbnNlEjIKFWZpbGVfZGVzY3JpcHRvcl9wcm90bxgBIAMoDFITZmlsZURlc2NyaXB0b3JQcm90byJqChdFeHRlbnNpb25OdW1iZXJSZXNwb25zZRIkCg5iYXNlX3R5cGVfbmFtZRgBIAEoCVIMYmFzZVR5cGVOYW1lEikKEGV4dGVuc2lvbl9udW1iZXIYAiADKAVSD2V4dGVuc2lvbk51bWJlciJZChNMaXN0U2VydmljZVJlc3BvbnNlEkIKB3NlcnZpY2UYASADKAsyKC5ncnBjLnJlZmxlY3Rpb24udjFhbHBoYS5TZXJ2aWNlUmVzcG9uc2VSB3NlcnZpY2UiJQoPU2VydmljZVJlc3BvbnNlEhIKBG5hbWUYASABKAlSBG5hbWUiUwoNRXJyb3JSZXNwb25zZRIdCgplcnJvcl9jb2RlGAEgASgFUgllcnJvckNvZGUSIwoNZXJyb3JfbWVzc2FnZRgCIAEoCVIMZXJyb3JNZXNzYWdlMpMBChBTZXJ2ZXJSZWZsZWN0aW9uEn8KFFNlcnZlclJlZmxlY3Rpb25JbmZvEjAuZ3JwYy5yZWZsZWN0aW9uLnYxYWxwaGEuU2VydmVyUmVmbGVjdGlvblJlcXVlc3QaMS5ncnBjLnJlZmxlY3Rpb24udjFhbHBoYS5TZXJ2ZXJSZWZsZWN0aW9uUmVzcG9uc2UoATABYgZwcm90bzM="
 
+  let grpc_masc_descriptor_b64 =
+    "ChdtYXNjX2Nvb3JkaW5hdGlvbi5wcm90bxIUbWFzYy5jb29yZGluYXRpb24udjEi2gEKC0pvaW5SZXF1ZXN0Eh0KCmFnZW50X25hbWUYASABKAlSCWFnZW50"
+    ^ "TmFtZRIiCgxjYXBhYmlsaXRpZXMYAiADKAlSDGNhcGFiaWxpdGllcxJLCghtZXRhZGF0YRgDIAMoCzIvLm1hc2MuY29vcmRpbmF0aW9uLnYxLkpvaW5SZXF1"
+    ^ "ZXN0Lk1ldGFkYXRhRW50cnlSCG1ldGFkYXRhGjsKDU1ldGFkYXRhRW50cnkSEAoDa2V5GAEgASgJUgNrZXkSFAoFdmFsdWUYAiABKAlSBXZhbHVlOgI4ASKn"
+    ^ "AQoMSm9pblJlc3BvbnNlEhgKB3N1Y2Nlc3MYASABKAhSB3N1Y2Nlc3MSGAoHbWVzc2FnZRgCIAEoCVIHbWVzc2FnZRIdCgpzZXNzaW9uX2lkGAMgASgJUglz"
+    ^ "ZXNzaW9uSWQSRAoNYWN0aXZlX2FnZW50cxgEIAMoCzIfLm1hc2MuY29vcmRpbmF0aW9uLnYxLkFnZW50SW5mb1IMYWN0aXZlQWdlbnRzIkwKDExlYXZlUmVx"
+    ^ "dWVzdBIdCgphZ2VudF9uYW1lGAEgASgJUglhZ2VudE5hbWUSHQoKc2Vzc2lvbl9pZBgCIAEoCVIJc2Vzc2lvbklkIkMKDUxlYXZlUmVzcG9uc2USGAoHc3Vj"
+    ^ "Y2VzcxgBIAEoCFIHc3VjY2VzcxIYCgdtZXNzYWdlGAIgASgJUgdtZXNzYWdlIpgBCg1IZWFydGJlYXRQaW5nEh0KCmFnZW50X25hbWUYASABKAlSCWFnZW50"
+    ^ "TmFtZRIdCgpzZXNzaW9uX2lkGAIgASgJUglzZXNzaW9uSWQSIQoMdGltZXN0YW1wX21zGAMgASgDUgt0aW1lc3RhbXBNcxImCg9jdXJyZW50X3Rhc2tfaWQY"
+    ^ "BCABKAlSDWN1cnJlbnRUYXNrSWQirQEKDEhlYXJ0YmVhdEFjaxIhCgx0aW1lc3RhbXBfbXMYASABKANSC3RpbWVzdGFtcE1zEiwKEmFjdGl2ZV9hZ2VudF9j"
+    ^ "b3VudBgCIAEoBVIQYWN0aXZlQWdlbnRDb3VudBIsChJwZW5kaW5nX3Rhc2tfY291bnQYAyABKAVSEHBlbmRpbmdUYXNrQ291bnQSHgoKZGlyZWN0aXZlcxgE"
+    ^ "IAMoCVIKZGlyZWN0aXZlcyKOAQoQU3Vic2NyaWJlUmVxdWVzdBIdCgphZ2VudF9uYW1lGAEgASgJUglhZ2VudE5hbWUSHQoKc2Vzc2lvbl9pZBgCIAEoCVIJ"
+    ^ "c2Vzc2lvbklkEh8KC2V2ZW50X3R5cGVzGAMgAygJUgpldmVudFR5cGVzEhsKCXNpbmNlX3NlcRgEIAEoA1IIc2luY2VTZXEioQEKBUV2ZW50EhAKA3NlcRgB"
+    ^ "IAEoA1IDc2VxEh0KCmV2ZW50X3R5cGUYAiABKAlSCWV2ZW50VHlwZRIhCgxzb3VyY2VfYWdlbnQYAyABKAlSC3NvdXJjZUFnZW50EiEKDHRpbWVzdGFtcF9t"
+    ^ "cxgEIAEoA1ILdGltZXN0YW1wTXMSIQoMcGF5bG9hZF9qc29uGAUgASgJUgtwYXlsb2FkSnNvbiKTAQoPVG9vbENhbGxSZXF1ZXN0Eh0KCmFnZW50X25hbWUY"
+    ^ "ASABKAlSCWFnZW50TmFtZRIdCgpzZXNzaW9uX2lkGAIgASgJUglzZXNzaW9uSWQSGwoJdG9vbF9uYW1lGAMgASgJUgh0b29sTmFtZRIlCg5hcmd1bWVudHNf"
+    ^ "anNvbhgEIAEoCVINYXJndW1lbnRzSnNvbiKRAQoQVG9vbENhbGxSZXNwb25zZRIYCgdzdWNjZXNzGAEgASgIUgdzdWNjZXNzEh8KC3Jlc3VsdF9qc29uGAIg"
+    ^ "ASgJUgpyZXN1bHRKc29uEiMKDWVycm9yX21lc3NhZ2UYAyABKAlSDGVycm9yTWVzc2FnZRIdCgplcnJvcl9jb2RlGAQgASgFUgllcnJvckNvZGUiZwoQQnJv"
+    ^ "YWRjYXN0UmVxdWVzdBIdCgphZ2VudF9uYW1lGAEgASgJUglhZ2VudE5hbWUSGAoHbWVzc2FnZRgCIAEoCVIHbWVzc2FnZRIaCghtZW50aW9ucxgDIAMoCVII"
+    ^ "bWVudGlvbnMiPwoRQnJvYWRjYXN0UmVzcG9uc2USGAoHc3VjY2VzcxgBIAEoCFIHc3VjY2VzcxIQCgNzZXEYAiABKANSA3NlcSIPCg1TdGF0dXNSZXF1ZXN0"
+    ^ "IsEBCg5TdGF0dXNSZXNwb25zZRI3CgZhZ2VudHMYASADKAsyHy5tYXNjLmNvb3JkaW5hdGlvbi52MS5BZ2VudEluZm9SBmFnZW50cxI0CgV0YXNrcxgCIAMo"
+    ^ "CzIeLm1hc2MuY29vcmRpbmF0aW9uLnYxLlRhc2tJbmZvUgV0YXNrcxIjCg1tZXNzYWdlX2NvdW50GAMgASgFUgxtZXNzYWdlQ291bnQSGwoJcm9vbV9wYXRo"
+    ^ "GAQgASgJUghyb29tUGF0aCLRAQoJQWdlbnRJbmZvEhIKBG5hbWUYASABKAlSBG5hbWUSFgoGc3RhdHVzGAIgASgJUgZzdGF0dXMSIgoMY2FwYWJpbGl0aWVz"
+    ^ "GAMgAygJUgxjYXBhYmlsaXRpZXMSKgoRbGFzdF9oZWFydGJlYXRfbXMYBCABKANSD2xhc3RIZWFydGJlYXRNcxIgCgxqb2luZWRfYXRfbXMYBSABKANSCmpv"
+    ^ "aW5lZEF0TXMSJgoPY3VycmVudF90YXNrX2lkGAYgASgJUg1jdXJyZW50VGFza0lkIoUBCghUYXNrSW5mbxIOCgJpZBgBIAEoCVICaWQSFAoFdGl0bGUYAiAB"
+    ^ "KAlSBXRpdGxlEhYKBnN0YXR1cxgDIAEoCVIGc3RhdHVzEh8KC2Fzc2lnbmVkX3RvGAQgASgJUgphc3NpZ25lZFRvEhoKCHByaW9yaXR5GAUgASgFUghwcmlv"
+    ^ "cml0eTLyBAoQTWFzY0Nvb3JkaW5hdGlvbhJNCgRKb2luEiEubWFzYy5jb29yZGluYXRpb24udjEuSm9pblJlcXVlc3QaIi5tYXNjLmNvb3JkaW5hdGlvbi52"
+    ^ "MS5Kb2luUmVzcG9uc2USUAoFTGVhdmUSIi5tYXNjLmNvb3JkaW5hdGlvbi52MS5MZWF2ZVJlcXVlc3QaIy5tYXNjLmNvb3JkaW5hdGlvbi52MS5MZWF2ZVJl"
+    ^ "c3BvbnNlElgKCUhlYXJ0YmVhdBIjLm1hc2MuY29vcmRpbmF0aW9uLnYxLkhlYXJ0YmVhdFBpbmcaIi5tYXNjLmNvb3JkaW5hdGlvbi52MS5IZWFydGJlYXRB"
+    ^ "Y2soATABElIKCVN1YnNjcmliZRImLm1hc2MuY29vcmRpbmF0aW9uLnYxLlN1YnNjcmliZVJlcXVlc3QaGy5tYXNjLmNvb3JkaW5hdGlvbi52MS5FdmVudDAB"
+    ^ "ElkKCFRvb2xDYWxsEiUubWFzYy5jb29yZGluYXRpb24udjEuVG9vbENhbGxSZXF1ZXN0GiYubWFzYy5jb29yZGluYXRpb24udjEuVG9vbENhbGxSZXNwb25z"
+    ^ "ZRJcCglCcm9hZGNhc3QSJi5tYXNjLmNvb3JkaW5hdGlvbi52MS5Ccm9hZGNhc3RSZXF1ZXN0GicubWFzYy5jb29yZGluYXRpb24udjEuQnJvYWRjYXN0UmVz"
+    ^ "cG9uc2USVgoJR2V0U3RhdHVzEiMubWFzYy5jb29yZGluYXRpb24udjEuU3RhdHVzUmVxdWVzdBokLm1hc2MuY29vcmRpbmF0aW9uLnYxLlN0YXR1c1Jlc3Bv"
+    ^ "bnNlYgZwcm90bzM="
+
   let grpc_health_descriptor =
     Base64.decode_exn grpc_health_descriptor_b64
 
@@ -76,6 +111,9 @@ module Reflection_bridge = struct
 
   let grpc_reflection_v1alpha_descriptor =
     Base64.decode_exn grpc_reflection_v1alpha_descriptor_b64
+
+  let grpc_masc_descriptor =
+    Base64.decode_exn grpc_masc_descriptor_b64
 
   let health_proto_filenames =
     [ "grpc/health/v1/health.proto"; "grpc-health.proto"; "health.proto" ]
@@ -89,6 +127,9 @@ module Reflection_bridge = struct
 
   let reflection_v1alpha_proto_filenames =
     [ "reflection_v1alpha.proto"; "grpc/reflection/v1alpha/reflection.proto" ]
+
+  let masc_proto_filenames =
+    [ "masc_coordination.proto" ]
 
   let health_symbols =
     [
@@ -128,6 +169,9 @@ module Reflection_bridge = struct
       "grpc.reflection.v1alpha.ExtensionNumberResponse";
     ]
 
+  let masc_symbols =
+    [ Masc_grpc_service.service_name ]
+
   let has_prefix ~prefix value =
     String.length value >= String.length prefix
     && String.sub value 0 (String.length prefix) = prefix
@@ -138,6 +182,8 @@ module Reflection_bridge = struct
     let done_ = ref false in
     while !pos < String.length bytes && not !done_ do
       let byte = Char.code bytes.[!pos] in
+      if !shift >= Sys.int_size then
+        invalid_arg "reflection varint overflow";
       incr pos;
       result := !result lor ((byte land 0x7f) lsl !shift);
       shift := !shift + 7;
@@ -181,6 +227,8 @@ module Reflection_bridge = struct
         match wire_type with
         | 2 ->
             let len = decode_varint data pos in
+            if !pos + len > String.length data then
+              invalid_arg "reflection truncated length-delimited field";
             let value = String.sub data !pos len in
             pos := !pos + len;
             (match field_num with
@@ -240,12 +288,22 @@ module Reflection_bridge = struct
   let reflection_v1alpha_descriptor_response () =
     encode_file_descriptor_response [ grpc_reflection_v1alpha_descriptor ]
 
+  let masc_descriptor_response () =
+    encode_file_descriptor_response [ grpc_masc_descriptor ]
+
   let handles_health_symbol symbol =
     List.mem symbol health_symbols
     || has_prefix ~prefix:"grpc.health.v1." symbol
 
   let handles_health_filename filename =
     List.mem filename health_proto_filenames
+
+  let handles_masc_symbol symbol =
+    List.mem symbol masc_symbols
+    || has_prefix ~prefix:"masc.coordination.v1." symbol
+
+  let handles_masc_filename filename =
+    List.mem filename masc_proto_filenames
 
   let handles_reflection_v1_symbol symbol =
     List.mem symbol reflection_symbols
@@ -272,38 +330,45 @@ module Reflection_bridge = struct
           try
             let request_bytes = Grpc_eio.Stream.take request_stream in
             let services = Grpc_eio.Server.list_services !server_ref in
-            let parsed_request = parse_request request_bytes in
             let response_payload =
-              match parsed_request with
-              | ListServices ->
-                  encode_list_services_response services
-              | FileContainingSymbol symbol
-                when handles_reflection_v1alpha_symbol symbol ->
-                  reflection_v1alpha_descriptor_response ()
-              | FileByFilename filename
-                when handles_reflection_v1alpha_filename filename ->
-                  reflection_v1alpha_descriptor_response ()
-              | FileContainingSymbol symbol
-                when handles_reflection_v1_symbol symbol ->
-                  reflection_v1_descriptor_response ()
-              | FileByFilename filename
-                when handles_reflection_v1_filename filename ->
-                  reflection_v1_descriptor_response ()
-              | FileContainingSymbol symbol when handles_health_symbol symbol ->
-                  health_descriptor_response ()
-              | FileByFilename filename when handles_health_filename filename ->
-                  health_descriptor_response ()
-              | FileContainingSymbol symbol when List.mem symbol services ->
-                  encode_list_services_response [ symbol ]
-              | FileContainingSymbol symbol ->
-                  encode_error_response 5
-                    (Printf.sprintf "Symbol not found: %s" symbol)
-              | FileByFilename filename ->
-                  encode_error_response 5
-                    (Printf.sprintf "FileDescriptor not available for: %s"
-                       filename)
-              | Unknown ->
-                  encode_error_response 3 "Unknown request type"
+              try
+                match parse_request request_bytes with
+                | ListServices ->
+                    encode_list_services_response services
+                | FileContainingSymbol symbol
+                  when handles_reflection_v1alpha_symbol symbol ->
+                    reflection_v1alpha_descriptor_response ()
+                | FileByFilename filename
+                  when handles_reflection_v1alpha_filename filename ->
+                    reflection_v1alpha_descriptor_response ()
+                | FileContainingSymbol symbol
+                  when handles_reflection_v1_symbol symbol ->
+                    reflection_v1_descriptor_response ()
+                | FileByFilename filename
+                  when handles_reflection_v1_filename filename ->
+                    reflection_v1_descriptor_response ()
+                | FileContainingSymbol symbol when handles_health_symbol symbol ->
+                    health_descriptor_response ()
+                | FileByFilename filename when handles_health_filename filename ->
+                    health_descriptor_response ()
+                | FileContainingSymbol symbol when handles_masc_symbol symbol ->
+                    masc_descriptor_response ()
+                | FileByFilename filename when handles_masc_filename filename ->
+                    masc_descriptor_response ()
+                | FileContainingSymbol symbol ->
+                    encode_error_response 5
+                      (Printf.sprintf "Symbol not found: %s" symbol)
+                | FileByFilename filename ->
+                    encode_error_response 5
+                      (Printf.sprintf "FileDescriptor not available for: %s"
+                         filename)
+                | Unknown ->
+                    encode_error_response 3 "Unknown request type"
+              with
+              | Invalid_argument _ | Failure _ as exn ->
+                  encode_error_response 3
+                    (Printf.sprintf "Malformed reflection request: %s"
+                       (Printexc.to_string exn))
             in
             let response =
               with_original_request ~request:request_bytes response_payload

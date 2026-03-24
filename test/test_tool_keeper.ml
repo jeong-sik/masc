@@ -607,6 +607,8 @@ let test_keeper_bash_requires_cmd_and_runs () =
           code <> 0))
 
 let test_keeper_fs_edit_policy_gates () =
+  (* keeper_fs_edit remains an internal legacy handler rather than part of the
+     default keeper-exposed filesystem/coding shard surface. *)
   let heuristic_disabled = make_keeper_exec_meta () in
   let heuristic_coding =
     make_keeper_exec_meta ~name:"fs-edit-heuristic"

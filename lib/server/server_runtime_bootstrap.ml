@@ -714,6 +714,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   (* Initialize Eio environment for MODEL HTTP calls (cohttp-eio via OAS Provider) *)
   Masc_eio_env.init ~sw ~net ~clock ();
   Discovery_cache.set_env ~sw ~net;
+  (* Refresh llama endpoint list: auto-scan ports 8085-8090 if LLM_ENDPOINTS unset *)
+  let llama_endpoints =
+    Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ()
+  in
+  Log.Server.info "[MASC] Llama endpoints: %s"
+    (String.concat ", " llama_endpoints);
 
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = make_http_config ~host ~port in

@@ -283,7 +283,6 @@ let start
       (try
         let server = create_server ~port ~room_config ~tool_dispatcher in
         Log.Server.info
-          "gRPC coordination server starting on port %d (reflection + health enabled)"
           "gRPC coordination server starting on port %d (health + reflection enabled)"
           port;
         Log.Server.info "  service: %s" Masc_grpc_service.service_name;

@@ -100,12 +100,12 @@ let ensure_keeper_exists
               | [] -> "")
     in
     (* Mode categorization removed: always use fixed values. *)
-    let policy_mode = canonical_policy_mode "heuristic" in
+    let policy_mode = "unified" in
     let policy_voice_enabled =
       profile_defaults.policy_voice_enabled
       |> Option.value ~default:false
     in
-    let policy_shell_mode = canonical_policy_shell_mode "coding" in
+    let policy_shell_mode = "coding" in
     let allowed_paths = [] in
     let room_scope =
       profile_defaults.room_scope |> Option.value ~default:"current"

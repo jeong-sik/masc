@@ -160,11 +160,6 @@ let canonical_trigger_mode = function
   | "explicit_only" -> "explicit_only"
   | _ -> "explicit_only"
 
-(** Mode categorization removed. Always returns "heuristic" regardless of input.
-    Field kept for JSON backward compatibility. *)
-let canonical_policy_mode = function
-  | _ -> "heuristic"
-
 let canonical_voice_channel = function
   | "voice_only" -> "voice_only"
   | "text_only" -> "text_only"
@@ -185,11 +180,6 @@ let default_voice_channel_for name =
 
 let default_voice_agent_id_for name =
   if default_voice_enabled_for name then name else ""
-
-(** Mode categorization removed. Always returns "coding" (full access) regardless
-    of input. Field kept for JSON backward compatibility. *)
-let canonical_policy_shell_mode = function
-  | _ -> "coding"
 
 let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (room_id, seq) -> (room_id, `Int seq)) items)
@@ -369,11 +359,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
          active_model = str "active_model";
          policy_mode =
            str "policy_mode"
-           |> Option.map canonical_policy_mode;
+           |> Option.map (fun _ -> "unified");
          policy_voice_enabled = bool_ "policy_voice_enabled";
          policy_shell_mode =
            str "policy_shell_mode"
-           |> Option.map canonical_policy_shell_mode;
+           |> Option.map (fun _ -> "coding");
          room_scope =
            str "room_scope"
            |> Option.map canonical_room_scope;
@@ -480,14 +470,14 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 active_model = Safe_ops.json_string_opt "active_model" keeper_json;
                 policy_mode =
                   Safe_ops.json_string_opt "policy_mode" keeper_json
-                  |> Option.map canonical_policy_mode;
+                  |> Option.map (fun _ -> "unified");
                 policy_voice_enabled =
                   (match Yojson.Safe.Util.member "policy_voice_enabled" keeper_json with
                   | `Bool flag -> Some flag
                   | _ -> None);
                 policy_shell_mode =
                   Safe_ops.json_string_opt "policy_shell_mode" keeper_json
-                  |> Option.map canonical_policy_shell_mode;
+                  |> Option.map (fun _ -> "coding");
                 room_scope = Safe_ops.json_string_opt "room_scope" keeper_json;
                 scope_kind = Safe_ops.json_string_opt "scope_kind" keeper_json;
                 trigger_mode =

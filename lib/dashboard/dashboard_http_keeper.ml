@@ -546,8 +546,8 @@ let keeper_config_json (config : Room.config) (name : string)
           ("models", `List (List.map (fun s -> `String s) m.models));
           ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
           ("active_model", `String active_model);
-          ("policy_mode", `String m.policy_mode);
-          ("policy_shell_mode", `String m.policy_shell_mode);
+          ("policy_mode", `String "unified");
+          ("policy_shell_mode", `String "coding");
           ("verify", `Bool false);
         ]
       in

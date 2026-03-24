@@ -82,17 +82,11 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let active_model =
     Safe_ops.json_string ~default:"" "active_model" json |> String.trim
   in
-  let _policy_mode =
-    Safe_ops.json_string ~default:"heuristic" "policy_mode" json
-    |> canonical_policy_mode
-  in
+  let _policy_mode = "unified" in
   let _policy_voice_enabled =
     Safe_ops.json_bool ~default:false "policy_voice_enabled" json
   in
-  let _policy_shell_mode =
-    Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json
-    |> canonical_policy_shell_mode
-  in
+  let _policy_shell_mode = "coding" in
   let _initiative_enabled =
     Safe_ops.json_bool ~default:false "initiative_enabled" json
   in
@@ -207,9 +201,8 @@ let resolved_keeper_args_from_persona args :
                      | [] -> "")
             in
             let policy_mode =
-              first_some (get_string_opt args "policy_mode") defaults.policy_mode
-              |> Option.value ~default:"heuristic"
-              |> canonical_policy_mode
+              ignore (first_some (get_string_opt args "policy_mode") defaults.policy_mode);
+              "unified"
             in
             let policy_voice_enabled =
               first_some
@@ -218,11 +211,10 @@ let resolved_keeper_args_from_persona args :
               |> Option.value ~default:false
             in
             let policy_shell_mode =
-              first_some
+              ignore (first_some
                 (get_string_opt args "policy_shell_mode")
-                defaults.policy_shell_mode
-              |> Option.value ~default:"disabled"
-              |> canonical_policy_shell_mode
+                defaults.policy_shell_mode);
+              "coding"
             in
             let room_scope =
               get_string_opt args "room_scope"

@@ -330,9 +330,8 @@ let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
        ("runtime_class", `String runtime_class);
        ("agent_name", `String meta.agent_name);
        ("status", `String status);
-       ("policy_mode", `String meta.policy_mode);
+       ("policy_mode", `String "unified");
        ("action_budget", `String "conversation");
-       ("reward_model_path", `Null);
        ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
        ("allowed_models", `List (List.map (fun model -> `String model) meta.allowed_models));
        ("updated_at", `String meta.updated_at);
@@ -497,9 +496,7 @@ let handle_tool_admin_snapshot ctx args =
 
 let apply_keeper_policy_update config ~runtime_class args =
   let name = get_string args "name" "" |> String.trim in
-  let policy_mode_opt = get_string_opt args "policy_mode" |> Option.map String.trim in
   let action_budget_opt = get_string_opt args "action_budget" |> Option.map String.trim in
-  let reward_model_path_opt = get_string_opt args "reward_model_path" |> Option.map String.trim in
   let membership_ok =
     match runtime_class with
     | "resident_keeper" -> List.mem name (Keeper_types.resident_keeper_names config)
@@ -516,14 +513,6 @@ let apply_keeper_policy_update config ~runtime_class args =
     | Error err -> Error err
     | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
     | Ok (Some meta) ->
-        let policy_mode =
-          match policy_mode_opt with
-          | None -> Ok (Keeper_contract.policy_mode_of_string meta.policy_mode)
-          | Some raw -> (
-              match Keeper_contract.parse_policy_mode raw with
-              | Some mode -> Ok mode
-              | None -> Error (Printf.sprintf "invalid policy_mode: %s" raw))
-        in
         let action_budget =
           match action_budget_opt with
           | None -> Ok Keeper_contract.Conversation
@@ -532,36 +521,13 @@ let apply_keeper_policy_update config ~runtime_class args =
               | Some budget -> Ok budget
               | None -> Error (Printf.sprintf "invalid action_budget: %s" raw))
         in
-        (match policy_mode, action_budget with
-        | Error err, _ | _, Error err -> Error err
-        | Ok policy_mode, Ok action_budget ->
-            let reward_model_path_raw =
-              match reward_model_path_opt with
-              | Some value -> value
-              | None -> ""
-            in
-            let reward_model_path =
-              if reward_model_path_raw <> ""
-                 && Filename.is_relative reward_model_path_raw
-              then
-                Filename.concat config.base_path reward_model_path_raw
-              else
-                reward_model_path_raw
-            in
-            let effective_reward_result =
-              if Keeper_contract.policy_mode_is_learned policy_mode then
-                Keeper_memory.load_keeper_reward_model reward_model_path
-                |> Result.map (fun _ -> (reward_model_path, None))
-              else
-                Ok (reward_model_path, None)
-            in
-            match effective_reward_result with
-            | Error err -> Error err
-            | Ok (effective_reward_path, reward_model_version) ->
+        (match action_budget with
+        | Error err -> Error err
+        | Ok action_budget ->
                 let updated =
                   {
                     meta with
-                    policy_mode = Keeper_contract.policy_mode_to_string policy_mode;
+                    policy_mode = "unified";
                     updated_at = Types.now_iso ();
                   }
                 in
@@ -579,10 +545,8 @@ let apply_keeper_policy_update config ~runtime_class args =
                            ("status", `String "ok");
                            ("runtime_class", `String runtime_class);
                            ("name", `String updated.name);
-                           ("policy_mode", `String updated.policy_mode);
+                           ("policy_mode", `String "unified");
                            ("action_budget", `String (Keeper_contract.policy_action_budget_to_string action_budget));
-                           ("reward_model_path", json_string_option (Some effective_reward_path));
-                           ("reward_model_version", json_string_option reward_model_version);
                          ]
                         @ policy_json)))
         )

@@ -47,10 +47,6 @@ let policy_action_order action =
   | "board_post" -> 2
   | _ -> 9
 
-let keeper_policy_mode_is_learned (meta : keeper_meta) =
-  Keeper_contract.policy_mode_of_string meta.policy_mode
-  |> Keeper_contract.policy_mode_is_learned
-
 let keeper_policy_feature_vector (obs : keeper_policy_observation) : (string * float) list =
   let clamp01 value = max 0.0 (min 1.0 value) in
   [

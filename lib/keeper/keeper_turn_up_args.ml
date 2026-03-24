@@ -18,9 +18,7 @@ type parsed_args = {
   models_in : string list;
   allowed_models_in : string list;
   active_model_opt : string option;
-  policy_mode_opt : string option;
   policy_voice_enabled_opt : bool option;
-  policy_shell_mode_opt : string option;
   allowed_paths_opt : string list option;
   room_scope_opt : string option;
   scope_kind_opt : string option;
@@ -68,9 +66,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let models_in = get_string_list args "models" in
     let allowed_models_in = get_string_list args "allowed_models" in
     let active_model_opt = get_string_opt args "active_model" in
-    let policy_mode_opt = get_string_opt args "policy_mode" in
     let policy_voice_enabled_opt = get_bool_opt args "policy_voice_enabled" in
-    let policy_shell_mode_opt = get_string_opt args "policy_shell_mode" in
     let allowed_paths_opt =
       let raw = get_string_list args "allowed_paths" in
       if raw = [] then None else Some raw
@@ -136,9 +132,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       models_in;
       allowed_models_in;
       active_model_opt;
-      policy_mode_opt;
       policy_voice_enabled_opt;
-      policy_shell_mode_opt;
       allowed_paths_opt;
       room_scope_opt;
       scope_kind_opt;

@@ -187,14 +187,6 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
        (match defaults.active_model with
         | Some value -> value <> meta.active_model
         | None -> false)
-  |> add_if "execution.policy_mode"
-       (match defaults.policy_mode with
-        | Some value -> value <> meta.policy_mode
-        | None -> false)
-  |> add_if "execution.policy_shell_mode"
-       (match defaults.policy_shell_mode with
-        | Some value -> value <> meta.policy_shell_mode
-        | None -> false)
   |> add_if "coordination.room_scope"
        (match defaults.room_scope with
         | Some value ->

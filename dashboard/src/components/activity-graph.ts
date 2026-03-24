@@ -119,7 +119,7 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
   const s = data.stats
   const h = data.stats_history ?? []
   const evSeries = h.map(b => b.events)
-  const agSeries = h.map(b => b.agents_active)
+  const agSeries = h.map(b => b.active_agents)
   const tdSeries = h.map(b => b.tasks_done)
 
   function statCard(label: string, value: number, series: number[], color: string, highlight = false) {

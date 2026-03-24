@@ -27,6 +27,12 @@ val update_metrics_from_result :
   Keeper_agent_run.run_result ->
   Keeper_types.keeper_meta
 
+val update_metrics_from_failure :
+  Keeper_types.keeper_meta ->
+  latency_ms:int ->
+  reason:string ->
+  Keeper_types.keeper_meta
+
 val run_unified_turn :
   config:Room.config ->
   meta:Keeper_types.keeper_meta ->

@@ -77,6 +77,24 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       (if has_tool_calls then now_iso () else meta.last_autonomous_action_at);
   }
 
+let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
+    ~(reason : string) : keeper_meta =
+  let now_ts = Time_compat.now () in
+  let preview =
+    let trimmed = String.trim reason in
+    if trimmed = "" then "unified turn failed"
+    else short_preview trimmed
+  in
+  {
+    meta with
+    updated_at = now_iso ();
+    total_turns = meta.total_turns + 1;
+    last_turn_ts = now_ts;
+    last_latency_ms = latency_ms;
+    last_proactive_reason = "unified:error:" ^ String.trim reason;
+    last_proactive_preview = preview;
+  }
+
 let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int) : (keeper_meta, string) result =
@@ -126,7 +144,16 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ())
       in
       match run_result with
-      | Error e -> Error e
+      | Error e ->
+          let updated_meta =
+            update_metrics_from_failure meta ~latency_ms ~reason:e
+          in
+          (match write_meta config updated_meta with
+           | Ok () -> ()
+           | Error msg ->
+               Log.Keeper.error
+                 "write_meta failed after unified turn failure: %s" msg);
+          Error e
       | Ok result ->
           (* 6. Observe result and update metrics *)
           let updated_meta =

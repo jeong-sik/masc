@@ -52,7 +52,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     mark_cached_surface_attempt _execution_cache;
     let started_at = Unix.gettimeofday () in
     try
-      run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config:room_config
+      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
         (fun ~config ~sw ->
           Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
           |> with_projection_diagnostics ~surface:"execution" ~started_at

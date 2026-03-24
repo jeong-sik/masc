@@ -34,7 +34,6 @@ let validate_room_id room_id =
   else if not (Str.string_match (Str.regexp "^[A-Za-z0-9._-]+$") room_id 0) then
     Error "Room id may only contain letters, digits, dot, underscore, and hyphen"
   else Ok room_id
-
 let validate_file_path path =
   (* Delegate to Validation module for consistent security checks *)
   (* Additional length check for file paths *)

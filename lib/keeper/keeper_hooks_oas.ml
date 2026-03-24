@@ -18,6 +18,28 @@
 let destructive_check_tools =
   [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit"; "keeper_github" ]
 
+(** Keeper deny list — tools that keepers must never call directly.
+    These are administrative/destructive operations that should only
+    be invoked by operators or through controlled workflows.
+
+    Inspired by Trail of Bits' deny-rule pattern: restrict at the
+    harness level so the model cannot bypass. *)
+let keeper_denied_tools = [
+  "masc_room_delete";
+  "masc_room_destroy";
+  "masc_force_leave";
+  "masc_force_remove_agent";
+  "masc_admin_reset";
+  "masc_admin_cleanup";
+  "masc_gc_force";
+  "masc_config_set";
+  "masc_config_reset";
+  "masc_spawn";
+  (* Raw database operations — keepers must use GraphQL *)
+  "masc_neo4j_query";
+  "masc_pg_query";
+]
+
 (** Extract command or content string from tool input JSON for screening.
     Reads "command", "cmd" (keeper_github), or "content" keys. *)
 let extract_command_from_input (input : Yojson.Safe.t) : string =
@@ -101,6 +123,13 @@ let make_hooks
     pre_tool_use = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
+        (* Safety gate 0: Keeper deny list *)
+        if List.mem tool_name keeper_denied_tools then begin
+          Log.Keeper.warn "keeper:%s deny list: blocked %s"
+            (!meta_ref).name tool_name;
+          Agent_sdk.Hooks.Skip
+        end
+        else
         (* Safety gate 1: Cost budget *)
         (match max_cost_usd with
          | Some limit when accumulated_cost_usd >= limit ->

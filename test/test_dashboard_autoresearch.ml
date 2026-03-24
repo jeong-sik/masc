@@ -131,13 +131,15 @@ let test_loops_json_skips_invalid_persisted_state () =
   let state_path =
     Filename.concat base_path ".masc/autoresearch/bad-loop/state.json"
   in
-  (* Valid JSON but missing required fields used by state_of_yojson. *)
-  write_file state_path {|{"loop_id":"bad-loop","status":"running"}|};
+  (* Valid JSON but missing loop_id — the only required string field
+     checked by load_state before attempting deserialization.
+     state_of_yojson provides defaults for all optional fields, so
+     the only way to trigger rejection is to omit loop_id. *)
+  write_file state_path {|{"status":"running"}|};
   let json =
     Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
   in
-  (* Partial state.json (only loop_id+status) is now rejected by
-     required_fields validation in load_state (13 fields required).
+  (* Missing loop_id causes load_state to reject the state.
      The dashboard gracefully skips invalid persisted state. *)
   check int "total skips invalid partial state" 0
     Yojson.Safe.Util.(json |> member "total" |> to_int);

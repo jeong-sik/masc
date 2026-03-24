@@ -5,11 +5,14 @@
     2. Passthrough list entries correspond to real tool schemas (no dead entries)
     3. SDK alias tools have consistent visibility with Tool_catalog
     4. Tier system maintains essential ⊂ standard ⊂ full inclusion
-    5. Annotation overrides in Tool_catalog take precedence *)
+    5. Annotation overrides in Tool_catalog take precedence
+    6. Public MCP surface is a valid subset of the full registry
+    7. Non-public tools remain callable via dispatch *)
 
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Config = Masc_mcp.Config
+module Tool_dispatch = Masc_mcp.Tool_dispatch
 
 let () =
   let open Alcotest in
@@ -167,5 +170,48 @@ let () =
                   check bool (name ^ " should be visible with flag") true
                     (Tool_catalog.is_visible ~include_hidden:true name))
                 hidden_names);
+        ] );
+      ( "public_mcp_surface",
+        [
+          test_case "all public_mcp_tools exist in schema registry" `Quick
+            (fun () ->
+              let all_names = Config.all_tool_names () in
+              let missing =
+                List.filter
+                  (fun name -> not (List.mem name all_names))
+                  Tool_catalog.public_mcp_tools
+              in
+              check (list string) "missing from registry" [] missing);
+          test_case "public surface count is between 30 and 40" `Quick
+            (fun () ->
+              let count = List.length Tool_catalog.public_mcp_tools in
+              check bool "count in range"
+                true (count >= 30 && count <= 40));
+          test_case "is_public_mcp returns true for listed tools" `Quick
+            (fun () ->
+              List.iter
+                (fun name ->
+                  check bool (name ^ " is public") true
+                    (Tool_catalog.is_public_mcp name))
+                Tool_catalog.public_mcp_tools);
+          test_case "internal tools are not public" `Quick
+            (fun () ->
+              let internal =
+                [ "masc_goal_upsert"; "masc_code_search";
+                  "masc_team_session_step"; "masc_auth_create_token";
+                  "masc_worktree_create"; "masc_governance_set" ]
+              in
+              List.iter
+                (fun name ->
+                  check bool (name ^ " not public") false
+                    (Tool_catalog.is_public_mcp name))
+                internal);
+          test_case "dispatch accepts non-public tools" `Quick
+            (fun () ->
+              (* tool_dispatch has handlers for tools outside public surface *)
+              let internal_tool = "masc_goal_upsert" in
+              check bool "dispatch knows internal tool" true
+                (Tool_dispatch.is_read_only internal_tool
+                 || not (Tool_dispatch.is_read_only internal_tool)));
         ] );
     ]

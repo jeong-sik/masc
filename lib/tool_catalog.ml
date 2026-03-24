@@ -253,7 +253,7 @@ let public_mcp_tools =
     "masc_broadcast"; "masc_messages"; "masc_who";
     (* Task coordination *)
     "masc_add_task"; "masc_batch_add_tasks"; "masc_tasks";
-    "masc_claim_next"; "masc_transition"; "masc_done";
+    "masc_claim_next"; "masc_transition";
     (* Planning *)
     "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
     (* Heartbeat *)

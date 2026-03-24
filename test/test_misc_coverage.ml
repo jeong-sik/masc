@@ -173,7 +173,9 @@ let test_config_of_json_custom () =
   check bool "mode tools removed" false (List.mem "masc_switch_mode" names)
 
 let test_config_of_json_invalid () =
-  check bool "pause visible" true (Config.is_tool_visible "masc_pause")
+  (* masc_pause is auto-classified as Hidden (not on public MCP surface) *)
+  check bool "pause hidden (not on public surface)" false
+    (Config.is_tool_visible "masc_pause")
 
 (* ============================================================
    Env_config Tests

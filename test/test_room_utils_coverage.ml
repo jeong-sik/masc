@@ -296,6 +296,9 @@ let test_backend_config_for_uses_fallback_pg_url () =
       check (option string) "postgres url" (Some url) cfg.postgres_url)
 
 let test_postgres_url_from_env_normalizes_supabase_pooler () =
+  (* normalize_postgres_url logs a warning for Supabase Transaction Pooler
+     (port 6543) but does NOT rewrite the port. Pg_infix handles this at
+     query time via oneshot queries. The URL is passed through unchanged. *)
   let raw_url =
     "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
   in

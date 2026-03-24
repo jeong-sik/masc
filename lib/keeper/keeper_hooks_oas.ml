@@ -25,6 +25,7 @@ let destructive_check_tools =
     Inspired by Trail of Bits' deny-rule pattern: restrict at the
     harness level so the model cannot bypass. *)
 let keeper_denied_tools = [
+  (* Admin/destructive operations *)
   "masc_room_delete";
   "masc_room_destroy";
   "masc_force_leave";
@@ -35,6 +36,12 @@ let keeper_denied_tools = [
   "masc_config_set";
   "masc_config_reset";
   "masc_spawn";
+  (* Operator privilege escalation *)
+  "masc_operator_action";
+  "masc_operator_confirm";
+  "masc_operator_judgment_write";
+  "masc_execute";
+  "masc_execute_dry_run";
   (* Raw database operations — keepers must use GraphQL *)
   "masc_neo4j_query";
   "masc_pg_query";

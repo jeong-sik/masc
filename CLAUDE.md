@@ -53,6 +53,54 @@ let cmd = Printf.sprintf
 } } } }
 ```
 
+## MCP Tool Surface
+
+MASC MCP는 외부 에이전트와의 커뮤니케이션 레이어다. 도구 생성은 OAS 하네스 책임.
+
+### tools/list (discovery)
+
+기본 33개 도구만 노출. `lib/tool_catalog.ml`의 `public_mcp_tools` 리스트가 SSOT.
+
+| 카테고리 | 도구 |
+|----------|------|
+| Room | start, join, leave, set_room, status |
+| Messaging | broadcast, messages, who |
+| Task | add_task, batch_add_tasks, tasks, claim_next, transition |
+| Planning | plan_init, plan_get, plan_set_task, plan_update |
+| Heartbeat | heartbeat |
+| Keeper | keeper_msg, keeper_list, keeper_status, keeper_up, keeper_down |
+| Board | board_post, board_list, board_get, board_comment, board_vote |
+| Agent | agents, dashboard, agent_card |
+| Utility | tool_help, check |
+
+### tools/call (execution)
+
+모든 등록 도구 호출 가능. tools/list에 없어도 호출된다.
+
+### 표면 확장
+
+```bash
+# 특정 도구 추가 (서버 시작 시)
+MASC_PUBLIC_TOOLS_EXTRA=masc_goal_upsert,masc_pause ./start-masc-mcp.sh --http --port 8935
+
+# 전체 표면 복원 (디버깅)
+MASC_FULL_SURFACE=1 ./start-masc-mcp.sh --http --port 8935
+
+# tools/list에 include_hidden=true 전달 (API 레벨)
+{"method": "tools/list", "params": {"include_hidden": true}}
+```
+
+### 도구 가시성 규칙
+
+| 도구 상태 | tools/list | tools/call | Keeper dispatch |
+|-----------|-----------|------------|-----------------|
+| Public (33개) | O | O | O |
+| Hidden (내부) | X | O | O |
+| Hidden + include_hidden | O | O | O |
+| FULL_SURFACE=1 | O | O | O |
+
+코드 경로: `Tool_catalog.is_public_mcp` → `Mcp_server_eio_tool_profile.tool_schemas_for_profile`
+
 ## Usage SSOT
 
 MASC usage는 문서마다 흩어져 있지 않다. 아래 문서를 기준으로 본다.
@@ -96,6 +144,8 @@ curl http://127.0.0.1:8935/health
 - `ME_ROOT` — repo 루트. 미지정 시 `$HOME/me`를 우선 사용
 - `MASC_DASHBOARD_PROXY_TARGET` — dashboard dev server가 프록시할 API origin
 - `MASC_BOARD_BACKEND` — Board 백엔드 선택 (`pg` default, `jsonl` for file-based)
+- `MASC_FULL_SURFACE` — `1`로 설정하면 tools/list에서 전체 도구 노출 (디버깅용)
+- `MASC_PUBLIC_TOOLS_EXTRA` — 공개 표면에 추가할 도구명 (쉼표 구분). 예: `masc_goal_upsert,masc_pause`
 
 ### 로그
 script-based 실행에서는 표준 출력/표준 오류를 현재 셸 또는 호출 스크립트에서 직접 관리한다.

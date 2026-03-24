@@ -60,12 +60,21 @@ let () = test "keeper_bash_not_denied" (fun () ->
 (* Deny list size sanity check                                      *)
 (* ================================================================ *)
 
+let () = test "operator_action_denied" (fun () ->
+  assert (List.mem "masc_operator_action" Keeper_hooks_oas.keeper_denied_tools))
+
+let () = test "operator_confirm_denied" (fun () ->
+  assert (List.mem "masc_operator_confirm" Keeper_hooks_oas.keeper_denied_tools))
+
+let () = test "execute_denied" (fun () ->
+  assert (List.mem "masc_execute" Keeper_hooks_oas.keeper_denied_tools))
+
 let () = test "deny_list_not_empty" (fun () ->
   assert (List.length Keeper_hooks_oas.keeper_denied_tools > 0))
 
 let () = test "deny_list_reasonable_size" (fun () ->
   let n = List.length Keeper_hooks_oas.keeper_denied_tools in
-  (* Should be focused: 5-20 tools, not hundreds *)
+  (* Should be focused: 5-30 tools, not hundreds *)
   assert (n >= 5 && n <= 30))
 
 let () = Printf.printf "=== Keeper Deny List: all tests passed ===\n"

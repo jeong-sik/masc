@@ -5,7 +5,9 @@
     2. Passthrough list entries correspond to real tool schemas (no dead entries)
     3. SDK alias tools have consistent visibility with Tool_catalog
     4. Tier system maintains essential ⊂ standard ⊂ full inclusion
-    5. Annotation overrides in Tool_catalog take precedence *)
+    5. Annotation overrides in Tool_catalog take precedence
+    6. Public MCP surface is a valid subset of the full registry
+    7. Non-public tools remain callable via dispatch *)
 
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
@@ -17,23 +19,30 @@ let () =
     [
       ( "hidden_tool_leak",
         [
-          test_case "no hidden tools in spawned_agent_public_tool_names" `Quick
+          test_case "no explicitly-hidden tools in spawned_agent_public_tool_names" `Quick
             (fun () ->
+              (* Only check tools with explicit Hidden metadata (not auto-classified).
+                 Auto-Hidden tools are just "not on public MCP surface" and may
+                 legitimately appear in other profiles like Managed_agent. *)
+              let explicit_hidden =
+                List.filter_map (fun (name, (meta : Tool_catalog.metadata)) ->
+                  match meta.visibility with
+                  | Tool_catalog.Hidden -> Some name
+                  | Tool_catalog.Default -> None)
+                Tool_catalog.explicit_metadata
+              in
               let names = Agent_tool_surfaces.spawned_agent_public_tool_names in
               let leaked =
-                List.filter
-                  (fun name ->
-                    not (Tool_catalog.is_visible ~include_hidden:false name))
-                  names
+                List.filter (fun name -> List.mem name explicit_hidden) names
               in
-              check (list string) "leaked hidden tools" [] leaked);
+              check (list string) "leaked explicitly-hidden tools" [] leaked);
         ] );
       ( "passthrough_dead_entries",
         [
           test_case "all passthrough names exist in visible schemas" `Quick
             (fun () ->
               let all_schemas =
-                Config.visible_tool_schemas ~include_hidden:false
+                Config.visible_tool_schemas ~include_hidden:true
                   ~include_deprecated:false ()
               in
               let schema_names =
@@ -167,5 +176,49 @@ let () =
                   check bool (name ^ " should be visible with flag") true
                     (Tool_catalog.is_visible ~include_hidden:true name))
                 hidden_names);
+        ] );
+      ( "public_mcp_surface",
+        [
+          test_case "all public_mcp_tools exist in schema registry" `Quick
+            (fun () ->
+              let all_names = Config.all_tool_names () in
+              let missing =
+                List.filter
+                  (fun name -> not (List.mem name all_names))
+                  Tool_catalog.public_mcp_tools
+              in
+              check (list string) "missing from registry" [] missing);
+          test_case "public surface count is between 30 and 40" `Quick
+            (fun () ->
+              let count = List.length Tool_catalog.public_mcp_tools in
+              check bool "count in range"
+                true (count >= 30 && count <= 40));
+          test_case "is_public_mcp returns true for listed tools" `Quick
+            (fun () ->
+              List.iter
+                (fun name ->
+                  check bool (name ^ " is public") true
+                    (Tool_catalog.is_public_mcp name))
+                Tool_catalog.public_mcp_tools);
+          test_case "internal tools are not public" `Quick
+            (fun () ->
+              let internal =
+                [ "masc_goal_upsert"; "masc_code_search";
+                  "masc_team_session_step"; "masc_auth_create_token";
+                  "masc_worktree_create"; "masc_governance_set" ]
+              in
+              List.iter
+                (fun name ->
+                  check bool (name ^ " not public") false
+                    (Tool_catalog.is_public_mcp name))
+                internal);
+          test_case "non-public tool remains in full registry" `Quick
+            (fun () ->
+              let all_names = Config.all_tool_names () in
+              let internal = "masc_goal_upsert" in
+              check bool (internal ^ " in registry") true
+                (List.mem internal all_names);
+              check bool (internal ^ " not public") false
+                (Tool_catalog.is_public_mcp internal));
         ] );
     ]

@@ -19,6 +19,10 @@ export MCP_SESSION_ID
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/test_framework.sh"
 
+extract_text() {
+  mcp_extract_text
+}
+
 PASS=0
 FAIL=0
 JOINED=0

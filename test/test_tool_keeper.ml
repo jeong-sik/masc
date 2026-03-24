@@ -367,6 +367,7 @@ let write_jsonl_lines path lines =
    policy_shell_mode, initiative_* removed in #2607. *)
 
 let test_keeper_shell_tool_policy_gates () =
+  Eio_main.run @@ fun _env ->
   let heuristic = make_keeper_exec_meta () in
   let learned_disabled =
     make_keeper_exec_meta ~name:"learned-disabled"
@@ -386,15 +387,15 @@ let test_keeper_shell_tool_policy_gates () =
       ~policy_mode:"model_deliberation" ()
   in
   check_keeper_shell_tool_presence "heuristic" heuristic
-    ~expect_bash:false ~expect_shell_readonly:true;
+    ~expect_bash:true ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "learned disabled" learned_disabled
-    ~expect_bash:false ~expect_shell_readonly:false;
+    ~expect_bash:true ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "learned readonly" learned_readonly
-    ~expect_bash:false ~expect_shell_readonly:true;
+    ~expect_bash:true ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "explicit event" explicit_event
-    ~expect_bash:false ~expect_shell_readonly:true;
+    ~expect_bash:true ~expect_shell_readonly:true;
   check_keeper_shell_tool_presence "model deliberation" deliberation
-    ~expect_bash:false ~expect_shell_readonly:true
+    ~expect_bash:true ~expect_shell_readonly:true
 
 let test_keeper_shell_readonly_enforces_allowed_paths () =
   Eio_main.run @@ fun _env ->
@@ -448,6 +449,7 @@ let test_keeper_shell_readonly_enforces_allowed_paths () =
         (contains_substring error_text "path_not_in_allowed_paths"))
 
 let test_keeper_fs_read_policy_gates () =
+  Eio_main.run @@ fun _env ->
   let heuristic = make_keeper_exec_meta () in
   let learned_offline =
     make_keeper_exec_meta ~name:"fs-read-learned"
@@ -611,6 +613,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
           code <> 0))
 
 let test_keeper_fs_edit_policy_gates () =
+  Eio_main.run @@ fun _env ->
   let heuristic_disabled = make_keeper_exec_meta () in
   let heuristic_coding =
     make_keeper_exec_meta ~name:"fs-edit-heuristic"
@@ -1246,7 +1249,9 @@ let test_keeper_policy_tools_roundtrip () =
       in
       check bool "status after policy set ok" true ok;
       let status_json = Yojson.Safe.from_string status_body in
-      check string "status policy mode" "learned_offline_v1"
+      (* canonical_policy_mode normalises all modes to "heuristic" since
+         mode categorization was removed — verify the canonical value *)
+      check string "status policy mode" "heuristic"
         Yojson.Safe.Util.(status_json |> member "policy" |> member "mode" |> to_string);
       Masc_mcp.Keeper_types.append_jsonl_line
         (Masc_mcp.Keeper_types.keeper_policy_log_path config "sangsu")
@@ -1408,16 +1413,16 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
          Test checks whichever mode is active. *)
       let voice_enabled =
         Yojson.Safe.Util.(json |> member "voice_enabled" |> to_bool) in
+      (* canonical_policy_mode maps all modes to "heuristic" since mode
+         categorization was removed — policy_mode is always heuristic *)
+      check string "policy mode" "heuristic"
+        Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
       if voice_enabled then begin
-        check string "policy mode" "explicit_event_v1"
-          Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
         check string "voice channel" "voice_text"
           Yojson.Safe.Util.(json |> member "voice_channel" |> to_string);
         check string "voice agent id" "sangsu"
           Yojson.Safe.Util.(json |> member "voice_agent_id" |> to_string)
       end else begin
-        check string "policy mode" "heuristic"
-          Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
         check string "voice channel" "text_only"
           Yojson.Safe.Util.(json |> member "voice_channel" |> to_string)
       end;

@@ -95,8 +95,10 @@ let execute_spawn_pipeline
                            "You are agent '%s'. Execute the task and return a clear result."
                            prepared.spec.spawn_agent)
                          ~max_turns
-                         ~temperature:0.3
-                         ~max_tokens:4096
+                         ~temperature:(Safe_ops.get_env_float_logged
+                           "MASC_SPAWN_TEMPERATURE" ~default:0.3)
+                         ~max_tokens:(Safe_ops.get_env_int_logged
+                           "MASC_SPAWN_MAX_TOKENS" ~default:4096)
                          ()
                      in
                      let elapsed_ms =

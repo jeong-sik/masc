@@ -89,7 +89,7 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
     |> Option.value ~default:0.0
   in
   let activity_ts =
-    let base = max meta.last_turn_ts meta.last_proactive_ts in
+    let base = max meta.usage.last_turn_ts meta.proactive.last_ts in
     if base > 0.0 then base else created_ts
   in
   if activity_ts <= 0.0 then 0

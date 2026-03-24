@@ -99,8 +99,8 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
               else
               let stale_now =
                 stale_turn_sec > 0.0
-                && (m.last_turn_ts <= 0.0
-                    || now_ts -. m.last_turn_ts >= stale_turn_sec)
+                && (m.usage.last_turn_ts <= 0.0
+                    || now_ts -. m.usage.last_turn_ts >= stale_turn_sec)
               in
               let already_running = keeper_keepalive_running m.name in
               let started_here =

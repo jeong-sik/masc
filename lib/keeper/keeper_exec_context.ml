@@ -83,7 +83,7 @@ let context_of_legacy_checkpoint
 
 let checkpoint_model_of_meta (meta : keeper_meta) =
   let candidates =
-    [ meta.last_model_used; meta.active_model; meta.cascade_name ]
+    [ meta.usage.last_model_used; meta.active_model; meta.cascade_name ]
     @ meta.models
   in
   List.find_opt (fun value -> String.trim value <> "") candidates
@@ -169,7 +169,7 @@ let save_checkpoint session (ctx : working_context) ~generation =
   ckpt
 
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
-  (meta.compaction_ratio_gate, meta.compaction_message_gate, meta.compaction_token_gate)
+  (meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate)
 
 let compact_if_needed
     ~(meta : keeper_meta)
@@ -180,19 +180,19 @@ let compact_if_needed
   let message_count = List.length ctx.messages in
   let token_count = ctx.token_count in
   let ratio_gate, message_gate, token_gate = compaction_policy_of_keeper meta in
-  let cooldown = Float.of_int meta.continuity_compaction_cooldown_sec in
-  let last_reflection_ts = max meta.last_continuity_update_ts meta.last_proactive_ts in
+  let cooldown = Float.of_int meta.compaction.cooldown_sec in
+  let last_reflection_ts = max meta.last_continuity_update_ts meta.proactive.last_ts in
   let reflection_ready =
     last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown
   in
   let hold_s =
     if cooldown <= 0.0 then 0.0
     else if last_reflection_ts <= 0.0 then
-      Float.of_int meta.continuity_compaction_cooldown_sec
+      Float.of_int meta.compaction.cooldown_sec
     else
       max
         0.0
-        (Float.of_int meta.continuity_compaction_cooldown_sec
+        (Float.of_int meta.compaction.cooldown_sec
        -. (now_ts -. last_reflection_ts))
   in
   let trigger_reason =
@@ -200,7 +200,7 @@ let compact_if_needed
       Some
         (Printf.sprintf
            "skipped:continuity_reflection(%0.0fs<%ds)"
-           hold_s meta.continuity_compaction_cooldown_sec)
+           hold_s meta.compaction.cooldown_sec)
     else if ratio >= ratio_gate then
       Some (Printf.sprintf "ratio(%.4f>=%.4f)" ratio ratio_gate)
     else if message_gate > 0 && message_count >= message_gate then
@@ -507,7 +507,7 @@ let proactive_fallback_reply ~(meta : keeper_meta) ~(idle_seconds : int) : strin
     |]
   in
   let idx =
-    abs (Hashtbl.hash (meta.name, meta.proactive_count_total, idle_seconds))
+    abs (Hashtbl.hash (meta.name, meta.proactive.count_total, idle_seconds))
     mod Array.length templates
   in
   templates.(idx)
@@ -556,7 +556,7 @@ let run_proactive_generation
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
   in
   let max_attempts = 3 in
-  let previous_preview = String.trim meta.last_proactive_preview in
+  let previous_preview = String.trim meta.proactive.last_preview in
   let similarity_threshold = Keeper_config.keeper_proactive_similarity_threshold () in
   let fallback_skill_route =
     route_keeper_skill ~soul_profile:meta.soul_profile ~message:"proactive idle automation checkin"

@@ -26,6 +26,10 @@ const loopDetail = signal<AutoresearchLoopDetail | null>(null)
 const detailLoading = signal(false)
 const detailError = signal<string | null>(null)
 
+let loopsRequest: Promise<void> | null = null
+let pendingRefreshDetail = false
+let detailRequestSeq = 0
+
 const selectedLoop = computed<AutoresearchLoopSummary | null>(() => {
   const id = selectedLoopId.value
   if (!id || !loopsData.value) return null
@@ -54,25 +58,34 @@ async function syncSelectedLoopDetail(data: AutoresearchLoopsResponse): Promise<
 }
 
 async function loadLoops({ refreshDetail = false }: { refreshDetail?: boolean } = {}) {
-  if (loopsLoading.value) return
+  pendingRefreshDetail ||= refreshDetail
+  if (loopsRequest) return loopsRequest
+
   loopsLoading.value = true
   loopsError.value = null
-  try {
-    const data = await fetchAutoresearchLoops()
-    loopsData.value = data
-    if (refreshDetail) {
-      await syncSelectedLoopDetail(data)
-    } else if (!selectedLoopId.value && data.loops.length > 0) {
-      const first = data.loops[0]
-      if (first) {
-        selectedLoopId.value = first.loop_id
+  loopsRequest = (async () => {
+    try {
+      const data = await fetchAutoresearchLoops()
+      loopsData.value = data
+      if (pendingRefreshDetail) {
+        pendingRefreshDetail = false
+        await syncSelectedLoopDetail(data)
+      } else if (!selectedLoopId.value && data.loops.length > 0) {
+        const first = data.loops[0]
+        if (first) {
+          selectedLoopId.value = first.loop_id
+        }
       }
+    } catch (err) {
+      loopsError.value = err instanceof Error ? err.message : String(err)
+    } finally {
+      pendingRefreshDetail = false
+      loopsLoading.value = false
+      loopsRequest = null
     }
-  } catch (err) {
-    loopsError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    loopsLoading.value = false
-  }
+  })()
+
+  return loopsRequest
 }
 
 export async function refreshAutoresearchSurface(): Promise<void> {
@@ -80,13 +93,19 @@ export async function refreshAutoresearchSurface(): Promise<void> {
 }
 
 async function loadDetail(loopId: string) {
+  const requestSeq = ++detailRequestSeq
   detailLoading.value = true
   detailError.value = null
   try {
-    loopDetail.value = await fetchAutoresearchLoopDetail(loopId)
+    const detail = await fetchAutoresearchLoopDetail(loopId)
+    if (requestSeq !== detailRequestSeq || selectedLoopId.value !== loopId) return
+    loopDetail.value = detail
   } catch (err) {
+    if (requestSeq !== detailRequestSeq || selectedLoopId.value !== loopId) return
+    loopDetail.value = null
     detailError.value = err instanceof Error ? err.message : String(err)
   } finally {
+    if (requestSeq !== detailRequestSeq) return
     detailLoading.value = false
   }
 }

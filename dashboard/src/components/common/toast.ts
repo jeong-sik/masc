@@ -52,7 +52,7 @@ export function ToastContainer() {
   if (items.length === 0) return null
 
   return html`
-    <div class="fixed top-5 right-5 z-[var(--z-overlay-toast,3070)] flex flex-col gap-2">
+    <div class="fixed top-5 right-5 z-[var(--z-overlay-toast,3070)] flex flex-col gap-2" aria-live="polite" aria-atomic="true">
       ${items.map(t => html`
         <div
           key=${t.id}
@@ -62,6 +62,7 @@ export function ToastContainer() {
           <span class="flex-1 text-[12px] text-[var(--text-body)] leading-[1.4]">${t.message}</span>
           <button type="button"
             class="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer text-[11px] p-0.5 transition-colors duration-150"
+            aria-label="알림 닫기"
             onClick=${(e: Event) => { e.stopPropagation(); dismissToast(t.id) }}
             title="닫기"
           >\u2715</button>

@@ -197,6 +197,9 @@ export function AgentDetailOverlay() {
               <input
                 class="w-full px-4 py-2.5 rounded-xl border border-card-border bg-card/60 text-text-strong text-[13px] placeholder:text-text-dim focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-200 shadow-inner"
                 type="text"
+                name="agent_direct_mention"
+                aria-label="직접 멘션 메시지"
+                autocomplete="off"
                 placeholder="@멘션 메시지 입력..."
                 value=${mentionText.value}
                 onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}

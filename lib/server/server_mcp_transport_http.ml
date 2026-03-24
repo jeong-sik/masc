@@ -53,6 +53,13 @@ let body_jsonrpc_method body_str =
     | _ -> None
   with Yojson.Json_error _ -> None
 
+let body_jsonrpc_id body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc fields -> List.assoc_opt "id" fields
+    | _ -> None
+  with Yojson.Json_error _ -> None
+
 let mcp_headers session_id protocol_version =
   [ ("mcp-session-id", session_id); ("mcp-protocol-version", protocol_version) ]
 
@@ -332,10 +339,11 @@ let stream_post_sse_json info (json : Yojson.Safe.t) =
     (send_raw info
        (Sse.format_event ~event_type:"message" (Yojson.Safe.to_string json)))
 
-let mcp_internal_error_json msg =
+let mcp_internal_error_json ?id msg =
   `Assoc
     [
       ("jsonrpc", `String "2.0");
+      ("id", Option.value ~default:`Null id);
       ("error", `Assoc [ ("code", `Int (-32603)); ("message", `String msg) ]);
     ]
 
@@ -479,6 +487,7 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                               should_stream_post_tools_call request body_str
                                 accept_mode
                             in
+                            let response_id = body_jsonrpc_id body_str in
                             let inline_sse : sse_conn_info option ref = ref None in
                             try
                               if wants_streaming_post then (
@@ -605,7 +614,7 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                                 (match !inline_sse with
                                 | Some info ->
                                     stream_post_sse_json info
-                                      (mcp_internal_error_json
+                                      (mcp_internal_error_json ?id:response_id
                                          ("Internal error: "
                                         ^ Printexc.to_string exn));
                                     stream_post_sse_finish info

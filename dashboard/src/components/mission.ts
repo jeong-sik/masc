@@ -99,19 +99,12 @@ export function Mission() {
 
   return html`
     <section class="flex flex-col gap-5">
-      <!-- Header -->
-      <div class="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h2 class="m-0 text-lg font-semibold text-[var(--text-strong)]">상황판</h2>
-          <p class="m-0 mt-1 text-xs text-[var(--text-muted)] leading-relaxed">세션, 에이전트, 키퍼 현황.</p>
-        </div>
-        <div class="flex gap-2 flex-wrap items-center">
-          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-body)]">
-            <span class="w-1.5 h-1.5 rounded-full ${toneClass(mission.summary.room_health) === 'ok' ? 'bg-[var(--ok)]' : toneClass(mission.summary.room_health) === 'warn' ? 'bg-[var(--warn)]' : 'bg-[var(--bad)]'}"></span>
-            ${statusLabel(mission.summary.room_health)}
-          </span>
-          <span class="text-[10px] text-[var(--text-muted)]">${mission.generated_at ? relativeTime(mission.generated_at) : ''}</span>
-        </div>
+      <div class="flex items-center justify-end gap-2 flex-wrap">
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-body)]">
+          <span class="w-1.5 h-1.5 rounded-full ${toneClass(mission.summary.room_health) === 'ok' ? 'bg-[var(--ok)]' : toneClass(mission.summary.room_health) === 'warn' ? 'bg-[var(--warn)]' : 'bg-[var(--bad)]'}"></span>
+          ${statusLabel(mission.summary.room_health)}
+        </span>
+        <span class="text-[10px] text-[var(--text-muted)]">${mission.generated_at ? relativeTime(mission.generated_at) : ''}</span>
       </div>
 
       <${MissionContextBar}

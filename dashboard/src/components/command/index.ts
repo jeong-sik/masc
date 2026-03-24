@@ -190,11 +190,7 @@ export function Command() {
 
   return html`
     <section class="flex flex-col gap-[18px]">
-      <div class="${CARD_STANDARD} flex justify-between gap-4 items-start max-[880px]:flex-col">
-        <div>
-          <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">지휘면</h2>
-          <p class="text-[13px] text-[var(--text-muted)] leading-relaxed max-w-[62ch]">작전, 오케스트라, 스웜, 체인, 제어 표면을 선택해 실제 MCP 도구 기반 현황을 확인합니다.</p>
-        </div>
+      <div class="${CARD_STANDARD} flex justify-end gap-4 items-center flex-wrap">
         <div class="flex gap-3 flex-wrap">
           <button type="button"
             class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"

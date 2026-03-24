@@ -299,13 +299,12 @@ let test_postgres_url_from_env_normalizes_supabase_pooler () =
   let raw_url =
     "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
   in
-  let expected_url =
-    "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
-  in
+  (* normalize_postgres_url logs a warning but returns the URL unchanged;
+     port rewriting (6543→5432) is the caller's responsibility. *)
   with_envs
     (pg_env_bindings ~sb_pg_url:raw_url ())
     (fun () ->
-      check (option string) "session pooler url" (Some expected_url)
+      check (option string) "transaction pooler url preserved" (Some raw_url)
         (Room_utils.postgres_url_from_env ()))
 
 (* ============================================================

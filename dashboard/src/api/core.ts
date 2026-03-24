@@ -34,14 +34,20 @@ export function currentDashboardActor(): string {
   )
 }
 
-function authHeaders(): Record<string, string> {
+type HeaderOptions = {
+  includeActor?: boolean
+}
+
+function authHeaders(options: HeaderOptions = {}): Record<string, string> {
   const params = getQueryParams()
   const headers: Record<string, string> = {}
   const token = params.get('token')
   const storedAgent = readStoredAgentName()
   const agent = params.get('agent') ?? params.get('agent_name') ?? storedAgent
   if (token) headers['Authorization'] = `Bearer ${token}`
-  if (agent) headers['X-MASC-Agent'] = encodeURIComponent(agent)
+  if (options.includeActor !== false && agent) {
+    headers['X-MASC-Agent'] = encodeURIComponent(agent)
+  }
   return headers
 }
 
@@ -127,12 +133,13 @@ export function defaultBoardVoter(): string {
 
 export type GetOptions = {
   timeoutMs?: number
+  includeActorHeader?: boolean
 }
 
 export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
   const res = await fetchWithTimeout(
     path,
-    { headers: authHeaders() },
+    { headers: authHeaders({ includeActor: opts.includeActorHeader }) },
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
   )
   if (!res.ok) {
@@ -304,7 +311,7 @@ export function confirmOperatorAction(
 }
 
 export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
-  return get('/api/v1/operator')
+  return get('/api/v1/operator', { includeActorHeader: false })
 }
 
 export function fetchOperatorDigest(options: {
@@ -317,5 +324,7 @@ export function fetchOperatorDigest(options: {
   if (options.targetId) params.set('target_id', options.targetId)
   if (options.includeWorkers != null) params.set('include_workers', options.includeWorkers ? 'true' : 'false')
   const query = params.toString()
-  return get(`/api/v1/operator/digest${query ? `?${query}` : ''}`)
+  return get(`/api/v1/operator/digest${query ? `?${query}` : ''}`, {
+    includeActorHeader: false,
+  })
 }

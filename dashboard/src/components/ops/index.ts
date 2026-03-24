@@ -27,15 +27,17 @@ import {
   attentionTone,
   hydratedWorkflowId,
   hydrateOpsWorkflow,
+  isSessionTerminal,
   isKeeperAttention,
   keeperPrioritySummary,
   isSessionAttention,
   keeperPriorityTone,
   normalizeStatus,
-  persistActorName,
   selectedSessionId,
   sessionPriorityTone,
+  submitPause,
   submitResume,
+  submitTeamStop,
   workflowTargetReady,
   type OpsPriorityCardData,
   type OpsPriorityTone,
@@ -53,11 +55,9 @@ export function Ops() {
   const sessions = snapshot?.sessions ?? []
   const keepers = snapshot?.keepers ?? []
   const pendingState = selectPendingConfirmState(snapshot)
-  const visiblePendingCount = pendingState.visible_count
   const totalPendingCount = pendingState.total_count
-  const hiddenPendingCount = pendingState.hidden_count
-  const pendingActorFilter = pendingState.actor_filter
   const selectedSession = sessions.find(session => session.session_id === selectedSessionId.value) ?? sessions[0] ?? null
+  const currentActor = actorName.value.trim() || 'dashboard'
   const roomAttention = roomDigest?.attention_items ?? []
   const sessionAttention = roomAttention.filter(isSessionAttention)
   const keeperAttention = roomAttention.filter(isKeeperAttention)
@@ -106,12 +106,10 @@ export function Ops() {
     {
       key: 'confirm',
       label: '확인 대기',
-      value: hiddenPendingCount > 0 ? `${visiblePendingCount}/${totalPendingCount}` : visiblePendingCount,
-      detail: visiblePendingCount > 0
-        ? '미리보기만 된 개입이 아직 사람 확인을 기다리고 있습니다'
-        : hiddenPendingCount > 0 && pendingActorFilter
-          ? `현재 개입 ID(${pendingActorFilter}) 기준으로는 비어 있고, 다른 개입 ID 대기 ${hiddenPendingCount}건이 있습니다`
-          : '지금 막혀 있는 확인 대기는 없습니다',
+      value: totalPendingCount,
+      detail: totalPendingCount > 0
+        ? '전역 승인 대기열에 사람 확인이 필요한 개입이 남아 있습니다'
+        : '지금 막혀 있는 확인 대기는 없습니다',
       tone: totalPendingCount > 0 ? 'warn' : 'ok',
     },
     {
@@ -155,15 +153,12 @@ export function Ops() {
   return html`
     <section class="flex flex-col gap-4">
       <div class="${CARD_STANDARD} flex justify-end items-center gap-4 flex-wrap">
-        <div class="flex items-end gap-3 flex-wrap max-[880px]:w-full">
-          <label class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.06em] font-medium" for="ops-actor">개입 ID</label>
-          <input
-            id="ops-actor"
-            class="w-full px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] focus:border-[var(--accent)]/50 outline-none ops-actor-input min-w-[180px]"
-            type="text"
-            value=${actorName.value}
-            onInput=${(event: Event) => persistActorName((event.target as HTMLInputElement).value)}
-          />
+        <div class="flex items-center gap-3 flex-wrap max-[880px]:w-full">
+          <div class="grid gap-0.5">
+            <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.06em] font-medium">실행 actor</span>
+            <strong class="text-[13px] text-[var(--text-strong)]">${currentActor}</strong>
+            <span class="text-[12px] text-[var(--text-muted)]">변경은 아래 고급 room 제어에서 합니다.</span>
+          </div>
           <button type="button"
             class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
             onClick=${() => {
@@ -201,21 +196,6 @@ export function Ops() {
 
       ${(() => {
         const actions: Array<{ label: string; desc: string; tone: OpsPriorityTone; onClick: () => void }> = []
-        if (visiblePendingCount > 0 || hiddenPendingCount > 0) {
-          actions.push({
-            label: hiddenPendingCount > 0
-              ? `확인 대기 ${visiblePendingCount}/${totalPendingCount}건 확인`
-              : `확인 대기 ${visiblePendingCount}건 처리`,
-            desc: hiddenPendingCount > 0 && pendingActorFilter
-              ? `현재 개입 ID(${pendingActorFilter}) 기준으로 보이는 대기열을 먼저 확인합니다`
-              : '승인 또는 거부가 필요한 개입이 대기 중입니다',
-            tone: visiblePendingCount > 0 ? 'bad' : 'warn',
-            onClick: () => {
-              const el = document.querySelector('.ops-pending-section')
-              el?.scrollIntoView({ behavior: 'smooth' })
-            },
-          })
-        }
         if (room.paused) {
           actions.push({
             label: '방 재개',
@@ -223,19 +203,20 @@ export function Ops() {
             tone: 'warn',
             onClick: () => void submitResume(),
           })
-        }
-        if (flaggedKeepers.length > 0) {
-          const badKeepers = flaggedKeepers.filter(k => keeperPriorityTone(k) === 'bad')
+        } else {
           actions.push({
-            label: badKeepers.length > 0 ? `오프라인 키퍼 ${badKeepers.length}개` : `점검이 필요한 키퍼 ${flaggedKeepers.length}개`,
-            desc: badKeepers.length > 0
-              ? '메시지를 보내거나 상태를 확인하세요'
-              : `${leadingFlaggedKeeper?.name ?? '일부 키퍼'} · ${leadingFlaggedKeeper ? keeperPrioritySummary(leadingFlaggedKeeper) : '점검 필요'}`,
-            tone: badKeepers.length > 0 ? 'bad' : 'warn',
-            onClick: () => {
-              const el = document.querySelector('.ops-keeper-section')
-              el?.scrollIntoView({ behavior: 'smooth' })
-            },
+            label: '방 일시정지',
+            desc: '자동 spawn과 room automation을 잠시 멈춥니다',
+            tone: 'warn',
+            onClick: () => void submitPause(),
+          })
+        }
+        if (selectedSession && !isSessionTerminal(selectedSession)) {
+          actions.push({
+            label: '선택 세션 중지',
+            desc: `${selectedSession.session_id} · 실행 중인 세션을 즉시 멈춥니다`,
+            tone: 'bad',
+            onClick: () => void submitTeamStop(),
           })
         }
         if (actions.length === 0) return null
@@ -243,7 +224,7 @@ export function Ops() {
           <section class="${CARD_STANDARD}">
             <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-3">지금 할 수 있는 것</h3>
             <div class="flex flex-col gap-2">
-              ${actions.slice(0, 3).map(action => html`
+              ${actions.map(action => html`
                 <button type="button" class="ops-action-guide-item rounded-lg ${action.tone}" onClick=${action.onClick}>
                   <strong class="font-semibold">${action.label}</strong>
                   <span>${action.desc}</span>

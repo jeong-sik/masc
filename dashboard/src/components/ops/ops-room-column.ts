@@ -1,6 +1,7 @@
 // Ops — Room column: broadcast, pause/resume, task inject, recommended actions, pending confirmations, room feed
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
 import { useRef } from 'preact/hooks'
@@ -13,9 +14,12 @@ import {
 } from '../../operator-store'
 import {
   actionTypeLabel,
+  actorName,
+  canManagePendingConfirmation,
   broadcastMessage,
   confirmPending,
   deliveryModeLabel,
+  filterPendingConfirmations,
   guidanceFreshnessLabel,
   guidanceLayerLabel,
   guidanceLayerTone,
@@ -34,8 +38,12 @@ import {
   taskTitle,
   formatMessageContent,
   logEntryBorderClass,
+  persistActorName,
+  type PendingQueueFilter,
 } from './helpers'
 import { selectPendingConfirmState } from '../../pending-confirm'
+
+const pendingQueueFilter = signal<PendingQueueFilter>({ kind: 'all' })
 
 export function OpsRoomColumn() {
   const roomControlDisclosureRef = useRef<HTMLDetailsElement | null>(null)
@@ -44,10 +52,6 @@ export function OpsRoomColumn() {
   const room = snapshot?.room ?? {}
   const pendingState = selectPendingConfirmState(snapshot)
   const pendingConfirms = pendingState.items
-  const confirmRequiredActions = pendingState.confirm_required_actions
-  const actorFilter = pendingState.actor_filter
-  const hiddenCount = pendingState.hidden_count
-  const hiddenActors = pendingState.hidden_actors
   const recentMessages = snapshot?.recent_messages ?? []
   const recommendedActions = roomDigest?.recommended_actions ?? []
   const activeRecommendedActions =
@@ -58,6 +62,23 @@ export function OpsRoomColumn() {
   const residentRuntime = roomDigest?.resident_judge_runtime ?? snapshot?.resident_judge_runtime
   const guidanceLayer = roomDigest?.active_guidance_layer ?? 'fallback'
   const roomFeed = recentMessages.slice(0, 5)
+  const currentActor = actorName.value.trim() || 'dashboard'
+  const actorOptions = pendingConfirms
+    .map(item => item.actor?.trim() ?? '')
+    .filter(Boolean)
+    .filter((value, index, source) => source.indexOf(value) === index)
+    .sort((a, b) => a.localeCompare(b))
+  const pendingFilter = pendingQueueFilter.value
+  const effectivePendingFilter =
+    pendingFilter.kind === 'actor'
+    && !actorOptions.includes(pendingFilter.actor)
+      ? ({ kind: 'all' } as PendingQueueFilter)
+      : pendingFilter
+  const filteredPendingConfirms =
+    filterPendingConfirmations(pendingConfirms, currentActor, effectivePendingFilter)
+  const confirmActionLabels = pendingState.confirm_required_actions
+    .map(item => actionTypeLabel(item.action_type))
+    .filter((label, index, source) => source.indexOf(label) === index)
   const openRoomControlDisclosure = () => {
     const disclosure = roomControlDisclosureRef.current
     if (disclosure) {
@@ -119,51 +140,81 @@ export function OpsRoomColumn() {
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">승인 대기</h3>
         </div>
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">
-          ${actorFilter
-            ? `현재 actor ${actorFilter} 기준 queue를 읽습니다. 승인 대기는 즉시 실행이 아니라 preview-confirm 경로를 타는 액션만 쌓입니다.`
-            : '승인 대기는 즉시 실행이 아니라 preview-confirm 경로를 타는 액션만 쌓입니다.'}
+          전역 승인 대기를 기본으로 보여줍니다. 현재 실행 actor는 <strong>${currentActor}</strong>이고, 다른 actor가 만든 항목은 여기서 읽기 전용입니다.
         </p>
-        ${confirmRequiredActions.length > 0 ? html`
-          <div class="flex flex-col gap-2">
-            ${confirmRequiredActions.map(item => html`
-              <article key=${`${item.action_type}:${item.target_type}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)] min-w-0 flex-shrink-0">
-                <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
-                  <strong>${actionTypeLabel(item.action_type)}</strong>
-                  <span>${targetTypeLabel(item.target_type)}</span>
-                  <span>${deliveryModeLabel(item.confirm_required)}</span>
-                </div>
-                <div class="mt-1.5 whitespace-pre-wrap break-words max-h-[200px] overflow-auto">${item.description ?? '설명 확인 필요'}</div>
-              </article>
-            `)}
+        ${confirmActionLabels.length > 0 ? html`
+          <div class="text-[12px] text-[var(--text-muted)] leading-[1.45]">
+            확인 후 실행 액션: ${confirmActionLabels.join(', ')}
           </div>
         ` : null}
         ${pendingConfirms.length > 0 ? html`
+          <div class="flex flex-wrap gap-2">
+            <${ActionButton}
+              variant=${effectivePendingFilter.kind === 'all' ? 'primary' : 'ghost'}
+              size="lg"
+              onClick=${() => { pendingQueueFilter.value = { kind: 'all' } }}
+              disabled=${operatorActionBusy.value}
+            >
+              전체 ${pendingConfirms.length}
+            <//>
+            <${ActionButton}
+              variant=${effectivePendingFilter.kind === 'mine' ? 'primary' : 'ghost'}
+              size="lg"
+              onClick=${() => { pendingQueueFilter.value = { kind: 'mine' } }}
+              disabled=${operatorActionBusy.value}
+            >
+              내 것 ${pendingConfirms.filter(item => canManagePendingConfirmation(item, currentActor)).length}
+            <//>
+            ${actorOptions
+              .filter(actor => actor !== currentActor)
+              .map(actor => html`
+                <${ActionButton}
+                  key=${actor}
+                  variant=${effectivePendingFilter.kind === 'actor' && effectivePendingFilter.actor === actor ? 'primary' : 'ghost'}
+                  size="lg"
+                  onClick=${() => { pendingQueueFilter.value = { kind: 'actor', actor } }}
+                  disabled=${operatorActionBusy.value}
+                >
+                  ${actor}
+                <//>
+              `)}
+          </div>
+        ` : null}
+        ${filteredPendingConfirms.length > 0 ? html`
           <div class="flex flex-col gap-3 max-h-[400px] overflow-y-auto min-w-0 text-[var(--fs-sm)] text-[var(--text-muted)]">
-            ${pendingConfirms.map(item => html`
+            ${filteredPendingConfirms.map(item => {
+              const canManage = canManagePendingConfirmation(item, currentActor)
+              return html`
               <article key=${item.confirm_token} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)] min-w-0 flex-shrink-0">
                 <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                   <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
+                  <span>owner ${item.actor ?? 'unknown'}</span>
                 </div>
                 ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[11px] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
+                <div class="mt-2 text-[12px] leading-[1.45] text-[var(--text-muted)]">
+                  ${canManage
+                    ? '현재 실행 actor가 이 승인 대기를 처리할 수 있습니다.'
+                    : '다른 actor가 만든 승인 대기라서 여기서는 읽기만 가능합니다.'}
+                </div>
                 <div class="flex justify-between items-center gap-3 mt-3 max-[880px]:flex-col max-[880px]:items-start">
-                  <${ActionButton} variant="primary" size="lg" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
+                  <${ActionButton} variant="primary" size="lg" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value || !canManage}>
                     실행
                   <//>
-                  <${ActionButton} variant="ghost" size="lg" onClick=${() => { void confirmPending(item.confirm_token, 'deny') }} disabled=${operatorActionBusy.value}>
+                  <${ActionButton} variant="ghost" size="lg" onClick=${() => { void confirmPending(item.confirm_token, 'deny') }} disabled=${operatorActionBusy.value || !canManage}>
                     거부
                   <//>
                   <span class="text-[var(--text-muted)] text-[var(--fs-xs)] font-mono break-all">${item.confirm_token}</span>
                 </div>
               </article>
-            `)}
+            `})}
           </div>
         ` : html`
           <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">
-            ${hiddenCount > 0 && actorFilter
-              ? `현재 선택한 actor(${actorFilter}) 기준 승인 대기는 0건입니다. 다른 actor 대기 ${hiddenCount}건${hiddenActors.length > 0 ? ` · ${hiddenActors.join(', ')}` : ''}`
-              : '지금 승인 대기는 없습니다. 위 목록의 preview-confirm 액션을 먼저 만들어야 여기에 쌓입니다.'}
+            ${pendingConfirms.length > 0
+              ? '선택한 필터에는 승인 대기가 없습니다. 전체 목록으로 돌아가서 다시 확인하세요.'
+              : '지금 승인 대기는 없습니다.'}
           </div>
         `}
       </section>
@@ -204,11 +255,21 @@ export function OpsRoomColumn() {
         >
           <summary class="ops-control-summary list-none cursor-pointer grid gap-1 p-3 px-3.5">
             <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 room 제어</span>
-            <strong>${room.paused ? '지금은 room이 멈춰 있어 재개 동선이 열려 있습니다.' : '방송 · 일시정지/재개 · 작업 주입'}</strong>
-            <span>${room.paused ? '운영 점검 후 재개하거나 공지를 보내세요.' : 'room 전체에 영향 주는 액션만 이 안에 넣었습니다.'}</span>
+            <strong>${room.paused ? '지금은 room이 멈춰 있어 재개 동선이 열려 있습니다.' : '실행 actor 설정, 방송, room 쓰기 액션'}</strong>
+            <span>${room.paused ? '운영 점검 후 재개하거나 공지를 보내세요.' : '기본 화면은 읽기 중심이고, 실제 room 변경은 이 안에서만 합니다.'}</span>
           </summary>
 
           <div class="grid gap-3 px-3.5 pb-3.5 border-t border-[var(--white-8)]">
+            <label class="control-label" for="ops-actor">실행 actor</label>
+            <input
+              id="ops-actor"
+              class="control-input"
+              type="text"
+              value=${actorName.value}
+              onInput=${(event: Event) => { persistActorName((event.target as HTMLInputElement).value) }}
+              disabled=${operatorActionBusy.value}
+            />
+
             <label class="control-label" for="ops-broadcast">Room 방송</label>
             <div class="control-row">
               <input

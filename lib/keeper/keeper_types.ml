@@ -255,7 +255,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       |> canonical_policy_shell_mode
     in
     let execution_scope =
-      Safe_ops.json_string ~default:"observe_only" "execution_scope" json
+      Safe_ops.json_string ~default:default_execution_scope "execution_scope" json
     in
     let allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
     let voice_enabled =

@@ -636,8 +636,11 @@ let render_prompt_template key vars =
   else
     render_template ~template ~vars ()
 
-(** Set an override for a prompt *)
-let set_override key value =
+(** Validate and apply a single override entry (shared logic for
+    [set_override] and [restore_overrides]).  Caller must NOT hold [mu].
+    Returns [Ok ()] on success or [Error msg] describing why the entry
+    was rejected. *)
+let apply_override_validated key value =
   let trimmed = String.trim value in
   if not (is_valid_prompt_key key) then Error "Invalid prompt key"
   else if trimmed = "" then Error "Prompt cannot be empty"
@@ -659,6 +662,9 @@ let set_override key value =
     | Ok () ->
         with_mutex (fun () -> Hashtbl.replace override_tbl key trimmed);
         Ok ()
+
+(** Set an override for a prompt *)
+let set_override key value = apply_override_validated key value
 
 (** Clear override, reverting to file or default *)
 let clear_prompt_override key =
@@ -722,7 +728,8 @@ let persist_overrides base_path =
   Out_channel.with_open_text path (fun oc ->
     Out_channel.output_string oc content)
 
-(** Restore overrides from JSON file *)
+(** Restore overrides from JSON file, applying the same validation as
+    [set_override] so that stale or manually-edited entries are rejected. *)
 let restore_overrides base_path =
   let path = Filename.concat (Filename.concat base_path ".masc") "prompt_overrides.json" in
   if Sys.file_exists path then begin
@@ -731,13 +738,16 @@ let restore_overrides base_path =
       let json = Yojson.Safe.from_string content in
       match json with
       | `Assoc pairs ->
-        with_mutex (fun () ->
-          List.iter (fun (key, value) ->
-            match value with
-            | `String s when is_valid_prompt_key key && Hashtbl.mem meta_tbl key ->
-                Hashtbl.replace override_tbl key s
-            | _ -> ()
-          ) pairs)
+        List.iter (fun (key, value) ->
+          match value with
+          | `String s -> (
+              match apply_override_validated key s with
+              | Ok () -> ()
+              | Error reason ->
+                  Log.Misc.warn "prompt override restore: skipping %s: %s"
+                    key reason)
+          | _ -> ()
+        ) pairs
       | _ -> ()
     with _ -> ()
   end

@@ -80,9 +80,18 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
 
 let bootstrap_chain_state (state : Mcp_server.server_state) =
   Chain_native_eio.ensure_bootstrap state.room_config;
-  (* Initialize prompt registry with defaults and restore saved overrides *)
+  (* Initialize prompt registry with defaults and restore saved overrides.
+     Use workspace_path (active checkout) rather than base_path (shared git
+     root) so that branch-specific prompt edits in worktrees are picked up. *)
+  let prompts_root =
+    let ws = state.room_config.workspace_path in
+    if ws <> state.room_config.base_path
+       && Sys.file_exists (Filename.concat ws "config/prompts")
+    then ws
+    else state.room_config.base_path
+  in
   Prompt_registry.set_markdown_dir
-    (Filename.concat state.room_config.base_path "config/prompts");
+    (Filename.concat prompts_root "config/prompts");
   Prompt_defaults.init ();
   let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
   if missing_prompt_files <> [] then
@@ -96,7 +105,7 @@ let bootstrap_chain_state (state : Mcp_server.server_state) =
       (invalid_prompt_templates
       |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)
       |> String.concat ", ");
-  (try Prompt_registry.restore_overrides state.room_config.base_path
+  (try Prompt_registry.restore_overrides state.room_config.workspace_path
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.error "prompt override restore failed: %s"
        (Printexc.to_string exn));

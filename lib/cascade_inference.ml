@@ -20,32 +20,9 @@ type t = {
 
 let empty = { temperature = None; max_tokens = None }
 
-(* ── JSON cache (shares mtime-reload semantics with OAS) ────── *)
-
-let json_cache : (string, float * Yojson.Safe.t) Hashtbl.t =
-  Hashtbl.create 2
-
-let load_json (path : string) : Yojson.Safe.t option =
-  try
-    let st = Unix.stat path in
-    let mtime = st.Unix.st_mtime in
-    match Hashtbl.find_opt json_cache path with
-    | Some (cached_mtime, json) when Float.equal cached_mtime mtime ->
-      Some json
-    | _ ->
-      let ic = open_in path in
-      let content = Fun.protect
-          ~finally:(fun () -> close_in_noerr ic)
-          (fun () ->
-             let len = in_channel_length ic in
-             let buf = Bytes.create len in
-             really_input ic buf 0 len;
-             Bytes.to_string buf)
-      in
-      let json = Yojson.Safe.from_string content in
-      Hashtbl.replace json_cache path (mtime, json);
-      Some json
-  with _ -> None
+(* ── JSON loading delegated to OAS Cascade_config ────────────
+   OAS maintains an Eio.Mutex-protected, mtime-based cache.
+   We convert Result → Option to keep the existing API unchanged. *)
 
 (* ── Field extraction helpers ──────────────────────────── *)
 
@@ -94,9 +71,9 @@ let for_cascade ~(name : string) : t =
   match Oas_worker.default_config_path () with
   | None -> empty
   | Some path ->
-    match load_json path with
-    | None -> empty
-    | Some json -> for_json ~name json
+    match Llm_provider.Cascade_config.load_json path with
+    | Error _ -> empty
+    | Ok json -> for_json ~name json
 
 (** Resolve a temperature value: cascade config -> env-var fallback -> hardcoded default. *)
 let resolve_temperature ~(cascade_name : string) ~(fallback : unit -> float) : float =

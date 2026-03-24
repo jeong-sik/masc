@@ -44,16 +44,11 @@ let clear_autoresearch_runtime () =
   Lib.Autoresearch.with_loops_rw (fun () ->
     Hashtbl.reset Lib.Autoresearch.active_loops;
     Lib.Autoresearch.latest_loop_id := None);
-  Lib.Tool_autoresearch.queued_generators := [];
   Hashtbl.reset Lib.Tool_autoresearch.pending_hypotheses;
-  Hashtbl.reset Lib.Tool_autoresearch.custom_generators;
-  Hashtbl.reset Lib.Tool_autoresearch.active_cycle_loops;
-  Hashtbl.reset Lib.Tool_autoresearch.active_driver_loops
+  Hashtbl.reset Lib.Tool_autoresearch.custom_generators
 
-let test_start_runs_autonomously_to_completion () =
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
+let test_start_runs_to_completion_via_manual_cycle () =
+  Eio_main.run @@ fun _env ->
   clear_autoresearch_runtime ();
   let base_path = temp_dir () in
   Fun.protect
@@ -82,17 +77,15 @@ let test_start_runs_autonomously_to_completion () =
            (Filename.quote repo_path) (Filename.quote "init autoresearch test repo"));
       run_cmd (Printf.sprintf "git -C %s branch -M main" (Filename.quote repo_path));
 
-      Lib.Tool_autoresearch.queue_generator
-        (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
-          Ok ("insert token", "MAGIC_20260324\n"));
-
       let ctx : Lib.Tool_autoresearch.context =
         {
           base_path;
           agent_name = Some "autoresearch-admin";
           start_operation = None;
           start_team_session = None;
-          sw = Some sw;
+          config = None;
+          sw = None;
+          clock = None;
         }
       in
       let args =
@@ -114,25 +107,48 @@ let test_start_runs_autonomously_to_completion () =
       check bool "start succeeds" true ok;
       let json = Yojson.Safe.from_string payload in
       let loop_id = Yojson.Safe.Util.(json |> member "loop_id" |> to_string) in
-      check string "driver status" "autonomous"
-        Yojson.Safe.Util.(json |> member "driver_status" |> to_string);
+      check string "start status" "running"
+        Yojson.Safe.Util.(json |> member "status" |> to_string);
 
-      let rec wait_for_completion attempts =
-        if attempts = 0 then
-          fail "autoresearch loop did not complete in time";
+      Lib.Tool_autoresearch.set_generator loop_id
+        (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
+          Ok ("insert token", "MAGIC_20260324\n"));
+
+      let cycle_args =
+        `Assoc [ ("loop_id", `String loop_id) ]
+      in
+      let cycle_ok, cycle_payload =
+        match Lib.Tool_autoresearch.dispatch ctx ~name:"masc_autoresearch_cycle" ~args:cycle_args with
+        | Some result -> result
+        | None -> fail "cycle dispatch returned None"
+      in
+      check bool "cycle succeeds" true cycle_ok;
+      let cycle_json = Yojson.Safe.from_string cycle_payload in
+      check string "cycle decision" "keep"
+        Yojson.Safe.Util.(cycle_json |> member "decision" |> to_string);
+      check int "cycles remaining after first cycle" 0
+        Yojson.Safe.Util.(cycle_json |> member "cycles_remaining" |> to_int);
+
+      let completion_ok, completion_payload =
+        match Lib.Tool_autoresearch.dispatch ctx ~name:"masc_autoresearch_cycle" ~args:cycle_args with
+        | Some result -> result
+        | None -> fail "completion dispatch returned None"
+      in
+      check bool "completion succeeds" true completion_ok;
+      let completion_json = Yojson.Safe.from_string completion_payload in
+      check string "completion status" "completed"
+        Yojson.Safe.Util.(completion_json |> member "status" |> to_string);
+
+      let final_state =
         match
           Lib.Autoresearch.with_loops_ro (fun () ->
             Hashtbl.find_opt Lib.Autoresearch.active_loops loop_id)
         with
-        | Some state when state.status = Lib.Autoresearch.Completed -> state
-        | Some state when state.status = Lib.Autoresearch.Error ->
-            failf "loop entered error state: %s"
-              (Option.value ~default:"unknown" state.error_message)
-        | _ ->
-            Eio.Time.sleep clock 0.05;
-            wait_for_completion (attempts - 1)
+        | Some state -> state
+        | None -> fail "loop missing after completion"
       in
-      let final_state = wait_for_completion 120 in
+      check bool "final status completed" true
+        (final_state.status = Lib.Autoresearch.Completed);
       check int "completed cycle count" 1 final_state.current_cycle;
       check int "keep count" 1 final_state.total_keeps;
       check int "discard count" 0 final_state.total_discards;
@@ -152,7 +168,7 @@ let () =
     [
       ( "autonomous",
         [
-          test_case "start runs to completion" `Quick
-            test_start_runs_autonomously_to_completion;
+          test_case "start runs to completion via manual cycle" `Quick
+            test_start_runs_to_completion_via_manual_cycle;
         ] );
     ]

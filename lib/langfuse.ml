@@ -184,60 +184,52 @@ let span_to_json (s : span) =
   in
   `Assoc with_end
 
-(** {1 HTTP Client (Eio-based)} *)
+(** {1 HTTP Client (Eio-based, non-blocking)} *)
 
-(** Send POST request to Langfuse API *)
+(** Send POST request to Langfuse API using Cohttp_eio (non-blocking).
+    Previous implementation used raw Unix sockets which blocked the Eio domain. *)
 let send_to_langfuse ~endpoint ~body () =
   if not (is_enabled ()) then ()
   else begin
     let cfg = Eio.Lazy.force config in
     let url = cfg.host ^ "/api/public" ^ endpoint in
     let auth = Base64.encode_string (cfg.public_key ^ ":" ^ cfg.secret_key) in
-    let headers = [
-      ("Content-Type", "application/json");
-      ("Authorization", "Basic " ^ auth);
-    ] in
     let body_str = Yojson.Safe.to_string body in
 
-    (* Fire-and-forget HTTP POST using blocking Unix socket *)
-    (* Using blocking mode for reliable delivery to local Langfuse *)
-    try
-      let uri = Uri.of_string url in
-      let host = Uri.host uri |> Option.value ~default:"localhost" in
-      let port = Uri.port uri |> Option.value ~default:3100 in
-      Log.Langfuse.info "Sending to %s:%d, endpoint=%s" host port endpoint;
-      Log.Langfuse.info "Body: %s" (String.sub body_str 0 (min 500 (String.length body_str)));
-      let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string
-        (try (Unix.gethostbyname host).Unix.h_addr_list.(0)
-              |> Unix.string_of_inet_addr
-         with
-         | Not_found -> "127.0.0.1"
-         | exn ->
-             Log.Telemetry.warn "langfuse hostname resolve failed: %s" (Printexc.to_string exn);
-             "127.0.0.1"), port) in
-      let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-      (* Use blocking socket for reliable connection *)
-      Unix.setsockopt_float sock Unix.SO_SNDTIMEO 2.0;  (* 2 second timeout *)
-      Unix.setsockopt_float sock Unix.SO_RCVTIMEO 2.0;
-      Unix.connect sock sockaddr;
-      Log.Langfuse.info "Connected to socket";
-
-      let path = Uri.path uri in
-      let request = Printf.sprintf
-        "POST %s HTTP/1.1\r\nHost: %s:%d\r\n%s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
-        path host port
-        (String.concat "\r\n" (List.map (fun (k, v) -> k ^ ": " ^ v) headers))
-        (String.length body_str)
-        body_str in
-
-      let _ = Unix.write_substring sock request 0 (String.length request) in
-      (* Read response to ensure request is processed *)
-      let buf = Bytes.create 256 in
-      let n = try Unix.read sock buf 0 256 with Unix.Unix_error _ -> 0 in
-      Log.Langfuse.info "Response (%d bytes): %s" n (Bytes.sub_string buf 0 (min n 100));
-      Unix.close sock
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Log.Langfuse.error "Error: %s" (Printexc.to_string exn)
+    match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
+    | None, _ | _, None ->
+        Log.Langfuse.info "Eio context not yet initialized, skipping telemetry"
+    | Some net, Some clock ->
+        let uri = Uri.of_string url in
+        Log.Langfuse.info "Sending to %s, endpoint=%s" url endpoint;
+        Log.Langfuse.info "Body: %s" (String.sub body_str 0 (min 500 (String.length body_str)));
+        (try
+          Eio.Switch.run (fun sw ->
+            let result = Eio.Time.with_timeout clock 2.0 (fun () ->
+              let client = Cohttp_eio.Client.make ~https:None net in
+              let headers = Cohttp.Header.of_list [
+                ("Content-Type", "application/json");
+                ("Authorization", "Basic " ^ auth);
+              ] in
+              let body_content = Eio.Flow.string_source body_str in
+              let resp, resp_body =
+                Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content
+              in
+              let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+              let resp_str =
+                Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024)
+              in
+              Ok (status, resp_str))
+            in
+            match result with
+            | Ok (status, resp_str) ->
+                Log.Langfuse.info "Response %d (%d bytes): %s"
+                  status (String.length resp_str)
+                  (String.sub resp_str 0 (min 100 (String.length resp_str)))
+            | Error `Timeout ->
+                Log.Langfuse.error "Timeout after 2s sending to %s" url)
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+          Log.Langfuse.error "Error: %s" (Printexc.to_string exn))
   end
 
 (** {1 API Functions} *)

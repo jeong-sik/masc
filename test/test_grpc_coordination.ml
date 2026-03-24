@@ -230,13 +230,13 @@ let test_grpc_default_port () =
   Alcotest.(check int) "default port" 8936
     Masc_mcp.Masc_grpc_server.default_port
 
-let test_grpc_opt_in_enablement () =
-  (* With no MASC_GRPC_ENABLED env var, gRPC stays disabled. *)
+let test_grpc_default_on_enablement () =
+  (* With no MASC_GRPC_ENABLED env var, gRPC stays enabled. *)
   let was_set = Sys.getenv_opt "MASC_GRPC_ENABLED" in
   (match was_set with Some _ -> Unix.putenv "MASC_GRPC_ENABLED" "" | None -> ());
   let result = Masc_mcp.Masc_grpc_server.is_enabled () in
-  Alcotest.(check bool) "disabled by default" false result;
-  (* Verify opt-in works. *)
+  Alcotest.(check bool) "enabled by default" true result;
+  (* Verify explicit enable still works. *)
   Unix.putenv "MASC_GRPC_ENABLED" "1";
   let enabled = Masc_mcp.Masc_grpc_server.is_enabled () in
   Alcotest.(check bool) "enabled via env" true enabled;
@@ -326,7 +326,7 @@ let () =
       ( "server_config",
         [
           Alcotest.test_case "default_port" `Quick test_grpc_default_port;
-          Alcotest.test_case "opt_in_enablement" `Quick test_grpc_opt_in_enablement;
+          Alcotest.test_case "default_on_enablement" `Quick test_grpc_default_on_enablement;
           Alcotest.test_case "registers_health_service" `Quick
             test_grpc_server_registers_health_service;
         ] );

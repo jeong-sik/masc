@@ -57,7 +57,7 @@ let handle_relay_checkpoint _ctx args =
       ) items
     | _ -> []
   in
-  let cell = !(Mcp_server.current_cell) in
+  let cell = Mcp_server.get_cell () in
   let messages = get_int args "messages" cell.Mitosis.task_count in
   let tool_calls = get_int args "tool_calls" cell.Mitosis.tool_call_count in
   let metrics = Relay.estimate_context ~messages ~tool_calls ~model:"claude" in

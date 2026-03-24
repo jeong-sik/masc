@@ -329,6 +329,23 @@ let parse_json_body label result =
       (Printf.sprintf "%s invalid JSON: %s\nbody=%s\nnormalized=%s" label err
          result.body normalized)
 
+let parse_get_json label ~port ~path () =
+  let result = run_curl_get ~port ~path () in
+  require_http_ok label result;
+  try Yojson.Safe.from_string result.body
+  with Yojson.Json_error err ->
+    fail (Printf.sprintf "%s invalid JSON: %s\nbody=%s" label err result.body)
+
+let rec parse_get_json_retry label ~port ~path ~retries =
+  try parse_get_json label ~port ~path ()
+  with exn ->
+    if retries <= 0 then
+      raise exn
+    else begin
+      Unix.sleepf 0.5;
+      parse_get_json_retry label ~port ~path ~retries:(retries - 1)
+    end
+
 let require_jsonrpc_ok label json =
   match json |> U.member "error" with
   | `Null -> ()
@@ -411,6 +428,12 @@ let extract_nickname_from_join_result result =
 let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let exe = find_main_eio_exe () in
   let port = match find_free_port () with Some p -> p | None -> Alcotest.skip () in
+  let grpc_port =
+    match find_free_port () with Some p -> p | None -> Alcotest.skip ()
+  in
+  let ws_port =
+    match find_free_port () with Some p -> p | None -> Alcotest.skip ()
+  in
   let log_file = Filename.temp_file "operator-mcp-e2e-" ".log" in
   let base_path = Filename.temp_file "operator-mcp-base-" "" in
   (try Sys.remove base_path with _ -> ());
@@ -481,11 +504,16 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
         ("MASC_HOST", host);
+        ("MASC_GRPC_ENABLED", "1");
+        ("MASC_GRPC_PORT", string_of_int grpc_port);
         ("MASC_POSTGRES_URL", "");
         ("DATABASE_URL", "");
         ("SUPABASE_DB_URL", "");
         ("SB_PG_URL", "");
         ("MASC_BOARD_BACKEND", "jsonl");
+        ("MASC_WS_ENABLED", "1");
+        ("MASC_WS_PORT", string_of_int ws_port);
+        ("MASC_WEBRTC_ENABLED", "1");
       ]
   in
   let argv =
@@ -513,7 +541,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
     fail (Printf.sprintf "server failed to become ready on port %d\n%s" port logs)
   end;
   Fun.protect ~finally:cleanup (fun () ->
-      f ~port ~supervisor_token ~planner_token ~implementer_a_token
+      f ~port ~grpc_port ~ws_port ~supervisor_token ~planner_token ~implementer_a_token
         ~implementer_b_token ~supervisor_nickname ~planner_nickname
         ~implementer_a_nickname ~implementer_b_nickname)
 
@@ -522,7 +550,7 @@ let _test_operator_mcp_supervises_team_session_impl () =
      so tool-level authorize_tool fails with "No credential found for <agent>".
      Needs production fix in mcp_server_eio_execute.ml to propagate credential
      from HTTP auth layer to tool dispatch. *)
-  with_server @@ fun ~port ~supervisor_token ~planner_token ~implementer_a_token
+  with_server @@ fun ~port ~grpc_port:_ ~ws_port:_ ~supervisor_token ~planner_token ~implementer_a_token
                          ~implementer_b_token ~supervisor_nickname
                          ~planner_nickname ~implementer_a_nickname
                          ~implementer_b_nickname ->
@@ -819,7 +847,7 @@ let _test_operator_mcp_supervises_team_session_impl () =
 
 let test_mcp_requires_auth_when_bound_non_loopback () =
   with_server ~host:"0.0.0.0" ~enable_auth:false
-  @@ fun ~port ~supervisor_token:_ ~planner_token:_ ~implementer_a_token:_
+  @@ fun ~port ~grpc_port:_ ~ws_port:_ ~supervisor_token:_ ~planner_token:_ ~implementer_a_token:_
             ~implementer_b_token:_ ~supervisor_nickname:_ ~planner_nickname:_
             ~implementer_a_nickname:_ ~implementer_b_nickname:_ ->
   let result =
@@ -831,31 +859,92 @@ let test_mcp_requires_auth_when_bound_non_loopback () =
     (contains_substr "requires room auth enabled with require_token=true"
        result.body)
 
-let test_agent_json_route_served_on_canonical_path () =
-  with_server ~enable_auth:false
-  @@ fun ~port ~supervisor_token:_ ~planner_token:_ ~implementer_a_token:_
-            ~implementer_b_token:_ ~supervisor_nickname:_ ~planner_nickname:_
-            ~implementer_a_nickname:_ ~implementer_b_nickname:_ ->
-  (* Retry up to 3 times to allow server_state initialization after /health readiness *)
-  let rec fetch_agent_card retries =
-    let result = run_curl_get ~port ~path:"/.well-known/agent.json" () in
-    require_http_ok "agent.json" result;
+let fetch_agent_card_json ~port =
+  let rec loop retries =
     let json =
-      try Yojson.Safe.from_string result.body
-      with Yojson.Json_error err ->
-        fail
-          (Printf.sprintf "agent.json invalid JSON: %s\nbody=%s" err result.body)
+      parse_get_json_retry "agent.json" ~port ~path:"/.well-known/agent.json"
+        ~retries:1
     in
     match json |> U.member "name" |> U.to_string_option with
     | Some name -> (json, name)
     | None when retries > 0 ->
         Unix.sleepf 0.5;
-        fetch_agent_card (retries - 1)
+        loop (retries - 1)
     | None ->
-        fail (Printf.sprintf "agent.json name is null after retries\nbody=%s" result.body)
+        fail
+          (Printf.sprintf "agent.json name is null after retries\nbody=%s"
+             (Yojson.Safe.to_string json))
   in
-  let (_json, name) = fetch_agent_card 3 in
+  loop 3
+
+let test_agent_json_route_served_on_canonical_path () =
+  with_server ~enable_auth:false
+  @@ fun ~port ~grpc_port:_ ~ws_port:_ ~supervisor_token:_ ~planner_token:_ ~implementer_a_token:_
+            ~implementer_b_token:_ ~supervisor_nickname:_ ~planner_nickname:_
+            ~implementer_a_nickname:_ ~implementer_b_nickname:_ ->
+  let (_json, name) = fetch_agent_card_json ~port in
   check string "agent card name present" "MASC-MCP" name
+
+let test_agent_json_advertises_runtime_transports () =
+  with_server ~enable_auth:false
+  @@ fun ~port ~grpc_port ~ws_port ~supervisor_token:_ ~planner_token:_
+            ~implementer_a_token:_ ~implementer_b_token:_ ~supervisor_nickname:_
+            ~planner_nickname:_ ~implementer_a_nickname:_
+            ~implementer_b_nickname:_ ->
+  let (json, _name) = fetch_agent_card_json ~port in
+  let interfaces = json |> U.member "supportedInterfaces" |> U.to_list in
+  let has_interface protocol expected_url =
+    List.exists
+      (fun row ->
+        row |> U.member "protocol" |> U.to_string = protocol
+        && row |> U.member "url" |> U.to_string = expected_url)
+      interfaces
+  in
+  check bool "has grpc interface" true
+    (has_interface "GRPC" (Printf.sprintf "grpc://127.0.0.1:%d" grpc_port));
+  check bool "has websocket interface" true
+    (has_interface "WEBSOCKET" (Printf.sprintf "ws://127.0.0.1:%d/" ws_port));
+  check bool "has webrtc interface" true
+    (has_interface "WEBRTC" (Printf.sprintf "http://127.0.0.1:%d/webrtc" port))
+
+let test_health_reports_transport_status () =
+  with_server ~enable_auth:false
+  @@ fun ~port ~grpc_port ~ws_port ~supervisor_token:_ ~planner_token:_
+            ~implementer_a_token:_ ~implementer_b_token:_ ~supervisor_nickname:_
+            ~planner_nickname:_ ~implementer_a_nickname:_
+            ~implementer_b_nickname:_ ->
+  let json = parse_get_json_retry "health" ~port ~path:"/health" ~retries:3 in
+  let transport = json |> U.member "transport" in
+  check bool "grpc enabled" true (transport |> U.member "grpc" |> U.member "enabled" |> U.to_bool);
+  check int "grpc port" grpc_port (transport |> U.member "grpc" |> U.member "port" |> U.to_int);
+  check string "grpc health service" "grpc.health.v1.Health"
+    (transport |> U.member "grpc" |> U.member "health_service" |> U.to_string);
+  check bool "websocket enabled" true
+    (transport |> U.member "websocket" |> U.member "enabled" |> U.to_bool);
+  check int "websocket port" ws_port
+    (transport |> U.member "websocket" |> U.member "ws_port" |> U.to_int);
+  check bool "webrtc enabled" true
+    (transport |> U.member "webrtc" |> U.member "enabled" |> U.to_bool);
+  check bool "webrtc ice servers exposed" true
+    (transport |> U.member "webrtc" |> U.member "ice_server_urls" |> U.to_list |> List.length > 0);
+  check string "webrtc signaling url"
+    (Printf.sprintf "http://127.0.0.1:%d/webrtc" port)
+    (transport |> U.member "webrtc" |> U.member "signaling_url" |> U.to_string)
+
+let test_ws_discovery_route_reports_standalone_socket () =
+  with_server ~enable_auth:false
+  @@ fun ~port ~grpc_port:_ ~ws_port ~supervisor_token:_ ~planner_token:_
+            ~implementer_a_token:_ ~implementer_b_token:_ ~supervisor_nickname:_
+            ~planner_nickname:_ ~implementer_a_nickname:_
+            ~implementer_b_nickname:_ ->
+  let json =
+    parse_get_json_retry "ws discovery" ~port ~path:"/ws" ~retries:3
+  in
+  check bool "ws enabled" true (json |> U.member "enabled" |> U.to_bool);
+  check string "mode" "standalone" (json |> U.member "mode" |> U.to_string);
+  check int "ws port" ws_port (json |> U.member "ws_port" |> U.to_int);
+  check string "ws url" (Printf.sprintf "ws://127.0.0.1:%d/" ws_port)
+    (json |> U.member "ws_url" |> U.to_string)
 
 let test_operator_mcp_supervises_team_session () =
   Alcotest.skip ()
@@ -871,5 +960,11 @@ let () =
             test_mcp_requires_auth_when_bound_non_loopback;
           test_case "canonical agent discovery route" `Quick
             test_agent_json_route_served_on_canonical_path;
+          test_case "agent discovery advertises runtime transports" `Quick
+            test_agent_json_advertises_runtime_transports;
+          test_case "health reports transport status" `Quick
+            test_health_reports_transport_status;
+          test_case "ws discovery reports standalone socket" `Quick
+            test_ws_discovery_route_reports_standalone_socket;
         ] );
     ]

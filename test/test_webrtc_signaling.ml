@@ -7,6 +7,18 @@ module Wrtc = Masc_mcp.Server_webrtc_transport
 module Transport = Masc_mcp.Transport
 module Agent_transport = Masc_mcp.Masc_grpc_transport
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
 (* ====== Signaling Lifecycle ====== *)
 
 let test_create_offer () =
@@ -159,6 +171,34 @@ let test_handle_answer_request_invalid () =
     let result = Wrtc.handle_answer_request "bad json" in
     Alcotest.(check bool) "bad json fails" true (Result.is_error result))
 
+let test_configured_ice_servers_from_csv_env () =
+  with_env "MASC_WEBRTC_ICE_SERVERS_JSON" None (fun () ->
+    with_env "MASC_WEBRTC_ICE_URLS" (Some "stun:stun.example.com:3478,turn:turn.example.com:3478") (fun () ->
+      with_env "MASC_WEBRTC_ICE_USERNAME" (Some "alice") (fun () ->
+        with_env "MASC_WEBRTC_ICE_CREDENTIAL" (Some "secret") (fun () ->
+          let servers = Wrtc.configured_ice_servers () in
+          Alcotest.(check int) "one server record" 1 (List.length servers);
+          let server = List.hd servers in
+          Alcotest.(check (list string)) "urls"
+            [ "stun:stun.example.com:3478"; "turn:turn.example.com:3478" ]
+            server.Webrtc.Ice.urls;
+          Alcotest.(check (option string)) "username" (Some "alice") server.username;
+          Alcotest.(check (option string)) "credential" (Some "secret") server.credential))))
+
+let test_configured_ice_servers_json_override () =
+  with_env "MASC_WEBRTC_ICE_URLS" (Some "stun:ignored.example.com:3478") (fun () ->
+    with_env "MASC_WEBRTC_ICE_SERVERS_JSON"
+      (Some {|[{"urls":["turns:relay.example.com:5349"],"username":"bob","credential":"pw"}]|})
+      (fun () ->
+        let servers = Wrtc.configured_ice_servers () in
+        Alcotest.(check int) "one json server record" 1 (List.length servers);
+        let server = List.hd servers in
+        Alcotest.(check (list string)) "json urls"
+          [ "turns:relay.example.com:5349" ]
+          server.Webrtc.Ice.urls;
+        Alcotest.(check (option string)) "json username" (Some "bob") server.username;
+        Alcotest.(check (option string)) "json credential" (Some "pw") server.credential))
+
 let () =
   Alcotest.run "WebRTC Signaling" [
     ("signaling", [
@@ -185,5 +225,9 @@ let () =
     ("transport_enum", [
       Alcotest.test_case "webrtc variant" `Quick test_transport_webrtc_variant;
       Alcotest.test_case "agent transport" `Quick test_agent_transport_webrtc;
+    ]);
+    ("ice_config", [
+      Alcotest.test_case "csv env" `Quick test_configured_ice_servers_from_csv_env;
+      Alcotest.test_case "json override" `Quick test_configured_ice_servers_json_override;
     ]);
   ]

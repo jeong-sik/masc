@@ -65,7 +65,7 @@ diag_dump() {
     grep -n '^Testing `' "${TEST_LOG_FILE}" | tail -n 10 || true
 
     echo "[ci-diag] failure markers (latest 20):"
-    grep -En '\[FAIL\]|FAILURE|Test Failed|Fatal error|ASSERT false|Process completed with exit code' "${TEST_LOG_FILE}" | tail -n 20 || true
+    grep -En '\[FAIL\]|FAILURE|Test Failed|Fatal error|ASSERT false|Alcotest\.fail|raised an exception|Process completed with exit code' "${TEST_LOG_FILE}" | tail -n 20 || true
 
     echo "[ci-diag] log tail -n 120 ${TEST_LOG_FILE}"
     tail -n 120 "${TEST_LOG_FILE}" || true
@@ -73,28 +73,42 @@ diag_dump() {
 
   local tests_root="${ACTIVE_TEST_BUILD_DIR%/}/default/test/_build/_tests"
   if [[ -d "${tests_root}" ]]; then
-    # Sort by file mtime so diagnostic tail follows the most recently updated test.
     local -a output_files=()
-    local -a latest_outputs=()
     while IFS= read -r line; do
       output_files+=("${line}")
     done < <(find "${tests_root}" -type f -name "*.output" -print 2>/dev/null || true)
+
+    # Separate files containing FAIL markers from the rest.
+    local -a failed_outputs=()
+    local -a latest_outputs=()
+    for f in "${output_files[@]}"; do
+      if grep -ql 'FAIL\|Exception\|Error' "$f" 2>/dev/null; then
+        failed_outputs+=("$f")
+      fi
+    done
     if [[ "${#output_files[@]}" -gt 0 ]]; then
       while IFS= read -r line; do
         latest_outputs+=("${line}")
       done < <(ls -1t "${output_files[@]}" 2>/dev/null | head -n 20 || true)
     fi
-    echo "[ci-diag] test output files (latest 20 by mtime):"
-    printf '%s\n' "${latest_outputs[@]}" || true
 
-    # Print tail of the most recently updated output file for quick signal.
-    local last_output=""
-    if [[ "${#latest_outputs[@]}" -gt 0 ]]; then
-      last_output="${latest_outputs[0]}"
+    if [[ "${#failed_outputs[@]}" -gt 0 ]]; then
+      echo "[ci-diag] output files with FAIL markers (${#failed_outputs[@]}):"
+      printf '  %s\n' "${failed_outputs[@]}" || true
     fi
-    if [[ -n "${last_output}" && -f "${last_output}" ]]; then
-      echo "[ci-diag] tail -n 120 ${last_output}"
-      tail -n 120 "${last_output}" || true
+    echo "[ci-diag] test output files (latest 20 by mtime):"
+    printf '  %s\n' "${latest_outputs[@]}" || true
+
+    # Tail the first file with FAIL markers; fall back to most recent by mtime.
+    local diag_output=""
+    if [[ "${#failed_outputs[@]}" -gt 0 ]]; then
+      diag_output="${failed_outputs[0]}"
+    elif [[ "${#latest_outputs[@]}" -gt 0 ]]; then
+      diag_output="${latest_outputs[0]}"
+    fi
+    if [[ -n "${diag_output}" && -f "${diag_output}" ]]; then
+      echo "[ci-diag] tail -n 120 ${diag_output}"
+      tail -n 120 "${diag_output}" || true
     fi
   else
     echo "[ci-diag] no test output directory yet: ${tests_root}"

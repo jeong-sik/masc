@@ -4,10 +4,10 @@
 # Usage:
 #   ./scripts/harness/transport/run_all.sh
 #
-# Prerequisites:
-#   - MASC server running on :8935 (HTTP) and :8936 (gRPC)
-#   - grpcurl installed (for gRPC tests)
-#   - websocat installed (optional, for WebSocket frame tests)
+# Behavior:
+#   - Self-bootstraps an isolated local server when none is running
+#   - grpcurl required for gRPC checks
+#   - Python 3 builtin socket fallback used for WebSocket frame tests
 
 set -euo pipefail
 
@@ -32,13 +32,6 @@ run_harness() {
     EXIT_CODE=1
   fi
 }
-
-# Check server first
-if ! curl -sf "http://127.0.0.1:${MASC_HTTP_PORT:-8935}/health" >/dev/null 2>&1; then
-  echo "ERROR: MASC server not running."
-  echo "Start it: ./start-masc-mcp.sh --http --port 8935"
-  exit 2
-fi
 
 echo "MASC Transport E2E Harness Suite"
 echo "================================"

@@ -52,14 +52,14 @@ fi
 SESSION_ID=$(curl -sf -i -X POST "${MASC_BASE_URL}/mcp" \
   -H "Content-Type: application/json" \
   -H "${MCP_ACCEPT}" \
-  -d "$init_req" 2>&1 | grep -i 'mcp-session-id' | head -1 | tr -d '\r' | awk '{print $2}')
+  -d "$init_req" 2>&1 | awk 'tolower($1)=="mcp-session-id:" { gsub("\r", "", $2); print $2; exit }')
 tools_req='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 tools_resp=$(curl -sf -X POST "${MASC_BASE_URL}/mcp" \
   -H "Content-Type: application/json" \
   -H "${MCP_ACCEPT}" \
   -H "Mcp-Session-Id: ${SESSION_ID}" \
   -d "$tools_req" 2>&1 || echo '{}')
-tool_count=$(echo "$tools_resp" | jq '.result.tools | length' 2>/dev/null || echo "0")
+tool_count=$(jq '.result.tools | length' <<<"$tools_resp" 2>/dev/null || echo "0")
 if [ "$tool_count" -gt 0 ]; then
   pass "MCP tools/list: ${tool_count} tools available"
 else

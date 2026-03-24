@@ -100,15 +100,33 @@ let command_available cmd =
       with Unix.Unix_error _ -> false)
     dirs
 
+(** Check if a TCP port is listening. Uses Eio.Net when available (non-blocking),
+    falls back to Unix socket during early startup before Eio context is set. *)
 let port_listening port =
-  try
-    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Fun.protect
-      ~finally:(fun () -> (try Unix.close sock with Unix.Unix_error _ -> ()))
-      (fun () ->
-        Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
-        true)
-  with Unix.Unix_error _ -> false
+  match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
+  | Some net, Some clock ->
+      (try
+        Eio.Switch.run (fun sw ->
+          let result = Eio.Time.with_timeout clock 1.0 (fun () ->
+            let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
+            let conn = Eio.Net.connect ~sw net addr in
+            Eio.Flow.close conn;
+            Ok true)
+          in
+          match result with
+          | Ok v -> v
+          | Error `Timeout -> false)
+      with _ -> false)
+  | _ ->
+      (* Fallback: Eio not yet initialized (startup-time readiness check) *)
+      (try
+        let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+        Fun.protect
+          ~finally:(fun () -> (try Unix.close sock with Unix.Unix_error _ -> ()))
+          (fun () ->
+            Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
+            true)
+      with Unix.Unix_error _ -> false)
 
 let readiness_check agent =
   match agent with

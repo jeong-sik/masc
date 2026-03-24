@@ -68,7 +68,16 @@ let test_protocol_of_string_invalid () =
     (Option.map Transport.protocol_to_string (Transport.protocol_of_string "invalid"))
 
 let test_protocol_roundtrip () =
-  let protocols = [Transport.JsonRpc; Transport.Rest; Transport.Grpc; Transport.Sse; Transport.Ws] in
+  let protocols =
+    [
+      Transport.JsonRpc;
+      Transport.Rest;
+      Transport.Grpc;
+      Transport.Sse;
+      Transport.Ws;
+      Transport.Webrtc;
+    ]
+  in
   List.iter (fun p ->
     let s = Transport.protocol_to_string p in
     match Transport.protocol_of_string s with
@@ -601,6 +610,21 @@ let test_get_bindings_has_rest () =
   check bool "has rest" true
     (List.exists (fun b -> b.Transport.protocol = Transport.Rest) bindings)
 
+let test_get_bindings_has_grpc () =
+  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
+  check bool "has grpc" true
+    (List.exists (fun b -> b.Transport.protocol = Transport.Grpc) bindings)
+
+let test_get_bindings_has_ws () =
+  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
+  check bool "has ws" true
+    (List.exists (fun b -> b.Transport.protocol = Transport.Ws) bindings)
+
+let test_get_bindings_has_webrtc () =
+  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
+  check bool "has webrtc" true
+    (List.exists (fun b -> b.Transport.protocol = Transport.Webrtc) bindings)
+
 let test_get_bindings_url_contains_host () =
   let bindings = Transport.get_bindings ~host:"127.0.0.1" ~port:9000 in
   check bool "contains host" true
@@ -871,6 +895,9 @@ let () =
       test_case "has sse" `Quick test_get_bindings_has_sse;
       test_case "has jsonrpc" `Quick test_get_bindings_has_jsonrpc;
       test_case "has rest" `Quick test_get_bindings_has_rest;
+      test_case "has grpc" `Quick test_get_bindings_has_grpc;
+      test_case "has ws" `Quick test_get_bindings_has_ws;
+      test_case "has webrtc" `Quick test_get_bindings_has_webrtc;
       test_case "url contains host" `Quick test_get_bindings_url_contains_host;
       test_case "url contains port" `Quick test_get_bindings_url_contains_port;
     ];

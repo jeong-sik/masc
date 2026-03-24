@@ -6,10 +6,13 @@
 (** Default gRPC port (8936). *)
 val default_port : int
 
+(** Standard gRPC health service name. *)
+val health_service_name : string
+
 (** Read the configured gRPC port from MASC_GRPC_PORT env or use default. *)
 val configured_port : unit -> int
 
-(** Whether gRPC transport is enabled (MASC_GRPC_ENABLED=1). *)
+(** Whether gRPC transport is enabled (default-on, opt-out via env). *)
 val is_enabled : unit -> bool
 
 (** Build a gRPC server preloaded with reflection, health, and coordination

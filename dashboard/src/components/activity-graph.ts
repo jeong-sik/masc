@@ -10,14 +10,16 @@ import { TimeAgo } from './common/time-ago'
 import { Sparkline } from './common/sparkline'
 import { GraphView } from './activity-graph-view'
 import { ActivitySwimlane } from './activity-swimlane'
+import { ActivityHeatmap } from './activity-heatmap'
 import { CollapsibleSection } from './common/collapsible'
 import { fetchActivityGraph } from '../api'
+import { registerActivityRefresh } from '../sse-store'
 import type { ActivityGraphResponse, ActivityGraphNode, ActivityGraphTimelineEvent } from '../types'
 
 const graphData = signal<ActivityGraphResponse | null>(null)
 const graphError = signal<string | null>(null)
 const graphLoading = signal(false)
-const selectedTimeRange = signal<string>('all')
+export const selectedTimeRange = signal<string>('all')
 
 const TIME_RANGES: Array<{ value: string; label: string }> = [
   { value: '1h', label: '1시간' },
@@ -258,7 +260,10 @@ function EmptyActivityGraph() {
 export { loadGraph as refreshActivityGraph }
 
 export function ActivityGraphSurface() {
-  useEffect(() => { loadGraph() }, [])
+  useEffect(() => {
+    loadGraph()
+    registerActivityRefresh(loadGraph)
+  }, [])
 
   const data = graphData.value
   const error = graphError.value
@@ -335,6 +340,12 @@ export function ActivityGraphSurface() {
           <${ActivityFeed} events=${[...data.timeline].reverse().slice(0, 30)} />
         <//>
       </div>
+
+      ${data.timeline.length > 0 ? html`
+        <${CollapsibleSection} title="활동 히트맵" open=${false}>
+          <${ActivityHeatmap} data=${data} />
+        <//>
+      ` : null}
     </div>
   `
 }

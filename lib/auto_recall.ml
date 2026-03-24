@@ -70,7 +70,8 @@ let make_config
 (** {1 Token Estimation} *)
 
 (** CJK-aware token estimate delegated to OAS Context_reducer. *)
-let estimate_tokens : string -> int = Agent_sdk.Context_reducer.estimate_char_tokens
+let estimate_tokens (s : string) : int =
+  if s = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens s
 
 (** {1 Source Fetchers} *)
 

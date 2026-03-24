@@ -105,6 +105,12 @@ extract_text() {
   jq -r 'try (.result.content[0].text) catch empty'
 }
 # Extract .result from MCP tool response content.
+# Usage: echo "$response" | extract_text
+extract_text() {
+  jq -r 'if ._harness_error? then empty else try (.result.content[0].text) catch empty end'
+}
+
+# Extract .result from MCP tool response content.
 # Usage: echo "$response" | extract_result
 extract_result() {
   jq -c 'try (.result.content[0].text | fromjson | .result) catch empty'

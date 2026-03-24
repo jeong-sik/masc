@@ -411,6 +411,16 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               float_of_int
                 (max 30 (min 300 meta_after_proactive.presence_keepalive_sec))
             in
+            (try
+               Tool_improve_loop.maybe_tick_from_keepalive ~config:ctx.config
+                 ~agent_name:meta_after_proactive.agent_name
+                 ~keeper_name:meta_after_proactive.name
+                 ~sw:ctx.sw ~clock:ctx.clock ~proc_mgr:ctx.proc_mgr ()
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Keeper.warn "improve loop keepalive tick skipped: %s"
+                 (Printexc.to_string exn));
             let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
             interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
             if !stop then ()

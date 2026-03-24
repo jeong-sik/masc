@@ -94,14 +94,20 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
 let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
   let open Yojson.Safe.Util in
   let str key ~default = json |> member key |> to_string_option |> Option.value ~default in
+  let required_str key =
+    match json |> member key |> to_string_option |> Option.map String.trim with
+    | Some value when value <> "" -> value
+    | _ ->
+        raise
+          (Invalid_argument
+             (Printf.sprintf
+                "missing required autoresearch state field: %s" key))
+  in
   let int_ key ~default = try json |> member key |> to_int with Type_error _ -> default in
   let float_ key ~default = try json |> member key |> to_float with Type_error _ -> default in
   {
-    loop_id = str "loop_id" ~default:"unknown";
-    status =
-      (json |> member "status" |> to_string_option
-       |> Option.map status_of_string |> Option.join)
-      |> Option.value ~default:Error;
+    loop_id = required_str "loop_id";
+    status = status_of_string (required_str "status") |> Option.value ~default:Error;
     current_cycle = int_ "current_cycle" ~default:0;
     baseline = float_ "baseline" ~default:0.0;
     best_score = float_ "best_score" ~default:0.0;
@@ -109,10 +115,10 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
     queued_hypothesis = json |> member "queued_hypothesis" |> to_string_option;
     total_keeps = int_ "total_keeps" ~default:0;
     total_discards = int_ "total_discards" ~default:0;
-    goal = str "goal" ~default:"";
-    metric_fn = str "metric_fn" ~default:"";
-    model_model = str "model_model" ~default:"";
-    target_file = str "target_file" ~default:"";
+    goal = required_str "goal";
+    metric_fn = required_str "metric_fn";
+    model_model = required_str "model_model";
+    target_file = required_str "target_file";
     workdir = str "workdir" ~default:".";
     cycle_timeout_s = float_ "cycle_timeout_s" ~default:300.0;
     max_cycles = int_ "max_cycles" ~default:10;

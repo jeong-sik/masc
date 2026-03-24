@@ -216,6 +216,11 @@
  (name test_tool_voice)
  (modules test_tool_voice)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
+
+(test
+ (name test_tool_improve_loop)
+ (modules test_tool_improve_loop)
+ (libraries masc_mcp alcotest yojson unix))
 ; Board TTL + metadata classification tests
 (test
  (name test_board_ttl)

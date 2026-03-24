@@ -120,6 +120,18 @@ let persist_checkpoint ~dir ~session_id (ckpt : Oas.Checkpoint.t) =
   Fs_compat.mkdir_p dir;
   Fs_compat.save_file path (Oas.Checkpoint.to_string ckpt)
 
+let build_checkpoint ~session_id ?working_context (agent : Oas.Agent.t) =
+  match working_context with
+  | None -> Oas.Agent.checkpoint ~session_id agent
+  | Some json ->
+      Oas.Agent_checkpoint.build_checkpoint
+        ~session_id ~working_context:json
+        ~state:(Oas.Agent.state agent)
+        ~tools:(Oas.Agent.tools agent)
+        ~context:(Oas.Agent.context agent)
+        ~mcp_clients:(Oas.Agent.options agent).mcp_clients
+        ()
+
 (* ================================================================ *)
 (* Build                                                             *)
 (* ================================================================ *)
@@ -233,10 +245,7 @@ let run
     in
     let checkpoint = match config.checkpoint_dir with
       | Some dir ->
-        let ckpt =
-          Oas.Agent.checkpoint ~session_id ?working_context:config.working_context
-            agent
-        in
+        let ckpt = build_checkpoint ~session_id ?working_context:config.working_context agent in
         (try persist_checkpoint ~dir ~session_id ckpt
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "oas_worker: Checkpoint save failed: %s"
@@ -244,8 +253,8 @@ let run
         Some ckpt
       | None ->
         Option.map
-          (fun working_context ->
-            Oas.Agent.checkpoint ~session_id ~working_context agent)
+          (fun _ ->
+            build_checkpoint ~session_id ?working_context:config.working_context agent)
           config.working_context
     in
     Option.iter (fun bus ->

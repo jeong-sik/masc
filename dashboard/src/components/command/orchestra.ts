@@ -360,24 +360,26 @@ export function OrchestraSurface() {
           <${StatusChip} label=${`${Math.round(camera.zoom * 100)}%`} />
         </div>
         <div class="orchestra-toolbar-group">
-          <button type="button"
-            class=${`control-btn ${density === 'balanced' ? 'is-active' : 'ghost'}`}
+          <${ActionButton}
+            variant=${density === 'balanced' ? 'primary' : 'ghost'}
+            size="lg"
             onClick=${() => {
               orchestraDensity.value = 'balanced'
               orchestraSelection.value = selectedId
             }}
           >
             균형
-          </button>
-          <button type="button"
-            class=${`control-btn ${density === 'compact' ? 'is-active' : 'ghost'}`}
+          <//>
+          <${ActionButton}
+            variant=${density === 'compact' ? 'primary' : 'ghost'}
+            size="lg"
             onClick=${() => {
               orchestraDensity.value = 'compact'
               orchestraSelection.value = selectedId
             }}
           >
             집약
-          </button>
+          <//>
           <${StatusChip} label=${densityLabel(density)} />
         </div>
       </div>

@@ -1,8 +1,8 @@
 // ActionBar — consistent action button row at the bottom of cards.
-// Replaces repeated flex gap-2 flex-wrap mt-3 + control-btn patterns.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
+import { ActionButton } from './button'
 
 interface ActionBarProps {
   children: ComponentChildren
@@ -25,8 +25,8 @@ interface ActionBtnProps {
 
 export function ActionBtn({ label, onClick, disabled }: ActionBtnProps) {
   return html`
-    <button type="button" class="control-btn rounded-lg ghost" onClick=${onClick} disabled=${disabled}>
+    <${ActionButton} variant="ghost" size="lg" onClick=${onClick} disabled=${disabled}>
       ${label}
-    </button>
+    <//>
   `
 }

@@ -4,8 +4,7 @@
     Token estimation: ~4 characters per token (conservative approximation). *)
 
 (** CJK-aware token estimate delegated to OAS Context_reducer. *)
-let estimate_tokens (s : string) : int =
-  if s = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens s
+let estimate_tokens : string -> int = Agent_sdk.Context_reducer.estimate_char_tokens
 
 let tier_rank (name : string) : int =
   match Tool_catalog.tool_tier name with

@@ -140,7 +140,34 @@ let () = test "substantive_notes_no_pattern_match" (fun () ->
        (make_request "Implemented the search feature with pagination support. 15 new tests added, all passing.")))
 
 (* ================================================================ *)
-(* parse_verdict (internal, tested via review path)                 *)
+(* parse_verdict (directly tested)                                  *)
+(* ================================================================ *)
+
+let () = test "parse_verdict_approve" (fun () ->
+  assert_approve (Anti_rationalization.parse_verdict "APPROVE"))
+
+let () = test "parse_verdict_approve_with_trailing" (fun () ->
+  assert_approve (Anti_rationalization.parse_verdict "APPROVE - looks good"))
+
+let () = test "parse_verdict_reject_with_reason" (fun () ->
+  assert_reject_contains
+    (Anti_rationalization.parse_verdict "REJECT: vague notes")
+    "vague notes")
+
+let () = test "parse_verdict_reject_bare" (fun () ->
+  assert_reject (Anti_rationalization.parse_verdict "REJECT"))
+
+let () = test "parse_verdict_reject_colon_only" (fun () ->
+  assert_reject (Anti_rationalization.parse_verdict "REJECT:"))
+
+let () = test "parse_verdict_unrecognized_defaults_approve" (fun () ->
+  assert_approve (Anti_rationalization.parse_verdict "I think it looks good"))
+
+let () = test "parse_verdict_empty_defaults_approve" (fun () ->
+  assert_approve (Anti_rationalization.parse_verdict ""))
+
+(* ================================================================ *)
+(* find_excuse_pattern                                               *)
 (* ================================================================ *)
 
 let () = test "find_excuse_pattern_none_for_clean_notes" (fun () ->

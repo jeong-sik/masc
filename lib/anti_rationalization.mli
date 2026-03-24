@@ -34,3 +34,9 @@ val review : review_request -> verdict
     Returns [Some (pattern, reason)] if a match is found.
     Exposed for testing. *)
 val find_excuse_pattern : string -> (string * string) option
+
+(** Parse LLM output into a verdict.
+    "APPROVE" -> [Approve], "REJECT: reason" -> [Reject reason].
+    Unrecognized format defaults to [Approve] (liveness).
+    Exposed for testing. *)
+val parse_verdict : string -> verdict

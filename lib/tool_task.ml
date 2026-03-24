@@ -275,7 +275,18 @@ let handle_transition ctx args =
   let reason = get_string args "reason" "" in
   let expected_version = get_int_opt args "expected_version" in
   let action_lc = String.lowercase_ascii action in
-  let force = get_bool args "force" false in
+  let force_raw = get_bool args "force" false in
+  (* force=true requires admin privilege: initial_admin or Admin role *)
+  let force =
+    if force_raw then
+      match Auth.read_initial_admin ctx.config.base_path with
+      | Some admin when String.equal ctx.agent_name admin -> true
+      | _ ->
+        Log.Task.warn "[anti-rationalization] force=true rejected: agent=%s lacks admin privilege"
+          ctx.agent_name;
+        false
+    else false
+  in
   let tasks = Room.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
   (* Anti-rationalization gate: verify completion notes before allowing "done" *)

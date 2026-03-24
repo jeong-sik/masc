@@ -20,10 +20,10 @@ let make_meta ?(policy_mode = "learned_offline_v1") () =
 let test_inject_filters_allowlist () =
   let schemas : Types.tool_schema list =
     [
-      { name = "masc_status"; description = ""; input_schema = `Assoc [] };
-      { name = "masc_broadcast"; description = ""; input_schema = `Assoc [] };
-      { name = "masc_messages"; description = ""; input_schema = `Assoc [] };
-      { name = "keeper_time_now"; description = ""; input_schema = `Assoc [] };
+      { name = "masc_status"; description = ""; input_schema = `Assoc []; visibility = Public };
+      { name = "masc_broadcast"; description = ""; input_schema = `Assoc []; visibility = Public };
+      { name = "masc_messages"; description = ""; input_schema = `Assoc []; visibility = Public };
+      { name = "keeper_time_now"; description = ""; input_schema = `Assoc []; visibility = Public };
     ]
   in
   KET.inject_masc_schemas schemas;

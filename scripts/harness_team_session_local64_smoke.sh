@@ -67,12 +67,12 @@ export MASC_LOCAL64_BASE_PATH="$BASE_PATH"
 need_pool_start="false"
 if [ "$POOL_SHARDS" -gt 1 ] || [ "$POOL_FORCE_START" = "true" ]; then
   need_pool_start="true"
-elif [ -n "${LLAMA_MODEL_PATH:-}" ] && [ -z "${MASC_LLAMA_RUNTIMES_JSON:-}" ]; then
+elif [ -n "${LLAMA_MODEL_PATH:-}" ] && [ -z "${LLM_ENDPOINTS:-}" ]; then
   need_pool_start="true"
 fi
 
 if [ "$need_pool_start" = "true" ]; then
-  export MASC_LLAMA_RUNTIMES_JSON="$("$ROOT_DIR/scripts/llama-runtime-pool.sh" start --target-shards "$POOL_SHARDS" --seed-port "$SEED_PORT")"
+  export LLM_ENDPOINTS="$("$ROOT_DIR/scripts/llama-runtime-pool.sh" start --target-shards "$POOL_SHARDS" --seed-port "$SEED_PORT")"
   POOL_STARTED="true"
 fi
 
@@ -86,8 +86,8 @@ if [ "$MCP_URL" = "http://127.0.0.1:${PORT}/mcp" ]; then
     PATH="$PATH" \
     HOME="$HOME" \
     TMPDIR="${TMPDIR:-/tmp}" \
+    LLM_ENDPOINTS="${LLM_ENDPOINTS:-}" \
     LLAMA_SERVER_URL="${LLAMA_SERVER_URL:-http://127.0.0.1:${SEED_PORT}}" \
-    MASC_LLAMA_RUNTIMES_JSON="${MASC_LLAMA_RUNTIMES_JSON:-}" \
     MASC_LLAMA_RUNTIME_COOLDOWN_SEC="${MASC_LLAMA_RUNTIME_COOLDOWN_SEC:-}" \
     MASC_LLAMA_RUNTIME_DEBUG="${MASC_LLAMA_RUNTIME_DEBUG:-}" \
     MASC_TEAM_SESSION_MODEL_35B="${MASC_TEAM_SESSION_MODEL_35B:-}" \

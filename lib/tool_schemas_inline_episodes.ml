@@ -20,6 +20,7 @@ Returns flushed/failed/pending counts. Pair with masc_episode_list to verify sto
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   (* masc_episode_list *)
@@ -45,6 +46,7 @@ Pair with masc_episode_flush to ensure episodes are persisted before querying.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   (* masc_self_introspect *)
@@ -57,6 +59,7 @@ Pair with masc_mitosis_check for threshold-based action, or masc_recall_search f
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 
   (* masc_recall_search *)
@@ -79,5 +82,6 @@ Returns matched memories sorted by relevance. Pair with masc_episode_list for st
       ]);
       ("required", `List [`String "query"]);
     ];
+    visibility = Public;
   };
 ]

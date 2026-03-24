@@ -363,6 +363,7 @@ Pair with masc_worktree_create to set up an isolated workspace first.";
       ]);
       ("required", `List [`String "path"; `String "content"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -393,6 +394,7 @@ The old_string must match exactly once unless replace_all is true.";
       ]);
       ("required", `List [`String "path"; `String "old_string"; `String "new_string"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -409,6 +411,7 @@ Cannot delete directories. Use when removing generated or obsolete files.";
       ]);
       ("required", `List [`String "path"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -435,6 +438,7 @@ Output truncated to 10KB. Timeout default 30s, max 120s.";
       ]);
       ("required", `List [`String "command"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -460,6 +464,7 @@ Restricted to .worktrees/ working directory. Force push and push to main/master 
       ]);
       ("required", `List [`String "action"; `String "cwd"]);
     ];
+    visibility = Public;
   };
 ]
 

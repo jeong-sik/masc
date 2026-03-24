@@ -154,6 +154,7 @@ let make_mitosis_ctx ~base_path : Tool_mitosis_oas.context =
   { config; agent_name = "test-agent"; masc_tools = []; dispatch = noop_dispatch }
 
 let with_mitosis_base f =
+  Eio_main.run @@ fun _env ->
   let base_path = temp_dir "test_mitosis_oas" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)

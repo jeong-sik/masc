@@ -25,6 +25,7 @@ After work, create a PR with `gh pr create` and call masc_worktree_remove.";
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_worktree_remove";
@@ -45,6 +46,7 @@ After completing work in a worktree created by masc_worktree_create.";
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_worktree_list";
@@ -55,5 +57,6 @@ Pair with masc_worktree_remove to clean up stale entries.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 ]

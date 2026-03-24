@@ -79,6 +79,7 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "agent_name"]);
     ];
+    visibility = Public;
   };
 
   (* masc_walph_control *)
@@ -100,6 +101,7 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "command"; `String "agent_name"]);
     ];
+    visibility = Public;
   };
 
   (* masc_walph_natural *)
@@ -120,6 +122,7 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "message"; `String "agent_name"]);
     ];
+    visibility = Public;
   };
 
 ]

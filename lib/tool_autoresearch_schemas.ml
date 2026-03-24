@@ -52,6 +52,7 @@ The MODEL receives the full file, generates a modified version, and writes it ba
       ]);
       ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -101,6 +102,7 @@ and persists cross-links so team-session status/stop can surface the linked loop
       ]);
       ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -116,6 +118,7 @@ Returns: loop_id, cycle count, baseline, best score, keep/discard counts, recent
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   {
@@ -135,6 +138,7 @@ The loop will finish its current cycle and save final state.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   {
@@ -156,6 +160,7 @@ Useful for directing the research based on human insight.";
       ]);
       ("required", `List [`String "hypothesis"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -177,6 +182,7 @@ Call this repeatedly to drive the autonomous loop.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   {
@@ -227,6 +233,7 @@ Use after synthesizing insights from multiple experiment cycles.";
       ]);
       ("required", `List [`String "goal"; `String "hypothesis"; `String "evidence"; `String "conclusion"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -247,5 +254,6 @@ Returns findings from all loops matching the query, most recent first.";
       ]);
       ("required", `List [`String "query"]);
     ];
+    visibility = Public;
   };
 ]

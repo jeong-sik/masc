@@ -232,23 +232,25 @@ start_shard() {
   fi
 }
 
-print_env_json() {
+print_env_value() {
   resolve_seed_args
   local max_port=$((SEED_PORT + TARGET_SHARDS - 1))
-  local runtimes='[]'
+  local endpoints=()
   local port
   for port in $(seq "$SEED_PORT" "$max_port"); do
     if port_is_listening "$port"; then
-      runtimes="$(jq -cn \
-        --argjson existing "$runtimes" \
-        --arg id "$(runtime_id "$port")" \
-        --arg base_url "$(runtime_url "$port")" \
-        --arg model "$MODEL_ALIAS" \
-        --argjson max_concurrency "$PARALLEL" \
-        '$existing + [{id:$id,base_url:$base_url,model:$model,max_concurrency:$max_concurrency}]')"
+      endpoints+=("$(runtime_url "$port")")
     fi
   done
-  printf '%s\n' "$runtimes"
+  local joined=""
+  local endpoint
+  for endpoint in "${endpoints[@]}"; do
+    if [ -n "$joined" ]; then
+      joined+=","
+    fi
+    joined+="$endpoint"
+  done
+  printf '%s\n' "$joined"
 }
 
 start_pool() {
@@ -259,7 +261,7 @@ start_pool() {
   for port in $(seq "$SEED_PORT" "$max_port"); do
     start_shard "$port" || failures=$((failures + 1))
   done
-  print_env_json
+  print_env_value
   if [ "$failures" -gt 0 ]; then
     echo "warning: $failures shard(s) failed to start" >&2
   fi
@@ -277,7 +279,7 @@ status_pool() {
       printf 'down\n'
     fi
   done
-  print_env_json
+  print_env_value
 }
 
 stop_pool() {
@@ -335,7 +337,7 @@ case "$COMMAND" in
   start) start_pool ;;
   status) status_pool ;;
   stop) stop_pool ;;
-  print-env) print_env_json ;;
+  print-env) print_env_value ;;
   bench) bench_pool ;;
   *)
     usage

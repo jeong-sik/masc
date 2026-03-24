@@ -24,6 +24,7 @@ Follow up with masc_portal_send to send messages; close with masc_portal_close."
       ]);
       ("required", `List [`String "agent_name"; `String "target_agent"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_portal_send";
@@ -50,6 +51,7 @@ After masc_portal_open establishes the channel; check responses via portal statu
       ]);
       ("required", `List [`String "agent_name"; `String "message"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_portal_close";
@@ -66,6 +68,7 @@ Auto-closes on masc_leave. Pair with masc_portal_open to re-establish if needed.
       ]);
       ("required", `List [`String "agent_name"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_portal_status";
@@ -80,5 +83,6 @@ Auto-closes on masc_leave. Pair with masc_portal_open to re-establish if needed.
       ]);
       ("required", `List [`String "agent_name"]);
     ];
+    visibility = Public;
   };
 ]

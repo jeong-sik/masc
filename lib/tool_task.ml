@@ -522,6 +522,7 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
       ]);
       ("required", `List [`String "title"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_batch_add_tasks";
@@ -558,6 +559,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
       ]);
       ("required", `List [`String "tasks"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_task_history";
@@ -577,6 +579,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
       ]);
       ("required", `List [`String "task_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_tasks";
@@ -604,6 +607,7 @@ Tip: Look for status='todo' tasks to claim.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_archive_view";
@@ -617,6 +621,7 @@ Tip: Look for status='todo' tasks to claim.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_claim_next";
@@ -631,6 +636,7 @@ Tip: Look for status='todo' tasks to claim.";
       ]);
       ("required", `List [`String "agent_name"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_update_priority";
@@ -651,6 +657,7 @@ Tip: Look for status='todo' tasks to claim.";
       ]);
       ("required", `List [`String "task_id"; `String "priority"]);
     ];
+    visibility = Public;
   };
 
   (* masc_transition *)
@@ -689,6 +696,7 @@ After masc_add_task or masc_claim_next; pair with masc_deliver before action='do
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"; `String "action"]);
     ];
+    visibility = Public;
   };
 
 ]

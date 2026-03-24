@@ -16,6 +16,7 @@ After masc_claim_next or masc_add_task; follow up with masc_plan_update to write
       ]);
       ("required", `List [`String "task_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_plan_update";
@@ -36,6 +37,7 @@ After masc_plan_init creates the structure; pair with masc_plan_get to review.";
       ]);
       ("required", `List [`String "task_id"; `String "content"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_plan_get";
@@ -52,6 +54,7 @@ After masc_plan_init; omit task_id if masc_plan_set_task was called.";
       ]);
       ("required", `List []);
     ];
+    visibility = Public;
   };
   {
     name = "masc_plan_set_task";
@@ -68,6 +71,7 @@ After masc_claim_next; auto-cleared on masc_leave.";
       ]);
       ("required", `List [`String "task_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_plan_get_task";
@@ -79,6 +83,7 @@ Set via masc_plan_set_task. Auto-cleared on masc_leave.";
       ("properties", `Assoc []);
       ("required", `List []);
     ];
+    visibility = Public;
   };
   {
     name = "masc_plan_clear_task";
@@ -90,6 +95,7 @@ Use masc_transition to change task status separately. Auto-called on masc_leave.
       ("properties", `Assoc []);
       ("required", `List []);
     ];
+    visibility = Public;
   };
   {
     name = "masc_note_add";
@@ -108,6 +114,7 @@ Use masc_transition to change task status separately. Auto-called on masc_leave.
       ]);
       ("required", `List [`String "task_id"; `String "note"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_deliver";
@@ -130,6 +137,7 @@ Example: masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pu
       ]);
       ("required", `List [`String "task_id"; `String "content"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_error_add";
@@ -156,6 +164,7 @@ Example: masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pu
       ]);
       ("required", `List [`String "task_id"; `String "error_type"; `String "message"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_error_resolve";
@@ -174,5 +183,6 @@ Example: masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pu
       ]);
       ("required", `List [`String "task_id"; `String "error_index"]);
     ];
+    visibility = Public;
   };
 ]

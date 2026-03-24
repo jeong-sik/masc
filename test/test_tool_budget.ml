@@ -4,7 +4,7 @@ module Tool_budget = Masc_mcp.Tool_budget
 module Tool_catalog = Masc_mcp.Tool_catalog
 
 let mk_schema name desc : Types.tool_schema =
-  { name; description = desc; input_schema = `Assoc [] }
+  { name; description = desc; input_schema = `Assoc []; visibility = Public }
 
 (* Helper: always returns 0 usage *)
 let no_usage _ = 0

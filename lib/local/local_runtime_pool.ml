@@ -199,10 +199,36 @@ let default_runtime () =
     total_failure = 0;
   }
 
+let runtime_from_endpoint base_url =
+  {
+    id = runtime_id_of_base_url base_url;
+    base_url;
+    model = trim_opt (Sys.getenv_opt "LLAMA_SWARM_MODEL");
+    max_concurrency =
+      int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
+        ~default:default_parallel_hint;
+    active_slots = 0;
+    queue_depth = 0;
+    latency_ema_ms = None;
+    failure_streak = 0;
+    cooldown_until = None;
+    last_error = None;
+    total_started = 0;
+    total_success = 0;
+    total_failure = 0;
+  }
+
+let parse_llm_endpoints raw =
+  raw
+  |> String.split_on_char ','
+  |> List.filter_map (fun item -> trim_opt (Some item))
+  |> List.map runtime_from_endpoint
+
 let current_fingerprint () =
   String.concat "||"
     [
       Option.value ~default:"" (Sys.getenv_opt "MASC_LLAMA_RUNTIMES_JSON");
+      Option.value ~default:"" (Sys.getenv_opt "LLM_ENDPOINTS");
       Env_config.Llama.server_url;
       Option.value ~default:"" (Sys.getenv_opt "LLAMA_SWARM_MODEL");
       Option.value ~default:""
@@ -214,7 +240,14 @@ let current_fingerprint () =
 
 let load_runtimes_from_env () =
   match trim_opt (Sys.getenv_opt "MASC_LLAMA_RUNTIMES_JSON") with
-  | None -> ([ default_runtime () ], [])
+  | None -> (
+      match trim_opt (Sys.getenv_opt "LLM_ENDPOINTS") with
+      | Some raw ->
+          let runtimes = parse_llm_endpoints raw in
+          if runtimes = [] then
+            ([ default_runtime () ], [ "LLM_ENDPOINTS produced no usable runtimes" ])
+          else (runtimes, [])
+      | None -> ([ default_runtime () ], []))
   | Some raw -> (
       try
         match Yojson.Safe.from_string raw with

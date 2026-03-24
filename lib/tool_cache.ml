@@ -127,6 +127,7 @@ Retrieve with masc_cache_get. Browse entries with masc_cache_list.";
       ]);
       ("required", `List [`String "key"; `String "value"]);
     ];
+    visibility = Public;
   };
 
   (* masc_cache_get *)
@@ -145,6 +146,7 @@ If miss, check masc_cache_list to verify the key exists or re-populate with masc
       ]);
       ("required", `List [`String "key"]);
     ];
+    visibility = Public;
   };
 
   (* masc_cache_delete *)
@@ -161,6 +163,7 @@ If miss, check masc_cache_list to verify the key exists or re-populate with masc
       ]);
       ("required", `List [`String "key"]);
     ];
+    visibility = Public;
   };
 
   (* masc_cache_list *)
@@ -176,6 +179,7 @@ If miss, check masc_cache_list to verify the key exists or re-populate with masc
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   (* masc_cache_clear *)
@@ -186,6 +190,7 @@ If miss, check masc_cache_list to verify the key exists or re-populate with masc
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 
   (* masc_cache_stats *)
@@ -196,6 +201,7 @@ If miss, check masc_cache_list to verify the key exists or re-populate with masc
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 
 ]

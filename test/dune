@@ -693,6 +693,13 @@
  (modules test_mcp_full_cycle)
  (libraries masc_mcp alcotest eio eio_main yojson))
 
+; MCP POST streamable HTTP keepalive regression test
+(test
+ (name test_mcp_post_sse_e2e)
+ (modules test_mcp_post_sse_e2e)
+ (libraries alcotest yojson unix)
+ (deps ../bin/main_eio.exe))
+
 ; SSE storm guard endpoint-level integration tests
 (test
  (name test_sse_storm_e2e)

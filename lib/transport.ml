@@ -583,11 +583,55 @@ end
 (** Get available bindings for current MASC instance *)
 let get_bindings ~host ~port : binding list =
   let base_url = Printf.sprintf "http://%s:%d" host port in
-  [
-    { protocol = Sse; url = Printf.sprintf "%s/sse" base_url; options = [] };
-    { protocol = JsonRpc; url = Printf.sprintf "%s/mcp" base_url; options = [] };
-    { protocol = Rest; url = Printf.sprintf "%s/api/v1" base_url; options = [] };
-  ]
+  let bindings =
+    [
+      { protocol = Sse; url = Printf.sprintf "%s/sse" base_url; options = [] };
+      { protocol = JsonRpc; url = Printf.sprintf "%s/mcp" base_url; options = [] };
+      { protocol = Rest; url = Printf.sprintf "%s/api/v1" base_url; options = [] };
+    ]
+  in
+  let bindings =
+    if Masc_grpc_server.is_enabled () then
+      bindings
+      @ [
+          {
+            protocol = Grpc;
+            url =
+              Printf.sprintf "grpc://%s:%d" host
+                (Masc_grpc_server.configured_port ());
+            options = [ ("health_service", Masc_grpc_server.health_service_name) ];
+          };
+        ]
+    else
+      bindings
+  in
+  let bindings =
+    if Server_ws_standalone.is_enabled () then
+      bindings
+      @ [
+          {
+            protocol = Ws;
+            url =
+              Printf.sprintf "ws://%s:%d/" host
+                (Server_ws_standalone.configured_port ());
+            options = [ ("mode", "standalone"); ("discovery_path", "/ws") ];
+          };
+        ]
+    else
+      bindings
+  in
+  if Server_webrtc_transport.is_enabled () then
+    bindings
+    @ [
+        {
+          protocol = Webrtc;
+          url = Printf.sprintf "%s/webrtc" base_url;
+          options =
+            [ ("offer_path", "/webrtc/offer"); ("answer_path", "/webrtc/answer") ];
+        };
+      ]
+  else
+    bindings
 
 (** Bindings to JSON (for Agent Card) *)
 let bindings_to_json (bindings : binding list) : Yojson.Safe.t =

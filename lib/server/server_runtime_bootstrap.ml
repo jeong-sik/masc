@@ -466,8 +466,16 @@ let print_startup_banner ~(config : Http.config) ~resolved_base ~base_path
     "   POST /messages → legacy client->server messages (deprecated)\n%!";
   Printf.printf "   GET  /health → Health check\n%!";
   if Masc_grpc_server.is_enabled () then
-    Printf.printf "   gRPC /:%d → Coordination (MASC_GRPC_ENABLED=1)\n%!"
-      (Masc_grpc_server.configured_port ())
+    Printf.printf
+      "   gRPC :%d → Coordination + grpc.health.v1.Health + reflection\n%!"
+      (Masc_grpc_server.configured_port ());
+  if Server_ws_standalone.is_enabled () then
+    Printf.printf
+      "   GET  /ws → WebSocket discovery (standalone ws://127.0.0.1:%d/)\n%!"
+      (Server_ws_standalone.configured_port ());
+  if Server_webrtc_transport.is_enabled () then
+    Printf.printf
+      "   POST /webrtc/offer, /webrtc/answer → WebRTC signaling\n%!"
 
 let serve ~sw ~clock ~socket ~request_handler =
   let is_cancelled exn =

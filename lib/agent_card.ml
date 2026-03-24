@@ -36,7 +36,7 @@ type skill = {
 (** Protocol binding for agent communication.
     Internal type; serialized as "supportedInterfaces" in v0.3 JSON. *)
 type binding = {
-  protocol: string;  (** "JSONRPC" | "GRPC" | "REST" | "SSE" *)
+  protocol: string;  (** "JSONRPC" | "GRPC" | "REST" | "SSE" | "WEBSOCKET" | "WEBRTC" *)
   url: string;
 } [@@deriving yojson, show, eq]
 
@@ -311,16 +311,58 @@ let skills_from_tools (schemas : Types.tool_schema list) : skill list =
       tool_count = count;
     }]
 
+let runtime_supported_interfaces ~host ~port =
+  let base_url = Printf.sprintf "http://%s:%d" host port in
+  let bindings =
+    [
+      { protocol = "SSE"; url = Printf.sprintf "%s/sse" base_url };
+      { protocol = "JSONRPC"; url = Printf.sprintf "%s/mcp" base_url };
+      { protocol = "REST"; url = Printf.sprintf "%s/api/v1" base_url };
+    ]
+  in
+  let bindings =
+    if Masc_grpc_server.is_enabled () then
+      bindings
+      @ [
+          {
+            protocol = "GRPC";
+            url =
+              Printf.sprintf "grpc://%s:%d" host
+                (Masc_grpc_server.configured_port ());
+          };
+        ]
+    else
+      bindings
+  in
+  let bindings =
+    if Server_ws_standalone.is_enabled () then
+      bindings
+      @ [
+          {
+            protocol = "WEBSOCKET";
+            url =
+              Printf.sprintf "ws://%s:%d/" host
+                (Server_ws_standalone.configured_port ());
+          };
+        ]
+    else
+      bindings
+  in
+  if Server_webrtc_transport.is_enabled () then
+    bindings @ [ { protocol = "WEBRTC"; url = Printf.sprintf "%s/webrtc" base_url } ]
+  else
+    bindings
+
 (** Generate default MASC agent card (A2A v0.3 compliant).
     [schemas] defaults to [Config.raw_all_tool_schemas] when provided,
     populating skills dynamically from actual MCP tools. *)
 let generate_default ?(port=8935) ?(host="127.0.0.1") ?(schemas=[]) () : agent_card =
   let timestamp = now_iso8601 () in
-  let base_url = Printf.sprintf "http://%s:%d" host port in
   let skills = match schemas with
     | [] -> []  (* Caller should pass schemas for dynamic skills *)
     | ss -> skills_from_tools ss
   in
+  let supported_interfaces = runtime_supported_interfaces ~host ~port in
   {
     name = "MASC-MCP";
     version = Version.version;
@@ -336,12 +378,7 @@ let generate_default ?(port=8935) ?(host="127.0.0.1") ?(schemas=[]) () : agent_c
       extended_agent_card = false;
     };
     skills;
-    supported_interfaces = [
-      { protocol = "SSE"; url = Printf.sprintf "%s/sse" base_url };
-      { protocol = "JSONRPC"; url = Printf.sprintf "%s/mcp" base_url };
-      { protocol = "REST"; url = Printf.sprintf "%s/api/v1" base_url };
-      { protocol = "GRPC"; url = Printf.sprintf "grpc://%s:%d" host (Masc_grpc_server.configured_port ()) };
-    ];
+    supported_interfaces;
     security_schemes = [
       ("bearer", {
         scheme_type = "bearer";

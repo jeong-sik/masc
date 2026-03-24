@@ -295,6 +295,16 @@ let test_generate_default () =
   check bool "has interfaces" true (List.length card.supported_interfaces > 0);
   check (list string) "protocol_versions" ["0.3"] card.protocol_versions
 
+let test_generate_default_advertises_runtime_transports () =
+  let card = Agent_card.generate_default () in
+  let protocols =
+    List.map (fun (binding : Agent_card.binding) -> binding.protocol)
+      card.supported_interfaces
+  in
+  check bool "has GRPC" true (List.mem "GRPC" protocols);
+  check bool "has WEBSOCKET" true (List.mem "WEBSOCKET" protocols);
+  check bool "has WEBRTC" true (List.mem "WEBRTC" protocols)
+
 let test_generate_with_custom_port () =
   let card = Agent_card.generate_default ~port:9000 () in
   let has_9000 = List.exists (fun (b : Agent_card.binding) ->
@@ -603,6 +613,8 @@ let () =
     ];
     "agent_card", [
       test_case "generate default" `Quick test_generate_default;
+      test_case "generate default advertises runtime transports" `Quick
+        test_generate_default_advertises_runtime_transports;
       test_case "custom port" `Quick test_generate_with_custom_port;
       test_case "custom host" `Quick test_generate_with_custom_host;
       test_case "to_json v0.3" `Quick test_agent_card_to_json;

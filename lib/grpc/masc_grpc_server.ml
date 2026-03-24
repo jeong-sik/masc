@@ -7,6 +7,7 @@
     It uses grpc-direct's Eio-native implementation for h2c (HTTP/2 cleartext). *)
 
 let default_port = 8936
+let health_service_name = "grpc.health.v1.Health"
 
 (** Read the configured gRPC port from environment or use default. *)
 let configured_port () =
@@ -19,7 +20,7 @@ let configured_port () =
       default_port)
   | None -> default_port
 
-(** Check whether gRPC is enabled (default: disabled, opt-in via env). *)
+(** Check whether gRPC is enabled (default: enabled, opt-out via env). *)
 let is_enabled () =
   match Sys.getenv_opt "MASC_GRPC_ENABLED" with
   | Some s -> (
@@ -28,10 +29,10 @@ let is_enabled () =
     | "" | "0" | "false" -> false
     | other ->
       Log.Server.warn
-        "MASC_GRPC_ENABLED=%s is not recognised, defaulting to disabled"
+        "MASC_GRPC_ENABLED=%s is not recognised, defaulting to enabled"
         other;
-      false)
-  | None -> false
+      true)
+  | None -> true
 
 module Reflection_bridge = struct
   type request =
@@ -274,7 +275,7 @@ let start
     ~(tool_dispatcher : string -> string -> (string, string) result)
   : unit =
   if not (is_enabled ()) then begin
-    Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=1 to enable)";
+    Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=0 to disable)";
   end
   else begin
     let port = configured_port () in
@@ -283,9 +284,10 @@ let start
         let server = create_server ~port ~room_config ~tool_dispatcher in
         Log.Server.info
           "gRPC coordination server starting on port %d (reflection + health enabled)"
+          "gRPC coordination server starting on port %d (health + reflection enabled)"
           port;
         Log.Server.info "  service: %s" Masc_grpc_service.service_name;
-        Log.Server.info "  health: grpc.health.v1.Health";
+        Log.Server.info "  health: %s/Check" health_service_name;
         Log.Server.info
           "  methods: Join, Leave, Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
         Grpc_eio.Server.serve ~sw ~env server

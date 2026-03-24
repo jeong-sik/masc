@@ -14,10 +14,10 @@ module Rate_limit = Masc_mcp.Rate_limit
    ============================================================ *)
 
 let test_default_rate () =
-  check (float 0.001) "default rate" 20.0 Rate_limit.default_rate
+  check (float 0.001) "default rate" 60.0 Rate_limit.default_rate
 
 let test_default_burst () =
-  check int "default burst" 50 Rate_limit.default_burst
+  check int "default burst" 150 Rate_limit.default_burst
 
 (* ============================================================
    Create Tests
@@ -25,8 +25,8 @@ let test_default_burst () =
 
 let test_create_default () =
   let limiter = Rate_limit.create () in
-  check (float 0.001) "rate" 20.0 limiter.rate;
-  check int "burst" 50 limiter.burst
+  check (float 0.001) "rate" 60.0 limiter.rate;
+  check int "burst" 150 limiter.burst
 
 let test_create_custom_rate () =
   let limiter = Rate_limit.create ~rate:100.0 () in

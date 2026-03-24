@@ -48,7 +48,8 @@ let register_keepalive name entry =
   Hashtbl.replace keepalives name entry
 
 let unregister_keepalive name =
-  Hashtbl.remove keepalives name
+  Hashtbl.remove keepalives name;
+  Hashtbl.remove last_agent_counts name
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~2 s instead of waiting for the full 30-300 s interval. *)
@@ -98,20 +99,20 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               | Ok (Some latest) -> latest
               | _ -> m
             in
-            (try
-               let synced = ensure_keeper_room_presence ctx.config meta_current in
-               (match write_meta ctx.config synced with
-                | Ok () -> ()
-                | Error e -> Log.Keeper.warn "write_meta failed (heartbeat): %s" e)
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Keeper.error "room heartbeat failed: %s"
-                 (Printexc.to_string exn));
             let meta_current =
-              match read_meta ctx.config m.name with
-              | Ok (Some latest) -> latest
-              | _ -> meta_current
+              try
+                let synced = ensure_keeper_room_presence ctx.config meta_current in
+                (match write_meta ctx.config synced with
+                 | Ok () -> synced  (* use written value directly, no second read_meta *)
+                 | Error e ->
+                   Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
+                   synced)
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Keeper.error "room heartbeat failed: %s"
+                  (Printexc.to_string exn);
+                meta_current
             in
             let now_ts = Time_compat.now () in
             if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec

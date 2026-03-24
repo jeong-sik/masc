@@ -171,7 +171,7 @@ let normalize_postgres_url url =
   | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
       Log.Backend.info
         "Supabase Transaction Pooler detected (port 6543 on %s); Pg_infix will use oneshot queries to avoid prepared-statement errors"
-        host;
+        host
   | _ -> ());
   url
 

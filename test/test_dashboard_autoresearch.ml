@@ -139,8 +139,8 @@ let test_loops_json_skips_invalid_persisted_state () =
   let json =
     Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
   in
-  (* Missing loop_id causes load_state to reject the state.
-     The dashboard gracefully skips invalid persisted state. *)
+  (* Valid JSON but missing required fields used by load_state.
+     The dashboard should skip invalid persisted state instead of surfacing it. *)
   check int "total skips invalid partial state" 0
     Yojson.Safe.Util.(json |> member "total" |> to_int);
   check int "no loop entries for invalid state" 0

@@ -758,20 +758,26 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             try
               let json = Yojson.Safe.from_string body_str in
               let room_id_opt = match Yojson.Safe.Util.member "room_id" json with
-                | `String s when String.trim s <> "" -> Some (String.trim s)
-                | `String _ -> None
+                | `String s -> Some s
+                | `Null -> None
                 | _ -> None
               in
               (match room_id_opt with
                | None ->
                    h2_respond_json h2_reqd
-                     (Yojson.Safe.to_string (error_json "room_id is required and cannot be empty"))
+                     (Yojson.Safe.to_string (error_json "room_id is required"))
                       ~status:`Bad_request ~extra_headers:cors
-               | Some room_id ->
-                     Room.write_current_room config room_id;
-                     Room.ensure_room_bootstrap config room_id;
-                     let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
-                     h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors)
+               | Some raw_room_id ->
+                   (match Room.validate_room_id raw_room_id with
+                    | Error msg ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (error_json (Printf.sprintf "invalid room_id: %s" msg)))
+                          ~status:`Bad_request ~extra_headers:cors
+                    | Ok room_id ->
+                        Room.write_current_room config room_id;
+                        Room.ensure_room_bootstrap config room_id;
+                        let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors))
             with
             | Yojson.Json_error msg ->
                 h2_respond_json h2_reqd

@@ -162,6 +162,14 @@ let test_input_validation_contracts () =
     (file_contains_pattern "lib/cache_eio.ml"
        "maybe_evict_expired config")
 
+let test_room_current_validation_contracts () =
+  check bool "room current route validates room id before bootstrap" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "match Room.validate_room_id raw_room_id with");
+  check bool "room current route still bootstraps validated room ids" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "Room.ensure_room_bootstrap config room_id")
+
 let test_dashboard_component_split_contracts () =
   check bool "proof view imports proof helpers" true
     (file_contains_pattern "dashboard/src/components/proof.ts"
@@ -363,6 +371,8 @@ let () =
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;
            test_case "input validation contracts" `Quick test_input_validation_contracts;
+           test_case "room current validation contracts" `Quick
+             test_room_current_validation_contracts;
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;
            test_case "local review script contracts" `Quick test_local_review_script_contracts;

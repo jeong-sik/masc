@@ -116,6 +116,12 @@ extract_result() {
   jq -c 'try (.result.content[0].text | fromjson | .result) catch empty'
 }
 
+# Extract raw text from MCP tool response content.
+# Usage: echo "$response" | extract_text
+extract_text() {
+  jq -r 'try (.result.content[0].text) catch empty'
+}
+
 # Extract .payload from MCP tool response content.
 # Usage: echo "$response" | extract_payload
 extract_payload() {

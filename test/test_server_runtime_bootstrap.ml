@@ -21,6 +21,11 @@ let with_pg_envs f =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let project_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when String.trim root <> "" -> root
+  | _ -> Sys.getcwd ()
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -123,6 +128,20 @@ let test_startup_state_json () =
   Alcotest.(check string) "last error recorded" "keeper failed"
     (json_string_field "last_error" json)
 
+let test_prompt_markdown_dir_falls_back_to_repo_root () =
+  with_temp_dir "startup-prompts" (fun dir ->
+      let expected =
+        Filename.concat (project_root ()) "config/prompts"
+      in
+      Alcotest.(check bool) "repo prompt dir exists" true
+        (Sys.file_exists expected && Sys.is_directory expected);
+      let resolved =
+        Server_runtime_bootstrap.resolve_prompt_markdown_dir
+          ~workspace_path:dir ~base_path:dir
+      in
+      Alcotest.(check string) "temp room falls back to repo prompt dir"
+        expected resolved)
+
 let () =
   Alcotest.run "Server_runtime_bootstrap"
     [
@@ -138,5 +157,7 @@ let () =
             test_keeper_paths_use_cluster_root;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
+          Alcotest.test_case "prompt markdown dir falls back to repo root"
+            `Quick test_prompt_markdown_dir_falls_back_to_repo_root;
         ] );
     ]

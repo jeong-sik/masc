@@ -217,6 +217,12 @@ let handle_tool_call
 
 (** {1 Streaming Handlers} *)
 
+(** Active heartbeat stream count (atomic for signal safety). *)
+let active_heartbeat_streams = Atomic.make 0
+
+(** Active subscribe stream count (atomic for signal safety). *)
+let active_subscribe_streams = Atomic.make 0
+
 (** Heartbeat bidi handler: receive pings, respond with acks. *)
 let handle_heartbeat
     (room_config : Room_utils_backend_setup.config)
@@ -224,10 +230,13 @@ let handle_heartbeat
     (request_stream : string Grpc_eio.Stream.t)
   : string Grpc_eio.Stream.t =
   let response_stream = Grpc_eio.Stream.create 16 in
+  Atomic.incr active_heartbeat_streams;
+  Transport_metrics.set_grpc_active_streams (Atomic.get active_heartbeat_streams);
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with
       | bytes ->
+        let t0 = Unix.gettimeofday () in
         let ping = T.HeartbeatPing.of_bytes bytes in
         (* Update agent last_seen *)
         (try
@@ -280,8 +289,13 @@ let handle_heartbeat
           directives = [];
         } in
         Grpc_eio.Stream.add response_stream (T.HeartbeatAck.to_bytes ack);
+        (* Record heartbeat latency *)
+        let latency = Unix.gettimeofday () -. t0 in
+        Transport_metrics.observe_grpc_heartbeat_latency latency;
         loop ()
       | exception End_of_file ->
+        Atomic.decr active_heartbeat_streams;
+        Transport_metrics.set_grpc_active_streams (Atomic.get active_heartbeat_streams);
         Grpc_eio.Stream.close response_stream
     in
     loop ());
@@ -294,6 +308,9 @@ let handle_subscribe
   : string Grpc_eio.Stream.t =
   let req = T.SubscribeRequest.of_bytes bytes in
   let stream = Grpc_eio.Stream.create 64 in
+  Atomic.incr active_subscribe_streams;
+  Transport_metrics.set_grpc_subscribers (Atomic.get active_subscribe_streams);
+  let events_count = ref 0 in
   (* Send initial event confirming subscription *)
   let init_event = T.Event.{
     seq = 0L;
@@ -307,6 +324,7 @@ let handle_subscribe
         (`List (List.map (fun s -> `String s) req.event_types)));
   } in
   Grpc_eio.Stream.add stream (T.Event.to_bytes init_event);
+  incr events_count;
   (* Read recent messages and push as events *)
   let backlog_file =
     Filename.concat
@@ -329,7 +347,8 @@ let handle_subscribe
               timestamp_ms = now_ms ();
               payload_json = line;
             } in
-            Grpc_eio.Stream.add stream (T.Event.to_bytes event)
+            Grpc_eio.Stream.add stream (T.Event.to_bytes event);
+            incr events_count
           end;
           seq := Int64.add !seq 1L
         end
@@ -337,6 +356,8 @@ let handle_subscribe
     with End_of_file -> ());
     close_in_noerr ic
   end;
+  (* Record delivered events from backlog replay *)
+  Transport_metrics.inc_grpc_events_delivered ~delta:!events_count ();
   (* Hook into SSE broadcast mechanism for real-time event push.
      External subscriber receives formatted SSE event strings on every
      Sse.broadcast/broadcast_to call, converts them to gRPC Event messages,

@@ -300,6 +300,7 @@ let run_cmd host port base_path =
 
   (* Enable Eio-aware locking in modules with dual-mode mutex guards *)
   Masc_mcp.Prometheus.enable_eio ();
+  Masc_mcp.Transport_metrics.init ();
   Masc_mcp.Chain_telemetry.enable_eio ();
   Masc_mcp.Generational_metrics.enable_eio ();
   Masc_mcp.Dashboard_cache.enable_eio ~clock:(Eio.Stdenv.clock env) ();

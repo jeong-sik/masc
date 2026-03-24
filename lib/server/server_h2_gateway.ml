@@ -474,6 +474,10 @@ let make_request_handler ~sw ~clock ~server_start_time =
           let json = dashboard_proof_http_json ~state httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/transport-health" ->
+          let json = Transport_metrics.transport_health_json () in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/mdal/loops" ->
           let state = get_server_state () in
           (match mdal_loops_json ~config:state.Mcp_server.room_config httpun_request with

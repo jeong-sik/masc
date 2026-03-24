@@ -26,6 +26,9 @@ type run_result = {
   trace_ref : Oas.Raw_trace.run_ref option;
 }
 
+(** Cascade call/error metrics as JSON array, sorted by call count. *)
+val cascade_metrics_json : unit -> Yojson.Safe.t
+
 (** Locate config/cascade.json via CWD or ME_ROOT.
     Delegates to {!Model_spec.cascade_config_path}. *)
 val default_config_path : unit -> string option

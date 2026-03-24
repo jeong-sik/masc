@@ -14,6 +14,51 @@
 module Oas = Agent_sdk
 
 (* ================================================================ *)
+(* Cascade metrics                                                   *)
+(* ================================================================ *)
+
+type cascade_counter = {
+  mutable calls : int;
+  mutable successes : int;
+  mutable failures : int;
+  mutable rejected : int;
+}
+
+let cascade_counters : (string, cascade_counter) Hashtbl.t = Hashtbl.create 8
+
+let record_cascade ~cascade_name ~outcome =
+  let c = match Hashtbl.find_opt cascade_counters cascade_name with
+    | Some c -> c
+    | None ->
+      let c = { calls = 0; successes = 0; failures = 0; rejected = 0 } in
+      Hashtbl.replace cascade_counters cascade_name c; c
+  in
+  c.calls <- c.calls + 1;
+  match outcome with
+  | `Success -> c.successes <- c.successes + 1
+  | `Failure -> c.failures <- c.failures + 1
+  | `Rejected -> c.rejected <- c.rejected + 1
+
+let cascade_metrics_json () : Yojson.Safe.t =
+  let entries = Hashtbl.fold (fun name c acc ->
+    let error_rate = if c.calls > 0
+      then float_of_int (c.failures + c.rejected) /. float_of_int c.calls
+      else 0.0 in
+    `Assoc [
+      ("cascade_name", `String name);
+      ("calls", `Int c.calls);
+      ("successes", `Int c.successes);
+      ("failures", `Int c.failures);
+      ("rejected", `Int c.rejected);
+      ("error_rate", `Float error_rate);
+    ] :: acc
+  ) cascade_counters [] in
+  `List (List.sort (fun a b ->
+    let get_calls j = Yojson.Safe.Util.(j |> member "calls" |> to_int) in
+    Int.compare (get_calls b) (get_calls a)
+  ) entries)
+
+(* ================================================================ *)
 (* Configuration                                                     *)
 (* ================================================================ *)
 
@@ -478,9 +523,15 @@ let run_named
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in
   match run ~sw ~net ~config ?on_event ?agent_ref goal with
-  | Ok result when accept result.response -> Ok result
-  | Ok _ -> Error (Printf.sprintf "cascade %s: response rejected by accept" cascade_name)
-  | Error e -> Error e
+  | Ok result when accept result.response ->
+    record_cascade ~cascade_name ~outcome:`Success;
+    Ok result
+  | Ok _ ->
+    record_cascade ~cascade_name ~outcome:`Rejected;
+    Error (Printf.sprintf "cascade %s: response rejected by accept" cascade_name)
+  | Error e ->
+    record_cascade ~cascade_name ~outcome:`Failure;
+    Error e
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
     Validates the label parses before attempting execution. *)

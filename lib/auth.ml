@@ -251,6 +251,7 @@ let permission_for_tool = function
   | "masc_join" -> Some CanJoin
   | "masc_leave" -> Some CanLeave
   | "masc_status" | "masc_who" | "masc_tasks" | "masc_messages"
+  | "masc_transport_status" | "masc_websocket_discovery"
   | "masc_agents" | "masc_portal_status" | "masc_pending_interrupts"
   | "masc_votes" | "masc_vote_status" | "masc_worktree_list"
   | "masc_cost_report" | "masc_task_history" | "masc_operator_snapshot"
@@ -281,6 +282,7 @@ let permission_for_tool = function
   | "masc_keeper_eval_replay" ->
       Some CanReadState
   | "masc_broadcast" | "masc_listen" | "masc_heartbeat"
+  | "masc_webrtc_offer" | "masc_webrtc_answer"
   | "masc_register_capabilities" | "masc_find_by_capability"
   | "masc_agent_update" | "masc_operator_action"
   | "masc_keeper_up" | "masc_keeper_down" | "masc_keeper_msg"

@@ -160,6 +160,16 @@ let test_permission_for_tool_status () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
+let test_permission_for_tool_transport_status () =
+  match Auth.permission_for_tool "masc_transport_status" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_tool_websocket_discovery () =
+  match Auth.permission_for_tool "masc_websocket_discovery" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
 let test_permission_for_tool_local_runtime_models () =
   match Auth.permission_for_tool "masc_local_runtime_models" with
   | Some Types.CanReadState -> ()
@@ -217,6 +227,16 @@ let test_permission_for_tool_done () =
 
 let test_permission_for_tool_broadcast () =
   match Auth.permission_for_tool "masc_broadcast" with
+  | Some Types.CanBroadcast -> ()
+  | _ -> fail "expected CanBroadcast"
+
+let test_permission_for_tool_webrtc_offer () =
+  match Auth.permission_for_tool "masc_webrtc_offer" with
+  | Some Types.CanBroadcast -> ()
+  | _ -> fail "expected CanBroadcast"
+
+let test_permission_for_tool_webrtc_answer () =
+  match Auth.permission_for_tool "masc_webrtc_answer" with
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
@@ -523,6 +543,8 @@ let () =
       test_case "join" `Quick test_permission_for_tool_join;
       test_case "leave" `Quick test_permission_for_tool_leave;
       test_case "status" `Quick test_permission_for_tool_status;
+      test_case "transport_status" `Quick test_permission_for_tool_transport_status;
+      test_case "websocket_discovery" `Quick test_permission_for_tool_websocket_discovery;
       test_case "who" `Quick test_permission_for_tool_who;
       test_case "tasks" `Quick test_permission_for_tool_tasks;
       test_case "add_task" `Quick test_permission_for_tool_add_task;
@@ -530,6 +552,8 @@ let () =
       test_case "claim_next" `Quick test_permission_for_tool_claim_next;
       test_case "done" `Quick test_permission_for_tool_done;
       test_case "broadcast" `Quick test_permission_for_tool_broadcast;
+      test_case "webrtc_offer" `Quick test_permission_for_tool_webrtc_offer;
+      test_case "webrtc_answer" `Quick test_permission_for_tool_webrtc_answer;
       test_case "board_list" `Quick test_permission_for_tool_board_list;
       test_case "board_post" `Quick test_permission_for_tool_board_post;
       test_case "portal_open" `Quick test_permission_for_tool_portal_open;

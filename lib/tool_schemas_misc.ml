@@ -4,6 +4,74 @@ open Types
 
 let schemas : tool_schema list = [
   {
+    name = "masc_transport_status";
+    description = "Return the active transport surfaces and runtime counters for HTTP, gRPC, WebSocket, and WebRTC. \
+Use when selecting a client transport or debugging whether realtime transports are enabled and reachable.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    name = "masc_websocket_discovery";
+    description = "Return the standalone WebSocket discovery payload equivalent to GET /ws, including enablement, port, URL, and session count. \
+Use before opening a WebSocket client to discover the correct ws:// endpoint.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    name = "masc_webrtc_offer";
+    description = "Create a WebRTC signaling offer in the server registry and return an offer_id. \
+Use from the initiating side before calling masc_webrtc_answer from the answering side.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Name of the agent creating the offer");
+        ]);
+        ("ice_candidates", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "ICE candidates gathered by the offering peer");
+          ("default", `List []);
+        ]);
+        ("dtls_fingerprint", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional DTLS fingerprint for the offering peer");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+  {
+    name = "masc_webrtc_answer";
+    description = "Accept a pending WebRTC signaling offer by offer_id and return the peer_id plus server-side ICE credentials. \
+Use from the answering side after a prior masc_webrtc_offer call.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("offer_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Offer identifier returned by masc_webrtc_offer");
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Name of the agent accepting the offer");
+        ]);
+        ("ice_candidates", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Optional ICE candidates gathered by the answering peer");
+          ("default", `List []);
+        ]);
+      ]);
+      ("required", `List [`String "offer_id"; `String "agent_name"]);
+    ];
+  };
+  {
     name = "masc_dashboard";
     description = "Render the MASC dashboard summarizing rooms, agents, and tasks in one view. \
 Use when you need a quick overview of cluster state; set scope='current' for this room only. \

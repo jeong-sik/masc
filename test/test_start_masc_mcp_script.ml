@@ -78,23 +78,32 @@ let copy_script src dst =
   write_file dst (read_file src);
   Unix.chmod dst 0o755
 
-let make_fake_eio_exe repo_root =
-  let exe_path = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
+let write_fake_eio_exe exe_path ~marker =
   mkdir_p (Filename.dirname exe_path);
-  write_file exe_path
-    {|
+  let content =
+    Printf.sprintf
+      {|
 #!/bin/sh
 set -eu
 capture="${FAKE_CAPTURE_FILE:?}"
 {
-  printf 'MASC_STORAGE_TYPE=%s\n' "${MASC_STORAGE_TYPE:-}"
-  printf 'SUPABASE_DB_URL=%s\n' "${SUPABASE_DB_URL:-}"
-  printf 'MASC_BASE_PATH=%s\n' "${MASC_BASE_PATH:-}"
-  printf 'ARGS=%s\n' "$*"
+  printf 'FAKE_EXE_MARKER=%s\n' '%s'
+  printf 'MASC_STORAGE_TYPE=%%s\n' "${MASC_STORAGE_TYPE:-}"
+  printf 'SUPABASE_DB_URL=%%s\n' "${SUPABASE_DB_URL:-}"
+  printf 'MASC_BASE_PATH=%%s\n' "${MASC_BASE_PATH:-}"
+  printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
+  printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
+  printf 'ARGS=%%s\n' "$*"
 } >"$capture"
 exit 0
-|};
+|} "%s" marker
+  in
+  write_file exe_path content;
   Unix.chmod exe_path 0o755
+
+let make_fake_eio_exe repo_root =
+  let exe_path = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
+  write_fake_eio_exe exe_path ~marker:"local"
 
 let test_explicit_env_overrides_repo_env_files () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -128,6 +137,85 @@ let test_explicit_env_overrides_repo_env_files () =
       check bool "base path passed through" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ dir)))
 
+let test_realtime_transports_default_enabled_and_preserve_override () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe dir;
+      let capture_default = Filename.concat dir "captured-default.txt" in
+      let code_default, stdout_default, stderr_default =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture_default);
+              ("MASC_BASE_PATH", dir);
+            ]
+          (Printf.sprintf "%s --http --port 9956 --base-path %s"
+             (quote script) (quote dir))
+      in
+      if code_default <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code_default stdout_default stderr_default;
+      let captured_default = read_file capture_default in
+      check bool "ws enabled by default" true
+        (contains_substring captured_default "MASC_WS_ENABLED=1");
+      check bool "webrtc enabled by default" true
+        (contains_substring captured_default "MASC_WEBRTC_ENABLED=1");
+      let capture_override = Filename.concat dir "captured-override.txt" in
+      let code_override, stdout_override, stderr_override =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture_override);
+              ("MASC_BASE_PATH", dir);
+              ("MASC_WS_ENABLED", "0");
+              ("MASC_WEBRTC_ENABLED", "0");
+            ]
+          (Printf.sprintf "%s --http --port 9957 --base-path %s"
+             (quote script) (quote dir))
+      in
+      if code_override <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code_override stdout_override stderr_override;
+      let captured_override = read_file capture_override in
+      check bool "ws override preserved" true
+        (contains_substring captured_override "MASC_WS_ENABLED=0");
+      check bool "webrtc override preserved" true
+        (contains_substring captured_override "MASC_WEBRTC_ENABLED=0"))
+
+let test_worktree_prefers_local_build_over_workspace_build () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let repo_root = Filename.concat dir "repo-root" in
+      let worktree = Filename.concat repo_root ".worktrees/fix-transport" in
+      mkdir_p worktree;
+      let script = Filename.concat worktree "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      let local_exe =
+        Filename.concat worktree "_build/default/bin/main_eio.exe"
+      in
+      let workspace_exe =
+        Filename.concat repo_root "_build/default/masc-mcp/bin/main_eio.exe"
+      in
+      write_fake_eio_exe local_exe ~marker:"local";
+      write_fake_eio_exe workspace_exe ~marker:"workspace";
+      let capture = Filename.concat dir "captured-pref.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:worktree
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_BASE_PATH", repo_root);
+            ]
+          (Printf.sprintf "%s --http --port 9958 --base-path %s"
+             (quote script) (quote repo_root))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "local build wins in worktree" true
+        (contains_substring captured "FAKE_EXE_MARKER=local"))
+
 let () =
   run "start_masc_mcp_script"
     [
@@ -135,5 +223,10 @@ let () =
         [
           test_case "explicit env overrides repo env files" `Quick
             test_explicit_env_overrides_repo_env_files;
+          test_case "realtime transports default enabled and preserve override"
+            `Quick
+            test_realtime_transports_default_enabled_and_preserve_override;
+          test_case "worktree prefers local build over workspace build" `Quick
+            test_worktree_prefers_local_build_over_workspace_build;
         ] );
     ]

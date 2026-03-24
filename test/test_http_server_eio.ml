@@ -55,6 +55,23 @@ let test_router_prefix_specificity () =
   Router.dispatch routes request (Obj.magic () : Httpun.Reqd.t);
   Alcotest.(check string) "longest prefix route should win" "asset" !matched
 
+let test_frontend_transport_routes_present () =
+  let routes =
+    Masc_mcp.Server_routes_http_routes_frontend.add_routes
+      ~port:8935 ~host:"127.0.0.1" Router.empty
+  in
+  let has_route meth path =
+    List.exists
+      (fun (route : Router.route) ->
+        String.equal route.path path && List.mem meth route.methods)
+      routes
+  in
+  Alcotest.(check bool) "GET /ws route" true (has_route `GET "/ws");
+  Alcotest.(check bool) "POST /webrtc/offer route" true
+    (has_route `POST "/webrtc/offer");
+  Alcotest.(check bool) "POST /webrtc/answer route" true
+    (has_route `POST "/webrtc/answer")
+
 (* ===== Unit Tests for Config ===== *)
 
 let test_default_config () =
@@ -150,6 +167,7 @@ let router_tests = [
   "add POST route", `Quick, test_router_add_post;
   "add multiple routes", `Quick, test_router_add_multiple;
   "prefix specificity", `Quick, test_router_prefix_specificity;
+  "frontend transport routes present", `Quick, test_frontend_transport_routes_present;
 ]
 
 let config_tests = [

@@ -164,6 +164,56 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd body ~extra_headers:cors
 
+      | `POST, "/webrtc/offer" ->
+          if not (Server_webrtc_transport.is_enabled ()) then
+            h2_respond_json h2_reqd {|{"error":"webrtc transport disabled"}|}
+              ~status:`Not_found ~extra_headers:cors
+          else (
+            let state = get_server_state () in
+            match
+              authorize_tool_request
+                ~base_path:state.Mcp_server.room_config.base_path
+                ~tool_name:"masc_webrtc_offer"
+                httpun_request
+            with
+            | Error err ->
+                let status = http_status_of_auth_error err in
+                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+            | Ok () ->
+                h2_read_body h2_reqd (fun body_str ->
+                  match Server_webrtc_transport.handle_offer_request body_str with
+                  | Ok body ->
+                      h2_respond_json h2_reqd body ~extra_headers:cors
+                  | Error msg ->
+                      h2_respond_json h2_reqd
+                        (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
+                        ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/webrtc/answer" ->
+          if not (Server_webrtc_transport.is_enabled ()) then
+            h2_respond_json h2_reqd {|{"error":"webrtc transport disabled"}|}
+              ~status:`Not_found ~extra_headers:cors
+          else (
+            let state = get_server_state () in
+            match
+              authorize_tool_request
+                ~base_path:state.Mcp_server.room_config.base_path
+                ~tool_name:"masc_webrtc_answer"
+                httpun_request
+            with
+            | Error err ->
+                let status = http_status_of_auth_error err in
+                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+            | Ok () ->
+                h2_read_body h2_reqd (fun body_str ->
+                  match Server_webrtc_transport.handle_answer_request body_str with
+                  | Ok body ->
+                      h2_respond_json h2_reqd body ~extra_headers:cors
+                  | Error msg ->
+                      h2_respond_json h2_reqd
+                        (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
+                        ~status:`Bad_request ~extra_headers:cors))
+
       | `GET, "/metrics" ->
           let body = Prometheus.to_prometheus_text () in
           let headers = H2.Headers.of_list ([

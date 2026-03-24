@@ -267,8 +267,9 @@ type checkpoint = {
 
 (** Checkpoint storage (in-memory, could be persisted) *)
 let checkpoints : checkpoint list ref = ref []
+let max_checkpoints = 500
 
-(** Save a checkpoint *)
+(** Save a checkpoint, capping at [max_checkpoints] to prevent unbounded growth. *)
 let save_checkpoint ~summary ~task ~todos ~pdca ~files ~metrics =
   let cp = {
     cp_timestamp = Time_compat.now ();
@@ -279,7 +280,8 @@ let save_checkpoint ~summary ~task ~todos ~pdca ~files ~metrics =
     cp_files = files;
     cp_metrics = metrics;
   } in
-  checkpoints := cp :: !checkpoints;
+  let cps = cp :: !checkpoints in
+  checkpoints := List.filteri (fun i _ -> i < max_checkpoints) cps;
   Printf.printf "[CHECKPOINT] Saved at %.1f%% context usage\n%!"
     (metrics.usage_ratio *. 100.0);
   cp

@@ -702,6 +702,25 @@ let test_get_latest_checkpoint_type () =
   let _ : Relay.checkpoint option = Relay.get_latest_checkpoint () in
   ()
 
+let test_checkpoint_cap () =
+  let dummy_metrics : Relay.context_metrics = {
+    estimated_tokens = 1000;
+    max_tokens = 2000;
+    usage_ratio = 0.5;
+    message_count = 10;
+    tool_call_count = 5;
+  } in
+  for i = 1 to 510 do
+    ignore (Relay.save_checkpoint
+      ~summary:(Printf.sprintf "cp-%d" i)
+      ~task:None ~todos:[] ~pdca:None ~files:[]
+      ~metrics:dummy_metrics)
+  done;
+  let latest = Relay.get_latest_checkpoint () in
+  check bool "latest exists" true (Option.is_some latest);
+  let cp = Option.get latest in
+  check string "latest is cp-510" "cp-510" cp.cp_summary
+
 (* ============================================================
    Goal-aware handoff_payload Tests
    ============================================================ *)
@@ -920,6 +939,9 @@ let () =
     ];
     "get_latest_checkpoint", [
       test_case "returns option" `Quick test_get_latest_checkpoint_type;
+    ];
+    "checkpoint_cap", [
+      test_case "capped at 500" `Quick test_checkpoint_cap;
     ];
     "handoff_payload", [
       test_case "creation" `Quick test_handoff_payload_creation;

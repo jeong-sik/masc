@@ -26,14 +26,19 @@ type cascade_counter = {
 
 let cascade_counters_mu = Eio.Mutex.create ()
 let cascade_counters : (string, cascade_counter) Hashtbl.t = Hashtbl.create 8
+let cascade_max_keys = 256
 
 let record_cascade ~cascade_name ~outcome =
   Eio.Mutex.use_rw ~protect:true cascade_counters_mu (fun () ->
     let c = match Hashtbl.find_opt cascade_counters cascade_name with
       | Some c -> c
       | None ->
-        let c = { calls = 0; successes = 0; failures = 0; rejected = 0 } in
-        Hashtbl.replace cascade_counters cascade_name c; c
+        if Hashtbl.length cascade_counters >= cascade_max_keys then
+          { calls = 0; successes = 0; failures = 0; rejected = 0 }
+        else begin
+          let c = { calls = 0; successes = 0; failures = 0; rejected = 0 } in
+          Hashtbl.replace cascade_counters cascade_name c; c
+        end
     in
     c.calls <- c.calls + 1;
     match outcome with

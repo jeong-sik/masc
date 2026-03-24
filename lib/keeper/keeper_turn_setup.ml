@@ -257,8 +257,18 @@ let ensure_keeper_exists
            ()
        in
        let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary_max_context in
-       (try ignore (save_checkpoint session ctx0 ~generation:0)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn ~label:"save_checkpoint (ensure) failed" exn);
+       (try
+          ignore
+            (Keeper_exec_context.save_oas_checkpoint
+               ~session
+               ~agent_name:meta.agent_name
+               ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
+               ~ctx:ctx0
+               ~generation:0)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            log_keeper_exn ~label:"save_oas_checkpoint (ensure) failed" exn);
        match write_meta ctx.config meta with
        | Error e -> Error e
        | Ok () -> Ok meta)

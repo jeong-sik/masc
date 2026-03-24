@@ -65,6 +65,9 @@ let make_hooks
     ()
   : Agent_sdk.Hooks.hooks =
   ignore config;
+  ignore session;
+  ignore ctx_ref;
+  ignore generation;
   let board_write_tools =
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
   in
@@ -73,9 +76,6 @@ let make_hooks
     after_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.AfterTurn { turn; response } ->
-        let ctx = !ctx_ref in
-        let _ckpt = Keeper_exec_context.save_checkpoint
-          session ctx ~generation in
         let model = response.model in
         let usage = match response.usage with
           | Some u -> u.input_tokens + u.output_tokens

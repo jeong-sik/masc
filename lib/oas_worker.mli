@@ -52,6 +52,7 @@ val run_named :
   ?agent_ref:Oas.Agent.t option ref ->
   ?transport:Masc_grpc_transport.t ->
   ?allowed_paths:string list ->
+  ?working_context:Yojson.Safe.t ->
   unit ->
   (run_result, string) result
 

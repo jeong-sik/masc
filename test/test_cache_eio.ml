@@ -195,7 +195,7 @@ let test_evict_expired_batch () =
 let test_maybe_evict_expired_triggers_when_ratio_high () =
   with_temp_masc_dir (fun config ->
     (* Reset last_batch_eviction to allow immediate trigger *)
-    Cache_eio.last_batch_eviction := 0.0;
+    Atomic.set Cache_eio.last_batch_eviction 0.0;
 
     (* Create 8 expired + 2 valid = 80% expired ratio > 50% threshold *)
     for i = 1 to 8 do
@@ -223,7 +223,7 @@ let test_maybe_evict_expired_triggers_when_ratio_high () =
 let test_maybe_evict_expired_throttled () =
   with_temp_masc_dir (fun config ->
     (* Set last_batch_eviction to now (prevents re-run within interval) *)
-    Cache_eio.last_batch_eviction := Unix.gettimeofday ();
+    Atomic.set Cache_eio.last_batch_eviction (Unix.gettimeofday ());
 
     (* Create expired entries *)
     let _ = Cache_eio.set config ~key:"exp-1" ~value:"v1" ~ttl_seconds:(-1) () in

@@ -11,7 +11,7 @@
     - Table polling: Reliable delivery (messages persist until consumed)
 *)
 
-open Caqti_request.Infix
+open Pg_infix
 
 (** Board listener channel (matches board_pg.ml) *)
 let channel = "masc_board"

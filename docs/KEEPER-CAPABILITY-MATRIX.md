@@ -1,9 +1,9 @@
 # Keeper Capability Matrix
 
-Tool availability for keepers is determined by two axes:
-**policy_mode** (who decides what tools) and **policy_shell_mode** (shell access level).
+All keepers receive the full tool surface unconditionally.
+`initiative_enabled` controls whether triage (trigger detection) runs on each heartbeat.
 
-Research profile (`soul_profile = "research"`) adds autoresearch/research tools regardless of other settings.
+Research profile (`soul_profile = "research"`) adds autoresearch/research tools.
 
 ## Tool Shards (keeper_model_tools: 26 tools total)
 
@@ -25,21 +25,23 @@ Notes:
 - `keeper_fs_edit` remains a legacy internal tool but is intentionally excluded from default keeper exposure.
 - Code mutation uses `masc_code_{write,edit,delete,shell,git}` in addition to the `coding` shard above.
 
-## Policy Mode × Shell Mode Matrix
+## Tool Surface
 
-| | `disabled` | `readonly` | `sandboxed` / default | `coding` |
-|---|---|---|---|---|
-| **Heuristic** (default) | base + board + fs + shell + library + taskboard + governance (26 tools) | same | same | default + coding shard + `masc_code_*` (38 tools) |
-| **Learned_offline_v1** | read + coordination + board + governance (23 tools) | + `keeper_shell_readonly` (24) | same as `disabled` | readonly set + coding shard + `masc_code_*` (36 tools) |
-| **Explicit_event_v1** | same as Heuristic | same | same | same |
-| **Model_deliberation** | same as Heuristic | same | same | same |
+All keepers receive: base + board + fs + shell + library + taskboard + governance + coding shards.
+Voice tools are added when `policy_voice_enabled = true`.
+`write_done = true` returns empty tool list (session terminated).
 
-Notes:
-- "read" = `keeper_read_tool_names` (7 tools: `keeper_read`, `keeper_fs_read`, `keeper_memory_search`, `keeper_library_search`, `keeper_library_read`, `keeper_time_now`, `keeper_context_status`)
-- "coordination" = `keeper_tasks_list`, `keeper_task_claim`, `keeper_task_done`, `keeper_broadcast`
-- Voice tools are added only when `policy_voice_enabled = true`
-- Coding mode is the preferred path for code writing, test execution, and GitHub issue/PR work because it exposes `masc_worktree_create` plus the worktree-restricted `masc_code_*` tools
-- `write_done = true` returns empty tool list (session terminated)
+## Initiative System
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `initiative_enabled` | true | Master gate for triage (trigger detection) |
+| `initiative_idle_sec` | 0 (use proactive.idle_sec) | Override idle threshold for triage triggers |
+| `initiative_cooldown_sec` | 0 (no cooldown) | Minimum wait between triage-triggered actions |
+
+When initiative is enabled, 9 trigger types are evaluated on each heartbeat:
+DirectMention, NewUnclaimedTask, FailedTask, AgentJoinedOrLeft, GoalDeadline,
+BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 
 ## Keeper Workflows
 

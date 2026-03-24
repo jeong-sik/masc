@@ -372,7 +372,14 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${'' /* --- Execution (read-only) --- */}
       ${'' /* Active model is shown in the header badge — not duplicated here */}
       <${SectionHeader} title="Execution" />
+<<<<<<< HEAD
       <${ConfigRow} label="Shell mode" value=${c.execution.policy_shell_mode || '--'} />
+||||||| parent of 597f7a4b (docs(keeper): replace policy_mode docs with initiative system)
+      <${ConfigRow} label="Active model" value=${c.execution.active_model || '--'} />
+      <${ConfigRow} label="Shell mode" value=${c.execution.policy_shell_mode || '--'} />
+=======
+      <${ConfigRow} label="Active model" value=${c.execution.active_model || '--'} />
+>>>>>>> 597f7a4b (docs(keeper): replace policy_mode docs with initiative system)
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">Verify</span>
         <${BoolBadge} value=${c.execution.verify} />

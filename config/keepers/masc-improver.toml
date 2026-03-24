@@ -42,8 +42,6 @@ proactive_enabled = true
 presence_keepalive = true
 presence_keepalive_sec = 30
 
-policy_shell_mode = "coding"
-
 initiative_enabled = true
 initiative_scope = "board_only"
 initiative_idle_sec = 300

@@ -77,17 +77,6 @@ let register_all () =
     "masc_code_shell"; "masc_code_git";
   ];
 
-  (* ── Mod_vote: Tool_vote ──────────────────────────────────────── *)
-  reg Mod_vote [
-    "masc_vote_create"; "masc_vote_cast"; "masc_vote_status"; "masc_votes";
-  ];
-
-  (* ── Mod_social: Tool_social ──────────────────────────────────── *)
-  reg Mod_social [
-    "masc_post_create"; "masc_post_list"; "masc_post_get";
-    "masc_comment_add"; "masc_comment_list"; "masc_vote";
-  ];
-
   (* ── Mod_council: non-schema tools ──────────────────────────── *)
   reg Mod_council [
     "masc_route"; "masc_execute"; "masc_execute_dry_run";

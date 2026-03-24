@@ -491,36 +491,6 @@ let test_masc_deliver_schema () =
 (* 9. Voting Tool Tests                                          *)
 (* ============================================================ *)
 
-let test_masc_vote_create_schema () =
-  match find_tool "masc_vote_create" with
-  | None -> Alcotest.fail "masc_vote_create not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has topic" true (List.mem_assoc "topic" props);
-          Alcotest.(check bool) "has options" true (List.mem_assoc "options" props)
-      | None -> Alcotest.fail "masc_vote_create missing properties"
-
-let test_masc_vote_cast_schema () =
-  match find_tool "masc_vote_cast" with
-  | None -> Alcotest.fail "masc_vote_cast not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has vote_id" true (List.mem_assoc "vote_id" props);
-          Alcotest.(check bool) "has choice" true (List.mem_assoc "choice" props)
-      | None -> Alcotest.fail "masc_vote_cast missing properties"
-
-let test_masc_vote_status_schema () =
-  match find_tool "masc_vote_status" with
-  | None -> Alcotest.fail "masc_vote_status not found"
-  | Some _ -> ()
-
-let test_masc_votes_schema () =
-  match find_tool "masc_votes" with
-  | None -> Alcotest.fail "masc_votes not found"
-  | Some _ -> ()
-
 (* ============================================================ *)
 (* 10. Auth Tool Tests                                           *)
 (* ============================================================ *)
@@ -1126,10 +1096,6 @@ let () =
       Alcotest.test_case "deliver" `Quick test_masc_deliver_schema;
     ];
     "vote_tools", [
-      Alcotest.test_case "vote_create" `Quick test_masc_vote_create_schema;
-      Alcotest.test_case "vote_cast" `Quick test_masc_vote_cast_schema;
-      Alcotest.test_case "vote_status" `Quick test_masc_vote_status_schema;
-      Alcotest.test_case "votes" `Quick test_masc_votes_schema;
     ];
     "auth_tools", [
       Alcotest.test_case "auth_enable" `Quick test_masc_auth_enable_schema;

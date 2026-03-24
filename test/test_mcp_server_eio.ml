@@ -1251,50 +1251,6 @@ let test_execute_tool_coding_mode_allows_governance_status () =
 
   cleanup_dir base_path
 
-let test_execute_tool_hidden_active_utility_direct_call () =
-  Eio_main.run @@ fun env ->
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Room.init state.room_config ~agent_name:(Some "test-agent"));
-  (* Room.init required: vote_create calls ensure_initialized *)
-  ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
-
-  let (ok_post, post_msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_post_create"
-      ~arguments:
-        (`Assoc
-          [
-            ("author", `String "codex");
-            ("content", `String "usage-cutoff hidden utility smoke");
-          ])
-  in
-  Alcotest.(check bool) "hidden social utility still callable" true ok_post;
-  Alcotest.(check bool) "social utility returns post id" true
-    (contains_substring post_msg "post-");
-
-  let (ok_vote, vote_msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_vote_create"
-      ~arguments:
-        (`Assoc
-          [
-            ("proposer", `String "codex");
-            ("topic", `String "Should hidden utilities remain callable?");
-            ("options", `List [ `String "yes"; `String "no" ]);
-          ])
-  in
-  Alcotest.(check bool) "hidden vote utility still callable" true ok_vote;
-  Alcotest.(check bool) "vote utility returns vote id" true
-    (contains_substring vote_msg "vote-");
-
-  cleanup_dir base_path
-
 let test_execute_tool_team_session_step_direct_call () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -2505,8 +2461,6 @@ let eio_tests = [
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)
   "coding mode allows governance status", `Quick, test_execute_tool_coding_mode_allows_governance_status;
-  "hidden active utility direct call", `Quick,
-    test_execute_tool_hidden_active_utility_direct_call;
   "canonical team_session_step direct call", `Quick,
     test_execute_tool_team_session_step_direct_call;
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;

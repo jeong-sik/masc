@@ -162,6 +162,16 @@
  (libraries masc_mcp alcotest str yojson unix))
 
 (test
+ (name test_dashboard_surface_readiness)
+ (modules test_dashboard_surface_readiness)
+ (libraries masc_mcp alcotest yojson))
+
+(test
+ (name test_dashboard_collaboration_evidence)
+ (modules test_dashboard_collaboration_evidence test_tool_team_session_support)
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
+
+(test
  (name test_masc_log)
  (modules test_masc_log)
  (libraries masc_mcp alcotest unix))

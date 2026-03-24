@@ -1,0 +1,134 @@
+import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
+import {
+  fetchDashboardCollaborationEvidence,
+  type DashboardCollaborationEvidenceResponse,
+} from '../api'
+
+const collaborationEvidence = signal<DashboardCollaborationEvidenceResponse | null>(null)
+const collaborationEvidenceError = signal<string | null>(null)
+const collaborationEvidenceLoading = signal(false)
+const collaborationEvidenceKey = signal('')
+
+async function loadCollaborationEvidence(sessionId?: string | null, roomId?: string | null) {
+  const key = `${sessionId ?? ''}:${roomId ?? ''}`
+  if (collaborationEvidenceLoading.value && collaborationEvidenceKey.value === key) return
+  collaborationEvidenceLoading.value = true
+  collaborationEvidenceError.value = null
+  collaborationEvidenceKey.value = key
+  try {
+    collaborationEvidence.value = await fetchDashboardCollaborationEvidence({ sessionId, roomId })
+  } catch (err) {
+    collaborationEvidenceError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    collaborationEvidenceLoading.value = false
+  }
+}
+
+function evidenceTone(value: string): string {
+  switch (value) {
+    case 'strong':
+      return 'text-[var(--ok)] bg-[var(--ok-10)] border-[rgba(74,222,128,0.2)]'
+    case 'partial':
+      return 'text-[var(--warn)] bg-[var(--warn-12)] border-[rgba(251,191,36,0.2)]'
+    default:
+      return 'text-[var(--bad)] bg-[var(--bad-12)] border-[rgba(239,68,68,0.2)]'
+  }
+}
+
+export function CollaborationEvidencePanel({
+  sessionId,
+  roomId,
+}: {
+  sessionId?: string | null
+  roomId?: string | null
+}) {
+  useEffect(() => {
+    void loadCollaborationEvidence(sessionId, roomId)
+  }, [sessionId, roomId])
+
+  const data = collaborationEvidence.value
+  const counts = data?.counts
+
+  return html`
+    <section class="rounded-lg border border-[var(--card-border)] bg-[var(--white-2)] p-4 grid gap-4">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div class="grid gap-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <strong class="text-[14px] text-[var(--text-strong)]">협업 근거</strong>
+            ${data
+              ? html`<span class="px-2 py-0.5 rounded-full border text-[10px] uppercase tracking-[0.06em] ${evidenceTone(data.evidence_status)}">${data.evidence_status}</span>`
+              : null}
+          </div>
+          <span class="text-[12px] text-[var(--text-body)]">${data?.headline ?? '세션/룸 상호작용 근거를 읽는 중입니다.'}</span>
+          <span class="text-[12px] text-[var(--text-muted)]">${data?.detail ?? ''}</span>
+        </div>
+        <div class="text-[11px] text-[var(--text-muted)] font-mono">
+          ${data?.session?.session_id ?? roomId ?? 'default'}
+        </div>
+      </div>
+
+      ${collaborationEvidenceError.value
+        ? html`<div class="text-[12px] text-[var(--bad)]">${collaborationEvidenceError.value}</div>`
+        : null}
+
+      ${collaborationEvidenceLoading.value && !data
+        ? html`<div class="text-[12px] text-[var(--text-muted)]">협업 근거 불러오는 중...</div>`
+        : null}
+
+      ${data && counts
+        ? html`
+            <div class="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
+              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
+                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">team turns</div>
+                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.team_turn_count}</strong>
+              </div>
+              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
+                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">broadcast</div>
+                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.session_broadcast_count}</strong>
+              </div>
+              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
+                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">portal</div>
+                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.portal_count}</strong>
+              </div>
+              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
+                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">mentions</div>
+                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.mention_count}</strong>
+              </div>
+              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
+                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">board</div>
+                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.board_interaction_count}</strong>
+              </div>
+              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
+                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">actors</div>
+                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.unique_actor_count}</strong>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-3 max-[980px]:grid-cols-1">
+              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3 grid gap-2">
+                <strong class="text-[13px] text-[var(--text-strong)]">proof / relation backend</strong>
+                <div class="text-[12px] text-[var(--text-muted)]">proof verdict · ${data.proof.verdict ?? 'none'} · ${data.proof.available ? 'available' : 'missing'}</div>
+                <div class="text-[12px] text-[var(--text-muted)]">relation backend · ${data.relation_backend.source} · ${data.relation_backend.status}</div>
+                <div class="text-[12px] text-[var(--text-muted)]">message broadcast count · ${counts.message_broadcast_count}</div>
+              </div>
+
+              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3 grid gap-2">
+                <strong class="text-[13px] text-[var(--text-strong)]">최근 세션 이벤트</strong>
+                ${data.recent_events.length > 0
+                  ? data.recent_events.map(item => html`
+                      <div key=${`${item.ts_iso ?? 'na'}:${item.event_type}:${item.actor ?? 'na'}`} class="text-[12px] text-[var(--text-muted)]">
+                        <span class="text-[var(--text-strong)]">${item.event_type}</span>
+                        ${item.actor ? html` · ${item.actor}` : null}
+                        ${item.summary ? html` · ${item.summary}` : null}
+                      </div>
+                    `)
+                  : html`<div class="text-[12px] text-[var(--text-muted)]">최근 세션 이벤트가 없습니다.</div>`}
+              </div>
+            </div>
+          `
+        : null}
+    </section>
+  `
+}

@@ -227,7 +227,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${dedupedTimeline.length > 0
               ? dedupedTimeline.slice(0, 18).map(item => html`<${TimelineRow} key=${item.id} item=${item} />`)
-              : html`<${EmptyState} message="타임라인 근거가 없습니다. 에이전트 협업이 진행되면 세션과 지휘 이벤트가 여기에 나타납니다." compact />`}
+              : html`<${EmptyState} message="타임라인 근거가 없습니다. 에이전트 협업이 진행되면 세션과 관제 이벤트가 여기에 나타납니다." compact />`}
           </div>
         <//>
 

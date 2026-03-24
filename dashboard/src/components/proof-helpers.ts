@@ -220,7 +220,7 @@ export function dedupeTimeline(items: DashboardProofTimelineItem[]): DedupedTime
 }
 
 export function timelineMetaLabel(item: DedupedTimelineItem): string {
-  if (item.sources.length === 2) return '세션 + 지휘'
+  if (item.sources.length === 2) return '세션 + 관제'
   if (item.sources.length === 1) return item.sources[0] === 'unknown' ? '출처 미상' : item.sources[0] ?? '출처'
   return item.sources.join(' + ')
 }

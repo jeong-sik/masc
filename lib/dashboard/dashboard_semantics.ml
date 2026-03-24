@@ -456,7 +456,7 @@ let json () =
                   ~agent_role:"Agents use it when operation behavior depends on chain execution."
                   ~ecosystem_function:"Makes orchestration substrate inspectable."
                   [];
-                panel ~id:"command.topology" ~title:"지휘 계층"
+                panel ~id:"command.topology" ~title:"관제 계층"
                   ~purpose:"Shows structural ownership across company/platoon/squad/agent."
                   ~problem_solved:"Prevents failures from being blamed on the wrong structural layer."
                   ~when_active:"Topology surface."

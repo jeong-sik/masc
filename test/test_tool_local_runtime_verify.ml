@@ -87,7 +87,7 @@ let test_classify_runtime_blocker_flags_chat_contract_mismatch () =
       ~actual_model_id:(Some "Qwen3.5-9B-Q4_K_M.gguf")
       ~expected_slots:(Some 4) ~actual_slots_total:4
       ~expected_ctx:(Some 131072) ~actual_ctx:(Some 131072)
-      ~chat_completion_compatible:false
+      ~chat_completion_compatible:true
   in
   check (option string) "chat blocker" (Some "chat_contract_incompatible")
     blocker;

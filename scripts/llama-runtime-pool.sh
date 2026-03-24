@@ -13,6 +13,11 @@ DEFAULT_CHAT_TEMPLATE="${LLAMA_POOL_CHAT_TEMPLATE:-chatml}"
 DEFAULT_CHAT_TEMPLATE_KWARGS="${LLAMA_POOL_CHAT_TEMPLATE_KWARGS:-{\"enable_thinking\":false}}"
 SEED_BINARY=""
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required but not found in PATH" >&2
+  exit 1
+fi
+
 mkdir -p "$STATE_DIR"
 
 usage() {

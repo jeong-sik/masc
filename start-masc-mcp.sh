@@ -133,7 +133,9 @@ for env_name in \
     SB_PG_URL \
     MASC_MCP_PORT \
     MASC_HOST \
-    MASC_BASE_PATH
+    MASC_BASE_PATH \
+    MASC_WS_ENABLED \
+    MASC_WEBRTC_ENABLED
 do
     preserve_env_override "$env_name"
 done
@@ -160,7 +162,9 @@ for env_name in \
     SB_PG_URL \
     MASC_MCP_PORT \
     MASC_HOST \
-    MASC_BASE_PATH
+    MASC_BASE_PATH \
+    MASC_WS_ENABLED \
+    MASC_WEBRTC_ENABLED
 do
     restore_env_override "$env_name"
 done
@@ -201,6 +205,15 @@ raise_open_file_limit
 # Default: enable internal guardian unless explicitly disabled
 if [ -z "$MASC_GUARDIAN_ENABLED" ]; then
     export MASC_GUARDIAN_ENABLED=true
+fi
+
+# Default: enable realtime transports unless explicitly disabled.
+if [ -z "${MASC_WS_ENABLED+x}" ]; then
+    export MASC_WS_ENABLED=1
+fi
+
+if [ -z "${MASC_WEBRTC_ENABLED+x}" ]; then
+    export MASC_WEBRTC_ENABLED=1
 fi
 
 # Default arguments
@@ -272,7 +285,7 @@ fi
 build_dashboard_spa
 
 # Resolve executable path
-# Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
+# Priority: 1. Release binary  2. Local build  3. Workspace build  4. Installed  5. Auto-download
 RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"
 WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main.exe"
 LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
@@ -289,27 +302,27 @@ MASC_STDIO_EIO_EXE=""
 # 1. Pre-downloaded release binary (fastest, no build needed)
 if [ -x "$RELEASE_BINARY" ]; then
     MASC_EXE="$RELEASE_BINARY"
-# 2. Workspace build
-elif [ -x "$WORKSPACE_EXE" ]; then
-    MASC_EXE="$WORKSPACE_EXE"
-# 3. Local build
+# 2. Local build
 elif [ -x "$LOCAL_EXE" ]; then
     MASC_EXE="$LOCAL_EXE"
+# 3. Workspace build
+elif [ -x "$WORKSPACE_EXE" ]; then
+    MASC_EXE="$WORKSPACE_EXE"
 # 4. System-installed
 elif [ -n "$INSTALLED_EXE" ]; then
     MASC_EXE="$INSTALLED_EXE"
 fi
 
-if [ -x "$WORKSPACE_EIO_EXE" ]; then
-    MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
-elif [ -x "$LOCAL_EIO_EXE" ]; then
+if [ -x "$LOCAL_EIO_EXE" ]; then
     MASC_EIO_EXE="$LOCAL_EIO_EXE"
+elif [ -x "$WORKSPACE_EIO_EXE" ]; then
+    MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
 fi
 
-if [ -x "$WORKSPACE_STDIO_EIO_EXE" ]; then
-    MASC_STDIO_EIO_EXE="$WORKSPACE_STDIO_EIO_EXE"
-elif [ -x "$LOCAL_STDIO_EIO_EXE" ]; then
+if [ -x "$LOCAL_STDIO_EIO_EXE" ]; then
     MASC_STDIO_EIO_EXE="$LOCAL_STDIO_EIO_EXE"
+elif [ -x "$WORKSPACE_STDIO_EIO_EXE" ]; then
+    MASC_STDIO_EIO_EXE="$WORKSPACE_STDIO_EIO_EXE"
 fi
 
 # 5. Build Eio version if not found (Lwt deprecated, download disabled)
@@ -341,10 +354,10 @@ if [ "$HTTP_MODE" = "false" ] && [ -z "$MASC_STDIO_EIO_EXE" ]; then
         dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" bin/main_stdio_eio.exe 1>&2
         release_build_lock
     fi
-    if [ -x "$WORKSPACE_STDIO_EIO_EXE" ]; then
-        MASC_STDIO_EIO_EXE="$WORKSPACE_STDIO_EIO_EXE"
-    elif [ -x "$LOCAL_STDIO_EIO_EXE" ]; then
+    if [ -x "$LOCAL_STDIO_EIO_EXE" ]; then
         MASC_STDIO_EIO_EXE="$LOCAL_STDIO_EIO_EXE"
+    elif [ -x "$WORKSPACE_STDIO_EIO_EXE" ]; then
+        MASC_STDIO_EIO_EXE="$WORKSPACE_STDIO_EIO_EXE"
     else
         echo "Error: failed to build stdio server." >&2
         exit 1
@@ -363,10 +376,10 @@ if [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
             release_build_lock
         fi
 
-        if [ -x "$WORKSPACE_EIO_EXE" ]; then
-            MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
-        elif [ -x "$LOCAL_EIO_EXE" ]; then
+        if [ -x "$LOCAL_EIO_EXE" ]; then
             MASC_EIO_EXE="$LOCAL_EIO_EXE"
+        elif [ -x "$WORKSPACE_EIO_EXE" ]; then
+            MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
         fi
     fi
 fi

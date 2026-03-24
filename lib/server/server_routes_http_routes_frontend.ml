@@ -19,9 +19,35 @@ let is_dashboard_observer_stream request =
       || String.equal normalized "dashboard"
   | None -> false
 
+let websocket_discovery_handler request reqd =
+  let body =
+    websocket_discovery_json request |> Yojson.Safe.to_string
+  in
+  Http.Response.json body reqd
+
+let webrtc_signaling_handler signaling_fn request reqd =
+  with_read_auth
+    (fun _state _req reqd ->
+      if not (Server_webrtc_transport.is_enabled ()) then
+        Http.Response.json ~status:`Not_found
+          {|{"error":"webrtc transport disabled"}|}
+          reqd
+      else
+        Http.Request.read_body_async reqd (fun body_str ->
+          match signaling_fn body_str with
+          | Ok body ->
+              Http.Response.json body reqd
+          | Error msg ->
+              Http.Response.json ~status:`Bad_request
+                (Yojson.Safe.to_string
+                   (`Assoc [ ("error", `String msg) ]))
+                reqd))
+    request reqd
+
 let add_routes ~port ~host router =
   router
   |> Http.Router.get "/health" health_handler
+  |> Http.Router.get "/ws" websocket_discovery_handler
   |> Http.Router.get "/metrics" (fun request reqd ->
        with_read_auth (fun _state _req reqd ->
          let body = Prometheus.to_prometheus_text () in
@@ -114,6 +140,10 @@ let add_routes ~port ~host router =
   |> Http.Router.post "/mcp" handle_post_mcp
   |> Http.Router.post "/mcp/managed" (handle_post_mcp ~profile:Mcp_eio.Managed_agent)
   |> Http.Router.post "/mcp/operator" (handle_post_mcp ~profile:Mcp_eio.Operator_remote)
+  |> Http.Router.post "/webrtc/offer"
+       (webrtc_signaling_handler Server_webrtc_transport.handle_offer_request)
+  |> Http.Router.post "/webrtc/answer"
+       (webrtc_signaling_handler Server_webrtc_transport.handle_answer_request)
   |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST]
        ~handler:(fun request reqd ->
          with_read_auth (fun _state req reqd -> handle_graphql req reqd) request reqd)

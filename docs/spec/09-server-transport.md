@@ -739,10 +739,10 @@ sequenceDiagram
 | 환경변수 | 기본값 | 설명 |
 |---------|--------|------|
 | `MASC_USE_H2` | 0 | HTTP/2 h2c 활성화 |
-| `MASC_WS_ENABLED` | 0 | WebSocket 활성화 |
+| `MASC_WS_ENABLED` | 1 | WebSocket 활성화 (`0`으로 비활성화) |
 | `MASC_GRPC_ENABLED` | 0 | gRPC 활성화 |
 | `MASC_GRPC_PORT` | 8936 | gRPC 포트 |
-| `MASC_WEBRTC_ENABLED` | 0 | WebRTC 활성화 |
+| `MASC_WEBRTC_ENABLED` | 1 | WebRTC 활성화 (`0`으로 비활성화) |
 | `MASC_AGENT_TRANSPORT` | `local` | 에이전트 측 트랜스포트 선택 |
 
 ### 15.3 인증 설정

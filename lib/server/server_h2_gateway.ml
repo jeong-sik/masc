@@ -164,6 +164,34 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd body ~extra_headers:cors
 
+      | `POST, "/webrtc/offer" ->
+          if not (Server_webrtc_transport.is_enabled ()) then
+            h2_respond_json h2_reqd {|{"error":"webrtc transport disabled"}|}
+              ~status:`Not_found ~extra_headers:cors
+          else
+            h2_read_body h2_reqd (fun body_str ->
+              match Server_webrtc_transport.handle_offer_request body_str with
+              | Ok body ->
+                  h2_respond_json h2_reqd body ~extra_headers:cors
+              | Error msg ->
+                  h2_respond_json h2_reqd
+                    (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
+                    ~status:`Bad_request ~extra_headers:cors)
+
+      | `POST, "/webrtc/answer" ->
+          if not (Server_webrtc_transport.is_enabled ()) then
+            h2_respond_json h2_reqd {|{"error":"webrtc transport disabled"}|}
+              ~status:`Not_found ~extra_headers:cors
+          else
+            h2_read_body h2_reqd (fun body_str ->
+              match Server_webrtc_transport.handle_answer_request body_str with
+              | Ok body ->
+                  h2_respond_json h2_reqd body ~extra_headers:cors
+              | Error msg ->
+                  h2_respond_json h2_reqd
+                    (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
+                    ~status:`Bad_request ~extra_headers:cors)
+
       | `GET, "/metrics" ->
           let body = Prometheus.to_prometheus_text () in
           let headers = H2.Headers.of_list ([

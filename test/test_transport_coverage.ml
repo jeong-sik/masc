@@ -472,6 +472,21 @@ let test_rest_tool_to_endpoint_agent_card () =
   check string "method" "GET" (Transport.Rest.method_to_string m);
   check string "path" "/.well-known/agent.json" path
 
+let test_rest_tool_to_endpoint_websocket_discovery () =
+  let (m, path) = Transport.Rest.tool_to_endpoint "masc_websocket_discovery" in
+  check string "method" "GET" (Transport.Rest.method_to_string m);
+  check string "path" "/ws" path
+
+let test_rest_tool_to_endpoint_webrtc_offer () =
+  let (m, path) = Transport.Rest.tool_to_endpoint "masc_webrtc_offer" in
+  check string "method" "POST" (Transport.Rest.method_to_string m);
+  check string "path" "/webrtc/offer" path
+
+let test_rest_tool_to_endpoint_webrtc_answer () =
+  let (m, path) = Transport.Rest.tool_to_endpoint "masc_webrtc_answer" in
+  check string "method" "POST" (Transport.Rest.method_to_string m);
+  check string "path" "/webrtc/answer" path
+
 let test_rest_tool_to_endpoint_unknown () =
   let (m, path) = Transport.Rest.tool_to_endpoint "unknown_tool" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
@@ -499,6 +514,27 @@ let test_rest_parse_request_agent_card_canonical () =
       ~path:"/.well-known/agent.json" ~query_params:[] ~body:""
   in
   check string "method_name" "masc_agent_card" req.method_name
+
+let test_rest_parse_request_websocket_discovery () =
+  let req =
+    Transport.Rest.parse_request ~http_method:"GET" ~path:"/ws"
+      ~query_params:[] ~body:""
+  in
+  check string "method_name" "masc_websocket_discovery" req.method_name
+
+let test_rest_parse_request_webrtc_offer () =
+  let req =
+    Transport.Rest.parse_request ~http_method:"POST" ~path:"/webrtc/offer"
+      ~query_params:[] ~body:"{\"agent_name\":\"a\"}"
+  in
+  check string "method_name" "masc_webrtc_offer" req.method_name
+
+let test_rest_parse_request_webrtc_answer () =
+  let req =
+    Transport.Rest.parse_request ~http_method:"POST" ~path:"/webrtc/answer"
+      ~query_params:[] ~body:"{\"offer_id\":\"offer-1\",\"agent_name\":\"b\"}"
+  in
+  check string "method_name" "masc_webrtc_answer" req.method_name
 
 let test_rest_parse_request_tool () =
   let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/api/v1/tools/custom_tool" ~query_params:[] ~body:"" in
@@ -868,6 +904,9 @@ let () =
       test_case "leave" `Quick test_rest_tool_to_endpoint_leave;
       test_case "broadcast" `Quick test_rest_tool_to_endpoint_broadcast;
       test_case "agent_card" `Quick test_rest_tool_to_endpoint_agent_card;
+      test_case "websocket_discovery" `Quick test_rest_tool_to_endpoint_websocket_discovery;
+      test_case "webrtc_offer" `Quick test_rest_tool_to_endpoint_webrtc_offer;
+      test_case "webrtc_answer" `Quick test_rest_tool_to_endpoint_webrtc_answer;
       test_case "unknown" `Quick test_rest_tool_to_endpoint_unknown;
     ];
     "rest.parse_request", [
@@ -877,6 +916,10 @@ let () =
       test_case "agent_card" `Quick test_rest_parse_request_agent_card;
       test_case "agent_card canonical" `Quick
         test_rest_parse_request_agent_card_canonical;
+      test_case "websocket discovery" `Quick
+        test_rest_parse_request_websocket_discovery;
+      test_case "webrtc offer" `Quick test_rest_parse_request_webrtc_offer;
+      test_case "webrtc answer" `Quick test_rest_parse_request_webrtc_answer;
       test_case "tool" `Quick test_rest_parse_request_tool;
       test_case "unknown" `Quick test_rest_parse_request_unknown;
       test_case "with body" `Quick test_rest_parse_request_with_body;

@@ -136,11 +136,22 @@ let gate_config_of_execution_scope
       { Eval_gate.default_config with
         allowlist_enabled = true;
         allowed_tools = [
+          (* read-only filesystem *)
           "file_read"; "shell_exec"; "list_dir"; "glob"; "grep";
           "search"; "git_status"; "git_log"; "git_diff";
+          "keeper_shell_readonly";
+          (* coordination — any keeper should coordinate *)
+          "keeper_tasks_list"; "keeper_task_claim";
+          "keeper_task_done"; "keeper_broadcast";
+          (* board — social interaction *)
+          "keeper_board_get"; "keeper_board_post";
+          "keeper_board_comment"; "keeper_board_vote";
+          "keeper_board_list";
+          (* masc status *)
+          "masc_status"; "masc_who"; "masc_messages";
         ];
-        max_tool_calls_per_turn = 8;
-        max_cost_usd = 0.05;
+        max_tool_calls_per_turn = 12;
+        max_cost_usd = 0.10;
       }
   | Limited_code_change ->
       { Eval_gate.default_config with

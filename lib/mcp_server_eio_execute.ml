@@ -150,6 +150,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | _ -> agent_name
   in
 
+  let arguments_with_agent_name =
+    match arguments with
+    | `Assoc fields ->
+        `Assoc
+          (("agent_name", `String agent_name) :: List.remove_assoc "agent_name" fields)
+    | other -> other
+  in
+
   let is_ephemeral_agent_name name =
     String.length name >= 6 && String.sub name 0 6 = "agent-"
   in
@@ -400,7 +408,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   (* Dispatch a single module by tag — creates only that module's context *)
   let dispatch_by_tag (tag : Tool_dispatch.module_tag) : (bool * string) option =
-    match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
+    match Tool_dispatch.run_pre_hooks ~name ~args:arguments_with_agent_name with
     | Some blocked -> Some (Tool_result.to_legacy blocked)
     | None -> match tag with
     | Mod_plan ->
@@ -544,7 +552,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_autoresearch ->
         let ctx : Tool_autoresearch.context = { base_path = config.base_path;
           agent_name = Some agent_name; start_operation = None;
-          start_team_session = None } in
+          start_team_session = None; sw = Some sw } in
         Tool_autoresearch.dispatch ctx ~name ~args:arguments
     | Mod_research ->
         let net = match state.Mcp_server.net with

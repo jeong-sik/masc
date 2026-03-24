@@ -781,6 +781,7 @@ let execute_keeper_tool_call
         agent_name = Some meta.name;
         start_operation = None;
         start_team_session = None;
+        sw = None;
       } in
       (match Tool_autoresearch.dispatch ctx ~name ~args with
       | Some (true, msg) -> msg

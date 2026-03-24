@@ -1,4 +1,4 @@
-(** Tool_autoresearch_schemas — 6 autoresearch tool schema definitions.
+(** Tool_autoresearch_schemas — 8 autoresearch tool schema definitions.
 
     Extracted from tool_autoresearch.ml to keep schema data separate from logic.
 
@@ -8,6 +8,7 @@ let schemas : Types.tool_schema list = [
   {
     name = "masc_autoresearch_start";
     description = "Start an autonomous experiment loop (inspired by Karpathy's autoresearch). \
+The runtime creates a managed worktree, measures baseline, and then runs experiment cycles in the background when an Eio runtime switch is available. \
 Each cycle: measure baseline -> apply change -> measure again -> keep if improved, discard if not. \
 Changes are tracked via git commits. Results are logged to JSONL. \
 Requires: goal (what to optimize), metric_fn (shell command that outputs a float on the last line).";

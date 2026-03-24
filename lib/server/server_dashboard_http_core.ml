@@ -479,7 +479,8 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
       | Ok json ->
           with_projection_diagnostics ~surface:"operator_digest" ~started_at
             ~extra:(operator_snapshot_extra sessions) json
-      | Error err -> failwith err
+      | Error err ->
+          `Assoc [("error", `String err); ("digest_error", `Bool true)]
     with exn ->
       mark_cached_surface_error _operator_digest_cache exn;
       raise exn
@@ -625,7 +626,8 @@ let operator_digest_http_json ~state ~sw ~clock request =
                  ctx
              with
              | Ok json -> json
-             | Error err -> failwith err))
+             | Error err ->
+                 `Assoc [("error", `String err); ("status", `String "validation_error")]))
     ) with
     | Ok json ->
         let extra =

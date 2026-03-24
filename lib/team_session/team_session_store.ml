@@ -349,7 +349,7 @@ let list_sessions ?(since_unix = 0.0) ?(limit = 0) config : Team_session_types.s
     | PostgresNative backend when since_unix > 0.0 || limit > 0 ->
         let row_limit =
           if limit > 0 then limit
-          else 1000
+          else 10000
         in
         ( true,
           Backend.PostgresNative.get_all_matching_recent backend

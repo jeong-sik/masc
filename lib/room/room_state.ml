@@ -317,6 +317,11 @@ let default_room_state config = {
 }
 
 let ensure_room_bootstrap config room_id =
+  let room_id =
+    match validate_room_id room_id with
+    | Ok room_id -> room_id
+    | Error msg -> invalid_arg ("invalid room_id: " ^ msg)
+  in
   (* 1. Always ensure root infrastructure exists *)
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in

@@ -83,6 +83,23 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
     H2.Body.Writer.close writer
   in
 
+  let h2_respond_redirect ?(extra_headers = []) h2_reqd location =
+    let headers =
+      H2.Headers.of_list
+        ([
+           ("location", location);
+           ("content-length", "0");
+         ]
+        @ extra_headers)
+    in
+    let response = H2.Response.create ~headers `Found in
+    let writer =
+      H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd
+        response
+    in
+    H2.Body.Writer.close writer
+  in
+
   (* Read H2 request body asynchronously *)
   let h2_read_body h2_reqd callback =
     let body = H2.Reqd.request_body h2_reqd in
@@ -226,7 +243,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           H2.Body.Writer.close writer
 
       | `GET, "/" ->
-          h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors
+          h2_respond_redirect h2_reqd "/dashboard" ~extra_headers:cors
 
       | `GET, "/favicon.ico" | `GET, "/favicon.svg" ->
           h2_respond_bytes
@@ -518,10 +535,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/transport-health" ->
           let state = get_server_state () in
-          let json =
-            Transport_metrics.transport_health_json
-              ~config:state.Mcp_server.room_config
-          in
+          let json = dashboard_transport_health_http_json ~state in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/mdal/loops" ->
@@ -802,11 +816,20 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                    h2_respond_json h2_reqd
                      (Yojson.Safe.to_string (error_json "room_id is required and cannot be empty"))
                       ~status:`Bad_request ~extra_headers:cors
-               | Some room_id ->
-                     Room.write_current_room config room_id;
-                     Room.ensure_room_bootstrap config room_id;
-                     let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
-                     h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors)
+               | Some raw_room_id ->
+                   (match Room.validate_room_id raw_room_id with
+                    | Error msg ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (error_json msg))
+                          ~status:`Bad_request ~extra_headers:cors
+                    | Ok room_id ->
+                        Room.write_current_room config room_id;
+                        Room.ensure_room_bootstrap config room_id;
+                        let response =
+                          `Assoc [("ok", `Bool true); ("room_id", `String room_id)]
+                        in
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string response)
+                          ~extra_headers:cors))
             with
             | Yojson.Json_error msg ->
                 h2_respond_json h2_reqd

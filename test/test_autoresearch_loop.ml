@@ -47,7 +47,7 @@ let clear_autoresearch_runtime () =
   Hashtbl.reset Lib.Tool_autoresearch.pending_hypotheses;
   Hashtbl.reset Lib.Tool_autoresearch.custom_generators
 
-let test_start_runs_autonomously_to_completion () =
+let test_start_runs_cycle_to_completion () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -79,24 +79,22 @@ let test_start_runs_autonomously_to_completion () =
            (Filename.quote repo_path) (Filename.quote "init autoresearch test repo"));
       run_cmd (Printf.sprintf "git -C %s branch -M main" (Filename.quote repo_path));
 
-      Lib.Tool_autoresearch.queue_generator
-        (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
-          Ok ("insert token", "MAGIC_20260324\n"));
-
       let ctx : Lib.Tool_autoresearch.context =
         {
           base_path;
           agent_name = Some "autoresearch-admin";
           start_operation = None;
           start_team_session = None;
+          config = None;
           sw = Some sw;
+          clock = Some clock;
         }
       in
       let args =
         `Assoc
           [
             ("goal", `String "Insert the required token");
-            ("metric_fn", `String "./metric.sh");
+            ("metric_fn", `String "sh metric.sh");
             ("target_file", `String "target.txt");
             ("workdir", `String repo_path);
             ("max_cycles", `Int 1);
@@ -108,28 +106,35 @@ let test_start_runs_autonomously_to_completion () =
         | Some result -> result
         | None -> fail "dispatch returned None"
       in
-      check bool "start succeeds" true ok;
+      if not ok then failf "start failed: %s" payload;
       let json = Yojson.Safe.from_string payload in
       let loop_id = Yojson.Safe.Util.(json |> member "loop_id" |> to_string) in
-      check string "driver status" "autonomous"
-        Yojson.Safe.Util.(json |> member "driver_status" |> to_string);
+      Lib.Tool_autoresearch.set_generator loop_id
+        (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
+          Ok ("insert token", "MAGIC_20260324\n"));
 
-      let rec wait_for_completion attempts =
-        if attempts = 0 then
-          fail "autoresearch loop did not complete in time";
+      let cycle_args = `Assoc [ ("loop_id", `String loop_id) ] in
+      let cycle_ok, cycle_payload =
+        match
+          Lib.Tool_autoresearch.dispatch ctx ~name:"masc_autoresearch_cycle"
+            ~args:cycle_args
+        with
+        | Some result -> result
+        | None -> fail "cycle dispatch returned None"
+      in
+      if not cycle_ok then failf "cycle failed: %s" cycle_payload;
+      let cycle_json = Yojson.Safe.from_string cycle_payload in
+      check string "cycle decision" "keep"
+        Yojson.Safe.Util.(cycle_json |> member "decision" |> to_string);
+
+      let final_state =
         match
           Lib.Autoresearch.with_loops_ro (fun () ->
             Hashtbl.find_opt Lib.Autoresearch.active_loops loop_id)
         with
-        | Some state when state.status = Lib.Autoresearch.Completed -> state
-        | Some state when state.status = Lib.Autoresearch.Error ->
-            failf "loop entered error state: %s"
-              (Option.value ~default:"unknown" state.error_message)
-        | _ ->
-            Eio.Time.sleep clock 0.05;
-            wait_for_completion (attempts - 1)
+        | Some state -> state
+        | None -> fail "autoresearch loop missing after cycle"
       in
-      let final_state = wait_for_completion 120 in
       check int "completed cycle count" 1 final_state.current_cycle;
       check int "keep count" 1 final_state.total_keeps;
       check int "discard count" 0 final_state.total_discards;
@@ -149,7 +154,7 @@ let () =
     [
       ( "autonomous",
         [
-          test_case "start runs to completion" `Quick
-            test_start_runs_autonomously_to_completion;
+          test_case "start runs one cycle to completion" `Quick
+            test_start_runs_cycle_to_completion;
         ] );
     ]

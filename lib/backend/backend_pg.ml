@@ -76,6 +76,17 @@ let get_all_q =
   (Caqti_type.string ->* Caqti_type.(t2 string string))
   "SELECT key, value FROM masc_kv WHERE key LIKE $1 AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY key DESC LIMIT 200"
 
+let get_all_matching_recent_q =
+  (Caqti_type.(t4 string string float int) ->* Caqti_type.(t2 string string))
+  "SELECT key, value \
+   FROM masc_kv \
+   WHERE key LIKE $1 \
+     AND key LIKE $2 \
+     AND updated_at >= TO_TIMESTAMP($3) \
+     AND (expires_at IS NULL OR expires_at > NOW()) \
+   ORDER BY updated_at DESC, key DESC \
+   LIMIT $4"
+
 let set_if_not_exists_q =
   (Caqti_type.(t2 string string) ->. Caqti_type.unit)
   "INSERT INTO masc_kv (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING"
@@ -353,6 +364,20 @@ let get_all t ~prefix =
   | Ok pairs ->
       Ok (List.map (fun (k, v) -> (strip_namespace t.namespace k, v)) pairs)
   | Error err -> Error (caqti_error_to_masc err)
+
+let get_all_matching_recent t ~prefix ~suffix ~updated_since ~limit =
+  if limit <= 0 then
+    Ok []
+  else
+    let nprefix = namespaced_key t.namespace prefix in
+    match Caqti_eio.Pool.use (fun conn ->
+      let module C = (val conn : Caqti_eio.CONNECTION) in
+      C.collect_list get_all_matching_recent_q
+        (nprefix ^ "%", "%" ^ suffix, updated_since, limit)
+    ) t.pool with
+    | Ok pairs ->
+        Ok (List.map (fun (k, v) -> (strip_namespace t.namespace k, v)) pairs)
+    | Error err -> Error (caqti_error_to_masc err)
 
 let set_if_not_exists t ~key ~value =
   let nkey = namespaced_key t.namespace key in

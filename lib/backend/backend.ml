@@ -413,6 +413,13 @@ module PostgresNative : sig
   val create_eio : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> config -> (t, error) result
   val create_eio_readonly : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> config -> (t, error) result
   val get_pool : t -> (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t
+  val get_all_matching_recent :
+    t ->
+    prefix:string ->
+    suffix:string ->
+    updated_since:float ->
+    limit:int ->
+    ((string * string) list, error) result
   val cleanup_pubsub_by_age : t -> days:int -> (int, error) result
   val cleanup_pubsub_by_limit : t -> max_messages:int -> (int, error) result
   val cleanup_pubsub : t -> days:int -> max_messages:int -> (int, error) result

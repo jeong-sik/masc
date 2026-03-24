@@ -215,7 +215,8 @@ export interface DashboardExecutionContinuityBrief {
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_tool_names?: string[]
-  allowed_tool_names?: string[]
+  allowed_tool_count?: number | null
+  allowed_tool_preview?: string[]
   latest_tool_names?: string[]
   latest_tool_call_count?: number | null
   tool_audit_source?: string | null

@@ -107,6 +107,71 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
              Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "room_pause")
            confirm_required_actions))
 
+let test_snapshot_caps_session_recent_events () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      for seq = 1 to 5 do
+        Team_session_store.append_event config session_id ~event_type:"team_turn"
+          ~detail:(`Assoc [ ("seq", `Int seq) ])
+      done;
+      let snapshot = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
+      let sessions =
+        Yojson.Safe.Util.(snapshot |> member "sessions" |> member "items" |> to_list)
+      in
+      let session_json =
+        match
+          List.find_opt
+            (fun row ->
+              Yojson.Safe.Util.(row |> member "session_id" |> to_string) = session_id)
+            sessions
+        with
+        | Some row -> row
+        | None -> Alcotest.fail "expected session in operator snapshot"
+      in
+      let recent_events =
+        Yojson.Safe.Util.(session_json |> member "recent_events" |> to_list)
+      in
+      Alcotest.(check int) "recent events capped at 3" 3 (List.length recent_events);
+      let seqs =
+        List.map
+          (fun row ->
+            Yojson.Safe.Util.(row |> member "detail" |> member "seq" |> to_int))
+          recent_events
+      in
+      Alcotest.(check (list int)) "recent events keep tail" [ 3; 4; 5 ] seqs)
+
+let test_snapshot_summary_view_can_omit_command_plane () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let json =
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_messages:false ~include_command_plane:false
+          (operator_ctx env sw config "owner")
+      in
+      Alcotest.(check bool) "command_plane omitted" true
+        (Yojson.Safe.Util.member "command_plane" json = `Null);
+      Alcotest.(check bool) "swarm_status omitted" true
+        (Yojson.Safe.Util.member "swarm_status" json = `Null);
+      Alcotest.(check bool) "attention summary still present" true
+        (Yojson.Safe.Util.member "attention_summary" json <> `Null);
+      Alcotest.(check bool) "recommendation summary still present" true
+        (Yojson.Safe.Util.member "recommendation_summary" json <> `Null))
+
 let test_orchestra_room_core_shape () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->

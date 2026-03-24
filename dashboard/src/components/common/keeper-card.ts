@@ -31,7 +31,8 @@ export type CanonicalKeeperCardModel = {
   recentInput?: string | null
   recentOutput?: string | null
   recentTools?: string[]
-  allowedTools?: string[]
+  allowedToolsPreview?: string[]
+  allowedToolsCount?: number | null
   routeSummary?: string | null
   auditSource?: string | null
   auditAt?: string | null
@@ -55,6 +56,18 @@ function renderToolSummary(tools: string[] | undefined, empty = '없음'): strin
   return tools.slice(0, 4).join(', ')
 }
 
+function renderAllowedToolSummary(
+  tools: string[] | undefined,
+  count: number | null | undefined,
+): string {
+  const preview = renderToolSummary(tools)
+  if (typeof count === 'number' && count > 0) {
+    if (!tools || tools.length === 0) return `${count}개`
+    return `${preview}${count > tools.length ? ` 외 ${count - tools.length}개` : ''}`
+  }
+  return preview
+}
+
 export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps) {
   const hasDetailDisclosure =
     Boolean(model.recentEvent)
@@ -64,7 +77,8 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
     || Boolean(model.auditSource)
     || Boolean(model.auditAt)
     || (model.recentTools?.length ?? 0) > 0
-    || (model.allowedTools?.length ?? 0) > 0
+    || (model.allowedToolsPreview?.length ?? 0) > 0
+    || (model.allowedToolsCount ?? 0) > 0
 
   const toneClass = model.tone ?? ''
   const wrapperClass =
@@ -143,11 +157,13 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
                     </div>
                   `
                 : null}
-              ${(model.recentTools?.length ?? 0) > 0 || (model.allowedTools?.length ?? 0) > 0
+              ${(model.recentTools?.length ?? 0) > 0
+                || (model.allowedToolsPreview?.length ?? 0) > 0
+                || (model.allowedToolsCount ?? 0) > 0
                 ? html`
                     <div class="flex flex-wrap gap-3 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
                       <span>최근 도구 · ${renderToolSummary(model.recentTools)}</span>
-                      <span>허용 도구 · ${renderToolSummary(model.allowedTools)}</span>
+                      <span>허용 도구 · ${renderAllowedToolSummary(model.allowedToolsPreview, model.allowedToolsCount)}</span>
                     </div>
                   `
                 : null}

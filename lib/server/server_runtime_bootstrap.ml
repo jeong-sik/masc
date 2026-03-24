@@ -319,17 +319,16 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
   (* Inject Event_bus into keeper resident runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
-  (* Wire broadcast → keeper wakeup: when a broadcast mentions a keeper,
-     interrupt its sleep so it processes the mention immediately. *)
+  (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
+     can react to new tasks, mentions, or room activity immediately. *)
   Room_eio.on_broadcast_mention := (fun mention ->
     match mention with
     | Some target ->
         Keeper_keepalive.wakeup_keeper target;
         Log.Keeper.info "broadcast mention → wakeup keeper %s" target
     | None ->
-        (* No specific mention — no targeted wakeup needed.
-           Keepers will see it on next heartbeat via board events. *)
-        ());
+        Keeper_keepalive.wakeup_all_keepers ();
+        Log.Keeper.info "broadcast → wakeup all keepers (reactive push)");
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
     let cancel_orchestrator =

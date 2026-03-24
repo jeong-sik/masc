@@ -148,32 +148,40 @@ function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
   `
 }
 
+function nodeScore(node: ActivityGraphNode): number {
+  return node.semantic_weight ?? node.weight
+}
+
 function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
   const agentNodes = nodes
     .filter(n => n.kind === 'agent')
-    .sort((a, b) => b.weight - a.weight)
+    .sort((a, b) => nodeScore(b) - nodeScore(a))
     .slice(0, 15)
 
   if (agentNodes.length === 0) {
     return html`<${EmptyState} message="활동 집계에 포함된 에이전트가 없습니다." compact />`
   }
 
-  const maxWeight = agentNodes[0]?.weight ?? 1
+  const maxScore = nodeScore(agentNodes[0]!) || 1
 
   return html`
     <div class="flex flex-col gap-1.5">
       ${agentNodes.map((node, i) => {
-        const pct = maxWeight > 0 ? (node.weight / maxWeight) * 100 : 0
+        const score = nodeScore(node)
+        const pct = maxScore > 0 ? (score / maxScore) * 100 : 0
         return html`
           <div class="flex items-center gap-[10px] py-2 px-3 rounded-[10px] bg-[rgba(15,23,42,0.5)] border border-solid border-[var(--slate-gray-8)]" key=${node.id}>
             <span class="w-[22px] text-center text-sm font-bold text-text-slate">${i + 1}</span>
             <div class="flex-1 flex flex-col gap-1 min-w-0">
-              <span class="text-base font-semibold text-[var(--text-near-white)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
+              <div class="flex items-center gap-2">
+                <span class="text-base font-semibold text-[var(--text-near-white)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
+                <span class="text-[11px] text-[var(--text-muted)]">${node.weight}회</span>
+              </div>
               <div class="h-1 rounded-sm bg-[var(--slate-gray-10)] overflow-hidden">
                 <div class="h-full rounded-sm bg-[var(--cyan)] transition-[width] duration-300 ease-in-out" style="width:${pct}%"></div>
               </div>
             </div>
-            <span class="text-sm font-semibold text-text-slate-light min-w-[32px] text-right">${node.weight}</span>
+            <span class="text-sm font-semibold text-text-slate-light min-w-[32px] text-right">${score.toFixed(1)}</span>
             <span class="text-[11px] py-0.5 px-[7px] rounded-md ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--ok)] bg-[var(--ok-10)]'}">${node.status}</span>
           </div>
         `
@@ -257,7 +265,7 @@ export function ActivityGraphSurface() {
       <${Card} title="활동 그래프" class="section mb-4" testId="activity_graph.graph">
         <div class="mb-4">
           <h2 class="monitor-headline">실행 이벤트 관계 그래프</h2>
-          <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 최근 실행 이벤트 기준으로 시각화합니다. 노드 크기는 활동 빈도를 반영합니다.</p>
+          <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 시각화합니다. 노드 크기는 의미적 중요도를 반영합니다 (완료=5x, 생성=3x, 루틴=0.5x). 노드를 클릭하면 상세 정보를 확인할 수 있습니다.</p>
         </div>
         <${StatsRow} data=${data} />
         <${GraphView} data=${data} />
@@ -272,7 +280,7 @@ export function ActivityGraphSurface() {
         <${Card} title="활동 주체 순위" class="section mb-4" testId="activity_graph.leaderboard">
           <div class="mb-4">
             <h2 class="monitor-headline">활동 주체 순위</h2>
-            <p class="monitor-subheadline">그래프 이벤트 빈도(weight)를 기준으로 정렬한 최근 활동 주체 순위입니다.</p>
+            <p class="monitor-subheadline">의미적 중요도 기준 정렬입니다. 작업 완료, 의사결정, 핸드오프가 단순 입퇴장보다 높게 평가됩니다.</p>
           </div>
           <${NodeLeaderboard} nodes=${data.nodes} />
         <//>

@@ -21,6 +21,7 @@ type graph_node = {
   label : string;
   status : string;
   weight : int;
+  semantic_weight : float;
   last_event_at : string;
   meta : Yojson.Safe.t;
 }
@@ -104,6 +105,7 @@ let graph_node_to_yojson (value : graph_node) =
       ("label", `String value.label);
       ("status", `String value.status);
       ("weight", `Int value.weight);
+      ("semantic_weight", `Float value.semantic_weight);
       ("last_event_at", `String value.last_event_at);
       ("meta", value.meta);
     ]
@@ -373,6 +375,7 @@ type node_acc = {
   mutable label : string;
   mutable status : string;
   mutable weight : int;
+  mutable semantic_weight : float;
   mutable last_event_at : string;
   mutable meta : Yojson.Safe.t;
 }
@@ -399,12 +402,34 @@ let is_generic_status = function
   | "" | "active" | "observed" -> true
   | _ -> false
 
+(* Semantic weight multiplier by event kind.
+   Completion events score high; routine lifecycle events score low. *)
+let semantic_multiplier = function
+  | "task.done" | "decision.resolved" | "operation.finalized" -> 5.0
+  | "task.created" | "task.claimed" | "decision.opened" -> 3.0
+  | "agent.handoff" | "agent.spawned" -> 3.0
+  | "board.posted" | "board.voted" -> 2.0
+  | "task.started" | "task.released" | "task.cancelled" -> 1.5
+  | "message.broadcast" | "message.mentioned" -> 1.0
+  | "team.turn" | "team.turn_failed" -> 1.0
+  | "board.commented" | "decision.voted" -> 1.0
+  | "operation.started" | "operation.resumed" -> 1.0
+  | "policy.approved" | "policy.denied" -> 2.0
+  | "agent.joined" | "agent.left" -> 0.5
+  | "agent.retired" | "agent.compacted" -> 0.5
+  | "keeper.compaction" | "keeper.guardrail" -> 0.5
+  | "keeper.autonomy_started" | "keeper.autonomy_completed" -> 1.5
+  | "operation.paused" | "operation.stopped" -> 0.5
+  | _ -> 1.0
+
 let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
     ~(kind : string) ~(label : string)
-    ~(status : string) ~(ts_iso : string) ~(meta : Yojson.Safe.t) =
+    ~(status : string) ~(ts_iso : string) ~(meta : Yojson.Safe.t)
+    ~(sw_delta : float) =
   match Hashtbl.find_opt nodes id with
   | Some node ->
       node.weight <- node.weight + 1;
+      node.semantic_weight <- node.semantic_weight +. sw_delta;
       node.last_event_at <- ts_iso;
       if node.label = id || node.label = "" then node.label <- label;
       if status <> ""
@@ -420,12 +445,13 @@ let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
           label;
           status;
           weight = 1;
+          semantic_weight = sw_delta;
           last_event_at = ts_iso;
           meta;
         }
 
 let ensure_entity_node (nodes : (string, node_acc) Hashtbl.t) value
-    ~fallback_status ~ts_iso ~meta =
+    ~fallback_status ~ts_iso ~meta ~sw_delta =
   let node_id = entity_node_id value in
   let label =
     match payload_string "label" meta with
@@ -433,7 +459,7 @@ let ensure_entity_node (nodes : (string, node_acc) Hashtbl.t) value
     | None -> value.id
   in
   ensure_node nodes ~id:node_id ~kind:value.kind ~label ~status:fallback_status
-    ~ts_iso ~meta;
+    ~ts_iso ~meta ~sw_delta;
   node_id
 
 let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
@@ -459,15 +485,16 @@ let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
         }
 
 let reduce_event ~nodes ~edges (value : event) =
+  let sw = semantic_multiplier value.kind in
   let room_node_id = "room:" ^ value.room_id in
   ensure_node nodes ~id:room_node_id ~kind:"room" ~label:value.room_id
-    ~status:"room" ~ts_iso:value.ts_iso ~meta:default_meta;
+    ~status:"room" ~ts_iso:value.ts_iso ~meta:default_meta ~sw_delta:sw;
   let actor_id =
     match value.actor with
     | Some actor ->
         let id =
           ensure_entity_node nodes actor ~fallback_status:"active"
-            ~ts_iso:value.ts_iso ~meta:value.payload
+            ~ts_iso:value.ts_iso ~meta:value.payload ~sw_delta:sw
         in
         ensure_edge edges ~source:id ~target:room_node_id ~kind:"belongs_to"
           ~active:true ~ts_iso:value.ts_iso ~meta:default_meta;
@@ -479,7 +506,7 @@ let reduce_event ~nodes ~edges (value : event) =
     | Some subject ->
         let id =
           ensure_entity_node nodes subject ~fallback_status:"observed"
-            ~ts_iso:value.ts_iso ~meta:value.payload
+            ~ts_iso:value.ts_iso ~meta:value.payload ~sw_delta:sw
         in
         ensure_edge edges ~source:id ~target:room_node_id ~kind:"belongs_to"
           ~active:true ~ts_iso:value.ts_iso ~meta:default_meta;
@@ -677,6 +704,7 @@ let graph_json config ?room_id ?(kinds = []) ?(limit = 500)
             label = node.label;
             status = node.status;
             weight = node.weight;
+            semantic_weight = node.semantic_weight;
             last_event_at = node.last_event_at;
             meta = node.meta;
           }

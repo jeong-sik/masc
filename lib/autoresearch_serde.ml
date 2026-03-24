@@ -107,10 +107,7 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
   let float_ key ~default = try json |> member key |> to_float with Type_error _ -> default in
   {
     loop_id = required_str "loop_id";
-    status =
-      (json |> member "status" |> to_string_option
-       |> Option.map status_of_string |> Option.join)
-      |> Option.value ~default:Error;
+    status = status_of_string (required_str "status") |> Option.value ~default:Error;
     current_cycle = int_ "current_cycle" ~default:0;
     baseline = float_ "baseline" ~default:0.0;
     best_score = float_ "best_score" ~default:0.0;

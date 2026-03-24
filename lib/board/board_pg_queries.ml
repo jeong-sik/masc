@@ -2,7 +2,7 @@
 
 open Board_core [@@warning "-33"]
 open Board [@@warning "-33"]
-open Caqti_request.Infix
+open Pg_infix
 
 let ttl_where = "(expires_at = 0 OR expires_at > extract(epoch from now()))"
 

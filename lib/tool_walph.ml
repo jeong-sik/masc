@@ -1,4 +1,4 @@
-(** Tool_walph - Walph loop control handlers *)
+(** Tool_walph - Walph transition handlers *)
 
 open Tool_args
 
@@ -7,39 +7,6 @@ type 'a context = {
   agent_name: string;
   clock: 'a Eio.Time.clock;
 }
-
-(** Walph response validator — moved from room_walph_eio.ml to remove
-    Oas_response dependency from Room sub-modules. *)
-let walph_response_is_valid (resp : Oas_response.api_response) =
-  let content = String.trim (Oas_response.text_of_response resp) in
-  let lower = String.lowercase_ascii content in
-  let len = String.length content in
-  len > 0
-  && not (len >= 5 && String.sub lower 0 5 = "error")
-  && not (len >= 14 && String.sub content 0 14 = "Empty response")
-  && not (len >= 9 && String.sub content 0 9 = "{\"error\":")
-
-(** Default model dispatch — moved from room_walph_eio.ml to remove
-    Oas_worker dependency from Room sub-modules. *)
-let default_model_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec:_ ~max_chars () =
-  match
-    Oas_worker.run_named ~cascade_name:"walph"
-      ~goal:prompt ~max_turns:1
-      ~max_tokens:max_chars ~accept:walph_response_is_valid ()
-  with
-  | Ok result -> Oas_response.text_of_response result.Oas_worker.response
-  | Error err -> failwith err
-
-(* Handle masc_walph_loop *)
-let handle_walph_loop ctx args =
-  let preset = get_string args "preset" "drain" in
-  let max_iterations = get_int args "max_iterations" 10 in
-  let max_consecutive_errors = get_int args "max_consecutive_errors" 5 in
-  let error_backoff_sec = get_int args "error_backoff_sec" 2 in
-  let target = get_string_opt args "target" in
-  (true, Room_walph_eio.walph_loop ctx.config ~clock:ctx.clock ~agent_name:ctx.agent_name
-    ~preset ~max_iterations ~max_consecutive_errors ~error_backoff_sec ?target
-    ~model_dispatch:default_model_dispatch ())
 
 (* Handle masc_walph_control *)
 let handle_walph_control ctx args =
@@ -67,13 +34,13 @@ let handle_walph_natural ctx args =
       else if contains "status" || contains "상태" || contains "뭐해" || contains "진행" then
         `Status
       else if contains "start" || contains "시작" || contains "커버리지" || contains "coverage" then
-        `Start_coverage
+        `Start_removed
       else if contains "refactor" || contains "리팩" || contains "lint" then
-        `Start_refactor
+        `Start_removed
       else if contains "docs" || contains "문서" || contains "doc" then
-        `Start_docs
+        `Start_removed
       else if contains "drain" || contains "태스크" || contains "task" then
-        `Start_drain
+        `Start_removed
       else
         `Ignore
     in
@@ -89,14 +56,8 @@ let handle_walph_natural ctx args =
         (true, Room_walph_eio.walph_control ctx.config ~from_agent:ctx.agent_name ~command:"RESUME" ~args:"" ())
     | `Status ->
         (true, Room_walph_eio.walph_control ctx.config ~from_agent:ctx.agent_name ~command:"STATUS" ~args:"" ())
-    | `Start_coverage ->
-        (true, Room_walph_eio.walph_loop ctx.config ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"coverage" ~max_iterations:10 ~model_dispatch:default_model_dispatch ())
-    | `Start_refactor ->
-        (true, Room_walph_eio.walph_loop ctx.config ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"refactor" ~max_iterations:10 ~model_dispatch:default_model_dispatch ())
-    | `Start_docs ->
-        (true, Room_walph_eio.walph_loop ctx.config ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"docs" ~max_iterations:10 ~model_dispatch:default_model_dispatch ())
-    | `Start_drain ->
-        (true, Room_walph_eio.walph_loop ctx.config ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"drain" ~max_iterations:10 ~model_dispatch:default_model_dispatch ())
+    | `Start_removed ->
+        (true, "🚫 Walph loop has been removed. Use Team Session + Supervisor for supervised swarm execution.")
   end
 
 (* Handle masc_walph_status *)
@@ -107,7 +68,7 @@ let handle_walph_status ctx _args =
 let schemas : Types.tool_schema list = [
   {
     name = "masc_walph_status";
-    description = "Get detailed status for the current agent's Walph loop, including iterations, claimed/done counts, error counters, backoff settings, and last stop reason.";
+    description = "Get transition-only status for the current agent's Walph state. Use when checking for leftover Walph state after the loop removal.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -120,68 +81,10 @@ let schemas : Types.tool_schema list = [
     ];
   };
 
-  (* masc_walph_loop *)
-  {
-    name = "masc_walph_loop";
-    description = "Start an automated claim-work-done loop that keeps claiming and completing tasks until a stop condition is met. \
-Use when you want to drain a task backlog or run a preset feedback loop (coverage, refactor, docs, figma, drain). \
-Control with masc_walph_control (STOP/PAUSE/RESUME/STATUS) or via broadcast '@walph STOP'.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name for claiming tasks");
-        ]);
-        ("preset", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [
-            `String "coverage";
-            `String "refactor";
-            `String "docs";
-            `String "review";
-            `String "figma";
-            `String "drain"
-          ]);
-          ("description", `String "Loop preset: coverage (80%+ test coverage), refactor (0 lint errors), docs (90%+ doc coverage), review (PR self-review), figma (SSIM visual fidelity loop), drain (empty backlog)");
-          ("default", `String "drain");
-        ]);
-        ("max_iterations", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Maximum iterations before forced stop (default: 10)");
-          ("default", `Int 10);
-          ("minimum", `Int 1);
-          ("maximum", `Int 100);
-        ]);
-        ("max_consecutive_errors", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Stop loop after this many consecutive errors (default: 5)");
-          ("default", `Int 5);
-          ("minimum", `Int 1);
-          ("maximum", `Int 100);
-        ]);
-        ("error_backoff_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Sleep seconds after an error before retrying (default: 2)");
-          ("default", `Int 2);
-          ("minimum", `Int 0);
-          ("maximum", `Int 300);
-        ]);
-        ("target", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Target file or directory for preset (e.g., src/utils.ts)");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
-    ];
-  };
-
   (* masc_walph_control *)
   {
     name = "masc_walph_control";
-    description = "Send a control command (STOP, PAUSE, RESUME, STATUS) to a running walph loop. \
-Use when you need to halt, pause, or inspect a walph loop mid-execution. \
-After masc_walph_loop starts a loop; also triggerable via broadcast '@walph STOP'.";
+    description = "Send a control command (STOP, PAUSE, RESUME, STATUS) to leftover Walph state during the transition away from Walph loop execution.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -202,9 +105,7 @@ After masc_walph_loop starts a loop; also triggerable via broadcast '@walph STOP
   (* masc_walph_natural *)
   {
     name = "masc_walph_natural";
-    description = "Control a walph loop using natural language in Korean or English (e.g., 'stop the loop', 'coverage up'). \
-Use when sending free-form instructions instead of explicit STOP/PAUSE/RESUME commands. \
-Translates intent into masc_walph_control commands; falls back to the MODEL for ambiguous messages.";
+    description = "Inspect or stop leftover Walph state using natural language in Korean or English. Start intents are rejected because Walph loop execution has been removed.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -226,7 +127,6 @@ Translates intent into masc_walph_control commands; falls back to the MODEL for 
 (* Dispatch handler *)
 let dispatch ctx ~name ~args =
   match name with
-  | "masc_walph_loop" -> Some (handle_walph_loop ctx args)
   | "masc_walph_control" -> Some (handle_walph_control ctx args)
   | "masc_walph_natural" -> Some (handle_walph_natural ctx args)
   | "masc_walph_status" -> Some (handle_walph_status ctx args)

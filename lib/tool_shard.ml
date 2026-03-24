@@ -393,8 +393,7 @@ let shard_coding : shard = {
   tools = coding_tools;
   removable = true;
   description =
-    "Coding tools: github/shell bridge + worktree/code inspection \
-     (requires policy_shell_mode=coding)";
+    "Coding tools: github/shell bridge + worktree/code inspection";
 }
 
 let shard_weather : shard = {
@@ -464,8 +463,8 @@ let shard_autoresearch : shard = {
 let agent_shards : (string, string list) Hashtbl.t = Hashtbl.create 32
 
 (** Default shards for a new keeper.
-    Keep the default surface focused on coordination/governance. Voice,
-    weather, and coding are opt-in. *)
+    All keepers get all shards unconditionally. Safety is handled by
+    eval_gate deny lists, not by shard membership. *)
 let default_shard_names : string list = [
   "base";
   "board";
@@ -474,6 +473,9 @@ let default_shard_names : string list = [
   "library";
   "taskboard";
   "governance";
+  "coding";
+  "autoresearch";
+  "weather";
 ]
 
 let get_agent_shards (agent_name : string) : string list =

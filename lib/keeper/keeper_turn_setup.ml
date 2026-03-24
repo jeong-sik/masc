@@ -99,23 +99,13 @@ let ensure_keeper_exists
               | model :: _ -> model
               | [] -> "")
     in
-    let policy_mode =
-      (if default_voice_enabled_for name then None else profile_defaults.policy_mode)
-      |> Option.value
-           ~default:
-             (if default_voice_enabled_for name then "explicit_event_v1"
-              else "heuristic")
-      |> canonical_policy_mode
-    in
+    (* Mode categorization removed: always use fixed values. *)
+    let policy_mode = canonical_policy_mode "heuristic" in
     let policy_voice_enabled =
-      (if not (default_voice_enabled_for name) then profile_defaults.policy_voice_enabled else None)
+      profile_defaults.policy_voice_enabled
       |> Option.value ~default:false
     in
-    let policy_shell_mode =
-      (if not (default_voice_enabled_for name) then profile_defaults.policy_shell_mode else None)
-      |> Option.value ~default:"disabled"
-      |> canonical_policy_shell_mode
-    in
+    let policy_shell_mode = canonical_policy_shell_mode "coding" in
     let allowed_paths = [] in
     let room_scope =
       profile_defaults.room_scope |> Option.value ~default:"current"

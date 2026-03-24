@@ -126,28 +126,31 @@ let load_latest ~(session_dir : string) : Keeper_working_context.checkpoint opti
 let oas_checkpoint_path ~(session_dir : string) ~(session_id : string) =
   Filename.concat session_dir (session_id ^ ".json")
 
+let save_oas_error (detail : string) =
+  Sys_error (Printf.sprintf "save_oas: %s" detail)
+
 let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : unit =
-  match Fs_compat.get_fs_opt () with
-  | Some fs ->
-      let dir = Eio.Path.(fs / session_dir) in
-      (match Agent_sdk.Checkpoint_store.create dir with
-       | Ok store -> (
-           match Agent_sdk.Checkpoint_store.save store ckpt with
-           | Ok () -> ()
-           | Error err ->
-               raise
-                 (Sys_error
-                    (Printf.sprintf "save_oas: %s"
-                       (Agent_sdk.Error.to_string err))))
-       | Error err ->
-           raise
-             (Sys_error
-                (Printf.sprintf "save_oas: %s"
-                   (Agent_sdk.Error.to_string err))))
-  | None ->
-      Fs_compat.save_file
-        (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
-        (Agent_sdk.Checkpoint.to_string ckpt)
+  try
+    Fs_compat.mkdir_p session_dir;
+    match Fs_compat.get_fs_opt () with
+    | Some fs ->
+        let dir = Eio.Path.(fs / session_dir) in
+        (match Agent_sdk.Checkpoint_store.create dir with
+         | Ok store -> (
+             match Agent_sdk.Checkpoint_store.save store ckpt with
+             | Ok () -> ()
+             | Error err ->
+                 raise (save_oas_error (Agent_sdk.Error.to_string err)))
+         | Error err ->
+             raise (save_oas_error (Agent_sdk.Error.to_string err)))
+    | None ->
+        Fs_compat.save_file
+          (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
+          (Agent_sdk.Checkpoint.to_string ckpt)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error _ as e -> raise e
+  | exn -> raise (save_oas_error (Printexc.to_string exn))
 
 let load_oas ~(session_dir : string) ~(session_id : string) :
     Agent_sdk.Checkpoint.t option =
@@ -163,7 +166,11 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
   | None ->
       let path = oas_checkpoint_path ~session_dir ~session_id in
       if Sys.file_exists path then
-        match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
-        | Ok ckpt -> Some ckpt
-        | Error _ -> None
+        try
+          match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
+          | Ok ckpt -> Some ckpt
+          | Error _ -> None
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | _ -> None
       else None

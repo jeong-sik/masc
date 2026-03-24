@@ -76,6 +76,11 @@ let context_of_oas_checkpoint
       oas_context = Agent_sdk.Context.copy cp.context;
     }
 
+let context_of_legacy_checkpoint
+    (ckpt : checkpoint)
+    ~(primary_model_max_tokens : int) : working_context =
+  restore_checkpoint ckpt ~max_tokens:primary_model_max_tokens
+
 let checkpoint_model_of_meta (meta : keeper_meta) =
   let candidates =
     [ meta.last_model_used; meta.active_model; meta.cascade_name ]
@@ -121,34 +126,42 @@ let save_oas_checkpoint
 
 let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
-  match
+  let oas_checkpoint =
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
       ~session_id:trace_id
-  with
-  | Some checkpoint ->
+  in
+  let legacy_checkpoint =
+    try load_latest_checkpoint session
+    with ex ->
+      Log.Keeper.error "keeper:%s checkpoint load failed: %s" trace_id
+        (Printexc.to_string ex);
+      None
+  in
+  let prefer_legacy =
+    match oas_checkpoint, legacy_checkpoint with
+    | Some oas, Some legacy -> legacy.timestamp > oas.created_at
+    | _ -> false
+  in
+  if prefer_legacy then
+    Log.Keeper.info
+      "keeper:%s checkpoint migration fallback: legacy newer than OAS"
+      trace_id;
+  match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
+  | (false, Some checkpoint, _) ->
       ( session,
         Some
           (context_of_oas_checkpoint checkpoint ~primary_model_max_tokens) )
-  | None ->
-      let latest_ckpt =
-        try load_latest_checkpoint session
-        with ex ->
-          Log.Keeper.error "keeper:%s checkpoint load failed: %s" trace_id
-            (Printexc.to_string ex);
-          None
-      in
-      match latest_ckpt with
-      | None -> (session, None)
-      | Some ckpt ->
-          (try
-             let ctx =
-               restore_checkpoint ckpt ~max_tokens:primary_model_max_tokens
-             in
-             (session, Some ctx)
-           with ex ->
-             Log.Keeper.error "keeper:%s checkpoint restore failed: %s"
-               trace_id (Printexc.to_string ex);
-             (session, None))
+  | (_, _, Some ckpt) ->
+      (try
+         let ctx =
+           context_of_legacy_checkpoint ckpt ~primary_model_max_tokens
+         in
+         (session, Some ctx)
+       with ex ->
+         Log.Keeper.error "keeper:%s checkpoint restore failed: %s"
+           trace_id (Printexc.to_string ex);
+         (session, None))
+  | _ -> (session, None)
 
 let save_checkpoint session (ctx : working_context) ~generation =
   let ckpt = create_checkpoint ctx ~generation in

@@ -141,7 +141,8 @@ function parseSseEvent(frame: string): KeeperChatStreamEvent | null {
   if (dataLines.length === 0) return null
   try {
     return JSON.parse(dataLines.join('\n')) as KeeperChatStreamEvent
-  } catch {
+  } catch (err) {
+    console.debug('[keeper-stream] SSE frame parse failed', dataLines.join('\n').slice(0, 120), err instanceof Error ? err.message : err)
     return null
   }
 }

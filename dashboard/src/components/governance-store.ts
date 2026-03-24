@@ -139,8 +139,8 @@ export async function loadRuntimeParams() {
     const data = await fetchRuntimeParams()
     runtimeParams.value = data.parameters ?? []
     runtimeSurfaces.value = data.surfaces ?? []
-  } catch {
-    // silent -- params panel is optional
+  } catch (err) {
+    console.debug('[governance] runtime params load failed (optional)', err instanceof Error ? err.message : err)
   } finally {
     runtimeLoading.value = false
   }

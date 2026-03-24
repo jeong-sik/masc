@@ -201,7 +201,8 @@ async function submitComment(postId: string) {
     showToast('댓글을 등록했습니다', 'success')
     await loadPostDetail(postId)
     refreshBoard()
-  } catch {
+  } catch (err) {
+    console.warn('[board] comment submit failed', err instanceof Error ? err.message : err)
     showToast('댓글 등록에 실패했습니다', 'error')
   } finally {
     commentSubmitting.value = false
@@ -220,7 +221,8 @@ async function submitNewPost() {
     showNewPostForm.value = false
     showToast('글을 등록했습니다', 'success')
     refreshBoard()
-  } catch {
+  } catch (err) {
+    console.warn('[board] post submit failed', err instanceof Error ? err.message : err)
     showToast('글 등록에 실패했습니다', 'error')
   } finally {
     newPostSubmitting.value = false
@@ -378,7 +380,8 @@ function PostCard({ post }: { post: BoardPost }) {
     try {
       await votePost(post.id, dir)
       refreshBoard()
-    } catch {
+    } catch (err) {
+      console.warn(`[board] vote failed (post=${post.id}, dir=${dir})`, err instanceof Error ? err.message : err)
       showToast('투표에 실패했습니다', 'error')
     }
   }
@@ -391,7 +394,8 @@ function PostCard({ post }: { post: BoardPost }) {
       await deleteBoardPost(post.id)
       showToast('게시글을 삭제했습니다', 'success')
       refreshBoard()
-    } catch {
+    } catch (err) {
+      console.warn('[board] post delete failed', err instanceof Error ? err.message : err)
       showToast('게시글 삭제에 실패했습니다', 'error')
     } finally {
       deletingPostId.value = null
@@ -549,7 +553,8 @@ function PostDetail({ post }: { post: BoardPost }) {
     try {
       await votePost(post.id, dir)
       refreshBoard()
-    } catch {
+    } catch (err) {
+      console.warn(`[board] vote failed (post=${post.id}, dir=${dir})`, err instanceof Error ? err.message : err)
       showToast('투표에 실패했습니다', 'error')
     }
   }

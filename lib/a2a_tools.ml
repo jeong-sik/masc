@@ -170,11 +170,10 @@ let latest_heartbeat_results : (string, heartbeat_result_snapshot) Hashtbl.t =
 
 let heartbeat_mutex = Eio.Mutex.create ()
 
-let heartbeat_snapshot_seq = ref 0
+let heartbeat_snapshot_seq = Atomic.make 0
 
 let next_heartbeat_snapshot_seq () =
-  heartbeat_snapshot_seq := !heartbeat_snapshot_seq + 1;
-  !heartbeat_snapshot_seq
+  Atomic.fetch_and_add heartbeat_snapshot_seq 1 + 1
 
 let latest_heartbeat_task agent =
   Eio.Mutex.use_ro heartbeat_mutex (fun () ->

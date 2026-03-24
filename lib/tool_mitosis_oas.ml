@@ -42,8 +42,8 @@ let get_string args key default =
 let get_float args key default =
   Tool_args.get_float args key default
 
-let current_cell () = !(Mcp_server.current_cell)
-let stem_pool () = !(Mcp_server.stem_pool)
+let current_cell () = Mcp_server.get_cell ()
+let stem_pool () = Mcp_server.get_pool ()
 
 (** Clamp context_ratio to valid range *)
 let validate_context_ratio ratio =
@@ -121,7 +121,7 @@ let handle_mitosis_record ctx args : result =
     | `Bool b -> b | _ -> false in
   let cell = current_cell () in
   let updated = Mitosis.record_activity ~cell ~task_done ~tool_called in
-  Mcp_server.current_cell := updated;
+  Mcp_server.set_cell updated;
   Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:updated ~config:Mitosis.default_config;
   json_ok (`Assoc [
     ("recorded", `Bool true);
@@ -143,7 +143,7 @@ let handle_mitosis_prepare ctx args : result =
   else begin
     let config = Mitosis.default_config in
     let prepared = Mitosis.prepare_for_division ~config ~cell ~full_context in
-    Mcp_server.current_cell := prepared;
+    Mcp_server.set_cell prepared;
     Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:prepared ~config;
     json_ok (`Assoc [
       ("prepared", `Bool true);
@@ -203,7 +203,7 @@ let handle_mitosis_divide ctx args : result =
   in
   (* Update MASC L3 state regardless of run outcome *)
   let new_cell = Mitosis.create_stem_cell ~generation:next_gen in
-  Mcp_server.current_cell := new_cell;
+  Mcp_server.set_cell new_cell;
   Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config;
   let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name:ctx.agent_name in
   match run_result with
@@ -252,7 +252,7 @@ let handle_mitosis_handoff ctx args : result =
     let full_context = summary in
     let dna = Mitosis.extract_dna ~config:config_m ~parent_cell:cell ~full_context in
     let prepared_cell = Mitosis.prepare_for_division ~config:config_m ~cell ~full_context in
-    Mcp_server.current_cell := prepared_cell;
+    Mcp_server.set_cell prepared_cell;
     (* Phase 2: Run successor agent *)
     let target = get_string args "target_agent" "claude" in
     let next_gen = prepared_cell.Mitosis.generation + 1 in
@@ -277,7 +277,7 @@ let handle_mitosis_handoff ctx args : result =
     in
     (* Update state regardless of run outcome *)
     let new_cell = Mitosis.create_stem_cell ~generation:next_gen in
-    Mcp_server.current_cell := new_cell;
+    Mcp_server.set_cell new_cell;
     Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_m;
     let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name:ctx.agent_name in
     match run_result with

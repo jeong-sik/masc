@@ -4,9 +4,30 @@
     Legacy handlers have been removed.
 *)
 
-(** Global state for Mitosis cell lifecycle *)
+(** Global state for Mitosis cell lifecycle.
+    Protected by [mitosis_mutex]. Use [get_cell]/[set_cell]/[with_cell_rw]
+    instead of direct ref access. *)
 let current_cell = ref (Mitosis.create_stem_cell ~generation:0)
 let stem_pool = ref (Mitosis.init_pool ~config:Mitosis.default_config)
+let mitosis_mutex = Eio.Mutex.create ()
+
+let get_cell () = Eio.Mutex.use_ro mitosis_mutex (fun () -> !current_cell)
+let get_pool () = Eio.Mutex.use_ro mitosis_mutex (fun () -> !stem_pool)
+
+let set_cell cell =
+  Eio.Mutex.use_rw ~protect:true mitosis_mutex (fun () ->
+    current_cell := cell)
+
+let set_pool pool =
+  Eio.Mutex.use_rw ~protect:true mitosis_mutex (fun () ->
+    stem_pool := pool)
+
+let with_cell_rw f =
+  Eio.Mutex.use_rw ~protect:true mitosis_mutex (fun () ->
+    let cell, pool, result = f !current_cell !stem_pool in
+    current_cell := cell;
+    stem_pool := pool;
+    result)
 
 (** JSON-RPC request *)
 type jsonrpc_request = {

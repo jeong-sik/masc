@@ -166,7 +166,7 @@ let schemas : tool_schema list =
     {
       name = "masc_runtime_verify";
       description =
-        "Strictly verify the active provider/runtime contract used for swarm and benchmark runs. Returns reachability, model match, slots, ctx, configured capacity, active slots, and blocker codes such as provider_unreachable, provider_model_mismatch, slot_count_insufficient, or ctx_mismatch.";
+        "Strictly verify the active provider/runtime contract used for swarm and benchmark runs. Returns reachability, chat-completions contract status, model match, slots, ctx, configured capacity, active slots, and blocker codes such as provider_unreachable, provider_model_mismatch, slot_count_insufficient, ctx_mismatch, or chat_contract_incompatible.";
       input_schema =
         `Assoc
           [

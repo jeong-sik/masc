@@ -174,9 +174,39 @@ let probe_chat_completion_compatible
 let provider_health_reachable ~status ~body:_ =
   status = Some 200
 
-let classify_runtime_blocker ~provider_reachable ~slot_reachable ~expected_model
-    ~actual_model_id ~expected_slots ~actual_slots_total ~expected_ctx ~actual_ctx
-    ~chat_completion_compatible
+let chat_contract_probe_body ~model_id =
+  Yojson.Safe.to_string
+    (`Assoc
+      [
+        ("model", `String model_id);
+        ("messages", `List [ `Assoc [ ("role", `String "user"); ("content", `String "ping") ] ]);
+        ("max_tokens", `Int 1);
+        ("temperature", `Float 0.0);
+      ])
+
+let chat_contract_reachable ~status ~body =
+  if status <> Some 200 then
+    false
+  else
+    match body with
+    | None -> false
+    | Some payload -> (
+        match Yojson.Safe.from_string payload with
+        | exception Yojson.Json_error _ -> false
+        | json -> (
+            match Yojson.Safe.Util.member "choices" json with
+            | `List _ -> true
+            | _ -> false))
+
+let chat_contract_status ~status ~body ~error =
+  match status with
+  | Some 200 when chat_contract_reachable ~status ~body -> "confirmed"
+  | Some _ -> "rejected"
+  | None -> if Option.is_some error then "unknown" else "unknown"
+
+let classify_runtime_blocker ~provider_reachable ~slot_reachable
+    ~chat_contract_status ~expected_model ~actual_model_id ~expected_slots
+    ~actual_slots_total ~expected_ctx ~actual_ctx ~chat_completion_compatible
     =
   if not provider_reachable || not slot_reachable then
     (Some "provider_unreachable", Some "llama runtime health or slots endpoint failed")
@@ -214,6 +244,9 @@ let classify_runtime_blocker ~provider_reachable ~slot_reachable ~expected_model
         (Printf.sprintf "expected ctx %s, got %s"
            (match expected_ctx with Some value -> string_of_int value | None -> "<none>")
            (match actual_ctx with Some value -> string_of_int value | None -> "<mixed-or-missing>")) )
+  else if String.equal chat_contract_status "rejected" then
+    ( Some "chat_contract_incompatible",
+      Some "runtime passed health/slots but failed /v1/chat/completions contract probe" )
   else
     (None, None)
 
@@ -312,7 +345,9 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
     | _ -> None
   in
   let runtime_blocker, detail =
-    classify_runtime_blocker ~provider_reachable ~slot_reachable ~expected_model
+    classify_runtime_blocker ~provider_reachable ~slot_reachable
+      ~chat_contract_status:(if chat_completion_compatible then "confirmed" else "rejected")
+      ~expected_model
       ~actual_model_id ~expected_slots ~actual_slots_total ~expected_ctx
       ~actual_ctx ~chat_completion_compatible
   in
@@ -357,10 +392,10 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
   let configured_max_concurrent_models = Inference_utils.max_concurrent_models in
   let available_model_permits = Inference_utils.model_permits_available () in
   let runtime_rows, provider_reachable, slot_reachable, actual_slots_total,
-      active_slots_now, actual_ctxs, actual_models =
+      active_slots_now, actual_ctxs, actual_models, chat_contract_statuses =
     List.fold_left
       (fun
-        (rows, provider_ok, slot_ok, slots_acc, active_acc, ctxs, models)
+        (rows, provider_ok, slot_ok, slots_acc, active_acc, ctxs, models, chat_states)
         (runtime : Local_runtime_pool.runtime_snapshot)
       ->
         let base_url = String.trim runtime.base_url in
@@ -421,6 +456,27 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
           | Some model -> Some model
           | None -> runtime.model
         in
+        let probe_model =
+          match actual_model with
+          | Some model_id -> Some model_id
+          | None -> (
+              match expected_model with
+              | Some model_id when String.trim model_id <> "" -> Some (String.trim model_id)
+              | _ -> runtime.model)
+        in
+        let chat_status, chat_body, chat_err =
+          match probe_model with
+          | None -> (None, None, Some "chat contract probe skipped: no model id available")
+          | Some model_id ->
+              let url = base_url ^ "/v1/chat/completions" in
+              let body_json = chat_contract_probe_body ~model_id in
+              match http_post_json_text_with_status ~timeout_sec:15 ~url ~body_json with
+              | Ok (status_code, payload) -> (status_code, Some payload, None)
+              | Error err -> (None, None, Some err)
+        in
+        let chat_status_label =
+          chat_contract_status ~status:chat_status ~body:chat_body ~error:chat_err
+        in
         let current_active =
           slot_json |> Option.map active_slots_of_json |> Option.value ~default:0
         in
@@ -441,6 +497,10 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
               ("props_error", string_opt_to_json props_err);
               ("models_status_code", int_opt_to_json models_status);
               ("models_error", string_opt_to_json models_err);
+              ("chat_status_code", int_opt_to_json chat_status);
+              ("chat_contract_status", `String chat_status_label);
+              ("chat_contract_reachable", `Bool (chat_contract_reachable ~status:chat_status ~body:chat_body));
+              ("chat_error", string_opt_to_json chat_err);
               ("expected_model", string_opt_to_json expected_model);
               ("actual_model_id", string_opt_to_json actual_model);
               ("expected_slots", int_opt_to_json expected_slots);
@@ -456,8 +516,9 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
           slots_acc + Option.value ~default:0 actual_slots,
           active_acc + current_active,
           (match actual_ctx with Some value -> value :: ctxs | None -> ctxs),
-          (match actual_model with Some value -> value :: models | None -> models) ))
-      ([], true, true, 0, 0, [], []) runtimes
+          (match actual_model with Some value -> value :: models | None -> models),
+          chat_status_label :: chat_states ))
+      ([], true, true, 0, 0, [], [], []) runtimes
   in
   let actual_ctx =
     match List.sort_uniq compare actual_ctxs with [ value ] -> Some value | _ -> None
@@ -467,9 +528,19 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
     | [ value ] -> Some value
     | _ -> None
   in
+  let overall_chat_contract_status =
+    let states = List.sort_uniq String.compare chat_contract_statuses in
+    if List.mem "rejected" states then
+      "rejected"
+    else if List.mem "unknown" states then
+      "unknown"
+    else
+      "confirmed"
+  in
   let runtime_blocker, detail =
     classify_runtime_blocker ~provider_reachable ~slot_reachable ~expected_model
       ~actual_model_id ~expected_slots ~actual_slots_total ~expected_ctx ~actual_ctx
+      ~chat_contract_status:overall_chat_contract_status
       ~chat_completion_compatible:true
   in
   `Assoc
@@ -481,6 +552,8 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
       ("provider_reachable", `Bool provider_reachable);
       ("slot_reachable", `Bool slot_reachable);
       ("chat_completion_compatible", `Bool true);
+      ("chat_contract_status", `String overall_chat_contract_status);
+      ("chat_contract_reachable", `Bool (String.equal overall_chat_contract_status "confirmed"));
       ("expected_model", string_opt_to_json expected_model);
       ("actual_model_id", string_opt_to_json actual_model_id);
       ("expected_slots", int_opt_to_json expected_slots);

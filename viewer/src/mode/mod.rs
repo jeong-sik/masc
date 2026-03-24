@@ -1767,6 +1767,7 @@ use room_hub::{
     bind_room_controls, refresh_rooms_from_server, remember_recent_room, sync_room_controls,
 };
 
+#[path = "../../../archive/trpg/viewer/trpg_controls.rs"]
 #[cfg(target_arch = "wasm32")]
 mod trpg_controls;
 #[cfg(target_arch = "wasm32")]
@@ -1905,21 +1906,21 @@ async fn seed_monitor_snapshot(doc: web_sys::Document) -> Result<(), String> {
 
 #[cfg(target_arch = "wasm32")]
 async fn seed_council_snapshot(doc: web_sys::Document) -> Result<(), String> {
-    let payload = mcp_tool_call("masc_council_status", json!({})).await?;
+    let payload = mcp_tool_call("masc_governance_status", json!({})).await?;
     let debates = payload
-        .get("active_debates")
+        .get("open_cases")
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let votes = payload
-        .get("active_votes")
+        .get("execution_orders")
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let threads = payload
-        .get("active_threads")
+        .get("total_cases")
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let line = format!(
-        "[snapshot] 활성 토론 {} · 활성 투표 {} · 활성 스레드 {}",
+        "[snapshot] 열린 거버넌스 {} · 실행 대기 {} · 전체 케이스 {}",
         debates, votes, threads
     );
     set_or_prepend_line(
@@ -1934,7 +1935,20 @@ async fn seed_council_snapshot(doc: web_sys::Document) -> Result<(), String> {
 
 #[cfg(target_arch = "wasm32")]
 async fn seed_experiment_snapshot(doc: web_sys::Document) -> Result<(), String> {
-    let payload = mcp_tool_call("experiment_list", json!({ "limit": 20 })).await?;
+    let payload = match mcp_tool_call("experiment_list", json!({ "limit": 20 })).await {
+        Ok(payload) => payload,
+        Err(err) if err.contains("not available on this MCP endpoint") => {
+            set_or_prepend_line(
+                &doc,
+                "experiment-dashboard",
+                "[snapshot] experiment surface unavailable on current MCP endpoint",
+                &["No experiments running."],
+                80,
+            );
+            return Ok(());
+        }
+        Err(err) => return Err(err),
+    };
     let total = payload.get("total").and_then(Value::as_i64).unwrap_or(0);
     let experiments = payload
         .get("experiments")

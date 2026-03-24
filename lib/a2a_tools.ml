@@ -110,22 +110,10 @@ let event_buffers_mutex = Eio.Mutex.create ()
 (* Max events per subscription to prevent memory bloat *)
 let max_buffered_events = Env_config_governance.Timeouts.event_buffer_size
 
-(** Generate UUID-like ID using Hashtbl.hash of timestamp (no Mirage_crypto dependency).
-    For A2A subscriptions, cryptographic randomness is not required.
-*)
+(** Generate stable UUIDv4 identifiers for subscriptions and delegated tasks. *)
 let generate_uuid () =
-  let t = Unix.gettimeofday () in
-  let h1 = Hashtbl.hash t in
-  let h2 = Hashtbl.hash (t *. 1000.0) in
-  let h3 = Hashtbl.hash (t *. 1_000_000.0) in
-  let h4 = Hashtbl.hash (h1 lxor h2) in
-  Printf.sprintf "%08x-%04x-%04x-%04x-%04x%08x"
-    (h1 land 0xFFFFFFFF)
-    (h2 land 0xFFFF)
-    (h3 land 0xFFFF)
-    (h4 land 0xFFFF)
-    ((h1 lxor h3) land 0xFFFF)
-    (h2 lxor h4)
+  let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
+  Uuidm.to_string uuid
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =
@@ -170,10 +158,11 @@ let latest_heartbeat_results : (string, heartbeat_result_snapshot) Hashtbl.t =
 
 let heartbeat_mutex = Eio.Mutex.create ()
 
-let heartbeat_snapshot_seq = Atomic.make 0
+let heartbeat_snapshot_seq = ref 0
 
 let next_heartbeat_snapshot_seq () =
-  Atomic.fetch_and_add heartbeat_snapshot_seq 1 + 1
+  heartbeat_snapshot_seq := !heartbeat_snapshot_seq + 1;
+  !heartbeat_snapshot_seq
 
 let latest_heartbeat_task agent =
   Eio.Mutex.use_ro heartbeat_mutex (fun () ->

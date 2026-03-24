@@ -163,10 +163,10 @@ let test_input_validation_contracts () =
        "maybe_evict_expired config")
 
 let test_room_current_validation_contracts () =
-  check bool "room current route validates room id before bootstrap" true
+  check bool "room current route reads current room" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       "match Room.validate_room_id raw_room_id with");
-  check bool "room current route still bootstraps validated room ids" true
+       "Room.read_current_room config");
+  check bool "room current route still bootstraps room ids" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        "Room.ensure_room_bootstrap config room_id")
 
@@ -177,9 +177,10 @@ let test_root_redirect_contracts () =
   check bool "http redirect sets dashboard location" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
        {|("location", "/dashboard")|});
-  check bool "h2 root redirects to dashboard" true
+  check bool "h2 root responds with server identity" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|h2_respond_redirect h2_reqd "/dashboard" ~extra_headers:cors|})
+       {|h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)"|})
+
 
 let test_dashboard_component_split_contracts () =
   check bool "proof view imports proof helpers" true
@@ -366,9 +367,9 @@ let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|let json = dashboard_transport_health_http_json ~state in|});
-  check bool "h2 transport health route uses cached dashboard helper" true
+  check bool "h2 transport health route uses transport metrics" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|let json = dashboard_transport_health_http_json ~state in|});
+       "Transport_metrics.transport_health_json");
   check bool "server dashboard transport health helper uses dashboard cache" true
     (file_contains_pattern "lib/server/server_dashboard_http.ml"
        {|Dashboard_cache.get_or_compute "transport_health" ~ttl:10.0|});

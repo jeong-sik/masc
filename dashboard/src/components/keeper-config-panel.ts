@@ -139,14 +139,52 @@ function ModelList({ models }: { models: string[] }) {
   `
 }
 
-function LongText({ text }: { text: string }) {
+function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: number | null }) {
   if (!text || text.trim() === '') return html`<span class="text-[11px] text-text-muted italic">--</span>`
-  const truncated = text.length > 200 ? text.slice(0, 200) + '...' : text
+  const truncated =
+    truncateAt !== null && truncateAt >= 0 && text.length > truncateAt
+      ? text.slice(0, truncateAt) + '...'
+      : text
   return html`<div class="text-[12px] text-text-body whitespace-pre-wrap max-h-[140px] overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-md p-3 rounded-xl mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
 }
 
 function formatMaybeNumber(value: number | null, suffix = ''): string {
   return value === null ? '--' : `${value}${suffix}`
+}
+
+function formatMaybeFloat(value: number | null, digits = 1, suffix = ''): string {
+  return value === null ? '--' : `${value.toFixed(digits)}${suffix}`
+}
+
+function PromptSourceBadge({ source }: { source: string }) {
+  const tone =
+    source === 'override'
+      ? 'bg-amber-500/10 text-amber-300 border-amber-400/20'
+      : source === 'file'
+        ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/20'
+        : 'bg-white/5 text-text-dim border-white/10'
+  return html`<span class="text-[10px] font-bold px-2 py-0.5 rounded-md border ${tone} shadow-sm">${source.toUpperCase()}</span>`
+}
+
+function PromptBlock({
+  title,
+  block,
+}: {
+  title: string
+  block: { key: string; source: string; text: string }
+}) {
+  return html`
+    <div class="mt-2">
+      <div class="flex items-center justify-between gap-2 mb-1">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${title}</div>
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] text-text-dim">${block.key}</span>
+          <${PromptSourceBadge} source=${block.source} />
+        </div>
+      </div>
+      <${LongText} text=${block.text} truncateAt=${null} />
+    </div>
+  `
 }
 
 const SOUL_PROFILES = ['balanced', 'safety', 'delivery', 'research', 'relationship', 'minimal'] as const
@@ -316,6 +354,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Instructions</div>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
+    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-3 mb-0.5">System prompt blocks</div>
+    <${PromptBlock} title="Constitution" block=${c.prompt.system_prompt_blocks.constitution} />
+    <${PromptBlock} title="World" block=${c.prompt.system_prompt_blocks.world} />
+    <${PromptBlock} title="Capabilities" block=${c.prompt.system_prompt_blocks.capabilities} />
+    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-3 mb-0.5">Effective system prompt</div>
+    <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
   `
 
   return html`
@@ -452,8 +496,17 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${SectionHeader} title="Metrics" />
       <${ConfigRow} label="Generation" value=${String(c.metrics.generation)} />
       <${ConfigRow} label="Total turns" value=${String(c.metrics.total_turns)} />
+      <${ConfigRow} label="Total input tokens" value=${formatTokens(c.metrics.total_input_tokens)} />
+      <${ConfigRow} label="Total output tokens" value=${formatTokens(c.metrics.total_output_tokens)} />
       <${ConfigRow} label="Total tokens" value=${formatTokens(c.metrics.total_tokens)} />
       <${ConfigRow} label="Total cost" value=${'$' + c.metrics.total_cost_usd.toFixed(4)} />
+      <${ConfigRow} label="Last model" value=${c.metrics.last_model_used || '--'} />
+      <${ConfigRow} label="Last input tokens" value=${formatTokens(c.metrics.last_input_tokens)} />
+      <${ConfigRow} label="Last output tokens" value=${formatTokens(c.metrics.last_output_tokens)} />
+      <${ConfigRow} label="Last total tokens" value=${formatTokens(c.metrics.last_total_tokens)} />
+      <${ConfigRow} label="Last latency" value=${formatMaybeNumber(c.metrics.last_latency_ms, 'ms')} />
+      <${ConfigRow} label="Last throughput" value=${formatMaybeFloat(c.metrics.last_total_tokens_per_sec, 1, ' tok/s')} />
+      <${ConfigRow} label="Last output throughput" value=${formatMaybeFloat(c.metrics.last_output_tokens_per_sec, 1, ' tok/s')} />
       <${ConfigRow} label="Compactions" value=${String(c.metrics.compaction_count)} />
 
       ${'' /* --- Sources (read-only) --- */}

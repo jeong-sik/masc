@@ -41,7 +41,6 @@ let schemas : tool_schema list =
                 ] );
             ("required", `List [ `String "agent_id"; `String "message" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_voice_session_start";
@@ -59,7 +58,6 @@ let schemas : tool_schema list =
                 ] );
             ("required", `List [ `String "agent_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_voice_session_end";
@@ -73,14 +71,12 @@ let schemas : tool_schema list =
                 [ ("agent_id", `Assoc [ ("type", `String "string") ]) ] );
             ("required", `List [ `String "agent_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_voice_sessions";
       description = "List active voice sessions. Use to check existing sessions before starting a new one or debugging.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
-      visibility = Public;
     };
     {
       name = "masc_voice_agent";
@@ -94,14 +90,12 @@ let schemas : tool_schema list =
                 [ ("agent_id", `Assoc [ ("type", `String "string") ]) ] );
             ("required", `List [ `String "agent_id" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_voice_transcript";
       description = "Get the current transcript (STT output). Requires STT service integration and an active voice session.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
-      visibility = Public;
     };
     {
       name = "masc_voice_conference_start";
@@ -124,7 +118,6 @@ let schemas : tool_schema list =
                 ] );
             ("required", `List [ `String "agent_ids" ]);
           ];
-      visibility = Public;
     };
     {
       name = "masc_voice_conference_end";
@@ -146,7 +139,6 @@ let schemas : tool_schema list =
                 ] );
             ("required", `List [ `String "agent_ids" ]);
           ];
-      visibility = Public;
     };
   ]
 

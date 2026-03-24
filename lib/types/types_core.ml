@@ -720,23 +720,11 @@ let tool_result_to_yojson r =
   | Some d -> `Assoc (base @ [("data", d)])
   | None -> `Assoc base
 
-(** Tool visibility controls which MCP surface a tool appears on.
-    - [Public]: Visible to TUI clients (Claude Code, Codex, Gemini) and agents.
-    - [Agent_only]: Internal agent use only; filtered from MCP tools/list.
-    - [Admin]: Requires explicit admin capability at runtime.
-    - [Hidden]: Deprecated or inactive; only visible with include_hidden=true. *)
-type tool_visibility =
-  | Public
-  | Agent_only
-  | Admin
-  | Hidden
-
 (** Tool schema for MCP *)
 type tool_schema = {
   name: string;
   description: string;
   input_schema: Yojson.Safe.t;
-  visibility: tool_visibility;
 }
 
 (** Structured result for claim_next scheduling (avoids brittle string parsing).

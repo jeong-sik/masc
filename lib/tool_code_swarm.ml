@@ -135,7 +135,6 @@ let schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "pattern" ]);
           ];
-    visibility = Public;
     };
     {
       name = "masc_code_swarm_verify";
@@ -170,7 +169,6 @@ let schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "plan_id" ]);
           ];
-    visibility = Public;
     };
     {
       name = "masc_code_swarm_merge";
@@ -235,6 +233,5 @@ let schemas : Types.tool_schema list =
                 ] );
             ("required", `List [ `String "plan_id" ]);
           ];
-    visibility = Public;
     };
   ]

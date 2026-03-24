@@ -36,6 +36,5 @@ Recommended for file-modifying tasks. Default: false.");
       ]);
       ("required", `List [`String "goal"]);
     ];
-    visibility = Public;
   };
 ]

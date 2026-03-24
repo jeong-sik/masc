@@ -29,7 +29,6 @@ and keeps changes that pass all tests. Results logged to research_results.tsv.";
       ]);
       ("required", `List []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_research_status";
@@ -39,7 +38,6 @@ Returns the contents of research_results.tsv with experiment outcomes.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
 ]
 

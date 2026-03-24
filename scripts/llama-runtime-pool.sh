@@ -13,6 +13,11 @@ DEFAULT_CHAT_TEMPLATE="${LLAMA_POOL_CHAT_TEMPLATE:-chatml}"
 DEFAULT_CHAT_TEMPLATE_KWARGS="${LLAMA_POOL_CHAT_TEMPLATE_KWARGS:-{\"enable_thinking\":false}}"
 SEED_BINARY=""
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required but not found in PATH" >&2
+  exit 1
+fi
+
 mkdir -p "$STATE_DIR"
 
 usage() {
@@ -165,6 +170,39 @@ port_is_listening() {
   lsof -iTCP:"$1" -sTCP:LISTEN -t >/dev/null 2>&1
 }
 
+chat_probe_payload() {
+  jq -cn --arg model "$1" \
+    '{model:$model,messages:[{role:"user",content:"ping"}],max_tokens:1,temperature:0}'
+}
+
+chat_contract_status() {
+  local port="$1"
+  local payload body status rc
+  payload="$(chat_probe_payload "$MODEL_ALIAS")"
+  if body="$(curl -sS --http1.1 --max-time 15 \
+    -H 'Content-Type: application/json' \
+    -d "$payload" \
+    -w '\n%{http_code}' \
+    "$(runtime_url "$port")/v1/chat/completions" 2>/dev/null)"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "${rc:-0}" -ne 0 ]; then
+    printf 'unknown'
+    return 0
+  fi
+  status="${body##*$'\n'}"
+  body="${body%$'\n'*}"
+  if [ "$status" = "200" ] && printf '%s' "$body" | jq -e '.choices | type == "array"' >/dev/null 2>&1; then
+    printf 'confirmed'
+  elif [[ "$status" =~ ^(400|404|405|415|422)$ ]]; then
+    printf 'rejected'
+  else
+    printf 'unknown'
+  fi
+}
+
 wait_for_runtime() {
   local port="$1"
   local deadline=$((SECONDS + 45))
@@ -236,10 +274,19 @@ print_env_value() {
   resolve_seed_args
   local max_port=$((SEED_PORT + TARGET_SHARDS - 1))
   local endpoints=()
-  local port
+  local port contract_status
   for port in $(seq "$SEED_PORT" "$max_port"); do
-    if port_is_listening "$port"; then
+    if ! port_is_listening "$port"; then
+      continue
+    fi
+    contract_status="$(chat_contract_status "$port")"
+    if [ "$contract_status" != "rejected" ]; then
       endpoints+=("$(runtime_url "$port")")
+      if [ "$contract_status" = "unknown" ]; then
+        echo "warning: including $(runtime_id "$port") in runtime pool with unconfirmed chat contract (probe timed out or transport failed)" >&2
+      fi
+    else
+      echo "warning: excluding $(runtime_id "$port") from runtime pool; /v1/chat/completions contract probe failed" >&2
     fi
   done
   local joined=""
@@ -269,12 +316,19 @@ start_pool() {
 
 status_pool() {
   resolve_seed_args
-  local port
+  local port contract_status
   local max_port=$((SEED_PORT + TARGET_SHARDS - 1))
   for port in $(seq "$SEED_PORT" "$max_port"); do
     printf '%s\t%s\t' "$(runtime_id "$port")" "$(runtime_url "$port")"
     if port_is_listening "$port"; then
-      printf 'up\n'
+      contract_status="$(chat_contract_status "$port")"
+      if [ "$contract_status" = "confirmed" ]; then
+        printf 'up-chat\n'
+      elif [ "$contract_status" = "unknown" ]; then
+        printf 'up-unknown\n'
+      else
+        printf 'up-nochat\n'
+      fi
     else
       printf 'down\n'
     fi

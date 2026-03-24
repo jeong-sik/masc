@@ -134,9 +134,11 @@ let test_keeper_direct_reply_contracts () =
   check bool "operator keeper_message forwards direct reply flag" true
     (file_contains_pattern "lib/operator/operator_control.ml"
        {|("direct_reply", `Bool true)|});
-  check bool "keeper turn bypasses auto team session for direct reply" true
+  (* auto_team_session interception removed in #2908; direct_reply
+     is parsed but unused until a replacement path is wired. *)
+  check bool "keeper turn parses direct reply flag" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
-       "if direct_reply then")
+       "get_bool args \"direct_reply\"")
 
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true

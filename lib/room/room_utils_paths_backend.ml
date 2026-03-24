@@ -13,13 +13,7 @@ let rooms_root_dir config = Filename.concat (masc_root_dir config) "rooms"
 let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.json"
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
 
-(* Legacy paths (pre-room refactor) — kept for read_current_room backward compat.
-   @deprecated Will be removed after all users migrate to scope-based config. *)
-let legacy_rooms_root_dir config = Filename.concat config.base_path "rooms"
-let legacy_registry_root_path config = Filename.concat config.base_path "rooms.json"
-let legacy_current_room_path config = Filename.concat config.base_path "current_room"
-
-(** Read current room ID from .masc/current_room with legacy fallback. *)
+(** Read current room ID from .masc/current_room. *)
 let read_current_room config =
   let read_from path =
     match Safe_ops.read_file_safe path with
@@ -34,20 +28,13 @@ let read_current_room config =
   in
   match read_from (current_room_root_path config) with
   | Some room_id -> Some room_id
-  | None ->
-      (match read_from (legacy_current_room_path config) with
-       | Some legacy_room -> Some legacy_room
-       | None -> Some "default")
+  | None -> Some "default"
 
 let room_dir_for config room_id =
   if room_id = "default" then
     masc_root_dir config
   else
-    let root_path = Filename.concat (rooms_root_dir config) room_id in
-    let legacy_path = Filename.concat (legacy_rooms_root_dir config) room_id in
-    if Sys.file_exists root_path then root_path
-    else if Sys.file_exists legacy_path then legacy_path
-    else root_path
+    Filename.concat (rooms_root_dir config) room_id
 
 (** Resolve the initial scope from the current_room file.
     Called once at config creation time; the result is stored in config.scope
@@ -60,7 +47,7 @@ let resolve_initial_scope config =
 (** Scope-based directory resolution.
     Both branches are pure — no filesystem reads.
     Default scope resolves to the root .masc/ directory.
-    Named scope resolves to .masc/rooms/{id}/ (with legacy fallback).
+    Named scope resolves to .masc/rooms/{id}/.
     Callers that need the current_room file must call
     [config_with_resolved_scope] at config creation time. *)
 let masc_dir config =

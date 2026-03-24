@@ -441,21 +441,6 @@ let test_current_room_root_path () =
   let result = Room_utils.current_room_root_path cfg in
   check string "current room path" "/tmp/test/.masc/current_room" result
 
-let test_legacy_rooms_root_dir () =
-  let cfg = make_test_config ~base_path:"/tmp/test" ~cluster_name:"default" in
-  let result = Room_utils.legacy_rooms_root_dir cfg in
-  check string "legacy rooms dir" "/tmp/test/rooms" result
-
-let test_legacy_registry_root_path () =
-  let cfg = make_test_config ~base_path:"/tmp/test" ~cluster_name:"default" in
-  let result = Room_utils.legacy_registry_root_path cfg in
-  check string "legacy registry path" "/tmp/test/rooms.json" result
-
-let test_legacy_current_room_path () =
-  let cfg = make_test_config ~base_path:"/tmp/test" ~cluster_name:"default" in
-  let result = Room_utils.legacy_current_room_path cfg in
-  check string "legacy current room path" "/tmp/test/current_room" result
-
 let test_masc_root_dir_with_cluster_nested () =
   let cfg = make_test_config ~base_path:"/a/b/c" ~cluster_name:"prod" in
   let result = Room_utils.masc_root_dir cfg in
@@ -572,9 +557,6 @@ let () =
       test_case "rooms_root_dir" `Quick test_rooms_root_dir;
       test_case "registry_root_path" `Quick test_registry_root_path;
       test_case "current_room_root_path" `Quick test_current_room_root_path;
-      test_case "legacy_rooms_root_dir" `Quick test_legacy_rooms_root_dir;
-      test_case "legacy_registry_root_path" `Quick test_legacy_registry_root_path;
-      test_case "legacy_current_room_path" `Quick test_legacy_current_room_path;
       test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
       test_case "rooms_root_dir with cluster" `Quick test_rooms_root_dir_with_cluster;
     ];

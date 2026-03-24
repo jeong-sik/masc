@@ -36,10 +36,7 @@ let read_current_room config =
     let result =
       match read_from path with
       | Some room_id -> Some room_id
-      | None ->
-          (match read_from (legacy_current_room_path config) with
-           | Some legacy_room -> Some legacy_room
-           | None -> Some "default")
+      | None -> Some "default"
     in
     current_room_cache := (path, mtime, result);
     result
@@ -58,8 +55,6 @@ let write_current_room config room_id =
   in
   (* Canonical location inside .masc/ *)
   write_to (current_room_path config);
-  (* Legacy compatibility: keep base_path/current_room in sync *)
-  write_to (legacy_current_room_path config);
   (* Invalidate the mtime cache so next read picks up the new value *)
   current_room_cache := ("", 0.0, None)
 

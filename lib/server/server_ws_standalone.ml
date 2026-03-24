@@ -48,6 +48,9 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
   in
   Server_mcp_transport_ws.with_sessions_rw (fun () ->
     Hashtbl.replace Server_mcp_transport_ws.sessions session_id session);
+  Transport_metrics.set_ws_sessions
+    (Server_mcp_transport_ws.with_sessions_rw (fun () ->
+       Hashtbl.length Server_mcp_transport_ws.sessions));
   (* Register as SSE external subscriber for broadcast events *)
   Sse.subscribe_external ~id:session_id
     ~is_alive:(fun () ->

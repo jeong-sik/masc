@@ -180,7 +180,7 @@ let ws_enabled () =
   match Sys.getenv_opt "MASC_WS_ENABLED" with
   | Some raw -> (
       match String.trim raw |> String.lowercase_ascii with
-      | "0" | "false" | "" -> false
+      | "0" | "false" -> false
       | _ -> true)
   | None -> true
 

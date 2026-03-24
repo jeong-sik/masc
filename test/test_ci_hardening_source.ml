@@ -332,6 +332,13 @@ let test_transport_route_contracts () =
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|Server_webrtc_transport.is_enabled ()|})
 
+let test_transport_health_contracts () =
+  check bool "standalone ws updates transport metrics on connect" true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|Transport_metrics.set_ws_sessions|});
+  check bool "transport metrics ws env parse matches runtime server" true
+    (file_contains_pattern "lib/transport_metrics.ml"
+       {|Server_ws_standalone.is_enabled ()|})
 let test_mermaid_xss_contracts () =
   check bool "mermaid securityLevel is strict (not loose)" true
     (file_contains_pattern "dashboard/src/components/command/helpers.ts"
@@ -361,6 +368,8 @@ let () =
              test_dashboard_executor_pool_contracts;
            test_case "transport route contracts" `Quick
              test_transport_route_contracts;
+           test_case "transport health contracts" `Quick
+             test_transport_health_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
          ]);
     ]

@@ -23,6 +23,21 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      (match value_opt with
+      | Some value -> Unix.putenv name value
+      | None -> Unix.putenv name "");
+      f ())
+
 (* ============================================================
    Initialization
    ============================================================ *)
@@ -126,6 +141,13 @@ let test_ws_sessions () =
     "masc_ws_sessions_total" () in
   check (float 0.01) "ws sessions" 4.0 v
 
+let test_ws_enabled_blank_env_matches_runtime () =
+  with_env "MASC_WS_ENABLED" (Some "") (fun () ->
+    check bool "transport metrics treats blank as enabled" true
+      (TM.ws_enabled ());
+    check bool "runtime server treats blank as enabled" true
+      (Masc_mcp.Server_ws_standalone.is_enabled ()))
+
 (* ============================================================
    Agent Health Metrics
    ============================================================ *)
@@ -224,6 +246,8 @@ let () =
     ]);
     ("websocket", [
       test_case "set_ws_sessions" `Quick test_ws_sessions;
+      test_case "blank env stays enabled" `Quick
+        test_ws_enabled_blank_env_matches_runtime;
     ]);
     ("agent_health", [
       test_case "set_agent_heartbeat_age" `Quick test_agent_heartbeat_age;

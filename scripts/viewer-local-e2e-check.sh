@@ -26,6 +26,8 @@ FAIL_COUNT=0
 STEP_INDEX=0
 TOTAL_STEPS=4
 LOG_DIR="${TMPDIR:-/tmp}/masc-viewer-local-e2e-$$"
+HARNESS_HELPERS_LOADED=0
+VIEWER_MCP_SESSION_ID=""
 
 STEP_LABELS=()
 STEP_RESULTS=()
@@ -108,6 +110,148 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+resolve_repo_script() {
+  local script_path="$1"
+  local primary="$REPO_ROOT/$script_path"
+  local archived="$REPO_ROOT/archive/trpg/$script_path"
+  local archived_actual=""
+
+  case "$script_path" in
+    scripts/harness_game_view_precondition.sh)
+      archived_actual="$REPO_ROOT/archive/trpg/scripts/game_view_precondition.sh"
+      ;;
+    scripts/harness_trpg_session_contract.sh)
+      archived_actual="$REPO_ROOT/archive/trpg/scripts/trpg_session_contract.sh"
+      ;;
+    scripts/run_trpg_grimland_smoke.sh)
+      archived_actual="$REPO_ROOT/archive/trpg/scripts/trpg_grimland_smoke.sh"
+      ;;
+  esac
+
+  if [ -x "$primary" ]; then
+    printf '%s\n' "$primary"
+    return 0
+  fi
+  if [ -n "$archived_actual" ] && [ -x "$archived_actual" ]; then
+    printf '%s\n' "$archived_actual"
+    return 0
+  fi
+  if [ -x "$archived" ]; then
+    printf '%s\n' "$archived"
+    return 0
+  fi
+
+  echo "missing harness script: $script_path" >&2
+  echo "checked: $primary" >&2
+  if [ -n "$archived_actual" ]; then
+    echo "checked: $archived_actual" >&2
+  fi
+  echo "checked: $archived" >&2
+  return 1
+}
+
+ensure_mcp_harness() {
+  if [ "$HARNESS_HELPERS_LOADED" -eq 1 ]; then
+    return 0
+  fi
+  export MCP_SESSION_ID="${MCP_SESSION_ID:-viewer-local-e2e-$$}"
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/scripts/harness/lib/test_framework.sh"
+  HARNESS_HELPERS_LOADED=1
+}
+
+ensure_viewer_mcp_session() {
+  if [ -n "$VIEWER_MCP_SESSION_ID" ]; then
+    return 0
+  fi
+
+  local headers_file body_file
+  headers_file="$(mktemp -t viewer-mcp-init-headers)"
+  body_file="$(mktemp -t viewer-mcp-init-body)"
+
+  if ! curl -sS -m 30 -D "$headers_file" -o "$body_file" -X POST "$MCP_URL" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"viewer-local-e2e","version":"1.0"},"capabilities":{}}}' \
+    >/dev/null; then
+    rm -f "$headers_file" "$body_file"
+    echo "failed to initialize MCP session" >&2
+    return 1
+  fi
+
+  VIEWER_MCP_SESSION_ID="$(
+    awk '
+      tolower($0) ~ /^mcp-session-id:/ {
+        sub(/^[^:]+:[[:space:]]*/, "", $0)
+        sub(/\r$/, "", $0)
+        print $0
+        exit
+      }
+    ' "$headers_file"
+  )"
+
+  rm -f "$headers_file" "$body_file"
+  [ -n "$VIEWER_MCP_SESSION_ID" ]
+}
+
+viewer_call_tool() {
+  local id="$1"
+  local name="$2"
+  local args_json="$3"
+  local raw
+
+  ensure_viewer_mcp_session
+  raw="$(curl -sS -m 60 -X POST "$MCP_URL" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H "mcp-session-id: $VIEWER_MCP_SESSION_ID" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")"
+
+  if printf '%s' "$raw" | rg -q '^data:'; then
+    printf '%s' "$raw" | sed -n 's/^data: //p' | tail -n1
+  else
+    printf '%s' "$raw"
+  fi
+}
+
+viewer_extract_is_error() {
+  jq -r '
+    if .error then "true"
+    else try (.result.isError | tostring) catch "false"
+    end
+  '
+}
+
+viewer_extract_text() {
+  jq -r '
+    if .error then (.error.message // "")
+    else try .result.content[0].text catch ""
+    end
+  '
+}
+
+viewer_extract_result_json() {
+  jq -c '
+    if .error then {}
+    else
+      try (.result.content[0].text | fromjson | if has("result") and .result != null then .result else . end)
+      catch {}
+    end
+  '
+}
+
+tool_text_json() {
+  jq -c 'try (.result.content[0].text | fromjson) catch empty'
+}
+
+extract_result_json() {
+  extract_result
+}
+
+extract_is_error() {
+  jq -r 'try (.result.isError) catch "false"'
+}
+
 step_check_commands() {
   local missing=()
   local cmd
@@ -153,12 +297,91 @@ step_viewer_build() {
 }
 
 step_game_view_contract() {
-  (cd "$REPO_ROOT" && MCP_URL="$MCP_URL" scripts/harness_game_view_precondition.sh)
+  local rooms_raw rooms_text
+  rooms_raw="$(viewer_call_tool 2101 "masc_rooms_list" "{}")"
+  if [ "$(printf '%s' "$rooms_raw" | viewer_extract_is_error)" = "true" ]; then
+    printf '%s\n' "$rooms_raw"
+    return 1
+  fi
+  rooms_text="$(printf '%s' "$rooms_raw" | viewer_extract_text)"
+  if ! printf '%s\n' "$rooms_text" | rg -q '"current_room"'; then
+    echo "masc_rooms_list did not return current_room"
+    printf '%s\n' "$rooms_text"
+    return 1
+  fi
+
+  local pause_raw pause_json
+  pause_raw="$(viewer_call_tool 2102 "masc_pause_status" "{}")"
+  pause_json="$(printf '%s' "$pause_raw" | viewer_extract_text | jq -c 'try fromjson catch {}')"
+  if ! printf '%s' "$pause_json" | jq -e '.ok == true and (.paused == false or .status == "running")' >/dev/null; then
+    echo "masc_pause_status returned unexpected payload"
+    printf '%s\n' "$pause_json"
+    return 1
+  fi
+
+  local keeper_raw keeper_json
+  keeper_raw="$(viewer_call_tool 2103 "masc_keeper_list" '{"limit":10}')"
+  keeper_json="$(printf '%s' "$keeper_raw" | viewer_extract_text | jq -c 'try fromjson catch {}')"
+  if ! printf '%s' "$keeper_json" | jq -e '.count >= 0 and (.keepers | type == "array")' >/dev/null; then
+    echo "masc_keeper_list returned unexpected payload"
+    printf '%s\n' "$keeper_json"
+    return 1
+  fi
+
+  local gov_raw gov_json
+  gov_raw="$(viewer_call_tool 2104 "masc_governance_status" "{}")"
+  gov_json="$(printf '%s' "$gov_raw" | viewer_extract_text | jq -c 'try fromjson catch {}')"
+  if ! printf '%s' "$gov_json" | jq -e '.total_cases >= 0 and .execution_orders >= 0' >/dev/null; then
+    echo "masc_governance_status returned unexpected payload"
+    printf '%s\n' "$gov_json"
+    return 1
+  fi
 }
 
 step_trpg_session_contract() {
-  local session_id="viewer-local-e2e-$(date +%s)-$$"
-  (cd "$REPO_ROOT" && MCP_URL="$MCP_URL" SESSION_ID="$session_id" scripts/harness_trpg_session_contract.sh)
+  local agent_name="viewer-local-e2e"
+  local init_raw join_raw start_raw start_json session_id status_raw status_json stop_raw leave_raw
+
+  init_raw="$(viewer_call_tool 2201 "masc_init" "$(jq -cn --arg a "$agent_name" '{agent_name:$a}')")"
+  if [ "$(printf '%s' "$init_raw" | viewer_extract_is_error)" = "true" ]; then
+    printf '%s\n' "$init_raw"
+    return 1
+  fi
+
+  join_raw="$(viewer_call_tool 2202 "masc_join" "$(jq -cn --arg a "$agent_name" '{agent_name:$a,capabilities:["viewer","team-session"]}')")"
+  if [ "$(printf '%s' "$join_raw" | viewer_extract_is_error)" = "true" ]; then
+    printf '%s\n' "$join_raw"
+    return 1
+  fi
+
+  start_raw="$(viewer_call_tool 2203 "masc_team_session_start" '{"goal":"viewer local e2e contract","duration_seconds":120,"checkpoint_interval_sec":20,"min_agents":1,"report_formats":["json"]}')"
+  start_json="$(printf '%s' "$start_raw" | viewer_extract_result_json)"
+  session_id="$(printf '%s' "$start_json" | jq -r '.session_id // empty')"
+  if [ -z "$session_id" ]; then
+    echo "masc_team_session_start did not return session_id"
+    printf '%s\n' "$start_json"
+    return 1
+  fi
+
+  status_raw="$(viewer_call_tool 2204 "masc_team_session_status" "$(jq -cn --arg s "$session_id" '{session_id:$s}')")"
+  status_json="$(printf '%s' "$status_raw" | viewer_extract_result_json)"
+  if ! printf '%s' "$status_json" | jq -e --arg s "$session_id" '.session.session_id == $s and .summary != null' >/dev/null; then
+    echo "masc_team_session_status returned unexpected payload"
+    printf '%s\n' "$status_json"
+    return 1
+  fi
+
+  stop_raw="$(viewer_call_tool 2205 "masc_team_session_stop" "$(jq -cn --arg s "$session_id" '{session_id:$s,reason:"viewer-local-e2e",generate_report:false}')")"
+  if [ "$(printf '%s' "$stop_raw" | viewer_extract_is_error)" = "true" ]; then
+    printf '%s\n' "$stop_raw"
+    return 1
+  fi
+
+  leave_raw="$(viewer_call_tool 2206 "masc_leave" "$(jq -cn --arg a "$agent_name" '{agent_name:$a}')")"
+  if [ "$(printf '%s' "$leave_raw" | viewer_extract_is_error)" = "true" ]; then
+    printf '%s\n' "$leave_raw"
+    return 1
+  fi
 }
 
 step_trpg_smoke() {
@@ -168,25 +391,87 @@ step_trpg_smoke() {
     echo "--run-smoke requires --keeper-models (or KEEPER_MODELS env)"
     return 1
   fi
-  local smoke_room_id
-  smoke_room_id="$(trim "$ROOM_ID")"
-  if [ -z "$smoke_room_id" ]; then
-    smoke_room_id="local-e2e-$(date +%s)-$$"
-  fi
-  echo "smoke room_id=$smoke_room_id"
+  local agent_name="viewer-local-smoke"
+  local init_raw join_raw start_raw start_json session_id step_raw step_json
+  local events_raw events_json deadline
 
-  (cd "$REPO_ROOT" && \
-    MCP_URL="$MCP_URL" \
-    ROOM_ID="$smoke_room_id" \
-    WORLD_PRESET_ID="$WORLD_PRESET_ID" \
-    DM_PRESET_ID="$DM_PRESET_ID" \
-    PARTY_SIZE="$PARTY_SIZE" \
-    POOL_SIZE="$POOL_SIZE" \
-    RUN_ROUND="$RUN_ROUND" \
-    ROUNDS="$ROUNDS" \
-    ROUND_TIMEOUT_SEC="$ROUND_TIMEOUT_SEC" \
-    KEEPER_MODELS="$model_csv" \
-    scripts/run_trpg_grimland_smoke.sh)
+  init_raw="$(viewer_call_tool 2301 "masc_init" "$(jq -cn --arg a "$agent_name" '{agent_name:$a}')")"
+  if [ "$(printf '%s' "$init_raw" | viewer_extract_is_error)" = "true" ]; then
+    printf '%s\n' "$init_raw"
+    return 1
+  fi
+
+  join_raw="$(viewer_call_tool 2302 "masc_join" "$(jq -cn --arg a "$agent_name" '{agent_name:$a,capabilities:["viewer","smoke","local64"]}')")"
+  if [ "$(printf '%s' "$join_raw" | viewer_extract_is_error)" = "true" ]; then
+    printf '%s\n' "$join_raw"
+    return 1
+  fi
+
+  start_raw="$(viewer_call_tool 2303 "masc_team_session_start" '{"goal":"viewer local smoke","duration_seconds":180,"checkpoint_interval_sec":20,"min_agents":1,"scale_profile":"local64","report_formats":["json"]}')"
+  start_json="$(printf '%s' "$start_raw" | viewer_extract_result_json)"
+  session_id="$(printf '%s' "$start_json" | jq -r '.session_id // empty')"
+  if [ -z "$session_id" ]; then
+    echo "viewer smoke failed to obtain session_id"
+    printf '%s\n' "$start_json"
+    return 1
+  fi
+
+  step_raw="$(
+    viewer_call_tool 2304 "masc_team_session_step" "$(
+      jq -cn --arg s "$session_id" --arg a "$agent_name" --arg prompt "Leave exactly one short line proving local64 smoke worker execution." '
+        {
+          session_id:$s,
+          actor:$a,
+          wait_mode:"background",
+          spawn_batch:[
+            {
+              spawn_role:"viewer-smoke-worker",
+              worker_class:"executor",
+              worker_size:"lg",
+              runtime_pool:"local64",
+              spawn_timeout_seconds:60,
+              spawn_prompt:$prompt
+            }
+          ]
+        }
+      '
+    )"
+  )"
+  if [ "$(printf '%s' "$step_raw" | viewer_extract_is_error)" = "true" ]; then
+    printf '%s\n' "$step_raw"
+    return 1
+  fi
+  step_json="$(printf '%s' "$step_raw" | viewer_extract_result_json)"
+  if ! printf '%s' "$step_json" | jq -e '.spawn.results[0].success == true or .spawn.success == true or .spawn.status == "accepted"' >/dev/null; then
+    echo "viewer smoke spawn was not accepted"
+    printf '%s\n' "$step_json"
+    return 1
+  fi
+
+  deadline=$(( $(date +%s) + 90 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    events_raw="$(viewer_call_tool 2305 "masc_team_session_events" "$(jq -cn --arg s "$session_id" '{session_id:$s,event_types:["team_step_spawn","session_agent_attached","team_turn"],limit:200}')")"
+    events_json="$(printf '%s' "$events_raw" | viewer_extract_result_json)"
+    if printf '%s' "$events_json" | jq -e '
+      ([.events[]? | select(.event_type == "team_step_spawn" and .detail.success == true)] | length) >= 1
+      and ([.events[]? | select(.event_type == "team_turn")] | length) >= 1
+    ' >/dev/null; then
+      break
+    fi
+    sleep 2
+  done
+
+  if ! printf '%s' "$events_json" | jq -e '
+    ([.events[]? | select(.event_type == "team_step_spawn" and .detail.success == true)] | length) >= 1
+    and ([.events[]? | select(.event_type == "team_turn")] | length) >= 1
+  ' >/dev/null; then
+    echo "viewer smoke did not observe spawn + turn within timeout"
+    printf '%s\n' "$events_json"
+    return 1
+  fi
+
+  viewer_call_tool 2306 "masc_team_session_stop" "$(jq -cn --arg s "$session_id" '{session_id:$s,reason:"viewer-local-smoke",generate_report:false}')" >/dev/null
+  viewer_call_tool 2307 "masc_leave" "$(jq -cn --arg a "$agent_name" '{agent_name:$a}')" >/dev/null
 }
 
 while [ $# -gt 0 ]; do

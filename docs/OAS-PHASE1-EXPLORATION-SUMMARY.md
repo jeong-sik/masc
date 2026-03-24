@@ -238,7 +238,7 @@ Eio_main.run @@ fun env ->
 |----------|--------|----------|--------|
 | Anthropic | api_anthropic.ml | Messages API | Active, pure Eio |
 | OpenAI-compat | api_openai.ml | Chat Completions | Active, pure Eio |
-| Ollama | api_ollama.ml | http://127.0.0.1:11434/api/chat | Active, pure Eio |
+| ~~Ollama~~ | ~~api_ollama.ml~~ | ~~http://127.0.0.1:11434/api/chat~~ | Removed (replaced by OpenAI-compat local runtime) |
 
 **All providers use `cohttp-eio` for HTTP** — zero Lwt
 

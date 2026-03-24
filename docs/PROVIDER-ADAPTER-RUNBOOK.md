@@ -16,7 +16,6 @@
 | Canonical name | Runtime | Auth | Notes |
 |---|---|---|---|
 | `llama` | `local` | `none` | `LLAMA_SERVER_URL` OpenAI-compatible local runtime |
-| `ollama` | `local` | `none` | local Ollama HTTP or CLI path |
 | `glm` | `direct_api` | `api_key` (`ZAI_API_KEY`) | current Z.ai direct path |
 | `claude-api` | `direct_api` | `api_key` (`ANTHROPIC_API_KEY`) | direct Anthropic API |
 | `codex-api` | `direct_api` | `api_key` (`OPENAI_API_KEY`) | direct OpenAI/Codex-family API |
@@ -67,7 +66,7 @@ Current canonical CLI contracts:
 
 ## Default Swarm Policy
 
-- default worker substrate: `llama`, `ollama`, or `glm`
+- default worker substrate: managed by cascade
 - `claude`, `codex`, `gemini` are explicit opt-in workers
 - direct API adapters are for:
   - keeper/perpetual/MDAL/direct reasoning paths

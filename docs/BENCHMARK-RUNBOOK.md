@@ -151,8 +151,8 @@ hot-swarm proof와 별도로, `agent_swarm_runner`에는 planner가 tasks를 만
     "kind": "squad",
     "label": "Verify Squad",
     "parent_unit_id": "platoon-research",
-    "leader_id": "ollama-worker-1",
-    "roster": ["ollama-worker-1", "ollama-worker-2"]
+    "leader_id": "local-worker-1",
+    "roster": ["local-worker-1", "local-worker-2"]
   }
 }
 ```

@@ -28,7 +28,7 @@ let cache_ttl = 30.0
 let refresh_cache_unlocked () =
   match !sw_ref, !net_ref with
   | Some sw, Some net ->
-    let endpoints = Llm_provider.Discovery.endpoints_from_env () in
+    let endpoints = Llm_provider.Provider_registry.active_llama_endpoints () in
     let results = Llm_provider.Discovery.discover ~sw ~net ~endpoints in
     cached_endpoints := results;
     cache_updated_at := Time_compat.now ()

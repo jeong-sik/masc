@@ -119,6 +119,7 @@ let reset config =
     let rec rm_rf path =
       if Sys.is_directory path then begin
         Sys.readdir path |> Array.iter (fun name ->
+          Room_query.safe_yield ();
           rm_rf (Filename.concat path name)
         );
         Unix.rmdir path

@@ -7,7 +7,7 @@
 
     Sub-modules:
     - Keeper_turn_up: start/reconfigure
-    - Keeper_turn_session: team-session integration
+    - Keeper_turn_session: team-session helpers (auto-interception removed)
     - Keeper_turn_setup: ensure_keeper_exists, apply_settings_update
     - Keeper_turn_lifecycle: model-set, shutdown *)
 
@@ -86,10 +86,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
          slots, starving the synchronous run_turn call (Issue #2610). *)
-      match maybe_handle_auto_team_session ctx meta message with
-      | Error err -> (false, "❌ " ^ err)
-      | Ok (Some result, _) -> result
-      | Ok (None, meta) ->
       (* === Harness: trajectory accumulator + eval gate config === *)
       let masc_root = Filename.concat ctx.config.base_path ".masc" in
       let trajectory_acc =

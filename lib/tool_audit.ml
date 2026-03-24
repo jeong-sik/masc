@@ -398,6 +398,7 @@ Pair with masc_audit_stats for aggregate trust metrics, masc_auth_list for crede
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   (* masc_audit_stats *)
@@ -420,6 +421,7 @@ Pair with masc_audit_query for detailed event logs, masc_agent_fitness for perfo
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   (* masc_governance_report *)
@@ -441,6 +443,7 @@ Pair with masc_governance_set to configure audit policies, or masc_governance_st
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   (* masc_audit_trail *)
@@ -476,6 +479,7 @@ Pair with masc_operator_confirm to see the original pending_confirm, or masc_gov
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
 ]

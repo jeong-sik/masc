@@ -328,6 +328,7 @@ Pair with masc_library_read to fetch a specific document or masc_library_search 
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   (* masc_library_read *)
@@ -346,6 +347,7 @@ After masc_library_list or masc_library_search to find the topic name.";
       ]);
       ("required", `List [`String "topic"]);
     ];
+    visibility = Public;
   };
 
   (* masc_library_add *)
@@ -382,6 +384,7 @@ Follow up with masc_library_promote to move candidates to the main library after
       ]);
       ("required", `List [`String "title"; `String "source"; `String "confidence"; `String "content"]);
     ];
+    visibility = Public;
   };
 
   (* masc_library_promote *)
@@ -404,6 +407,7 @@ After masc_library_add placed the document in candidates/.";
       ]);
       ("required", `List [`String "topic"; `String "confidence"]);
     ];
+    visibility = Public;
   };
 
   (* masc_library_search *)
@@ -422,6 +426,7 @@ Pair with masc_library_read to fetch matching documents in full.";
       ]);
       ("required", `List [`String "query"]);
     ];
+    visibility = Public;
   };
 
 ]

@@ -80,6 +80,7 @@ MDAL itself does not read or score this path.");
       ]);
       ("required", `List [`String "profile"]);
     ];
+    visibility = Public;
   };
 
   {
@@ -96,6 +97,7 @@ Pair with masc_mdal_iterate to continue or masc_mdal_stop to end.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   {
@@ -112,6 +114,7 @@ After masc_mdal_start; check masc_mdal_status to see if the goal was met.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
   {
@@ -132,6 +135,7 @@ After masc_mdal_iterate; pair with masc_mdal_status to review final metrics.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_mdal_swarm_start";
@@ -179,6 +183,7 @@ Pair with masc_mdal_status per worker to check individual progress.";
       ]);
       ("required", `List [`String "swarm_id"; `String "title"; `String "workers"; `String "aggregate_goal_expr"]);
     ];
+    visibility = Public;
   };
 ]
 

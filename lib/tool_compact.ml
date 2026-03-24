@@ -69,6 +69,7 @@ Each message has 'role' (system/user/assistant/tool) and 'content' (string).");
       ]);
       ("required", `List [`String "messages"; `String "strategy"]);
     ];
+    visibility = Public;
   };
 ]
 

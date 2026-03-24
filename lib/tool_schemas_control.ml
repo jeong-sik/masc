@@ -16,6 +16,7 @@ let schemas : tool_schema list = [
         ]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_resume";
@@ -24,6 +25,7 @@ let schemas : tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   {
     name = "masc_pause_status";
@@ -32,5 +34,6 @@ let schemas : tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 ]

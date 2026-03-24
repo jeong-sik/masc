@@ -18,6 +18,7 @@ Use this only when you explicitly need named-room compatibility behavior.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   {
     name = "masc_room_create";
@@ -38,6 +39,7 @@ Use this only when you explicitly need named-room compatibility behavior.";
       ]);
       ("required", `List [`String "name"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_room_enter";
@@ -59,6 +61,7 @@ Use this only when you explicitly need named-room compatibility behavior.";
       ]);
       ("required", `List [`String "room_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_room_strategy_get";
@@ -69,6 +72,7 @@ Pair with masc_room_strategy_set to update the strategy.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   {
     name = "masc_room_strategy_set";
@@ -93,5 +97,6 @@ Call masc_room_strategy_get first to see current settings.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
 ]

@@ -71,6 +71,7 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "agent_name"; `String "cost_usd"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_cost_report";
@@ -93,6 +94,7 @@ let schemas : Types.tool_schema list = [
         ]);
       ]);
     ];
+    visibility = Public;
   };
 ]
 

@@ -22,6 +22,7 @@ Costs nothing to call frequently.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   {
     name = "masc_check_notifications";
@@ -38,6 +39,7 @@ Use masc_consume_notifications to actually remove them after processing.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_consume_notifications";
@@ -53,6 +55,7 @@ Use masc_check_notifications first if you want to preview before consuming.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
 ]
 

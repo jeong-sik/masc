@@ -134,6 +134,7 @@ Pair with masc_vote_cast to collect votes and masc_vote_status to check the resu
       ]);
       ("required", `List [`String "proposer"; `String "topic"; `String "options"]);
     ];
+    visibility = Public;
   };
 
   (* masc_vote_cast *)
@@ -160,6 +161,7 @@ After masc_vote_create; check masc_vote_status to see if quorum is reached.";
       ]);
       ("required", `List [`String "agent_name"; `String "vote_id"; `String "choice"]);
     ];
+    visibility = Public;
   };
 
   (* masc_vote_status *)
@@ -178,6 +180,7 @@ After masc_vote_create or masc_vote_cast; pair with masc_votes to list all votes
       ]);
       ("required", `List [`String "vote_id"]);
     ];
+    visibility = Public;
   };
 
   (* masc_votes *)
@@ -190,6 +193,7 @@ Pair with masc_vote_cast to participate or masc_vote_create to start a new vote.
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 
 ]

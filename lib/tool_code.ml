@@ -331,6 +331,7 @@ Pair with masc_code_symbols for file-level symbol outlines or masc_code_read for
       ]);
       ("required", `List [`String "query"]);
     ];
+    visibility = Public;
   };
 
   (* masc_code_symbols *)
@@ -349,6 +350,7 @@ Pair with masc_code_read to then read specific line ranges of interest.";
       ]);
       ("required", `List [`String "path"]);
     ];
+    visibility = Public;
   };
 
   (* masc_code_read *)
@@ -377,6 +379,7 @@ After masc_code_symbols identifies the relevant line numbers.";
       ]);
       ("required", `List [`String "path"]);
     ];
+    visibility = Public;
   };
 
 ]

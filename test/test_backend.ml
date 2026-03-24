@@ -245,6 +245,12 @@ let test_filesystem_backend_recursive_prefix_get_all () =
           check bool "session key present" true
             (List.mem "team-sessions:ts-1:session.json" keys)
       | Error e -> fail (Backend.show_error e));
+      (match Backend.FileSystemBackend.list_keys backend ~prefix:"team-sessions:ts" with
+      | Ok keys ->
+          check int "raw prefix session keys" 3 (List.length keys);
+          check bool "raw prefix matched ts-2" true
+            (List.mem "team-sessions:ts-2:session.json" keys)
+      | Error e -> fail (Backend.show_error e));
       (match Backend.FileSystemBackend.get_all backend ~prefix:"team-sessions:" with
       | Ok pairs ->
           check int "recursive session rows" 3 (List.length pairs);

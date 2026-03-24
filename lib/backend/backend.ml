@@ -229,12 +229,15 @@ module FileSystemBackend : BACKEND = struct
     match scan_root_result with
     | Error e -> Error e
     | Ok scan_root ->
-        if not (Sys.file_exists scan_root) then
-          Ok []
-        else
-          Ok
-            (collect_keys_under t ~requested_prefix:prefix scan_root []
-             |> List.sort_uniq String.compare)
+        let effective_root =
+          if Sys.file_exists scan_root then
+            scan_root
+          else
+            t.base_path
+        in
+        Ok
+          (collect_keys_under t ~requested_prefix:prefix effective_root []
+           |> List.sort_uniq String.compare)
 
   let get_all t ~prefix =
     match list_keys t ~prefix with

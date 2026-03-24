@@ -162,13 +162,9 @@ let test_input_validation_contracts () =
     (file_contains_pattern "lib/cache_eio.ml"
        "maybe_evict_expired config")
 
-let test_room_current_validation_contracts () =
-  check bool "room current route validates room id before bootstrap" true
-    (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       "match Room.validate_room_id raw_room_id with");
-  check bool "room current route still bootstraps validated room ids" true
-    (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       "Room.ensure_room_bootstrap config room_id")
+(* Room validation moved out of h2_gateway in #2882 current-room-only refactor.
+   Named-room routes and their validation were removed entirely. *)
+let test_room_current_validation_contracts () = ()
 
 let test_root_redirect_contracts () =
   check bool "http root redirects to dashboard" true
@@ -176,10 +172,8 @@ let test_root_redirect_contracts () =
        {|Http.Router.get "/" (fun _req reqd -> redirect_to_dashboard reqd)|});
   check bool "http redirect sets dashboard location" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
-       {|("location", "/dashboard")|});
-  check bool "h2 root redirects to dashboard" true
-    (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|h2_respond_redirect h2_reqd "/dashboard" ~extra_headers:cors|})
+       {|("location", "/dashboard")|})
+  (* h2 redirect removed — h2_gateway no longer handles root redirect after #2882 *)
 
 let test_dashboard_component_split_contracts () =
   check bool "proof view imports proof helpers" true
@@ -366,9 +360,7 @@ let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|let json = dashboard_transport_health_http_json ~state in|});
-  check bool "h2 transport health route uses cached dashboard helper" true
-    (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|let json = dashboard_transport_health_http_json ~state in|});
+  (* h2 transport health route removed from h2_gateway after #2882 *)
   check bool "server dashboard transport health helper uses dashboard cache" true
     (file_contains_pattern "lib/server/server_dashboard_http.ml"
        {|Dashboard_cache.get_or_compute "transport_health" ~ttl:10.0|});

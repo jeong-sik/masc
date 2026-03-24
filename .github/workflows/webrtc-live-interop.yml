@@ -1,0 +1,73 @@
+name: WebRTC Live Interop
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '15 3 * * *'
+
+jobs:
+  live-interop:
+    name: WebRTC Live Interop
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.4.x
+          dune-cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Refresh system package index
+        run: sudo apt-get update -qq
+
+      - name: Install OS dependencies
+        run: sudo apt-get install -y jq
+
+      - name: Install Playwright
+        run: |
+          npm --prefix dashboard install --no-save playwright
+          npx --prefix dashboard playwright install --with-deps chromium
+
+      - name: Install OCaml dependencies
+        run: |
+          for attempt in 1 2 3; do
+            opam install . --deps-only --yes && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "opam install failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
+            sleep 15
+          done
+
+      - name: Build server executable
+        run: opam exec -- dune build --root . ./bin/main_eio.exe
+
+      - name: Run env-gated live interop proof
+        env:
+          MASC_WEBRTC_LIVE_ICE_URLS: ${{ secrets.MASC_WEBRTC_LIVE_ICE_URLS }}
+          MASC_WEBRTC_LIVE_ICE_USERNAME: ${{ secrets.MASC_WEBRTC_LIVE_ICE_USERNAME }}
+          MASC_WEBRTC_LIVE_ICE_CREDENTIAL: ${{ secrets.MASC_WEBRTC_LIVE_ICE_CREDENTIAL }}
+          WEBRTC_LIVE_ARTIFACT_PATH: ${{ github.workspace }}/.artifacts/webrtc-live-interop.json
+        run: |
+          mkdir -p .artifacts
+          export PLAYWRIGHT_MODULE_PATH="$(cd dashboard && node -p "require.resolve('playwright')")"
+          chmod +x scripts/harness/transport/verify_webrtc_live_env.sh
+          bash scripts/harness/transport/verify_webrtc_live_env.sh
+
+      - name: Upload live interop artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-live-interop
+          path: .artifacts/webrtc-live-interop.json
+          if-no-files-found: ignore

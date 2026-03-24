@@ -22,7 +22,7 @@ let make_error_handler () =
 
   h2_error_handler
 
-let make_request_handler ~sw ~clock ~server_start_time =
+let make_request_handler ~sw ~clock ~server_start_time:_ =
   (* ═══════════════════════════════════════════════════════════════════════
      HTTP/2 Response Helpers - Reduce duplication in handlers
      ═══════════════════════════════════════════════════════════════════════ *)
@@ -151,25 +151,17 @@ let make_request_handler ~sw ~clock ~server_start_time =
          Health & Metrics
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/health" ->
-          let uptime_secs = int_of_float (Unix.gettimeofday () -. server_start_time) in
-          let uptime_str =
-            if uptime_secs < 60 then Printf.sprintf "%ds" uptime_secs
-            else if uptime_secs < 3600 then Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
-            else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
+          let body =
+            Server_routes_http_runtime.make_health_json ~listener:"h2" httpun_request
+            |> Yojson.Safe.to_string
           in
-          let _state = get_server_state () in
-          let build = Build_identity.current () in
-          let health_json = `Assoc [
-            ("status", `String "ok");
-            ("server", `String "masc-mcp");
-            ("version", `String build.release_version);
-            ("release_version", `String build.release_version);
-            ("build", Build_identity.to_yojson build);
-            ("protocol", `String "h2");
-            ("uptime", `String uptime_str);
-            ("sse_clients", `Int (Sse.client_count ()));
-          ] in
-          let body = Yojson.Safe.to_string health_json in
+          h2_respond_json h2_reqd body ~extra_headers:cors
+
+      | `GET, "/ws" ->
+          let body =
+            Server_routes_http_runtime.websocket_discovery_json httpun_request
+            |> Yojson.Safe.to_string
+          in
           h2_respond_json h2_reqd body ~extra_headers:cors
 
       | `GET, "/metrics" ->

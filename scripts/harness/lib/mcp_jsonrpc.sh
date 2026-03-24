@@ -11,7 +11,22 @@
 : "${MCP_CURL_EXTRA_ARGS:=}"
 
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/harness/jsonrpc_sse.sh
 source "${_HARNESS_DIR}/jsonrpc_sse.sh"
+
+mcp_mktemp_file() {
+  local prefix="$1"
+  local suffix="${2:-}"
+  local tmp_root="${TMPDIR:-/tmp}"
+  local path
+  path="$(mktemp "${tmp_root%/}/${prefix}.XXXXXX")" || return 1
+  if [[ -n "$suffix" ]]; then
+    local target="${path}${suffix}"
+    mv "$path" "$target"
+    path="$target"
+  fi
+  printf '%s\n' "$path"
+}
 
 mcp_print_log_tail() {
   local log_file="${1:-${HARNESS_LOG_FILE:-}}"
@@ -200,8 +215,8 @@ mcp_jsonrpc_call() {
 
   while :; do
     local body_file stderr_file
-    body_file="$(mktemp "${TMPDIR:-/tmp}/masc-jsonrpc-body.XXXXXX.json")"
-    stderr_file="$(mktemp "${TMPDIR:-/tmp}/masc-jsonrpc-stderr.XXXXXX.log")"
+    body_file="$(mcp_mktemp_file "masc-jsonrpc-body" ".json")"
+    stderr_file="$(mcp_mktemp_file "masc-jsonrpc-stderr" ".log")"
     printf '%s' "$request_body" >"$body_file"
 
     local -a cmd=(

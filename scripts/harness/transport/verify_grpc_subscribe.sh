@@ -9,7 +9,9 @@
 #   5. Server stays healthy after subscriber disconnect
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/harness/transport/common.sh
 source "${SCRIPT_DIR}/common.sh"
+# shellcheck disable=SC2034
 HARNESS_NAME="gRPC-Subscribe"
 
 require_server
@@ -23,14 +25,29 @@ fi
 
 echo "--- gRPC Subscribe E2E ---"
 
-health_resp="$(
-  grpcurl -plaintext \
-    -import-path "${PROTO_DIR}" \
-    -proto grpc_health_v1.proto \
-    -d '{"service":"masc.coordination.v1.MascCoordination"}' \
-    "${MASC_GRPC_ADDR}" \
-    grpc.health.v1.Health/Check 2>&1 || true
-)"
+wait_for_grpc_health() {
+  local deadline=$((SECONDS + 20))
+  local response=""
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    response="$(
+      grpcurl -plaintext \
+        -import-path "${PROTO_DIR}" \
+        -proto grpc_health_v1.proto \
+        -d '{"service":"masc.coordination.v1.MascCoordination"}' \
+        "${MASC_GRPC_ADDR}" \
+        grpc.health.v1.Health/Check 2>&1 || true
+    )"
+    if echo "$response" | grep -q "SERVING"; then
+      printf '%s\n' "$response"
+      return 0
+    fi
+    sleep 1
+  done
+  printf '%s\n' "$response"
+  return 1
+}
+
+health_resp="$(wait_for_grpc_health || true)"
 if echo "$health_resp" | grep -q "SERVING"; then
   pass "gRPC health: SERVING"
 elif echo "$health_resp" | grep -qi "connect"; then
@@ -67,7 +84,7 @@ else
   fail "Subscribe" "no subscription_started event: ${subscribe_resp:0:200}"
 fi
 
-subscribe_output="$(mktemp "${TMPDIR:-/tmp}/masc-transport-grpc.XXXXXX")"
+subscribe_output="$(harness_mktemp_file "masc-transport-grpc")"
 grpcurl -plaintext \
   -import-path "${PROTO_DIR}" \
   -proto masc_coordination.proto \

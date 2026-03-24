@@ -205,7 +205,8 @@ policy_voice_enabled = false
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "keepalive" (Some true) d.presence_keepalive;
       check (option int) "keepalive_sec" (Some 30) d.presence_keepalive_sec;
-      check (option string) "policy_mode" (Some "heuristic") d.policy_mode;
+      (* policy_mode always canonicalized to "unified" *)
+      check (option string) "policy_mode" (Some "unified") d.policy_mode;
       (* Mode removal: canonical_policy_shell_mode always returns "coding" *)
       check (option string) "policy_shell_mode" (Some "coding") d.policy_shell_mode;
       check (option bool) "policy_voice" (Some false) d.policy_voice_enabled

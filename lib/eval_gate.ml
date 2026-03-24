@@ -16,9 +16,27 @@
 (* ================================================================ *)
 
 type gate_config = {
-  max_cost_usd : float;             (** Per-session cost limit (default: 0.50) *)
-  max_tool_calls_per_turn : int;    (** Max tool calls in a single turn (default: 10) *)
-  entropy_threshold : int;          (** Consecutive same-tool calls to trigger (default: 3) *)
+  max_cost_usd : float;
+  (** Per-session cost limit.
+      Default 0.50 USD. Based on observed MASC keeper sessions averaging
+      $0.02-0.15 per session (local llama + GLM fallback). 0.50 is ~3x the
+      worst-case observed session cost, providing headroom without allowing
+      runaway spending. Adjust upward if using expensive cloud models directly. *)
+
+  max_tool_calls_per_turn : int;
+  (** Max tool calls in a single LLM turn (before yielding control).
+      Default 10. Claude/GPT typically issue 1-5 tool calls per turn in
+      agentic loops. 10 provides 2x headroom. Beyond 10, the agent is
+      likely in a retry loop or stuck — better to force a new turn for
+      fresh reasoning. *)
+
+  entropy_threshold : int;
+  (** Consecutive calls to the same tool before triggering a rejection.
+      Default 3. Empirically, 2 consecutive identical calls is common
+      (retry after transient failure). 3+ usually indicates a stuck loop
+      (e.g., repeatedly calling masc_status with no state change).
+      Set higher for tools with legitimate repeated use (e.g., broadcast). *)
+
   destructive_check_enabled : bool; (** Check bash commands for destructive patterns *)
   allowlist_enabled : bool;         (** Enforce tool allowlist *)
   allowed_tools : string list;      (** Empty = all tools allowed *)
@@ -272,9 +290,13 @@ let post_eval
     else None
   in
 
-  (* Warn if approaching cost limit (80% threshold) *)
+  (* Warn if approaching cost limit.
+     80%% threshold: standard practice from capacity planning (e.g., disk usage
+     alerts at 80%%). Gives ~20%% remaining budget for the agent to wrap up
+     gracefully rather than hitting a hard wall mid-operation. *)
   let new_cost = accumulated_cost +. cost in
-  let approaching_limit = new_cost >= config.max_cost_usd *. 0.8 in
+  let cost_warn_ratio = 0.8 in
+  let approaching_limit = new_cost >= config.max_cost_usd *. cost_warn_ratio in
   let should_warn = approaching_limit in
   let warning =
     if approaching_limit then
@@ -283,9 +305,14 @@ let post_eval
     else None
   in
 
-  (* Warn on unusually long execution *)
+  (* Warn on unusually long execution.
+     30s threshold: most MASC tool calls complete in <5s (room ops, broadcasts).
+     The slowest normal operations (Neo4j queries, cascade LLM calls) take 10-20s.
+     30s indicates either a hung connection or an unexpectedly large operation
+     that may be consuming shared resources. *)
+  let slow_threshold_ms = 30_000 in
   let slow_warn =
-    if duration_ms > 30000 then  (* 30 seconds *)
+    if duration_ms > slow_threshold_ms then
       Some (Printf.sprintf "slow tool execution: %s took %dms" tool_name duration_ms)
     else None
   in
@@ -300,7 +327,7 @@ let post_eval
   { has_error;
     error_message;
     cost_usd = cost;
-    should_warn = should_warn || (duration_ms > 30000);
+    should_warn = should_warn || (duration_ms > slow_threshold_ms);
     warning = combined_warning;
   }
 

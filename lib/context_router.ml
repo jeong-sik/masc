@@ -110,21 +110,33 @@ let has_pattern patterns query =
   ) patterns
 
 (** Classify query intent using heuristic pattern matching.
-    Fast (no MODEL call), covers ~80%% of cases accurately. *)
+    Fast (no MODEL call), covers ~80%% of cases accurately.
+
+    Confidence values rationale:
+    - 0.95: Pattern-matched command (e.g., "claim", "done") — almost certainly correct.
+    - 0.90: Short (<3 chars) or @mention — high confidence by structure alone.
+    - 0.85: Keyword-matched (conversational/knowledge patterns) — good but not definitive.
+    - 0.60: Length-based fallback (>50 chars) — weak signal, long queries tend to be
+      knowledge-seeking but this is unreliable.
+    - 0.50: Default for ambiguous short queries — lowest confidence, routes to Light
+      retrieval as a safe middle ground.
+
+    Length thresholds:
+    - <3 chars: Single-word inputs like "hi", "ok", "ㅇㅋ" — conversational by nature.
+    - >50 chars: Empirically, queries above ~50 chars in MASC rooms are usually
+      asking about procedures, bugs, or domain knowledge rather than issuing commands.
+      This is the weakest heuristic (0.6 confidence reflects that). *)
 let classify_intent_heuristic (query : string) : query_intent * float =
   let q = String.trim query in
   let len = String.length q in
-  (* Very short queries are usually conversational or commands *)
   if len < 3 then (Conversational, 0.9)
   else if has_pattern command_patterns q then (Task_command, 0.95)
   else if has_pattern status_patterns q then (Status_check, 0.9)
   else if has_pattern conversational_patterns q then (Conversational, 0.85)
   else if has_pattern knowledge_patterns q then (Knowledge_query, 0.85)
-  (* Check for @mentions — coordination *)
   else if String.length q > 0 && q.[0] = '@' then (Coordination, 0.9)
-  (* Default: treat medium+ queries as potential knowledge queries *)
   else if len > 50 then (Knowledge_query, 0.6)
-  else (Coordination, 0.5)  (* Short ambiguous → coordination *)
+  else (Coordination, 0.5)
 
 (* ---------- Intent Classification (MODEL) ---------- *)
 
@@ -256,7 +268,12 @@ let broadcasts_cover_query ~(recent_broadcasts : string list) ~(query : string) 
           check 0
       ) q_words in
       let coverage = float_of_int (List.length matching) /. float_of_int (List.length q_words) in
-      coverage >= 0.6  (* 60%+ keyword overlap → broadcasts likely sufficient *)
+      (* 60%% keyword overlap threshold: if more than half the query words appear
+         in recent broadcasts, the answer is likely already available without
+         full retrieval. 60%% (rather than 50%%) reduces false positives from
+         common words. This is a bag-of-words heuristic — semantic similarity
+         would be more accurate but adds latency. *)
+      coverage >= 0.6
 
 (* ---------- Main Router ---------- *)
 
@@ -284,6 +301,10 @@ let route ?(recent_broadcasts = []) (query : string) : routing_decision =
       confidence }
   | Coordination ->
     if broadcasts_cover_query ~recent_broadcasts ~query then
+      (* +0.1 confidence boost: finding the answer in broadcasts is an independent
+         confirmation signal beyond intent classification alone. The boost is small
+         (0.1) because keyword overlap is a weak signal — it does not confirm
+         semantic relevance, only lexical overlap. *)
       { depth = Light;
         intent;
         reason = "coordination query — answer found in recent broadcasts";

@@ -80,14 +80,23 @@ let summary_report () : Yojson.Safe.t =
     ("distinct_tools_called", `Int distinct);
     ("top_20",
      `List (List.map (fun (name, stats) ->
-       `Assoc [
+       let latency = match Tool_metrics.stats_for name with
+         | Some s ->
+           [ ("p50_ms", `Float s.p50_ms); ("p95_ms", `Float s.p95_ms)
+           ; ("p99_ms", `Float s.p99_ms); ("mean_ms", `Float s.mean_ms)
+           ; ("success_count", `Int s.success_count)
+           ; ("failure_count", `Int s.failure_count) ]
+         | None -> []
+       in
+       `Assoc ([
          ("name", `String name);
          ("call_count", `Int stats.Tool_registry.call_count);
          ("tier", `String (Tool_catalog.tier_to_string (Tool_catalog.tool_tier name)));
-       ]
+       ] @ latency)
      ) top_20));
     ("never_called_count", `Int (List.length never_called));
     ("tier_distribution", tier_dist);
     ("dispatch_v2_enabled", `Bool Tool_dispatch.v2_enabled);
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
+    ("cascade_metrics", Oas_worker.cascade_metrics_json ());
   ]

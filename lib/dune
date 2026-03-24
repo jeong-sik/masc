@@ -15,6 +15,7 @@
    agent_tool_surfaces
    agent_neo4j
    agent_registry_eio
+   anti_rationalization
    auto_recall
    auto_responder
    auth

@@ -250,7 +250,7 @@ let handle_cancel_task ctx args =
   result_to_response result
 
 let transition_known_args =
-  ["task_id"; "action"; "notes"; "reason"; "expected_version"; "agent_name"]
+  ["task_id"; "action"; "notes"; "reason"; "expected_version"; "agent_name"; "force"]
 
 let handle_transition ctx args =
   let unknown = match args with
@@ -275,8 +275,31 @@ let handle_transition ctx args =
   let reason = get_string args "reason" "" in
   let expected_version = get_int_opt args "expected_version" in
   let action_lc = String.lowercase_ascii action in
+  let force = get_bool args "force" false in
   let tasks = Room.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
+  (* Anti-rationalization gate: verify completion notes before allowing "done" *)
+  let gate_rejection =
+    if action_lc = "done" && not force then
+      match task_opt with
+      | Some task ->
+        (match Anti_rationalization.review {
+           task_title = task.title;
+           task_description = task.description;
+           completion_notes = notes;
+           agent_name = ctx.agent_name;
+         } with
+         | Anti_rationalization.Reject reason -> Some reason
+         | Anti_rationalization.Approve -> None)
+      | None -> None
+    else None
+  in
+  match gate_rejection with
+  | Some reason ->
+    (false, Printf.sprintf "Completion rejected by anti-rationalization gate: %s\n\
+                             Revise your completion notes to describe actual work, then retry.\n\
+                             Use force=true to override (operator only)." reason)
+  | None ->
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with

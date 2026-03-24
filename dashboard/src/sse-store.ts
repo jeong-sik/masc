@@ -41,6 +41,11 @@ export function registerMissionRefresh(fn: () => void): void {
   _refreshMissionFn = fn
 }
 
+let _refreshActivityFn: (() => void) | null = null
+export function registerActivityRefresh(fn: () => void): void {
+  _refreshActivityFn = fn
+}
+
 // --- Debounced scheduling ---
 
 const _debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
@@ -58,7 +63,7 @@ function scheduleRefresh(key: string, fn: () => void, delayMs = 500): void {
 // Simple events that map directly to a debounced refresh target.
 // Complex events (conditional logic, async imports) use named handlers below.
 
-type RefreshTarget = 'execution' | 'board' | 'mdal' | 'operator'
+type RefreshTarget = 'execution' | 'board' | 'mdal' | 'operator' | 'activity'
 
 interface SimpleRoute {
   target: RefreshTarget
@@ -92,12 +97,16 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   mdal_iteration:  { target: 'mdal', debounceMs: 350 },
   mdal_completed:  { target: 'mdal', debounceMs: 350 },
   mdal_stopped:    { target: 'mdal', debounceMs: 350 },
+  // Activity graph
+  'activity':                { target: 'activity', debounceMs: 2000 },
+  'masc/activity':           { target: 'activity', debounceMs: 2000 },
 }
 
 // Prefix patterns for events that use startsWith matching
 const PREFIX_ROUTES: Array<{ prefix: string; target: RefreshTarget }> = [
   { prefix: 'task_',      target: 'execution' },
   { prefix: 'masc/task_', target: 'execution' },
+  { prefix: 'activity_',  target: 'activity' },
 ]
 
 const REFRESH_FNS: Record<RefreshTarget, () => void> = {
@@ -105,6 +114,7 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
   board:     refreshBoard,
   mdal:      refreshMdal,
   operator:  () => _refreshOperatorFn?.(),
+  activity:  () => _refreshActivityFn?.(),
 }
 
 // --- Named handlers for complex events ---

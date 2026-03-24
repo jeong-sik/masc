@@ -8,6 +8,7 @@ import { Card } from './common/card'
 import { EmptyState, LoadingState } from './common/feedback-state'
 import { fetchSwimlane } from '../api'
 import type { SwimlaneResponse, AgentSpan } from '../types'
+import { selectedNodeId, highlightedAgentId } from './activity-graph-view'
 
 const swimlaneData = signal<SwimlaneResponse | null>(null)
 const swimlaneLoading = signal(false)
@@ -72,6 +73,7 @@ function drawSwimlane(
   canvasWidth: number,
   canvasHeight: number,
   tooltip: TooltipInfo | null,
+  highlightedAgent: string | null = null,
 ) {
   const { agents, spans, time_range } = data
   const drawWidth = canvasWidth - LEFT_MARGIN - RIGHT_PAD
@@ -108,17 +110,26 @@ function drawSwimlane(
   for (let i = 0; i < agents.length; i++) {
     const agentName = agents[i]!
     const y = TOP_PAD + i * (LANE_HEIGHT + LANE_GAP)
+    const isHighlighted = highlightedAgent === agentName
 
-    // Agent name
-    ctx.fillStyle = '#94a3b8'
+    // Highlighted lane background
+    if (isHighlighted) {
+      ctx.fillStyle = 'rgba(251, 191, 36, 0.08)'
+      ctx.fillRect(LEFT_MARGIN, y, drawWidth, LANE_HEIGHT)
+    }
+
+    // Agent name — brighter if highlighted
+    ctx.fillStyle = isHighlighted ? '#fbbf24' : '#94a3b8'
     ctx.font = '11px system-ui, sans-serif'
     ctx.textAlign = 'right'
     const displayName = agentName.length > 10 ? agentName.slice(0, 9) + '..' : agentName
     ctx.fillText(displayName, LEFT_MARGIN - 8, y + LANE_HEIGHT / 2 + 4)
 
-    // Lane background
-    ctx.fillStyle = 'rgba(30, 41, 59, 0.3)'
-    ctx.fillRect(LEFT_MARGIN, y, drawWidth, LANE_HEIGHT)
+    // Lane background (default, drawn on top of highlight if present)
+    if (!isHighlighted) {
+      ctx.fillStyle = 'rgba(30, 41, 59, 0.3)'
+      ctx.fillRect(LEFT_MARGIN, y, drawWidth, LANE_HEIGHT)
+    }
   }
 
   // Draw spans
@@ -247,7 +258,30 @@ export function ActivitySwimlane() {
     if (!ctx) return
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-    drawSwimlane(ctx, data, width, height, tooltipRef.current)
+    const currentHighlightedAgent = highlightedAgentId.value
+    drawSwimlane(ctx, data, width, height, tooltipRef.current, currentHighlightedAgent)
+
+    function handleClick(event: MouseEvent) {
+      const canvasEl = canvasRef.current
+      const containerEl = containerRef.current
+      if (!canvasEl || !containerEl || !data) return
+
+      const canvasRect = canvasEl.getBoundingClientRect()
+      const mx = event.clientX - canvasRect.left
+      const my = event.clientY - canvasRect.top
+
+      const containerRect = containerEl.getBoundingClientRect()
+      const cWidth = Math.max(containerRect.width, 400)
+
+      const span = hitTestSpan(data, mx, my, cWidth)
+      if (span) {
+        selectedNodeId.value = 'agent:' + span.agent
+        highlightedAgentId.value = span.agent
+      } else {
+        selectedNodeId.value = null
+        highlightedAgentId.value = null
+      }
+    }
 
     function handleMouse(event: MouseEvent) {
       const canvasEl = canvasRef.current
@@ -279,16 +313,18 @@ export function ActivitySwimlane() {
         if (ctx2) {
           const dpr2 = window.devicePixelRatio || 1
           ctx2.setTransform(dpr2, 0, 0, dpr2, 0, 0)
-          drawSwimlane(ctx2, data, cWidth, canvasEl.height / dpr2, tooltipRef.current)
+          drawSwimlane(ctx2, data, cWidth, canvasEl.height / dpr2, tooltipRef.current, highlightedAgentId.value)
         }
       }
     }
 
     canvas.addEventListener('mousemove', handleMouse)
+    canvas.addEventListener('click', handleClick)
     return () => {
       canvas.removeEventListener('mousemove', handleMouse)
+      canvas.removeEventListener('click', handleClick)
     }
-  }, [data])
+  }, [data, highlightedAgentId.value])
 
   if (loading && !data) {
     return html`

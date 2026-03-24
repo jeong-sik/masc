@@ -10,6 +10,7 @@ import type { ActivityGraphResponse, ActivityGraphNode, ActivityGraphEdge } from
 
 const hoveredNodeId = signal<string | null>(null)
 export const selectedNodeId = signal<string | null>(null)
+export const highlightedAgentId = signal<string | null>(null)
 
 // Node color by kind
 function nodeColor(kind: string, status: string): string {
@@ -155,6 +156,7 @@ export function GraphView({ data }: GraphViewProps) {
     const positions = layout.positions
     const hovered = hoveredNodeId.value
     const selected = selectedNodeId.value
+    const highlightedAgent = highlightedAgentId.value
 
     // Background
     ctx.fillStyle = '#0f1117'
@@ -190,10 +192,11 @@ export function GraphView({ data }: GraphViewProps) {
       const r = nodeRadius(node)
       const isHovered = hovered === node.id
       const isSelected = selected === node.id
+      const isHighlightedAgent = highlightedAgent !== null && node.id === 'agent:' + highlightedAgent
       const color = nodeColor(node.kind, node.status)
 
-      // Glow for selected (distinct from hover)
-      if (isSelected) {
+      // Glow for selected or highlighted agent (distinct from hover)
+      if (isSelected || isHighlightedAgent) {
         ctx.beginPath()
         ctx.arc(pos.x, pos.y, r + 8, 0, Math.PI * 2)
         ctx.fillStyle = 'rgba(251, 191, 36, 0.15)'
@@ -210,15 +213,15 @@ export function GraphView({ data }: GraphViewProps) {
       ctx.fillStyle = color
       ctx.fill()
 
-      // Border — selected gets gold, hovered gets white
-      ctx.strokeStyle = isSelected ? '#fbbf24' : isHovered ? '#fff' : 'rgba(255,255,255,0.15)'
-      ctx.lineWidth = isSelected ? 2.5 : isHovered ? 2 : 1
+      // Border — selected/highlighted gets gold, hovered gets white
+      ctx.strokeStyle = (isSelected || isHighlightedAgent) ? '#fbbf24' : isHovered ? '#fff' : 'rgba(255,255,255,0.15)'
+      ctx.lineWidth = (isSelected || isHighlightedAgent) ? 2.5 : isHovered ? 2 : 1
       ctx.stroke()
 
-      // Label for larger, hovered, or selected nodes
-      if (r >= 10 || isHovered || isSelected) {
-        ctx.fillStyle = isSelected ? '#fbbf24' : '#e2e8f0'
-        ctx.font = `${isHovered || isSelected ? 11 : 9}px system-ui, sans-serif`
+      // Label for larger, hovered, selected, or highlighted nodes
+      if (r >= 10 || isHovered || isSelected || isHighlightedAgent) {
+        ctx.fillStyle = (isSelected || isHighlightedAgent) ? '#fbbf24' : '#e2e8f0'
+        ctx.font = `${isHovered || isSelected || isHighlightedAgent ? 11 : 9}px system-ui, sans-serif`
         ctx.textAlign = 'center'
         ctx.fillText(node.label, pos.x, pos.y + r + 12)
       }
@@ -244,6 +247,11 @@ export function GraphView({ data }: GraphViewProps) {
       const my = event.clientY - canvasRect.top
       const found = hitTest(data.nodes, positions, mx, my)
       selectedNodeId.value = found
+      if (found && found.startsWith('agent:')) {
+        highlightedAgentId.value = found.slice(6)
+      } else {
+        highlightedAgentId.value = null
+      }
     }
 
     canvas.addEventListener('mousemove', handleMouse)
@@ -252,7 +260,7 @@ export function GraphView({ data }: GraphViewProps) {
       canvas.removeEventListener('mousemove', handleMouse)
       canvas.removeEventListener('click', handleClick)
     }
-  }, [data, hoveredNodeId.value, selectedNodeId.value])
+  }, [data, hoveredNodeId.value, selectedNodeId.value, highlightedAgentId.value])
 
   const hoveredNode = hoveredNodeId.value
     ? data.nodes.find(n => n.id === hoveredNodeId.value)

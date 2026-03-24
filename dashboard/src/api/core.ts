@@ -58,11 +58,20 @@ function jsonHeaders(): Record<string, string> {
   }
 }
 
-// Backend dashboard timeout is 30s. Frontend must wait longer.
-export const DEFAULT_GET_TIMEOUT_MS = 35_000
-export const DEFAULT_POST_TIMEOUT_MS = 30_000
-export const DEFAULT_MCP_TIMEOUT_MS = 60_000
-export const ROOM_TRUTH_GET_TIMEOUT_MS = 30_000
+import {
+  DEFAULT_GET_TIMEOUT_MS,
+  DEFAULT_POST_TIMEOUT_MS,
+  KEEPER_MESSAGE_TIMEOUT_MS,
+  SOCIAL_SWEEP_TIMEOUT_MS,
+} from '../config/constants'
+
+// Re-export so existing consumers keep working
+export {
+  DEFAULT_GET_TIMEOUT_MS,
+  DEFAULT_POST_TIMEOUT_MS,
+  DEFAULT_MCP_TIMEOUT_MS,
+  ROOM_TRUTH_GET_TIMEOUT_MS,
+} from '../config/constants'
 const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504])
 
 class ApiRequestError extends Error {
@@ -286,9 +295,9 @@ function operatorActionTimeoutMs(body: OperatorActionRequest): number {
   switch (body.action_type) {
     case 'keeper_message':
     case 'keeper_recover':
-      return 90_000
+      return KEEPER_MESSAGE_TIMEOUT_MS
     case 'social_sweep':
-      return 45_000
+      return SOCIAL_SWEEP_TIMEOUT_MS
     default:
       return DEFAULT_POST_TIMEOUT_MS
   }

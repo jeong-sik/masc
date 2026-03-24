@@ -11,7 +11,6 @@ import type {
   BoardPost,
   ServerStatus,
   PerpetualStatus,
-  TrpgState,
   BoardSortMode,
   KeeperLifecycleState,
   Goal,
@@ -31,7 +30,6 @@ import {
   fetchDashboardPlanning,
   fetchDashboardShell,
   fetchMessagesList,
-  fetchTrpgState,
   fetchAgentActivity,
   type AgentActivityEntry,
 } from './api'
@@ -107,11 +105,6 @@ export const boardPosts = signal<BoardPost[]>([])
 export const boardSortMode = signal<BoardSortMode>('recent')
 export const boardExcludeSystem = signal(true)
 
-// --- TRPG state ---
-
-export const trpgState = signal<TrpgState | null>(null)
-export const trpgRoom = signal<string>('')
-
 // --- Goals state ---
 
 export const goals = signal<Goal[]>([])
@@ -180,7 +173,6 @@ export const lastMdalError = signal<string | null>(null)
 
 export const dashboardLoading = signal(false)
 export const boardLoading = signal(false)
-export const trpgLoading = signal(false)
 export const mdalLoading = signal(false)
 
 // Semantics: loaded once on startup, never refreshed (static data).
@@ -540,20 +532,6 @@ export async function refreshBoard(): Promise<void> {
     showToast('게시판을 불러오지 못했습니다', 'error')
   } finally {
     boardLoading.value = false
-  }
-}
-
-export async function refreshTrpg(): Promise<void> {
-  trpgLoading.value = true
-  try {
-    const room = trpgRoom.value || serverStatus.value?.room || 'default'
-    if (!trpgRoom.value) trpgRoom.value = room
-    const data = await fetchTrpgState(room)
-    trpgState.value = data
-  } catch (err) {
-    console.warn('[TRPG] fetch error:', err)
-  } finally {
-    trpgLoading.value = false
   }
 }
 

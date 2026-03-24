@@ -15,7 +15,7 @@ const COMMAND_SURFACE_SEGMENTS = new Set([
   'chains',
   'control',
 ])
-const LAB_SECTION_SEGMENTS = new Set(['overview', 'trpg', 'avatars', 'autoresearch'])
+const LAB_SECTION_SEGMENTS = new Set(['overview', 'autoresearch'])
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
@@ -100,14 +100,6 @@ function parseSegments(
     }
     if (params.surface) {
       const nextParams = { ...params }
-      if (params.surface === 'trpg' || params.surface === 'avatars') {
-        nextParams.section = params.surface
-        return {
-          tab: 'lab',
-          params: normalizeRouteParams('lab', nextParams),
-          postId: null,
-        }
-      }
       nextParams.section = 'command'
       return {
         tab: 'command',
@@ -162,14 +154,6 @@ function parseSegments(
 
   if ((tabFromPath === 'lab' || tabFromQuery === 'lab') && params.surface && !params.section) {
     const nextParams = { ...params, section: 'command' }
-    if (params.surface === 'trpg' || params.surface === 'avatars') {
-      nextParams.section = params.surface
-      return {
-        tab: 'lab',
-        params: normalizeRouteParams('lab', nextParams),
-        postId: null,
-      }
-    }
     return {
       tab: 'command',
       params: normalizeRouteParams('command', nextParams),

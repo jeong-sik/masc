@@ -186,8 +186,17 @@ let public_mcp_tools =
   ]
 
 let public_mcp_set : (string, unit) Hashtbl.t =
-  let tbl = Hashtbl.create 48 in
+  let tbl = Hashtbl.create 64 in
   List.iter (fun name -> Hashtbl.replace tbl name ()) public_mcp_tools;
+  (* MASC_PUBLIC_TOOLS_EXTRA: comma-separated tool names to add at runtime.
+     Example: MASC_PUBLIC_TOOLS_EXTRA=masc_goal_upsert,masc_pause *)
+  (match Sys.getenv_opt "MASC_PUBLIC_TOOLS_EXTRA" with
+   | Some raw ->
+       String.split_on_char ',' raw
+       |> List.iter (fun s ->
+              let name = String.trim s in
+              if name <> "" then Hashtbl.replace tbl name ())
+   | None -> ());
   tbl
 
 let is_public_mcp name = Hashtbl.mem public_mcp_set name

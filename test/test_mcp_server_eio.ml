@@ -1475,14 +1475,14 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~description:""
   in
 
-  let transition action =
+  let transition ?(extra=[]) action =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_transition"
-      ~arguments:(`Assoc [
+      ~arguments:(`Assoc ([
         ("task_id", `String "task-001");
         ("action", `String action);
         ("agent_name", `String "alpha-agent");
-      ])
+      ] @ extra))
   in
 
   let (ok_claim, claim_msg) = transition "claim" in

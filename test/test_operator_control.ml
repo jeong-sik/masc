@@ -1,4 +1,22 @@
+let has_prompt_root path =
+  Sys.file_exists (Filename.concat path "config/prompts/keeper.world.md")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_prompt_root root -> root
+  | _ ->
+      let rec ascend path =
+        if has_prompt_root path then path
+        else
+          let parent = Filename.dirname path in
+          if String.equal parent path then Sys.getcwd () else ascend parent
+      in
+      ascend (Sys.getcwd ())
+
 let () =
+  let root = repo_root () in
+  Masc_mcp.Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Masc_mcp.Prompt_defaults.init ();
   Alcotest.run "Operator_control"
     [
       ( "operator",

@@ -280,7 +280,7 @@ initiative_post_ttl_hours = 24
       Alcotest.(check (option (float 0.001))) "last output tokens per sec surfaced"
         (Some 20.0)
         (json |> member "metrics" |> member "last_output_tokens_per_sec" |> to_float_option);
-      Alcotest.(check string) "prompt block source surfaced" "default"
+      Alcotest.(check string) "prompt block source surfaced" "file"
         (json |> member "prompt" |> member "system_prompt_blocks"
          |> member "world" |> member "source" |> to_string);
       let effective_system_prompt =

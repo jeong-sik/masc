@@ -150,6 +150,7 @@ let resolve_allowed_models ~explicit_allowed_models ~seed_allowed_models ~models
     dedupe_keep_order models
 
 let canonical_room_scope = function
+  | "all" -> "all"
   | _ -> "current"
 
 let canonical_scope_kind = function

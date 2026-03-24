@@ -63,6 +63,24 @@ type registry_stats = {
   avg_usage: float;
 }
 
+type prompt_meta = {
+  description: string;
+  category: string;
+  required_file: bool;
+  template_variables: string list;
+}
+
+type prompt_resolution = {
+  effective: string;
+  source: string;
+  file_value: string option;
+  override_value: string option;
+  default_value: string option;
+  file_path: string option;
+  file_exists: bool;
+  has_override: bool;
+}
+
 (** {1 Variable Extraction} *)
 
 (** Extract variable names from a template string.
@@ -89,6 +107,12 @@ let registry : (string, prompt_entry) Hashtbl.t = Hashtbl.create 64
 (** Version index: id -> [version list] for quick version lookup *)
 let version_index : (string, string list) Hashtbl.t = Hashtbl.create 64
 
+(** Override store — highest priority. Dashboard/API edits go here. *)
+let override_tbl : (string, string) Hashtbl.t = Hashtbl.create 16
+
+(** Description and category metadata for prompts *)
+let meta_tbl : (string, prompt_meta) Hashtbl.t = Hashtbl.create 32
+
 let registry_mutex = Eio.Mutex.create ()
 
 let with_mutex f =
@@ -99,6 +123,9 @@ let with_mutex f =
 
 (** File-based persistence directory *)
 let prompts_dir = ref None
+
+(** Markdown prompt source directory for operator-managed prompt text. *)
+let markdown_dir = ref None
 
 (** Make a storage key from id and version *)
 let make_key ~id ~version = Printf.sprintf "%s@%s" id version
@@ -141,6 +168,27 @@ let init ?persist_dir () =
         ) files
       end
   | None -> ()
+
+let set_markdown_dir dir =
+  markdown_dir := Some dir
+
+let is_valid_prompt_key key =
+  key <> ""
+  && String.for_all
+       (function
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' -> true
+         | _ -> false)
+       key
+
+let prompt_markdown_path key =
+  if not (is_valid_prompt_key key) then None
+  else
+    Option.map (fun dir -> Filename.concat dir (key ^ ".md")) !markdown_dir
+
+let read_file_if_exists path =
+  if Sys.file_exists path && not (Sys.is_directory path) then
+    Some (In_channel.with_open_text path In_channel.input_all)
+  else None
 
 (** {1 Registration and Lookup} *)
 
@@ -396,10 +444,15 @@ let stats () : registry_stats =
 (** Clear all registered prompts *)
 let clear () : unit =
   with_mutex (fun () ->
+    let persisted_dir = !prompts_dir in
     Hashtbl.clear registry;
     Hashtbl.clear version_index;
+    Hashtbl.clear override_tbl;
+    Hashtbl.clear meta_tbl;
+    prompts_dir := None;
+    markdown_dir := None;
     (* Clear files if persistence enabled *)
-    match !prompts_dir with
+    match persisted_dir with
     | Some dir when Sys.file_exists dir && Sys.is_directory dir ->
         let files = Sys.readdir dir in
         Array.iter (fun file ->
@@ -445,17 +498,115 @@ let of_json (json : Yojson.Safe.t) : (int, string) result =
 
 (** {1 Simple Override API for Hardcoded Prompts} *)
 
-(** Override store — highest priority. Dashboard/API edits go here. *)
-let override_tbl : (string, string) Hashtbl.t = Hashtbl.create 16
+let default_prompt_value_unlocked key =
+  let storage_key = make_key ~id:key ~version:"default" in
+  match Hashtbl.find_opt registry storage_key with
+  | Some entry -> Some entry.template
+  | None -> None
 
-(** Description and category metadata for prompts *)
-let meta_tbl : (string, string * string) Hashtbl.t = Hashtbl.create 16
+let resolve_prompt_unlocked key =
+  let override_value = Hashtbl.find_opt override_tbl key in
+  let file_path = prompt_markdown_path key in
+  let file_value = Option.bind file_path read_file_if_exists in
+  let default_value = default_prompt_value_unlocked key in
+  let source, effective =
+    match override_value with
+    | Some value -> ("override", value)
+    | None -> (
+        match file_value with
+        | Some value -> ("file", value)
+        | None -> (
+            match default_value with
+            | Some value -> ("default", value)
+            | None -> ("missing", "")))
+  in
+  {
+    effective;
+    source;
+    file_value;
+    override_value;
+    default_value;
+    file_path;
+    file_exists = Option.is_some file_value;
+    has_override = Option.is_some override_value;
+  }
+
+let unexpected_template_variables meta template =
+  let expected = meta.template_variables in
+  if expected = [] then []
+  else
+    extract_variables template
+    |> List.filter (fun variable -> not (List.mem variable expected))
+
+let prompt_item_json key (meta : prompt_meta) =
+  let resolved = resolve_prompt_unlocked key in
+  `Assoc
+    [
+      ("key", `String key);
+      ("category", `String meta.category);
+      ("description", `String meta.description);
+      ("current", `String resolved.effective);
+      ( "default",
+        match resolved.file_value with
+        | Some value -> `String value
+        | None -> (
+            match resolved.default_value with
+            | Some value -> `String value
+            | None -> `Null) );
+      ("effective", `String resolved.effective);
+      ( "file_value",
+        match resolved.file_value with
+        | Some value -> `String value
+        | None -> `Null );
+      ( "override_value",
+        match resolved.override_value with
+        | Some value -> `String value
+        | None -> `Null );
+      ( "file_path",
+        match resolved.file_path with
+        | Some value -> `String value
+        | None -> `Null );
+      ("file_exists", `Bool resolved.file_exists);
+      ("source", `String resolved.source);
+      ("has_override", `Bool resolved.has_override);
+      ("char_count", `Int (String.length resolved.effective));
+      ("required_file", `Bool meta.required_file);
+      ( "template_variables",
+        `List (List.map (fun value -> `String value) meta.template_variables) );
+    ]
+
+let compare_prompt_items a b =
+  let get_key = function
+    | `Assoc fields -> (
+        match List.assoc_opt "key" fields with
+        | Some (`String value) -> value
+        | _ -> "")
+    | _ -> ""
+  in
+  String.compare (get_key a) (get_key b)
+
+let register_prompt ~key ~description ?(category = "general")
+    ?(required_file = false) ?(template_variables = []) () =
+  with_mutex (fun () ->
+      Hashtbl.replace meta_tbl key
+        {
+          description;
+          category;
+          required_file;
+          template_variables = List.sort_uniq String.compare template_variables;
+        })
 
 (** Register a hardcoded prompt with its default value.
     This also registers it in the versioned template system as a fallback. *)
 let register_default ~key ~default ~description ?(category="general") () =
   with_mutex (fun () ->
-    Hashtbl.replace meta_tbl key (description, category);
+    Hashtbl.replace meta_tbl key
+      {
+        description;
+        category;
+        required_file = false;
+        template_variables = [];
+      };
     let entry = {
       id = key;
       template = default;
@@ -471,41 +622,49 @@ let register_default ~key ~default ~description ?(category="general") () =
       | Some vs -> if List.mem "default" vs then vs else "default" :: vs
       | None -> ["default"]
     in
-    Hashtbl.replace version_index key versions
+      Hashtbl.replace version_index key versions
   )
 
 (** Get a prompt value. Resolution: override > file > registered default *)
 let get_prompt key =
-  with_mutex (fun () ->
-    match Hashtbl.find_opt override_tbl key with
-    | Some v -> v
-    | None ->
-      let file_val = match !prompts_dir with
-        | Some dir ->
-          let path = Filename.concat dir (key ^ ".md") in
-          if Sys.file_exists path then
-            Some (In_channel.with_open_text path In_channel.input_all)
-          else None
-        | None -> None
-      in
-      match file_val with
-      | Some v -> v
-      | None ->
-        let storage_key = make_key ~id:key ~version:"default" in
-        match Hashtbl.find_opt registry storage_key with
-        | Some entry -> entry.template
-        | None -> ""
-  )
+  with_mutex (fun () -> (resolve_prompt_unlocked key).effective)
+
+let render_prompt_template key vars =
+  let template = get_prompt key in
+  if String.trim template = "" then
+    Error (Printf.sprintf "Prompt '%s' is missing" key)
+  else
+    render_template ~template ~vars ()
+
+(** Validate and apply a single override entry (shared logic for
+    [set_override] and [restore_overrides]).  Caller must NOT hold [mu].
+    Returns [Ok ()] on success or [Error msg] describing why the entry
+    was rejected. *)
+let apply_override_validated key value =
+  let trimmed = String.trim value in
+  if not (is_valid_prompt_key key) then Error "Invalid prompt key"
+  else if trimmed = "" then Error "Prompt cannot be empty"
+  else if String.length trimmed > 10000 then Error "Prompt too long (max 10000 chars)"
+  else
+    match
+      with_mutex (fun () ->
+          match Hashtbl.find_opt meta_tbl key with
+          | None -> Error "Unknown prompt key"
+          | Some meta ->
+              let unexpected = unexpected_template_variables meta trimmed in
+              if unexpected <> [] then
+                Error
+                  (Printf.sprintf "Unknown template variables: %s"
+                     (String.concat ", " unexpected))
+              else Ok ())
+    with
+    | Error msg -> Error msg
+    | Ok () ->
+        with_mutex (fun () -> Hashtbl.replace override_tbl key trimmed);
+        Ok ()
 
 (** Set an override for a prompt *)
-let set_override key value =
-  let trimmed = String.trim value in
-  if trimmed = "" then Error "Prompt cannot be empty"
-  else if String.length trimmed > 10000 then Error "Prompt too long (max 10000 chars)"
-  else begin
-    with_mutex (fun () -> Hashtbl.replace override_tbl key trimmed);
-    Ok ()
-  end
+let set_override key value = apply_override_validated key value
 
 (** Clear override, reverting to file or default *)
 let clear_prompt_override key =
@@ -513,49 +672,41 @@ let clear_prompt_override key =
 
 (** Get source of current value *)
 let prompt_source key =
+  with_mutex (fun () -> (resolve_prompt_unlocked key).source)
+
+let validate_required_prompt_files () =
   with_mutex (fun () ->
-    if Hashtbl.mem override_tbl key then "override"
-    else match !prompts_dir with
-      | Some dir ->
-        let path = Filename.concat dir (key ^ ".md") in
-        if Sys.file_exists path then "file" else "default"
-      | None -> "default"
-  )
+      Hashtbl.fold
+        (fun key meta acc ->
+          if not meta.required_file then acc
+          else
+            match prompt_markdown_path key with
+            | Some path when Sys.file_exists path && not (Sys.is_directory path) -> acc
+            | Some path -> (key, path) :: acc
+            | None -> (key, "<invalid-key>") :: acc)
+        meta_tbl [] |> List.sort compare)
+
+let validate_prompt_templates () =
+  with_mutex (fun () ->
+      Hashtbl.fold
+        (fun key meta acc ->
+          let issues =
+            match resolve_prompt_unlocked key with
+            | { effective = ""; source = "missing"; _ } -> []
+            | resolved ->
+                unexpected_template_variables meta resolved.effective
+                |> List.map (fun variable -> (key, variable))
+          in
+          issues @ acc)
+        meta_tbl [] |> List.sort compare)
 
 (** List all registered prompts with metadata, for API/dashboard *)
 let list_prompts () =
   with_mutex (fun () ->
-    Hashtbl.fold (fun key (description, category) acc ->
-      let current = match Hashtbl.find_opt override_tbl key with
-        | Some v -> v
-        | None ->
-          let storage_key = make_key ~id:key ~version:"default" in
-          match Hashtbl.find_opt registry storage_key with
-          | Some entry -> entry.template
-          | None -> ""
-      in
-      let default_val =
-        let storage_key = make_key ~id:key ~version:"default" in
-        match Hashtbl.find_opt registry storage_key with
-        | Some entry -> entry.template
-        | None -> ""
-      in
-      let source = if Hashtbl.mem override_tbl key then "override" else "default" in
-      `Assoc [
-        ("key", `String key);
-        ("category", `String category);
-        ("description", `String description);
-        ("current", `String current);
-        ("default", `String default_val);
-        ("source", `String source);
-        ("has_override", `Bool (Hashtbl.mem override_tbl key));
-        ("char_count", `Int (String.length current));
-      ] :: acc
-    ) meta_tbl []
-    |> List.sort (fun a b ->
-      let get_key j = match j with `Assoc l -> (match List.assoc "key" l with `String s -> s | _ -> "") | _ -> "" in
-      String.compare (get_key a) (get_key b))
-  )
+      Hashtbl.fold
+        (fun key meta acc -> prompt_item_json key meta :: acc)
+        meta_tbl []
+      |> List.sort compare_prompt_items)
 
 (** JSON export of all prompts for API *)
 let prompts_json () =
@@ -577,7 +728,8 @@ let persist_overrides base_path =
   Out_channel.with_open_text path (fun oc ->
     Out_channel.output_string oc content)
 
-(** Restore overrides from JSON file *)
+(** Restore overrides from JSON file, applying the same validation as
+    [set_override] so that stale or manually-edited entries are rejected. *)
 let restore_overrides base_path =
   let path = Filename.concat (Filename.concat base_path ".masc") "prompt_overrides.json" in
   if Sys.file_exists path then begin
@@ -586,12 +738,16 @@ let restore_overrides base_path =
       let json = Yojson.Safe.from_string content in
       match json with
       | `Assoc pairs ->
-        with_mutex (fun () ->
-          List.iter (fun (key, value) ->
-            match value with
-            | `String s -> Hashtbl.replace override_tbl key s
-            | _ -> ()
-          ) pairs)
+        List.iter (fun (key, value) ->
+          match value with
+          | `String s -> (
+              match apply_override_validated key s with
+              | Ok () -> ()
+              | Error reason ->
+                  Log.Misc.warn "prompt override restore: skipping %s: %s"
+                    key reason)
+          | _ -> ()
+        ) pairs
       | _ -> ()
     with _ -> ()
   end

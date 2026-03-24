@@ -20,27 +20,13 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 
-let keeper_constitution_default =
-  "Continuity rules:\n\
-   - This conversation may be compacted/summarized and handed off to a successor.\n\
-   - You MUST preserve continuity by emitting a stable state block at the end of each reply.\n\
-   - The state block is used for compaction/handoff. Do not include secrets.\n\
-   - Reply in the user's language. Keep the main reply concise.\n\
-   - Do not output [GOAL_COMPLETE] unless explicitly requested.\n\
-   \n\
-   State block template (must use these exact markers):\n\
-   [STATE]\n\
-   Goal: <short>\n\
-   Progress: <short>\n\
-   Next: <0-3 items separated by ';'>\n\
-   Decisions: <0-3 items separated by ';'>\n\
-   OpenQuestions: <0-3 items separated by ';'>\n\
-   Constraints: <0-3 items separated by ';'>\n\
-   [/STATE]\n"
+let render_required_prompt key vars =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok value -> value
+  | Error _ -> Prompt_registry.get_prompt key
 
 let keeper_constitution () =
-  let v = Prompt_registry.get_prompt "keeper.constitution" in
-  if v = "" then keeper_constitution_default else v
+  Prompt_registry.get_prompt "keeper.constitution"
 
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~soul_profile ~will ~needs ~desires
@@ -187,29 +173,15 @@ let proactive_prompt_for_keeper
       if fallback = "" then continuity_snapshot else fallback
     else continuity_snapshot
   in
-  Printf.sprintf
-    "Autonomous proactive turn (no new user message) after %d seconds idle.\n\
-     Keeper SOUL profile: %s.\n\
-     Goal: %s\n\
-     Last proactive preview (avoid repeating): %s\n\
-     Continuity snapshot:\n%s\n\
-     SOUL perspective hint: %s\n\
-     \n\
-     What to do on this turn:\n\
-     1. Call masc_board_list to see recent Board posts.\n\
-     2. Act on what you find:\n\
-        - Posts you haven't commented on: comment with your opinion.\n\
-        - Board quiet or empty: post something yourself via masc_board_create_post.\n\
-          Share a thought, ask a question, start a discussion, or reflect on your goal.\n\
-        - Something worth saying aloud: use keeper_voice_speak.\n\
-     3. Summarize what you did.\n\
-     \n\
-     Guidance:\n\
-     - Prefer the same language as the recent conversation.\n\
-     - Avoid repeating the previous proactive message verbatim.\n\
-     - Do NOT output [STATE] blocks on this turn.\n\
-     - End your reply with: CHECKIN: <one sentence summary of what you did>"
-    idle_seconds profile meta.goal last_preview continuity_snapshot seed
+  render_required_prompt "keeper.proactive_turn"
+    [
+      ("idle_seconds", string_of_int idle_seconds);
+      ("profile", profile);
+      ("goal", meta.goal);
+      ("last_preview", last_preview);
+      ("continuity_snapshot", continuity_snapshot);
+      ("seed", seed);
+    ]
 
 type proactive_generation_result = {
   reply: string;
@@ -223,14 +195,15 @@ type proactive_generation_result = {
 }
 
 let proactive_retry_instruction attempt ~(reason : string) =
-  if attempt = 2 then
-    Printf.sprintf
-      "Retry policy: previous attempt failed (%s). You MUST output now with a clearly different angle."
-      reason
-  else
-    Printf.sprintf
-      "Retry policy: previous attempts failed (%s). You MUST output one decisive check-in now, materially different from the last preview."
-      reason
+  let attempt_phrase, directive =
+    if attempt = 2 then
+      ("previous attempt", "now with a clearly different angle.")
+    else
+      ( "previous attempts",
+        "one decisive check-in now, materially different from the last preview." )
+  in
+  render_required_prompt "keeper.proactive_retry"
+    [ ("attempt_phrase", attempt_phrase); ("reason", reason); ("directive", directive) ]
 
 let proactive_temperature ~cascade_name attempt =
   let fallback () =

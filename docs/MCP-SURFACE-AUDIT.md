@@ -30,7 +30,7 @@ As of `2026-03-12`, the server shape is broadly sound, but its explanation surfa
 | MCP prompts | 3 | `lib/mcp_prompt_surface.ml` | `tool_help`, `team_session_proof`, `command_truth` |
 | Fixed MCP resources | 21 | `lib/mcp_server.ml` | Status, tasks, messages, events, worktrees, schema, institution, library, tool-help index |
 | MCP resource templates | 7 | `lib/mcp_server.ml` | Message/event ranges, library docs, per-tool help |
-| Internal prompt templates | 7 | `data/prompts/` | Chain/runtime prompt registry, not MCP-discoverable |
+| Internal prompt templates | 18 | `data/prompts/` + `config/prompts/` | Chain/runtime prompt registry plus markdown-managed operator prompts, not MCP-discoverable |
 
 The key split is intentional:
 
@@ -47,7 +47,7 @@ The key split is intentional:
 | MCP prompts | `prompts/list`, `prompts/get` | `tool_help`, `team_session_proof`, `command_truth` | Explanation/proof layer, not runtime prompt registry |
 | MCP resources | `resources/list/read` | `masc://status`, `masc://tasks`, `masc://tool-help-index` | Snapshot/read layer |
 | Remote operator | `/mcp/operator` | `masc_operator_snapshot`, `masc_operator_digest` | Separate 4-tool remote-safe profile |
-| Internal prompt/runtime plane | Not MCP-discoverable | `Prompt_registry`, `data/prompts/*.json` | Used by chains, sentinel, and runtime execution |
+| Internal prompt/runtime plane | Not MCP-discoverable | `Prompt_registry`, `data/prompts/*.json`, `config/prompts/*.md` | Used by chains, keepers, dashboard judges, and runtime execution |
 
 ## Public Surface Map
 
@@ -155,7 +155,7 @@ flowchart TD
 | Type | Examples | Status |
 |------|----------|--------|
 | Intentional compatibility | `masc_claim`, `experiment_start`, `masc_trpg_*` | Deprecated/default-off aliases; keep if compatibility matters |
-| Intentional internal-only | `Prompt_registry`, `data/prompts/*.json` | Real runtime feature, not public MCP surface |
+| Intentional internal-only | `Prompt_registry`, `data/prompts/*.json`, `config/prompts/*.md` | Real runtime feature, not public MCP surface |
 | Experimental but documented | `SWARM-RISC`, `GAME-VIEW-PROTOCOL` draft | Keep clearly labeled as non-canonical or draft |
 | Placeholder / review-needed | none | Dead hidden placeholder removed from the MCP schema inventory |
 | Documentation orphan | old count claims, old module lists, stale “full spec” prose | Should be downgraded to historical or refreshed |
@@ -167,7 +167,7 @@ flowchart TD
 | What tools are truly public? | `tools/list` plus [README.md](../README.md) |
 | What hidden or deprecated tools still exist? | `masc_tool_admin_snapshot`, `masc_tool_help`, `Tool_catalog` |
 | What prompts are public MCP prompts? | `prompts/list`, [mcp_prompt_surface.ml](../lib/mcp_prompt_surface.ml) |
-| What prompt templates exist internally? | `data/prompts/`, `Prompt_registry` |
+| What prompt templates exist internally? | `data/prompts/`, `config/prompts/`, `Prompt_registry` |
 | What resources exist? | `resources/list`, `resources/templates/list`, [mcp_server.ml](../lib/mcp_server.ml) |
 | What is the canonical architecture? | [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md) |
 | What is the canonical managed-operation flow? | [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) |

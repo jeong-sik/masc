@@ -341,6 +341,51 @@ export function fetchDashboardTools(): Promise<DashboardToolsResponse> {
   return get('/api/v1/dashboard/tools')
 }
 
+export type PromptSource = 'override' | 'file' | 'default' | 'missing'
+
+export interface DashboardPromptItem {
+  key: string
+  category: string
+  description: string
+  current: string
+  default: string | null
+  effective: string
+  file_value: string | null
+  override_value: string | null
+  file_path: string | null
+  file_exists: boolean
+  source: PromptSource
+  has_override: boolean
+  char_count: number
+  required_file: boolean
+  template_variables: string[]
+}
+
+export interface DashboardPromptsResponse {
+  prompts: DashboardPromptItem[]
+}
+
+export interface PromptMutationResponse {
+  ok: boolean
+  message?: string
+  key?: string
+  source?: PromptSource
+  effective?: string
+  error?: string
+}
+
+export function fetchDashboardPrompts(): Promise<DashboardPromptsResponse> {
+  return get('/api/v1/prompts')
+}
+
+export function savePromptOverride(key: string, value: string): Promise<PromptMutationResponse> {
+  return post('/api/v1/prompts', { action: 'set', key, value })
+}
+
+export function clearPromptOverride(key: string): Promise<PromptMutationResponse> {
+  return post('/api/v1/prompts', { action: 'clear', key })
+}
+
 // --- Individual resource fetchers (selective SSE-driven refresh) ---
 
 export interface PaginatedAgentsResponse {

@@ -32,6 +32,49 @@ let requested_backend_mode () =
       in
       if has_pg then "postgres-native" else "filesystem"
 
+let existing_dir path =
+  Sys.file_exists path && Sys.is_directory path
+
+let dedupe_keep_order values =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | value :: rest ->
+        if List.mem value acc then loop acc rest
+        else loop (value :: acc) rest
+  in
+  loop [] values
+
+let prompt_markdown_dir_candidates ~workspace_path ~base_path =
+  let workspace_candidate =
+    Filename.concat workspace_path "config/prompts"
+  in
+  let base_candidate = Filename.concat base_path "config/prompts" in
+  let cwd_candidate = Filename.concat (Sys.getcwd ()) "config/prompts" in
+  let exe_candidate =
+    let exe_dir = Filename.dirname Sys.executable_name in
+    let root = Filename.dirname (Filename.dirname (Filename.dirname exe_dir)) in
+    Filename.concat root "config/prompts"
+  in
+  let dune_candidate =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root when String.trim root <> "" ->
+        Some (Filename.concat root "config/prompts")
+    | _ -> None
+  in
+  let candidates =
+    workspace_candidate
+    :: base_candidate
+    :: (match dune_candidate with Some dir -> [ dir ] | None -> [])
+    @ [ exe_candidate; cwd_candidate ]
+  in
+  dedupe_keep_order candidates
+
+let resolve_prompt_markdown_dir ~workspace_path ~base_path =
+  let candidates = prompt_markdown_dir_candidates ~workspace_path ~base_path in
+  match List.find_opt existing_dir candidates with
+  | Some dir -> dir
+  | None -> Filename.concat base_path "config/prompts"
+
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in
   let mono_clock = Eio.Stdenv.mono_clock env in
@@ -81,8 +124,31 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
 let bootstrap_chain_state (state : Mcp_server.server_state) =
   Chain_native_eio.ensure_bootstrap state.room_config;
   (* Initialize prompt registry with defaults and restore saved overrides *)
+  let prompt_markdown_dir =
+    resolve_prompt_markdown_dir
+      ~workspace_path:state.room_config.workspace_path
+      ~base_path:state.room_config.base_path
+  in
+  Prompt_registry.set_markdown_dir prompt_markdown_dir;
+  if prompt_markdown_dir
+     <> Filename.concat state.room_config.workspace_path "config/prompts"
+  then
+    Log.Misc.info "prompt markdown dir resolved outside room base: %s"
+      prompt_markdown_dir;
   Prompt_defaults.init ();
-  (try Prompt_registry.restore_overrides state.room_config.base_path
+  let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
+  if missing_prompt_files <> [] then
+    Log.Misc.error "required prompt files missing: %s"
+      (missing_prompt_files
+      |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
+      |> String.concat ", ");
+  let invalid_prompt_templates = Prompt_registry.validate_prompt_templates () in
+  if invalid_prompt_templates <> [] then
+    Log.Misc.error "prompt templates use unknown variables: %s"
+      (invalid_prompt_templates
+      |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)
+      |> String.concat ", ");
+  (try Prompt_registry.restore_overrides state.room_config.workspace_path
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.error "prompt override restore failed: %s"
        (Printexc.to_string exn));

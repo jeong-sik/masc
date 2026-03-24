@@ -366,42 +366,20 @@ let build_deliberation_prompt
     {|
 {"action":"multi_step","params":{"steps":[{"action":"task_claim","params":{"task_id":"task-1","reason":"urgent"}},{"action":"broadcast","params":{"message":"Claimed task-1"}}]},"reasoning":"Claim and announce","confidence":0.7}|}
   in
-  Printf.sprintf
-    {|You are %s, a keeper agent in a multi-agent coordination system.
-
-Your soul profile: %s
-Your current goal: %s
-
-Detected triggers that require your attention:
-%s
-
-%s
-
-Available actions (pick exactly one):
-- noop: Do nothing. Use when triggers do not warrant action.
-- reply_in_room: Send a message to a specific room. Requires room_id and content.
-- task_claim: Claim an unclaimed task. Requires task_id and reason.
-- broadcast: Send a broadcast message to all agents. Requires message.
-- board_post: Post to the community board. Requires content and optional hearth.
-- board_comment: Comment on a board post. Requires post_id and content.
-- board_vote: Vote on a board post. Requires post_id and direction (up/down).
-- propose_spawn: Propose spawning a new agent. Requires topic and reason.%s
-
-Respond with ONLY a JSON object in this exact format:
-{"action":"<action_name>","params":{<action_specific_params>},"reasoning":"<brief_explanation>","confidence":<0.0_to_1.0>}
-
-Examples:
-{"action":"noop","params":{"reason":"No urgent triggers"},"reasoning":"All triggers are low priority","confidence":0.9}
-{"action":"reply_in_room","params":{"room_id":"default","content":"I see a new task available."},"reasoning":"Direct mention needs response","confidence":0.8}
-{"action":"task_claim","params":{"task_id":"task-123","reason":"Matches my goal"},"reasoning":"Unclaimed task aligns with keeper goal","confidence":0.7}
-{"action":"broadcast","params":{"message":"Status update: monitoring active goals"},"reasoning":"Team needs coordination update","confidence":0.6}%s|}
-    keeper_name
-    soul_profile
-    goal
-    (triggers_to_prompt_list triggers)
-    (world_observation_to_prompt_section obs)
-    multi_step_line
-    multi_step_example
+  match
+    Prompt_registry.render_prompt_template "keeper.deliberation"
+      [
+        ("keeper_name", keeper_name);
+        ("soul_profile", soul_profile);
+        ("goal", goal);
+        ("triggers", triggers_to_prompt_list triggers);
+        ("world_state", world_observation_to_prompt_section obs);
+        ("multi_step_line", multi_step_line);
+        ("multi_step_example", multi_step_example);
+      ]
+  with
+  | Ok value -> value
+  | Error _ -> Prompt_registry.get_prompt "keeper.deliberation"
 
 (* ---------- Response parser ---------- *)
 

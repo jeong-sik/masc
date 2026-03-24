@@ -8,6 +8,26 @@ module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
 
+let has_prompt_root path =
+  Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_prompt_root root -> root
+  | _ ->
+      let rec ascend path =
+        if has_prompt_root path then path
+        else
+          let parent = Filename.dirname path in
+          if String.equal parent path then Sys.getcwd () else ascend parent
+      in
+      ascend (Sys.getcwd ())
+
+let () =
+  let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
+  Masc_mcp.Prompt_registry.set_markdown_dir prompts_dir;
+  Masc_mcp.Prompt_defaults.init ()
+
 (* ---------- World Observation type tests ---------- *)
 
 let base_observation : WO.world_observation =

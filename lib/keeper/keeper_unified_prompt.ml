@@ -17,59 +17,54 @@ let format_goals (goal_ids : string list) : string =
   String.concat "\n"
     (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
 
+let line_block label value =
+  if value = "" then ""
+  else Printf.sprintf "%s: %s\n" label value
+
 let build_prompt ~(meta : Keeper_types.keeper_meta)
     ~(observation : Keeper_world_observation.world_observation) : string * string
     =
-  let buf = Buffer.create 2048 in
-  (* Identity *)
-  Buffer.add_string buf
-    (Printf.sprintf "You are %s, a resident keeper agent.\n" meta.name);
-  (* Soul profile *)
-  if meta.soul_profile <> "" then
-    Buffer.add_string buf
-      (Printf.sprintf "Soul profile: %s\n" meta.soul_profile);
-  (* Will / Needs / Desires *)
-  if meta.will <> "" then
-    Buffer.add_string buf (Printf.sprintf "Will: %s\n" meta.will);
-  if meta.needs <> "" then
-    Buffer.add_string buf (Printf.sprintf "Needs: %s\n" meta.needs);
-  if meta.desires <> "" then
-    Buffer.add_string buf (Printf.sprintf "Desires: %s\n" meta.desires);
-  (* Instructions *)
-  if meta.instructions <> "" then
-    Buffer.add_string buf
-      (Printf.sprintf "\nInstructions:\n%s\n" meta.instructions);
-  (* Goal horizons *)
-  Buffer.add_string buf "\n";
-  if meta.goal <> "" then
-    Buffer.add_string buf (Printf.sprintf "Primary goal: %s\n" meta.goal);
-  if meta.short_goal <> "" && meta.short_goal <> meta.goal then
-    Buffer.add_string buf
-      (Printf.sprintf "Short-term goal: %s\n" meta.short_goal);
-  if meta.mid_goal <> "" && meta.mid_goal <> meta.goal then
-    Buffer.add_string buf
-      (Printf.sprintf "Mid-term goal: %s\n" meta.mid_goal);
-  if meta.long_goal <> "" && meta.long_goal <> meta.goal then
-    Buffer.add_string buf
-      (Printf.sprintf "Long-term goal: %s\n" meta.long_goal);
-  (* Behavioral guidance *)
-  Buffer.add_string buf
-    "\n\
-     ## Behavior\n\
-     You have tools available. Use them when appropriate.\n\
-     Decide what to do based on the current world state below.\n\
-     The turn budget is limited. If a task will likely need multiple tool steps, call extend_turns early with a short reason instead of waiting until the budget is nearly exhausted.\n\
-     Possible actions:\n\
-     - Reply to pending mentions (use room broadcast tools)\n\
-     - Work on active goals (use planning/execution tools)\n\
-     - Proactive observation (post findings to board)\n\
-     - Search knowledge library (keeper_library_search/read) for research references\n\
-     - Do nothing if the situation warrants it (respond with brief reasoning)\n\n\
-     Prefer a single moderate extend_turns request before read/edit/build/verify style work.\n\
-     When making claims or decisions, search the library first if relevant documents may exist.\n\
-     Do NOT explain your decision-making process at length.\n\
-     Act directly or state briefly why you chose not to act.\n";
-  let system_prompt = Buffer.contents buf in
+  let trait_lines =
+    String.concat ""
+      [
+        line_block "Soul profile" meta.soul_profile;
+        line_block "Will" meta.will;
+        line_block "Needs" meta.needs;
+        line_block "Desires" meta.desires;
+      ]
+  in
+  let instructions_block =
+    if meta.instructions = "" then ""
+    else Printf.sprintf "\nInstructions:\n%s\n" meta.instructions
+  in
+  let goal_lines =
+    String.concat ""
+      [
+        line_block "Primary goal" meta.goal;
+        (if meta.short_goal <> "" && meta.short_goal <> meta.goal then
+           line_block "Short-term goal" meta.short_goal
+         else "");
+        (if meta.mid_goal <> "" && meta.mid_goal <> meta.goal then
+           line_block "Mid-term goal" meta.mid_goal
+         else "");
+        (if meta.long_goal <> "" && meta.long_goal <> meta.goal then
+           line_block "Long-term goal" meta.long_goal
+         else "");
+      ]
+  in
+  let system_prompt =
+    match
+      Prompt_registry.render_prompt_template "keeper.unified.system"
+        [
+          ("identity_header", Printf.sprintf "You are %s, a resident keeper agent." meta.name);
+          ("trait_lines", trait_lines);
+          ("instructions_block", instructions_block);
+          ("goal_lines", goal_lines);
+        ]
+    with
+    | Ok value -> value
+    | Error _ -> Prompt_registry.get_prompt "keeper.unified.system"
+  in
   (* User message: structured world observation *)
   let ubuf = Buffer.create 1024 in
   Buffer.add_string ubuf "## Current World State\n\n";

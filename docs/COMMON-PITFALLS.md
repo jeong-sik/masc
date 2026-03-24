@@ -79,3 +79,4 @@ Keeper system prompts are cached in checkpoints. After changing prompts:
 - Existing keepers continue using the old prompt from checkpoint
 - New prompts only apply when `build_turn_prompt` overrides at runtime
 - If testing prompt changes, verify the running keeper's actual system prompt
+- Core prompt text now lives in `config/prompts/*.md`; Dashboard overrides in `Lab > Tools > Prompt Registry` only change runtime effective text and are persisted to `.masc/prompt_overrides.json`

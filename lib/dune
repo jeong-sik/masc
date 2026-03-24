@@ -90,6 +90,7 @@
    dashboard_http_keeper
    dashboard_http_mdal
    dashboard_http_autoresearch
+   dashboard_http_repo_synthesis
    dashboard_provider_runs
    proactive_refresh
    server_dashboard_http
@@ -131,6 +132,7 @@
    credits_dashboard
    cp_microarch_summary
    cp_search_fabric
+   repo_synthesis_benchmark
 
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly

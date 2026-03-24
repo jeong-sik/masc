@@ -92,6 +92,20 @@ count_pattern() {
   printf '%s' "${total:-0}"
 }
 
+count_pattern_ref() {
+  local ref="$1"
+  local dir="$2"
+  local pattern="$3"
+  local tmp_dir
+  local total
+
+  tmp_dir="$(mktemp -d)"
+  git archive "$ref" -- "$dir" | tar -x -C "$tmp_dir"
+  total="$(rg -c "$pattern" "$tmp_dir/$dir" -g '*.{ml,mli}' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
+  rm -rf "$tmp_dir"
+  printf '%s' "${total:-0}"
+}
+
 extract_baseline_value() {
   local content="$1"
   local key="$2"
@@ -100,14 +114,16 @@ extract_baseline_value() {
   printf '%s' "${value:-0}"
 }
 
-load_baseline_content() {
+load_baseline_counts() {
   if [ -n "$BASELINE_REF" ]; then
-    local ref_content
-    ref_content="$(git show "${BASELINE_REF}:${BASELINE_FILE}" 2>/dev/null || true)"
-    if [ -n "$ref_content" ]; then
+    if git rev-parse --verify "$BASELINE_REF" >/dev/null 2>&1; then
       baseline_source="git_ref"
       baseline_ref_used="$BASELINE_REF"
-      BASELINE_CONTENT="$ref_content"
+      baseline_lib_failwith="$(count_pattern_ref "$BASELINE_REF" lib 'failwith')"
+      baseline_lib_list_hd="$(count_pattern_ref "$BASELINE_REF" lib 'List\.hd')"
+      baseline_lib_list_tl="$(count_pattern_ref "$BASELINE_REF" lib 'List\.tl')"
+      baseline_lib_option_get="$(count_pattern_ref "$BASELINE_REF" lib 'Option\.get')"
+      baseline_lib_obj_magic="$(count_pattern_ref "$BASELINE_REF" lib 'Obj\.magic')"
       return 0
     fi
   fi
@@ -115,9 +131,15 @@ load_baseline_content() {
   if [ -f "$BASELINE_FILE" ]; then
     baseline_source="file"
     BASELINE_CONTENT="$(cat "$BASELINE_FILE")"
-  else
-    BASELINE_CONTENT=""
+    baseline_lib_failwith="$(extract_baseline_value "$BASELINE_CONTENT" "lib_failwith")"
+    baseline_lib_list_hd="$(extract_baseline_value "$BASELINE_CONTENT" "lib_list_hd")"
+    baseline_lib_list_tl="$(extract_baseline_value "$BASELINE_CONTENT" "lib_list_tl")"
+    baseline_lib_option_get="$(extract_baseline_value "$BASELINE_CONTENT" "lib_option_get")"
+    baseline_lib_obj_magic="$(extract_baseline_value "$BASELINE_CONTENT" "lib_obj_magic")"
+    return 0
   fi
+
+  return 1
 }
 
 extract_json_int() {
@@ -236,18 +258,10 @@ baseline_lib_list_tl=0
 baseline_lib_option_get=0
 baseline_lib_obj_magic=0
 if [ "$FAIL_ON_LIB_REGRESSION" -eq 1 ]; then
-  load_baseline_content
-  baseline_content="$BASELINE_CONTENT"
-  if [ -z "$baseline_content" ]; then
+  if ! load_baseline_counts; then
     echo "ERROR: baseline file not found: $BASELINE_FILE" >&2
     exit 2
   fi
-
-  baseline_lib_failwith="$(extract_baseline_value "$baseline_content" "lib_failwith")"
-  baseline_lib_list_hd="$(extract_baseline_value "$baseline_content" "lib_list_hd")"
-  baseline_lib_list_tl="$(extract_baseline_value "$baseline_content" "lib_list_tl")"
-  baseline_lib_option_get="$(extract_baseline_value "$baseline_content" "lib_option_get")"
-  baseline_lib_obj_magic="$(extract_baseline_value "$baseline_content" "lib_obj_magic")"
 
   [ "$lib_failwith" -gt "$baseline_lib_failwith" ] && regressions+=("lib_failwith ${baseline_lib_failwith}->${lib_failwith}")
   [ "$lib_list_hd" -gt "$baseline_lib_list_hd" ] && regressions+=("lib_list_hd ${baseline_lib_list_hd}->${lib_list_hd}")

@@ -280,7 +280,9 @@ let create_eio ~sw ~env (cfg : config) : (t, error) result =
                Log.Backend.info "[PG] connected and schema ready";
                at_exit (fun () ->
                  try Caqti_eio.Pool.drain pool
-                 with _ -> ());
+                 with exn ->
+                   Log.Backend.warn "[PG] pool drain failed: %s"
+                     (Printexc.to_string exn));
                Ok { pool; namespace = cfg.cluster_name; clock = env#clock; _sw = sw })
 
 let create_eio_readonly ~sw ~env (cfg : config) : (t, error) result =

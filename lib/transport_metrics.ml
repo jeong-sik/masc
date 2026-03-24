@@ -244,14 +244,19 @@ let transport_health_json ~config =
   let listener_mode = http_listener_mode () in
   let topology_summary = cluster_summary_json config in
   let room_id =
-    try Room.current_room_id config with _ -> "default"
+    try Room.current_room_id config
+    with exn ->
+      Log.Transport.debug "current_room_id failed: %s" (Printexc.to_string exn);
+      "default"
   in
   let cluster_name =
     Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")
   in
   let recent_messages =
     try Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit:20 |> List.length
-    with _ -> 0
+    with exn ->
+      Log.Transport.debug "recent_messages count failed: %s" (Printexc.to_string exn);
+      0
   in
   let grpc_subscribers_i = int_of_float grpc_subscribers in
   let primary_path =

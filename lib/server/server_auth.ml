@@ -182,7 +182,10 @@ let host_port_of_origin origin =
         Some
           ( String.trim host |> String.lowercase_ascii,
             effective_port_of_uri uri )
-  with _ -> None
+  with exn ->
+    Log.Auth.debug "host_port_of_origin: parse failed for %S: %s"
+      origin (Printexc.to_string exn);
+    None
 
 let host_port_of_request request =
   match Httpun.Headers.get request.Httpun.Request.headers "host" with
@@ -196,7 +199,10 @@ let host_port_of_request request =
             Some
               ( String.trim host |> String.lowercase_ascii,
                 effective_port_of_uri uri )
-      with _ -> None)
+      with exn ->
+        Log.Auth.debug "host_port_of_request: parse failed for %S: %s"
+          host_header (Printexc.to_string exn);
+        None)
 
 let ensure_same_origin_browser_request request :
     (unit, Types.masc_error) result =

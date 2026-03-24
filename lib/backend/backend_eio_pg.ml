@@ -132,7 +132,9 @@ let create ~sw ~env ~url ~cluster_name ~node_id =
        | Ok () ->
            at_exit (fun () ->
              try Caqti_eio.Pool.drain pool
-             with _ -> ());
+             with exn ->
+               Log.Backend.warn "[EioPG] pool drain failed: %s"
+                 (Printexc.to_string exn));
            Ok { pool; namespace = cluster_name; node_id })
 
 let get t key =

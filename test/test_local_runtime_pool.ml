@@ -12,24 +12,45 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let make_runtime ?model ?(max_concurrency = 2) id base_url =
+  {
+    Local_runtime_pool.id;
+    base_url;
+    model;
+    max_concurrency;
+    active_slots = 0;
+    queue_depth = 0;
+    latency_ema_ms = None;
+    failure_streak = 0;
+    cooldown_until = None;
+    last_error = None;
+    total_started = 0;
+    total_success = 0;
+    total_failure = 0;
+  }
+
+let install_pool runtimes =
+  Local_runtime_pool.pool :=
+    {
+      Local_runtime_pool.empty_pool with
+      runtimes;
+      fingerprint = Local_runtime_pool.current_fingerprint ();
+    }
+
 let test_parse_runtime_env () =
   Local_runtime_pool.reset ();
-  let json =
-    {|[
-      {"id":"local-a","base_url":"http://127.0.0.1:8085","model":"qwen-a","max_concurrency":12},
-      {"id":"local-b","base_url":"http://127.0.0.1:8086","model":"qwen-a","max_concurrency":10}
-    ]|}
-  in
-  with_env "MASC_LLAMA_RUNTIMES_JSON" (Some json) @@ fun () ->
+  with_env "LLM_ENDPOINTS"
+    (Some "http://127.0.0.1:8085,http://127.0.0.1:8086")
+  @@ fun () ->
   let snapshots = Local_runtime_pool.snapshots () in
   Alcotest.(check int) "runtime count" 2 (List.length snapshots);
-  Alcotest.(check int) "configured capacity" 22
+  Alcotest.(check int) "configured capacity" 24
     (Local_runtime_pool.configured_capacity ());
   let runtime_ids =
     snapshots |> List.map (fun (runtime : Local_runtime_pool.runtime_snapshot) -> runtime.id)
   in
-  Alcotest.(check bool) "contains local-a" true (List.mem "local-a" runtime_ids);
-  Alcotest.(check bool) "contains local-b" true (List.mem "local-b" runtime_ids)
+  Alcotest.(check bool) "contains local-8085" true (List.mem "local-8085" runtime_ids);
+  Alcotest.(check bool) "contains local-8086" true (List.mem "local-8086" runtime_ids)
 
 let test_parse_llm_endpoints_env () =
   Local_runtime_pool.reset ();
@@ -52,13 +73,12 @@ let test_parse_llm_endpoints_env () =
 
 let test_acquire_and_release () =
   Local_runtime_pool.reset ();
-  let json =
-    {|[
-      {"id":"local-a","base_url":"http://127.0.0.1:8085","max_concurrency":2},
-      {"id":"local-b","base_url":"http://127.0.0.1:8086","model":"qwen-b","max_concurrency":2}
-    ]|}
-  in
-  with_env "MASC_LLAMA_RUNTIMES_JSON" (Some json) @@ fun () ->
+  install_pool
+    [
+      make_runtime "local-a" "http://127.0.0.1:8085" ~max_concurrency:2;
+      make_runtime "local-b" "http://127.0.0.1:8086" ~model:"qwen-b"
+        ~max_concurrency:2;
+    ];
   let assignment =
     match
       Local_runtime_pool.acquire ~preferred_pool:"local-a"
@@ -82,14 +102,14 @@ let test_acquire_and_release () =
 
 let test_acquire_prefers_exact_model_match () =
   Local_runtime_pool.reset ();
-  let json =
-    {|[
-      {"id":"generic","base_url":"http://127.0.0.1:8185","max_concurrency":2},
-      {"id":"lead","base_url":"http://127.0.0.1:8186","model":"qwen35-lead","max_concurrency":2},
-      {"id":"worker","base_url":"http://127.0.0.1:8187","model":"qwen9-worker","max_concurrency":2}
-    ]|}
-  in
-  with_env "MASC_LLAMA_RUNTIMES_JSON" (Some json) @@ fun () ->
+  install_pool
+    [
+      make_runtime "generic" "http://127.0.0.1:8185" ~max_concurrency:2;
+      make_runtime "lead" "http://127.0.0.1:8186" ~model:"qwen35-lead"
+        ~max_concurrency:2;
+      make_runtime "worker" "http://127.0.0.1:8187" ~model:"qwen9-worker"
+        ~max_concurrency:2;
+    ];
   let assignment =
     match Local_runtime_pool.acquire ~model_name:(Some "qwen9-worker") () with
     | Ok assignment -> assignment
@@ -102,13 +122,13 @@ let test_acquire_prefers_exact_model_match () =
 
 let test_acquire_rejects_mismatched_preferred_model_pool () =
   Local_runtime_pool.reset ();
-  let json =
-    {|[
-      {"id":"lead","base_url":"http://127.0.0.1:8285","model":"qwen35-lead","max_concurrency":2},
-      {"id":"worker","base_url":"http://127.0.0.1:8286","model":"qwen9-worker","max_concurrency":2}
-    ]|}
-  in
-  with_env "MASC_LLAMA_RUNTIMES_JSON" (Some json) @@ fun () ->
+  install_pool
+    [
+      make_runtime "lead" "http://127.0.0.1:8285" ~model:"qwen35-lead"
+        ~max_concurrency:2;
+      make_runtime "worker" "http://127.0.0.1:8286" ~model:"qwen9-worker"
+        ~max_concurrency:2;
+    ];
   match
     Local_runtime_pool.acquire ~preferred_pool:"lead"
       ~model_name:(Some "qwen9-worker") ()
@@ -128,12 +148,8 @@ let test_select_runtime_from_empty_returns_error () =
 
 let test_acquire_requires_explicit_or_runtime_model () =
   Local_runtime_pool.reset ();
-  let json =
-    {|[
-      {"id":"local-no-model","base_url":"http://127.0.0.1:7085","max_concurrency":1}
-    ]|}
-  in
-  with_env "MASC_LLAMA_RUNTIMES_JSON" (Some json) @@ fun () ->
+  install_pool
+    [ make_runtime "local-no-model" "http://127.0.0.1:7085" ~max_concurrency:1 ];
   match Local_runtime_pool.acquire ~preferred_pool:"local-no-model" ~model_name:None () with
   | Ok _ -> Alcotest.fail "runtime without model should reject implicit acquire"
   | Error message ->
@@ -150,13 +166,9 @@ let test_record_measured_ceiling () =
 
 let test_failure_cooldown_from_env () =
   Local_runtime_pool.reset ();
-  let json =
-    {|[
-      {"id":"local-c","base_url":"http://127.0.0.1:9085","model":"qwen-c","max_concurrency":1}
-    ]|}
-  in
   with_env "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" (Some "120") @@ fun () ->
-  with_env "MASC_LLAMA_RUNTIMES_JSON" (Some json) @@ fun () ->
+  install_pool
+    [ make_runtime "local-c" "http://127.0.0.1:9085" ~model:"qwen-c" ~max_concurrency:1 ];
   let fail_once () =
     let assignment =
       match Local_runtime_pool.acquire ~preferred_pool:"local-c" ~model_name:None () with

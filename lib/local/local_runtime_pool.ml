@@ -95,8 +95,13 @@ let empty_pool = {
 }
 
 let pool : pool_state ref = ref empty_pool
+let pool_mu = Mutex.create ()
 
-let reset () = pool := empty_pool
+let with_pool_lock f =
+  Mutex.lock pool_mu;
+  Fun.protect ~finally:(fun () -> Mutex.unlock pool_mu) f
+
+let reset () = with_pool_lock (fun () -> pool := empty_pool)
 
 let parse_int_opt raw =
   try Some (int_of_string (String.trim raw)) with Failure _ -> None
@@ -118,6 +123,71 @@ let runtime_id_of_base_url base_url =
   | None ->
       let digest = Digest.string base_url |> Digest.to_hex in
       sprintf "local-%s" (String.sub digest 0 8)
+
+let model_of_discovery_status (status : Discovery_cache.endpoint_info) =
+  match status.models with
+  | model :: _ -> trim_opt (Some model.id)
+  | [] -> (
+      match status.props with
+      | Some props -> trim_opt (Some props.model)
+      | None -> trim_opt (Sys.getenv_opt "LLAMA_SWARM_MODEL"))
+
+let max_concurrency_of_discovery_status (status : Discovery_cache.endpoint_info) =
+  match status.slots with
+  | Some slots when slots.total > 0 -> slots.total
+  | _ ->
+      int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
+        ~default:default_parallel_hint
+
+let runtime_of_discovery_status (status : Discovery_cache.endpoint_info) =
+  let base_url = String.trim status.url in
+  let unavailable =
+    if status.healthy then None else Some (wall_now () +. cooldown_seconds ())
+  in
+  {
+    id = runtime_id_of_base_url base_url;
+    base_url;
+    model = model_of_discovery_status status;
+    max_concurrency = max_concurrency_of_discovery_status status;
+    active_slots = 0;
+    queue_depth = 0;
+    latency_ema_ms = None;
+    failure_streak = if status.healthy then 0 else 1;
+    cooldown_until = unavailable;
+    last_error =
+      if status.healthy then None else Some "oas discovery marked endpoint unhealthy";
+    total_started = 0;
+    total_success = 0;
+    total_failure = 0;
+  }
+
+let runtime_of_endpoint_url base_url =
+  let base_url = String.trim base_url in
+  {
+    id = runtime_id_of_base_url base_url;
+    base_url;
+    model = trim_opt (Sys.getenv_opt "LLAMA_SWARM_MODEL");
+    max_concurrency =
+      int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
+        ~default:default_parallel_hint;
+    active_slots = 0;
+    queue_depth = 0;
+    latency_ema_ms = None;
+    failure_streak = 0;
+    cooldown_until = None;
+    last_error = None;
+    total_started = 0;
+    total_success = 0;
+    total_failure = 0;
+  }
+
+let safe_discovery_statuses () =
+  try Discovery_cache.get_cached_or_refresh ()
+  with
+  | Stdlib.Effect.Unhandled _ -> []
+  | exn ->
+      debug_log "discovery_cache unavailable: %s" (Printexc.to_string exn);
+      []
 
 let runtime_to_snapshot (runtime : runtime) =
   {
@@ -227,8 +297,7 @@ let parse_llm_endpoints raw =
 let current_fingerprint () =
   String.concat "||"
     [
-      Option.value ~default:"" (Sys.getenv_opt "MASC_LLAMA_RUNTIMES_JSON");
-      Option.value ~default:"" (Sys.getenv_opt "LLM_ENDPOINTS");
+      String.concat "," (Llm_provider.Discovery.endpoints_from_env ());
       Env_config.Llama.server_url;
       Option.value ~default:"" (Sys.getenv_opt "LLAMA_SWARM_MODEL");
       Option.value ~default:""
@@ -239,59 +308,53 @@ let current_fingerprint () =
     ]
 
 let load_runtimes_from_env () =
-  match trim_opt (Sys.getenv_opt "MASC_LLAMA_RUNTIMES_JSON") with
-  | None -> (
-      match trim_opt (Sys.getenv_opt "LLM_ENDPOINTS") with
-      | Some raw ->
-          let runtimes = parse_llm_endpoints raw in
-          if runtimes = [] then
-            ([ default_runtime () ], [ "LLM_ENDPOINTS produced no usable runtimes" ])
-          else (runtimes, [])
-      | None -> ([ default_runtime () ], []))
-  | Some raw -> (
-      try
-        match Yojson.Safe.from_string raw with
-        | `List items ->
-            let parsed, errors =
-              List.fold_left
-                (fun (acc, errs) item ->
-                  match normalize_runtime_json item with
-                  | Ok runtime -> (runtime :: acc, errs)
-                  | Error err -> (acc, err :: errs))
-                ([], []) items
-            in
-            let runtimes = List.rev parsed in
-            if runtimes = [] then
-              ([ default_runtime () ], "MASC_LLAMA_RUNTIMES_JSON produced no usable runtimes" :: errors)
-            else (runtimes, List.rev errors)
-        | _ ->
-            ([ default_runtime () ], [ "MASC_LLAMA_RUNTIMES_JSON must be a JSON array" ])
-      with Yojson.Json_error err ->
-        ([ default_runtime () ], [ "invalid MASC_LLAMA_RUNTIMES_JSON: " ^ err ]))
+  let discovered =
+    safe_discovery_statuses () |> List.map runtime_of_discovery_status
+  in
+  match discovered with
+  | _ :: _ -> (discovered, [])
+  | [] ->
+      let endpoints = Llm_provider.Discovery.endpoints_from_env () in
+      let runtimes = List.map runtime_of_endpoint_url endpoints in
+      if runtimes = [] then ([ default_runtime () ], []) else (runtimes, [])
 
 (* ensure_loaded: the only function that may yield (debug_log calls Eio.traceln).
    Yield happens AFTER the ref swap, so callers reading !pool after this
    function returns see a consistent snapshot. *)
 let ensure_loaded () =
-  let state = !pool in
   let fingerprint = current_fingerprint () in
-  if not (String.equal fingerprint state.fingerprint) then begin
+  let needs_reload =
+    with_pool_lock (fun () -> not (String.equal fingerprint (!pool).fingerprint))
+  in
+  if needs_reload then begin
     let loaded, errors = load_runtimes_from_env () in
     let refreshed = List.map refresh_runtime_metrics loaded in
-    pool := { state with runtimes = refreshed; fingerprint; parse_errors = errors };
-    debug_log "reload runtimes count=%d errors=%d" (List.length loaded) (List.length errors)
+    let reloaded =
+      with_pool_lock (fun () ->
+        let state = !pool in
+        if not (String.equal fingerprint state.fingerprint) then begin
+          pool := { state with runtimes = refreshed; fingerprint; parse_errors = errors };
+          true
+        end else
+          false)
+    in
+    if reloaded then
+      debug_log "reload runtimes count=%d errors=%d" (List.length loaded)
+        (List.length errors)
   end else begin
-    let refreshed = List.map refresh_runtime_metrics state.runtimes in
-    pool := { state with runtimes = refreshed }
+    with_pool_lock (fun () ->
+      let state = !pool in
+      let refreshed = List.map refresh_runtime_metrics state.runtimes in
+      pool := { state with runtimes = refreshed })
   end
 
 let parse_errors () =
   ensure_loaded ();
-  (!pool).parse_errors
+  with_pool_lock (fun () -> (!pool).parse_errors)
 
 let snapshots () =
   ensure_loaded ();
-  List.map runtime_to_snapshot (!pool).runtimes
+  with_pool_lock (fun () -> List.map runtime_to_snapshot (!pool).runtimes)
 
 let configured_capacity () =
   snapshots ()
@@ -314,17 +377,18 @@ let allocated_slots () =
        (fun acc (runtime : runtime_snapshot) -> acc + runtime.active_slots)
        0
 
-let measured_ceiling () = (!pool).measured_ceiling
+let measured_ceiling () = with_pool_lock (fun () -> (!pool).measured_ceiling)
 
 let record_measured_ceiling value =
-  let state = !pool in
-  let bounded = max 0 value in
-  let new_ceiling =
-    match state.measured_ceiling with
-    | Some current -> Some (max current bounded)
-    | None -> Some bounded
-  in
-  pool := { state with measured_ceiling = new_ceiling }
+  with_pool_lock (fun () ->
+    let state = !pool in
+    let bounded = max 0 value in
+    let new_ceiling =
+      match state.measured_ceiling with
+      | Some current -> Some (max current bounded)
+      | None -> Some bounded
+    in
+    pool := { state with measured_ceiling = new_ceiling })
 
 let model_name_for_runtime (runtime : runtime) requested_model =
   match trim_opt requested_model with
@@ -442,85 +506,107 @@ let select_runtime ?preferred_pool ?model_name () =
    After that, reading !pool and swapping pool := are yield-free. *)
 let acquire ?preferred_pool ~model_name () =
   ensure_loaded ();
-  (* --- yield-free critical section --- *)
-  let state : pool_state = !pool in
-  let* runtime = select_runtime_from state.runtimes ?preferred_pool ?model_name () in
-  let* model_name = model_name_for_runtime runtime model_name in
-  let updated = { runtime with
-    active_slots = runtime.active_slots + 1;
-    queue_depth = max 0 (runtime.active_slots + 1 - runtime.max_concurrency);
-    total_started = runtime.total_started + 1;
-  } in
-  let new_runtimes : runtime list =
-    List.map
-      (fun (r : runtime) ->
-        if String.equal r.id runtime.id then updated else r)
-      (state.runtimes : runtime list)
-  in
-  pool := { state with runtimes = new_runtimes };
-  (* --- end critical section --- *)
-  Ok
-    {
-      runtime_id = runtime.id;
-      base_url = runtime.base_url;
-      model_name;
-      max_concurrency = runtime.max_concurrency;
-      lease = { runtime_id = runtime.id };
-    }
+  with_pool_lock (fun () ->
+    let state : pool_state = !pool in
+    let* runtime =
+      select_runtime_from state.runtimes ?preferred_pool ?model_name ()
+    in
+    let* model_name = model_name_for_runtime runtime model_name in
+    let updated =
+      {
+        runtime with
+        active_slots = runtime.active_slots + 1;
+        queue_depth = max 0 (runtime.active_slots + 1 - runtime.max_concurrency);
+        total_started = runtime.total_started + 1;
+      }
+    in
+    let new_runtimes : runtime list =
+      List.map
+        (fun (r : runtime) ->
+          if String.equal r.id runtime.id then updated else r)
+        (state.runtimes : runtime list)
+    in
+    pool := { state with runtimes = new_runtimes };
+    Ok
+      {
+        runtime_id = runtime.id;
+        base_url = runtime.base_url;
+        model_name;
+        max_concurrency = runtime.max_concurrency;
+        lease = { runtime_id = runtime.id };
+      })
 
 (* release: ensure_loaded may yield. After that, ref read+swap is yield-free.
    debug_log (may yield) is placed AFTER the ref swap. *)
 let release (lease : lease) ~success ?error ?latency_ms () =
   ensure_loaded ();
-  (* --- yield-free critical section --- *)
-  let state : pool_state = !pool in
-  match
-    List.find_opt
-      (fun (runtime : runtime) -> String.equal runtime.id lease.runtime_id)
-      state.runtimes
-  with
-  | None -> ()
-  | Some runtime ->
-      let before_failure_streak = runtime.failure_streak in
-      let active_slots = max 0 (runtime.active_slots - 1) in
-      let latency_ema_ms =
-        match latency_ms with
-        | Some latency ->
-            let latency = float_of_int (max 0 latency) in
-            Some
-              (match runtime.latency_ema_ms with
-               | None -> latency
-               | Some previous -> (previous *. 0.8) +. (latency *. 0.2))
-        | None -> runtime.latency_ema_ms
-      in
-      let failure_streak, cooldown_until, last_error, total_success, total_failure =
-        if success then
-          (0, None, None, runtime.total_success + 1, runtime.total_failure)
-        else
-          let streak = runtime.failure_streak + 1 in
-          let cooldown =
-            if streak >= 3 then Some (wall_now () +. cooldown_seconds ())
-            else runtime.cooldown_until
+  let release_summary =
+    with_pool_lock (fun () ->
+      let state : pool_state = !pool in
+      match
+        List.find_opt
+          (fun (runtime : runtime) -> String.equal runtime.id lease.runtime_id)
+          state.runtimes
+      with
+      | None -> None
+      | Some runtime ->
+          let before_failure_streak = runtime.failure_streak in
+          let active_slots = max 0 (runtime.active_slots - 1) in
+          let latency_ema_ms =
+            match latency_ms with
+            | Some latency ->
+                let latency = float_of_int (max 0 latency) in
+                Some
+                  (match runtime.latency_ema_ms with
+                   | None -> latency
+                   | Some previous -> (previous *. 0.8) +. (latency *. 0.2))
+            | None -> runtime.latency_ema_ms
           in
-          (streak, cooldown, trim_opt error, runtime.total_success, runtime.total_failure + 1)
-      in
-      let queue_depth = max 0 (active_slots - runtime.max_concurrency) in
-      let updated = { runtime with
-        active_slots; queue_depth; latency_ema_ms;
-        failure_streak; cooldown_until; last_error;
-        total_success; total_failure;
-      } in
-      let new_runtimes : runtime list =
-        List.map
-          (fun (r : runtime) ->
-            if String.equal r.id runtime.id then updated else r)
-          (state.runtimes : runtime list)
-      in
-      pool := { state with runtimes = new_runtimes };
-      (* --- end critical section --- *)
+          let failure_streak, cooldown_until, last_error, total_success,
+              total_failure =
+            if success then
+              (0, None, None, runtime.total_success + 1, runtime.total_failure)
+            else
+              let streak = runtime.failure_streak + 1 in
+              let cooldown =
+                if streak >= 3 then Some (wall_now () +. cooldown_seconds ())
+                else runtime.cooldown_until
+              in
+              ( streak,
+                cooldown,
+                trim_opt error,
+                runtime.total_success,
+                runtime.total_failure + 1 )
+          in
+          let queue_depth = max 0 (active_slots - runtime.max_concurrency) in
+          let updated =
+            {
+              runtime with
+              active_slots;
+              queue_depth;
+              latency_ema_ms;
+              failure_streak;
+              cooldown_until;
+              last_error;
+              total_success;
+              total_failure;
+            }
+          in
+          let new_runtimes : runtime list =
+            List.map
+              (fun (r : runtime) ->
+                if String.equal r.id runtime.id then updated else r)
+              (state.runtimes : runtime list)
+          in
+          pool := { state with runtimes = new_runtimes };
+          Some (runtime.id, before_failure_streak, updated))
+  in
+  match release_summary with
+  | None -> ()
+  | Some (runtime_id, before_failure_streak, updated) ->
       debug_log
         "release runtime=%s success=%b before_streak=%d after_streak=%d cooldown=%s total_success=%d total_failure=%d error=%s"
-        runtime.id success before_failure_streak updated.failure_streak
+        runtime_id success before_failure_streak updated.failure_streak
         (match updated.cooldown_until with
          | Some value -> Printf.sprintf "%.3f" value
          | None -> "null")

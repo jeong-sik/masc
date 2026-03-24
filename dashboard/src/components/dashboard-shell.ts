@@ -91,7 +91,7 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="absolute top-[calc(100%+10px)] right-0 min-w-[300px] py-3 px-3.5 border border-solid border-[var(--card-border)] rounded-lg bg-[rgba(6,14,28,0.97)] shadow-lg grid gap-2">
+            <div class="absolute top-[calc(100%+8px)] right-0 min-w-[280px] rounded-lg border border-solid border-[var(--card-border)] bg-[rgba(6,14,28,0.96)] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.22)] grid gap-1.5">
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>릴리즈</span>
                 <strong class="text-[color:var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
@@ -127,7 +127,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
 
   return html`
     <nav class="flex flex-col h-full">
-      <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-3 pt-3 pb-1.5">
+      <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-2.5 pt-2.5 pb-1">
         ${!collapsed ? html`
           <div class="px-1">
             <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-[rgba(154,217,255,0.5)]">Navigation</div>
@@ -143,8 +143,8 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         </button>
       </div>
 
-      <div class="flex-1 overflow-y-auto ${collapsed ? 'px-1.5' : 'px-3'} py-2">
-        <div class="flex flex-col gap-2.5">
+      <div class="flex-1 overflow-y-auto ${collapsed ? 'px-1.5' : 'px-2.5'} py-1.5">
+        <div class="flex flex-col gap-2">
           ${DASHBOARD_SURFACES.map(surface => {
             const isSurfaceActive = surface.id === currentTab
             const sections = sectionItemsForTab(surface.id)
@@ -152,7 +152,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
             if (collapsed) {
               return html`
                 <button type="button"
-                  class="flex items-center justify-center w-full rounded-xl p-2.5 cursor-pointer transition-all duration-200 ${isSurfaceActive ? 'bg-[rgba(71,184,255,0.18)] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.2)]' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.06)] border border-transparent'}"
+                  class="flex items-center justify-center w-full rounded-xl p-2 cursor-pointer transition-all duration-200 ${isSurfaceActive ? 'bg-[rgba(71,184,255,0.16)] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)] border border-[rgba(71,184,255,0.18)]' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.05)] border border-transparent'}"
                   onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
                   title=${surface.label}
                 >
@@ -162,29 +162,29 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
             }
 
             return html`
-              <div class="flex flex-col gap-1.5">
+              <div class="flex flex-col gap-1">
                 <button type="button"
-                  class="flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left cursor-pointer transition-all duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.15),rgba(71,184,255,0.05))] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.2)]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.05)] border border-transparent'}"
+                  class="flex items-center gap-2.5 w-full rounded-lg px-2.5 py-1.5 text-left cursor-pointer transition-all duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.14),rgba(71,184,255,0.04))] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)] border border-[rgba(71,184,255,0.18)]' : 'bg-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.05)] border border-transparent'}"
                   onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
                 >
                   <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-[14px]">
                     ${surface.icon}
                   </span>
                   <div class="flex-1 min-w-0">
-                    <div class="text-[14px] font-medium truncate leading-none ${isSurfaceActive ? 'text-[#9ad9ff] drop-shadow-[0_0_8px_rgba(71,184,255,0.4)]' : ''}">${surface.label}</div>
+                    <div class="text-[14px] font-medium truncate leading-none ${isSurfaceActive ? 'text-[#9ad9ff]' : ''}">${surface.label}</div>
                   </div>
                 </button>
 
                 ${sections.length > 0 ? html`
-                  <div class="flex flex-col gap-0.5 pl-11 pr-1 border-l border-[rgba(255,255,255,0.05)] ml-7">
+                  <div class="ml-7 flex flex-col gap-0.5 border-l border-[rgba(255,255,255,0.05)] pl-10 pr-1">
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id
                       return html`
                         <button type="button"
-                          class="w-full rounded-lg px-3 py-2 text-left cursor-pointer text-[13px] transition-all duration-200 ${isSectionActive ? 'bg-[rgba(71,184,255,0.15)] text-[#cfeaff] font-medium shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[rgba(71,184,255,0.15)]' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--text-body)] border border-transparent'}"
+                          class="w-full rounded-lg px-2.5 py-1.5 text-left cursor-pointer text-[13px] transition-all duration-200 ${isSectionActive ? 'bg-[rgba(71,184,255,0.14)] text-[#cfeaff] font-medium shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)] border border-[rgba(71,184,255,0.14)]' : 'text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--text-body)] border border-transparent'}"
                           onClick=${() => navigate(surface.id, item.params)}
                         >
-                          <div class="truncate ${isSectionActive ? 'drop-shadow-[0_0_8px_rgba(71,184,255,0.3)]' : ''}">${item.label}</div>
+                          <div class="truncate">${item.label}</div>
                         </button>
                       `
                     })}
@@ -197,7 +197,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
       </div>
 
       ${!collapsed ? html`
-        <div class="shrink-0 border-t border-[rgba(255,255,255,0.08)] p-4 bg-[rgba(0,0,0,0.1)]">
+        <div class="shrink-0 border-t border-[rgba(255,255,255,0.08)] bg-[rgba(0,0,0,0.08)] p-3.5">
           <${SnapshotCard} />
         </div>
       ` : null}
@@ -252,12 +252,12 @@ function SurfaceLead() {
   const currentSection = currentSectionForRoute(route.value)
 
   return html`
-    <div class="mb-8 flex flex-wrap items-end justify-between gap-4">
+    <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div class="min-w-0">
-        <h2 class="text-[32px] font-bold tracking-tight text-[var(--text-strong)] flex items-center gap-3 drop-shadow-md">
+        <h2 class="flex items-center gap-2.5 text-[28px] font-bold tracking-tight text-[var(--text-strong)]">
           ${currentSection?.label ?? currentView?.label ?? '홈'}
         </h2>
-        <p class="mt-2 max-w-[700px] text-[14px] leading-relaxed text-[rgba(255,255,255,0.5)]">
+        <p class="mt-1.5 max-w-[680px] text-[13px] leading-relaxed text-[rgba(255,255,255,0.54)]">
           ${currentSection?.description ?? currentView?.description ?? '지금 필요한 신호를 가장 안정적으로 읽을 수 있는 기본 화면입니다.'}
         </p>
       </div>
@@ -282,7 +282,7 @@ export function DashboardMain() {
 
   return html`
     ${roomTruthInitializing.value ? html`
-      <div class="text-center py-[6px] px-4 bg-[rgba(230,167,0,0.12)] border-b border-solid border-b-[rgba(230,167,0,0.3)] text-[#e6a700] text-[0.8rem] shrink-0 rounded-xl mb-4">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
+      <div class="mb-3 shrink-0 rounded-xl border border-solid border-[rgba(230,167,0,0.22)] bg-[rgba(230,167,0,0.1)] px-3.5 py-1.5 text-center text-[0.78rem] text-[#e6a700]">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
     ` : null}
     <${SurfaceLead} />
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>

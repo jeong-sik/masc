@@ -19,8 +19,10 @@ let admin_tools =
     "masc_operator_action";
     "masc_operator_confirm";
     "masc_operator_snapshot";
+    (* team_session_stop intentionally stays outside this list:
+       owner/intruder authorization is enforced per session in the team
+       session handlers and contract tests exercise that path directly. *)
     "masc_team_session_finalize";
-    "masc_team_session_stop";
     "masc_tool_admin_snapshot";
   ]
 

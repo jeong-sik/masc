@@ -21,6 +21,7 @@ import {
   commentPost,
   createPost,
 } from '../api'
+import { deleteBoardPost } from '../api/actions'
 import { navigate, navigateToPost, route } from '../router'
 import type { BoardComment, BoardPost, BoardSortMode } from '../types'
 
@@ -38,13 +39,14 @@ const detailLoading = signal(false)
 const detailPostId = signal<string | null>(null)
 const commentText = signal('')
 const commentSubmitting = signal(false)
-const hideAutomationPosts = signal(true)
+const hideAutomationPosts = signal(false)
 const showNewPostForm = signal(false)
 const newPostTitle = signal('')
 const newPostContent = signal('')
 const newPostSubmitting = signal(false)
 const PAGE_SIZE = 20
 const visibleLimit = signal(PAGE_SIZE)
+const opsVisibleLimit = signal(PAGE_SIZE)
 
 function defaultCommentAuthor(): string {
   const params = new URLSearchParams(window.location.search)
@@ -63,7 +65,7 @@ function previewText(content: string): string {
     .replace(/\s+/g, ' ')
     .trim()
   if (!flattened) return '미리보기 없음'
-  return flattened.length > 180 ? `${flattened.slice(0, 177)}...` : flattened
+  return flattened.length > 250 ? `${flattened.slice(0, 247)}...` : flattened
 }
 
 function isUpdated(post: BoardPost): boolean {
@@ -133,6 +135,16 @@ function kindBadgeColor(kind: string): string {
     case 'automation': return 'bg-[var(--cyan-16)] text-[#38bdf8] border-[rgba(34,211,238,0.3)]'
     case 'system': return 'bg-[var(--slate-gray-15)] text-[var(--text-slate)] border-[var(--border-slate-22)]'
     default: return 'bg-[var(--white-8)] text-[var(--text-muted)] border-[var(--border-slate-16)]'
+  }
+}
+
+function visibilityLabel(vis: string): string | null {
+  switch (vis) {
+    case 'internal': return '내부'
+    case 'unlisted': return '비공개'
+    case 'direct': return 'DM'
+    case 'public': return null
+    default: return vis
   }
 }
 
@@ -257,7 +269,7 @@ function NewPostForm() {
 
 function SortBar() {
   const current = boardSortMode.value
-  const hideLabel = hideAutomationPosts.value ? '자동화 글 숨김' : '자동화 글 표시 중'
+  const hideLabel = hideAutomationPosts.value ? '자동화 제외' : '자동화 포함'
   return html`
     <div class="flex flex-col gap-3 mb-4 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
       <div class="flex items-center gap-1.5 flex-wrap">
@@ -271,6 +283,7 @@ function SortBar() {
             onClick=${() => {
               boardSortMode.value = mode.id
               visibleLimit.value = PAGE_SIZE
+              opsVisibleLimit.value = PAGE_SIZE
               refreshBoard()
             }}
           >
@@ -287,6 +300,7 @@ function SortBar() {
             }"
           onClick=${() => {
             hideAutomationPosts.value = !hideAutomationPosts.value
+            refreshBoard()
           }}
         >
           ${hideLabel}
@@ -302,7 +316,7 @@ function SortBar() {
             refreshBoard()
           }}
         >
-          ${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 글 표시 중'}
+          ${boardExcludeSystem.value ? '시스템 제외' : '시스템 포함'}
         </button>
         <div class="ml-auto">
           <button type="button"
@@ -334,11 +348,11 @@ function MemorySummary() {
       </div>
       <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">잡음 필터</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 숨김` : '분리된 레인 표시'}</strong>
+        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 제외` : '모두 표시'}</strong>
       </div>
       <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">시스템 글 정책</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 레인 표시'}</strong>
+        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${boardExcludeSystem.value ? '시스템 제외' : '모두 표시'}</strong>
       </div>
       <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">최근 갱신</span>
@@ -348,8 +362,11 @@ function MemorySummary() {
   `
 }
 
+const deletingPostId = signal<string | null>(null)
+
 function PostCard({ post }: { post: BoardPost }) {
   const kind = boardPostKind(post)
+  const isDeleting = deletingPostId.value === post.id
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
     event.stopPropagation()
@@ -358,6 +375,21 @@ function PostCard({ post }: { post: BoardPost }) {
       refreshBoard()
     } catch {
       showToast('투표에 실패했습니다', 'error')
+    }
+  }
+
+  const handleDelete = async (event: Event) => {
+    event.stopPropagation()
+    if (!confirm(`"${post.title}" 게시글을 삭제하시겠습니까?`)) return
+    deletingPostId.value = post.id
+    try {
+      await deleteBoardPost(post.id)
+      showToast('게시글을 삭제했습니다', 'success')
+      refreshBoard()
+    } catch {
+      showToast('게시글 삭제에 실패했습니다', 'error')
+    } finally {
+      deletingPostId.value = null
     }
   }
 
@@ -393,7 +425,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="text-[12px] text-[var(--text-muted)]">${authorAvatar(post.author)}</span>
           <a
             class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
-            onClick=${(e: Event) => { e.stopPropagation(); navigate('status', { section: 'agents', agent: post.author }) }}
+            onClick=${(e: Event) => { e.stopPropagation(); navigate('monitoring', { section: 'agents', agent: post.author }) }}
           >${post.author}</a>
           <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
           ${isUpdated(post) ? html`<span class="text-[10px] text-[var(--text-muted)] opacity-50">(수정됨)</span>` : null}
@@ -407,40 +439,42 @@ function PostCard({ post }: { post: BoardPost }) {
           <!-- Category badges -->
           ${kind !== 'human' ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(kind)}">${kind}</span>` : null}
           ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-          ${post.visibility && post.visibility !== 'public' ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]">${post.visibility}</span>` : null}
+          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]">${visibilityLabel(post.visibility)}</span>` : null}
+
+          <!-- Delete button -->
+          <button type="button"
+            class="ml-auto px-2 py-0.5 rounded text-[10px] font-semibold border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.1)] text-[#f87171] hover:bg-[rgba(239,68,68,0.2)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick=${handleDelete}
+            disabled=${isDeleting}
+          >
+            ${isDeleting ? '삭제 중...' : '삭제'}
+          </button>
         </div>
       </div>
     </div>
   `
 }
 
-function toggleCommentExpand(e: Event) {
-  const btn = e.currentTarget as HTMLButtonElement
-  const comment = btn.parentElement
-  if (!comment) return
-  const textEl = comment.querySelector('.comment-text')
-  if (!textEl) return
-  const isExpanded = textEl.classList.toggle('expanded')
-  btn.textContent = isExpanded ? '접기' : '더 보기...'
-}
-
 function CommentItem({ comment }: { comment: BoardComment }) {
   const needsTruncation = (comment.content?.length ?? 0) > 300
+  const [expanded, setExpanded] = useState(false)
+  const displayText = needsTruncation && !expanded
+    ? `${comment.content.slice(0, 297)}...`
+    : comment.content
 
   return html`
     <div class="board-comment rounded-lg p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)]">
       <div class="flex items-center gap-2 mb-1.5">
         <span class="text-[12px]">${authorAvatar(comment.author)}</span>
-        <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('status', { section: 'agents', agent: comment.author })}>${comment.author}</a>
+        <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('monitoring', { section: 'agents', agent: comment.author })}>${comment.author}</a>
         <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
       </div>
-      <div class="comment-text text-[13px] text-[var(--text-body)] leading-[1.55]">${comment.content}</div>
+      <div class="text-[13px] text-[var(--text-body)] leading-[1.55] whitespace-pre-wrap">${displayText}</div>
       ${needsTruncation ? html`
         <button type="button"
-          class="comment-expand-btn mt-1 text-[11px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
-          style="display: inline"
-          onClick=${toggleCommentExpand}
-        >더 보기...</button>
+          class="mt-1 text-[11px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
+          onClick=${() => setExpanded(!expanded)}
+        >${expanded ? '접기' : '더 보기...'}</button>
       ` : null}
     </div>
   `
@@ -449,13 +483,14 @@ function CommentItem({ comment }: { comment: BoardComment }) {
 function CommentThread({ comments }: { comments: BoardComment[] }) {
   if (comments.length === 0) return html`<${EmptyState} message="아직 댓글이 없습니다" compact />`
 
-  const INITIAL_SHOW = 3
+  const INITIAL_SHOW = 5
   const [expanded, setExpanded] = useState(false)
   const hiddenCount = comments.length - INITIAL_SHOW
   const visible = expanded || comments.length <= INITIAL_SHOW ? comments : comments.slice(-INITIAL_SHOW)
 
   return html`
     <div class="flex flex-col gap-2">
+      <div class="text-[11px] text-[var(--text-muted)] mb-1">댓글 ${comments.length}개</div>
       ${!expanded && hiddenCount > 0 ? html`
         <button type="button"
           class="text-[12px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1"
@@ -530,7 +565,7 @@ function PostDetail({ post }: { post: BoardPost }) {
           <!-- Author and meta -->
           <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--border-slate-12)]">
             <span class="text-[13px]">${authorAvatar(post.author)}</span>
-            <a class="text-[12px] text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('status', { section: 'agents', agent: post.author })}>${post.author}</a>
+            <a class="text-[12px] text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('monitoring', { section: 'agents', agent: post.author })}>${post.author}</a>
             <span class="text-[11px] text-[var(--text-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
             <span class="text-[11px] text-[var(--text-muted)]">${post.votes ?? 0} votes</span>
           </div>
@@ -540,7 +575,7 @@ function PostDetail({ post }: { post: BoardPost }) {
             ? html`
                 <div class="flex gap-1.5 flex-wrap">
                   ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-                  ${post.visibility ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]">${post.visibility}</span>` : null}
+                  ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]">${visibilityLabel(post.visibility)}</span>` : null}
                   ${boardPostKind(post) !== 'human' ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(boardPostKind(post))}">${boardPostKind(post)}</span>` : null}
                   ${expiryChip(post)}
                 </div>
@@ -632,7 +667,7 @@ export function Memory() {
         : posts.length === 0
           ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
           : html`
-              <${Card} title="사람이 쓴 글" class="mb-4">
+              <${Card} title=${`사람이 쓴 글 (${grouped.human.length})`} class="mb-4">
                 <div class="flex flex-col gap-2">
                   ${grouped.human.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                 </div>
@@ -649,10 +684,20 @@ export function Memory() {
               <//>
               ${grouped.operations.length > 0
                 ? html`
-                    <${Card} title="자동화 · 시스템" class="mb-4">
+                    <${Card} title=${`자동화 · 시스템 (${grouped.operations.length})`} class="mb-4">
                       <div class="flex flex-col gap-2">
-                        ${grouped.operations.map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
+                        ${grouped.operations.slice(0, opsVisibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                       </div>
+                      ${grouped.operations.length > opsVisibleLimit.value ? html`
+                        <div class="text-center py-4">
+                          <button type="button"
+                            class="px-4 py-2 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
+                            onClick=${() => { opsVisibleLimit.value = opsVisibleLimit.value + PAGE_SIZE }}
+                          >
+                            더 보기 (${grouped.operations.length - opsVisibleLimit.value}개 남음)
+                          </button>
+                        </div>
+                      ` : null}
                     <//>
                   `
                 : null}

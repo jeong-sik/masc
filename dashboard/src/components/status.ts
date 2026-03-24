@@ -19,7 +19,7 @@ export function Status() {
   const section = currentSection()
 
   return html`
-    <div class="flex flex-col gap-6">
+    <div class="flex flex-col gap-4">
       <div class="transition-opacity duration-300">
         ${section === 'agents'
           ? html`<${AgentsUnified} />`

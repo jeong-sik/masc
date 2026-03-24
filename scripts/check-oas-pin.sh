@@ -4,9 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# GitHub releases are stale for this repo. We track upstream main directly
-# because the required llama multi-endpoint round-robin feature is one commit
-# ahead of the latest tag.
+# GitHub release metadata can lag for this repo. Keep the minimum supported
+# version aligned with the latest tagged SDK floor, but ratchet the runtime pin
+# against upstream main so CI catches drift immediately.
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 
 min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"

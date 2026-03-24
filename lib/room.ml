@@ -62,11 +62,15 @@ let () = Room_hooks.force_release_task_fn :=
 (* Activity graph emit — wraps Activity_graph for room sub-modules *)
 let () = Room_hooks.activity_emit_fn :=
   (fun config ~room_id ~actor ?subject ~kind ~payload ~tags () ->
-    ignore (Activity_graph.emit config ~room_id
-      ~actor:(Activity_graph.entity ~kind:actor.Room_hooks.kind actor.id)
-      ?subject:(Option.map (fun (s : Room_hooks.activity_entity) ->
-        Activity_graph.entity ~kind:s.kind s.id) subject)
-      ~kind ~payload ~tags ()))
+    (try
+      ignore (Activity_graph.emit config ~room_id
+        ~actor:(Activity_graph.entity ~kind:actor.Room_hooks.kind actor.id)
+        ?subject:(Option.map (fun (s : Room_hooks.activity_entity) ->
+          Activity_graph.entity ~kind:s.kind s.id) subject)
+        ~kind ~payload ~tags ())
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn -> Log.Room.warn "activity_graph emit failed: %s" (Printexc.to_string exn)))
 
 (* Agent economy earn — wraps Agent_economy for task completion credits *)
 let () = Room_hooks.agent_economy_earn_fn :=

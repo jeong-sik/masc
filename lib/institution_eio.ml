@@ -341,7 +341,7 @@ let save_institution ~fs (config : config) (inst : institution) =
   let dir = Filename.dirname file in
   let dir_path = Eio.Path.(fs / dir) in
   (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 dir_path
-   with Eio.Io _ as e -> Eio.traceln "[WARN] mkdirs %s: %s" dir (Printexc.to_string e));
+   with Eio.Io _ as e -> Log.Institution.warn "mkdirs %s: %s" dir (Printexc.to_string e));
   let json = institution_to_json inst in
   let content = Yojson.Safe.pretty_to_string json in
   Eio.Path.save ~create:(`Or_truncate 0o644) path content

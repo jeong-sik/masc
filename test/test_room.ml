@@ -585,6 +585,13 @@ let test_room_bootstrap_preserves_backend_state () =
     Alcotest.(check int) "backlog preserved" 7 saved_backlog.version
   )
 
+let test_room_bootstrap_rejects_invalid_room_id () =
+  with_memory_test_env (fun config ->
+    Alcotest.check_raises "invalid room id rejected"
+      (Invalid_argument "invalid room_id: Room id cannot contain path separators")
+      (fun () -> Room.ensure_room_bootstrap config "../escape")
+  )
+
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
     (* Heartbeat for non-joined agent *)
@@ -1520,6 +1527,7 @@ let () =
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "backend bootstrap preserves room state" `Quick test_room_bootstrap_preserves_backend_state;
+      Alcotest.test_case "bootstrap rejects invalid room id" `Quick test_room_bootstrap_rejects_invalid_room_id;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
       Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;

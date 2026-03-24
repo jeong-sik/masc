@@ -625,10 +625,12 @@ let test_handle_request_tools_list_operator_profile () =
                  in
                  Alcotest.(check (list string)) "operator-only tools"
                    [
+                     "masc_collaboration_evidence";
                      "masc_operator_action";
                      "masc_operator_confirm";
                      "masc_operator_digest";
                      "masc_operator_snapshot";
+                     "masc_surface_audit";
                    ]
                    names;
                  let find_tool name =

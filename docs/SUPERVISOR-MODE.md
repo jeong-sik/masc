@@ -50,6 +50,17 @@ Codex / Claude TUI
 Use `/mcp/operator` when you want a small, deterministic control surface.
 Use `/mcp` when an agent needs the full room and team-session tool inventory.
 
+Repo-synthesis workflow에서는 이 분리를 그대로 유지한다.
+
+- start/control:
+  - `/mcp`에서 `masc_repo_synthesis_swarm_start`
+  - 이어서 `masc_team_session_step`, `masc_operation_checkpoint`
+- read/proof:
+  - `/mcp/operator`의 `masc_operator_snapshot` / `masc_operator_digest`
+  - dashboard `/api/v1/dashboard/repo-synthesis`
+
+즉 dashboard는 read-only truth/proof surface이고, canonical write/control은 계속 MCP다.
+
 ## Local Worker Runtime
 
 `masc-mcp` can run a worker directly on the hidden local worker backend.

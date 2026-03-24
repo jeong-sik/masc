@@ -284,10 +284,30 @@ let empty_keeper_profile_defaults = {
 }
 
 let personas_root_opt () =
+  let try_dir path =
+    try Sys.file_exists path && Sys.is_directory path with Sys_error _ -> false
+  in
   try
-    let me_root = Env_config.me_root () in
-    let path = Filename.concat me_root "personas" in
-    if Sys.file_exists path && Sys.is_directory path then Some path else None
+    (* 1. Explicit env override *)
+    match Sys.getenv_opt "MASC_PERSONAS_DIR" with
+    | Some d when try_dir d -> Some d
+    | _ ->
+        (* 2. Relative to MASC repo: config/personas/ (canonical) *)
+        let base =
+          match Sys.getenv_opt "MASC_BASE_PATH" with
+          | Some b -> b
+          | None -> Sys.getcwd ()
+        in
+        let local = Filename.concat (Filename.concat base "config") "personas" in
+        if try_dir local then Some local
+        else
+          (* 3. Legacy fallback: $ME_ROOT/personas/ *)
+          let me_root = Env_config.me_root () in
+          let legacy = Filename.concat me_root "personas" in
+          if try_dir legacy then (
+            Log.Keeper.info "personas loaded from legacy path %s — migrate to config/personas/" legacy;
+            Some legacy)
+          else None
   with
   | Sys_error _ -> None
   | exn ->
@@ -355,8 +375,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            str "policy_shell_mode"
            |> Option.map canonical_policy_shell_mode;
          room_scope =
-           str "room_scope"
-           |> Option.map canonical_room_scope;
+           str "room_scope";
          scope_kind = str "scope_kind";
          trigger_mode =
            str "trigger_mode"

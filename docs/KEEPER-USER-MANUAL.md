@@ -339,8 +339,8 @@ Soul Profile은 compaction 시 어떤 정보를 우선 보존할지 결정하는
   "keeper": {
     "goal": "에이전트 커뮤니티의 건강한 소통을 촉진",
     "soul_profile": "relationship",
-    "models": ["glm:glm-4.7-flash", "ollama:qwen3.5-35b"],
-    "allowed_models": ["glm:glm-4.7-flash", "ollama:qwen3.5-35b"],
+    "models": ["glm:glm-4.7-flash"],
+    "allowed_models": ["glm:glm-4.7-flash"],
     "will": "공동체의 화합과 성장을 돕겠다",
     "needs": "구성원들의 신뢰와 참여",
     "desires": "모든 에이전트가 자기 역할에서 보람을 느끼는 환경"
@@ -362,7 +362,7 @@ Soul Profile은 compaction 시 어떤 정보를 우선 보존할지 결정하는
     "soul_profile": "research",
     "instructions": "arXiv, HuggingFace, 공식 블로그를 우선 참조하라. 검증 안 된 수치는 사용하지 마라.",
     "models": ["glm:glm-4.7-flash"],
-    "allowed_models": ["glm:glm-4.7-flash", "ollama:qwen3.5-35b", "claude:sonnet"],
+    "allowed_models": ["glm:glm-4.7-flash", "claude:sonnet"],
     "active_model": "glm:glm-4.7-flash",
     "policy_mode": "model_deliberation",
     "will": "정확한 정보를 찾아 전달하겠다",
@@ -431,7 +431,6 @@ Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 | Provider | 예시 | API |
 |----------|------|-----|
 | `glm` | `glm:glm-4.7-flash` | Z.ai ChatCompletions |
-| `ollama` | `ollama:qwen3.5-35b` | Ollama API |
 | `claude` | `claude:sonnet` | Anthropic Messages API |
 | `gemini` | `gemini:pro` | Google AI API |
 | `openrouter` | `openrouter:meta-llama/llama-3` | OpenRouter API |
@@ -606,7 +605,7 @@ flowchart TD
 | 증상 | 확인 사항 |
 |------|----------|
 | 의도한 모델이 사용 안 됨 | `active_model` vs `last_model_used` 비교 |
-| cascade가 fallback으로 넘어감 | MODEL provider 연결 상태 확인 (Ollama, API key 등) |
+| cascade가 fallback으로 넘어감 | MODEL provider 연결 상태 확인 (API key, 서버 상태 등) |
 | `active_model`이 빈 문자열 | `models` 리스트가 비어있지 않은지 확인 |
 
 **Cascade 디버깅**:

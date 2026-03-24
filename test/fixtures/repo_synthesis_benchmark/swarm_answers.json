@@ -1,0 +1,44 @@
+[
+  {
+    "question_id": "cpv2-vs-supervisor",
+    "claims": [
+      "cpv2_direct_is_canonical_benchmark",
+      "supervisor_mode_is_guided_loop",
+      "swarm_delivery_uses_team_session_plus_supervisor"
+    ],
+    "cited_paths": [
+      "docs/COMMAND-PLANE-RUNBOOK.md",
+      "docs/SUPERVISOR-MODE.md",
+      "docs/SWARM-DELIVERY-RUNBOOK.md"
+    ],
+    "latency_ms": 820
+  },
+  {
+    "question_id": "current-room-compat",
+    "claims": [
+      "current_room_pointer_is_ssot",
+      "named_room_tools_removed",
+      "repo_root_room_semantics_remain"
+    ],
+    "cited_paths": [
+      "docs/spec/03-room-coordination.md",
+      "docs/MULTI-ROOM-DESIGN.md",
+      "lib/tool_room.ml"
+    ],
+    "latency_ms": 910
+  },
+  {
+    "question_id": "proof-surface-linkage",
+    "claims": [
+      "team_session_prove_emits_proof_paths",
+      "operator_surface_reads_without_being_canonical_benchmark_path",
+      "dashboard_proof_links_cp_backing"
+    ],
+    "cited_paths": [
+      "docs/TEAM-SESSION.md",
+      "docs/SUPERVISOR-MODE.md",
+      "lib/dashboard/dashboard_proof.ml"
+    ],
+    "latency_ms": 980
+  }
+]

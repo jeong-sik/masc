@@ -1,0 +1,68 @@
+[
+  {
+    "question_id": "cpv2-vs-supervisor",
+    "title": "Canonical benchmark path versus supervisor loop",
+    "question": "Which path is canonical for benchmark or swarm orchestration, and how does Supervisor Mode differ from it?",
+    "artifact_scope": [
+      "docs/COMMAND-PLANE-RUNBOOK.md",
+      "docs/SUPERVISOR-MODE.md",
+      "docs/SWARM-DELIVERY-RUNBOOK.md"
+    ],
+    "required_claims": [
+      "cpv2_direct_is_canonical_benchmark",
+      "supervisor_mode_is_guided_loop",
+      "swarm_delivery_uses_team_session_plus_supervisor"
+    ],
+    "gold_paths": [
+      "docs/COMMAND-PLANE-RUNBOOK.md",
+      "docs/SUPERVISOR-MODE.md",
+      "docs/SWARM-DELIVERY-RUNBOOK.md"
+    ],
+    "difficulty": "medium",
+    "tags": ["cpv2", "supervisor", "runbook"]
+  },
+  {
+    "question_id": "current-room-compat",
+    "title": "Current-room-only room semantics",
+    "question": "What remains of the room concept after the current-room-only refactor, and which named-room tools were removed?",
+    "artifact_scope": [
+      "docs/spec/03-room-coordination.md",
+      "docs/MULTI-ROOM-DESIGN.md",
+      "lib/tool_room.ml"
+    ],
+    "required_claims": [
+      "current_room_pointer_is_ssot",
+      "named_room_tools_removed",
+      "repo_root_room_semantics_remain"
+    ],
+    "gold_paths": [
+      "docs/spec/03-room-coordination.md",
+      "docs/MULTI-ROOM-DESIGN.md",
+      "lib/tool_room.ml"
+    ],
+    "difficulty": "medium",
+    "tags": ["room", "compat", "current-room"]
+  },
+  {
+    "question_id": "proof-surface-linkage",
+    "title": "Proof and operator linkage",
+    "question": "How are team-session proof artifacts connected to the operator and command-plane surfaces?",
+    "artifact_scope": [
+      "docs/TEAM-SESSION.md",
+      "docs/SUPERVISOR-MODE.md",
+      "lib/dashboard/dashboard_proof.ml"
+    ],
+    "required_claims": [
+      "team_session_prove_emits_proof_paths",
+      "operator_surface_reads_without_being_canonical_benchmark_path",
+      "dashboard_proof_links_cp_backing"
+    ],
+    "gold_paths": [
+      "docs/TEAM-SESSION.md",
+      "docs/SUPERVISOR-MODE.md",
+      "lib/dashboard/dashboard_proof.ml"
+    ],
+    "difficulty": "medium",
+    "tags": ["proof", "operator", "dashboard"]
+  }
+]

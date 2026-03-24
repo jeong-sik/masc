@@ -4,7 +4,7 @@ open Keeper_types
 
 let string_list_to_json values =
   `List (List.map (fun value -> `String value) values)
-let auto_team_session_enabled (_meta : keeper_meta) = true
+(* auto_team_session removed — keeper decides autonomously via Agent.run() *)
 let linked_team_session config (meta : keeper_meta) =
   match meta.active_team_session_id with
   | Some session_id -> Team_session_store.load_session config session_id
@@ -27,7 +27,7 @@ let team_session_bridge_json config (meta : keeper_meta) =
   in
   `Assoc
     [
-      ("enabled", `Bool (auto_team_session_enabled meta));
+      ("enabled", `Bool false);
       ("active_session_id",
        match meta.active_team_session_id with
        | Some session_id -> `String session_id
@@ -113,8 +113,8 @@ let drift_surface_json () =
 let auto_team_session_surface_json () =
   `Assoc
     [
-      ("status", `String "wired");
-      ("enabled", `Bool true);
+      ("status", `String "removed");
+      ("enabled", `Bool false);
     ]
 
 let coordination_surface_json (meta : keeper_meta) =
@@ -179,7 +179,9 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
         | None -> false)
   |> add_if "coordination.room_scope"
        (match defaults.room_scope with
-        | Some value -> canonical_room_scope value <> meta.room_scope
+        | Some value ->
+            let authored = String.trim value in
+            authored <> "" && authored <> meta.room_scope
         | None -> false)
   |> add_if "coordination.scope_kind"
        (match defaults.scope_kind with

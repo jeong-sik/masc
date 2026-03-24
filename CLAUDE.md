@@ -15,9 +15,13 @@ OCaml (5.x + Eio) 기반 MCP 서버. 멀티 AI 에이전트 협업 조율.
 
 ## Agent System (⚠️ 중요)
 
-**Persona 개념은 삭제됨. Agent만 존재.**
+**Keeper personas**: `config/personas/<name>/profile.json`에서 로드.
+검색 순서: `$MASC_PERSONAS_DIR` → `$MASC_BASE_PATH/config/personas/` → `$ME_ROOT/personas/` (legacy).
+모델 필드는 persona에 넣지 않는다 (cascade가 관리).
 
-에이전트 정보는 **Neo4j → GraphQL API**를 통해 로드:
+**Lodge**: 제거됨. keeper 자동 기동 없음. `masc_keeper_up`으로 수동 시작.
+
+**Agent 목록**: Neo4j → GraphQL API를 통해 로드:
 - Endpoint: `https://second-brain-graphql-production.up.railway.app/graphql`
 - Auth: `Authorization: Bearer $GRAPHQL_API_KEY` 헤더
 - Query cost limit: **1000** (초과 시 에러)

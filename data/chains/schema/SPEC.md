@@ -7,7 +7,7 @@
 Chain JSON is a declarative format for defining multi-MODEL orchestration workflows as Directed Acyclic Graphs (DAGs). It enables:
 
 - **Visual Programming**: Convert from Mermaid diagrams
-- **Multi-MODEL**: Mix Codex, Claude, Gemini, Ollama in one workflow
+- **Multi-MODEL**: Mix Codex, Claude, Gemini in one workflow
 - **Tool Integration**: Seamlessly call MCP tools between MODEL nodes
 - **Parallel Execution**: Automatic parallelization of independent nodes
 - **Type Safety**: JSON Schema validation for inputs/outputs
@@ -44,7 +44,7 @@ Node
 └── timeout_ms?: number
 
 ModelConfig
-├── model: "codex" | "claude-cli" | "gemini" | "ollama"
+├── model: "codex" | "claude-cli" | "gemini" | "default"
 ├── prompt: string (with {{variable}} placeholders)
 ├── system_prompt?: string
 ├── temperature?: number (0-2)

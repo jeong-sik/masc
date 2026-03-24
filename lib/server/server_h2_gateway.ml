@@ -83,18 +83,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
     H2.Body.Writer.close writer
   in
 
-  let h2_respond_redirect ?(status = `Found) ?(extra_headers = []) h2_reqd location =
-    let headers =
-      H2.Headers.of_list ([
-        ("location", location);
-        ("content-length", "0");
-      ] @ extra_headers)
-    in
-    let response = H2.Response.create ~headers status in
-    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-    H2.Body.Writer.close writer
-  in
-
   (* Read H2 request body asynchronously *)
   let h2_read_body h2_reqd callback =
     let body = H2.Reqd.request_body h2_reqd in
@@ -238,7 +226,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           H2.Body.Writer.close writer
 
       | `GET, "/" ->
-          h2_respond_redirect h2_reqd "/dashboard" ~extra_headers:cors
+          h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors
 
       | `GET, "/favicon.ico" | `GET, "/favicon.svg" ->
           h2_respond_bytes
@@ -530,7 +518,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/transport-health" ->
           let state = get_server_state () in
-          let json = dashboard_transport_health_http_json ~state in
+          let json =
+            Transport_metrics.transport_health_json
+              ~config:state.Mcp_server.room_config
+          in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/mdal/loops" ->
@@ -550,6 +541,41 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/repo-synthesis" ->
+          let state = get_server_state () in
+          let base_path = state.Mcp_server.room_config.base_path in
+          let limit =
+            match Server_utils.query_param httpun_request "limit" with
+            | Some raw -> (try int_of_string raw with _ -> 20)
+            | None -> 20
+          in
+          let json =
+            Dashboard_http_repo_synthesis.repo_synthesis_benchmarks_json
+              ~base_path ~limit ()
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, p when String.length p > 34
+                   && String.sub p 0 34 = "/api/v1/repo-synthesis/benchmarks/" ->
+          let state = get_server_state () in
+          let base_path = state.Mcp_server.room_config.base_path in
+          let run_id = String.trim (String.sub p 34 (String.length p - 34)) in
+          if String.length run_id = 0 then
+            h2_respond_json h2_reqd {|{"error":"run_id is required"}|}
+              ~status:`Bad_request ~extra_headers:cors
+          else
+            (match
+               Dashboard_http_repo_synthesis
+               .repo_synthesis_benchmark_detail_json ~base_path ~run_id
+             with
+             | Ok json ->
+                 h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                   ~extra_headers:cors
+             | Error msg ->
+                 h2_respond_json h2_reqd
+                   (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
+                   ~status:`Not_found ~extra_headers:cors)
 
       | `GET, p when String.length p > 27
                    && String.sub p 0 27 = "/api/v1/autoresearch/loops/" ->
@@ -767,26 +793,20 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             try
               let json = Yojson.Safe.from_string body_str in
               let room_id_opt = match Yojson.Safe.Util.member "room_id" json with
-                | `String s -> Some s
-                | `Null -> None
+                | `String s when String.trim s <> "" -> Some (String.trim s)
+                | `String _ -> None
                 | _ -> None
               in
               (match room_id_opt with
                | None ->
                    h2_respond_json h2_reqd
-                     (Yojson.Safe.to_string (error_json "room_id is required"))
+                     (Yojson.Safe.to_string (error_json "room_id is required and cannot be empty"))
                       ~status:`Bad_request ~extra_headers:cors
-               | Some raw_room_id ->
-                   (match Room.validate_room_id raw_room_id with
-                    | Error msg ->
-                        h2_respond_json h2_reqd
-                          (Yojson.Safe.to_string (error_json (Printf.sprintf "invalid room_id: %s" msg)))
-                          ~status:`Bad_request ~extra_headers:cors
-                    | Ok room_id ->
-                        Room.write_current_room config room_id;
-                        Room.ensure_room_bootstrap config room_id;
-                        let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
-                        h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors))
+               | Some room_id ->
+                     Room.write_current_room config room_id;
+                     Room.ensure_room_bootstrap config room_id;
+                     let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
+                     h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors)
             with
             | Yojson.Json_error msg ->
                 h2_respond_json h2_reqd

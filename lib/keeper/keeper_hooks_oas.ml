@@ -36,11 +36,8 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
 
 (** Build OAS hooks for a keeper agent.
 
-    Tool availability is determined at keeper creation time by
-    [keeper_exec_tools] based on policy_shell_mode. No secondary
-    autonomy-level filtering — industry standard is binary tool grants.
-
-    Safety gates:
+    All keepers receive the full tool set unconditionally.
+    Safety is enforced through eval_gate deny lists and these hooks:
     1. Cost budget — reject when accumulated cost exceeds limit
     2. Destructive pattern detection — reject dangerous bash/edit commands
 

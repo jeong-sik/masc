@@ -66,9 +66,6 @@ let keeper_research_loop_tool_names =
   Tool_research.schemas
   |> List.map (fun (t : Types.tool_schema) -> t.name)
 
-let is_research_profile (meta : keeper_meta) =
-  meta.soul_profile = "research"
-
 let keeper_coding_tool_names = Tool_code_write.tool_names
 
 let keeper_voice_tool_schemas =
@@ -123,67 +120,51 @@ let keeper_default_model_tools (meta : keeper_meta) : Types.tool_schema list =
   else
     keeper_model_tools
 
+(** Return all keeper tool names unconditionally.
+    Mode-based categorization removed: every keeper gets the full tool set.
+    Safety is handled by eval_gate deny lists (kept intact). *)
 let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     string list =
   if write_done then
     []
-  else if keeper_policy_mode_is_learned meta then
-    let base = keeper_coordination_tool_names @ keeper_read_tool_names in
-    let with_voice =
-      if meta.policy_voice_enabled then keeper_voice_tool_names @ base else base
-    in
-    let shell_mode = canonical_policy_shell_mode meta.policy_shell_mode in
-    let with_shell =
-      if shell_mode = "readonly" || shell_mode = "coding" then
-        keeper_shell_readonly_tool_names @ with_voice
-      else with_voice
-    in
-    let with_governance = keeper_governance_tool_names @ with_shell in
-    let with_research =
-      if is_research_profile meta then
-        keeper_research_loop_tool_names @ keeper_autoresearch_tool_names
-        @ with_governance
-      else with_governance
-    in
-    let with_coding =
-      if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
-        keeper_coding_shard_tool_names @ keeper_coding_tool_names @ with_research
-      else with_research
-    in
-    dedupe_tool_names (keeper_masc_tool_names meta @ keeper_board_tool_names @ with_coding)
   else
-    let base_names = keeper_default_tool_names meta in
-    let with_research =
-      if is_research_profile meta then
-        keeper_research_loop_tool_names @ keeper_autoresearch_tool_names @ base_names
-      else base_names
+    let all_names =
+      keeper_read_tool_names
+      @ keeper_coordination_tool_names
+      @ keeper_board_tool_names
+      @ keeper_shell_readonly_tool_names
+      @ keeper_governance_tool_names
+      @ keeper_coding_shard_tool_names
+      @ keeper_coding_tool_names
+      @ keeper_autoresearch_tool_names
+      @ keeper_research_loop_tool_names
+      @ (keeper_masc_tool_names meta)
+      @ (keeper_default_tool_names meta)
     in
-    let with_coding =
-      if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
-        keeper_coding_shard_tool_names @ keeper_coding_tool_names @ with_research
-      else with_research
+    let with_voice =
+      if meta.policy_voice_enabled then keeper_voice_tool_names @ all_names
+      else all_names
     in
-    dedupe_tool_names (keeper_masc_tool_names meta @ with_coding)
+    dedupe_tool_names with_voice
 
+(** Return all keeper model tool schemas unconditionally.
+    Mode-based categorization removed: every keeper gets the full tool set.
+    Safety is handled by eval_gate deny lists (kept intact). *)
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     Types.tool_schema list =
   let allowed = keeper_allowed_tool_names ~write_done meta in
   if allowed = [] then
     []
   else
-    let base = keeper_default_model_tools meta in
-    let with_research =
-      if is_research_profile meta then
-        base @ Tool_research.schemas @ Tool_shard.autoresearch_keeper_tools
-      else base
+    let all_schemas =
+      (keeper_default_model_tools meta)
+      @ Tool_research.schemas
+      @ Tool_shard.autoresearch_keeper_tools
+      @ Tool_shard.coding_tools
+      @ Tool_code_write.schemas
+      @ (keeper_masc_tool_schemas meta)
     in
-    let with_coding =
-      if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
-        with_research @ Tool_shard.coding_tools @ Tool_code_write.schemas
-      else with_research
-    in
-    let with_masc = with_coding @ keeper_masc_tool_schemas meta in
-    with_masc
+    all_schemas
     |> List.filter (fun tool -> List.mem tool.Types.name allowed)
 
 let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =

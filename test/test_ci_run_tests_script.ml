@@ -1,9 +1,14 @@
 open Alcotest
 
 let source_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> Sys.getcwd ()
+  let cwd = Sys.getcwd () in
+  let cwd_script = Filename.concat cwd "scripts/ci-run-tests.sh" in
+  if Sys.file_exists cwd_script then
+    cwd
+  else
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> cwd
 
 let script_path () =
   Filename.concat (source_root ()) "scripts/ci-run-tests.sh"
@@ -96,6 +101,7 @@ exit 0
 let test_rpc_retry_uses_isolated_build_dir () =
   with_temp_dir "ci-run-tests-retry" (fun dir ->
       let fake_log = Filename.concat dir "fake-dune.log" in
+      let ci_log = Filename.concat dir "ci-run-tests.log" in
       let fake_bin = make_fake_dune dir in
       let path =
         Printf.sprintf "%s:%s" fake_bin
@@ -104,9 +110,11 @@ let test_rpc_retry_uses_isolated_build_dir () =
       let env =
         [
           ("PATH", path);
+          ("DUNE_BUILD_DIR", "");
           ("FAKE_DUNE_LOG", fake_log);
           ("CI_TEST_HEARTBEAT_SEC", "1");
           ("CI_TEST_TIMEOUT_SEC", "30");
+          ("CI_TEST_LOG_FILE", ci_log);
         ]
       in
       let code, stdout, stderr =
@@ -117,11 +125,16 @@ let test_rpc_retry_uses_isolated_build_dir () =
       if code <> 0 then
         failf "ci-run-tests failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
+      let ci_log_contents = read_file ci_log in
+      let observed_output =
+        String.concat "\n" [ ci_log_contents; stdout; stderr ]
+      in
       check bool "retry warning present" true
-        (contains_substring stdout
+        (contains_substring observed_output
            "detected dune RPC/lock failure; retrying once with isolated build dir .ci_build");
       check bool "isolated command exports build dir" true
-        (contains_substring stdout "isolated_command: env DUNE_BUILD_DIR=.ci_build");
+        (contains_substring observed_output
+           "isolated_command: env DUNE_BUILD_DIR=.ci_build");
       check bool "success message present" true
         (contains_substring stdout "tests completed successfully");
       let log_lines =

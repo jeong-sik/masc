@@ -92,9 +92,14 @@ else
   pr_number="$(gh pr view "$pr_url" --repo "$repo" --json number --jq .number)"
 fi
 
-mapfile -t changed_files < <(git diff --name-only "origin/$base...HEAD" 2>/dev/null || true)
+changed_files=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && changed_files+=("$line")
+done < <(git diff --name-only "origin/$base...HEAD" 2>/dev/null || true)
 if [[ ${#changed_files[@]} -eq 0 ]]; then
-  mapfile -t changed_files < <(git diff --name-only "HEAD~1..HEAD" || true)
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && changed_files+=("$line")
+  done < <(git diff --name-only "HEAD~1..HEAD" || true)
 fi
 
 docs_only=1

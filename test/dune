@@ -32,6 +32,7 @@
         test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
         test_keeper_memory
         test_keeper_deliberation
+        test_keeper_registry
         test_keeper_resident_supervisor
         test_metrics_rotation
         test_tool_tier
@@ -56,6 +57,7 @@
           test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
           test_keeper_memory
           test_keeper_deliberation
+          test_keeper_registry
           test_keeper_resident_supervisor
           test_metrics_rotation
           test_tool_tier

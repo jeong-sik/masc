@@ -191,8 +191,10 @@ chat_contract_status() {
   body="${body%$'\n'*}"
   if [ "$status" = "200" ] && printf '%s' "$body" | jq -e '.choices | type == "array"' >/dev/null 2>&1; then
     printf 'confirmed'
-  else
+  elif [[ "$status" =~ ^(400|404|405|415|422)$ ]]; then
     printf 'rejected'
+  else
+    printf 'unknown'
   fi
 }
 

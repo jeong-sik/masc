@@ -96,6 +96,19 @@ let test_classify_runtime_blocker_flags_chat_contract_mismatch () =
     | Some msg -> String.contains msg 'c'
     | None -> false)
 
+let test_classify_runtime_blocker_allows_unknown_chat_status () =
+  let blocker, detail =
+    Masc_mcp.Tool_local_runtime.classify_runtime_blocker ~provider_reachable:true
+      ~slot_reachable:true ~chat_contract_status:"unknown"
+      ~expected_model:(Some "Qwen3.5-9B-Q4_K_M.gguf")
+      ~actual_model_id:(Some "Qwen3.5-9B-Q4_K_M.gguf")
+      ~expected_slots:(Some 4) ~actual_slots_total:4
+      ~expected_ctx:(Some 131072) ~actual_ctx:(Some 131072)
+      ~chat_completion_compatible:true
+  in
+  check (option string) "unknown chat is not blocker" None blocker;
+  check (option string) "unknown chat detail absent" None detail
+
 let () =
   run "tool_local_runtime_verify"
     [
@@ -112,5 +125,7 @@ let () =
             test_runtime_verify_prefers_oas_discovery_cache;
           test_case "chat contract mismatch is reported" `Quick
             test_classify_runtime_blocker_flags_chat_contract_mismatch;
+          test_case "unknown chat status is tolerated" `Quick
+            test_classify_runtime_blocker_allows_unknown_chat_status;
         ] );
     ]

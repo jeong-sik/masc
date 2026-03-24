@@ -198,11 +198,12 @@ let chat_contract_reachable ~status ~body =
             | `List _ -> true
             | _ -> false))
 
-let chat_contract_status ~status ~body ~error =
+let chat_contract_status ~status ~body =
   match status with
   | Some 200 when chat_contract_reachable ~status ~body -> "confirmed"
-  | Some _ -> "rejected"
-  | None -> if Option.is_some error then "unknown" else "unknown"
+  | Some (400 | 404 | 405 | 415 | 422) -> "rejected"
+  | Some _ -> "unknown"
+  | None -> "unknown"
 
 let classify_runtime_blocker ~provider_reachable ~slot_reachable
     ~chat_contract_status ~expected_model ~actual_model_id ~expected_slots
@@ -382,6 +383,7 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
 let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
     ?expected_model () =
   let runtimes = runtime_snapshots_for_pool runtime_pool in
+  let has_runtimes = runtimes <> [] in
   let configured_capacity =
     runtimes
     |> List.fold_left
@@ -475,7 +477,7 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
               | Error err -> (None, None, Some err)
         in
         let chat_status_label =
-          chat_contract_status ~status:chat_status ~body:chat_body ~error:chat_err
+          chat_contract_status ~status:chat_status ~body:chat_body
         in
         let current_active =
           slot_json |> Option.map active_slots_of_json |> Option.value ~default:0
@@ -530,7 +532,9 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
   in
   let overall_chat_contract_status =
     let states = List.sort_uniq String.compare chat_contract_statuses in
-    if List.mem "rejected" states then
+    if not has_runtimes then
+      "unknown"
+    else if List.mem "rejected" states then
       "rejected"
     else if List.mem "unknown" states then
       "unknown"
@@ -538,7 +542,9 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
       "confirmed"
   in
   let runtime_blocker, detail =
-    classify_runtime_blocker ~provider_reachable ~slot_reachable ~expected_model
+    classify_runtime_blocker
+      ~provider_reachable:(provider_reachable && has_runtimes)
+      ~slot_reachable:(slot_reachable && has_runtimes) ~expected_model
       ~actual_model_id ~expected_slots ~actual_slots_total ~expected_ctx ~actual_ctx
       ~chat_contract_status:overall_chat_contract_status
       ~chat_completion_compatible:true
@@ -549,8 +555,8 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
       ("runtime_pool", string_opt_to_json runtime_pool);
       ("provider_base_url", `String Env_config.Llama.server_url);
       ("slot_url", `String Env_config.Llama.server_url);
-      ("provider_reachable", `Bool provider_reachable);
-      ("slot_reachable", `Bool slot_reachable);
+      ("provider_reachable", `Bool (provider_reachable && has_runtimes));
+      ("slot_reachable", `Bool (slot_reachable && has_runtimes));
       ("chat_completion_compatible", `Bool true);
       ("chat_contract_status", `String overall_chat_contract_status);
       ("chat_contract_reachable", `Bool (String.equal overall_chat_contract_status "confirmed"));

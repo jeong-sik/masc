@@ -167,22 +167,6 @@ After masc_tool_admin_snapshot to review current state before making changes.";
           ("type", `String "object");
           ("description", `String "Unit budget envelope for section=unit_policy");
         ]);
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper or persistent agent name for policy updates");
-        ]);
-        ("policy_mode", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper policy mode: heuristic | learned_offline_v1");
-        ]);
-        ("action_budget", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper action budget: conversation | board");
-        ]);
-        ("reward_model_path", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Reward model path for learned_offline_v1 keeper policy");
-        ]);
       ]);
       ("required", `List [`String "section"]);
     ];

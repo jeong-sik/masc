@@ -210,18 +210,15 @@ let test_eio_multi_agent_walph () =
   check bool "codex not paused" false state_codex.paused;
   check bool "gemini not paused" false state_gemini.paused
 
-(** Test: Preset mapping includes review *)
-let test_eio_preset_mapping () =
+(** Test: START command is explicitly disabled *)
+let test_eio_start_disabled () =
   with_test_config "preset" @@ fun _env _fs _config ->
-  (* Test all presets map correctly *)
-  let open Room_walph_eio in
-  check (option string) "coverage maps" (Some "walph-coverage") (get_chain_id_for_preset "coverage");
-  check (option string) "refactor maps" (Some "walph-refactor") (get_chain_id_for_preset "refactor");
-  check (option string) "docs maps" (Some "walph-docs") (get_chain_id_for_preset "docs");
-  check (option string) "review maps" (Some "pr-review-pipeline") (get_chain_id_for_preset "review");
-  check (option string) "figma maps" (Some "walph-figma") (get_chain_id_for_preset "figma");
-  check (option string) "drain maps" None (get_chain_id_for_preset "drain");
-  check (option string) "unknown maps" None (get_chain_id_for_preset "unknown")
+  let result =
+    Room_walph_eio.walph_control _config ~from_agent:"tester"
+      ~command:"START" ~args:"coverage" ()
+  in
+  check bool "start disabled message" true
+    (contains result "START is disabled")
 
 (** Test: Multi-agent with review preset *)
 let test_eio_multi_agent_with_review () =
@@ -280,15 +277,10 @@ let test_eio_status_json_fields () =
   ignore (json |> member "started_at");
   ignore (json |> member "last_stop_reason")
 
-(** Test: loop cuts off after max_consecutive_errors on deterministic claim failures *)
-let test_eio_error_cutoff () =
+(** Test: walph_loop is removed and leaves state idle *)
+let test_eio_loop_removed () =
   with_test_config "error_cutoff" @@ fun env _fs config ->
-  let _ = Masc_mcp.Room.add_task config ~title:"failing task #1" ~description:"model fail path" ~priority:2 in
-  let _ = Masc_mcp.Room.add_task config ~title:"failing task #2" ~description:"model fail path" ~priority:2 in
-
-  let failing_dispatch ~tool_name:_ ~model:_ ~prompt:_ ~timeout_sec:_ ~max_chars:_ () =
-    ""  (* Forces deterministic "Empty MODEL response" error path *)
-  in
+  let state = Room_walph_eio.get_walph_state_exn config ~agent_name:"error-agent" in
   let result =
     Room_walph_eio.walph_loop config
       ~clock:(Eio.Stdenv.clock env)
@@ -297,23 +289,17 @@ let test_eio_error_cutoff () =
       ~max_iterations:10
       ~max_consecutive_errors:2
       ~error_backoff_sec:0
-      ~model_dispatch:failing_dispatch
+      ~model_dispatch:(fun ~tool_name:_ ~model:_ ~prompt:_ ~timeout_sec:_ ~max_chars:_ () -> "")
       ()
   in
-  check bool "stop reason includes cutoff"
-    true (contains result "max_consecutive_errors reached (2)");
-
-  let status = Room_walph_eio.walph_status_json config ~agent_name:"error-agent" in
-  check int "errors=2" 2 (status |> member "errors" |> to_int);
-  check int "consecutive_errors=2" 2 (status |> member "consecutive_errors" |> to_int);
-  check int "released_on_error=2" 2 (status |> member "released_on_error" |> to_int);
-  check string "last_stop_reason"
-    "max_consecutive_errors reached (2)"
-    (status |> member "last_stop_reason" |> to_string)
+  check bool "removed message" true
+    (contains result "Walph loop has been removed");
+  check bool "state remains idle" false state.running;
+  check int "iterations unchanged" 0 state.iterations;
+  check int "errors unchanged" 0 state.errors
 
 let test_eio_default_dispatch_uses_shared_cascade () =
-  (* Oas_worker dependency was intentionally removed from Room (see room_walph_eio.ml L267-268).
-     Dispatch now lives in tool_walph.ml. Verify legacy paths remain absent. *)
+  (* Verify old direct MODEL dispatch paths remain absent from Room. *)
   check bool "legacy direct dispatch removed" false
     (file_contains_pattern "lib/room/room_walph_eio.ml" "Llm_direct.dispatch");
   check bool "no direct run_prompt_cascade" false
@@ -330,11 +316,11 @@ let eio_tests = [
   "room isolation in Eio", `Quick, test_eio_room_isolation;
   "cleanup function", `Quick, test_eio_cleanup;
   "multi-agent Walph", `Quick, test_eio_multi_agent_walph;
-  "preset mapping (incl. review)", `Quick, test_eio_preset_mapping;
+  "start disabled", `Quick, test_eio_start_disabled;
   "multi-agent with review preset", `Quick, test_eio_multi_agent_with_review;
   "list walph states", `Quick, test_eio_list_walph_states;
   "status json fields", `Quick, test_eio_status_json_fields;
-  "error cutoff", `Quick, test_eio_error_cutoff;
+  "loop removed", `Quick, test_eio_loop_removed;
   "default dispatch uses shared cascade", `Quick,
   test_eio_default_dispatch_uses_shared_cascade;
 ]

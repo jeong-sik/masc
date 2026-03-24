@@ -140,7 +140,7 @@ let register_all () =
 
   (* ── Mod_walph: non-schema tools ────────────────────────────── *)
   reg Mod_walph [
-    "masc_walph_loop"; "masc_walph_control";
+    "masc_walph_control";
     "masc_walph_natural";
   ];
 

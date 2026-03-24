@@ -7,6 +7,7 @@ type keeper_chat_stream_request = {
   name : string;
   message : string;
   models : string list;
+  timeout_sec : int option;
 }
 
 let keeper_chat_stream_error_json message =
@@ -142,12 +143,23 @@ let parse_keeper_chat_stream_request body_str =
             collect [] items
         | _ -> Error "models must be an array of strings"
       in
+      let timeout_sec =
+        match json |> member "timeout_sec" with
+        | `Null -> Ok None
+        | `Int value when value > 0 -> Ok (Some (max 5 (min 300 value)))
+        | `Float value when value > 0.0 ->
+            Ok (Some (max 5 (min 300 (int_of_float (Float.ceil value)))))
+        | `Int _ | `Float _ -> Ok None
+        | _ -> Error "timeout_sec must be a positive number"
+      in
       if name = "" then
         Error "name is required"
       else if message = "" then
         Error "message is required"
       else
-        Result.map (fun models -> { name; message; models }) models
+        match models, timeout_sec with
+        | Ok models, Ok timeout_sec -> Ok { name; message; models; timeout_sec }
+        | Error err, _ | _, Error err -> Error err
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
 
@@ -403,11 +415,16 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
           let args =
             `Assoc
               ([ ("name", `String payload.name);
-                 ("message", `String payload.message) ]
+                 ("message", `String payload.message);
+                 ("direct_reply", `Bool true) ]
+              @
+              (match payload.timeout_sec with
+               | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
+               | None -> [])
               @
               (if payload.models = [] then []
                else
-                 [ ("models",
+                  [ ("models",
                     `List
                       (List.map
                          (fun model -> `String model)

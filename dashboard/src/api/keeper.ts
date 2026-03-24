@@ -17,6 +17,8 @@ export interface KeeperToolReply {
   details: KeeperConversationDetails | null
 }
 
+const KEEPER_DIRECT_REPLY_TIMEOUT_SEC = 120
+
 export interface KeeperChatStreamEvent {
   type: string
   threadId?: string
@@ -36,7 +38,12 @@ async function callKeeperMessageRaw(
   message: string,
   models?: string[],
 ): Promise<string> {
-  const args: Record<string, unknown> = { name, message }
+  const args: Record<string, unknown> = {
+    name,
+    message,
+    direct_reply: true,
+    timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
+  }
   if (models && models.length > 0) args.models = models
   return callMcpTool('masc_keeper_msg', args)
 }
@@ -46,7 +53,11 @@ async function callKeeperMessageViaOperator(
   message: string,
   models?: string[],
 ): Promise<KeeperToolReply> {
-  const payload: Record<string, unknown> = { message }
+  const payload: Record<string, unknown> = {
+    message,
+    direct_reply: true,
+    timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
+  }
   if (models && models.length > 0) payload.models = models
   const response = await runOperatorAction({
     actor: currentDashboardActor(),
@@ -160,6 +171,8 @@ export async function streamKeeperMessage(
     body: JSON.stringify({
       name,
       message,
+      direct_reply: true,
+      timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
       ...(models && models.length > 0 ? { models } : {}),
     }),
     signal,

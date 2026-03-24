@@ -78,6 +78,9 @@ let test_route_auth_contracts () =
   check bool "http keeper chat stream uses keeper tool auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|with_tool_auth ~tool_name:"masc_keeper_msg"|});
+  check bool "http keeper chat stream forces direct reply mode" true
+    (file_contains_pattern "lib/server/server_routes_http_keeper_stream.ml"
+       {|("direct_reply", `Bool true)|});
   check bool "h2 gateway units use tool auth" true
     (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_unit_define"|});
@@ -123,6 +126,37 @@ let test_http_write_auth_contracts () =
   check bool "provider runs post requires admin permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        {|with_token_permission_auth ~permission:Types.CanAdmin|})
+
+let test_keeper_direct_reply_contracts () =
+  check bool "dashboard keeper direct messages request direct reply" true
+    (file_contains_pattern "dashboard/src/api/keeper.ts"
+       "direct_reply: true");
+  check bool "operator keeper_message forwards direct reply flag" true
+    (file_contains_pattern "lib/operator/operator_control.ml"
+       {|("direct_reply", `Bool true)|});
+  check bool "keeper turn bypasses auto team session for direct reply" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "if direct_reply then")
+
+let test_dashboard_warm_hydration_contracts () =
+  check bool "execution default route hydrates cache on first success" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "cached_surface_or_first_success_json _execution_cache");
+  check bool "mission default route hydrates cache on first success" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "cached_surface_or_first_success_json _mission_cache");
+  check bool "room truth advertises initializing while execution warms" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       {|("status", `String "initializing")|});
+  check bool "execution render timeout is env-configurable" true
+    (file_contains_pattern "lib/dashboard/dashboard_execution.ml"
+       "MASC_DASHBOARD_EXECUTION_RENDER_TIMEOUT_S");
+  check bool "execution proactive refresh timeout is extended" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S");
+  check bool "mission proactive refresh timeout is extended" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "MASC_DASHBOARD_MISSION_REFRESH_TIMEOUT_S")
 
 let test_http_read_surface_contracts () =
   check bool "room status route now requires read auth" true
@@ -380,6 +414,10 @@ let () =
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
+           test_case "keeper direct reply contracts" `Quick
+             test_keeper_direct_reply_contracts;
+           test_case "dashboard warm hydration contracts" `Quick
+             test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;
            test_case "input validation contracts" `Quick test_input_validation_contracts;
            test_case "room current validation contracts" `Quick

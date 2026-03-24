@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+source "${REPO_ROOT}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 PORT="${PORT:-8985}"
 RUN_ID="${RUN_ID:-swarm-live-proof}"
@@ -27,6 +28,8 @@ HARNESS_TIMEOUT_SEC="${HARNESS_TIMEOUT_SEC:-600}"
 SLOT_SAMPLE_INTERVAL_SEC="${SLOT_SAMPLE_INTERVAL_SEC:-0.25}"
 EXPECTED_SLOTS="${EXPECTED_SLOTS:-$WORKER_COUNT}"
 EXPECTED_CTX="${EXPECTED_CTX:-262144}"
+MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
+START_MASC_LOG_FILE="${START_MASC_LOG_FILE:-/tmp/agent-swarm-live-${RUN_ID}.log}"
 SERVER_PID=""
 OPERATION_ID=""
 HARNESS_PID=""
@@ -49,66 +52,25 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-urlencode() {
-  jq -rn --arg v "$1" '$v|@uri'
-}
-
-jsonrpc_call() {
-  local id="$1"
-  local method="$2"
-  local params="$3"
-  local raw
-  raw="$(curl -sS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -H "mcp-session-id: $MCP_SESSION_ID" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"$method\",\"params\":$params}")"
-  local sse_data
-  sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p')"
-  if [ -n "$sse_data" ]; then
-    local response_line
-    response_line="$(printf "%s\n" "$sse_data" | tail -n1)"
-    if [ -n "$response_line" ]; then
-      printf "%s" "$response_line"
-    else
-      echo "missing matching JSON-RPC response id: $id" >&2
-      printf "%s\n" "$raw" >&2
-      exit 1
-    fi
-  else
-    printf "%s" "$raw"
-  fi
-}
-
 call_tool() {
   local id="$1"
   local tool_name="$2"
   local args_json="$3"
-  jsonrpc_call "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
+  mcp_call_tool "$id" "$tool_name" "$args_json"
 }
 
 extract_result() {
-  jq -c 'try (.result.content[0].text | fromjson | .result) catch empty'
+  mcp_extract_result
 }
 
 extract_text() {
-  jq -r 'try (.result.content[0].text) catch empty'
-}
-
-extract_is_error() {
-  jq -r 'try (.result.isError) catch "true"'
+  mcp_extract_text
 }
 
 require_tool_success() {
   local payload="$1"
-  require_json "$payload"
-  local is_error
-  is_error="$(printf "%s" "$payload" | extract_is_error)"
-  if [ "$is_error" = "true" ]; then
-    printf "%s\n" "$payload" >&2
-    echo "tool call failed" >&2
-    exit 1
-  fi
+  local label="${2:-agent_swarm_live tool}"
+  mcp_require_tool_ok "$payload" "$label"
 }
 
 call_tool_checked() {
@@ -172,11 +134,8 @@ extract_added_task_id() {
 
 require_json() {
   local payload="$1"
-  if ! printf "%s" "$payload" | jq -e . >/dev/null 2>&1; then
-    echo "invalid payload" >&2
-    printf "%s\n" "$payload" >&2
-    exit 1
-  fi
+  local label="${2:-agent_swarm_live payload}"
+  mcp_require_json "$payload" "$label"
 }
 
 wait_for_http() {
@@ -616,7 +575,17 @@ cleanup() {
     kill "$SERVER_PID" >/dev/null 2>&1 || true
   fi
 }
-trap 'code=$?; if [ "$code" -ne 0 ] && [ "$EXIT_STATUS" -eq 0 ]; then EXIT_STATUS="$code"; FAIL_BLOCKER="${FAIL_BLOCKER:-unexpected_failure}"; FAIL_DETAIL="${FAIL_DETAIL:-stage ${CURRENT_STAGE:-unknown} failed}"; fi; cleanup' EXIT
+
+on_exit() {
+  local code="$1"
+  if [ "$code" -ne 0 ] && [ "$EXIT_STATUS" -eq 0 ]; then
+    EXIT_STATUS="$code"
+    FAIL_BLOCKER="${FAIL_BLOCKER:-unexpected_failure}"
+    FAIL_DETAIL="${FAIL_DETAIL:-stage ${CURRENT_STAGE:-unknown} failed}"
+  fi
+  cleanup
+}
+trap 'on_exit $?' EXIT
 
 RUN_SLUG="$(slugify_run_id "$RUN_ID")"
 RUN_ARTIFACT_DIR=""
@@ -658,7 +627,7 @@ wait_for_http "${SLOT_URL}/health" 20 1 || fail_stage "provider_unreachable" "ti
 if [ "$START_SERVER" = "1" ]; then
   CURRENT_STAGE="start-masc"
   echo "[3/12] start isolated masc-mcp on :$PORT"
-  nohup "$REPO_ROOT/start-masc-mcp.sh" --http --port "$PORT" --base-path "$BASE_PATH" >/tmp/agent-swarm-live-${RUN_ID}.log 2>&1 &
+  nohup "$REPO_ROOT/start-masc-mcp.sh" --http --port "$PORT" --base-path "$BASE_PATH" >"$START_MASC_LOG_FILE" 2>&1 &
   SERVER_PID="$!"
   wait_for_http "${MASC_URL}/health"
 else
@@ -681,17 +650,6 @@ if [ "$PREFLIGHT_ONLY" = "1" ]; then
   exit 0
 fi
 
-if [ "$START_SERVER" = "1" ]; then
-  CURRENT_STAGE="start-masc"
-  echo "[3/11] start isolated masc-mcp on :$PORT"
-  nohup "$REPO_ROOT/start-masc-mcp.sh" --http --port "$PORT" --base-path "$BASE_PATH" >/tmp/agent-swarm-live-${RUN_ID}.log 2>&1 &
-  SERVER_PID="$!"
-  wait_for_http "${MASC_URL}/health"
-else
-  CURRENT_STAGE="reuse-masc"
-  echo "[3/11] reusing existing masc-mcp ${MASC_URL}"
-  wait_for_http "${MASC_URL}/health"
-fi
 CURRENT_STAGE="manifest"
 echo "[5/12] describe deterministic swarm manifest"
 MANIFEST_JSON="$(generate_manifest_json)"
@@ -738,7 +696,6 @@ run_compat_swarm_harness >"$HARNESS_RESULT_FILE" &
 HARNESS_PID="$!"
 
 attempt=0
-RUN_ID_QUERY="$(urlencode "$RUN_ID")"
 while [ "$attempt" -lt 60 ]; do
   SWARM_LIVE_JSON="$(observe_swarm_result "$RUN_ID")"
   LIVE_WORKERS="$(printf "%s" "$SWARM_LIVE_JSON" | jq -r '.summary.live_workers // 0')"
@@ -762,7 +719,6 @@ if [ -z "$OPERATION_ID" ]; then
   exit 1
 fi
 call_tool_checked 90121 "masc_dispatch_tick" "$(jq -cn --arg operation_id "$OPERATION_ID" '{operation_id:$operation_id}')" >/dev/null
-OPERATION_ID_QUERY="$(urlencode "$OPERATION_ID")"
 
 HARNESS_STARTED_AT="$(date +%s)"
 while kill -0 "$HARNESS_PID" >/dev/null 2>&1; do

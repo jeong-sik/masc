@@ -12,6 +12,7 @@
 export MCP_SESSION_ID
 
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/harness/jsonrpc_sse.sh
 source "${_HARNESS_DIR}/jsonrpc_sse.sh"
 
 # Contract harness validates MCP semantics, not h2c prior-knowledge support.
@@ -100,12 +101,6 @@ call_tool() {
   jsonrpc_normalize_response "$raw" "$id"
 }
 
-# Backward-compatible text extractor used by older harness scripts.
-extract_text() {
-  jq -r 'try (.result.content[0].text) catch empty'
-}
-# Extract .result from MCP tool response content.
-# Usage: echo "$response" | extract_text
 extract_text() {
   jq -r 'if ._harness_error? then empty else try (.result.content[0].text) catch empty end'
 }
@@ -113,25 +108,35 @@ extract_text() {
 # Extract .result from MCP tool response content.
 # Usage: echo "$response" | extract_result
 extract_result() {
-  jq -c 'try (.result.content[0].text | fromjson | .result) catch empty'
-}
-
-# Extract raw text from MCP tool response content.
-# Usage: echo "$response" | extract_text
-extract_text() {
-  jq -r 'try (.result.content[0].text) catch empty'
+  jq -c '
+    if ._harness_error? then
+      empty
+    else
+      try (
+        .result.content[0].text
+        | fromjson
+        | if has("result") and .result != null then .result else . end
+      ) catch empty
+    end
+  '
 }
 
 # Extract .payload from MCP tool response content.
 # Usage: echo "$response" | extract_payload
 extract_payload() {
-  jq -c 'try (.result.content[0].text | fromjson | .payload) catch empty'
+  jq -c 'if ._harness_error? then empty else try (.result.content[0].text | fromjson | .payload) catch empty end'
 }
 
 # Extract error message from MCP tool response.
 # Usage: echo "$response" | extract_error
 extract_error() {
-  jq -r 'try (.result.content[0].text | fromjson | .message) catch (.error.message // "")'
+  jq -r '
+    if ._harness_error? then
+      ._harness_error.message // ""
+    else
+      try (.result.content[0].text | fromjson | .message) catch (.error.message // "")
+    end
+  '
 }
 
 # Assert that a payload is valid JSON. Exits 1 on failure.

@@ -790,7 +790,7 @@ let () =
         test_mitosis_prepare_success;
       Alcotest.test_case "handoff no_action" `Quick
         test_mitosis_handoff_no_action;
-      Alcotest.test_case "handoff force" `Quick
+      Alcotest.test_case "handoff force" `Slow
         test_mitosis_handoff_force;
       Alcotest.test_case "dispatch unknown" `Quick
         test_mitosis_dispatch_unknown;

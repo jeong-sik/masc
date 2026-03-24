@@ -24,39 +24,42 @@ type cascade_counter = {
   mutable rejected : int;
 }
 
+let cascade_counters_mu = Eio.Mutex.create ()
 let cascade_counters : (string, cascade_counter) Hashtbl.t = Hashtbl.create 8
 
 let record_cascade ~cascade_name ~outcome =
-  let c = match Hashtbl.find_opt cascade_counters cascade_name with
-    | Some c -> c
-    | None ->
-      let c = { calls = 0; successes = 0; failures = 0; rejected = 0 } in
-      Hashtbl.replace cascade_counters cascade_name c; c
-  in
-  c.calls <- c.calls + 1;
-  match outcome with
-  | `Success -> c.successes <- c.successes + 1
-  | `Failure -> c.failures <- c.failures + 1
-  | `Rejected -> c.rejected <- c.rejected + 1
+  Eio.Mutex.use_rw ~protect:true cascade_counters_mu (fun () ->
+    let c = match Hashtbl.find_opt cascade_counters cascade_name with
+      | Some c -> c
+      | None ->
+        let c = { calls = 0; successes = 0; failures = 0; rejected = 0 } in
+        Hashtbl.replace cascade_counters cascade_name c; c
+    in
+    c.calls <- c.calls + 1;
+    match outcome with
+    | `Success -> c.successes <- c.successes + 1
+    | `Failure -> c.failures <- c.failures + 1
+    | `Rejected -> c.rejected <- c.rejected + 1)
 
 let cascade_metrics_json () : Yojson.Safe.t =
-  let entries = Hashtbl.fold (fun name c acc ->
-    let error_rate = if c.calls > 0
-      then float_of_int (c.failures + c.rejected) /. float_of_int c.calls
-      else 0.0 in
-    `Assoc [
-      ("cascade_name", `String name);
-      ("calls", `Int c.calls);
-      ("successes", `Int c.successes);
-      ("failures", `Int c.failures);
-      ("rejected", `Int c.rejected);
-      ("error_rate", `Float error_rate);
-    ] :: acc
-  ) cascade_counters [] in
-  `List (List.sort (fun a b ->
-    let get_calls j = Yojson.Safe.Util.(j |> member "calls" |> to_int) in
-    Int.compare (get_calls b) (get_calls a)
-  ) entries)
+  Eio.Mutex.use_ro cascade_counters_mu (fun () ->
+    let entries = Hashtbl.fold (fun name c acc ->
+      let error_rate = if c.calls > 0
+        then float_of_int (c.failures + c.rejected) /. float_of_int c.calls
+        else 0.0 in
+      `Assoc [
+        ("cascade_name", `String name);
+        ("calls", `Int c.calls);
+        ("successes", `Int c.successes);
+        ("failures", `Int c.failures);
+        ("rejected", `Int c.rejected);
+        ("error_rate", `Float error_rate);
+      ] :: acc
+    ) cascade_counters [] in
+    `List (List.sort (fun a b ->
+      let get_calls j = Yojson.Safe.Util.(j |> member "calls" |> to_int) in
+      Int.compare (get_calls b) (get_calls a)
+    ) entries))
 
 (* ================================================================ *)
 (* Configuration                                                     *)

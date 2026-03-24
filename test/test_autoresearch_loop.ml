@@ -44,11 +44,8 @@ let clear_autoresearch_runtime () =
   Lib.Autoresearch.with_loops_rw (fun () ->
     Hashtbl.reset Lib.Autoresearch.active_loops;
     Lib.Autoresearch.latest_loop_id := None);
-  Lib.Tool_autoresearch.queued_generators := [];
   Hashtbl.reset Lib.Tool_autoresearch.pending_hypotheses;
-  Hashtbl.reset Lib.Tool_autoresearch.custom_generators;
-  Hashtbl.reset Lib.Tool_autoresearch.active_cycle_loops;
-  Hashtbl.reset Lib.Tool_autoresearch.active_driver_loops
+  Hashtbl.reset Lib.Tool_autoresearch.custom_generators
 
 let test_start_runs_autonomously_to_completion () =
   Eio_main.run @@ fun env ->

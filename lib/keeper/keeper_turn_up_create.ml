@@ -295,6 +295,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_autonomous_action_at = "";
             autonomous_action_count = 0;
             last_triage_triggers = "";
+            initiative_enabled =
+              Option.value ~default:true p.profile_defaults.initiative_enabled;
             active_team_session_id = None;
             last_team_session_started_at = "";
             team_session_start_count_total = 0;

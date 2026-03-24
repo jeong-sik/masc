@@ -99,6 +99,7 @@ type keeper_meta = {
   last_autonomous_action_at: string;
   autonomous_action_count: int;
   last_triage_triggers: string;
+  initiative_enabled: bool;
   paused: bool;
 }
 
@@ -189,6 +190,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("last_autonomous_action_at", `String m.last_autonomous_action_at);
       ("autonomous_action_count", `Int m.autonomous_action_count);
       ("last_triage_triggers", `String m.last_triage_triggers);
+      ("initiative_enabled", `Bool m.initiative_enabled);
       ("paused", `Bool m.paused);
     ]
 
@@ -396,6 +398,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let last_triage_triggers =
       Safe_ops.json_string ~default:"" "last_triage_triggers" json
     in
+    let initiative_enabled =
+      Safe_ops.json_bool ~default:true "initiative_enabled" json
+    in
     let paused =
       Safe_ops.json_bool ~default:false "paused" json
     in
@@ -491,6 +496,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           last_autonomous_action_at;
           autonomous_action_count;
           last_triage_triggers;
+          initiative_enabled;
           paused;
         }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

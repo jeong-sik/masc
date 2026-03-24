@@ -809,6 +809,37 @@ let test_prompt_always_includes_multi_step () =
     (try ignore (Str.search_forward (Str.regexp_string "multi_step") prompt 0); true
      with Not_found -> false)
 
+(* ---------- initiative_enabled tests ---------- *)
+
+let test_initiative_enabled_default_true () =
+  (* When JSON has initiative_enabled = true, roundtrip preserves it *)
+  let json_str = {|{"name":"test","initiative_enabled":true,"policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t1","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Keeper_types.meta_of_json json with
+  | Ok m -> check bool "initiative_enabled default" true m.initiative_enabled
+  | Error e -> fail ("parse failed: " ^ e)
+
+let test_initiative_enabled_roundtrip_false () =
+  (* When JSON has initiative_enabled = false, roundtrip preserves it *)
+  let json_str = {|{"name":"test","initiative_enabled":false,"policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t2","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Keeper_types.meta_of_json json with
+  | Ok m ->
+    check bool "initiative_enabled false" false m.initiative_enabled;
+    let re_json = Keeper_types.meta_to_json m in
+    let ie = Yojson.Safe.Util.member "initiative_enabled" re_json
+             |> Yojson.Safe.Util.to_bool in
+    check bool "roundtrip preserves false" false ie
+  | Error e -> fail ("parse failed: " ^ e)
+
+let test_initiative_enabled_missing_defaults_true () =
+  (* When JSON omits initiative_enabled, defaults to true (backward compat) *)
+  let json_str = {|{"name":"test","policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t3","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Keeper_types.meta_of_json json with
+  | Ok m -> check bool "missing initiative_enabled defaults to true" true m.initiative_enabled
+  | Error e -> fail ("parse failed: " ^ e)
+
 let () =
   run "Keeper_deliberation"
     [
@@ -984,5 +1015,14 @@ let () =
             test_daily_budget_from_env_default;
           test_case "daily budget from env custom" `Quick
             test_daily_budget_from_env_custom;
+        ] );
+      ( "initiative_enabled",
+        [
+          test_case "meta JSON default is true" `Quick
+            test_initiative_enabled_default_true;
+          test_case "meta JSON roundtrip false" `Quick
+            test_initiative_enabled_roundtrip_false;
+          test_case "missing field defaults to true" `Quick
+            test_initiative_enabled_missing_defaults_true;
         ] );
     ]

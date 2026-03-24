@@ -9,6 +9,7 @@ let admin_tools =
     "masc_autoresearch_start";
     "masc_autoresearch_stop";
     "masc_autoresearch_swarm_start";
+    "masc_repo_synthesis_swarm_start";
     "masc_policy_freeze_unit";
     "masc_policy_kill_switch";
     "masc_tool_admin_update";

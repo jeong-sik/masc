@@ -1,0 +1,122 @@
+module Lib = Masc_mcp
+
+open Alcotest
+
+let () = Mirage_crypto_rng_unix.use_default ()
+
+let test_dir () =
+  let tmp = Filename.temp_file "masc_tool_repo_synthesis" "" in
+  Sys.remove tmp;
+  Unix.mkdir tmp 0o755;
+  tmp
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun f -> rm (Filename.concat path f));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  rm dir
+
+let with_temp_base f =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () -> f dir)
+
+let test_repo_synthesis_swarm_start_creates_operation_session_and_run () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  with_temp_base @@ fun base_path ->
+  let config = Lib.Room.default_config base_path in
+  ignore (Lib.Room.init config ~agent_name:(Some "owner"));
+  ignore (Lib.Room.join config ~agent_name:"owner" ~capabilities:[ "ocaml"; "docs" ] ());
+  let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_ ~program_note:_ =
+    Lib.Team_session_engine_eio.start_session
+      ~sw
+      ~clock
+      ~config
+      ~created_by:"owner"
+      ~goal
+      ~duration_seconds:300
+      ~execution_scope:Lib.Team_session_types.Limited_code_change
+      ~checkpoint_interval_sec:30
+      ~min_agents:1
+      ~scale_profile:Lib.Team_session_types.Scale_standard
+      ~control_profile:Lib.Team_session_types.Control_hierarchical_quality_v1
+      ~orchestration_mode:Lib.Team_session_types.Assist
+      ~communication_mode:Lib.Team_session_types.Comm_broadcast
+      ~model_cascade:[]
+      ~fallback_policy:Lib.Team_session_types.Fallback_cascade_then_task
+      ~instruction_profile:Lib.Team_session_types.Profile_strict
+      ~alert_channel:Lib.Team_session_types.Alert_broadcast
+      ~auto_resume:true
+      ~report_formats:[ Lib.Team_session_types.Markdown; Lib.Team_session_types.Json ]
+      ~agent_names:[]
+      ~operation_id
+  in
+  let ctx : Lib.Tool_autoresearch.context =
+    {
+      base_path;
+      agent_name = Some "owner";
+      start_operation = None;
+      start_team_session = Some start_team_session;
+      config = Some config;
+      sw = Some sw;
+      clock = Some clock;
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("goal", `String "Improve repo answer quality");
+        ("question", `String "What is the canonical benchmark path?");
+        ("repo_root", `String base_path);
+        ("artifact_scope", `List [ `String "docs/COMMAND-PLANE-RUNBOOK.md" ]);
+        ("max_workers", `Int 4);
+      ]
+  in
+  match
+    Lib.Tool_autoresearch.dispatch ctx ~name:"masc_repo_synthesis_swarm_start"
+      ~args
+  with
+  | None -> fail "dispatch returned None"
+  | Some (false, msg) -> fail msg
+  | Some (true, payload) ->
+      let json = Yojson.Safe.from_string payload in
+      let run_id =
+        Yojson.Safe.Util.(json |> member "benchmark_run_id" |> to_string)
+      in
+      let session_id =
+        Yojson.Safe.Util.(json |> member "session_id" |> to_string)
+      in
+      let operation_id =
+        Yojson.Safe.Util.(json |> member "operation_id" |> to_string)
+      in
+      check bool "run saved" true
+        (Sys.file_exists
+           (Lib.Repo_synthesis_benchmark.run_json_path ~base_path run_id));
+      check bool "session saved" true
+        (Sys.file_exists (Lib.Team_session_store.session_json_path config session_id));
+      check bool "operation present" true (String.trim operation_id <> "");
+      let session_json =
+        match Lib.Team_session_engine_eio.status_session ~config ~session_id with
+        | Ok json -> json
+        | Error msg -> fail msg
+      in
+      check int "planned workers registered" 4
+        Yojson.Safe.Util.(
+          session_json |> member "session" |> member "planned_workers" |> to_list
+          |> List.length)
+
+let () =
+  run "tool_repo_synthesis"
+    [
+      ("tool_repo_synthesis",
+       [
+         test_case "swarm_start creates operation session and run" `Quick
+           test_repo_synthesis_swarm_start_creates_operation_session_and_run;
+       ]);
+    ]

@@ -96,6 +96,32 @@ let load_swarm_link_by_session ~base_path session_id =
   decode_json_file ~path ~kind:"swarm link"
     Autoresearch_serde.swarm_link_of_yojson
 
+let has_required_string_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> String.trim value <> ""
+  | _ -> false
+
+let has_required_number_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `Int _ | `Intlit _ | `Float _ -> true
+  | _ -> false
+
+let has_required_persisted_state_fields json =
+  List.for_all (has_required_string_field json)
+    [ "loop_id"; "status"; "goal"; "metric_fn"; "model_model"; "target_file"; "workdir" ]
+  && List.for_all (has_required_number_field json)
+       [
+         "current_cycle";
+         "baseline";
+         "best_score";
+         "best_cycle";
+         "total_keeps";
+         "total_discards";
+         "max_cycles";
+         "cycle_timeout_s";
+         "elapsed_s";
+       ]
+
 let load_state ~base_path loop_id =
   let path = state_file ~base_path loop_id in
   let file_mtime_opt () =
@@ -106,11 +132,6 @@ let load_state ~base_path loop_id =
   | None -> None
   | Some json ->
       (try
-         let has_required_string_field key =
-           match Yojson.Safe.Util.member key json with
-           | `String value -> String.trim value <> ""
-           | _ -> false
-         in
          match json with
          | `Assoc fields
            when List.mem_assoc "llm_model" fields
@@ -120,13 +141,9 @@ let load_state ~base_path loop_id =
                path;
              None
          | `Assoc _
-           when not (has_required_string_field "loop_id")
-                || Yojson.Safe.Util.member "goal" json = `Null
-                || Yojson.Safe.Util.member "metric_fn" json = `Null
-                || Yojson.Safe.Util.member "model_model" json = `Null
-                || Yojson.Safe.Util.member "target_file" json = `Null ->
+           when not (has_required_persisted_state_fields json) ->
              Log.Autoresearch.error
-               "invalid autoresearch state schema for %s: missing required string fields"
+               "invalid autoresearch state schema for %s: missing required fields"
                path;
              None
          | _ ->

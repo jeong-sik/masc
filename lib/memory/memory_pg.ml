@@ -14,7 +14,7 @@ type pool = (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t
 
 (** {1 Schema DDL} *)
 
-open Caqti_request.Infix
+open Pg_infix
 
 let create_table_q =
   (Caqti_type.unit ->. Caqti_type.unit)

@@ -25,7 +25,7 @@ let caqti_err e = Io_error (Caqti_error.show e)
 
 (** {1 Schema DDL} *)
 
-open Caqti_request.Infix
+open Pg_infix
 
 let create_posts_table_q =
   (Caqti_type.unit ->. Caqti_type.unit)

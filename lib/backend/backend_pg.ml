@@ -42,7 +42,7 @@ let strip_namespace namespace key =
 
 (* Caqti 2.x query definitions using Infix operators
    Syntax: (param_type ->? row_type) "SQL" for static queries *)
-open Caqti_request.Infix
+open Pg_infix
 
 let get_q =
   (Caqti_type.string ->? Caqti_type.string)

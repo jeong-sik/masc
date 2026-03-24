@@ -98,11 +98,12 @@ let test_loops_json_skips_invalid_persisted_state () =
   let json =
     Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
   in
-  (* PR #2732 null-safe parsing tolerates partial state.json:
-     a file with loop_id+status is now accepted as a valid (degraded) loop entry. *)
-  check int "total tolerates partial persisted state" 1
+  (* Partial state.json (only loop_id+status) is now rejected by
+     required_fields validation in load_state (13 fields required).
+     The dashboard gracefully skips invalid persisted state. *)
+  check int "total skips invalid partial state" 0
     Yojson.Safe.Util.(json |> member "total" |> to_int);
-  check int "one loop entry" 1
+  check int "no loop entries for invalid state" 0
     Yojson.Safe.Util.(json |> member "loops" |> to_list |> List.length)
 
 let test_loops_json_skips_legacy_persisted_state () =

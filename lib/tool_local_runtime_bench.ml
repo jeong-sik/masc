@@ -1,6 +1,7 @@
 (** Tool_local_runtime_bench -- concurrency benchmark against runtime pool. *)
 
 include Tool_local_runtime_http
+module Oas_types = Agent_sdk.Types
 
 let pctl percentile values =
   match values with
@@ -109,6 +110,19 @@ let raw_completion ~model_id ~prompt ~max_tokens ~timeout_sec () =
   raw_completion_at ~server_url:Env_config.Llama.server_url ~model_id ~prompt
     ~max_tokens ~timeout_sec ()
 
+let error_message_of_http_error = function
+  | Llm_provider.Http_client.NetworkError { message } -> message
+  | Llm_provider.Http_client.HttpError { code; body } -> (
+      try
+        let json = Yojson.Safe.from_string body in
+        match Yojson.Safe.Util.member "error" json with
+        | `Assoc fields -> (
+            match List.assoc_opt "message" fields with
+            | Some (`String msg) -> msg
+            | _ -> Printf.sprintf "HTTP %d" code)
+        | _ -> Printf.sprintf "HTTP %d" code
+      with Yojson.Json_error _ -> Printf.sprintf "HTTP %d" code)
+
 let per_runtime_breakdown_to_yojson counts =
   counts
   |> Hashtbl.to_seq_values
@@ -178,6 +192,118 @@ let finalize_runtime_breakdown json =
         ]
   | _ -> json
 
+let default_local_model_id () =
+  let _label, model_id = Oas_model_resolve.default_local_model_label_and_id () in
+  model_id
+
+let is_oas_managed_runtime_pool = function
+  | None -> true
+  | Some pool ->
+      let trimmed = String.trim pool in
+      trimmed = ""
+      || String.equal trimmed Local_runtime_pool.default_pool_label
+      || String.equal trimmed "default"
+
+let runtime_base_url_for_pool runtime_pool =
+  match runtime_pool with
+  | Some pool ->
+      let trimmed = String.trim pool in
+      if is_oas_managed_runtime_pool (Some trimmed) then
+        Llm_provider.Provider_registry.next_llama_endpoint ()
+      else if
+        String.starts_with ~prefix:"http://" trimmed
+        || String.starts_with ~prefix:"https://" trimmed
+      then
+        trimmed
+      else
+        let snapshots = Local_runtime_pool.snapshots () in
+        (match
+           List.find_opt
+             (fun (runtime : Local_runtime_pool.runtime_snapshot) ->
+               String.equal runtime.id trimmed)
+             snapshots
+         with
+         | Some runtime -> runtime.base_url
+         | None -> trimmed)
+  | None -> Llm_provider.Provider_registry.next_llama_endpoint ()
+
+let model_label_for_pool ~model_id runtime_pool =
+  match runtime_pool with
+  | Some pool ->
+      let trimmed = String.trim pool in
+      if is_oas_managed_runtime_pool (Some trimmed) then
+        Printf.sprintf "llama:%s" model_id
+      else
+        let base_url =
+          if
+            String.starts_with ~prefix:"http://" trimmed
+            || String.starts_with ~prefix:"https://" trimmed
+          then
+            trimmed
+          else
+            runtime_base_url_for_pool runtime_pool
+        in
+        Printf.sprintf "custom:%s@%s" model_id base_url
+  | None -> Printf.sprintf "llama:%s" model_id
+
+let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec ()
+    =
+  match Masc_eio_env.get_opt () with
+  | None ->
+      let base_url = runtime_base_url_for_pool runtime_pool in
+      ( raw_completion_at ~server_url:base_url ~model_id ~prompt ~max_tokens
+          ~timeout_sec (),
+        Local_runtime_pool.runtime_id_of_base_url base_url )
+  | Some env -> (
+      let started = Time_compat.now () in
+      let model_label = model_label_for_pool ~model_id runtime_pool in
+      match
+        Llm_provider.Cascade_config.parse_model_string ~max_tokens model_label
+      with
+      | None ->
+          ( { success = false; latency_ms = 0; error = Some ("invalid model label: " ^ model_label) },
+            "unknown" )
+      | Some provider_config ->
+          let runtime_id =
+            Local_runtime_pool.runtime_id_of_base_url provider_config.base_url
+          in
+          let messages =
+            [
+              {
+                Oas_types.role = Oas_types.User;
+                content = [ Oas_types.Text prompt ];
+                name = None;
+                tool_call_id = None;
+              };
+            ]
+          in
+          let run_completion () =
+            Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
+              ~config:provider_config ~messages ()
+          in
+          let outcome =
+            match env.clock with
+            | Some clock -> (
+                try Ok (Eio.Time.with_timeout_exn clock (float_of_int timeout_sec) run_completion)
+                with Eio.Time.Timeout -> Error "timeout")
+            | None -> Ok (run_completion ())
+          in
+          let latency_ms =
+            int_of_float ((Time_compat.now () -. started) *. 1000.0)
+          in
+          let sample =
+            match outcome with
+            | Error message -> { success = false; latency_ms; error = Some message }
+            | Ok (Ok _response) -> { success = true; latency_ms; error = None }
+            | Ok (Error http_error) ->
+                {
+                  success = false;
+                  latency_ms;
+                  error = Some (error_message_of_http_error http_error);
+                }
+          in
+          (sample, runtime_id))
+
 let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
     ~timeout_sec () =
   let total = parallelism * rounds in
@@ -188,25 +314,17 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
     Eio.Fiber.all
       (List.init parallelism (fun fiber_idx ->
            fun () ->
-             match
-               Local_runtime_pool.acquire ?preferred_pool:runtime_pool
-                 ~model_name:model_id ()
-             with
-             | Error err ->
-                 results.(offset + fiber_idx) <-
-                   Some { success = false; latency_ms = 0; error = Some err }
-             | Ok assignment ->
-                 let sample =
-                   raw_completion_at ~server_url:assignment.base_url
-                     ~model_id:assignment.model_name ~prompt ~max_tokens
-                     ~timeout_sec ()
-                 in
-                 Local_runtime_pool.release assignment.lease
-                   ~success:sample.success ?error:sample.error
-                   ~latency_ms:sample.latency_ms ();
-                 update_runtime_breakdown runtime_breakdown
-                   ~runtime_id:assignment.runtime_id ~sample;
-                 results.(offset + fiber_idx) <- Some sample))
+             let resolved_model_id =
+               match model_id with
+               | Some model when String.trim model <> "" -> model
+               | _ -> default_local_model_id ()
+             in
+             let sample, runtime_id =
+               oas_completion_at ?runtime_pool ~model_id:resolved_model_id
+                 ~prompt ~max_tokens ~timeout_sec ()
+             in
+             update_runtime_breakdown runtime_breakdown ~runtime_id ~sample;
+             results.(offset + fiber_idx) <- Some sample))
   done;
   let samples = results |> Array.to_list |> List.filter_map (fun item -> item) in
   let success_count =
@@ -235,6 +353,7 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
     (`Assoc
       [
         ("server_url", `String Env_config.Llama.server_url);
+        ("source", `String "oas_complete");
         ("model_id", string_opt_to_json model_id);
         ("runtime_pool", string_opt_to_json runtime_pool);
         ("parallelism", `Int parallelism);

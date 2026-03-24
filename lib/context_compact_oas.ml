@@ -25,12 +25,12 @@ type strategy =
 (* Token Estimation                                                  *)
 (* ================================================================ *)
 
-let msg_tokens (m : Agent_sdk.Types.message) =
-  let text = Agent_sdk.Types.text_of_message m in
-  (String.length text / 4) + 4
+(** CJK-aware token estimate delegated to OAS Context_reducer. *)
+let msg_tokens : Agent_sdk.Types.message -> int =
+  Agent_sdk.Context_reducer.estimate_message_tokens
 
 let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
-  let sys_tokens = (String.length system_prompt / 4) + 4 in
+  let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
   List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
 
 (* ================================================================ *)

@@ -236,6 +236,9 @@ let handle_websocket_discovery _ctx _args : result =
   (true, Yojson.Safe.pretty_to_string json)
 
 let handle_webrtc_offer _ctx args : result =
+  if not (Server_webrtc_transport.is_enabled ()) then
+    error_result "webrtc transport disabled"
+  else
   let*! agent_name = get_string_required args "agent_name" in
   let ice_candidates = get_string_list args "ice_candidates" in
   let fields =
@@ -257,6 +260,9 @@ let handle_webrtc_offer _ctx args : result =
   | Error msg -> error_result msg
 
 let handle_webrtc_answer _ctx args : result =
+  if not (Server_webrtc_transport.is_enabled ()) then
+    error_result "webrtc transport disabled"
+  else
   let*! offer_id = get_string_required args "offer_id" in
   let*! agent_name = get_string_required args "agent_name" in
   let ice_candidates = get_string_list args "ice_candidates" in

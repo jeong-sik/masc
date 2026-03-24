@@ -314,18 +314,20 @@ let test_transport_route_contracts () =
   check bool "frontend exposes webrtc answer route" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
        {|Http.Router.post "/webrtc/answer"|});
-  check bool "frontend webrtc routes require read auth" true
+  check bool "frontend webrtc routes require tool auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
-       "let webrtc_signaling_handler signaling_fn request reqd =\n  with_read_auth");
+       "let webrtc_signaling_handler ~tool_name signaling_fn request reqd =\n  with_tool_auth ~tool_name");
   check bool "h2 gateway exposes webrtc offer route" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|`POST, "/webrtc/offer"|});
   check bool "h2 gateway exposes webrtc answer route" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|`POST, "/webrtc/answer"|});
-  check bool "h2 gateway webrtc routes enforce read auth" true
+  check bool "h2 gateway webrtc routes enforce tool auth" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request|});
+       {|authorize_tool_request
+                ~base_path:state.Mcp_server.room_config.base_path
+                ~tool_name:"masc_webrtc_offer"|});
   check bool "h2 gateway respects webrtc disabled state" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|Server_webrtc_transport.is_enabled ()|})

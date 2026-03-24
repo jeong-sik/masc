@@ -32,6 +32,21 @@ let test name f =
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
     exit 1
 
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      (match value_opt with
+      | Some value -> Unix.putenv name value
+      | None -> Unix.putenv name "");
+      f ())
+
 (* Create test context *)
 let test_counter = ref 0
 let make_test_ctx () =
@@ -225,6 +240,39 @@ let () = test "dispatch_webrtc_answer" (fun () ->
       Server_webrtc_transport.remove_peer peer_id
   | None -> failwith "dispatch returned None"
 )
+
+let () = test "dispatch_webrtc_offer_disabled" (fun () ->
+  with_env "MASC_WEBRTC_ENABLED" (Some "0") (fun () ->
+    let ctx = make_test_ctx () in
+    let args =
+      `Assoc
+        [
+          ("agent_name", `String "offer-agent");
+          ("ice_candidates", `List [ `String "candidate:127.0.0.1:5000" ]);
+        ]
+    in
+    match Tool_misc.dispatch ctx ~name:"masc_webrtc_offer" ~args with
+    | Some (success, result) ->
+        assert (not success);
+        assert (str_contains result "webrtc transport disabled")
+    | None -> failwith "dispatch returned None"))
+
+let () = test "dispatch_webrtc_answer_disabled" (fun () ->
+  with_env "MASC_WEBRTC_ENABLED" (Some "0") (fun () ->
+    let ctx = make_test_ctx () in
+    let args =
+      `Assoc
+        [
+          ("offer_id", `String "offer-1");
+          ("agent_name", `String "answer-agent");
+          ("ice_candidates", `List [ `String "candidate:127.0.0.1:5002" ]);
+        ]
+    in
+    match Tool_misc.dispatch ctx ~name:"masc_webrtc_answer" ~args with
+    | Some (success, result) ->
+        assert (not success);
+        assert (str_contains result "webrtc transport disabled")
+    | None -> failwith "dispatch returned None"))
 
 let () = test "dispatch_tool_admin_snapshot" (fun () ->
   let ctx = make_test_ctx () in

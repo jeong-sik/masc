@@ -39,6 +39,9 @@ let next_id =
     let n = Atomic.fetch_and_add counter 1 in
     Printf.sprintf "ws-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) n
 
+let log_ws_delivery_dropped ~context session_id =
+  Log.Transport.warn "WS %s not delivered for session=%s" context session_id
+
 (** Send a text frame to a WebSocket client. *)
 let send_text session text =
   if session.closed || Httpun_ws.Wsd.is_closed session.wsd then begin
@@ -52,10 +55,17 @@ let send_text session text =
       true
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _exn ->
+    | exn ->
+      Log.Transport.warn "WS text send failed for session=%s: %s" session.id
+        (Printexc.to_string exn);
       session.closed <- true;
       false
   end
+
+let send_text_checked ~context session text =
+  let sent = send_text session text in
+  if not sent then log_ws_delivery_dropped ~context session.id;
+  sent
 
 (** Remove a session and unsubscribe from SSE. *)
 let cleanup_session session_id =
@@ -101,8 +111,10 @@ let upgrade_connection
             ~is_alive:(fun () ->
               not session.closed && not (Httpun_ws.Wsd.is_closed session.wsd))
             ~callback:(fun sse_event ->
-              if not session.closed then
-                ignore (send_text session sse_event))
+              if not session.closed
+                 && not (send_text_checked ~context:"sse-forward" session sse_event)
+              then
+                cleanup_session session_id)
             ();
           Log.Server.info "WebSocket session %s connected" session_id;
           let buf = Buffer.create 4096 in
@@ -144,7 +156,10 @@ let send_to_session session_id text =
   in
   match session_opt with
   | None -> false
-  | Some session -> send_text session text
+  | Some session ->
+      let sent = send_text_checked ~context:"send-to-session" session text in
+      if not sent then cleanup_session session_id;
+      sent
 
 (** Broadcast a JSON string to all WebSocket sessions.
     Independent of SSE -- for WS-only messages. *)
@@ -155,7 +170,7 @@ let broadcast_ws json_str =
   in
   let failed = ref [] in
   List.iter (fun session ->
-    if not (send_text session json_str) then
+    if not (send_text_checked ~context:"broadcast" session json_str) then
       failed := session.id :: !failed
   ) snapshot;
   List.iter cleanup_session !failed

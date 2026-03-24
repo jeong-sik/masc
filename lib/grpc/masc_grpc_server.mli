@@ -12,6 +12,17 @@ val configured_port : unit -> int
 (** Whether gRPC transport is enabled (MASC_GRPC_ENABLED=1). *)
 val is_enabled : unit -> bool
 
+(** Build the gRPC server with reflection, health, and MascCoordination services.
+
+    Exposed for tests and harnesses that need to verify service wiring without
+    binding a real network listener. *)
+val create_server :
+  ?port:int ->
+  room_config:Room_utils_backend_setup.config ->
+  tool_dispatcher:(string -> string -> (string, string) result) ->
+  unit ->
+  Grpc_eio.Server.t
+
 (** Start the gRPC coordination server in a forked fiber.
 
     Does nothing if gRPC is not enabled.

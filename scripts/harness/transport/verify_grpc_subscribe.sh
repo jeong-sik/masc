@@ -15,6 +15,7 @@ HARNESS_NAME="gRPC-Subscribe"
 require_server
 
 PROTO_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)/proto"
+HEALTH_PROTO="grpc_health_v1.proto"
 
 if ! require_tool grpcurl; then
   echo "ERROR: grpcurl required for gRPC E2E tests"
@@ -24,9 +25,13 @@ fi
 echo "--- gRPC Subscribe E2E ---"
 
 # Test 1: gRPC health check
-health_resp=$(grpcurl -plaintext "${MASC_GRPC_ADDR}" \
+health_resp=$(grpcurl -plaintext \
+  -import-path "${PROTO_DIR}" \
+  -proto "${HEALTH_PROTO}" \
+  -d '{"service":"masc.coordination.v1.MascCoordination"}' \
+  "${MASC_GRPC_ADDR}" \
   grpc.health.v1.Health/Check 2>&1 || true)
-if echo "$health_resp" | grep -q "SERVING"; then
+if echo "$health_resp" | grep -q '"status": "SERVING"'; then
   pass "gRPC health: SERVING"
 elif echo "$health_resp" | grep -qi "connect"; then
   fail "gRPC health" "connection refused (gRPC server not running on ${MASC_GRPC_ADDR})"

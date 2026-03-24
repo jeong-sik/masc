@@ -1020,7 +1020,7 @@
 (test
  (name test_grpc_coordination)
  (modules test_grpc_coordination)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest yojson unix eio eio_main grpc-direct))
 
 ; gRPC client types, transport selection, and round-trip tests
 (test

@@ -8,6 +8,27 @@
 
 module T = Masc_mcp.Masc_grpc_types
 
+let grpc_health_service = "grpc.health.v1.Health"
+
+let encode_health_check_request ~service =
+  if service = ""
+  then ""
+  else
+    let len = String.length service in
+    String.make 1 (Char.chr ((1 lsl 3) lor 2))
+    ^ String.make 1 (Char.chr len)
+    ^ service
+
+let decode_health_check_status bytes =
+  if String.length bytes < 2 then
+    Alcotest.failf "health response too short: %d bytes" (String.length bytes);
+  let tag = Char.code bytes.[0] in
+  let field_num = tag lsr 3 in
+  let wire_type = tag land 0x7 in
+  Alcotest.(check int) "health field number" 1 field_num;
+  Alcotest.(check int) "health wire type" 0 wire_type;
+  Char.code bytes.[1]
+
 (* ====== Type serialization/deserialization round-trip tests ====== *)
 
 let test_join_request_roundtrip () =
@@ -226,6 +247,59 @@ let test_grpc_enabled_by_default () =
   (* Restore *)
   (match was_set with Some v -> Unix.putenv "MASC_GRPC_ENABLED" v | None -> ())
 
+let test_grpc_health_service_reports_serving () =
+  let base_path = Filename.temp_dir "masc-grpc-health-" "" in
+  Eio_main.run (fun env ->
+    let room_config =
+      Masc_mcp.Room.default_config base_path
+      |> Masc_mcp.Room.config_with_resolved_scope
+    in
+    let server =
+      Masc_mcp.Masc_grpc_server.create_server
+        ~port:0
+        ~room_config
+        ~tool_dispatcher:(fun _tool_name _arguments_json -> Ok "{}")
+        ()
+    in
+    Alcotest.(check bool) "health service registered"
+      true (List.mem grpc_health_service (Grpc_eio.Server.list_services server));
+    Alcotest.(check bool) "coordination service registered"
+      true
+      (List.mem Masc_mcp.Masc_grpc_service.service_name
+         (Grpc_eio.Server.list_services server));
+    let request_data =
+      encode_health_check_request
+        ~service:Masc_mcp.Masc_grpc_service.service_name
+    in
+    let request_body =
+      match Grpc_core.Message.encode ~codec:Grpc_core.Codec.identity request_data with
+      | Ok body -> body
+      | Error err -> Alcotest.failf "health request encode failed: %s" err
+    in
+    match
+      Grpc_eio.Server.handle_request
+        server
+        ~clock:(Eio.Stdenv.clock env)
+        ~path:"/grpc.health.v1.Health/Check"
+        ~metadata:[]
+        ~body:request_body
+        ~request_codec:Grpc_core.Codec.identity
+        ~response_codec:Grpc_core.Codec.identity
+    with
+    | Error status ->
+      Alcotest.failf "health check failed: %s"
+        (Grpc_core.Status.to_string status)
+    | Ok (response_body, trailers, _codec) ->
+      Alcotest.(check bool) "grpc-status=0"
+        true (List.mem ("grpc-status", "0") trailers);
+      let response_data =
+        match Grpc_core.Message.decode ~codec:Grpc_core.Codec.identity response_body with
+        | Ok body -> body
+        | Error err -> Alcotest.failf "health response decode failed: %s" err
+      in
+      let status = decode_health_check_status response_data in
+      Alcotest.(check int) "service reports SERVING" 1 status)
+
 let test_empty_request_handling () =
   (* Verify graceful handling of empty protobuf message (all defaults). *)
   let bytes = T.JoinRequest.to_bytes {
@@ -280,5 +354,6 @@ let () =
         [
           Alcotest.test_case "default_port" `Quick test_grpc_default_port;
           Alcotest.test_case "enabled_by_default" `Quick test_grpc_enabled_by_default;
+          Alcotest.test_case "health_service_reports_serving" `Quick test_grpc_health_service_reports_serving;
         ] );
     ]

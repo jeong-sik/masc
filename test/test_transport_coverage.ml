@@ -288,7 +288,7 @@ let test_error_with_data () =
   | Some d ->
     let open Yojson.Safe.Util in
     let stack = d |> member "stack" |> to_string in
-    check bool "has stack" true (String.length stack > 0)
+    check string "stack value" "traceback..." stack
   | None -> fail "expected data"
 
 (* ============================================================
@@ -361,7 +361,11 @@ let test_jsonrpc_parse_request_wrong_version () =
   ] in
   match Transport.JsonRpc.parse_request json with
   | Ok _ -> fail "should reject wrong version"
-  | Error e -> check bool "error contains version" true (String.length e > 0)
+  | Error e -> check bool "error mentions version" true
+      (try ignore (Str.search_forward (Str.regexp_string "version") e 0); true
+       with Not_found ->
+         try ignore (Str.search_forward (Str.regexp_string "jsonrpc") e 0); true
+         with Not_found -> false)
 
 let test_jsonrpc_parse_request_missing_method () =
   let json = `Assoc [
@@ -673,7 +677,8 @@ let test_bindings_to_json_has_url () =
 
 let test_generate_request_id_nonempty () =
   let id = Transport.generate_request_id () in
-  check bool "nonempty" true (String.length id > 0)
+  check bool "has req- prefix" true
+    (String.length id > 4 && String.sub id 0 4 = "req-")
 
 let test_generate_request_id_has_prefix () =
   let id = Transport.generate_request_id () in

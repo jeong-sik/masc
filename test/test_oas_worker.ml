@@ -125,8 +125,12 @@ let test_default_model_strings_unknown () =
   Alcotest.(check bool) "unknown cascade has fallback" true (models <> [])
 
 let test_default_config_path () =
-  let _path = Oas_worker.default_config_path () in
-  Alcotest.(check pass) "default_config_path does not raise" () ()
+  match Oas_worker.default_config_path () with
+  | Some path ->
+    Alcotest.(check bool) "non-empty path" true (String.length path > 0);
+    Alcotest.(check bool) "path contains separator" true (String.contains path '/')
+  | None ->
+    Alcotest.(check bool) "returns a path" true false
 
 let test_cascade_names_produce_models () =
   let cascades = [

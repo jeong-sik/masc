@@ -110,7 +110,7 @@ let test_decompress_uncompressed_data () =
   let data = "hello world" in
   let result = Compression_dict.decompress ~orig_size:11 ~used_dict:false data in
   (* Should return original if not actually compressed *)
-  check bool "reasonable result" true (String.length result > 0)
+  check string "returns original data" data result
 
 (* ============================================================
    Encoding Headers Tests

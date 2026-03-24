@@ -242,12 +242,17 @@ function NewPostForm() {
       <input
         class="w-full px-3 py-2 rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-[14px] font-medium focus:border-[rgba(71,184,255,0.5)] outline-none placeholder:text-[var(--text-muted)]"
         type="text"
+        name="board_post_title"
+        aria-label="새 글 제목"
+        autocomplete="off"
         placeholder="제목"
         value=${newPostTitle.value}
         onInput=${(e: Event) => { newPostTitle.value = (e.target as HTMLInputElement).value }}
       />
       <textarea
         class="w-full px-3 py-2 rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] min-h-[80px] resize-y focus:border-[rgba(71,184,255,0.5)] outline-none placeholder:text-[var(--text-muted)]"
+        name="board_post_content"
+        aria-label="새 글 내용"
         placeholder="내용을 입력하세요..."
         value=${newPostContent.value}
         onInput=${(e: Event) => { newPostContent.value = (e.target as HTMLTextAreaElement).value }}

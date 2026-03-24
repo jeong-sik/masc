@@ -92,6 +92,7 @@ let message_json (message : Types.message) =
 (** Maximum wall-clock time for a single dashboard render.
     Prevents unbounded waits when PG connections drop mid-render. *)
 let render_timeout_s = 30.0
+let session_list_timeout_s = 5.0
 
 let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let ctx : _ Operator_control.context =
@@ -117,7 +118,18 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let cutoff_unix = Time_compat.now () -. 86400.0 in
       let all_sessions =
         if Room.is_initialized config then
-          Team_session_store.list_sessions ~since_unix:cutoff_unix ~limit:100 config
+          (match
+             Eio.Time.with_timeout clock session_list_timeout_s (fun () ->
+                 Ok
+                   (Team_session_store.list_sessions ~since_unix:cutoff_unix
+                      ~limit:100 config))
+           with
+          | Ok rows -> rows
+          | Error `Timeout ->
+              Log.Dashboard.warn
+                "[dashboard_execution] session list timed out after %.0fs; serving without session rows"
+                session_list_timeout_s;
+              [])
         else []
       in
       let cutoff_iso =
@@ -144,6 +156,8 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ~include_messages:false
           ~include_sessions:true
           ~include_keepers:true
+          ~include_summary_fields:false
+          ~lightweight_summary:true
           ~sessions
           ctx
       in

@@ -22,36 +22,62 @@ let default_config ~label ~interval_s =
     timeout_s = 10.0;
   }
 
+let is_internal_race_cancel exn =
+  match exn with
+  | Eio.Cancel.Cancelled _ ->
+      let msg = Printexc.to_string exn in
+      String.equal msg "Cancelled: Eio__core__Fiber.Not_first"
+      || String.ends_with ~suffix:"Eio__core__Fiber.Not_first" msg
+  | _ -> false
+
+let should_reraise_cancel exn =
+  match exn with
+  | Eio.Cancel.Cancelled _ -> not (is_internal_race_cancel exn)
+  | _ -> false
+
+let log_refresh_failure ~config ~consecutive_failures ~current_interval ~dt exn =
+  incr consecutive_failures;
+  if !consecutive_failures >= config.failure_threshold then
+    current_interval :=
+      min config.max_backoff_s (!current_interval *. 2.0);
+  Log.Dashboard.warn
+    "%s refresh failed (%d consecutive, next in %.0fs, %.1fs): %s"
+    config.label !consecutive_failures !current_interval dt
+    (Printexc.to_string exn)
+
 let start ~sw ~clock ~config ~compute ~on_result =
-  (* --- Warm cache: run [compute] once synchronously with a timeout
-     so the server has data before the first async tick.  If it takes
-     longer than [timeout_s] the async loop will populate it. *)
-  (let t0 = Time_compat.now () in
-   try
-     match
-       Eio.Time.with_timeout clock config.timeout_s (fun () -> Ok (compute ()))
+  Eio.Fiber.fork ~sw (fun () ->
+    let t0 = Time_compat.now () in
+    (try
+       match
+         Eio.Time.with_timeout clock config.timeout_s (fun () -> Ok (compute ()))
+       with
+       | Ok v ->
+         on_result v;
+         Log.Dashboard.info "%s warm cache done (%.1fs)" config.label
+           (Time_compat.now () -. t0)
+       | Error `Timeout ->
+         Log.Dashboard.warn "%s warm cache skipped (%.1fs timeout)" config.label
+           (Time_compat.now () -. t0)
      with
-     | Ok v ->
-       on_result v;
-       Log.Dashboard.info "%s warm cache done (%.1fs)" config.label
-         (Time_compat.now () -. t0)
-     | Error `Timeout ->
-       Log.Dashboard.warn "%s warm cache skipped (%.1fs timeout)" config.label
-         (Time_compat.now () -. t0)
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Dashboard.warn "%s warm cache failed (%.1fs): %s" config.label
-       (Time_compat.now () -. t0) (Printexc.to_string exn));
-  (* --- Background refresh loop with circuit breaker. *)
+     | exn ->
+       if should_reraise_cancel exn then
+         raise exn
+       else
+         Log.Dashboard.warn "%s warm cache failed (%.1fs): %s" config.label
+           (Time_compat.now () -. t0) (Printexc.to_string exn)));
   Eio.Fiber.fork ~sw (fun () ->
     Log.Dashboard.info "starting %s refresh loop" config.label;
     let consecutive_failures = ref 0 in
     let current_interval = ref config.interval_s in
     let rec loop () =
+      Eio.Time.sleep clock !current_interval;
       let t0 = Time_compat.now () in
       (try
-         let v = compute () in
+         match
+           Eio.Time.with_timeout clock config.timeout_s (fun () -> Ok (compute ()))
+         with
+         | Ok v ->
          on_result v;
          let dt = Time_compat.now () -. t0 in
          if !consecutive_failures > 0 then
@@ -60,19 +86,15 @@ let start ~sw ~clock ~config ~compute ~on_result =
          consecutive_failures := 0;
          current_interval := config.interval_s;
          Log.Dashboard.info "%s refreshed (%.1fs)" config.label dt
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
+         | Error `Timeout ->
+             let dt = Time_compat.now () -. t0 in
+             log_refresh_failure ~config ~consecutive_failures ~current_interval
+               ~dt (Failure "timeout")
+       with exn ->
+         if should_reraise_cancel exn then raise exn;
          let dt = Time_compat.now () -. t0 in
-         consecutive_failures := !consecutive_failures + 1;
-         if !consecutive_failures >= config.failure_threshold then
-           current_interval :=
-             min config.max_backoff_s (!current_interval *. 2.0);
-         Log.Dashboard.warn
-           "%s refresh failed (%d consecutive, next in %.0fs, %.1fs): %s"
-           config.label !consecutive_failures !current_interval dt
-           (Printexc.to_string exn));
-      Eio.Time.sleep clock !current_interval;
+         log_refresh_failure ~config ~consecutive_failures ~current_interval
+           ~dt exn);
       loop ()
     in
     loop ())

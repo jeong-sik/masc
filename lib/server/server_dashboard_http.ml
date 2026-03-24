@@ -61,12 +61,15 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
                    ("session_list", Team_session_store.session_list_diagnostics_json ());
                    ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
                  ])
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       mark_cached_surface_error _execution_cache exn;
       raise exn
   in
   Proactive_refresh.start ~sw ~clock
-    ~config:(Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0)
+    ~config:{ (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0)
+              with timeout_s = 30.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _execution_cache)
 

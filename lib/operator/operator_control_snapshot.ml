@@ -161,7 +161,7 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
   | None, None ->
       (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
 
-let keepers_json ?keeper_names config =
+let keepers_json ?keeper_names ?(include_recent_activity = true) config =
   let names = match keeper_names with
     | Some n -> n
     | None -> Keeper_types.resident_keeper_names config
@@ -249,18 +249,21 @@ let keepers_json ?keeper_names config =
                   ("updated_at", `String meta.updated_at);
                   ("created_at", `String meta.created_at);
                   ("recent_activity",
-                    let store = Keeper_types.keeper_metrics_store config name in
-                    let lines =
-                      let dated = Dated_jsonl.read_recent_lines store 5 in
-                      if dated <> [] then dated
-                      else
-                        let metrics_path = Keeper_types.keeper_metrics_path config name in
-                        Keeper_memory.read_file_tail_lines metrics_path
-                          ~max_bytes:8000 ~max_lines:5
-                    in
-                    `List (List.filter_map (fun line ->
-                      try Some (Yojson.Safe.from_string line)
-                      with Yojson.Json_error _ -> None) lines));
+                    if include_recent_activity then
+                      let store = Keeper_types.keeper_metrics_store config name in
+                      let lines =
+                        let dated = Dated_jsonl.read_recent_lines store 5 in
+                        if dated <> [] then dated
+                        else
+                          let metrics_path = Keeper_types.keeper_metrics_path config name in
+                          Keeper_memory.read_file_tail_lines metrics_path
+                            ~max_bytes:8000 ~max_lines:5
+                      in
+                      `List (List.filter_map (fun line ->
+                        try Some (Yojson.Safe.from_string line)
+                        with Yojson.Json_error _ -> None) lines)
+                    else
+                      `List []);
                 ]))
       names
   in
@@ -411,13 +414,15 @@ let _snapshot_ttl_s =
 let invalidate_snapshot_cache () = _snapshot_cache := None
 
 let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
-    ?(include_keepers = true) ?(include_command_plane = true) ?sessions
+    ?(include_keepers = true) ?(include_summary_fields = true)
+    ?(include_command_plane = true) ?(lightweight_summary = false) ?sessions
     (ctx : 'a context) : Yojson.Safe.t =
   let cache_key =
-    Printf.sprintf "%s|%s|%b|%b|%b|%b"
+    Printf.sprintf "%s|%s|%b|%b|%b|%b|%b|%b"
       (Option.value ~default:"" actor)
       (Option.value ~default:"" view)
-      include_messages include_sessions include_keepers include_command_plane
+      include_messages include_sessions include_keepers include_summary_fields
+      include_command_plane lightweight_summary
   in
   let now = Time_compat.now () in
   (match !_snapshot_cache with
@@ -478,13 +483,16 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
         s
   in
   let command_plane_summary =
-    if initialized then
+    if include_summary_fields && initialized then
       timed "command_plane_summary" (fun () ->
         Some (Command_plane_v2.summary_json ~sessions:tracked_sessions config))
     else None
   in
   let summary_fields = timed "summary_fields" (fun () ->
-    if initialized && (match view with Summary | Full -> true | _ -> false) then
+    if include_summary_fields
+       && initialized
+       && (match view with Summary | Full -> true | _ -> false)
+    then
       let now = Time_compat.now () in
       let session_digests =
         tracked_sessions
@@ -541,7 +549,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
            else `Assoc [ ("count", `Int 0); ("items", `List []) ]) );
          ( "keepers",
            timed "keepers_json" (fun () ->
-           if initialized && include_keepers then keepers_json ~keeper_names config
+           if initialized && include_keepers then
+             keepers_json ~keeper_names
+               ~include_recent_activity:(not lightweight_summary) config
            else `Assoc [ ("count", `Int 0); ("items", `List []) ]) );
          ( "persistent_agents",
            timed "persistent_agents_json" (fun () ->
@@ -558,12 +568,17 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("task_profiles", aggregate_task_profile_counts tracked_sessions);
          ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
          ("local_runtime", aggregated_local_runtime_json tracked_sessions);
-         ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
+         ( "recent_messages",
+           if initialized && include_messages && not lightweight_summary then
+             recent_messages_json config
+           else
+             `List [] );
          ("pending_confirms", pending_confirms_json ?actor config);
          ("pending_confirm_envelope", pending_confirm_envelope_json ?actor config);
          ("pending_confirm_summary", pending_confirm_summary_json ?actor config);
          ("available_actions", available_actions_json);
-         ("recent_actions", recent_actions_json config);
+         ( "recent_actions",
+           if lightweight_summary then `List [] else recent_actions_json config );
        ]
       @ summary_fields)
   in

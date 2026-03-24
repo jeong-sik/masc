@@ -507,7 +507,12 @@ let execute_single_agent_run ~sw:_ ~provider ~model ~prompt =
           match
             Oas_worker.run_model_by_label ~model_label:label ~goal:prompt
               ~system_prompt:(run_system_prompt provider)
-              ~max_turns:4 ~max_tokens:2048 ~temperature:0.2 ()
+              ~max_turns:4
+              ~max_tokens:(Cascade_inference.resolve_max_tokens
+                ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 2048))
+              ~temperature:(Cascade_inference.resolve_temperature
+                ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 0.2))
+              ()
           with
           | Ok result ->
               Ok (response_text_of_api_response result.response)

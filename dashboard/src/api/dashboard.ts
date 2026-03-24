@@ -358,6 +358,7 @@ export interface DashboardPromptItem {
   has_override: boolean
   char_count: number
   required_file: boolean
+  template_variables: string[]
 }
 
 export interface DashboardPromptsResponse {

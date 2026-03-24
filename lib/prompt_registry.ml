@@ -67,6 +67,7 @@ type prompt_meta = {
   description: string;
   category: string;
   required_file: bool;
+  template_variables: string list;
 }
 
 type prompt_resolution = {
@@ -530,6 +531,13 @@ let resolve_prompt_unlocked key =
     has_override = Option.is_some override_value;
   }
 
+let unexpected_template_variables meta template =
+  let expected = meta.template_variables in
+  if expected = [] then []
+  else
+    extract_variables template
+    |> List.filter (fun variable -> not (List.mem variable expected))
+
 let prompt_item_json key (meta : prompt_meta) =
   let resolved = resolve_prompt_unlocked key in
   `Assoc
@@ -563,6 +571,8 @@ let prompt_item_json key (meta : prompt_meta) =
       ("has_override", `Bool resolved.has_override);
       ("char_count", `Int (String.length resolved.effective));
       ("required_file", `Bool meta.required_file);
+      ( "template_variables",
+        `List (List.map (fun value -> `String value) meta.template_variables) );
     ]
 
 let compare_prompt_items a b =
@@ -575,15 +585,28 @@ let compare_prompt_items a b =
   in
   String.compare (get_key a) (get_key b)
 
-let register_prompt ~key ~description ?(category = "general") ?(required_file = false) () =
+let register_prompt ~key ~description ?(category = "general")
+    ?(required_file = false) ?(template_variables = []) () =
   with_mutex (fun () ->
-      Hashtbl.replace meta_tbl key { description; category; required_file })
+      Hashtbl.replace meta_tbl key
+        {
+          description;
+          category;
+          required_file;
+          template_variables = List.sort_uniq String.compare template_variables;
+        })
 
 (** Register a hardcoded prompt with its default value.
     This also registers it in the versioned template system as a fallback. *)
 let register_default ~key ~default ~description ?(category="general") () =
   with_mutex (fun () ->
-    Hashtbl.replace meta_tbl key { description; category; required_file = false };
+    Hashtbl.replace meta_tbl key
+      {
+        description;
+        category;
+        required_file = false;
+        template_variables = [];
+      };
     let entry = {
       id = key;
       template = default;
@@ -617,14 +640,25 @@ let render_prompt_template key vars =
 let set_override key value =
   let trimmed = String.trim value in
   if not (is_valid_prompt_key key) then Error "Invalid prompt key"
-  else if not (with_mutex (fun () -> Hashtbl.mem meta_tbl key)) then
-    Error "Unknown prompt key"
   else if trimmed = "" then Error "Prompt cannot be empty"
   else if String.length trimmed > 10000 then Error "Prompt too long (max 10000 chars)"
-  else begin
-    with_mutex (fun () -> Hashtbl.replace override_tbl key trimmed);
-    Ok ()
-  end
+  else
+    match
+      with_mutex (fun () ->
+          match Hashtbl.find_opt meta_tbl key with
+          | None -> Error "Unknown prompt key"
+          | Some meta ->
+              let unexpected = unexpected_template_variables meta trimmed in
+              if unexpected <> [] then
+                Error
+                  (Printf.sprintf "Unknown template variables: %s"
+                     (String.concat ", " unexpected))
+              else Ok ())
+    with
+    | Error msg -> Error msg
+    | Ok () ->
+        with_mutex (fun () -> Hashtbl.replace override_tbl key trimmed);
+        Ok ()
 
 (** Clear override, reverting to file or default *)
 let clear_prompt_override key =
@@ -644,6 +678,20 @@ let validate_required_prompt_files () =
             | Some path when Sys.file_exists path && not (Sys.is_directory path) -> acc
             | Some path -> (key, path) :: acc
             | None -> (key, "<invalid-key>") :: acc)
+        meta_tbl [] |> List.sort compare)
+
+let validate_prompt_templates () =
+  with_mutex (fun () ->
+      Hashtbl.fold
+        (fun key meta acc ->
+          let issues =
+            match resolve_prompt_unlocked key with
+            | { effective = ""; source = "missing"; _ } -> []
+            | resolved ->
+                unexpected_template_variables meta resolved.effective
+                |> List.map (fun variable -> (key, variable))
+          in
+          issues @ acc)
         meta_tbl [] |> List.sort compare)
 
 (** List all registered prompts with metadata, for API/dashboard *)

@@ -90,6 +90,12 @@ let bootstrap_chain_state (state : Mcp_server.server_state) =
       (missing_prompt_files
       |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
       |> String.concat ", ");
+  let invalid_prompt_templates = Prompt_registry.validate_prompt_templates () in
+  if invalid_prompt_templates <> [] then
+    Log.Misc.error "prompt templates use unknown variables: %s"
+      (invalid_prompt_templates
+      |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)
+      |> String.concat ", ");
   (try Prompt_registry.restore_overrides state.room_config.base_path
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.error "prompt override restore failed: %s"

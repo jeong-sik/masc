@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
         has_override: true,
         char_count: 14,
         required_file: true,
+        template_variables: [],
       },
       {
         key: 'governance.dry_run',
@@ -36,6 +37,7 @@ const mocks = vi.hoisted(() => ({
         has_override: false,
         char_count: 14,
         required_file: true,
+        template_variables: [],
       },
     ],
   })),

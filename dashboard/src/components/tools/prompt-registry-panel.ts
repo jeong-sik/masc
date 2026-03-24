@@ -171,6 +171,17 @@ export function PromptRegistryPanel() {
               </div>
             </div>
 
+            ${selectedPrompt.template_variables.length > 0 ? html`
+              <div class="mb-4 rounded-lg border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
+                <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">Allowed placeholders</div>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  ${selectedPrompt.template_variables.map(variable => html`
+                    <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-body)]">${`{{${variable}}}`}</span>
+                  `)}
+                </div>
+              </div>
+            ` : null}
+
             <div class="mb-4">
               <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">File baseline</div>
               <pre class="max-h-[220px] overflow-auto rounded-lg border border-[var(--card-border)] bg-[rgba(6,12,24,0.72)] px-3 py-3 text-[12px] leading-relaxed whitespace-pre-wrap break-words text-[var(--text-body)]">${selectedPrompt.file_value ?? 'missing'}</pre>

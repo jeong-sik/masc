@@ -161,6 +161,23 @@ let () =
               match Lib.Prompt_registry.set_override "unknown.prompt" "x" with
               | Error _ -> ()
               | Ok () -> fail "should reject unknown prompt key");
+          test_case "set_override rejects unknown template variable" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Lib.Prompt_registry.set_override "keeper.proactive_retry"
+                  "Retry {{attempt_phrase}} {{reason}} {{unknown}}"
+              with
+              | Error msg ->
+                  check bool "mentions unknown variable" true
+                    (try
+                       ignore
+                         (Str.search_forward
+                            (Str.regexp_string "Unknown template variables")
+                            msg 0);
+                       true
+                     with Not_found -> false)
+              | Ok () -> fail "should reject unknown template variable");
         ] );
       ( "integration",
         [
@@ -204,6 +221,13 @@ let () =
                 (get_string_field "source" keeper_capabilities);
               check (option bool) "required_file"
                 (Some true)
-                (get_bool_field "required_file" keeper_capabilities));
+                (get_bool_field "required_file" keeper_capabilities);
+              match keeper_capabilities with
+              | `Assoc fields ->
+                  check int "template_variables field exists" 0
+                    (match List.assoc_opt "template_variables" fields with
+                     | Some (`List items) -> List.length items
+                     | _ -> -1)
+              | _ -> fail "unexpected prompt JSON");
         ] );
     ]

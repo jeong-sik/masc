@@ -467,15 +467,19 @@ let test_handle_request_tools_list () =
          | _ -> None)
     |> List.filter_map (function `String s -> Some s | _ -> None)
   in
-  (* Plan and Board categories remain available. *)
+  (* Public MCP surface: only allowlisted tools are visible. *)
   Alcotest.(check bool)
-    "contains masc_goal_upsert (Plan category)"
+    "contains masc_status (public surface)"
     true
-    (List.mem "masc_goal_upsert" names);
+    (List.mem "masc_status" names);
   Alcotest.(check bool)
-    "contains masc_board_post (Board category)"
+    "contains masc_board_post (public surface)"
     true
     (List.mem "masc_board_post" names);
+  Alcotest.(check bool)
+    "goal_upsert hidden from public surface"
+    false
+    (List.mem "masc_goal_upsert" names);
   Alcotest.(check bool)
     "legacy experiment_start hidden from list"
     false
@@ -511,6 +515,7 @@ let test_handle_request_tools_list () =
   cleanup_dir base_path
 
 let test_handle_request_tools_list_mdal_descriptions () =
+  with_env "MASC_FULL_SURFACE" "1" (fun () ->
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -548,7 +553,7 @@ let test_handle_request_tools_list_mdal_descriptions () =
   Alcotest.(check bool) "iterate description stays concise" true
     (String.length iterate_description <= 220);
 
-  cleanup_dir base_path
+  cleanup_dir base_path)
 
 let test_handle_request_initialize_operator_profile () =
   Eio_main.run @@ fun env ->
@@ -1112,7 +1117,8 @@ let test_handle_request_tools_list_hides_team_session_turn_by_default () =
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   let tools = tools_list_all ~clock ~sw state in
-  Alcotest.(check bool) "step still visible" true
+  (* team_session_step is not in the public MCP surface *)
+  Alcotest.(check bool) "step hidden from public surface" false
     (List.exists
        (function
          | `Assoc fields -> (

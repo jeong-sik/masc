@@ -236,6 +236,52 @@ let standard_tools =
     "masc_note_add"; "masc_batch_add_tasks";
   ]
 
+(** {1 Public MCP Surface}
+
+    The subset of tools exposed via tools/list on the Full (external MCP client)
+    profile. Internal tools remain callable via [Tool_dispatch.dispatch] but are
+    hidden from discovery. This keeps the MCP surface focused on agent
+    communication and coordination.
+
+    Override: set [MASC_FULL_SURFACE=1] to restore the full inventory. *)
+
+let public_mcp_tools =
+  [
+    (* Room lifecycle *)
+    "masc_start"; "masc_join"; "masc_leave"; "masc_set_room"; "masc_status";
+    (* Messaging *)
+    "masc_broadcast"; "masc_messages"; "masc_who";
+    (* Task coordination *)
+    "masc_add_task"; "masc_batch_add_tasks"; "masc_tasks";
+    "masc_claim_next"; "masc_transition"; "masc_done";
+    (* Planning *)
+    "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
+    (* Heartbeat *)
+    "masc_heartbeat";
+    (* Keeper interaction *)
+    "masc_keeper_msg"; "masc_keeper_list"; "masc_keeper_status";
+    "masc_keeper_up"; "masc_keeper_down";
+    (* Board — async agent communication *)
+    "masc_board_post"; "masc_board_list"; "masc_board_get";
+    "masc_board_comment"; "masc_board_vote";
+    (* Agent discovery *)
+    "masc_agents"; "masc_dashboard"; "masc_agent_card";
+    (* Utility *)
+    "masc_tool_help"; "masc_check";
+  ]
+
+let public_mcp_set : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create 48 in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) public_mcp_tools;
+  tbl
+
+let is_public_mcp name = Hashtbl.mem public_mcp_set name
+
+let full_surface_override () =
+  match Sys.getenv_opt "MASC_FULL_SURFACE" with
+  | Some "1" | Some "true" -> true
+  | _ -> false
+
 (** Pre-built Hashtbl sets for O(1) tier lookups.
     The lists above are kept for enumeration/documentation. *)
 let essential_set : (string, unit) Hashtbl.t =

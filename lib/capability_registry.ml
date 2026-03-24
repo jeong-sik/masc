@@ -381,9 +381,11 @@ let public_raw_tool_schemas_from (public_tool_source_schemas : Types.tool_schema
     Types.tool_schema list =
   dedupe_schemas public_tool_source_schemas
 
-(* Surface filtering removed — all registered tools are public.
-   Previous: surface_tool_schemas_from ... Public_mcp filtered ~47 tools.
-   See #1961 for context. *)
+(* Surface filtering at this layer removed in #1961 — all registered tools pass
+   through here unchanged. The public MCP surface is now filtered at the profile
+   level: [Mcp_server_eio_tool_profile.tool_schemas_for_profile] applies
+   [Tool_catalog.is_public_mcp] to the Full profile, reducing tools/list to ~34.
+   Internal dispatch ([Tool_dispatch.dispatch]) remains unrestricted. *)
 let public_tool_schemas_from (public_tool_source_schemas : Types.tool_schema list) :
     Types.tool_schema list =
   dedupe_schemas public_tool_source_schemas

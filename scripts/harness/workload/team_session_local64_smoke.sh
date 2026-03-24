@@ -409,7 +409,7 @@ fi
 echo "session_id=$SESSION_ID"
 
 echo "[3/8] inspect local llama runtime"
-runtime_raw="$(call_tool 91004 "masc_llama_runtime_status" '{"include_models":true}')"
+runtime_raw="$(call_tool 91004 "masc_local_runtime_status" '{"include_models":true}')"
 require_tool_success "$runtime_raw"
 require_result_condition "$runtime_raw" '.runtime_count >= 1 and .configured_capacity >= 1' "runtime status missing pool data"
 
@@ -484,7 +484,7 @@ fi
 require_json_condition "$digest_json" "$digest_expr" "operator digest did not expose local64 census/runtime visibility"
 
 echo "[8/8] benchmark runtime pool"
-bench_raw="$(call_tool 91008 "masc_llama_runtime_bench" '{"parallelism":8,"rounds":1,"runtime_pool":"local64"}')"
+bench_raw="$(call_tool 91008 "masc_local_runtime_bench" '{"parallelism":8,"rounds":1,"runtime_pool":"local64"}')"
 require_tool_success "$bench_raw"
 require_result_condition "$bench_raw" '.total_requests >= 1 and .per_runtime_breakdown != null' "runtime bench did not return breakdown"
 

@@ -77,13 +77,6 @@ let test_coding_in_defaults () =
   Alcotest.(check bool) "coding in defaults" true
     (List.mem "coding" Tool_shard.default_shard_names)
 
-let test_shard_weather_exists () =
-  match Tool_shard.get_shard "weather" with
-  | Some s ->
-    Alcotest.(check bool) "removable" true s.Tool_shard.removable;
-    Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1)
-  | None -> Alcotest.fail "weather shard not found"
-
 let test_shard_voice_exists () =
   match Tool_shard.get_shard "voice" with
   | Some s ->
@@ -106,7 +99,7 @@ let test_all_shards_count () =
 let test_default_shard_names () =
   let defaults = Tool_shard.default_shard_names in
   (* All shards are now in defaults (mode removal: every keeper gets all tools) *)
-  Alcotest.(check bool) "at least 9 defaults" true (List.length defaults >= 9);
+  Alcotest.(check bool) "at least 8 defaults" true (List.length defaults >= 8);
   Alcotest.(check bool) "base in defaults" true (List.mem "base" defaults);
   Alcotest.(check bool) "governance in defaults" true
     (List.mem "governance" defaults);
@@ -114,7 +107,7 @@ let test_default_shard_names () =
     (List.mem "coding" defaults);
   Alcotest.(check bool) "autoresearch in defaults" true
     (List.mem "autoresearch" defaults);
-  Alcotest.(check bool) "weather in defaults" true
+  Alcotest.(check bool) "weather removed from defaults" false
     (List.mem "weather" defaults);
   (* voice still not in defaults: gated by policy_voice_enabled boolean *)
   Alcotest.(check bool) "voice not in defaults" false
@@ -425,7 +418,6 @@ let test_keeper_dispatch_coverage () =
       (Tool_shard.keeper_model_tools
        |> List.map (fun (t : Types.tool_schema) -> t.name));
       shard_tool_names "voice";
-      shard_tool_names "weather";
       (Tool_shard.coding_tools
        |> List.map (fun (t : Types.tool_schema) -> t.name));
     ]
@@ -468,7 +460,6 @@ let () =
       Alcotest.test_case "governance" `Quick test_shard_governance_exists;
       Alcotest.test_case "coding" `Quick test_shard_coding_exists;
       Alcotest.test_case "coding in defaults" `Quick test_coding_in_defaults;
-      Alcotest.test_case "weather" `Quick test_shard_weather_exists;
       Alcotest.test_case "voice" `Quick test_shard_voice_exists;
       Alcotest.test_case "unknown" `Quick test_shard_unknown;
       Alcotest.test_case "all count" `Quick test_all_shards_count;

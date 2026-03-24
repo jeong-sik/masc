@@ -84,9 +84,6 @@ type keeper_meta = {
   team_session_start_count_total: int;
   last_autonomous_action_at: string;
   autonomous_action_count: int;
-  deliberation_count: int;
-  deliberation_cost_total_usd: float;
-  last_deliberation_ts: float;
   last_triage_triggers: string;
   paused: bool;
 }
@@ -176,9 +173,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("team_session_start_count_total", `Int m.team_session_start_count_total);
       ("last_autonomous_action_at", `String m.last_autonomous_action_at);
       ("autonomous_action_count", `Int m.autonomous_action_count);
-      ("deliberation_count", `Int m.deliberation_count);
-      ("deliberation_cost_total_usd", `Float m.deliberation_cost_total_usd);
-      ("last_deliberation_ts", `Float m.last_deliberation_ts);
       ("last_triage_triggers", `String m.last_triage_triggers);
       ("paused", `Bool m.paused);
     ]
@@ -381,15 +375,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let autonomous_action_count =
       Safe_ops.json_int ~default:0 "autonomous_action_count" json
     in
-    let deliberation_count =
-      Safe_ops.json_int ~default:0 "deliberation_count" json
-    in
-    let deliberation_cost_total_usd =
-      Safe_ops.json_float ~default:0.0 "deliberation_cost_total_usd" json
-    in
-    let last_deliberation_ts =
-      Safe_ops.json_float ~default:0.0 "last_deliberation_ts" json
-    in
     let last_triage_triggers =
       Safe_ops.json_string ~default:"" "last_triage_triggers" json
     in
@@ -480,9 +465,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           team_session_start_count_total;
           last_autonomous_action_at;
           autonomous_action_count;
-          deliberation_count;
-          deliberation_cost_total_usd;
-          last_deliberation_ts;
           last_triage_triggers;
           paused;
         }

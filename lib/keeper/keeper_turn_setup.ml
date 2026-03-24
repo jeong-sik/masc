@@ -211,9 +211,6 @@ let ensure_keeper_exists
       active_goal_ids = [];
       last_autonomous_action_at = "";
       autonomous_action_count = 0;
-      deliberation_count = 0;
-      deliberation_cost_total_usd = 0.0;
-      last_deliberation_ts = 0.0;
       last_triage_triggers = "";
       active_team_session_id = None;
       last_team_session_started_at = "";

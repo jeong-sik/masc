@@ -71,16 +71,6 @@ let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
   | Unix.WSTOPPED sig_num ->
       `Assoc [("kind", `String "stopped"); ("signal", `Int sig_num)]
 
-let is_weather_text (s : string) : bool =
-  let h = String.lowercase_ascii s in
-  let n = String.lowercase_ascii "weather" in
-  let has_weather =
-    try let _ = Str.search_forward (Str.regexp_string n) h 0 in true
-    with Not_found -> false
-  in
-  has_weather
-  || (try let _ = Str.search_forward (Str.regexp_string "\xeb\x82\xa0\xec\x94\xa8") s 0 in true with Not_found -> false)
-
 let extract_user_messages (ctx_work : Keeper_working_context.working_context) : string list =
   ctx_work.messages
   |> List.filter_map (fun (m : Agent_sdk.Types.message) ->

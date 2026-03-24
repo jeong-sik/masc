@@ -243,19 +243,6 @@ let voice_tools : Types.tool_schema list = [
   };
 ]
 
-let weather_tools : Types.tool_schema list = [
-  {
-    name = "keeper_weather_note";
-    description = "Get weather capability note and recent weather-related questions.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("location", `Assoc [("type", `String "string")]);
-      ]);
-    ];
-  };
-]
-
 let library_tools : Types.tool_schema list = [
   {
     name = "keeper_library_search";
@@ -396,13 +383,6 @@ let shard_coding : shard = {
     "Coding tools: github/shell bridge + worktree/code inspection";
 }
 
-let shard_weather : shard = {
-  name = "weather";
-  tools = weather_tools;
-  removable = true;
-  description = "Weather queries";
-}
-
 let shard_voice : shard = {
   name = "voice";
   tools = voice_tools;
@@ -475,7 +455,6 @@ let default_shard_names : string list = [
   "governance";
   "coding";
   "autoresearch";
-  "weather";
 ]
 
 let get_agent_shards (agent_name : string) : string list =
@@ -494,7 +473,6 @@ let all_shards : (string, shard) Hashtbl.t =
     shard_filesystem;
     shard_shell;
     shard_coding;
-    shard_weather;
     shard_voice;
     shard_library;
     shard_taskboard;
@@ -557,7 +535,7 @@ let schemas : Types.tool_schema list = [
   {
     name = "masc_tool_grant";
     description = "Grant a tool shard to an agent. \
-Shards: base (core), board, filesystem, shell, governance, weather, voice, taskboard, coding, autoresearch.";
+Shards: base (core), board, filesystem, shell, governance, voice, taskboard, coding, autoresearch.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -567,7 +545,7 @@ Shards: base (core), board, filesystem, shell, governance, weather, voice, taskb
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to grant: base, board, filesystem, shell, governance, weather, voice, taskboard, coding, autoresearch");
+          ("description", `String "Shard to grant: base, board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);
@@ -586,7 +564,7 @@ Cannot revoke 'base' shard (always present).";
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to revoke (must be removable). One of: board, filesystem, shell, governance, weather, voice, taskboard, coding, autoresearch");
+          ("description", `String "Shard to revoke (must be removable). One of: board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);

@@ -247,25 +247,6 @@ let execute_keeper_tool_call
             ("match_count", `Int (List.length matches));
             ("matches", `List matches);
           ])
-  | "keeper_weather_note" ->
-      let location =
-        Safe_ops.json_string ~default:"current location" "location" args
-      in
-      let recent_weather_questions =
-        extract_user_messages ctx_work
-        |> List.filter is_weather_text
-        |> List.rev
-        |> take 5
-        |> List.map (fun q -> `String q)
-      in
-      Yojson.Safe.to_string
-        (`Assoc
-          [
-            ("location", `String location);
-            ("capability", `String "no_realtime_weather_feed");
-            ("note", `String "This keeper cannot fetch live weather by itself.");
-            ("recent_weather_questions", `List recent_weather_questions);
-          ])
   | "keeper_library_search" ->
       let ok, msg = Tool_library.handle_search
         Tool_library.{ agent_name = meta.name }

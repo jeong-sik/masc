@@ -6,7 +6,8 @@ module Types = Types
 (** Helper: create a minimal tool_schema for registration. *)
 let make_schema name =
   { Types.name; description = "test tool " ^ name;
-    input_schema = `Assoc [("type", `String "object")] }
+    input_schema = `Assoc [("type", `String "object")];
+    visibility = Public }
 
 (** Helper: a handler that returns (true, "ok:<name>"). *)
 let echo_handler ~name ~args:_ = Some (true, "ok:" ^ name)

@@ -60,6 +60,7 @@ let schemas : tool_schema list =
                   ("parent_goal_id", `Assoc [ ("type", `String "string") ]);
                 ] );
           ];
+      visibility = Public;
     };
     {
       name = "masc_goal_list";
@@ -92,6 +93,7 @@ let schemas : tool_schema list =
                       ] );
                 ] );
           ];
+      visibility = Public;
     };
     {
       name = "masc_goal_snapshot";
@@ -102,6 +104,7 @@ let schemas : tool_schema list =
             ("type", `String "object");
             ("properties", `Assoc [ ("mode", `Assoc [ ("type", `String "string") ]) ]);
           ];
+      visibility = Public;
     };
     {
       name = "masc_goal_refresh";
@@ -130,6 +133,7 @@ let schemas : tool_schema list =
                   ("force", `Assoc [ ("type", `String "boolean") ]);
                 ] );
           ];
+      visibility = Public;
     };
     {
       name = "masc_goal_dispatch";
@@ -162,6 +166,7 @@ let schemas : tool_schema list =
                   ("goal_ids", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
                 ] );
           ];
+      visibility = Public;
     };
     {
       name = "masc_goal_review";
@@ -197,6 +202,7 @@ let schemas : tool_schema list =
                 ] );
             ("required", `List [ `String "goal_id"; `String "outcome" ]);
           ];
+      visibility = Public;
     };
   ]
 

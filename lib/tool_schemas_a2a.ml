@@ -21,6 +21,7 @@ Pair with masc_a2a_delegate to send work, or masc_a2a_query_skill for skill deta
         ]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_a2a_query_skill";
@@ -41,6 +42,7 @@ Call masc_a2a_discover first to find available agents and skill IDs.";
       ]);
       ("required", `List [`String "agent_name"; `String "skill_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_a2a_delegate";
@@ -84,6 +86,7 @@ Call masc_a2a_discover first to find capable agents. Pair with masc_a2a_subscrib
       ]);
       ("required", `List [`String "target_agent"; `String "message"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_a2a_subscribe";
@@ -108,6 +111,7 @@ Pair with masc_poll_events to read buffered events, and masc_a2a_unsubscribe to 
       ]);
       ("required", `List [`String "events"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_a2a_unsubscribe";
@@ -126,6 +130,7 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
       ]);
       ("required", `List [`String "subscription_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_poll_events";
@@ -147,6 +152,7 @@ Workflow: masc_a2a_subscribe -> do work -> masc_poll_events periodically -> masc
       ]);
       ("required", `List [`String "subscription_id"]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_heartbeat_result";
@@ -208,5 +214,6 @@ Reports tool usage and decision metadata. Pair with masc_heartbeat_start to init
             `String "decision_confidence";
           ]);
     ];
+    visibility = Public;
   };
 ]

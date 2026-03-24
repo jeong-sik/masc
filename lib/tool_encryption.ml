@@ -99,6 +99,7 @@ let schemas : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
   {
     name = "masc_encryption_enable";
@@ -113,6 +114,7 @@ let schemas : Types.tool_schema list = [
         ]);
       ]);
     ];
+    visibility = Public;
   };
   {
     name = "masc_encryption_disable";
@@ -121,6 +123,7 @@ let schemas : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 
   (* masc_generate_key *)
@@ -139,6 +142,7 @@ Store the key securely. Pair with masc_encryption_enable to apply.";
         ]);
       ]);
     ];
+    visibility = Public;
   };
 
 ]

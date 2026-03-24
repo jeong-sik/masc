@@ -110,6 +110,7 @@ After init, use masc_run_plan to set approach, masc_run_log for notes, masc_run_
       ]);
       ("required", `List [`String "task_id"; `String "agent_name"]);
     ];
+    visibility = Public;
   };
 
   (* masc_run_plan *)
@@ -130,6 +131,7 @@ After init, use masc_run_plan to set approach, masc_run_log for notes, masc_run_
       ]);
       ("required", `List [`String "task_id"; `String "plan"]);
     ];
+    visibility = Public;
   };
 
   (* masc_run_log *)
@@ -150,6 +152,7 @@ After init, use masc_run_plan to set approach, masc_run_log for notes, masc_run_
       ]);
       ("required", `List [`String "task_id"; `String "note"]);
     ];
+    visibility = Public;
   };
 
   (* masc_run_deliverable *)
@@ -172,6 +175,7 @@ After recording, the run shows as completed in masc_run_list and masc_run_get.";
       ]);
       ("required", `List [`String "task_id"; `String "deliverable"]);
     ];
+    visibility = Public;
   };
 
   (* masc_run_get *)
@@ -188,6 +192,7 @@ After recording, the run shows as completed in masc_run_list and masc_run_get.";
       ]);
       ("required", `List [`String "task_id"]);
     ];
+    visibility = Public;
   };
 
   (* masc_run_list *)
@@ -198,6 +203,7 @@ After recording, the run shows as completed in masc_run_list and masc_run_get.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
+    visibility = Public;
   };
 
 ]

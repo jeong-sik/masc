@@ -8,6 +8,23 @@
 
 module T = Masc_mcp.Masc_grpc_types
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () -> f dir)
+
 (* ====== Type serialization/deserialization round-trip tests ====== *)
 
 let test_join_request_roundtrip () =
@@ -230,6 +247,32 @@ let test_grpc_opt_in_enablement () =
   (* Restore *)
   (match was_set with Some v -> Unix.putenv "MASC_GRPC_ENABLED" v | None -> ())
 
+let test_grpc_server_registers_health_service () =
+  let was_storage = Sys.getenv_opt "MASC_STORAGE_TYPE" in
+  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
+  Fun.protect
+    ~finally:(fun () ->
+      match was_storage with
+      | Some value -> Unix.putenv "MASC_STORAGE_TYPE" value
+      | None -> Unix.putenv "MASC_STORAGE_TYPE" "")
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      with_temp_dir "masc-grpc-health" (fun dir ->
+          let room_config = Room_utils.default_config dir in
+          let server =
+            Masc_mcp.Masc_grpc_server.create_server
+              ~port:Masc_mcp.Masc_grpc_server.default_port
+              ~room_config
+              ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+          in
+          let services = Grpc_eio.Server.list_services server in
+          Alcotest.(check bool) "coordination service registered" true
+            (List.mem Masc_mcp.Masc_grpc_service.service_name services);
+          Alcotest.(check bool) "reflection service registered" true
+            (List.mem "grpc.reflection.v1.ServerReflection" services);
+          Alcotest.(check bool) "health service registered" true
+            (List.mem "grpc.health.v1.Health" services)))
+
 let test_empty_request_handling () =
   (* Verify graceful handling of empty protobuf message (all defaults). *)
   let bytes = T.JoinRequest.to_bytes {
@@ -284,5 +327,7 @@ let () =
         [
           Alcotest.test_case "default_port" `Quick test_grpc_default_port;
           Alcotest.test_case "opt_in_enablement" `Quick test_grpc_opt_in_enablement;
+          Alcotest.test_case "registers_health_service" `Quick
+            test_grpc_server_registers_health_service;
         ] );
     ]

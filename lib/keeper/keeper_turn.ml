@@ -7,7 +7,7 @@
 
     Sub-modules:
     - Keeper_turn_up: start/reconfigure
-    - Keeper_turn_session: team-session helpers (auto-interception removed)
+    - Keeper_turn_session: team-session helpers
     - Keeper_turn_setup: ensure_keeper_exists, apply_settings_update
     - Keeper_turn_lifecycle: model-set, shutdown *)
 

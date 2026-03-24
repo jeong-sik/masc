@@ -86,16 +86,30 @@ let initiative_source_defaults_json (defaults : keeper_profile_defaults) :
 let initiative_configured_in_source (defaults : keeper_profile_defaults) =
   initiative_source_defaults_json defaults <> `Null
 
-let initiative_surface_json (defaults : keeper_profile_defaults) =
+let initiative_surface_json ?(meta : keeper_meta option) (defaults : keeper_profile_defaults) =
   let configured_in_source = initiative_configured_in_source defaults in
+  let runtime_enabled = match meta with
+    | Some m -> `Bool m.initiative_enabled
+    | None -> (match defaults.initiative_enabled with
+               | Some v -> `Bool v
+               | None -> `Bool true)
+  in
   `Assoc
     [
-      ("status", `String (unsupported_feature_status configured_in_source));
-      ("enabled", `Null);
-      ("scope", `Null);
-      ("idle_sec", `Null);
-      ("cooldown_sec", `Null);
-      ("context_mode", `Null);
+      ("status", `String "wired");
+      ("enabled", runtime_enabled);
+      ("scope",
+        match defaults.initiative_scope with
+        | Some v -> `String v | None -> `Null);
+      ("idle_sec",
+        match defaults.initiative_idle_sec with
+        | Some v -> `Int v | None -> `Null);
+      ("cooldown_sec",
+        match defaults.initiative_cooldown_sec with
+        | Some v -> `Int v | None -> `Null);
+      ("context_mode",
+        match defaults.initiative_context_mode with
+        | Some v -> `String v | None -> `Null);
       ("configured_in_source", `Bool configured_in_source);
       ("source_defaults", initiative_source_defaults_json defaults);
     ]

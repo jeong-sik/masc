@@ -594,7 +594,7 @@ let keeper_config_json (config : Room.config) (name : string)
       in
       let defaults_snapshot = Keeper_types.keeper_default_source_snapshot m.name in
       let drift = drift_surface_json () in
-      let initiative = initiative_surface_json defaults_snapshot.defaults in
+      let initiative = initiative_surface_json ~meta:m defaults_snapshot.defaults in
       let handoff =
         `Assoc [
           ("auto", `Bool m.auto_handoff);

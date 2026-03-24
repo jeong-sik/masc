@@ -12,7 +12,6 @@
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Config = Masc_mcp.Config
-module Tool_dispatch = Masc_mcp.Tool_dispatch
 
 let () =
   let open Alcotest in
@@ -213,12 +212,13 @@ let () =
                   check bool (name ^ " not public") false
                     (Tool_catalog.is_public_mcp name))
                 internal);
-          test_case "dispatch accepts non-public tools" `Quick
+          test_case "non-public tool remains in full registry" `Quick
             (fun () ->
-              (* tool_dispatch has handlers for tools outside public surface *)
-              let internal_tool = "masc_goal_upsert" in
-              check bool "dispatch knows internal tool" true
-                (Tool_dispatch.is_read_only internal_tool
-                 || not (Tool_dispatch.is_read_only internal_tool)));
+              let all_names = Config.all_tool_names () in
+              let internal = "masc_goal_upsert" in
+              check bool (internal ^ " in registry") true
+                (List.mem internal all_names);
+              check bool (internal ^ " not public") false
+                (Tool_catalog.is_public_mcp internal));
         ] );
     ]

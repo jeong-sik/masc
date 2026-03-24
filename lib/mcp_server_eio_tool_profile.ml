@@ -100,7 +100,7 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
           Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()
           |> List.filter (fun (schema : Types.tool_schema) ->
                  List.mem schema.name managed_agent_passthrough_tool_names
-                 && Tool_catalog.is_visible schema.name)
+                 && Tool_catalog.is_visible ~include_hidden:true schema.name)
         in
         dedupe_tool_schemas_by_name
           (Sdk_tool_contract.sdk_tool_schemas @ passthrough)

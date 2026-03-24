@@ -682,11 +682,13 @@ let test_validate_task_id_r_valid () =
 
 let test_validate_room_id_valid () =
   let room_result = Room_utils.validate_room_id "room-alpha_01" in
-  check (result string string) "valid room id" (Ok "room-alpha_01") room_result
+  check (Alcotest.result string string) "valid room id" (Ok "room-alpha_01")
+    room_result
 
 let test_validate_room_id_trims_whitespace () =
   let room_result = Room_utils.validate_room_id "  room-alpha_01  " in
-  check (result string string) "trimmed room id" (Ok "room-alpha_01") room_result
+  check (Alcotest.result string string) "trimmed room id" (Ok "room-alpha_01")
+    room_result
 
 let test_validate_room_id_rejects_path_traversal () =
   let room_result = Room_utils.validate_room_id "../../tmp/x" in

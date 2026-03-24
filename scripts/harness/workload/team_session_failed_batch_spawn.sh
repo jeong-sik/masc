@@ -8,7 +8,6 @@ PORT="${PORT:-}"
 BASE_PATH="${BASE_PATH:-}"
 LOG_FILE="${LOG_FILE:-}"
 MCP_URL=""
-OPERATOR_URL=""
 TEAM_SESSION_ID=""
 SUPERVISOR_SESSION_ID="failed-spawn-replay"
 SUPERVISOR_AGENT="failure-replay-supervisor"
@@ -72,7 +71,7 @@ else
 fi
 
 if [ -z "$LOG_FILE" ]; then
-  LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/masc-failed-batch-spawn.XXXXXX").log"
+  LOG_FILE="$(mcp_mktemp_file "masc-failed-batch-spawn" ".log")"
 else
   LOG_FILE_WAS_EXPLICIT="true"
 fi
@@ -80,7 +79,6 @@ HARNESS_LOG_FILE="${HARNESS_LOG_FILE:-$LOG_FILE}"
 MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
 
 MCP_URL="http://127.0.0.1:${PORT}/mcp"
-OPERATOR_URL="http://127.0.0.1:${PORT}/mcp/operator"
 SERVER_PID=""
 
 read_file() {
@@ -171,7 +169,7 @@ parse_nickname_from_text() {
 wait_for_health() {
   local deadline=$(( $(date +%s) + 20 ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    if curl -fsS --http2-prior-knowledge "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+    if curl -fsS --http1.1 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

@@ -12,6 +12,62 @@ type check_result = {
   detail : string;
 }
 
+let assoc_field key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let string_field ?(default = "") key json =
+  match assoc_field key json with
+  | Some (`String value) -> value
+  | _ -> default
+
+let bool_field ?(default = false) key json =
+  match assoc_field key json with
+  | Some (`Bool value) -> value
+  | _ -> default
+
+let list_field_length key json =
+  match assoc_field key json with
+  | Some (`List values) -> List.length values
+  | _ -> 0
+
+let check_startup_state () =
+  let startup = Server_startup_state.to_yojson () in
+  let phase = string_field ~default:"unknown" "phase" startup in
+  let state_ready = bool_field "state_ready" startup in
+  let pending_lazy = list_field_length "pending_lazy_tasks" startup in
+  let last_error = string_field "last_error" startup in
+  let healthy = state_ready && not (String.equal phase "degraded") in
+  let detail =
+    if String.trim last_error = "" then
+      Printf.sprintf "phase=%s ready=%b pending_lazy=%d"
+        phase state_ready pending_lazy
+    else
+      Printf.sprintf "phase=%s ready=%b pending_lazy=%d error=%s"
+        phase state_ready pending_lazy last_error
+  in
+  { name = "startup_state"; healthy; detail }
+
+let check_subsystems () =
+  let snapshot = Subsystem_health.to_yojson () in
+  let total, dead =
+    match snapshot with
+    | `Assoc entries ->
+      List.fold_left (fun (total, dead) (_name, json) ->
+        let dead =
+          match assoc_field "status" json with
+          | Some (`String "dead") -> dead + 1
+          | _ -> dead
+        in
+        (total + 1, dead)
+      ) (0, 0) entries
+    | _ -> (0, 0)
+  in
+  { name = "subsystem_health"
+  ; healthy = total > 0 && dead = 0
+  ; detail = Printf.sprintf "%d registered, %d dead" total dead
+  }
+
 let check_hooks () =
   let pre = List.length !(Tool_dispatch.pre_hooks) in
   let post = List.length !(Tool_dispatch.post_hooks) in
@@ -31,20 +87,6 @@ let check_trace () =
   ; detail = if has_spans then "spans present" else "no spans recorded"
   }
 
-let check_permissions () =
-  let admin_count = List.length Tool_permissions.admin_tools in
-  { name = "permissions"
-  ; healthy = admin_count > 0
-  ; detail = Printf.sprintf "%d admin tools protected" admin_count
-  }
-
-let check_sse_filter () =
-  let count = Sse_room_filter.registered_count () in
-  { name = "sse_room_filter"
-  ; healthy = true  (* Module exists and is functional *)
-  ; detail = Printf.sprintf "%d sessions tracked" count
-  }
-
 let check_metrics () =
   let all = Tool_metrics.all_stats () in
   let total_calls = List.fold_left (fun acc s -> acc + s.Tool_metrics.call_count) 0 all in
@@ -54,10 +96,10 @@ let check_metrics () =
   }
 
 let all_checks () =
-  [ check_hooks ()
+  [ check_startup_state ()
+  ; check_subsystems ()
+  ; check_hooks ()
   ; check_trace ()
-  ; check_permissions ()
-  ; check_sse_filter ()
   ; check_metrics ()
   ]
 

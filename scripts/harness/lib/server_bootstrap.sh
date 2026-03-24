@@ -66,6 +66,32 @@ s.close()
 PY
 }
 
+harness_tmp_root() {
+  printf '%s\n' "${TMPDIR:-/tmp}"
+}
+
+harness_mktemp_dir() {
+  local prefix="$1"
+  local tmp_root
+  tmp_root="$(harness_tmp_root)"
+  mktemp -d "${tmp_root%/}/${prefix}.XXXXXX"
+}
+
+harness_mktemp_file() {
+  local prefix="$1"
+  local suffix="${2:-}"
+  local tmp_root
+  local path
+  tmp_root="$(harness_tmp_root)"
+  path="$(mktemp "${tmp_root%/}/${prefix}.XXXXXX")" || return 1
+  if [[ -n "$suffix" ]]; then
+    local target="${path}${suffix}"
+    mv "$path" "$target"
+    path="$target"
+  fi
+  printf '%s\n' "$path"
+}
+
 harness_wait_for_health() {
   local port="$1"
   local timeout_sec="${2:-20}"

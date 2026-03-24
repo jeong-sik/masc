@@ -1,8 +1,8 @@
 (** Keeper Tool Exposure Tests
 
-    Verifies that keeper_allowed_tool_names correctly filters tools
-    based on profile attributes: soul_profile, policy_shell_mode,
-    policy_voice_enabled, write_done, and learned mode. *)
+    Verifies that keeper_allowed_tool_names returns the full tool set
+    unconditionally (mode removal), with voice gated by policy_voice_enabled
+    and write_done producing empty list. *)
 
 open Alcotest
 open Masc_mcp
@@ -50,13 +50,12 @@ let test_write_done_false_has_tools () =
   check bool "write_done=false returns nonempty" true (List.length tools > 0)
 
 (* ============================================================
-   2. Default profile (no special attributes)
+   2. Default profile — all keepers get all tools (mode removed)
    ============================================================ *)
 
 let test_default_has_base_tools () =
   let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  (* Non-learned mode uses keeper_model_tools (shard-based names) *)
   check bool "has tools" true (List.length tools > 0);
   check bool "has keeper_time_now" true (has_tool "keeper_time_now" tools);
   check bool "has keeper_context_status" true (has_tool "keeper_context_status" tools)
@@ -64,7 +63,7 @@ let test_default_has_base_tools () =
 let test_default_has_no_voice () =
   let meta = make_meta ~policy_voice_enabled:false () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no voice tools in default mode" false
+  check bool "no voice tools when voice disabled" false
     (has_tool "keeper_voice_speak" tools)
 
 let test_default_has_governance_tools () =
@@ -75,57 +74,45 @@ let test_default_has_governance_tools () =
   check bool "has case brief submit" true
     (has_tool "masc_case_brief_submit" tools)
 
-let test_default_has_no_research () =
+let test_default_has_research_tools () =
+  (* Mode removal: all keepers get autoresearch tools regardless of soul_profile *)
   let meta = make_meta ~soul_profile:"default" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no autoresearch" false (has_any_prefix "masc_autoresearch_" tools)
+  check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
 
 (* ============================================================
-   3. Voice profile
+   3. Voice profile (still gated by policy_voice_enabled)
    ============================================================ *)
 
 let test_voice_enabled_adds_voice_tools () =
-  let meta = make_meta ~policy_voice_enabled:true
-    ~policy_mode:"learned_offline_v1" () in
+  let meta = make_meta ~policy_voice_enabled:true () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_voice_speak" true (has_tool "keeper_voice_speak" tools);
   check bool "has keeper_voice_agent" true (has_tool "keeper_voice_agent" tools);
   check bool "has keeper_voice_sessions" true (has_tool "keeper_voice_sessions" tools)
 
 let test_voice_disabled_no_voice_tools () =
-  let meta = make_meta ~policy_voice_enabled:false
-    ~policy_mode:"learned_offline_v1" () in
+  let meta = make_meta ~policy_voice_enabled:false () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "no voice_speak" false (has_tool "keeper_voice_speak" tools);
   check bool "no voice_agent" false (has_tool "keeper_voice_agent" tools)
 
 (* ============================================================
-   4. Shell mode (readonly)
+   4. All keepers get shell tools (mode removed)
    ============================================================ *)
 
-let test_readonly_shell_adds_shell_tool () =
-  let meta = make_meta ~policy_shell_mode:"readonly"
-    ~policy_mode:"learned_offline_v1" () in
+let test_all_keepers_have_shell_readonly () =
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_shell_readonly" true
     (has_tool "keeper_shell_readonly" tools)
 
-let test_disabled_shell_no_shell_tool () =
-  let meta = make_meta ~policy_shell_mode:"disabled"
-    ~policy_mode:"learned_offline_v1" () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no keeper_shell_readonly" false
-    (has_tool "keeper_shell_readonly" tools)
-
 (* ============================================================
-   5. Shell mode (coding)
-      canonical_policy_shell_mode now maps "coding" -> "coding",
-      so coding tools are included for keepers in learned mode.
+   5. All keepers get coding tools (mode removed)
    ============================================================ *)
 
-let test_coding_shell_adds_coding_tools () =
-  let meta = make_meta ~policy_shell_mode:"coding"
-    ~policy_mode:"learned_offline_v1" () in
+let test_all_keepers_have_coding_tools () =
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let coding_names = Tool_code_write.tool_names in
   let has_any_coding = List.exists (fun n -> has_tool n tools) coding_names in
@@ -135,47 +122,42 @@ let test_coding_shell_adds_coding_tools () =
   check bool "has code search" true
     (has_tool "masc_code_search" tools)
 
-let test_disabled_shell_no_coding_tools () =
-  let meta = make_meta ~policy_shell_mode:"disabled"
-    ~policy_mode:"learned_offline_v1" () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let coding_names = Tool_code_write.tool_names in
-  let has_any_coding = List.exists (fun n -> has_tool n tools) coding_names in
-  check bool "no coding tools when disabled" false has_any_coding
-
 (* ============================================================
-   6. Research profile
+   6. All keepers get autoresearch tools (mode removed)
    ============================================================ *)
 
-let test_research_adds_autoresearch () =
-  let meta = make_meta ~soul_profile:"research" () in
+let test_all_keepers_have_autoresearch () =
+  let meta = make_meta ~soul_profile:"teaching" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
 
-let test_non_research_no_autoresearch () =
-  let meta = make_meta ~soul_profile:"teaching" () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no autoresearch" false (has_any_prefix "masc_autoresearch_" tools)
-
 (* ============================================================
-   7. Learned mode vs normal mode
+   7. All modes produce same tool set (mode removed)
    ============================================================ *)
 
-let test_learned_mode_has_board_tools () =
-  let meta = make_meta ~policy_mode:"learned_offline_v1" () in
+let test_all_modes_same_tool_count () =
+  let heuristic = make_meta ~policy_mode:"" () in
+  let learned = make_meta ~policy_mode:"learned_offline_v1" () in
+  let h_tools = Keeper_exec_tools.keeper_allowed_tool_names heuristic in
+  let l_tools = Keeper_exec_tools.keeper_allowed_tool_names learned in
+  check int "same tool count across modes"
+    (List.length h_tools) (List.length l_tools)
+
+let test_any_mode_has_board_tools () =
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_board_get" true (has_tool "keeper_board_get" tools);
   check bool "has keeper_board_post" true (has_tool "keeper_board_post" tools)
 
-let test_learned_mode_has_read_tools () =
-  let meta = make_meta ~policy_mode:"learned_offline_v1" () in
+let test_any_mode_has_read_tools () =
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_read" true (has_tool "keeper_read" tools);
   check bool "has keeper_fs_read" true (has_tool "keeper_fs_read" tools);
   check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools)
 
-let test_learned_mode_has_keeper_coordination_tools () =
-  let meta = make_meta ~policy_mode:"learned_offline_v1" () in
+let test_any_mode_has_coordination_tools () =
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_tasks_list" true
     (has_tool "keeper_tasks_list" tools);
@@ -184,19 +166,17 @@ let test_learned_mode_has_keeper_coordination_tools () =
   check bool "has keeper_broadcast" true
     (has_tool "keeper_broadcast" tools)
 
-let test_learned_mode_has_governance_tools () =
-  let meta = make_meta ~policy_mode:"learned_offline_v1" () in
+let test_any_mode_has_governance_tools () =
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has governance status" true
     (has_tool "masc_governance_status" tools);
   check bool "has petition submit" true
     (has_tool "masc_petition_submit" tools)
 
-let test_normal_mode_uses_shard_tools () =
-  let meta = make_meta ~policy_mode:"" () in
+let test_sufficient_tool_count () =
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  (* Normal mode uses keeper_model_tools (shard-based, 26 tools) *)
-  check bool "has keeper_time_now" true (has_tool "keeper_time_now" tools);
   check bool "tool count from shards" true (List.length tools >= 20)
 
 (* ============================================================
@@ -351,32 +331,28 @@ let () =
       test_case "has base tools" `Quick test_default_has_base_tools;
       test_case "no voice tools" `Quick test_default_has_no_voice;
       test_case "has governance tools" `Quick test_default_has_governance_tools;
-      test_case "no research tools" `Quick test_default_has_no_research;
+      test_case "has research tools" `Quick test_default_has_research_tools;
     ]);
     ("voice_profile", [
       test_case "enabled adds voice" `Quick test_voice_enabled_adds_voice_tools;
       test_case "disabled no voice" `Quick test_voice_disabled_no_voice_tools;
     ]);
-    ("shell_readonly", [
-      test_case "readonly adds shell" `Quick test_readonly_shell_adds_shell_tool;
-      test_case "disabled no shell" `Quick test_disabled_shell_no_shell_tool;
+    ("shell_tools", [
+      test_case "all keepers have shell readonly" `Quick test_all_keepers_have_shell_readonly;
     ]);
-    ("shell_coding", [
-      test_case "coding adds tools" `Quick test_coding_shell_adds_coding_tools;
-      test_case "disabled no coding" `Quick test_disabled_shell_no_coding_tools;
+    ("coding_tools", [
+      test_case "all keepers have coding tools" `Quick test_all_keepers_have_coding_tools;
     ]);
-    ("research_profile", [
-      test_case "adds autoresearch" `Quick test_research_adds_autoresearch;
-      test_case "non-research no autoresearch" `Quick test_non_research_no_autoresearch;
+    ("autoresearch_tools", [
+      test_case "all keepers have autoresearch" `Quick test_all_keepers_have_autoresearch;
     ]);
-    ("learned_mode", [
-      test_case "has board tools" `Quick test_learned_mode_has_board_tools;
-      test_case "has read tools" `Quick test_learned_mode_has_read_tools;
-      test_case "has keeper coordination tools" `Quick
-        test_learned_mode_has_keeper_coordination_tools;
-      test_case "has governance tools" `Quick
-        test_learned_mode_has_governance_tools;
-      test_case "normal mode uses shards" `Quick test_normal_mode_uses_shard_tools;
+    ("mode_free_access", [
+      test_case "all modes same tool count" `Quick test_all_modes_same_tool_count;
+      test_case "has board tools" `Quick test_any_mode_has_board_tools;
+      test_case "has read tools" `Quick test_any_mode_has_read_tools;
+      test_case "has coordination tools" `Quick test_any_mode_has_coordination_tools;
+      test_case "has governance tools" `Quick test_any_mode_has_governance_tools;
+      test_case "sufficient tool count" `Quick test_sufficient_tool_count;
     ]);
     ("combined_profiles", [
       test_case "research+learned+voice+readonly" `Quick test_research_learned_voice_combined;

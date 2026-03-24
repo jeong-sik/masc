@@ -225,7 +225,8 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
   match Keeper_types.meta_of_json json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
-      check string "policy mode" "model_deliberation" meta.policy_mode;
+      (* Mode removal: canonical_policy_mode always returns "heuristic" *)
+      check string "policy mode" "heuristic" meta.policy_mode;
       check int "deliberation count" 5 meta.deliberation_count;
       check (float 0.001) "deliberation cost" 0.03
         meta.deliberation_cost_total_usd;
@@ -296,7 +297,8 @@ let test_world_observation_json () =
 (* ---------- Canonical policy mode ---------- *)
 
 let test_canonical_policy_mode_model_deliberation () =
-  check string "canonical model_deliberation" "model_deliberation"
+  (* Mode removal: canonical_policy_mode always returns "heuristic" *)
+  check string "canonical model_deliberation" "heuristic"
     (Keeper_types.canonical_policy_mode "model_deliberation")
 
 let test_canonical_policy_mode_heuristic () =

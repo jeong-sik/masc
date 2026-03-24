@@ -16,7 +16,6 @@ After enabling, create tokens with masc_auth_create_token; check state with masc
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_auth_disable";
@@ -27,7 +26,6 @@ Pair with masc_auth_status to confirm auth is off.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_auth_status";
@@ -38,7 +36,6 @@ Pair with masc_auth_enable or masc_auth_disable to change settings.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_auth_create_token";
@@ -60,7 +57,6 @@ After masc_auth_enable; the token should be passed in subsequent requests.";
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_auth_refresh";
@@ -81,7 +77,6 @@ After masc_auth_create_token issued the original token.";
       ]);
       ("required", `List [`String "agent_name"; `String "token"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_auth_revoke";
@@ -98,7 +93,6 @@ Pair with masc_auth_create_token to issue a replacement if needed.";
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_auth_list";
@@ -109,6 +103,5 @@ Pair with masc_auth_revoke to remove stale credentials.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
 ]

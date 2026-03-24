@@ -147,7 +147,6 @@ let projection_to_schema (projection : projection) : Types.tool_schema =
     Types.name = projection.tool_name;
     description = projection.description;
     input_schema = projection.input_schema;
-    visibility = Public;
   }
 
 let make_seed ?capability_id ?(risk_class = Safe)

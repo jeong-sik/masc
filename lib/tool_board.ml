@@ -473,7 +473,6 @@ let tool_post_create : Types.tool_schema = {
     ]);
     ("required", `List [`String "content"]);
   ];
-  visibility = Public;
 }
 
 let tool_post_list : Types.tool_schema = {
@@ -493,7 +492,6 @@ let tool_post_list : Types.tool_schema = {
       ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a 🔔 indicator")]);
     ]);
   ];
-  visibility = Public;
 }
 
 let tool_post_get : Types.tool_schema = {
@@ -506,7 +504,6 @@ let tool_post_get : Types.tool_schema = {
     ]);
     ("required", `List [`String "post_id"]);
   ];
-  visibility = Public;
 }
 
 let tool_comment_add : Types.tool_schema = {
@@ -523,7 +520,6 @@ let tool_comment_add : Types.tool_schema = {
     ]);
     ("required", `List [`String "post_id"; `String "content"]);
   ];
-  visibility = Public;
 }
 
 let tool_vote : Types.tool_schema = {
@@ -538,7 +534,6 @@ let tool_vote : Types.tool_schema = {
     ]);
     ("required", `List [`String "post_id"]);
   ];
-  visibility = Public;
 }
 
 let tool_stats : Types.tool_schema = {
@@ -548,7 +543,6 @@ let tool_stats : Types.tool_schema = {
     ("type", `String "object");
     ("properties", `Assoc []);
   ];
-  visibility = Public;
 }
 
 let tool_search : Types.tool_schema = {
@@ -562,7 +556,6 @@ let tool_search : Types.tool_schema = {
     ]);
     ("required", `List [`String "query"]);
   ];
-  visibility = Public;
 }
 
 let tool_comment_vote : Types.tool_schema = {
@@ -577,7 +570,6 @@ let tool_comment_vote : Types.tool_schema = {
     ]);
     ("required", `List [`String "comment_id"]);
   ];
-  visibility = Public;
 }
 
 let tool_profile : Types.tool_schema = {
@@ -590,7 +582,6 @@ let tool_profile : Types.tool_schema = {
     ]);
     ("required", `List [`String "agent"]);
   ];
-  visibility = Public;
 }
 
 let tool_hearth_list : Types.tool_schema = {
@@ -600,7 +591,6 @@ let tool_hearth_list : Types.tool_schema = {
     ("type", `String "object");
     ("properties", `Assoc []);
   ];
-  visibility = Public;
 }
 
 (** {1 Migration Tool} *)
@@ -642,7 +632,6 @@ let tool_migrate : Types.tool_schema = {
     ("type", `String "object");
     ("properties", `Assoc []);
   ];
-  visibility = Public;
 }
 
 (** All board tools *)

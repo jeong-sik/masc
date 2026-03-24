@@ -13,7 +13,6 @@ let schemas : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
 
   (* masc_mitosis_all *)
@@ -26,7 +25,6 @@ Pair with masc_mitosis_divide to assist an agent approaching threshold.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
 
   (* masc_mitosis_pool *)
@@ -39,7 +37,6 @@ Pair with masc_mitosis_divide for manual division, or masc_memento_mori for auto
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
 
   (* masc_mitosis_divide *)
@@ -62,7 +59,6 @@ Pair with masc_mitosis_prepare to extract DNA first, or use masc_memento_mori fo
       ]);
       ("required", `List [`String "summary"]);
     ];
-    visibility = Public;
   };
 
   (* masc_mitosis_check *)
@@ -80,7 +76,6 @@ After should_prepare: call masc_mitosis_prepare. After should_handoff: call masc
         ]);
       ]);
     ];
-    visibility = Public;
   };
 
   (* masc_mitosis_record *)
@@ -102,7 +97,6 @@ Pair with masc_mitosis_check to see if the counters have triggered a threshold."
         ]);
       ]);
     ];
-    visibility = Public;
   };
 
   (* masc_mitosis_prepare *)
@@ -121,7 +115,6 @@ Actual handoff happens at 80% via masc_mitosis_divide or masc_memento_mori.";
       ]);
       ("required", `List [`String "full_context"]);
     ];
-    visibility = Public;
   };
 
   (* masc_mitosis_handoff *)
@@ -210,7 +203,6 @@ Pair with masc_memento_mori for the all-in-one convenience wrapper.";
       ]);
       ("required", `List [`String "context_ratio"]);
     ];
-    visibility = Public;
   };
 
   (* masc_metrics_compare *)
@@ -233,7 +225,6 @@ Returns verdict: improved/degraded/neutral. Pair with masc_metrics_record to col
       ]);
       ("required", `List [`String "gen_a"; `String "gen_b"]);
     ];
-    visibility = Public;
   };
 
   (* masc_metrics_record *)
@@ -272,6 +263,5 @@ Pair with masc_metrics_compare to evaluate generational improvement.";
       ]);
       ("required", `List [`String "task_id"; `String "completed"]);
     ];
-    visibility = Public;
   };
 ]

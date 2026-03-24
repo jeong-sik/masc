@@ -172,7 +172,6 @@ let schemas : Types.tool_schema list = [
         ]);
       ]);
     ];
-    visibility = Public;
   };
 
   (* masc_relay_checkpoint *)
@@ -209,7 +208,6 @@ Pair with masc_relay_now to trigger handoff, or masc_relay_status to check if re
       ]);
       ("required", `List [`String "summary"]);
     ];
-    visibility = Public;
   };
 
   (* masc_relay_now *)
@@ -242,7 +240,6 @@ Call masc_relay_checkpoint first to save state. The successor continues where yo
       ]);
       ("required", `List [`String "summary"]);
     ];
-    visibility = Public;
   };
 
   (* masc_relay_smart_check *)
@@ -274,7 +271,6 @@ Returns relay recommendation before you commit. Pair with masc_relay_now if rela
       ]);
       ("required", `List [`String "task_hint"]);
     ];
-    visibility = Public;
   };
 
 ]

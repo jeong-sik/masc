@@ -242,7 +242,6 @@ Pair with masc_comment_add for discussion and masc_vote for prioritization.";
       ]);
       ("required", `List [`String "content"]);
     ];
-    visibility = Public;
   };
 
   (* masc_post_list *)
@@ -264,7 +263,6 @@ Pair with masc_post_get to read a specific post with its threaded comments.";
         ]);
       ]);
     ];
-    visibility = Public;
   };
 
   (* masc_post_get *)
@@ -283,7 +281,6 @@ Pair with masc_post_list to find the post_id, then masc_comment_add to reply.";
       ]);
       ("required", `List [`String "post_id"]);
     ];
-    visibility = Public;
   };
 
   (* masc_comment_add *)
@@ -314,7 +311,6 @@ Pair with masc_post_get to read existing comments before replying.";
       ]);
       ("required", `List [`String "post_id"; `String "content"]);
     ];
-    visibility = Public;
   };
 
   (* masc_comment_list *)
@@ -333,7 +329,6 @@ Pair with masc_post_get for the threaded view, or masc_comment_add to contribute
       ]);
       ("required", `List [`String "post_id"]);
     ];
-    visibility = Public;
   };
 
   (* masc_vote *)
@@ -366,7 +361,6 @@ Pair with masc_post_list to find posts worth voting on.";
       ]);
       ("required", `List [`String "target_id"]);
     ];
-    visibility = Public;
   };
 
 ]

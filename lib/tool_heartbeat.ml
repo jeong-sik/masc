@@ -140,7 +140,6 @@ Prefer masc_heartbeat_start for automatic pings. Pair with masc_cleanup_zombies 
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
 
   (* masc_heartbeat_start *)
@@ -169,7 +168,6 @@ Smart mode skips beats when busy. Stop with masc_heartbeat_stop before masc_leav
         ]);
       ]);
     ];
-    visibility = Public;
   };
 
   (* masc_heartbeat_stop *)
@@ -188,7 +186,6 @@ Get heartbeat_id from masc_heartbeat_start response or masc_heartbeat_list.";
       ]);
       ("required", `List [`String "heartbeat_id"]);
     ];
-    visibility = Public;
   };
 
   (* masc_heartbeat_list *)
@@ -201,7 +198,6 @@ Pair with masc_heartbeat_stop to cancel or masc_cleanup_zombies to reap dead age
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
 
 ]

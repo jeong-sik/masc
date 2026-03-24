@@ -145,7 +145,6 @@ let make_schema ~tool_name ~description : Types.tool_schema =
       ]);
       ("required", `List [`String "query"]);
     ];
-    visibility = Public;
   }
 
 (* ================================================================ *)

@@ -537,6 +537,5 @@ let sdk_tool_schemas : Types.tool_schema list =
         Types.name = binding.sdk_name;
         description = binding.description;
         input_schema = binding.input_schema;
-        visibility = Public;
       })
     sdk_bindings

@@ -147,7 +147,6 @@ let schemas : tool_schema list =
             ("type", `String "object");
             ("properties", `Assoc []);
           ];
-      visibility = Public;
     };
     {
       name = "masc_local_runtime_status";
@@ -163,7 +162,6 @@ let schemas : tool_schema list =
                   ("include_models", `Assoc [ ("type", `String "boolean") ]);
                 ] );
           ];
-      visibility = Public;
     };
     {
       name = "masc_runtime_verify";
@@ -182,7 +180,6 @@ let schemas : tool_schema list =
                   ("expected_ctx", `Assoc [ ("type", `String "integer") ]);
                 ] );
           ];
-      visibility = Public;
     };
     {
       name = "masc_local_runtime_bench";
@@ -204,6 +201,5 @@ let schemas : tool_schema list =
                   ("timeout_sec", `Assoc [ ("type", `String "integer") ]);
                 ] );
           ];
-      visibility = Public;
     };
   ]

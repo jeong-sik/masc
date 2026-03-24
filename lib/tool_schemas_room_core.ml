@@ -17,7 +17,6 @@ Call after masc_join to orient yourself. Pair with masc_tasks for detailed backl
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_reset";
@@ -35,7 +34,6 @@ Requires confirm=true to execute. Example: masc_reset({confirm: true})";
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_workflow_guide";
@@ -46,7 +44,6 @@ Pair with masc_check to assert specific prerequisites before acting.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_check";
@@ -70,7 +67,6 @@ Pair with masc_workflow_guide for next-step recommendations.";
       ]);
       ("required", `List [`String "assertions"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_init";
@@ -86,6 +82,5 @@ After init, call masc_join to register your presence, then masc_add_task or masc
         ]);
       ]);
     ];
-    visibility = Public;
   };
 ]

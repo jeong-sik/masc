@@ -22,7 +22,6 @@ let schemas : tool_schema list =
                   ("dry_run", `Assoc [ ("type", `String "boolean") ]);
                 ] );
           ];
-      visibility = Public;
     };
     {
       name = "masc_improve_loop_status";
@@ -30,7 +29,6 @@ let schemas : tool_schema list =
         "Read the persisted state of the masc-mcp self-improvement loop, including current candidate, pause reason, last success/failure, and recent queue summary.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
-      visibility = Public;
     };
     {
       name = "masc_improve_loop_pause";
@@ -43,7 +41,6 @@ let schemas : tool_schema list =
             ( "properties",
               `Assoc [ ("reason", `Assoc [ ("type", `String "string") ]) ] );
           ];
-      visibility = Public;
     };
     {
       name = "masc_improve_loop_resume";
@@ -56,7 +53,6 @@ let schemas : tool_schema list =
             ( "properties",
               `Assoc [ ("dry_run", `Assoc [ ("type", `String "boolean") ]) ] );
           ];
-      visibility = Public;
     };
     {
       name = "masc_improve_loop_tick";
@@ -74,6 +70,5 @@ let schemas : tool_schema list =
                   ("review_ok", `Assoc [ ("type", `String "boolean") ]);
                 ] );
           ];
-      visibility = Public;
     };
   ]

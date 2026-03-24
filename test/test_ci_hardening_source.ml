@@ -323,6 +323,9 @@ let test_transport_route_contracts () =
   check bool "h2 gateway exposes webrtc answer route" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|`POST, "/webrtc/answer"|});
+  check bool "h2 gateway webrtc routes enforce read auth" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request|});
   check bool "h2 gateway respects webrtc disabled state" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|Server_webrtc_transport.is_enabled ()|})

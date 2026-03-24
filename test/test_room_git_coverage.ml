@@ -14,13 +14,22 @@ open Alcotest
 
 module Room_git = Room_git
 
+let current_repo_base_path () =
+  let cwd = Sys.getcwd () in
+  if Room_git.is_git_repo ~base_path:cwd then
+    cwd
+  else
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root when Room_git.is_git_repo ~base_path:root -> root
+    | _ -> cwd
+
 (* ============================================================
    git_root Tests
    ============================================================ *)
 
 let test_git_root_returns_option () =
   (* Test on current directory - should be a git repo *)
-  let result = Room_git.git_root ~base_path:"." in
+  let result = Room_git.git_root ~base_path:(current_repo_base_path ()) in
   (* Just verify it returns an option *)
   let _ : string option = result in
   ()
@@ -38,12 +47,12 @@ let test_git_root_tmp () =
   | Some _ -> ()
 
 let test_git_root_current_nonempty () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root -> check bool "root nonempty" true (String.length root > 0)
   | None -> fail "expected git root for current dir"
 
 let test_git_root_is_directory () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root -> check bool "root is directory" true (Sys.is_directory root)
   | None -> fail "expected git root"
 
@@ -52,7 +61,7 @@ let test_git_root_is_directory () =
    ============================================================ *)
 
 let test_is_git_repo_current () =
-  let result = Room_git.is_git_repo ~base_path:"." in
+  let result = Room_git.is_git_repo ~base_path:(current_repo_base_path ()) in
   (* Current directory should be a git repo for masc-mcp *)
   check bool "current dir is git repo" true result
 
@@ -76,7 +85,7 @@ let test_is_git_repo_root () =
    ============================================================ *)
 
 let test_remote_branch_exists_returns_bool () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root ->
       let result = Room_git.remote_branch_exists root "main" in
       let _ : bool = result in
@@ -84,7 +93,7 @@ let test_remote_branch_exists_returns_bool () =
   | None -> fail "need git repo"
 
 let test_remote_branch_exists_main_or_master () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root ->
       let has_main = Room_git.remote_branch_exists root "main" in
       let has_master = Room_git.remote_branch_exists root "master" in
@@ -96,14 +105,14 @@ let test_remote_branch_exists_main_or_master () =
   | None -> fail "need git repo"
 
 let test_remote_branch_exists_nonexistent () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root ->
       let result = Room_git.remote_branch_exists root "nonexistent-branch-xyz-123" in
       check bool "nonexistent branch" false result
   | None -> fail "need git repo"
 
 let test_remote_branch_exists_empty_branch () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root ->
       let result = Room_git.remote_branch_exists root "" in
       check bool "empty branch" false result
@@ -114,7 +123,7 @@ let test_remote_branch_exists_empty_branch () =
    ============================================================ *)
 
 let test_origin_head_branch_returns_option () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root ->
       let result = Room_git.origin_head_branch root in
       let _ : string option = result in
@@ -122,7 +131,7 @@ let test_origin_head_branch_returns_option () =
   | None -> fail "need git repo"
 
 let test_origin_head_branch_typical_values () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root ->
       (match Room_git.origin_head_branch root with
        | Some branch ->
@@ -138,7 +147,7 @@ let test_origin_head_branch_typical_values () =
    ============================================================ *)
 
 let test_resolve_base_branch_main () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root ->
       (* If origin/main exists, should resolve to main *)
       if Room_git.remote_branch_exists root "main" then begin
@@ -152,7 +161,7 @@ let test_resolve_base_branch_main () =
   | None -> fail "need git repo for test"
 
 let test_resolve_base_branch_returns_result () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root ->
       let result = Room_git.resolve_base_branch root "main" in
       let _ : (string * string option, Types.masc_error) result = result in
@@ -160,7 +169,7 @@ let test_resolve_base_branch_returns_result () =
   | None -> fail "need git repo"
 
 let test_resolve_base_branch_nonexistent_fallback () =
-  match Room_git.git_root ~base_path:"." with
+  match Room_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root ->
       (* If we ask for a nonexistent branch, it should fallback *)
       (match Room_git.resolve_base_branch root "nonexistent-xyz-123" with
@@ -178,33 +187,33 @@ let test_resolve_base_branch_nonexistent_fallback () =
    ============================================================ *)
 
 let test_list_returns_json () =
-  let result = Room_git.list ~base_path:"." in
+  let result = Room_git.list ~base_path:(current_repo_base_path ()) in
   let _ : Yojson.Safe.t = result in
   ()
 
 let test_list_has_worktrees_key () =
-  let result = Room_git.list ~base_path:"." in
+  let result = Room_git.list ~base_path:(current_repo_base_path ()) in
   match result with
   | `Assoc fields ->
       check bool "has worktrees key" true (List.mem_assoc "worktrees" fields)
   | _ -> fail "expected assoc"
 
 let test_list_has_count_key () =
-  let result = Room_git.list ~base_path:"." in
+  let result = Room_git.list ~base_path:(current_repo_base_path ()) in
   match result with
   | `Assoc fields ->
       check bool "has count key" true (List.mem_assoc "count" fields)
   | _ -> fail "expected assoc"
 
 let test_list_has_masc_hint () =
-  let result = Room_git.list ~base_path:"." in
+  let result = Room_git.list ~base_path:(current_repo_base_path ()) in
   match result with
   | `Assoc fields ->
       check bool "has masc_hint" true (List.mem_assoc "masc_hint" fields)
   | _ -> fail "expected assoc"
 
 let test_list_count_is_int () =
-  let result = Room_git.list ~base_path:"." in
+  let result = Room_git.list ~base_path:(current_repo_base_path ()) in
   let open Yojson.Safe.Util in
   let count = result |> member "count" in
   match count with
@@ -212,7 +221,7 @@ let test_list_count_is_int () =
   | _ -> fail "count should be int"
 
 let test_list_worktrees_is_list () =
-  let result = Room_git.list ~base_path:"." in
+  let result = Room_git.list ~base_path:(current_repo_base_path ()) in
   let open Yojson.Safe.Util in
   let worktrees = result |> member "worktrees" in
   match worktrees with
@@ -230,14 +239,14 @@ let test_list_nonrepo () =
   | _ -> fail "expected assoc"
 
 let test_list_current_repo_worktrees () =
-  let result = Room_git.list ~base_path:"." in
+  let result = Room_git.list ~base_path:(current_repo_base_path ()) in
   let open Yojson.Safe.Util in
   let worktrees = result |> member "worktrees" |> to_list in
   (* Should have at least one worktree (the main repo) *)
   check bool "at least one worktree" true (List.length worktrees >= 1)
 
 let test_list_worktree_has_path () =
-  let result = Room_git.list ~base_path:"." in
+  let result = Room_git.list ~base_path:(current_repo_base_path ()) in
   let open Yojson.Safe.Util in
   let worktrees = result |> member "worktrees" |> to_list in
   match worktrees with
@@ -247,7 +256,7 @@ let test_list_worktree_has_path () =
   | [] -> ()
 
 let test_list_worktree_has_branch () =
-  let result = Room_git.list ~base_path:"." in
+  let result = Room_git.list ~base_path:(current_repo_base_path ()) in
   let open Yojson.Safe.Util in
   let worktrees = result |> member "worktrees" |> to_list in
   match worktrees with
@@ -257,7 +266,7 @@ let test_list_worktree_has_branch () =
   | [] -> ()
 
 let test_list_worktree_has_is_masc () =
-  let result = Room_git.list ~base_path:"." in
+  let result = Room_git.list ~base_path:(current_repo_base_path ()) in
   let open Yojson.Safe.Util in
   let worktrees = result |> member "worktrees" |> to_list in
   match worktrees with
@@ -272,7 +281,10 @@ let test_list_worktree_has_is_masc () =
    ============================================================ *)
 
 let test_get_info_returns_option () =
-  let result = Room_git.get_info ~base_path:"." ~agent_name:"test" ~task_id:"001" in
+  let result =
+    Room_git.get_info ~base_path:(current_repo_base_path ()) ~agent_name:"test"
+      ~task_id:"001"
+  in
   let _ : (string * string) option = result in
   ()
 
@@ -285,12 +297,18 @@ let test_get_info_nonrepo () =
   check (option (pair string string)) "non-repo returns None" None result
 
 let test_get_info_empty_agent () =
-  let result = Room_git.get_info ~base_path:"." ~agent_name:"" ~task_id:"task" in
+  let result =
+    Room_git.get_info ~base_path:(current_repo_base_path ()) ~agent_name:""
+      ~task_id:"task"
+  in
   (* Empty agent name should return None (no such worktree) *)
   check (option (pair string string)) "empty agent" None result
 
 let test_get_info_empty_task () =
-  let result = Room_git.get_info ~base_path:"." ~agent_name:"agent" ~task_id:"" in
+  let result =
+    Room_git.get_info ~base_path:(current_repo_base_path ()) ~agent_name:"agent"
+      ~task_id:""
+  in
   (* Empty task id should return None *)
   check (option (pair string string)) "empty task" None result
 

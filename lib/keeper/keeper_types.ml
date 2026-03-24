@@ -128,9 +128,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("models", `List (List.map (fun s -> `String s) m.models));
       ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
       ("active_model", `String m.active_model);
-      ("policy_mode", `String m.policy_mode);
+      ("policy_mode", `String "unified");
       ("policy_voice_enabled", `Bool m.policy_voice_enabled);
-      ("policy_shell_mode", `String m.policy_shell_mode);
+      ("policy_shell_mode", `String "coding");
       ("execution_scope", `String m.execution_scope);
       ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
       ("scope_kind", `String m.scope_kind);
@@ -249,13 +249,16 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       dedupe_keep_order base
     in
     let active_model = Safe_ops.json_string ~default:"" "active_model" json in
-    let policy_mode = "heuristic" in
+    let policy_mode =
+      ignore (Safe_ops.json_string ~default:"heuristic" "policy_mode" json);
+      "unified"
+    in
     let policy_voice_enabled =
       Safe_ops.json_bool ~default:(default_voice_enabled_for name) "policy_voice_enabled" json
     in
     let policy_shell_mode =
-      Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json
-      |> canonical_policy_shell_mode
+      ignore (Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json);
+      "coding"
     in
     let execution_scope =
       Safe_ops.json_string ~default:default_execution_scope "execution_scope" json

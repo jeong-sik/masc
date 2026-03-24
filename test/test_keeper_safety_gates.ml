@@ -16,10 +16,9 @@ open Masc_mcp
 
 (** Build a keeper_meta via JSON round-trip, overriding key policy fields. *)
 let make_meta
-    ?(policy_shell_mode = "disabled")
+    ?(policy_shell_mode = "coding")
     ?(policy_voice_enabled = false)
     ?(soul_profile = "default")
-    ?(policy_mode = "learned_offline_v1")
     ?(name = "test-keeper")
     () : Keeper_types.keeper_meta =
   let json = `Assoc [
@@ -29,7 +28,6 @@ let make_meta
     ("policy_shell_mode", `String policy_shell_mode);
     ("policy_voice_enabled", `Bool policy_voice_enabled);
     ("soul_profile", `String soul_profile);
-    ("policy_mode", `String policy_mode);
   ] in
   match Keeper_types.meta_of_json json with
   | Ok meta -> meta
@@ -189,8 +187,7 @@ let test_write_done_kills_all () =
 
 let test_all_keepers_get_full_toolset () =
   (* Any keeper (regardless of mode/shell/profile) gets all tools *)
-  let meta = make_meta ~policy_shell_mode:"disabled"
-    ~policy_mode:"learned_offline_v1" () in
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
   check bool "has keeper_read" true (List.mem "keeper_read" tools);
@@ -225,7 +222,7 @@ let test_all_keepers_have_research_tools () =
   check bool "has research tools" true has_any_research
 
 let test_heuristic_mode_tools () =
-  let meta = make_meta ~policy_mode:"heuristic" () in
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "heuristic returns nonempty tools" true (List.length tools > 0)
 
@@ -244,8 +241,7 @@ let test_all_keepers_have_shell_and_coding () =
   check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
 
 let test_all_modes_produce_same_tools () =
-  (* Mode removal: canonical_policy_shell_mode always returns "coding",
-     canonical_policy_mode always returns "heuristic" *)
+  (* policy_mode and policy_shell_mode are always "unified" and "coding" respectively *)
   let meta_a = make_meta ~policy_shell_mode:"sandboxed" () in
   let meta_b = make_meta ~policy_shell_mode:"coding" () in
   let tools_a = Keeper_exec_tools.keeper_allowed_tool_names meta_a in

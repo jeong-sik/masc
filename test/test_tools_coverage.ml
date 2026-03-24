@@ -687,8 +687,6 @@ let test_masc_keeper_up_schema () =
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          Alcotest.(check bool) "has policy_mode" true
-            (List.mem_assoc "policy_mode" props);
           Alcotest.(check bool) "has scope_kind" true
             (List.mem_assoc "scope_kind" props);
           Alcotest.(check bool) "has presence_keepalive" true

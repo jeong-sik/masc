@@ -189,7 +189,7 @@ let coding_workspace_tools : Types.tool_schema list =
     (Tool_schemas_worktree.schemas @ Tool_code.schemas)
 
 (** Coding tools — shell/github bridges plus worktree-first code workflow.
-    NOT in default shards. Only granted when policy_shell_mode = "coding". *)
+    Always granted (policy_shell_mode is always "coding"). *)
 let coding_tools : Types.tool_schema list =
   coding_keeper_bridge_tools @ coding_workspace_tools
 

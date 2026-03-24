@@ -1,7 +1,6 @@
 open Alcotest
 
 module D = Masc_mcp.Keeper_deliberation
-module Contract = Masc_mcp.Keeper_contract
 module Keeper_types = Masc_mcp.Keeper_types
 
 let has_prompt_root path =
@@ -248,8 +247,6 @@ let test_deliberation_meta_defaults () =
   check (float 0.001) "default ts" 0.0 dm.last_deliberation_ts;
   check string "default triggers" "" dm.last_triage_triggers
 
-(* Policy mode tests removed: type system purged (always "heuristic") *)
-
 (* ---------- Keeper meta deliberation fields ---------- *)
 
 let test_keeper_meta_deliberation_fields_roundtrip () =
@@ -274,7 +271,7 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
   match Keeper_types.meta_of_json json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
-      check string "policy mode" "heuristic" meta.policy_mode;
+      check string "policy mode" "unified" meta.policy_mode;
       check string "triage triggers" "direct_mention"
         meta.last_triage_triggers
 

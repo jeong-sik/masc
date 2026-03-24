@@ -59,15 +59,15 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            | model :: _ -> model
             | [] -> "")
   in
-  let policy_mode = "heuristic" in
+  (* Mode categorization removed: always use fixed values. *)
+  let policy_mode = "unified" in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
-      (if not (default_voice_enabled_for p.name && Option.is_none p.policy_mode_opt)
-       then p.profile_defaults.policy_voice_enabled else None)
+      p.profile_defaults.policy_voice_enabled
     |> Option.value ~default:false
   in
-  let policy_shell_mode = canonical_policy_shell_mode "coding" in
+  let policy_shell_mode = "coding" in
   let allowed_paths =
     Option.value ~default:[] p.allowed_paths_opt
   in

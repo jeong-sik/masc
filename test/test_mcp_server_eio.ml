@@ -2384,8 +2384,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
               }
           else None);
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let room_path = Masc_mcp.Room.masc_dir state.room_config in
-      let _ = Config.switch_mode room_path Mode.Full in
+      let _room_path = Masc_mcp.Room.masc_dir state.room_config in
       let ok, msg =
         Mcp_eio.execute_tool_eio ~sw ~clock state ~name:"masc_tool_help"
           ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])

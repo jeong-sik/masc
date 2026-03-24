@@ -21,6 +21,11 @@ async function refreshAutoresearchLabSurface(): Promise<void> {
   await refreshAutoresearchSurface()
 }
 
+async function refreshGovernanceSurface(): Promise<void> {
+  const { refreshGovernance } = await import('./components/governance-store')
+  await refreshGovernance()
+}
+
 export type RefreshTask =
   | 'roomTruth'
   | 'missionSnapshot'
@@ -35,6 +40,7 @@ export type RefreshTask =
   | 'commandOrchestra'
   | 'operatorSnapshot'
   | 'operatorRoomDigest'
+  | 'governance'
 
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
   switch (routeState.tab) {
@@ -68,6 +74,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       if (routeState.params.section === 'intervene') {
         return ['roomTruth', 'operatorSnapshot', 'operatorRoomDigest']
+      }
+      if (routeState.params.section === 'governance') {
+        return ['roomTruth', 'governance']
       }
       return []
     case 'workspace':
@@ -109,6 +118,7 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
   commandOrchestra: () => { void refreshCommandPlaneOrchestra(undefined, undefined, { force: true }) },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },
+  governance: () => { void refreshGovernanceSurface() },
 }
 
 export function refreshForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): void {

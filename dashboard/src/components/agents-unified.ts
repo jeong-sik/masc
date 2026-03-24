@@ -10,9 +10,7 @@ import { agents, keepers } from '../store'
 import { missionKeeperBriefs } from '../mission-signals'
 import { AgentRoster } from './agent-roster'
 import { AgentProfile } from './agent-profile'
-import { Execution } from './agents'
-
-type AgentsView = 'all' | 'agents' | 'keepers' | 'sessions'
+type AgentsView = 'all' | 'agents' | 'keepers'
 
 const activeView = signal<AgentsView>('all')
 
@@ -38,7 +36,6 @@ const CHIPS: { id: AgentsView; label: string; description: string }[] = [
   { id: 'all', label: '전체 보기', description: '등록된 모든 런타임을 함께 봅니다.' },
   { id: 'agents', label: '일반 에이전트', description: '키퍼가 연결되지 않은 일반 에이전트만 봅니다.' },
   { id: 'keepers', label: '키퍼 런타임', description: '장기 컨텍스트를 유지하는 상주 런타임만 봅니다.' },
-  { id: 'sessions', label: '세션/실행', description: '세션, 작전, 실행 흐름을 별도 화면으로 봅니다.' },
 ]
 
 export function AgentsUnified() {
@@ -50,7 +47,7 @@ export function AgentsUnified() {
 
   const viewParam = route.value.params.view as string | undefined
   const routeView =
-    viewParam === 'sessions' || viewParam === 'keepers' || viewParam === 'agents'
+    viewParam === 'keepers' || viewParam === 'agents'
       ? viewParam
       : null
   const currentView = routeView ?? activeView.value
@@ -89,9 +86,7 @@ export function AgentsUnified() {
       ? `일반 에이전트 ${agentOnlyCount}개와 키퍼 런타임 ${keeperCount}개를 함께 보여줍니다.`
       : currentView === 'agents'
         ? `지속 실행용 키퍼가 없는 일반 에이전트 ${agentOnlyCount}개만 표시합니다.`
-        : currentView === 'keepers'
-          ? `장기 컨텍스트를 유지하는 키퍼 런타임 ${keeperCount}개만 표시합니다.`
-          : '세션, 작전, 연속성, 개입 대기 등 실행 흐름을 따로 봅니다.'
+        : `장기 컨텍스트를 유지하는 키퍼 런타임 ${keeperCount}개만 표시합니다.`
 
   return html`
     <div class="flex flex-col gap-4">
@@ -116,14 +111,11 @@ export function AgentsUnified() {
         <span>${currentViewMeta.description} ${currentViewSummary}</span>
       </div>
 
-      ${currentView === 'sessions'
-        ? html`<${Execution} />`
-        : html`<${AgentRoster}
-            keeperFilter=${currentView === 'keepers' ? 'keeper-only'
-              : currentView === 'agents' ? 'agent-only'
-              : 'all'}
-          />`
-      }
+      <${AgentRoster}
+        keeperFilter=${currentView === 'keepers' ? 'keeper-only'
+          : currentView === 'agents' ? 'agent-only'
+          : 'all'}
+      />
     </div>
   `
 }

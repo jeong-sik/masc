@@ -179,7 +179,9 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
         | None -> false)
   |> add_if "coordination.room_scope"
        (match defaults.room_scope with
-        | Some value -> canonical_room_scope value <> meta.room_scope
+        | Some value ->
+            let authored = String.trim value in
+            authored <> "" && authored <> meta.room_scope
         | None -> false)
   |> add_if "coordination.scope_kind"
        (match defaults.scope_kind with

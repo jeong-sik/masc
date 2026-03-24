@@ -7,19 +7,19 @@
     {
       "id": "glm_light",
       "type": "model",
-      "model": "ollama:glm-4.5",
+      "model": "glm:glm-4.5",
       "prompt": "{{input}}"
     },
     {
       "id": "glm_mid",
       "type": "model",
-      "model": "ollama:glm-4.7",
+      "model": "glm:glm-4.7",
       "prompt": "{{input}}"
     },
     {
       "id": "glm_heavy",
       "type": "model",
-      "model": "ollama:glm-5",
+      "model": "glm:glm-5",
       "prompt": "{{input}}"
     },
     {

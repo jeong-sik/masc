@@ -255,7 +255,8 @@ let permission_for_tool = function
   | "masc_agents" | "masc_portal_status" | "masc_pending_interrupts"
   | "masc_votes" | "masc_vote_status" | "masc_worktree_list"
   | "masc_cost_report" | "masc_task_history" | "masc_operator_snapshot"
-  | "masc_operator_digest"
+  | "masc_operator_digest" | "masc_surface_audit"
+  | "masc_collaboration_evidence"
   | "masc_persona_list"
   | "masc_keeper_status" | "masc_keeper_list"
   | "masc_keeper_trajectory" | "masc_keeper_eval"
@@ -302,6 +303,7 @@ let permission_for_tool = function
   | "masc_policy_deny" | "masc_policy_update" ->
       Some CanBroadcast
   | "masc_autoresearch_start" | "masc_autoresearch_swarm_start"
+  | "masc_repo_synthesis_swarm_start"
   | "masc_autoresearch_cycle" | "masc_autoresearch_inject"
   | "masc_autoresearch_stop" ->
       Some CanAdmin

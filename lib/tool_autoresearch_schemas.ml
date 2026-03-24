@@ -1,4 +1,4 @@
-(** Tool_autoresearch_schemas — 6 autoresearch tool schema definitions.
+(** Tool_autoresearch_schemas — autoresearch + swarm-facing synthesis schema definitions.
 
     Extracted from tool_autoresearch.ml to keep schema data separate from logic.
 
@@ -100,6 +100,59 @@ and persists cross-links so team-session status/stop can surface the linked loop
         ]);
       ]);
       ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);
+    ];
+  };
+
+  {
+    name = "masc_repo_synthesis_swarm_start";
+    description = "Start a repo-synthesis benchmark or case-study run through CPv2 operation + attached team session + proof surfaces. \
+Use this as the canonical front door for repo-scoped synthesis questions before dropping to raw CPv2 tools.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Human goal for the synthesis run.");
+        ]);
+        ("question", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Repo question or synthesis prompt to answer.");
+        ]);
+        ("repo_root", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Repo root path for benchmark metadata and question-set lookup.");
+        ]);
+        ("question_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional dataset question id from benchmark/repo_synthesis_question_set.json.");
+        ]);
+        ("artifact_scope", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Optional repo-relative paths that narrow synthesis scope.");
+        ]);
+        ("program_note", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional human-owned benchmark note.");
+        ]);
+        ("model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional model label recorded into benchmark metadata.");
+        ]);
+        ("time_budget_sec", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Time budget recorded for fairness comparisons (default: 900).");
+        ]);
+        ("max_workers", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum planned worker count to seed into the attached team session (default: 6).");
+        ]);
+        ("baseline_label", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional baseline label for paired benchmark comparisons.");
+        ]);
+      ]);
+      ("required", `List [`String "goal"; `String "question"; `String "repo_root"]);
     ];
   };
 

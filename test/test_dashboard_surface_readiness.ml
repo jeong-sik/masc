@@ -1,0 +1,43 @@
+open Alcotest
+open Masc_mcp
+
+let find_surface surfaces target_id =
+  List.find_opt
+    (fun json ->
+      Yojson.Safe.Util.(json |> member "id" |> to_string = target_id))
+    surfaces
+
+let test_warroom_is_demoted_to_lab () =
+  let json = Dashboard_surface_readiness.json () in
+  let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
+  match find_surface surfaces "command.warroom" with
+  | None -> fail "command.warroom missing"
+  | Some surface ->
+      check string "exposure_status" "lab"
+        Yojson.Safe.Util.(surface |> member "exposure_status" |> to_string);
+      check bool "hidden_from_nav" true
+        Yojson.Safe.Util.(surface |> member "hidden_from_nav" |> to_bool);
+      check bool "meets_main_gate" false
+        Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool)
+
+let test_sessions_surface_stays_main () =
+  let json = Dashboard_surface_readiness.json ~surface_id:"monitoring.sessions" () in
+  let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
+  match find_surface surfaces "monitoring.sessions" with
+  | None -> fail "monitoring.sessions missing"
+  | Some surface ->
+      check string "exposure_status" "main"
+        Yojson.Safe.Util.(surface |> member "exposure_status" |> to_string);
+      check bool "meets_main_gate" true
+        Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool)
+
+let () =
+  run "Dashboard_surface_readiness"
+    [
+      ( "surface_readiness",
+        [
+          test_case "warroom demoted to lab" `Quick test_warroom_is_demoted_to_lab;
+          test_case "sessions stays main" `Quick test_sessions_surface_stays_main;
+        ] );
+    ]
+

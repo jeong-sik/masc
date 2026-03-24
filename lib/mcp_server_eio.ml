@@ -80,6 +80,7 @@ let read_only_tools =
    "masc_team_session_list"; "masc_team_session_compare";
    "masc_team_session_events"; "masc_team_session_prove";
    "masc_operator_snapshot"; "masc_operator_digest";
+   "masc_surface_audit"; "masc_collaboration_evidence";
    "masc_improve_loop_status"]
 
 let requires_join_tools = [

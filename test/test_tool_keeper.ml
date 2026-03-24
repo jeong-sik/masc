@@ -261,40 +261,7 @@ let test_keeper_model_set_persists_active_model () =
 
 (* write_persona_profile removed: persona concept deleted, see CLAUDE.md *)
 
-let write_reward_model path =
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      output_string oc
-        {|{
-  "version": "reward-model-v1",
-  "candidates": {
-    "noop": {
-      "bias": 0.0,
-      "weights": {
-        "direct_mention": -0.5
-      }
-    },
-    "reply_in_room": {
-      "bias": 0.1,
-      "weights": {
-        "direct_mention": 1.5,
-        "question_mark": 0.2
-      }
-    },
-        "board_post": {
-          "bias": -0.3,
-      "weights": {
-        "active_goal_count": 0.8,
-        "idle_seconds": 1.0,
-        "room_scope_all": 0.3,
-        "board_recent_external_post_count": 0.4,
-        "board_newest_external_post_freshness": 0.4
-      }
-    }
-    }
-}|})
+(* write_reward_model removed: keeper policy tools removed *)
 
 let make_keeper_exec_meta
     ?(name = "sangsu")
@@ -1181,186 +1148,8 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
       in
       check string "detailed list skill route primary" "masc-heartbeat"
         Yojson.Safe.Util.(keeper_row |> member "skill_route" |> member "primary" |> to_string))
-let test_keeper_policy_tools_roundtrip () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
-      rm_rf base_dir)
-    (fun () ->
-      let reward_model_path = Filename.concat base_dir "reward-model.json" in
-      write_reward_model reward_model_path;
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
-      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
-      in
-      let dispatch name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some result -> result
-        | None -> fail ("missing dispatch for " ^ name)
-      in
-      let ok, _ =
-        dispatch "masc_keeper_up"
-          (`Assoc
-            [
-              ("name", `String "sangsu");
-              ("goal", `String "Maintain Sangsu persona");
-              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
-              ("active_model", `String "llama:qwen3.5-35b-a3b-ud-q8-xl");
-              ("room_scope", `String "all");
-              ("trigger_mode", `String "explicit_only");
-              ("mention_targets", `List [ `String "sangsu" ]);
-              ("presence_keepalive", `Bool false);
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "keeper up ok" true ok;
-      let ok, _policy_body =
-        dispatch "masc_keeper_policy_set"
-          (`Assoc
-            [
-              ("name", `String "sangsu");
-              ("policy_mode", `String "learned_offline_v1");
-              ("action_budget", `String "board");
-              ("reward_model_path", `String reward_model_path);
-            ])
-      in
-      check bool "policy set removed" false ok;
-      (* policy_set tool is removed — skip JSON parsing *)
-      let ok, status_body =
-        dispatch "masc_keeper_status"
-          (`Assoc
-            [
-              ("name", `String "sangsu");
-              ("fast", `Bool true);
-              ("include_context", `Bool false);
-              ("include_metrics_overview", `Bool false);
-              ("include_memory_bank", `Bool false);
-              ("include_history_tail", `Bool false);
-              ("include_compaction_history", `Bool false);
-            ])
-      in
-      check bool "status after policy set ok" true ok;
-      let status_json = Yojson.Safe.from_string status_body in
-      (* canonical_policy_mode normalises all modes to "heuristic" since
-         mode categorization was removed — verify the canonical value *)
-      check string "status policy mode" "heuristic"
-        Yojson.Safe.Util.(status_json |> member "policy" |> member "mode" |> to_string);
-      Masc_mcp.Keeper_types.append_jsonl_line
-        (Masc_mcp.Keeper_types.keeper_policy_log_path config "sangsu")
-        (`Assoc
-          [
-            ("action_id", `String "act-1");
-            ("chosen_action", `String "reply_in_room");
-            ("feature_vector",
-              `Assoc
-                [
-                  ("direct_mention", `Float 1.0);
-                  ("question_mark", `Float 1.0);
-                  ("active_goal_count", `Float 0.0);
-                ]);
-            ("candidates",
-              `List
-                [
-                  `Assoc [("action", `String "noop")];
-                  `Assoc [("action", `String "reply_in_room")];
-                ]);
-            ("observation",
-              `Assoc
-                [
-                  ("source_kind", `String "room_message");
-                  ("room_id", `String "default");
-                  ("from_agent", `String "tester");
-                  ("message", `String "@sangsu?");
-                  ("direct_mention", `Bool true);
-                  ("has_question", `Bool true);
-                  ("message_chars", `Int 8);
-                  ("total_turns", `Int 0);
-                  ("active_goal_count", `Int 0);
-                  ("joined_room_count", `Int 1);
-                  ("room_scope", `String "all");
-                  ("trigger_mode", `String "explicit_only");
-                  ("last_turn_ago_s", `Float 0.0);
-                ]);
-          ]);
-      let ok, _explain_body =
-        dispatch "masc_keeper_action_explain"
-          (`Assoc
-            [
-              ("name", `String "sangsu");
-              ("action_id", `String "act-1");
-            ])
-      in
-      check bool "action explain removed" false ok;
-      let ok, _ =
-        dispatch "masc_keeper_feedback_record"
-          (`Assoc
-            [
-              ("name", `String "sangsu");
-              ("action_id", `String "act-1");
-              ("verdict", `String "good_action");
-              ("score", `Float 1.0);
-            ])
-      in
-      check bool "feedback record removed" false ok;
-      let ok, _ =
-        dispatch "masc_keeper_dataset_export"
-          (`Assoc
-            [
-              ("name", `String "sangsu");
-              ("output_path", `String (Filename.concat base_dir "dataset.json"));
-            ])
-      in
-      check bool "dataset export removed" false ok)
-
-let test_keeper_policy_set_rejects_invalid_mode () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
-      rm_rf base_dir)
-    (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
-      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
-      in
-      let dispatch name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some result -> result
-        | None -> fail ("missing dispatch for " ^ name)
-      in
-      let ok, _ =
-        dispatch "masc_keeper_up"
-          (`Assoc
-            [
-              ("name", `String "sangsu");
-              ("goal", `String "Maintain Sangsu persona");
-              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
-              ("presence_keepalive", `Bool false);
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "keeper up ok" true ok;
-      let ok, body =
-        dispatch "masc_keeper_policy_set"
-          (`Assoc
-            [
-              ("name", `String "sangsu");
-              ("policy_mode", `String "learned_offline_v9");
-            ])
-      in
-      check bool "policy set rejected (tool removed)" false ok;
-      check bool "error mentions removal" true
-        (try
-           let _ = Str.search_forward (Str.regexp_string "policy_mode system has been removed") body 0 in
-           true
-         with Not_found -> false))
+(* test_keeper_policy_tools_roundtrip: removed — keeper policy tools return stubs *)
+(* test_keeper_policy_set_rejects_invalid_mode: removed — keeper policy_mode system removed *)
 
 let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
   Eio_main.run @@ fun env ->
@@ -1616,44 +1405,7 @@ let test_keeper_up_persists_allowed_paths_to_status_policy () =
           status_json |> member "policy" |> member "allowed_paths" |> to_list |> filter_string)
       in
       check (list string) "allowed_paths roundtrip" allowed_paths persisted)
-let test_keeper_policy_set_accepts_explicit_event_v1 () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_dir)
-    (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
-      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
-      in
-      let dispatch name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some result -> result
-        | None -> fail ("missing dispatch for " ^ name)
-      in
-      let ok, _ =
-        dispatch "masc_keeper_up"
-          (`Assoc
-            [
-              ("name", `String "buddy");
-              ("goal", `String "Stay resident");
-              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
-              ("presence_keepalive", `Bool false);
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "keeper up ok" true ok;
-      let ok, _body =
-        dispatch "masc_keeper_policy_set"
-          (`Assoc
-            [
-              ("name", `String "buddy");
-              ("policy_mode", `String "explicit_event_v1");
-            ])
-      in
-      check bool "policy set removed" false ok)
+(* test_keeper_policy_set_accepts_explicit_event_v1: removed — keeper policy_mode system removed *)
 
 let test_resident_bootstrap_marks_stale_explicit_keeper () =
   Eio_main.run @@ fun env ->
@@ -1776,10 +1528,6 @@ let () =
            test_keeper_fs_edit_policy_gates;
          test_case "fs_edit enforces allowed paths and modes" `Quick
            test_keeper_fs_edit_enforces_allowed_paths_and_modes;
-         test_case "policy tools roundtrip" `Quick
-           test_keeper_policy_tools_roundtrip;
-         test_case "policy set rejects invalid mode" `Quick
-           test_keeper_policy_set_rejects_invalid_mode;
          test_case "sangsu defaults explicit voice policy" `Quick
            test_keeper_up_defaults_sangsu_to_explicit_voice_policy;
          test_case "keeper up update preserves proactive when omitted" `Quick
@@ -1788,8 +1536,6 @@ let () =
            test_write_meta_syncs_registered_resident_seed;
          test_case "keeper up persists allowed paths" `Quick
            test_keeper_up_persists_allowed_paths_to_status_policy;
-         test_case "policy set accepts explicit_event_v1" `Quick
-           test_keeper_policy_set_accepts_explicit_event_v1;
          test_case "resident bootstrap marks stale explicit keeper" `Quick
            test_resident_bootstrap_marks_stale_explicit_keeper;
        ]);

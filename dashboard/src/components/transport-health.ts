@@ -106,6 +106,7 @@ type PracticalCase = {
 const transportHealth: Signal<TransportHealthData | null> = signal(null)
 const loading: Signal<boolean> = signal(false)
 const error: Signal<string | null> = signal(null)
+let inflightTransportHealthRefresh: Promise<void> | null = null
 
 const PRACTICAL_CASES: PracticalCase[] = [
   {
@@ -151,16 +152,21 @@ const PRACTICAL_CASES: PracticalCase[] = [
 ]
 
 async function refreshTransportHealth(): Promise<void> {
+  if (inflightTransportHealthRefresh) return inflightTransportHealthRefresh
   loading.value = true
   error.value = null
-  try {
-    const data = await get<TransportHealthData>('/api/v1/dashboard/transport-health')
-    transportHealth.value = data
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loading.value = false
-  }
+  inflightTransportHealthRefresh = (async () => {
+    try {
+      const data = await get<TransportHealthData>('/api/v1/dashboard/transport-health')
+      transportHealth.value = data
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      loading.value = false
+      inflightTransportHealthRefresh = null
+    }
+  })()
+  return inflightTransportHealthRefresh
 }
 
 function shouldRefreshFromEvent(event: SSEEvent): boolean {

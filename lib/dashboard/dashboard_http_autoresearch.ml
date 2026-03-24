@@ -157,24 +157,23 @@ let load_degraded_persisted_summary ~(base_path : string) loop_id =
   match Safe_ops.read_json_file_safe path with
   | Error _ -> None
   | Ok (`Assoc fields as json) ->
-      if List.mem_assoc "llm_model" fields && not (List.mem_assoc "model_model" fields)
-      then None
-      else if
-        not (List.mem_assoc "goal" fields)
-        || not (List.mem_assoc "metric_fn" fields)
-        || not (List.mem_assoc "model_model" fields)
-        || not (List.mem_assoc "target_file" fields)
-      then None
-      else (
-        try Some (Autoresearch_serde.state_of_yojson json)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _ -> None)
+      if List.mem_assoc "llm_model" fields && not (List.mem_assoc "model_model" fields) then
+        None
+      else if not (Autoresearch_storage.has_required_persisted_state_fields json) then
+        None
+      else
+        (try Some (Autoresearch_serde.state_of_yojson json)
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | _ -> None)
   | Ok json ->
-      (try Some (Autoresearch_serde.state_of_yojson json)
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | _ -> None)
+      if not (Autoresearch_storage.has_required_persisted_state_fields json) then
+        None
+      else
+        (try Some (Autoresearch_serde.state_of_yojson json)
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | _ -> None)
 
 (** Build the loops list JSON for GET /api/v1/autoresearch/loops.
     Merges in-memory active loops with persisted-only loops.

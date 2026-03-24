@@ -681,12 +681,12 @@ let test_validate_task_id_r_valid () =
   check bool "ok result" true (is_ok result)
 
 let test_validate_room_id_valid () =
-  let result = Room_utils.validate_room_id "room-alpha_01" in
-  check (result string string) "valid room id" (Ok "room-alpha_01") result
+  let room_id_result = Room_utils.validate_room_id "room-alpha_01" in
+  check (result string string) "valid room id" (Ok "room-alpha_01") room_id_result
 
 let test_validate_room_id_trims_whitespace () =
-  let result = Room_utils.validate_room_id "  room-alpha_01  " in
-  check (result string string) "trimmed room id" (Ok "room-alpha_01") result
+  let room_id_result = Room_utils.validate_room_id "  room-alpha_01  " in
+  check (result string string) "trimmed room id" (Ok "room-alpha_01") room_id_result
 
 let test_validate_room_id_rejects_path_traversal () =
   let result = Room_utils.validate_room_id "../../tmp/x" in

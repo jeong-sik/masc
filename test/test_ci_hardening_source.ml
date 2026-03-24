@@ -395,6 +395,24 @@ let test_transport_health_contracts () =
   check bool "standalone ws reuses transport metrics env parser" true
     (file_contains_pattern "lib/server/server_ws_standalone.ml"
        {|Transport_metrics.ws_enabled ()|})
+
+let test_dashboard_timeout_guard_contracts () =
+  check bool "http transport health route uses cached dashboard helper" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       {|let json = dashboard_transport_health_http_json ~state in|});
+  check bool "h2 transport health route uses cached dashboard helper" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|let json = dashboard_transport_health_http_json ~state in|});
+  check bool "server dashboard transport health helper uses dashboard cache" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       {|Dashboard_cache.get_or_compute "transport_health" ~ttl:10.0|});
+  check bool "mission refresh dedupes inflight fetches" true
+    (file_contains_pattern "dashboard/src/mission-actions.ts"
+       "let inflightMissionSnapshotRefresh: Promise<void> | null = null");
+  check bool "transport health panel dedupes inflight fetches" true
+    (file_contains_pattern "dashboard/src/components/transport-health.ts"
+       "let inflightTransportHealthRefresh: Promise<void> | null = null")
+
 let test_mermaid_xss_contracts () =
   check bool "mermaid securityLevel is strict (not loose)" true
     (file_contains_pattern "dashboard/src/components/command/helpers.ts"
@@ -433,6 +451,8 @@ let () =
              test_transport_route_contracts;
            test_case "transport health contracts" `Quick
              test_transport_health_contracts;
+           test_case "dashboard timeout guard contracts" `Quick
+             test_dashboard_timeout_guard_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
          ]);
     ]

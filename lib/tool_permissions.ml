@@ -9,6 +9,7 @@ let admin_tools =
     "masc_autoresearch_start";
     "masc_autoresearch_stop";
     "masc_autoresearch_swarm_start";
+    "masc_repo_synthesis_swarm_start";
     "masc_policy_freeze_unit";
     "masc_policy_kill_switch";
     "masc_tool_admin_update";
@@ -55,11 +56,21 @@ let check ~agent_name ~tool_name =
       agent_name tool_name)
 
 let install ~get_agent_name =
-  Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
+  Tool_dispatch.register_pre_hook (fun ~name ~args ->
     if not (requires_admin name) then
       None  (* Unrestricted tool — proceed *)
     else
-      match get_agent_name () with
+      let agent_name_opt =
+        match get_agent_name () with
+        | Some _ as agent -> agent
+        | None ->
+            (match Safe_ops.json_string_opt "agent_name" args with
+             | Some value ->
+                 let trimmed = String.trim value in
+                 if trimmed = "" then None else Some trimmed
+             | None -> None)
+      in
+      match agent_name_opt with
       | None ->
         Some { Tool_result.success = false
              ; data = `String "permission denied: no agent identity"

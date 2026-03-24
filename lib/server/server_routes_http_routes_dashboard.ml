@@ -164,12 +164,27 @@ let add_routes ~sw ~clock router =
          let json = dashboard_proof_http_json ~state req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/surface-readiness" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let surface_id = Server_utils.query_param req "surface_id" in
+         let json = Dashboard_surface_readiness.json ?surface_id () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/collaboration-evidence" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let session_id = Server_utils.query_param req "session_id" in
+         let room_id = Server_utils.query_param req "room_id" in
+         let json =
+           Dashboard_collaboration_evidence.json ?session_id ?room_id
+             ~config:state.Mcp_server.room_config ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json =
-           Transport_metrics.transport_health_json
-             ~config:state.Mcp_server.room_config
-         in
+         let json = dashboard_transport_health_http_json ~state in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
@@ -511,6 +526,49 @@ let add_routes ~sw ~clock router =
                  (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
                  reqd
            | exception Invalid_argument msg ->
+               Http.Response.json ~status:`Not_found
+                 (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
+               reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/dashboard/repo-synthesis" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let limit =
+           match Server_utils.query_param req "limit" with
+           | Some raw -> (try int_of_string raw with _ -> 20)
+           | None -> 20
+         in
+         let json =
+           Dashboard_http_repo_synthesis.repo_synthesis_benchmarks_json
+             ~base_path ~limit ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.prefix_get "/api/v1/repo-synthesis/benchmarks/" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let req_path = Http.Request.path req in
+         let prefix = "/api/v1/repo-synthesis/benchmarks/" in
+         let run_id =
+           String.trim
+             (String.sub req_path (String.length prefix)
+                (String.length req_path - String.length prefix))
+         in
+         if String.length run_id = 0 then
+           Http.Response.json ~status:`Bad_request
+             {|{"error":"run_id is required"}|} reqd
+         else
+           match
+             Dashboard_http_repo_synthesis.repo_synthesis_benchmark_detail_json
+               ~base_path ~run_id
+           with
+           | Ok json ->
+               Http.Response.json ~compress:true ~request:req
+                 (Yojson.Safe.to_string json) reqd
+           | Error msg ->
                Http.Response.json ~status:`Not_found
                  (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
                  reqd

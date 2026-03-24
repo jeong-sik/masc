@@ -405,6 +405,16 @@ let test_permission_for_tool_operator_digest () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
+let test_permission_for_tool_surface_audit () =
+  match Auth.permission_for_tool "masc_surface_audit" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_tool_collaboration_evidence () =
+  match Auth.permission_for_tool "masc_collaboration_evidence" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
 let test_permission_for_tool_operator_action () =
   match Auth.permission_for_tool "masc_operator_action" with
   | Some Types.CanBroadcast -> ()
@@ -445,6 +455,11 @@ let test_permission_for_tool_autoresearch_swarm_start () =
   | Some Types.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
+let test_permission_for_tool_repo_synthesis_swarm_start () =
+  match Auth.permission_for_tool "masc_repo_synthesis_swarm_start" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
 let test_permission_for_tool_autoresearch_cycle () =
   match Auth.permission_for_tool "masc_autoresearch_cycle" with
   | Some Types.CanAdmin -> ()
@@ -465,30 +480,7 @@ let test_permission_for_tool_keeper_create_from_persona () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
-let test_permission_for_tool_keeper_policy_set () =
-  match Auth.permission_for_tool "masc_keeper_policy_set" with
-  | Some Types.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
-
-let test_permission_for_tool_keeper_feedback_record () =
-  match Auth.permission_for_tool "masc_keeper_feedback_record" with
-  | Some Types.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
-
-let test_permission_for_tool_keeper_dataset_export () =
-  match Auth.permission_for_tool "masc_keeper_dataset_export" with
-  | Some Types.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
-
-let test_permission_for_tool_keeper_action_explain () =
-  match Auth.permission_for_tool "masc_keeper_action_explain" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
-let test_permission_for_tool_keeper_eval_replay () =
-  match Auth.permission_for_tool "masc_keeper_eval_replay" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
+(* keeper policy auth tests removed — policy tools no longer registered in Auth *)
 
 let test_permission_for_tool_unknown () =
   match Auth.permission_for_tool "unknown_tool_xyz" with
@@ -579,6 +571,9 @@ let () =
       test_case "observe_swarm" `Quick test_permission_for_tool_observe_swarm;
       test_case "operator_snapshot" `Quick test_permission_for_tool_operator_snapshot;
       test_case "operator_digest" `Quick test_permission_for_tool_operator_digest;
+      test_case "surface_audit" `Quick test_permission_for_tool_surface_audit;
+      test_case "collaboration_evidence" `Quick
+        test_permission_for_tool_collaboration_evidence;
       test_case "operator_action" `Quick test_permission_for_tool_operator_action;
       test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;
       test_case "persona_list" `Quick test_permission_for_tool_persona_list;
@@ -590,6 +585,8 @@ let () =
         test_permission_for_tool_autoresearch_start;
       test_case "autoresearch_swarm_start" `Quick
         test_permission_for_tool_autoresearch_swarm_start;
+      test_case "repo_synthesis_swarm_start" `Quick
+        test_permission_for_tool_repo_synthesis_swarm_start;
       test_case "autoresearch_cycle" `Quick
         test_permission_for_tool_autoresearch_cycle;
       test_case "autoresearch_inject" `Quick
@@ -598,16 +595,6 @@ let () =
         test_permission_for_tool_autoresearch_stop;
       test_case "keeper_create_from_persona" `Quick
         test_permission_for_tool_keeper_create_from_persona;
-      test_case "keeper_policy_set" `Quick
-        test_permission_for_tool_keeper_policy_set;
-      test_case "keeper_feedback_record" `Quick
-        test_permission_for_tool_keeper_feedback_record;
-      test_case "keeper_dataset_export" `Quick
-        test_permission_for_tool_keeper_dataset_export;
-      test_case "keeper_action_explain" `Quick
-        test_permission_for_tool_keeper_action_explain;
-      test_case "keeper_eval_replay" `Quick
-        test_permission_for_tool_keeper_eval_replay;
       test_case "unknown" `Quick test_permission_for_tool_unknown;
       test_case "empty" `Quick test_permission_for_tool_empty;
     ];

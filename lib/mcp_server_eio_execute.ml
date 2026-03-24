@@ -542,9 +542,30 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           worker_runner = None; clock = Some clock } in
         Tool_mdal.dispatch ctx ~name ~args:arguments
     | Mod_autoresearch ->
+        let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_
+            ~program_note:_ =
+          Team_session_engine_eio.start_session ~sw ~clock ~config
+            ~created_by:agent_name ~goal ~duration_seconds:900
+            ~execution_scope:Team_session_types.Limited_code_change
+            ~checkpoint_interval_sec:60 ~min_agents:1
+            ~scale_profile:Team_session_types.Scale_standard
+            ~control_profile:
+              Team_session_types.Control_hierarchical_quality_v1
+            ~orchestration_mode:Team_session_types.Assist
+            ~communication_mode:Team_session_types.Comm_broadcast
+            ~model_cascade:[]
+            ~fallback_policy:Team_session_types.Fallback_cascade_then_task
+            ~instruction_profile:Team_session_types.Profile_strict
+            ~alert_channel:Team_session_types.Alert_broadcast
+            ~auto_resume:true
+            ~report_formats:
+              [ Team_session_types.Markdown; Team_session_types.Json ]
+            ~agent_names:[] ~operation_id
+        in
         let ctx : Tool_autoresearch.context = { base_path = config.base_path;
           agent_name = Some agent_name; start_operation = None;
-          start_team_session = None } in
+          start_team_session = Some start_team_session;
+          config = Some config; sw = Some sw; clock = Some clock } in
         Tool_autoresearch.dispatch ctx ~name ~args:arguments
     | Mod_research ->
         let net = match state.Mcp_server.net with

@@ -47,6 +47,11 @@ let read_current_room config =
 
 (** Write current room ID *)
 let write_current_room config room_id =
+  let room_id =
+    match validate_room_id room_id with
+    | Ok room_id -> room_id
+    | Error msg -> invalid_arg ("invalid room_id: " ^ msg)
+  in
   let write_to path =
     Fs_compat.mkdir_p (Filename.dirname path);
     Fs_compat.save_file path (room_id ^ "\n")

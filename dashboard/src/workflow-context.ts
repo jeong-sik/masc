@@ -405,7 +405,7 @@ export function workflowCommandSurfaceLabel(surface?: string | null): string {
     case 'operations':
       return '작전'
     default:
-      return surface?.trim() || '지휘'
+      return surface?.trim() || '관제'
   }
 }
 

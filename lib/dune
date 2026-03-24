@@ -54,9 +54,11 @@
    dashboard_agent_relations
    dashboard_attention
    dashboard_cache
+   dashboard_collaboration_evidence
    dashboard_governance
    dashboard_governance_judge
    dashboard_operator_judge
+   dashboard_surface_readiness
    dashboard_semantics
    dashboard_utils
    dashboard_execution
@@ -88,6 +90,7 @@
    dashboard_http_keeper
    dashboard_http_mdal
    dashboard_http_autoresearch
+   dashboard_http_repo_synthesis
    dashboard_provider_runs
    proactive_refresh
    server_dashboard_http
@@ -129,6 +132,7 @@
    credits_dashboard
    cp_microarch_summary
    cp_search_fabric
+   repo_synthesis_benchmark
 
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly

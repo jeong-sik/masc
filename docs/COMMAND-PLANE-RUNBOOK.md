@@ -117,6 +117,21 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 9. `masc_operation_finalize`
    - 정상 종료 시 operation을 completed로 닫는다.
 
+### Repo Synthesis Front Door
+
+repo 질문을 바로 `operation + session + proof` spine에 올리고 싶으면 `masc_repo_synthesis_swarm_start`를 쓴다.
+
+- wrapper path:
+  - managed `coding_task/inspect` operation 생성
+  - attached team session 시작
+  - planned worker roles seed
+  - benchmark run metadata를 `.masc/repo-synthesis-benchmarks/`에 저장
+- read path:
+  - MCP가 canonical write/control
+  - dashboard는 `/api/v1/dashboard/repo-synthesis`와 proof/report artifact를 읽는 read-only surface
+- raw escape hatch:
+  - 이후 세부 조율은 `masc_dispatch_tick`, `masc_operator_digest`, `masc_team_session_step`, `masc_team_session_prove`로 내려간다.
+
 ### 첫 번째 concrete example: 12-worker live harness
 
 가장 먼저 검증할 예시는 research-radar가 아니라 `synthetic live harness`다.

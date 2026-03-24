@@ -13,7 +13,7 @@ import {
   DASHBOARD_SURFACES,
   DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
-  sectionItemsForTab,
+  visibleSectionItemsForTab,
 } from '../config/navigation'
 import { SnapshotCard } from './resident-runtime-rail'
 
@@ -148,7 +148,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         <div class="flex flex-col gap-2">
           ${DASHBOARD_SURFACES.map(surface => {
             const isSurfaceActive = surface.id === currentTab
-            const sections = sectionItemsForTab(surface.id)
+            const sections = visibleSectionItemsForTab(surface.id)
 
             if (collapsed) {
               return html`
@@ -226,7 +226,7 @@ export function TabContent() {
       `
     case 'command':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('지휘 통제 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('운영 개입 화면')}>
           <${LazyOperations} />
         <//>
       `

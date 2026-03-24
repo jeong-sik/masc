@@ -141,6 +141,11 @@
  (libraries masc_mcp alcotest yojson unix))
 
 (test
+ (name test_dashboard_repo_synthesis)
+ (modules test_dashboard_repo_synthesis)
+ (libraries masc_mcp alcotest yojson unix))
+
+(test
  (name test_dashboard_tools)
  (modules test_dashboard_tools)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
@@ -160,6 +165,16 @@
  (name test_dashboard_labels)
  (modules test_dashboard_labels)
  (libraries masc_mcp alcotest str yojson unix))
+
+(test
+ (name test_dashboard_surface_readiness)
+ (modules test_dashboard_surface_readiness)
+ (libraries masc_mcp alcotest yojson))
+
+(test
+ (name test_dashboard_collaboration_evidence)
+ (modules test_dashboard_collaboration_evidence test_tool_team_session_support)
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 (test
  (name test_masc_log)
@@ -439,6 +454,11 @@
  (modules test_cp_search_fabric_benchmark)
  (libraries masc_mcp yojson unix))
 
+(executable
+ (name test_repo_synthesis_benchmark)
+ (modules test_repo_synthesis_benchmark)
+ (libraries masc_mcp yojson unix))
+
 (test
  (name test_chain_orchestrator_eio)
  (modules test_chain_orchestrator_eio)
@@ -461,6 +481,11 @@
           test_tool_team_session_step_followup
           test_tool_team_session_misc)
  (libraries masc_mcp agent_sdk alcotest yojson unix eio eio_main))
+
+(test
+ (name test_tool_repo_synthesis)
+ (modules test_tool_repo_synthesis)
+ (libraries masc_mcp alcotest yojson unix eio eio_main mirage-crypto-rng.unix))
 
 (test
  (name test_operator_control)
@@ -915,6 +940,12 @@
  (name test_tool_permissions)
  (modules test_tool_permissions)
  (libraries masc_mcp alcotest yojson))
+
+; Autoresearch loop — deterministic autonomous cycle E2E
+(test
+ (name test_autoresearch_loop)
+ (modules test_autoresearch_loop)
+ (libraries masc_mcp alcotest eio eio_main unix yojson mirage-crypto-rng.unix))
 
 ; Keeper-Agent Tool Isolation — structural namespace separation
 (test

@@ -153,7 +153,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
         Yojson.Safe.Util.(diagnostic |> member "next_action_path" |> to_string);
       Alcotest.(check bool) "recoverable true" true
         Yojson.Safe.Util.(diagnostic |> member "recoverable" |> to_bool);
-      Alcotest.(check string) "auto team session wired" "wired"
+      Alcotest.(check string) "auto team session status" "removed"
         Yojson.Safe.Util.(
           status_json |> member "auto_team_session" |> member "status" |> to_string);
       Alcotest.(check bool) "summary present" true
@@ -254,7 +254,7 @@ initiative_post_ttl_hours = 24
         (json |> member "sources" |> member "default_source_kind" |> to_string);
       Alcotest.(check bool) "live override flagged" true
         (json |> member "sources" |> member "has_live_override" |> to_bool);
-      Alcotest.(check string) "auto team session wired" "wired"
+      Alcotest.(check string) "auto team session status" "removed"
         (json |> member "auto_team_session" |> member "status" |> to_string);
       let override_fields =
         json |> member "sources" |> member "override_fields" |> to_list

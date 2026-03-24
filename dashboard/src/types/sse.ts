@@ -237,7 +237,6 @@ export const LEGACY_TAB_REDIRECTS: Record<LegacyTabId, { tab: TabId; params?: Re
 export interface ActivityGraphNode {
   id: string
   label: string
-  type: string
   weight: number
   semantic_weight?: number
   kind: string
@@ -250,10 +249,11 @@ export interface ActivityGraphEdge {
   id?: string
   source: string
   target: string
-  type: string
-  weight: number
   kind: string
+  weight: number
   active: boolean
+  last_event_at?: string
+  meta?: Record<string, unknown>
 }
 
 export interface ActivityGraphTimelineEvent {
@@ -279,5 +279,23 @@ export interface ActivityGraphResponse {
   stats: ActivityGraphStats
   timeline: ActivityGraphTimelineEvent[]
   generated_at: string
-  window: { start: number; end: number; limit: number; room_id: string }
+  window: { limit: number; room_id: string | null; kinds: string[] }
+  stats_history?: Array<{ bucket: number; events: number; active_agents: number; tasks_done: number }>
+}
+
+// --- Swimlane types ---
+
+export interface AgentSpan {
+  agent: string
+  start_ms: number
+  end_ms: number
+  kind: string
+  label: string
+  status: string
+}
+
+export interface SwimlaneResponse {
+  agents: string[]
+  spans: AgentSpan[]
+  time_range: { min_ms: number; max_ms: number }
 }

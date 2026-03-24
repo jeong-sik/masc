@@ -59,6 +59,17 @@ let events_http_json ~deps ~state request =
   Activity_graph.json_response state.Mcp_server.room_config ?room_id ~kinds
     ~after_seq ~limit ()
 
+let parse_since_ms (raw : string) : int option =
+  let len = String.length raw in
+  if len < 2 then None
+  else
+    let suffix = raw.[len - 1] in
+    let num_str = String.sub raw 0 (len - 1) in
+    match (int_of_string_opt num_str, suffix) with
+    | Some n, 'h' -> Some (n * 3600 * 1000)
+    | Some n, 'd' -> Some (n * 24 * 3600 * 1000)
+    | _ -> None
+
 let graph_http_json ~deps ~state request =
   let room_id = room_filter deps request in
   let kinds = kind_filters deps request in
@@ -70,8 +81,18 @@ let graph_http_json ~deps ~state request =
     deps.int_query_param request "timeline_limit" ~default:80
     |> clamp ~min_v:10 ~max_v:200
   in
+  let since_ms =
+    match deps.query_param request "since" with
+    | Some raw ->
+        (match parse_since_ms raw with
+         | Some delta_ms ->
+             let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
+             Some (now_ms - delta_ms)
+         | None -> None)
+    | None -> None
+  in
   Activity_graph.graph_json state.Mcp_server.room_config ?room_id ~kinds ~limit
-    ~timeline_limit ()
+    ~timeline_limit ?since_ms ()
 
 let stream_headers ~deps origin =
   Httpun.Headers.of_list

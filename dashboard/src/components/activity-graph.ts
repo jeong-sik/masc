@@ -7,25 +7,56 @@ import { Card } from './common/card'
 import { EmptyState, LoadingState } from './common/feedback-state'
 import { ActionButton } from './common/button'
 import { TimeAgo } from './common/time-ago'
+import { Sparkline } from './common/sparkline'
 import { GraphView } from './activity-graph-view'
+import { ActivitySwimlane } from './activity-swimlane'
+import { CollapsibleSection } from './common/collapsible'
 import { fetchActivityGraph } from '../api'
 import type { ActivityGraphResponse, ActivityGraphNode, ActivityGraphTimelineEvent } from '../types'
 
 const graphData = signal<ActivityGraphResponse | null>(null)
 const graphError = signal<string | null>(null)
 const graphLoading = signal(false)
+const selectedTimeRange = signal<string>('all')
+
+const TIME_RANGES: Array<{ value: string; label: string }> = [
+  { value: '1h', label: '1시간' },
+  { value: '6h', label: '6시간' },
+  { value: '24h', label: '24시간' },
+  { value: '7d', label: '7일' },
+  { value: 'all', label: '전체' },
+]
 
 async function loadGraph() {
   if (graphLoading.value) return
   graphLoading.value = true
   graphError.value = null
   try {
-    graphData.value = await fetchActivityGraph()
+    const since = selectedTimeRange.value !== 'all' ? selectedTimeRange.value : undefined
+    graphData.value = await fetchActivityGraph(since)
   } catch (err) {
     graphError.value = err instanceof Error ? err.message : String(err)
   } finally {
     graphLoading.value = false
   }
+}
+
+function TimeRangeSelector() {
+  const current = selectedTimeRange.value
+  return html`
+    <div class="flex gap-1.5 mb-3">
+      ${TIME_RANGES.map(({ value, label }) => html`
+        <button type="button" key=${value}
+          class="px-3 py-1 text-xs rounded-full border cursor-pointer transition-all duration-150 ${
+            current === value
+              ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
+              : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'
+          }"
+          onClick=${() => { selectedTimeRange.value = value; loadGraph() }}
+        >${label}</button>
+      `)}
+    </div>
+  `
 }
 
 function kindLabel(kind: string): string {
@@ -86,32 +117,29 @@ function eventSummary(event: ActivityGraphTimelineEvent): string {
 
 function StatsRow({ data }: { data: ActivityGraphResponse }) {
   const s = data.stats
+  const h = data.stats_history ?? []
+  const evSeries = h.map(b => b.events)
+  const agSeries = h.map(b => b.active_agents)
+  const tdSeries = h.map(b => b.tasks_done)
+
+  function statCard(label: string, value: number, series: number[], color: string, highlight = false) {
+    return html`
+      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] py-[15px] px-3.5">
+        <div class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">${label}</div>
+        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums ${highlight ? 'text-[var(--ok)]' : ''}">${value}</div>
+        ${series.length >= 2 ? html`<div class="mt-2"><${Sparkline} values=${series} color=${color} /></div>` : null}
+      </div>
+    `
+  }
+
   return html`
     <div class="stats-grid grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
-      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">노드</div>
-        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.node_count}</div>
-      </div>
-      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">엣지</div>
-        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.edge_count}</div>
-      </div>
-      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">에이전트</div>
-        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.agent_count}</div>
-      </div>
-      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">활성</div>
-        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums text-[var(--ok)]">${s.active_agents}</div>
-      </div>
-      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">작업</div>
-        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.task_count}</div>
-      </div>
-      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">이벤트</div>
-        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.event_count}</div>
-      </div>
+      ${statCard('노드', s.node_count ?? 0, evSeries, '#94a3b8')}
+      ${statCard('엣지', s.edge_count ?? 0, evSeries, '#64748b')}
+      ${statCard('에이전트', s.agent_count ?? 0, agSeries, '#22d3ee')}
+      ${statCard('활성', s.active_agents ?? 0, agSeries, '#4ade80', true)}
+      ${statCard('작업', s.task_count ?? 0, tdSeries, '#fbbf24')}
+      ${statCard('이벤트', s.event_count ?? 0, evSeries, '#a78bfa')}
     </div>
   `
 }
@@ -265,15 +293,21 @@ export function ActivityGraphSurface() {
       <${Card} title="활동 그래프" class="section mb-4" testId="activity_graph.graph">
         <div class="mb-4">
           <h2 class="monitor-headline">실행 이벤트 관계 그래프</h2>
-          <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 시각화합니다. 노드 크기는 의미적 중요도를 반영합니다 (완료=5x, 생성=3x, 루틴=0.5x). 노드를 클릭하면 상세 정보를 확인할 수 있습니다.</p>
+          <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 시각화합니다. 노드 크기는 의미적 중요도를 반영합니다. 노드를 클릭하면 상세 정보를 확인할 수 있습니다.</p>
         </div>
+        <${TimeRangeSelector} />
         <${StatsRow} data=${data} />
         <${GraphView} data=${data} />
         <div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[13px]">
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
+          ${selectedTimeRange.value !== 'all' ? html`<span>필터: ${TIME_RANGES.find(r => r.value === selectedTimeRange.value)?.label}</span>` : null}
           ${data.window.room_id ? html`<span>room: ${data.window.room_id}</span>` : null}
         </div>
+      <//>
+
+      <${CollapsibleSection} title="에이전트 타임라인" open=${true}>
+        <${ActivitySwimlane} />
       <//>
 
       <div class="grid grid-cols-[minmax(0,1.08fr)_minmax(0,0.96fr)_minmax(0,0.88fr)] gap-4">

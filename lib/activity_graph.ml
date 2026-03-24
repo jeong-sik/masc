@@ -689,8 +689,12 @@ let reduce_event ~nodes ~edges (value : event) =
   | _ -> ())
 
 let graph_json config ?room_id ?(kinds = []) ?(limit = 500)
-    ?(timeline_limit = 80) () =
+    ?(timeline_limit = 80) ?since_ms () =
   let events = list_events config ?room_id ~kinds ~after_seq:0 ~limit () in
+  let events = match since_ms with
+    | Some ms -> List.filter (fun e -> e.ts_ms >= ms) events
+    | None -> events
+  in
   let nodes = Hashtbl.create 64 in
   let edges = Hashtbl.create 96 in
   List.iter (reduce_event ~nodes ~edges) events;
@@ -762,6 +766,41 @@ let graph_json config ?room_id ?(kinds = []) ?(limit = 500)
            | _ -> acc)
          0
   in
+  let stats_history =
+    let num_buckets = 12 in
+    match events with
+    | [] -> []
+    | _ ->
+        let min_ts = List.fold_left (fun m e -> min m e.ts_ms) max_int events in
+        let max_ts = List.fold_left (fun m e -> max m e.ts_ms) 0 events in
+        let range = max 1 (max_ts - min_ts) in
+        let bucket_width = max 1 (range / num_buckets) in
+        let buckets = Array.make num_buckets (0, (Hashtbl.create 4 : (string, bool) Hashtbl.t), 0) in
+        Array.iteri (fun i _ ->
+          buckets.(i) <- (0, Hashtbl.create 4, 0)
+        ) buckets;
+        List.iter (fun (e : event) ->
+          let idx = min (num_buckets - 1) ((e.ts_ms - min_ts) / bucket_width) in
+          let (count, agents_tbl, tasks_done) = buckets.(idx) in
+          let new_tasks_done = tasks_done + (if e.kind = "task.done" then 1 else 0) in
+          (match e.actor with
+           | Some actor -> Hashtbl.replace agents_tbl actor.id true
+           | None -> ());
+          buckets.(idx) <- (count + 1, agents_tbl, new_tasks_done)
+        ) events;
+        Array.to_list (Array.mapi (fun i (count, agents_tbl, tasks_done) ->
+          let bucket_start = min_ts + (i * bucket_width) in
+          let bucket_end = if i = num_buckets - 1 then max_ts else bucket_start + bucket_width in
+          `Assoc [
+            ("bucket", `Int i);
+            ("start_ms", `Int bucket_start);
+            ("end_ms", `Int bucket_end);
+            ("events", `Int count);
+            ("active_agents", `Int (Hashtbl.length agents_tbl));
+            ("tasks_done", `Int tasks_done);
+          ]
+        ) buckets)
+  in
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
@@ -787,7 +826,128 @@ let graph_json config ?room_id ?(kinds = []) ?(limit = 500)
             ("operation_count", `Int (count_kind "operation"));
             ("active_agents", `Int active_agents);
           ] );
+      ("stats_history", `List stats_history);
       ("nodes", `List nodes_json);
       ("edges", `List edges_json);
       ("timeline", `List (List.map event_to_yojson timeline));
     ]
+
+type agent_span = {
+  agent : string;
+  start_ms : int;
+  end_ms : int;
+  span_kind : string;
+  label : string;
+  span_status : string;
+}
+
+let agent_span_to_yojson (s : agent_span) =
+  `Assoc [
+    ("agent", `String s.agent);
+    ("start_ms", `Int s.start_ms);
+    ("end_ms", `Int s.end_ms);
+    ("kind", `String s.span_kind);
+    ("label", `String s.label);
+    ("status", `String s.span_status);
+  ]
+
+(* Span start events paired with their matching end events *)
+let span_start_kind = function
+  | "task.claimed" | "task.started" -> Some "task"
+  | "agent.joined" -> Some "presence"
+  | "operation.started" -> Some "operation"
+  | "keeper.autonomy_started" -> Some "autonomy"
+  | _ -> None
+
+let span_end_kind = function
+  | "task.done" | "task.released" | "task.cancelled" -> Some "task"
+  | "agent.left" | "agent.retired" -> Some "presence"
+  | "operation.finalized" | "operation.stopped" -> Some "operation"
+  | "keeper.autonomy_completed" -> Some "autonomy"
+  | _ -> None
+
+let span_end_status = function
+  | "task.done" -> "completed"
+  | "task.released" -> "released"
+  | "task.cancelled" -> "cancelled"
+  | "agent.left" -> "left"
+  | "agent.retired" -> "retired"
+  | "operation.finalized" -> "finalized"
+  | "operation.stopped" -> "stopped"
+  | "keeper.autonomy_completed" -> "completed"
+  | _ -> "ended"
+
+let agent_spans_json config ?room_id ?(limit = 500) () =
+  let events = list_events config ?room_id ~kinds:[] ~after_seq:0 ~limit () in
+  let now_ms = now_ts_ms () in
+  (* open_spans keyed by (agent_id, subject_id option) *)
+  let open_spans : (string * string option, int * string * string) Hashtbl.t =
+    Hashtbl.create 32
+  in
+  let closed_spans : agent_span list ref = ref [] in
+  let agents_set : (string, bool) Hashtbl.t = Hashtbl.create 16 in
+  List.iter (fun (e : event) ->
+    let agent_id = match e.actor with
+      | Some a -> Some a.id
+      | None -> None
+    in
+    let subject_id = match e.subject with
+      | Some s -> Some s.id
+      | None -> None
+    in
+    match agent_id with
+    | None -> ()
+    | Some aid ->
+        Hashtbl.replace agents_set aid true;
+        (match span_start_kind e.kind with
+         | Some sk ->
+             let label = match subject_id with
+               | Some sid -> sid
+               | None -> e.kind
+             in
+             Hashtbl.replace open_spans (aid, subject_id) (e.ts_ms, sk, label)
+         | None -> ());
+        (match span_end_kind e.kind with
+         | Some ek ->
+             let key = (aid, subject_id) in
+             (match Hashtbl.find_opt open_spans key with
+              | Some (start_ms, sk, label) when String.equal sk ek ->
+                  Hashtbl.remove open_spans key;
+                  closed_spans := {
+                    agent = aid;
+                    start_ms;
+                    end_ms = e.ts_ms;
+                    span_kind = sk;
+                    label;
+                    span_status = span_end_status e.kind;
+                  } :: !closed_spans
+              | _ -> ())
+         | None -> ())
+  ) events;
+  (* Close unpaired start events with now_ms *)
+  Hashtbl.iter (fun (aid, _subj) (start_ms, sk, label) ->
+    closed_spans := {
+      agent = aid;
+      start_ms;
+      end_ms = now_ms;
+      span_kind = sk;
+      label;
+      span_status = "open";
+    } :: !closed_spans
+  ) open_spans;
+  let all_spans = List.rev !closed_spans in
+  let agents = Hashtbl.fold (fun k _ acc -> k :: acc) agents_set []
+    |> List.sort String.compare
+  in
+  let min_ms = List.fold_left (fun m (s : agent_span) -> min m s.start_ms) max_int all_spans in
+  let max_ms = List.fold_left (fun m (s : agent_span) -> max m s.end_ms) 0 all_spans in
+  let time_range_min = if all_spans = [] then now_ms else min_ms in
+  let time_range_max = if all_spans = [] then now_ms else max_ms in
+  `Assoc [
+    ("agents", `List (List.map (fun a -> `String a) agents));
+    ("spans", `List (List.map agent_span_to_yojson all_spans));
+    ("time_range", `Assoc [
+      ("min_ms", `Int time_range_min);
+      ("max_ms", `Int time_range_max);
+    ]);
+  ]

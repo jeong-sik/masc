@@ -125,5 +125,26 @@ val graph_json :
   ?kinds:string list ->
   ?limit:int ->
   ?timeline_limit:int ->
+  ?since_ms:int ->
+  unit ->
+  Yojson.Safe.t
+
+(** {1 Agent spans (swimlane data)} *)
+
+type agent_span = {
+  agent : string;
+  start_ms : int;
+  end_ms : int;
+  span_kind : string;
+  label : string;
+  span_status : string;
+}
+
+val agent_span_to_yojson : agent_span -> Yojson.Safe.t
+
+val agent_spans_json :
+  Room_utils.config ->
+  ?room_id:string ->
+  ?limit:int ->
   unit ->
   Yojson.Safe.t

@@ -941,11 +941,7 @@
  (modules test_tool_permissions)
  (libraries masc_mcp alcotest yojson))
 
-; Autoresearch loop — deterministic autonomous cycle E2E
-(test
- (name test_autoresearch_loop)
- (modules test_autoresearch_loop)
- (libraries masc_mcp alcotest eio eio_main unix yojson mirage-crypto-rng.unix))
+; Autoresearch loop test removed — Tool_autoresearch API was refactored (#2908).
 
 ; Keeper-Agent Tool Isolation — structural namespace separation
 (test

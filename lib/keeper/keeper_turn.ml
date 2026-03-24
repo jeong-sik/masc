@@ -18,7 +18,6 @@ open Keeper_alerting [@@warning "-33"]
 open Keeper_exec_tools [@@warning "-33"]
 open Keeper_keepalive
 open Keeper_execution
-open Keeper_turn_session
 open Keeper_turn_setup
 
 type tool_result = Keeper_types.tool_result

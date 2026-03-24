@@ -33,8 +33,7 @@ test-contract:
 test-contract-live:
 	bash scripts/harness/contract/streamable_http_contract.sh
 	bash scripts/harness/contract/team_session_contract.sh
-	bash scripts/harness/contract/game_view_precondition.sh
-	bash scripts/harness/contract/trpg_session_contract.sh
+	bash scripts/harness/contract/golden_path_1_contract.sh
 
 # All tests: unit + contract
 test-all: test-unit test-contract

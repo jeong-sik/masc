@@ -13,11 +13,10 @@
   - 실행 진입점은 `make test` 또는 `scripts/ci-run-tests.sh "opam exec -- dune test"`를 기준으로 본다
 - `./_build/default/test/test_sse_storm_e2e.exe`
   - server executable 기반 SSE reconnect e2e
-- contract harness 4종
+- contract harness 3종
   - `scripts/harness/contract/streamable_http_contract.sh`
   - `scripts/harness/contract/team_session_contract.sh`
-  - `scripts/harness/contract/game_view_precondition.sh`
-  - `scripts/harness/contract/trpg_session_contract.sh`
+  - `scripts/harness/contract/golden_path_1_contract.sh`
 
 로컬 진입점:
 
@@ -30,8 +29,9 @@ make test-contract
 
 의도:
 
-- 기본 브랜치가 초록이면 core MCP/HTTP/team-session/TRPG 계약이 깨지지 않았다고 볼 수 있어야 한다.
+- 기본 브랜치가 초록이면 core MCP/HTTP/team-session/golden-path 계약이 깨지지 않았다고 볼 수 있어야 한다.
 - contract harness는 “서버가 이미 떠 있음”을 전제로 하지 않고 hermetic bootstrap 경로로 실행돼야 한다.
+- `archive/trpg/scripts/` 아래의 game-view/TRPG 계약 스크립트는 active CI-required contract suite가 아니라 archive/manual 성격으로 본다.
 
 ## 2. Optional Env-Gated
 
@@ -91,7 +91,7 @@ make test-contract
 
 - `make test`
 - `test_sse_storm_e2e.exe`
-- contract harness 4종
+- contract harness 3종
 
 그리고 이번 변경에서 **필수로 올리지 않는 것**은:
 

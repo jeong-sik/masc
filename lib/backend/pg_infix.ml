@@ -6,22 +6,7 @@
     prepared statement errors.
 
     Session Pooler (port 5432) and direct connections work normally with
-    the default Static prepared statement policy.
-
-    NOTE: [Room_utils.normalize_postgres_url] rewrites Supabase `:6543` to
-    `:5432` at connection time. This module mirrors that normalization so
-    the oneshot policy matches the actual port the driver connects to. *)
-
-(* Apply the same port normalization as Room_utils.normalize_postgres_url.
-   Supabase Transaction Pooler URLs on pooler.supabase.com:6543 are rewritten
-   to Session Pooler port 5432 at connection time, so the driver never actually
-   talks to port 6543. *)
-let normalize_pg_port url =
-  let uri = Uri.of_string url in
-  match Uri.host uri, Uri.port uri with
-  | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
-      Uri.with_port uri (Some 5432) |> Uri.to_string
-  | _ -> url
+    the default Static prepared statement policy. *)
 
 let use_oneshot =
   lazy
@@ -43,9 +28,8 @@ let use_oneshot =
      in
      match url with
      | None -> false
-     | Some raw_url ->
-         let url = normalize_pg_port raw_url in
-         (match Uri.port (Uri.of_string url) with
+     | Some url -> (
+         match Uri.port (Uri.of_string url) with
          | Some 6543 -> true
          | _ -> false))
 

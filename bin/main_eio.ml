@@ -282,7 +282,6 @@ let acquire_pid_lock port =
 
 let run_cmd host port base_path =
   acquire_pid_lock port;
-  Log.init_from_env ();
   Eio_main.run @@ fun env ->
   (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
   Mirage_crypto_rng_unix.use_default ();

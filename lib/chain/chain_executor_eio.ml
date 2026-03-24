@@ -713,7 +713,7 @@ let execute ~sw ~(clock : _ Eio.Time.clock) ~timeout ~trace ~(exec_fn : exec_fn)
                 (* Save checkpoint after successful node completion *)
                 (match r with
                  | Ok _ -> save_checkpoint ctx ~chain_id:plan.chain.Chain_types.id ~node_id:node.Chain_types.id
-                 | Error e -> Log.Chain.debug "node %s failed, skipping checkpoint: %s" node.Chain_types.id e);
+                 | Error _ -> ());
                 r
               end
           | Parallel nodes ->
@@ -740,7 +740,7 @@ let execute ~sw ~(clock : _ Eio.Time.clock) ~timeout ~trace ~(exec_fn : exec_fn)
                 List.iter (fun (node_id, r) ->
                   match r with
                   | Ok _ -> save_checkpoint ctx ~chain_id:plan.chain.Chain_types.id ~node_id
-                  | Error e -> Log.Chain.debug "parallel node %s failed, skipping checkpoint: %s" node_id e
+                  | Error _ -> ()
                 ) !results;
                 (* Check all succeeded *)
                 let errors = List.filter_map (fun (id, r) ->

@@ -1,6 +1,6 @@
 # masc-mcp
 
-[![Version](https://img.shields.io/badge/version-2.146.0-blue.svg)](https://github.com/jeong-sik/masc-mcp)
+[![Version](https://img.shields.io/badge/version-2.87.0-blue.svg)](https://github.com/jeong-sik/masc-mcp)
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![Status](https://img.shields.io/badge/status-Personal%20Project-lightgrey.svg)]()
 

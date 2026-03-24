@@ -119,7 +119,7 @@ let execute_mcts ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_no
     match list_nth_opt strategies node.strategy_idx with
     | None ->
         (* Invalid strategy index — treat as failed strategy *)
-        Log.Chain.error "MCTS: invalid strategy index %d (strategies=%d)"
+        Eio.traceln "[MCTS] invalid strategy index %d (strategies=%d)"
           node.strategy_idx (List.length strategies);
         0.0
     | Some strategy_node ->
@@ -224,14 +224,14 @@ let execute_mcts ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_no
         fun () ->
           match select root with
           | Error msg ->
-              Log.Chain.warn "MCTS select failed: %s" msg
+              Eio.traceln "[MCTS] select failed: %s" msg
           | Ok selected ->
           (* Protect expand with tree_mutex to prevent race on node.children *)
           let expand_result = Eio.Mutex.use_rw tree_mutex ~protect:true (fun () ->
             expand selected) in
           match expand_result with
           | Error msg ->
-              Log.Chain.warn "MCTS expand failed: %s" msg
+              Eio.traceln "[MCTS] expand failed: %s" msg
           | Ok expanded ->
           let score = simulate expanded in
           Eio.Mutex.use_rw results_mutex ~protect:true (fun () ->

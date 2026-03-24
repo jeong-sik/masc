@@ -6,7 +6,6 @@ import type {
   OperatorAttentionItem,
   OperatorGuidanceSummary,
   OperatorKeeperSnapshot,
-  PendingConfirmation,
   OperatorRecommendedAction,
   OperatorResidentJudgeRuntime,
   OperatorSessionSnapshot,
@@ -284,33 +283,6 @@ export function targetTypeLabel(value?: string | null): string {
 
 export function deliveryModeLabel(confirmRequired?: boolean): string {
   return confirmRequired ? '확인 후 실행' : '즉시 실행'
-}
-
-export type PendingQueueFilter =
-  | { kind: 'all' }
-  | { kind: 'mine' }
-  | { kind: 'actor'; actor: string }
-
-export function filterPendingConfirmations(
-  items: PendingConfirmation[],
-  currentActor: string,
-  filter: PendingQueueFilter,
-): PendingConfirmation[] {
-  switch (filter.kind) {
-    case 'all':
-      return items
-    case 'mine':
-      return items.filter(item => (item.actor ?? '').trim() === currentActor)
-    case 'actor':
-      return items.filter(item => (item.actor ?? '').trim() === filter.actor)
-  }
-}
-
-export function canManagePendingConfirmation(
-  item: PendingConfirmation,
-  currentActor: string,
-): boolean {
-  return (item.actor ?? '').trim() === currentActor
 }
 
 export function sessionActionLabel(value: typeof teamTurnKind.value): string {

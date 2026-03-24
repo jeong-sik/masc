@@ -238,14 +238,7 @@ let with_file_lock config path f =
       in
       if acquire 20 0.005 then
         Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
-          ~finally:(fun () ->
-            match backend_release_lock config ~key ~owner with
-            | Ok _ -> ()
-            | Error e ->
-              let msg = match e with
-                | Backend_core.ConnectionFailed s | KeyNotFound s
-                | OperationFailed s | BackendNotSupported s | InvalidKey s -> s in
-              Log.Room.warn "lock release failed for %s: %s" key msg)
+          ~finally:(fun () -> ignore (backend_release_lock config ~key ~owner))
           f
       else
         invalid_arg (Printf.sprintf "Failed to acquire distributed lock for key: %s (20 attempts exhausted)" key)
@@ -267,14 +260,7 @@ let with_file_lock_r config path f : ('a, masc_error) result =
       in
       if acquire 20 0.005 then
         Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
-          ~finally:(fun () ->
-            match backend_release_lock config ~key ~owner with
-            | Ok _ -> ()
-            | Error e ->
-              let msg = match e with
-                | Backend_core.ConnectionFailed s | KeyNotFound s
-                | OperationFailed s | BackendNotSupported s | InvalidKey s -> s in
-              Log.Room.warn "lock release failed for %s: %s" key msg)
+          ~finally:(fun () -> ignore (backend_release_lock config ~key ~owner))
           (fun () -> Ok (f ()))
       else
         Error (IoError (Printf.sprintf "Failed to acquire distributed lock for %s" path))

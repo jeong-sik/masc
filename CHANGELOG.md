@@ -3,17 +3,16 @@
 
 ## [Unreleased]
 
-## [2.146.0] - 2026-03-24
+## [2.145.0] - 2026-03-24
 
 ### Added
-- **Slim dashboard command-plane projection** — added an internal minimal read model for execution and mission surfaces so dashboard hot paths no longer depend on the full command-plane snapshot.
-
-### Changed
-- **Mission and execution assembly** — switched dashboard builders to lightweight operator snapshots plus cached command-plane summary inputs where available.
-- **Command-plane refresh cadence** — slowed proactive full snapshot refresh and raised its timeout budget to match observed runtime cost without changing the public `/api/v1/command-plane` contract.
+- **Dashboard delete actions** — delete board posts, goals, and tasks from the dashboard UI with confirm dialog (#2813)
 
 ### Fixed
-- **Dashboard timeout cascades** — moved operator digest and mission proactive refresh work onto offloaded readonly compute paths and stopped injecting initializing command-plane summaries into mission/digest builders.
+- **Board filter toggle** — hideAutomationPosts toggle now calls refreshBoard(), default changed to show all posts (#2813)
+- **Board UX overhaul** — visibility badges localized (internal→내부), comment expand uses signal state instead of DOM manipulation, operations section paginated, preview text extended to 250 chars (#2813)
+- **Navigation** — author name links use direct monitoring tab instead of legacy status redirect (#2813)
+- **Flaky tests** — correct operator auth status 400→401, fix SSE reconnect cooldown race condition (#2813)
 
 ## [2.144.0] - 2026-03-24
 

@@ -89,10 +89,6 @@ type available_action = {
   confirm_required : bool;
 }
 
-let make_available_action ~action_type ~target_type ~description =
-  { action_type; target_type; description;
-    confirm_required = Operator_approval.confirm_required action_type }
-
 let preview_of_pending_confirm (entry : pending_confirm) =
   `Assoc
     [
@@ -249,44 +245,84 @@ let pending_confirms_json ?actor config =
 
 let available_actions : available_action list =
   [
-    make_available_action ~action_type:"broadcast" ~target_type:"room"
-      ~description:"Use this when you need a room-wide operator broadcast.";
-    make_available_action ~action_type:"room_pause" ~target_type:"room"
-      ~description:"Use this when you need to pause room automation or spawning.";
-    make_available_action ~action_type:"room_resume" ~target_type:"room"
-      ~description:
-        "Resume a paused MASC room, allowing the orchestrator to spawn agents again. Use when the pause reason is resolved (review done, incident cleared).";
-    make_available_action ~action_type:"social_sweep" ~target_type:"room"
-      ~description:
-        "Use this when you need to run one immediate public-square social sweep and inspect which keepers acted, passed, or were system-skipped.";
-    make_available_action ~action_type:"task_inject" ~target_type:"room"
-      ~description:
-        "Use this when you need to inject a new backlog task into the room immediately.";
-    make_available_action ~action_type:"team_note" ~target_type:"team_session"
-      ~description:
-        "Use this when you need to append a non-broadcast operator note to a team session.";
-    make_available_action ~action_type:"team_broadcast"
-      ~target_type:"team_session"
-      ~description:
-        "Use this when you need a broadcast-style orchestration turn in a team session.";
-    make_available_action ~action_type:"team_task_inject"
-      ~target_type:"team_session"
-      ~description:
-        "Use this when you need to inject a new task into a running team session.";
-    make_available_action ~action_type:"team_worker_spawn_batch"
-      ~target_type:"team_session"
-      ~description:
-        "Use this when you need to spawn or replace one or more team-session workers.";
-    make_available_action ~action_type:"team_stop" ~target_type:"team_session"
-      ~description:"Use this when you need to stop a running team session.";
-    make_available_action ~action_type:"keeper_message" ~target_type:"keeper"
-      ~description:"Use this when you need to send a direct operator message to a keeper.";
-    make_available_action ~action_type:"keeper_probe" ~target_type:"keeper"
-      ~description:
-        "Use this when you need an immediate keeper diagnostic snapshot with health, silence reason, and next suggested action.";
-    make_available_action ~action_type:"keeper_recover" ~target_type:"keeper"
-      ~description:
-        "Use this when a keeper is stale, degraded, or offline and you need a safe down/up recovery with before-and-after diagnostics.";
+    {
+      action_type = "broadcast";
+      target_type = "room";
+      description = "Use this when you need a room-wide operator broadcast.";
+      confirm_required = false;
+    };
+    {
+      action_type = "room_pause";
+      target_type = "room";
+      description = "Use this when you need to pause room automation or spawning.";
+      confirm_required = true;
+    };
+    {
+      action_type = "room_resume";
+      target_type = "room";
+      description = "Resume a paused MASC room, allowing the orchestrator to spawn agents again. Use when the pause reason is resolved (review done, incident cleared).";
+      confirm_required = false;
+    };
+    {
+      action_type = "social_sweep";
+      target_type = "room";
+      description = "Use this when you need to run one immediate public-square social sweep and inspect which keepers acted, passed, or were system-skipped.";
+      confirm_required = false;
+    };
+    {
+      action_type = "task_inject";
+      target_type = "room";
+      description = "Use this when you need to inject a new backlog task into the room through a preview-confirm path.";
+      confirm_required = true;
+    };
+    {
+      action_type = "team_note";
+      target_type = "team_session";
+      description = "Use this when you need to append a non-broadcast operator note to a team session.";
+      confirm_required = false;
+    };
+    {
+      action_type = "team_broadcast";
+      target_type = "team_session";
+      description = "Use this when you need a broadcast-style orchestration turn in a team session.";
+      confirm_required = false;
+    };
+    {
+      action_type = "team_task_inject";
+      target_type = "team_session";
+      description = "Use this when you need to inject a new task into a running team session.";
+      confirm_required = true;
+    };
+    {
+      action_type = "team_worker_spawn_batch";
+      target_type = "team_session";
+      description = "Use this when you need to spawn or replace one or more team-session workers through a preview-confirm path.";
+      confirm_required = true;
+    };
+    {
+      action_type = "team_stop";
+      target_type = "team_session";
+      description = "Use this when you need to stop a running team session.";
+      confirm_required = true;
+    };
+    {
+      action_type = "keeper_message";
+      target_type = "keeper";
+      description = "Use this when you need to send a direct operator message to a keeper.";
+      confirm_required = false;
+    };
+    {
+      action_type = "keeper_probe";
+      target_type = "keeper";
+      description = "Use this when you need an immediate keeper diagnostic snapshot with health, silence reason, and next suggested action.";
+      confirm_required = false;
+    };
+    {
+      action_type = "keeper_recover";
+      target_type = "keeper";
+      description = "Use this when a keeper is stale, degraded, or offline and you need a safe down/up recovery with before-and-after diagnostics.";
+      confirm_required = false;
+    };
   ]
 
 let available_action_to_yojson (entry : available_action) =

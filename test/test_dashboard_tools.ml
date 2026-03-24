@@ -34,10 +34,9 @@ let test_dashboard_tools_projection () =
       let inventory = json |> member "tool_inventory" in
       let inventory_rows = inventory |> member "tools" |> to_list in
       let usage = json |> member "tool_usage" in
-      check bool "inventory has tools" true (List.length inventory_rows > 0);
-      (* Verify registered_count is a valid integer field *)
-      let reg_count = usage |> member "registered_count" |> to_int in
-      check bool "registered_count is non-negative" true (reg_count >= 0);
+      check bool "inventory non-empty" true (List.length inventory_rows > 0);
+      check bool "usage summary present" true
+        ((usage |> member "registered_count" |> to_int) >= 0);
       check bool "usage dispatch flag present" true
         (match usage |> member "dispatch_v2_enabled" with
          | `Bool _ -> true

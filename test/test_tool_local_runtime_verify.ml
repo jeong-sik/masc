@@ -14,7 +14,7 @@ let test_provider_health_reachable_accepts_json_health () =
 let test_classify_runtime_blocker_prefers_slot_count_when_health_ok () =
   let blocker, detail =
     Masc_mcp.Tool_local_runtime.classify_runtime_blocker ~provider_reachable:true
-      ~slot_reachable:true ~chat_contract_status:"confirmed"
+      ~slot_reachable:true
       ~expected_model:(Some "qwen3.5-35b-a3b-ud-q8-xl")
       ~actual_model_id:(Some "qwen3.5-35b-a3b-ud-q8-xl")
       ~expected_slots:(Some 12) ~actual_slots_total:4
@@ -79,36 +79,6 @@ let test_runtime_verify_prefers_oas_discovery_cache () =
       check bool "passes expected contract" true
         (result |> member "pass" |> to_bool))
 
-let test_classify_runtime_blocker_flags_chat_contract_mismatch () =
-  let blocker, detail =
-    Masc_mcp.Tool_local_runtime.classify_runtime_blocker ~provider_reachable:true
-      ~slot_reachable:true ~chat_contract_status:"rejected"
-      ~expected_model:(Some "Qwen3.5-9B-Q4_K_M.gguf")
-      ~actual_model_id:(Some "Qwen3.5-9B-Q4_K_M.gguf")
-      ~expected_slots:(Some 4) ~actual_slots_total:4
-      ~expected_ctx:(Some 131072) ~actual_ctx:(Some 131072)
-      ~chat_completion_compatible:true
-  in
-  check (option string) "chat blocker" (Some "chat_contract_incompatible")
-    blocker;
-  check bool "detail mentions chat contract" true
-    (match detail with
-    | Some msg -> String.contains msg 'c'
-    | None -> false)
-
-let test_classify_runtime_blocker_allows_unknown_chat_status () =
-  let blocker, detail =
-    Masc_mcp.Tool_local_runtime.classify_runtime_blocker ~provider_reachable:true
-      ~slot_reachable:true ~chat_contract_status:"unknown"
-      ~expected_model:(Some "Qwen3.5-9B-Q4_K_M.gguf")
-      ~actual_model_id:(Some "Qwen3.5-9B-Q4_K_M.gguf")
-      ~expected_slots:(Some 4) ~actual_slots_total:4
-      ~expected_ctx:(Some 131072) ~actual_ctx:(Some 131072)
-      ~chat_completion_compatible:true
-  in
-  check (option string) "unknown chat is not blocker" None blocker;
-  check (option string) "unknown chat detail absent" None detail
-
 let () =
   run "tool_local_runtime_verify"
     [
@@ -123,9 +93,5 @@ let () =
             test_classify_runtime_blocker_prefers_slot_count_when_health_ok;
           test_case "runtime verify prefers oas discovery cache" `Quick
             test_runtime_verify_prefers_oas_discovery_cache;
-          test_case "chat contract mismatch is reported" `Quick
-            test_classify_runtime_blocker_flags_chat_contract_mismatch;
-          test_case "unknown chat status is tolerated" `Quick
-            test_classify_runtime_blocker_allows_unknown_chat_status;
         ] );
     ]

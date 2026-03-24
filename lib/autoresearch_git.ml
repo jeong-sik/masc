@@ -77,25 +77,15 @@ let git_commit ~workdir ~message
 let git_restore_head ~workdir =
   let cmd = Printf.sprintf "cd %s && git reset --hard HEAD 2>/dev/null"
     (Filename.quote workdir) in
-  (try
-    let (status, _output) = Process_eio.run_argv_with_status ~timeout_sec:30.0
-      ["sh"; "-c"; cmd] in
-    match status with
-    | Unix.WEXITED 0 -> ()
-    | _ -> Log.Autoresearch.warn "git restore HEAD non-zero exit in %s" workdir
-   with exn -> Log.Autoresearch.warn "git restore HEAD failed in %s: %s" workdir (Printexc.to_string exn))
+  ignore (Process_eio.run_argv_with_status ~timeout_sec:30.0
+    ["sh"; "-c"; cmd])
 
 (** Reset to HEAD~1, discarding the last commit. *)
 let git_reset_last ~workdir =
   let cmd = Printf.sprintf "cd %s && git reset --hard HEAD~1 2>/dev/null"
     (Filename.quote workdir) in
-  (try
-    let (status, _output) = Process_eio.run_argv_with_status ~timeout_sec:30.0
-      ["sh"; "-c"; cmd] in
-    match status with
-    | Unix.WEXITED 0 -> ()
-    | _ -> Log.Autoresearch.warn "git reset HEAD~1 non-zero exit in %s" workdir
-   with exn -> Log.Autoresearch.warn "git reset HEAD~1 failed in %s: %s" workdir (Printexc.to_string exn))
+  ignore (Process_eio.run_argv_with_status ~timeout_sec:30.0
+    ["sh"; "-c"; cmd])
 
 (** Commit with autoresearch-formatted message. *)
 let git_commit_cycle ~workdir ~cycle ~hypothesis ~baseline =
@@ -114,9 +104,8 @@ let git_tag_best ~workdir ~cycle ~score =
   let tag = Printf.sprintf "ar-best-c%d-%.4f" cycle score in
   let cmd = Printf.sprintf "cd %s && git tag -f %s 2>/dev/null"
     (Filename.quote workdir) (Filename.quote tag) in
-  (try ignore (Process_eio.run_argv_with_status ~timeout_sec:10.0
+  ignore (Process_eio.run_argv_with_status ~timeout_sec:10.0
     ["sh"; "-c"; cmd])
-   with exn -> Log.Autoresearch.warn "git tag failed in %s: %s" workdir (Printexc.to_string exn))
 
 (** Get the git top-level directory for a workdir. *)
 let git_top_level ~workdir =

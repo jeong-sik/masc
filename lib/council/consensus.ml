@@ -290,21 +290,20 @@ let load_sessions base =
   let dir = consensus_dir base in
   if Sys.file_exists dir then
     match list_dir_safe dir with
-    | Error e -> Log.Council.debug "consensus dir listing failed: %s" e
+    | Error _ -> ()
     | Ok files ->
         List.iter (fun filename ->
           if Filename.check_suffix filename ".json" then
             let path = Filename.concat dir filename in
             match read_file_safe path with
-            | Error e -> Log.Council.debug "consensus file read failed %s: %s" filename e
+            | Error _ -> ()
             | Ok content ->
                 (try
                    let json = Yojson.Safe.from_string content in
                    match full_session_of_yojson json with
                    | Ok session -> Hashtbl.replace sessions session.id session
-                   | Error e -> Log.Council.debug "consensus session parse failed %s: %s" filename e
-                 with Yojson.Json_error msg -> Log.Council.debug "consensus JSON error %s: %s" filename msg
-                    | Failure msg -> Log.Council.debug "consensus failure %s: %s" filename msg)
+                   | Error _ -> ()
+                 with Yojson.Json_error _ | Failure _ -> ())
         ) files
 
 (** Initialize consensus with file persistence *)

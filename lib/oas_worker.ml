@@ -90,12 +90,13 @@ let resolve_provider_of_label (label : string) : Oas.Provider.config =
   match Llm_provider.Cascade_config.parse_model_string label with
   | Some pc -> Oas.Provider.config_of_provider_config pc
   | None ->
+    (* No vendor-specific fallback — use local llama via OAS round-robin *)
     Oas.Provider.config_of_provider_config
       (Llm_provider.Provider_config.make
-         ~kind:Llm_provider.Provider_config.Glm
+         ~kind:Llm_provider.Provider_config.OpenAI_compat
          ~model_id:"auto"
-         ~base_url:"https://open.bigmodel.cn/api/paas/v4"
-         ~request_path:"/chat/completions" ())
+         ~base_url:(Llm_provider.Provider_registry.next_llama_endpoint ())
+         ~request_path:"/v1/chat/completions" ())
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)

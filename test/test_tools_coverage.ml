@@ -60,7 +60,6 @@ let test_schema_has_required_fields () =
     | _ -> Alcotest.fail (Printf.sprintf "%s input_schema is not an object" schema.name)
   ) all_schemas
 
-(* TODO: activate after fixing duplicate schema names in tool registry *)
 let _test_schema_names_are_unique () =
   let names = List.map (fun s -> s.name) all_schemas in
   let unique_names = List.sort_uniq String.compare names in

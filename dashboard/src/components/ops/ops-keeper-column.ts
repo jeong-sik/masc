@@ -2,24 +2,24 @@
 
 import { html } from 'htm/preact'
 import { CARD_STANDARD } from '../common/card'
-import { ActionButton } from '../common/button'
+import { showToast } from '../common/toast'
 import { openKeeperDetail } from '../keeper-detail'
 import { findKeeper } from '../execution/shared'
 import {
-  operatorActionBusy,
   operatorActionLog,
   operatorSnapshot,
 } from '../../operator-store'
-import type { Keeper, OperatorKeeperSnapshot } from '../../types'
+import type { Keeper, OperatorActionDescriptor, OperatorKeeperSnapshot } from '../../types'
 import {
   actionTypeLabel,
   displayStatus,
-  keeperMessage,
+  executeAction,
   keeperPrioritySummary,
   keeperPriorityTone,
   relativeAge,
   selectedKeeperName,
-  submitKeeperMessage,
+  selectedSessionId,
+  targetTypeLabel,
   logEntryBorderClass,
 } from './helpers'
 
@@ -43,8 +43,8 @@ export function OpsKeeperColumn() {
   const snapshot = operatorSnapshot.value
   const keepers = snapshot?.keepers ?? []
   const persistentAgents = snapshot?.persistent_agents ?? []
+  const availableActions = snapshot?.available_actions ?? []
   const selectedKeeper = keepers.find(keeper => keeper.name === selectedKeeperName.value) ?? keepers[0] ?? null
-  const busy = operatorActionBusy.value
 
   return html`
     <div class="flex flex-col gap-4 min-w-0">
@@ -121,56 +121,51 @@ export function OpsKeeperColumn() {
       </section>
 
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0">
-        <div class="pb-2 border-b border-[var(--card-border)] mb-1">
-          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">선택한 Keeper 상태</h3>
+        <div class="flex items-center justify-between pb-2 border-b border-[var(--card-border)]">
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">액션</h3>
+          <span class="text-[12px] text-[var(--text-muted)]">${availableActions.length}개</span>
         </div>
-        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">목록에서는 상태를 보고, 직접 메시지는 아래 고급 패널에서만 보냅니다.</p>
-        ${selectedKeeper ? html`
-          <article class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-2">
-            <div class="flex justify-between items-center gap-3 max-[880px]:flex-col max-[880px]:items-start">
-              <strong>${selectedKeeper.name}</strong>
-              <span class="inline-flex items-center gap-1.5 text-[11px]">
-                <span class="w-2 h-2 rounded-full ${selectedKeeper.status === 'offline' ? 'bg-[var(--text-muted)]' : selectedKeeper.status === 'active' || selectedKeeper.status === 'running' ? 'bg-[var(--ok)]' : 'bg-[var(--warn)]'}"></span>
-                ${displayStatus(selectedKeeper.status)}
-              </span>
-            </div>
-            <div class="text-[12px] text-[var(--text-muted)] leading-[1.45]">
-              ${keeperPrioritySummary(selectedKeeper)}
-            </div>
-            <div class="text-[11px] text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis flex gap-2">
-              <span>${selectedKeeper.last_model_used ?? selectedKeeper.model ?? 'model 확인 필요'}</span>
-              <span>${typeof selectedKeeper.context_ratio === 'number' ? `${Math.round(selectedKeeper.context_ratio * 100)}% ctx` : typeof selectedKeeper.context_tokens === 'number' ? `${Math.round(selectedKeeper.context_tokens / 1000)}k tok` : 'ctx 확인 필요'}</span>
-              <span>${relativeAge(selectedKeeper.last_turn_ago_s)}</span>
-            </div>
-          </article>
-        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">먼저 keeper를 하나 고르세요.</div>`}
-
-        <details class="ops-control-disclosure mt-0.5 border border-[var(--white-8)] rounded-xl bg-[var(--white-2)]">
-          <summary class="ops-control-summary list-none cursor-pointer grid gap-1 p-3 px-3.5">
-            <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 keeper 개입</span>
-            <strong>${selectedKeeper ? `${selectedKeeper.name}에게 직접 메시지` : 'keeper를 선택하면 메시지 입력이 열립니다.'}</strong>
-            <span>상세 진단은 keeper 상세 보기에서, 직접 개입은 이 패널에서 진행합니다.</span>
-          </summary>
-
-          <div class="grid gap-3 px-3.5 pb-3.5 border-t border-[var(--white-8)]">
-            <textarea
-              class="control-textarea"
-              rows=${3}
-              placeholder="keeper에게 보낼 메시지"
-              value=${keeperMessage.value}
-              onInput=${(event: Event) => { keeperMessage.value = (event.target as HTMLTextAreaElement).value }}
-              disabled=${busy || !selectedKeeper}
-            ></textarea>
-            <div class="control-row items-stretch">
-              <${ActionButton} variant="primary" size="lg" onClick=${() => { void submitKeeperMessage() }} disabled=${busy || !selectedKeeper || !keeperMessage.value.trim()}>
-                메시지 보내기
-              <//>
-              <span class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">
-                현재 선택한 keeper에만 적용됩니다.
-              </span>
-            </div>
-          </div>
-        </details>
+        ${availableActions.length
+          ? html`<div class="flex flex-col gap-2">
+              ${['room', 'keeper', 'team_session'].map(targetType => {
+                const group = availableActions.filter((a: OperatorActionDescriptor) => a.target_type === targetType)
+                if (group.length === 0) return null
+                return html`
+                  <div key=${targetType}>
+                    <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">${targetTypeLabel(targetType)}</div>
+                    <div class="flex flex-wrap gap-1">
+                      ${group.map((action: OperatorActionDescriptor) => html`
+                        <button type="button" key=${action.action_type}
+                          type="button"
+                          title=${action.description ?? ''}
+                          onClick=${() => {
+                            const targetId =
+                              action.target_type === 'keeper' ? selectedKeeperName.value
+                              : action.target_type === 'team_session' ? selectedSessionId.value
+                              : undefined
+                            if ((action.target_type === 'keeper' || action.target_type === 'team_session') && !targetId) {
+                              const what = action.target_type === 'keeper' ? 'keeper' : '세션'
+                              showToast(`먼저 ${what}를 선택하세요`, 'warning')
+                              return
+                            }
+                            void executeAction({
+                              action_type: action.action_type as Parameters<typeof executeAction>[0]['action_type'],
+                              target_type: action.target_type as 'room' | 'team_session' | 'keeper',
+                              target_id: targetId,
+                              payload: {},
+                              successMessage: `${actionTypeLabel(action.action_type)} 실행 완료`,
+                            })
+                          }}
+                          class="text-[12px] px-2 py-0.5 rounded cursor-pointer hover:brightness-125 transition-all ${action.confirm_required ? 'bg-[var(--warn-12)] border border-[var(--warn-28)] text-[var(--warn)]' : 'bg-[var(--accent-8)] border border-[var(--accent-12)] text-[var(--accent)]'}">
+                          ${actionTypeLabel(action.action_type)}
+                        </button>
+                      `)}
+                    </div>
+                  </div>
+                `
+              })}
+            </div>`
+          : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">액션 없음</div>`}
       </section>
 
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0">

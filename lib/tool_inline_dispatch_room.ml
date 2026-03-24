@@ -272,7 +272,7 @@ let handle_join (ctx : context) : result option =
          | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
-             Log.Institution.warn "Unexpected institution error: %s" (Printexc.to_string exn); "")
+             Eio.traceln "[WARN] Unexpected institution error: %s" (Printexc.to_string exn); "")
     | None -> ""
   in
   let final_result = if institution_welcome = "" then result

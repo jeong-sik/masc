@@ -84,7 +84,7 @@ let debug_enabled () =
   | _ -> false
 
 let debug_log fmt =
-  if debug_enabled () then Printf.ksprintf (fun msg -> Log.LocalWorker.debug "%s" msg) fmt
+  if debug_enabled () then Printf.ksprintf (fun msg -> Eio.traceln "[local_runtime_pool] %s" msg) fmt
   else Printf.ksprintf (fun _ -> ()) fmt
 
 let empty_pool = {
@@ -318,7 +318,7 @@ let load_runtimes_from_env () =
       let runtimes = List.map runtime_of_endpoint_url endpoints in
       if runtimes = [] then ([ default_runtime () ], []) else (runtimes, [])
 
-(* ensure_loaded: the only function that may yield (debug_log calls Log.LocalWorker.debug).
+(* ensure_loaded: the only function that may yield (debug_log calls Eio.traceln).
    Yield happens AFTER the ref swap, so callers reading !pool after this
    function returns see a consistent snapshot. *)
 let ensure_loaded () =
@@ -502,7 +502,7 @@ let select_runtime ?preferred_pool ?model_name () =
   ensure_loaded ();
   select_runtime_from (!pool).runtimes ?preferred_pool ?model_name ()
 
-(* acquire: ensure_loaded may yield (Log.LocalWorker.debug inside debug_log).
+(* acquire: ensure_loaded may yield (Eio.traceln inside debug_log).
    After that, reading !pool and swapping pool := are yield-free. *)
 let acquire ?preferred_pool ~model_name () =
   ensure_loaded ();

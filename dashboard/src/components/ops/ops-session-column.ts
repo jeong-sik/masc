@@ -247,13 +247,26 @@ export function OpsSessionColumn() {
 
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
-          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">선택한 Session 상태</h3>
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">선택한 Session 액션</h3>
         </div>
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">
           ${selectedSessionActionable
-            ? '기본은 읽기만 하고, 실제 세션 개입은 아래 고급 패널에서만 합니다.'
+            ? '선택한 live 세션에만 메모, 작업, 체크포인트, 중지 요청을 보냅니다.'
             : '종료된 세션은 여기서 읽기만 하고, 실제 개입은 위 live 세션을 다시 골라서 진행합니다.'}
         </p>
+        ${availableSessionActions.length > 0 ? html`
+          <div class="flex flex-col gap-2">
+            ${availableSessionActions.map(action => html`
+              <article key=${action.action_type} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
+                <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                  <strong>${actionTypeLabel(action.action_type)}</strong>
+                  <span>${deliveryModeLabel(action.confirm_required)}</span>
+                </div>
+                <div class="mt-1.5 whitespace-pre-wrap break-words">${action.description ?? '설명 확인 필요'}</div>
+              </article>
+            `)}
+          </div>
+        ` : null}
 
         ${selectedSession ? html`
           <div class="flex flex-col gap-2">
@@ -302,135 +315,118 @@ export function OpsSessionColumn() {
           <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">이 세션은 이미 종료돼서 새 노트, 작업, 중지를 보내지 않습니다. 위의 live 세션을 선택하세요.</div>
         ` : null}
 
-        <details class="ops-control-disclosure mt-0.5 border border-[var(--white-8)] rounded-xl bg-[var(--white-2)]">
-          <summary class="ops-control-summary list-none cursor-pointer grid gap-1 p-3 px-3.5">
-            <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 세션 개입</span>
-            <strong>${selectedSessionActionable ? '노트, 방송, 작업 주입, worker 교체, 중지' : '읽기 전용 세션은 여기서도 실행되지 않습니다.'}</strong>
-            <span>${selectedSessionActionable ? '선택한 live 세션에만 적용합니다.' : '실제 개입은 위 live 세션을 다시 선택한 뒤 진행하세요.'}</span>
-          </summary>
-
-          <div class="grid gap-3 px-3.5 pb-3.5 border-t border-[var(--white-8)]">
-            ${availableSessionActions.length > 0 ? html`
-              <div class="text-[12px] text-[var(--text-muted)] leading-[1.45]">
-                지원 액션:
-                ${availableSessionActions.map(action => `${actionTypeLabel(action.action_type)} (${deliveryModeLabel(action.confirm_required)})`).join(', ')}
-              </div>
-            ` : null}
-
-            ${linkedAutoresearch?.loop_id ? html`
-              <label class="control-label" for="ops-autoresearch-hypothesis">Autoresearch 제어</label>
-              <div class="control-row items-stretch">
-                <${ActionButton} variant="ghost" size="lg" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
-                  상태 새로고침
-                <//>
-                <${ActionButton} variant="primary" size="lg" onClick=${() => { void cycleAutoresearch() }} disabled=${busy}>
-                  1 cycle 실행
-                <//>
-                <${ActionButton} variant="ghost" size="lg" onClick=${() => { void stopAutoresearch() }} disabled=${busy}>
-                  loop 중지
-                <//>
-              </div>
-              <textarea
-                id="ops-autoresearch-hypothesis"
-                class="control-textarea"
-                rows=${2}
-                placeholder="다음 cycle에 넣을 hypothesis"
-                value=${autoresearchHypothesis.value}
-                onInput=${(event: Event) => { autoresearchHypothesis.value = (event.target as HTMLTextAreaElement).value }}
-                disabled=${busy}
-              ></textarea>
-              <div class="control-row items-stretch">
-                <${ActionButton} variant="primary" size="lg" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
-                  hypothesis 주입
-                <//>
-                <span class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
-              </div>
-              ${autoresearchError.value ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">${autoresearchError.value}</div>` : null}
-            ` : null}
-
-            <label class="control-label" for="ops-turn-kind">세션 액션</label>
-            <div class="control-row items-stretch">
-              <select
-                id="ops-turn-kind"
-                class="control-input min-w-[92px]"
-                value=${teamTurnKind.value}
-                onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
-                disabled=${busy || !selectedSessionActionable}
-              >
-                <option value="note">노트</option>
-                <option value="broadcast">방송</option>
-                <option value="task">작업</option>
-                <option value="worker_spawn_batch">worker 교체</option>
-              </select>
-              <${ActionButton} variant="primary" size="lg" onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSessionActionable}>
-                적용
-              <//>
-            </div>
-            <div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">현재 선택: ${sessionActionLabel(teamTurnKind.value)}</div>
-
-            <textarea
-              class="control-textarea"
-              rows=${3}
-              placeholder="세션에 남길 메시지"
-              value=${teamMessage.value}
-              onInput=${(event: Event) => { teamMessage.value = (event.target as HTMLTextAreaElement).value }}
-              disabled=${busy || !selectedSessionActionable}
-            ></textarea>
-
-            ${teamTurnKind.value === 'task' ? html`
-              <input
-                class="control-input"
-                type="text"
-                placeholder="주입할 작업 제목"
-                value=${teamTaskTitle.value}
-                onInput=${(event: Event) => { teamTaskTitle.value = (event.target as HTMLInputElement).value }}
-                disabled=${busy || !selectedSessionActionable}
-              />
-              <textarea
-                class="control-textarea"
-                rows=${2}
-                placeholder="주입할 작업 설명"
-                value=${teamTaskDescription.value}
-                onInput=${(event: Event) => { teamTaskDescription.value = (event.target as HTMLTextAreaElement).value }}
-                disabled=${busy || !selectedSessionActionable}
-              ></textarea>
-              <select
-                class="control-input min-w-[92px]"
-                value=${teamTaskPriority.value}
-                onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
-                disabled=${busy || !selectedSessionActionable}
-              >
-                <option value="1">P1</option>
-                <option value="2">P2</option>
-                <option value="3">P3</option>
-                <option value="4">P4</option>
-                <option value="5">P5</option>
-              </select>
-            ` : teamTurnKind.value === 'worker_spawn_batch' ? html`
-              <textarea
-                class="control-textarea"
-                rows=${6}
-                placeholder='spawn_batch JSON, 예: [{"spawn_agent":"llama","spawn_prompt":"...", "spawn_role":"replacement"}]'
-                value=${teamSpawnBatchJson.value}
-                onInput=${(event: Event) => { teamSpawnBatchJson.value = (event.target as HTMLTextAreaElement).value }}
-                disabled=${busy || !selectedSessionActionable}
-              ></textarea>
-            ` : null}
-
-            <div class="control-row items-stretch">
-              <input
-                class="control-input"
-                type="text"
-                value=${teamStopReason.value}
-                onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
-                disabled=${busy || !selectedSessionActionable}
-              />
-              <${ActionButton} variant="ghost" size="lg" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSessionActionable}>
-                세션 중지
-              <//>
-            </div>
+        ${linkedAutoresearch?.loop_id ? html`
+          <label class="control-label" for="ops-autoresearch-hypothesis">Autoresearch 제어</label>
+          <div class="control-row items-stretch">
+            <${ActionButton} variant="ghost" size="lg" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
+              상태 새로고침
+            <//>
+            <${ActionButton} variant="primary" size="lg" onClick=${() => { void cycleAutoresearch() }} disabled=${busy}>
+              1 cycle 실행
+            <//>
+            <${ActionButton} variant="ghost" size="lg" onClick=${() => { void stopAutoresearch() }} disabled=${busy}>
+              loop 중지
+            <//>
           </div>
-        </details>
+          <textarea
+            id="ops-autoresearch-hypothesis"
+            class="control-textarea"
+            rows=${2}
+            placeholder="다음 cycle에 넣을 hypothesis"
+            value=${autoresearchHypothesis.value}
+            onInput=${(event: Event) => { autoresearchHypothesis.value = (event.target as HTMLTextAreaElement).value }}
+            disabled=${busy}
+          ></textarea>
+          <div class="control-row items-stretch">
+            <${ActionButton} variant="primary" size="lg" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
+              hypothesis 주입
+            <//>
+            <span class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
+          </div>
+          ${autoresearchError.value ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">${autoresearchError.value}</div>` : null}
+        ` : null}
+
+        <label class="control-label" for="ops-turn-kind">세션 액션</label>
+        <div class="control-row items-stretch">
+          <select
+            id="ops-turn-kind"
+            class="control-input min-w-[92px]"
+            value=${teamTurnKind.value}
+            onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
+            disabled=${busy || !selectedSessionActionable}
+          >
+            <option value="note">노트</option>
+            <option value="broadcast">방송</option>
+            <option value="task">작업</option>
+            <option value="worker_spawn_batch">worker 교체</option>
+          </select>
+          <${ActionButton} variant="primary" size="lg" onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSessionActionable}>
+            적용
+          <//>
+        </div>
+        <div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">현재 선택: ${sessionActionLabel(teamTurnKind.value)}</div>
+
+        <textarea
+          class="control-textarea"
+          rows=${3}
+          placeholder="세션에 남길 메시지"
+          value=${teamMessage.value}
+          onInput=${(event: Event) => { teamMessage.value = (event.target as HTMLTextAreaElement).value }}
+          disabled=${busy || !selectedSessionActionable}
+        ></textarea>
+
+        ${teamTurnKind.value === 'task' ? html`
+          <input
+            class="control-input"
+            type="text"
+            placeholder="주입할 작업 제목"
+            value=${teamTaskTitle.value}
+            onInput=${(event: Event) => { teamTaskTitle.value = (event.target as HTMLInputElement).value }}
+            disabled=${busy || !selectedSessionActionable}
+          />
+          <textarea
+            class="control-textarea"
+            rows=${2}
+            placeholder="주입할 작업 설명"
+            value=${teamTaskDescription.value}
+            onInput=${(event: Event) => { teamTaskDescription.value = (event.target as HTMLTextAreaElement).value }}
+            disabled=${busy || !selectedSessionActionable}
+          ></textarea>
+          <select
+            class="control-input min-w-[92px]"
+            value=${teamTaskPriority.value}
+            onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
+            disabled=${busy || !selectedSessionActionable}
+          >
+            <option value="1">P1</option>
+            <option value="2">P2</option>
+            <option value="3">P3</option>
+            <option value="4">P4</option>
+            <option value="5">P5</option>
+          </select>
+        ` : teamTurnKind.value === 'worker_spawn_batch' ? html`
+          <textarea
+            class="control-textarea"
+            rows=${6}
+            placeholder='spawn_batch JSON, 예: [{"spawn_agent":"llama","spawn_prompt":"...", "spawn_role":"replacement"}]'
+            value=${teamSpawnBatchJson.value}
+            onInput=${(event: Event) => { teamSpawnBatchJson.value = (event.target as HTMLTextAreaElement).value }}
+            disabled=${busy || !selectedSessionActionable}
+          ></textarea>
+        ` : null}
+
+        <div class="control-row items-stretch">
+          <input
+            class="control-input"
+            type="text"
+            value=${teamStopReason.value}
+            onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
+            disabled=${busy || !selectedSessionActionable}
+          />
+          <${ActionButton} variant="ghost" size="lg" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSessionActionable}>
+            세션 중지
+          <//>
+        </div>
       </section>
     </div>
   `

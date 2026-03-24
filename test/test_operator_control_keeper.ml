@@ -67,21 +67,7 @@ let test_snapshot_exposes_keeper_and_social_actions () =
           Alcotest.(check string) "worker spawn batch target_type" "team_session"
             Yojson.Safe.Util.(worker_spawn_batch |> member "target_type" |> to_string);
           Alcotest.(check bool) "worker spawn batch confirm true" true
-            Yojson.Safe.Util.(worker_spawn_batch |> member "confirm_required" |> to_bool);
-          let task_inject =
-            match find_action "task_inject" with
-            | Some row -> row
-            | None -> Alcotest.fail "expected task_inject in available_actions"
-          in
-          Alcotest.(check bool) "task inject confirm false" false
-            Yojson.Safe.Util.(task_inject |> member "confirm_required" |> to_bool);
-          let team_stop =
-            match find_action "team_stop" with
-            | Some row -> row
-            | None -> Alcotest.fail "expected team_stop in available_actions"
-          in
-          Alcotest.(check bool) "team stop confirm true" true
-            Yojson.Safe.Util.(team_stop |> member "confirm_required" |> to_bool))
+            Yojson.Safe.Util.(worker_spawn_batch |> member "confirm_required" |> to_bool))
 
 let test_keeper_status_exposes_summary_and_recoverable () =
   Eio_main.run @@ fun env ->

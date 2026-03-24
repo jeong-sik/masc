@@ -49,43 +49,6 @@ let http_get_json_with_status ?(timeout_sec = 10) url =
       with Yojson.Json_error msg ->
         Error (Printf.sprintf "invalid json from %s: %s" url msg))
 
-let http_post_json_text_with_status ~timeout_sec ~url ~body_json =
-  let status, body =
-    Process_eio.run_argv_with_status
-      [
-        "curl";
-        "-sS";
-        "--http1.1";
-        "--max-time";
-        string_of_int (max 1 timeout_sec);
-        "-H";
-        "Content-Type: application/json";
-        "-d";
-        body_json;
-        "-w";
-        "\n%{http_code}";
-        url;
-      ]
-  in
-  match status with
-  | Unix.WEXITED 0 ->
-      let payload, http_status = split_http_body_and_status body in
-      Ok (http_status, payload)
-  | Unix.WEXITED code ->
-      Error (Printf.sprintf "curl exit code %d for %s" code url)
-  | Unix.WSIGNALED sig_num ->
-      Error (Printf.sprintf "curl signal %d for %s" sig_num url)
-  | Unix.WSTOPPED sig_num ->
-      Error (Printf.sprintf "curl stopped %d for %s" sig_num url)
-
-let http_post_json_with_status ~timeout_sec ~url ~body_json =
-  match http_post_json_text_with_status ~timeout_sec ~url ~body_json with
-  | Error _ as err -> err
-  | Ok (http_status, payload) -> (
-      try Ok (http_status, Yojson.Safe.from_string payload)
-      with Yojson.Json_error msg ->
-        Error (Printf.sprintf "invalid json from %s: %s" url msg))
-
 let int_member json key =
   let open Yojson.Safe.Util in
   match member key json with

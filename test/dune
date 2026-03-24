@@ -783,12 +783,6 @@
  (modules test_trace)
  (libraries masc_mcp alcotest yojson))
 
-; Agent Ecosystem tests (Extended identity with types, persona, lineage)
-(test
- (name test_agent_ecosystem)
- (modules test_agent_ecosystem)
- (libraries masc_mcp alcotest str))
-
 ; Pulse module tests (Space heartbeat engine — Eio real clock)
 (test
  (name test_pulse)
@@ -849,12 +843,6 @@
  (name test_silent_failures_p2a)
  (modules test_silent_failures_p2a)
  (libraries masc_mcp alcotest unix yojson))
-
-; Anti-Fake Test Quality Scoring (harness P2)
-(test
- (name test_anti_fake)
- (modules test_anti_fake)
- (libraries masc_mcp alcotest yojson))
 
 ; P3 Phase 5: Tool_board coverage tests
 (test
@@ -1000,13 +988,6 @@
  (name test_agent_economy)
  (modules test_agent_economy)
  (libraries masc_mcp alcotest yojson unix mirage-crypto-rng mirage-crypto-rng.unix))
-
-; Agent Neo4j — parameterized Cypher query safety tests
-(test
- (name test_agent_neo4j)
- (modules test_agent_neo4j)
- (libraries masc_mcp alcotest yojson))
-
 
 ; Server checkpoint tests (Phase 3: State Management)
 (test

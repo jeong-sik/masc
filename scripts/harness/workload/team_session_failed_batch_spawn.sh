@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 SERVER_EXE="${SERVER_EXE:-${ROOT_DIR}/_build/default/bin/main_eio.exe}"
 PORT="${PORT:-}"
 BASE_PATH="${BASE_PATH:-}"
@@ -76,6 +76,8 @@ if [ -z "$LOG_FILE" ]; then
 else
   LOG_FILE_WAS_EXPLICIT="true"
 fi
+HARNESS_LOG_FILE="${HARNESS_LOG_FILE:-$LOG_FILE}"
+MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
 
 MCP_URL="http://127.0.0.1:${PORT}/mcp"
 OPERATOR_URL="http://127.0.0.1:${PORT}/mcp/operator"
@@ -83,36 +85,6 @@ SERVER_PID=""
 
 read_file() {
   cat "$1"
-}
-
-jsonrpc_call() {
-  local session_id="$1"
-  local token="$2"
-  local id="$3"
-  local method="$4"
-  local params="$5"
-  local endpoint="${6:-$MCP_URL}"
-  local body_file
-  body_file="$(mktemp "${TMPDIR:-/tmp}/masc-jsonrpc-body.XXXXXX.json")"
-  printf '{"jsonrpc":"2.0","id":%s,"method":"%s","params":%s}' "$id" "$method" "$params" >"$body_file"
-  local cmd=(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$endpoint" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -H "Mcp-Session-Id: $session_id" \
-    --data-binary "@$body_file")
-  if [ -n "$token" ]; then
-    cmd+=( -H "Authorization: Bearer $token" )
-  fi
-  local response
-  set +e
-  response="$("${cmd[@]}")"
-  local curl_status=$?
-  set -e
-  rm -f "$body_file"
-  if [ "$curl_status" -ne 0 ]; then
-    return "$curl_status"
-  fi
-  jsonrpc_normalize_response "$response" "$id"
 }
 
 allocate_port() {
@@ -132,56 +104,33 @@ call_tool() {
   local tool_name="$4"
   local args_json="$5"
   local endpoint="${6:-$MCP_URL}"
-  jsonrpc_call "$session_id" "$token" "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}" "$endpoint"
+  mcp_call_tool "$id" "$tool_name" "$args_json" "$session_id" "$token" "$endpoint"
 }
 
 extract_tool_text() {
-  jq -r 'try (.result.content[0].text) catch empty'
+  mcp_extract_text
 }
 
 extract_tool_result() {
-  jq -c 'try (.result.content[0].text | fromjson | if has("result") and .result != null then .result else . end) catch empty'
-}
-
-extract_response_error() {
-  jq -r 'if (.error | type) == "object" and (.error.message | type) == "string" then .error.message else empty end'
-}
-
-extract_is_error() {
-  jq -r 'try (.result.isError) catch "false"'
+  mcp_extract_result
 }
 
 require_json() {
   local payload="$1"
-  if ! printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
-    echo "FAIL: invalid JSON payload"
-    printf '%s\n' "$payload"
-    exit 1
-  fi
+  local label="${2:-team_session_failed_batch_spawn}"
+  mcp_require_json "$payload" "$label"
 }
 
 require_success_response() {
   local payload="$1"
-  require_json "$payload"
-  local err
-  err="$(printf '%s' "$payload" | extract_response_error)"
-  if [ -n "$err" ]; then
-    echo "FAIL: JSON-RPC error: $err"
-    printf '%s\n' "$payload"
-    exit 1
-  fi
+  local label="${2:-team_session_failed_batch_spawn response}"
+  mcp_require_jsonrpc_ok "$payload" "$label"
 }
 
 require_tool_success() {
   local payload="$1"
-  require_success_response "$payload"
-  local is_error
-  is_error="$(printf '%s' "$payload" | extract_is_error)"
-  if [ "$is_error" = "true" ]; then
-    echo "FAIL: tool returned isError=true"
-    printf '%s\n' "$payload" | extract_tool_text
-    exit 1
-  fi
+  local label="${2:-team_session_failed_batch_spawn tool}"
+  mcp_require_tool_ok "$payload" "$label"
 }
 
 require_json_condition() {

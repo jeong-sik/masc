@@ -99,6 +99,51 @@ let test_triage_idle_without_goals_skips () =
   | D.Triggered _ ->
       fail "idle without goals should not trigger"
 
+let test_triage_board_new_posts () =
+  let obs = { base_obs with board_new_post_count = 3 } in
+  match D.triage obs with
+  | D.Skip _ -> fail "expected Triggered for new board posts"
+  | D.Triggered triggers ->
+      let has_new_posts =
+        List.exists
+          (function D.BoardActivity "new_posts" -> true | _ -> false)
+          triggers
+      in
+      check bool "contains BoardActivity new_posts" true has_new_posts
+
+let test_triage_board_new_posts_not_when_mentioned () =
+  (* When mention_count > 0, the "mentioned_in_post" trigger fires instead *)
+  let obs = { base_obs with board_new_post_count = 2; board_mention_count = 1 } in
+  match D.triage obs with
+  | D.Skip _ -> fail "expected Triggered for board mention"
+  | D.Triggered triggers ->
+      let has_new_posts =
+        List.exists
+          (function D.BoardActivity "new_posts" -> true | _ -> false)
+          triggers
+      in
+      let has_mentioned =
+        List.exists
+          (function D.BoardActivity "mentioned_in_post" -> true | _ -> false)
+          triggers
+      in
+      check bool "no new_posts when mentioned" false has_new_posts;
+      check bool "has mentioned_in_post" true has_mentioned
+
+let test_triage_board_idle_share () =
+  let obs =
+    { base_obs with idle_seconds = 3100; idle_gate = 300; board_new_post_count = 0 }
+  in
+  match D.triage obs with
+  | D.Skip _ -> fail "expected Triggered for idle_share"
+  | D.Triggered triggers ->
+      let has_idle_share =
+        List.exists
+          (function D.BoardActivity "idle_share" -> true | _ -> false)
+          triggers
+      in
+      check bool "contains BoardActivity idle_share" true has_idle_share
+
 let test_triage_multiple_triggers () =
   let obs =
     { base_obs with
@@ -781,6 +826,12 @@ let () =
             test_triage_agent_change;
           test_case "board mention triggers" `Quick
             test_triage_board_mention;
+          test_case "board new posts triggers" `Quick
+            test_triage_board_new_posts;
+          test_case "board new posts suppressed when mentioned" `Quick
+            test_triage_board_new_posts_not_when_mentioned;
+          test_case "board idle share triggers" `Quick
+            test_triage_board_idle_share;
           test_case "idle with goals triggers" `Quick
             test_triage_idle_with_goals;
           test_case "idle without goals skips" `Quick

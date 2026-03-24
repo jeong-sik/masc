@@ -69,7 +69,7 @@ let run_turn
     ~(user_message : string)
     ~(cascade_name : string)
     ~(generation : int)
-    ?(max_turns : int = 10)
+    ?(max_turns : int = 50)
     ?(history_user_source = "direct_user")
     ?(history_assistant_source = "direct_assistant")
     ?guardrails

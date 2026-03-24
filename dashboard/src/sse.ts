@@ -132,6 +132,18 @@ let source: EventSource | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempts = 0
 
+export function buildDashboardSseUrl(sessionId: string, locationSearch = window.location.search): string {
+  const urlParams = new URLSearchParams(locationSearch)
+  const sseParams = new URLSearchParams()
+  const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
+  const token = urlParams.get('token')
+  if (agent) sseParams.set('agent', agent)
+  if (token) sseParams.set('token', token)
+  sseParams.set('session_id', sessionId)
+  sseParams.set('sse_kind', 'observer')
+  return `/mcp?${sseParams.toString()}`
+}
+
 function clearReconnectTimer(): void {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
@@ -157,15 +169,7 @@ export function connectSSE(): void {
     source = null
   }
 
-  const urlParams = new URLSearchParams(window.location.search)
-  const sseParams = new URLSearchParams()
-  const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
-  const token = urlParams.get('token')
-  if (agent) sseParams.set('agent', agent)
-  if (token) sseParams.set('token', token)
-  sseParams.set('session_id', getOrCreateSessionId())
-
-  const sseUrl = sseParams.toString() ? `/sse?${sseParams.toString()}` : '/sse'
+  const sseUrl = buildDashboardSseUrl(getOrCreateSessionId())
   const es = new EventSource(sseUrl)
   source = es
 

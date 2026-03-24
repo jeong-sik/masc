@@ -272,30 +272,10 @@ let append_keeper_auto_team_session_note (ctx : _ context) (meta : keeper_meta)
     | Some refreshed -> Ok refreshed
     | None -> Error ("team session disappeared after note: " ^ session.session_id)
 
-let maybe_handle_auto_team_session (ctx : _ context) (meta : keeper_meta)
-    (message : string) :
+(* Auto team_session interception removed — keeper decides autonomously
+   via Agent.run() and tool calls. Stub kept for backward compatibility
+   until keeper_turn_session.ml is fully cleaned up. *)
+let maybe_handle_auto_team_session (_ctx : _ context) (meta : keeper_meta)
+    (_message : string) :
     ((tool_result option * keeper_meta), string) result =
-  if not (Keeper_status_bridge.auto_team_session_enabled meta) then
-    Ok (None, meta)
-  else
-    let linked_meta, running_session = running_session_for_keeper ctx.config meta in
-    match running_session with
-    | Some session -> (
-        match append_keeper_auto_team_session_note ctx linked_meta session message with
-        | Error err -> Error err
-        | Ok session' ->
-            let json =
-              keeper_auto_team_session_response_json
-                ~meta:linked_meta ~session:session' ~created:false ~reused:true ()
-            in
-            Ok (Some (true, Yojson.Safe.pretty_to_string json), linked_meta))
-    | None -> (
-        match start_keeper_auto_team_session ctx linked_meta message with
-        | Error err -> Error err
-        | Ok (updated_meta, session, spawn_error) ->
-            let json =
-              keeper_auto_team_session_response_json
-                ~meta:updated_meta ~session ~created:true ~reused:false
-                ?spawn_error ()
-            in
-            Ok (Some (true, Yojson.Safe.pretty_to_string json), updated_meta))
+  Ok (None, meta)

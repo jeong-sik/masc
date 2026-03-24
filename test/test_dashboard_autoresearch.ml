@@ -136,11 +136,11 @@ let test_loops_json_skips_invalid_persisted_state () =
   let json =
     Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
   in
-  (* Partial state.json (only loop_id+status) is accepted with defaults
-     for missing fields.  The dashboard includes it as a valid loop. *)
-  check int "partial state accepted" 1
+  (* Partial state.json (only loop_id+status) is rejected by strict
+     schema validation in load_state. Dashboard skips invalid entries. *)
+  check int "partial state rejected" 0
     Yojson.Safe.Util.(json |> member "total" |> to_int);
-  check int "loop entry present" 1
+  check int "no loop entries" 0
     Yojson.Safe.Util.(json |> member "loops" |> to_list |> List.length)
 
 let test_loops_json_skips_legacy_persisted_state () =

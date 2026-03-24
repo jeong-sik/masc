@@ -1465,7 +1465,6 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~extra:
         [
           ("notes", `String "Completed alias-reuse-task implementation and verified");
-          ("force", `Bool true);
         ]
       "done"
   in

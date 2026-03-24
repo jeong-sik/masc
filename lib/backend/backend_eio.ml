@@ -177,19 +177,55 @@ module FileSystem = struct
     )
 
   (** List keys with prefix *)
+  let starts_with ~prefix value =
+    let prefix_len = String.length prefix in
+    String.length value >= prefix_len
+    && String.sub value 0 prefix_len = prefix
+
+  let normalize_prefix_for_scan prefix =
+    let len = String.length prefix in
+    if len > 0 && prefix.[len - 1] = ':' then
+      String.sub prefix 0 (len - 1)
+    else
+      prefix
+
+  let rec collect_keys_under ~requested_prefix ~logical_prefix path acc =
+    match Eio.Path.kind ~follow:true path with
+    | `Directory ->
+        Eio.Path.read_dir path
+        |> List.fold_left
+             (fun acc name ->
+               let child_prefix =
+                 if logical_prefix = "" then name else logical_prefix ^ ":" ^ name
+               in
+               collect_keys_under ~requested_prefix ~logical_prefix:child_prefix
+                 Eio.Path.(path / name) acc)
+             acc
+    | _ ->
+        if requested_prefix = ""
+           || starts_with ~prefix:requested_prefix logical_prefix
+        then
+          logical_prefix :: acc
+        else
+          acc
+
   let list_keys t ~prefix =
-    match key_to_path t prefix with
+    let scan_prefix = normalize_prefix_for_scan prefix in
+    let scan_root =
+      if scan_prefix = "" then
+        Ok (scan_prefix, t.fs)
+      else
+        match key_to_path t scan_prefix with
+        | Ok path -> Ok (scan_prefix, path)
+        | Error e -> Error e
+    in
+    match scan_root with
     | Error e -> Error e
-    | Ok dir_path ->
+    | Ok (logical_prefix, dir_path) ->
         try
-          let entries = Eio.Path.read_dir dir_path in
-          let keys = List.filter_map (fun name ->
-            let key = if prefix = "" then name else prefix ^ ":" ^ name in
-            match validate_key key with
-            | Ok k -> Some k
-            | Error _ -> None
-          ) entries in
-          Ok keys
+          Ok
+            (collect_keys_under ~requested_prefix:prefix ~logical_prefix dir_path []
+             |> List.sort_uniq String.compare)
         with
         | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
             Ok []  (* Directory doesn't exist = no keys *)

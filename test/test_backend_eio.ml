@@ -129,6 +129,29 @@ let test_nested_keys () =
   | Ok v -> Alcotest.(check string) "nested value matches" value v
   | Error _ -> Alcotest.fail "get nested key failed"
 
+let test_recursive_prefix_get_all () =
+  with_eio_env @@ fun backend ->
+  let writes =
+    [
+      ("team-sessions:ts-1:session.json", "s1");
+      ("team-sessions:ts-1:events.jsonl", "e1");
+      ("team-sessions:ts-2:session.json", "s2");
+      ("mitosis:node-1", "m1");
+    ]
+  in
+  List.iter
+    (fun (key, value) ->
+      match Backend_eio.FileSystem.set backend key value with
+      | Ok () -> ()
+      | Error _ -> Alcotest.fail "set for recursive prefix test failed")
+    writes;
+  match Backend_eio.FileSystem.list_keys backend ~prefix:"team-sessions:" with
+  | Ok keys ->
+      Alcotest.(check int) "recursive keys" 3 (List.length keys);
+      Alcotest.(check bool) "session key present" true
+        (List.mem "team-sessions:ts-2:session.json" keys)
+  | Error _ -> Alcotest.fail "recursive list_keys failed"
+
 (** Test set_if_not_exists *)
 let test_set_if_not_exists () =
   with_eio_env @@ fun backend ->
@@ -251,6 +274,8 @@ let () =
     "validation", [
       Alcotest.test_case "key validation" `Quick test_key_validation;
       Alcotest.test_case "nested keys" `Quick test_nested_keys;
+      Alcotest.test_case "recursive prefix get_all" `Quick
+        test_recursive_prefix_get_all;
     ];
     "atomic", [
       Alcotest.test_case "set_if_not_exists" `Quick test_set_if_not_exists;

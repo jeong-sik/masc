@@ -85,12 +85,14 @@ type worker_run_event_snapshot = {
   in_flight_actors : string list;
 }
 
-let worker_run_event_snapshot (config : Room.config)
+let worker_run_event_snapshot ?events (config : Room.config)
     (session : Team_session_types.session) =
   let requested = Hashtbl.create 16 in
   let completed = Hashtbl.create 16 in
   let events =
-    Team_session_store.read_events ~max_events:2000 config session.session_id
+    match events with
+    | Some rows -> rows
+    | None -> Team_session_store.read_events ~max_events:2000 config session.session_id
   in
   List.iter
     (fun json ->
@@ -165,10 +167,12 @@ let bootstrap_present_agent_names (config : Room.config)
     |> Team_session_types.dedup_strings
     |> List.sort String.compare
 
-let session_seen_and_live_agent_names (config : Room.config)
+let session_seen_and_live_agent_names ?events (config : Room.config)
     (session : Team_session_types.session) ~now =
   let events =
-    Team_session_store.read_events ~max_events:2000 config session.session_id
+    match events with
+    | Some rows -> rows
+    | None -> Team_session_store.read_events ~max_events:2000 config session.session_id
   in
   let seen_agents, live_agents =
     List.fold_left
@@ -184,7 +188,7 @@ let session_seen_and_live_agent_names (config : Room.config)
       ([], []) events
   in
   let bootstrap_agents = bootstrap_present_agent_names config session ~now in
-  let worker_runs = worker_run_event_snapshot config session in
+  let worker_runs = worker_run_event_snapshot ~events config session in
   ( (seen_agents @ bootstrap_agents)
     |> Team_session_types.dedup_strings
     |> List.sort String.compare,
@@ -192,8 +196,8 @@ let session_seen_and_live_agent_names (config : Room.config)
     |> Team_session_types.dedup_strings
     |> List.sort String.compare )
 
-let session_active_agent_names config session ~now =
-  session_seen_and_live_agent_names config session ~now |> snd
+let session_active_agent_names ?events config session ~now =
+  session_seen_and_live_agent_names ?events config session ~now |> snd
 
 let bootstrap_grace_seconds (session : Team_session_types.session) =
   float_of_int (session.checkpoint_interval_sec * max 1 session.min_agents)
@@ -263,9 +267,11 @@ let controller_tree_json_of_session (session : Team_session_types.session) =
           ("lanes", `List lanes);
         ]
 
-let controller_intervention_counts (config : Room.config) session_id =
+let controller_intervention_counts ?events (config : Room.config) session_id =
   let counts = Hashtbl.create 8 in
-  Team_session_store.read_events ~max_events:2000 config session_id
+  (match events with
+  | Some rows -> rows
+  | None -> Team_session_store.read_events ~max_events:2000 config session_id)
   |> List.iter (fun json ->
          match Yojson.Safe.Util.member "event_type" json with
          | `String
@@ -320,8 +326,12 @@ let context_pressure_by_lane_json (session : Team_session_types.session) =
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
   |> fun fields -> `Assoc fields
 
-let lane_health_json (config : Room.config) (session : Team_session_types.session) =
-  let events = Team_session_store.read_events ~max_events:2000 config session.session_id in
+let lane_health_json ?events (config : Room.config) (session : Team_session_types.session) =
+  let events =
+    match events with
+    | Some rows -> rows
+    | None -> Team_session_store.read_events ~max_events:2000 config session.session_id
+  in
   let failed_runtime_actors =
     events
     |> List.filter_map (fun json ->
@@ -561,4 +571,3 @@ let cascade_metrics_json (session : Team_session_types.session) =
       ("success_rate", `Float success_rate);
       ("fallback_task_created", `Int (max 0 session.fallback_task_created));
     ]
-

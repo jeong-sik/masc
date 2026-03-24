@@ -550,14 +550,15 @@ let keeper_unified_max_tokens () : int =
     ~max_v:16000
 
 (** Max agent turns (tool loops) for unified keeper turns.
-    Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 12.
-    A productive keeper workflow (read -> edit -> build -> verify) needs 4-6 tool calls.
+    Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 20.
+    A productive keeper workflow (read -> inspect -> edit -> build -> verify)
+    can consume 8-12 turns once retries and board/reporting steps are included.
     Previous default (1000) caused 787s+ latency per turn.
-    At 10, multi-step turns were still hitting the ceiling after a single tool failure;
-    12 leaves one extra recovery step without reopening the old runaway latencies. *)
+    At 10, multi-step workflows still truncate too often before [extend_turns]
+    is used. *)
 let keeper_unified_max_turns () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TURNS"
-    ~default:12
+    ~default:20
     ~min_v:1
     ~max_v:50

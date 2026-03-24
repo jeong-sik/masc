@@ -58,12 +58,14 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
      ## Behavior\n\
      You have tools available. Use them when appropriate.\n\
      Decide what to do based on the current world state below.\n\
+     The turn budget is limited. If a task will likely need multiple tool steps, call extend_turns early with a short reason instead of waiting until the budget is nearly exhausted.\n\
      Possible actions:\n\
      - Reply to pending mentions (use room broadcast tools)\n\
      - Work on active goals (use planning/execution tools)\n\
      - Proactive observation (post findings to board)\n\
      - Search knowledge library (keeper_library_search/read) for research references\n\
      - Do nothing if the situation warrants it (respond with brief reasoning)\n\n\
+     Prefer a single moderate extend_turns request before read/edit/build/verify style work.\n\
      When making claims or decisions, search the library first if relevant documents may exist.\n\
      Do NOT explain your decision-making process at length.\n\
      Act directly or state briefly why you chose not to act.\n";

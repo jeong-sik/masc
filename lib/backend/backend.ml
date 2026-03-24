@@ -172,21 +172,61 @@ module FileSystemBackend : BACKEND = struct
     | Error _ -> false
     | Ok path -> Sys.file_exists path
 
+  let starts_with ~prefix value =
+    let prefix_len = String.length prefix in
+    String.length value >= prefix_len
+    && String.sub value 0 prefix_len = prefix
+
+  let normalize_prefix_for_scan prefix =
+    let len = String.length prefix in
+    if len > 0 && prefix.[len - 1] = ':' then
+      String.sub prefix 0 (len - 1)
+    else
+      prefix
+
+  let key_of_path t path =
+    let base = t.base_path ^ Filename.dir_sep in
+    if path = t.base_path then
+      Some ""
+    else if starts_with ~prefix:base path then
+      let rel =
+        String.sub path (String.length base) (String.length path - String.length base)
+      in
+      Some (String.map (function '/' -> ':' | c -> c) rel)
+    else
+      None
+
+  let rec collect_keys_under t ~requested_prefix path acc =
+    if Sys.is_directory path then
+      Sys.readdir path
+      |> Array.fold_left
+           (fun acc name ->
+             collect_keys_under t ~requested_prefix
+               (Filename.concat path name) acc)
+           acc
+    else
+      match key_of_path t path with
+      | Some key when requested_prefix = "" || starts_with ~prefix:requested_prefix key ->
+          key :: acc
+      | _ -> acc
+
   let list_keys t ~prefix =
-    match safe_key_to_path t prefix with
+    let scan_prefix = normalize_prefix_for_scan prefix in
+    let scan_root_result =
+      if scan_prefix = "" then
+        Ok t.base_path
+      else
+        safe_key_to_path t scan_prefix
+    in
+    match scan_root_result with
     | Error e -> Error e
-    | Ok prefix_path ->
-        let dir = Filename.dirname prefix_path in
-        if Sys.file_exists dir && Sys.is_directory dir then begin
-          let files = Sys.readdir dir |> Array.to_list in
-          let prefix_base = Filename.basename prefix_path in
-          let matching = List.filter (fun f ->
-            String.length f >= String.length prefix_base &&
-            String.sub f 0 (String.length prefix_base) = prefix_base
-          ) files in
-          Ok (List.map (fun f -> prefix ^ String.sub f (String.length prefix_base) (String.length f - String.length prefix_base)) matching)
-        end else
+    | Ok scan_root ->
+        if not (Sys.file_exists scan_root) then
           Ok []
+        else
+          Ok
+            (collect_keys_under t ~requested_prefix:prefix scan_root []
+             |> List.sort_uniq String.compare)
 
   let get_all t ~prefix =
     match list_keys t ~prefix with

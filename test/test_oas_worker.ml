@@ -775,7 +775,7 @@ let () =
       Alcotest.test_case "legacy fallback still works" `Quick
         test_keeper_checkpoint_legacy_fallback;
     ];
-    "keeper_checkpoint_boundary", [
+    "keeper_checkpoint_store", [
       Alcotest.test_case "OAS store roundtrip" `Quick
         test_keeper_checkpoint_store_oas_roundtrip;
       Alcotest.test_case "OAS store missing returns none" `Quick

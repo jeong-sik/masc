@@ -149,8 +149,6 @@ let () =
   (* Monolithic schema decomposition: modules that now export their own schemas *)
   register_module_tag ~schemas:Tool_cache.schemas ~tag:Mod_cache;
   register_module_tag ~schemas:Tool_run.schemas ~tag:Mod_run;
-  register_module_tag ~schemas:Tool_social.schemas ~tag:Mod_social;
-  register_module_tag ~schemas:Tool_vote.schemas ~tag:Mod_vote;
   register_module_tag ~schemas:Tool_code.schemas ~tag:Mod_code;
   register_module_tag ~schemas:Tool_code_write.schemas ~tag:Mod_code_write;
   register_module_tag ~schemas:Tool_library.schemas ~tag:Mod_library;

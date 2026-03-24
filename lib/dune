@@ -330,7 +330,6 @@
    tool_mitosis_oas
    tool_portal
    tool_worktree
-   tool_vote
    tool_a2a
    tool_handover
    tool_relay
@@ -421,7 +420,6 @@
    agent_reputation
    activity_feed
    social
-   tool_social
    transport
    transport_metrics
    ;; gRPC coordination transport (grpc-direct)

@@ -41,13 +41,13 @@ let test_dashboard_tools_projection () =
         (match usage |> member "dispatch_v2_enabled" with
          | `Bool _ -> true
          | _ -> false);
-      let hidden_post_create =
+      let hidden_tool =
         inventory_rows
         |> List.find_opt (fun row ->
-               row |> member "name" |> to_string = "masc_post_create")
+               row |> member "name" |> to_string = "masc_goal_upsert")
       in
-      check bool "includes hidden tool" true (Option.is_some hidden_post_create);
-      match hidden_post_create with
+      check bool "includes hidden tool" true (Option.is_some hidden_tool);
+      match hidden_tool with
       | None -> ()
       | Some row ->
           check string "visibility surfaced" "hidden"

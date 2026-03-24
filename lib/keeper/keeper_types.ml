@@ -66,6 +66,7 @@ type keeper_meta = {
   policy_mode: string;
   policy_voice_enabled: bool;
   policy_shell_mode: string;
+  execution_scope: string;
   allowed_paths: string list;
   scope_kind: string;
   room_scope: string;
@@ -127,6 +128,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("policy_mode", `String m.policy_mode);
       ("policy_voice_enabled", `Bool m.policy_voice_enabled);
       ("policy_shell_mode", `String m.policy_shell_mode);
+      ("execution_scope", `String m.execution_scope);
       ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
       ("scope_kind", `String m.scope_kind);
       ("room_scope", `String m.room_scope);
@@ -251,6 +253,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let policy_shell_mode =
       Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json
       |> canonical_policy_shell_mode
+    in
+    let execution_scope =
+      Safe_ops.json_string ~default:"observe_only" "execution_scope" json
     in
     let allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
     let voice_enabled =
@@ -422,6 +427,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           policy_mode;
           policy_voice_enabled;
           policy_shell_mode;
+          execution_scope;
           allowed_paths;
           scope_kind;
           room_scope;

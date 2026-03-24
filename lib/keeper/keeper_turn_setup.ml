@@ -149,6 +149,7 @@ let ensure_keeper_exists
       policy_mode;
       policy_voice_enabled;
       policy_shell_mode;
+      execution_scope = "observe_only";
       allowed_paths;
       scope_kind;
       room_scope;

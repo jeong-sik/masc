@@ -255,13 +255,13 @@ let test_observe_only_roundtrip () =
       Team_session_types.Observe_only
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
-  Alcotest.(check bool) "Observe_only -> AllowList (read-only)"
+  Alcotest.(check bool) "Observe_only -> DenyList (code mutation blocked)"
     true
     (match g.tool_filter with
-     | Oas.Guardrails.AllowList names -> List.length names > 0
+     | Oas.Guardrails.DenyList names -> List.length names > 0
      | _ -> false);
-  Alcotest.(check (option int)) "Observe_only max_calls = 8"
-    (Some 8) g.max_tool_calls_per_turn
+  Alcotest.(check (option int)) "Observe_only max_calls = 30"
+    (Some 30) g.max_tool_calls_per_turn
 
 let test_limited_code_change_roundtrip () =
   let gate =
@@ -338,7 +338,7 @@ let () =
       Alcotest.test_case "default -> AllowList (strict)" `Quick test_default_gate_roundtrip;
     ]);
     ("execution_scope roundtrip", [
-      Alcotest.test_case "Observe_only -> AllowList" `Quick
+      Alcotest.test_case "Observe_only -> DenyList" `Quick
         test_observe_only_roundtrip;
       Alcotest.test_case "Limited -> DenyList" `Quick
         test_limited_code_change_roundtrip;

@@ -149,9 +149,6 @@ let () =
                   "masc_vote_status";
                   "masc_post_create";
                   "masc_post_list";
-                  "masc_rooms_list";
-                  "masc_room_create";
-                  "masc_room_enter";
                 ]
               in
               List.iter
@@ -166,9 +163,6 @@ let () =
                   "masc_vote_create";
                   "masc_vote_cast";
                   "masc_vote_status";
-                  "masc_rooms_list";
-                  "masc_room_create";
-                  "masc_room_enter";
                 ]
               in
               List.iter
@@ -176,6 +170,14 @@ let () =
                   check bool (name ^ " should be visible with flag") true
                     (Tool_catalog.is_visible ~include_hidden:true name))
                 hidden_names);
+          test_case "removed named-room tools are absent from the schema registry" `Quick
+            (fun () ->
+              let all_names = Config.all_tool_names () in
+              List.iter
+                (fun name ->
+                  check bool (name ^ " removed from registry") false
+                    (List.mem name all_names))
+                [ "masc_rooms_list"; "masc_room_create"; "masc_room_enter" ]);
         ] );
       ( "public_mcp_surface",
         [

@@ -41,7 +41,7 @@ State that describes the coordination domain — not how an agent thinks, but wh
 
 | Category | Data | Current Owner | Target Owner |
 |----------|------|---------------|--------------|
-| Room membership | `joined_room_ids`, `room_scope`, agents.json | MASC | MASC (correct) |
+| Room membership | `joined_room_ids`, `room_scope`, agents.json | MASC | MASC (single-room compatibility state) |
 | Task claims | task files, `assignee`, `status` | MASC | MASC (correct) |
 | Board posts | `board_posts`, `board_comments`, `board_votes` | MASC | MASC (correct) |
 | Governance | petitions, cases, rulings, execution orders | MASC (`governance_v2`) | MASC (correct) |
@@ -69,7 +69,7 @@ State that describes the coordination domain — not how an agent thinks, but wh
 **Domain state fields in keeper_meta (correct placement):**
 - `name`, `agent_name`, `goal`, `soul_profile`, `instructions` — keeper identity/profile
 - `policy_mode`, `policy_action_budget`, `initiative_*`, `scope_kind`, `room_scope` — operational policy
-- `joined_room_ids`, `last_seen_seq_by_room` — room membership
+- `joined_room_ids`, `last_seen_seq_by_room` — current-room compatibility state (single-room canonical model)
 - `autonomy_level`, `active_goal_ids` — coordination state
 
 **Impact**: Every keeper turn reads the full 106-field record, updates agent-runtime fields, and writes it back. This couples domain persistence (MASC JSONL/PG) with agent-runtime state that OAS should own.

@@ -11,7 +11,6 @@ Use when selecting a client transport or debugging whether realtime transports a
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_websocket_discovery";
@@ -21,7 +20,6 @@ Use before opening a WebSocket client to discover the correct ws:// endpoint.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_webrtc_offer";
@@ -47,7 +45,6 @@ Use from the initiating side before calling masc_webrtc_answer from the answerin
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_webrtc_answer";
@@ -73,7 +70,6 @@ Use from the answering side after a prior masc_webrtc_offer call.";
       ]);
       ("required", `List [`String "offer_id"; `String "agent_name"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_dashboard";

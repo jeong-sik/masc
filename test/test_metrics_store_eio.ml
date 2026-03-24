@@ -178,10 +178,10 @@ let test_handoff_tracking () =
   print_endline "✓ test_handoff_tracking passed"
 
 let test_generate_id () =
-  let id1 = Metrics_store_eio.generate_id () in
-  let id2 = Metrics_store_eio.generate_id () in
-  assert (id1 <> id2);  (* Should be unique *)
-  assert (String.length id1 > 10);
+  let ids = List.init 256 (fun _ -> Metrics_store_eio.generate_id ()) in
+  let unique_ids = List.sort_uniq String.compare ids in
+  assert (List.length unique_ids = List.length ids);  (* Should stay unique in tight loops *)
+  assert (String.length (List.hd ids) > 10);
   print_endline "✓ test_generate_id passed"
 
 let () =

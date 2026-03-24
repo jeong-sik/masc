@@ -53,8 +53,12 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
     ~is_alive:(fun () ->
       not session.closed && not (Ws.Wsd.is_closed session.wsd))
     ~callback:(fun sse_event ->
-      if not session.closed then
-        ignore (Server_mcp_transport_ws.send_text session sse_event))
+      if not session.closed
+         && not
+              (Server_mcp_transport_ws.send_text_checked ~context:"sse-forward"
+                 session sse_event)
+      then
+        Server_mcp_transport_ws.cleanup_session session_id)
     ();
   Log.Server.info "WebSocket session %s connected (standalone port)" session_id;
   let buf = Buffer.create 4096 in
@@ -133,7 +137,10 @@ let start
           (* Backoff to avoid tight error loops *)
           (try Eio.Time.sleep (Eio.Stdenv.clock env) backoff_s
            with Eio.Cancel.Cancelled _ as e -> raise e
-              | _ -> ());
+              | exn ->
+                  Log.Server.warn
+                    "WS standalone backoff sleep failed on port %d (backoff=%.2fs): %s"
+                    port backoff_s (Printexc.to_string exn));
           let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
           accept_loop next_backoff
       in

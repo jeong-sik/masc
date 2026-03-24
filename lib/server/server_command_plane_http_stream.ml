@@ -1,6 +1,24 @@
 open Server_command_plane_http_support
 
+type stream_log_level =
+  | Info
+  | Warn
+  | Error
+
+let log_native_chain_stream ~level ~protocol ~session_id ~context message =
+  let line =
+    Printf.sprintf "native chain stream[%s] session=%s context=%s: %s"
+      protocol session_id context message
+  in
+  match level with
+  | Info -> Log.Transport.info "%s" line
+  | Warn -> Log.Transport.warn "%s" line
+  | Error -> Log.Transport.error "%s" line
+
 let stream_native_chain_events_http ~deps ~request reqd =
+  let session_id =
+    Option.value ~default:"-" (deps.get_session_id_any request)
+  in
   let origin = deps.get_origin request in
   let headers =
     Httpun.Headers.of_list
@@ -17,10 +35,7 @@ let stream_native_chain_events_http ~deps ~request reqd =
   let mutex = Eio.Mutex.create () in
   let closed = ref false in
   let sub_ref : Chain_telemetry.subscription option ref = ref None in
-  let log_chain_sse message =
-    Log.Misc.info "%s" message
-  in
-  let close_stream ?reason () =
+  let close_stream ?reason ?(level = Info) ~context () =
     let sub_to_remove, should_close =
       Eio.Mutex.use_rw ~protect:true mutex (fun () ->
           let sub = !sub_ref in
@@ -33,7 +48,9 @@ let stream_native_chain_events_http ~deps ~request reqd =
     in
     Option.iter Chain_telemetry.unsubscribe sub_to_remove;
     if should_close then (
-      Option.iter log_chain_sse reason;
+      Option.iter
+        (log_native_chain_stream ~level ~protocol:"http" ~session_id ~context)
+        reason;
       try
         if not (Httpun.Body.Writer.is_closed writer) then
           Httpun.Body.Writer.close writer
@@ -52,12 +69,21 @@ let stream_native_chain_events_http ~deps ~request reqd =
             with Eio.Cancel.Cancelled _ as e -> raise e | exn -> `Error exn)
     in
     match write_result with
+    | `Sent -> `Sent
+    | `Closed ->
+        `Closed
+    | `Error exn ->
+        `Error exn
+  in
+  let send_raw_checked ~context frame =
+    match send_raw frame with
     | `Sent -> true
     | `Closed ->
-        close_stream ();
+        close_stream ~context ~level:Warn
+          ~reason:"delivery dropped because stream is already closed" ();
         false
     | `Error exn ->
-        close_stream
+        close_stream ~context ~level:Error
           ~reason:
             (Printf.sprintf "stream write failed: %s" (Printexc.to_string exn))
           ();
@@ -72,30 +98,33 @@ let stream_native_chain_events_http ~deps ~request reqd =
                ~event_type:(Chain_native_eio.chain_event_name event)
                payload
            in
-           ignore (send_raw frame))
+           ignore (send_raw_checked ~context:"telemetry-event" frame))
      in
      Eio.Mutex.use_rw ~protect:true mutex (fun () -> sub_ref := Some sub);
-     if send_raw ": native chain stream\nretry: 3000\n\n" then
+     if send_raw_checked ~context:"prime"
+          ": native chain stream\nretry: 3000\n\n"
+     then
        Eio.Fiber.fork ~sw:(deps.get_switch ()) (fun () ->
            try
              while not !closed do
                Eio.Time.sleep (deps.get_clock ()) Env_config_governance.Timeouts.sse_keepalive_sec;
-               if not (send_raw ": keepalive\n\n") then close_stream ()
+               ignore (send_raw_checked ~context:"keepalive" ": keepalive\n\n")
              done
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
-             close_stream
+             close_stream ~context:"keepalive-loop" ~level:Error
                ~reason:
                  (Printf.sprintf "keepalive loop failed: %s"
                     (Printexc.to_string exn))
                ())
      else
-       close_stream ~reason:"initial stream write failed" ()
+       close_stream ~context:"prime" ~level:Error
+         ~reason:"initial stream write failed" ()
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     close_stream
+     close_stream ~context:"subscription-setup" ~level:Error
        ~reason:
          (Printf.sprintf "subscription setup failed: %s"
             (Printexc.to_string exn))
@@ -108,6 +137,9 @@ let command_plane_chain_events_http ~deps ~request reqd =
   stream_native_chain_events_http ~deps ~request reqd
 
 let stream_native_chain_events_h2 ~deps ~request h2_reqd =
+  let session_id =
+    Option.value ~default:"-" (deps.get_session_id_any request)
+  in
   let origin = deps.get_origin request in
   let headers =
     H2.Headers.of_list
@@ -126,10 +158,7 @@ let stream_native_chain_events_h2 ~deps ~request h2_reqd =
   let mutex = Eio.Mutex.create () in
   let closed = ref false in
   let sub_ref : Chain_telemetry.subscription option ref = ref None in
-  let log_chain_sse message =
-    Log.Misc.info "%s" message
-  in
-  let close_stream ?reason () =
+  let close_stream ?reason ?(level = Info) ~context () =
     let sub_to_remove, should_close =
       Eio.Mutex.use_rw ~protect:true mutex (fun () ->
           let sub = !sub_ref in
@@ -142,7 +171,9 @@ let stream_native_chain_events_h2 ~deps ~request h2_reqd =
     in
     Option.iter Chain_telemetry.unsubscribe sub_to_remove;
     if should_close then (
-      Option.iter log_chain_sse reason;
+      Option.iter
+        (log_native_chain_stream ~level ~protocol:"h2" ~session_id ~context)
+        reason;
       try
         if not (H2.Body.Writer.is_closed writer) then H2.Body.Writer.close writer
       with Invalid_argument _ -> ())
@@ -160,12 +191,21 @@ let stream_native_chain_events_h2 ~deps ~request h2_reqd =
             with Eio.Cancel.Cancelled _ as e -> raise e | exn -> `Error exn)
     in
     match write_result with
+    | `Sent -> `Sent
+    | `Closed ->
+        `Closed
+    | `Error exn ->
+        `Error exn
+  in
+  let send_raw_checked ~context frame =
+    match send_raw frame with
     | `Sent -> true
     | `Closed ->
-        close_stream ();
+        close_stream ~context ~level:Warn
+          ~reason:"delivery dropped because stream is already closed" ();
         false
     | `Error exn ->
-        close_stream
+        close_stream ~context ~level:Error
           ~reason:
             (Printf.sprintf "stream write failed: %s" (Printexc.to_string exn))
           ();
@@ -180,30 +220,33 @@ let stream_native_chain_events_h2 ~deps ~request h2_reqd =
                ~event_type:(Chain_native_eio.chain_event_name event)
                payload
            in
-           ignore (send_raw frame))
+           ignore (send_raw_checked ~context:"telemetry-event" frame))
      in
      Eio.Mutex.use_rw ~protect:true mutex (fun () -> sub_ref := Some sub);
-     if send_raw ": native chain stream\nretry: 3000\n\n" then
+     if send_raw_checked ~context:"prime"
+          ": native chain stream\nretry: 3000\n\n"
+     then
        Eio.Fiber.fork ~sw:(deps.get_switch ()) (fun () ->
            try
              while not !closed do
                Eio.Time.sleep (deps.get_clock ()) Env_config_governance.Timeouts.sse_keepalive_sec;
-               if not (send_raw ": keepalive\n\n") then close_stream ()
+               ignore (send_raw_checked ~context:"keepalive" ": keepalive\n\n")
              done
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
-             close_stream
+             close_stream ~context:"keepalive-loop" ~level:Error
                ~reason:
                  (Printf.sprintf "keepalive loop failed: %s"
                     (Printexc.to_string exn))
                ())
      else
-       close_stream ~reason:"initial stream write failed" ()
+       close_stream ~context:"prime" ~level:Error
+         ~reason:"initial stream write failed" ()
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     close_stream
+     close_stream ~context:"subscription-setup" ~level:Error
        ~reason:
          (Printf.sprintf "subscription setup failed: %s"
             (Printexc.to_string exn))
@@ -214,4 +257,3 @@ let proxy_chain_events_h2 ~deps ~request h2_reqd =
 
 let command_plane_chain_events_h2 ~deps ~request h2_reqd =
   stream_native_chain_events_h2 ~deps ~request h2_reqd
-

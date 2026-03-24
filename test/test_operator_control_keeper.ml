@@ -217,6 +217,19 @@ initiative_post_ttl_hours = 24
           room_scope = "current";
           trigger_mode = "explicit_only";
           proactive = { meta.proactive with enabled = false };
+          usage =
+            {
+              meta.usage with
+              total_input_tokens = 1200;
+              total_output_tokens = 800;
+              total_tokens = 2000;
+              total_cost_usd = 0.042;
+              last_model_used = "glm:glm-4.7";
+              last_input_tokens = 120;
+              last_output_tokens = 80;
+              last_total_tokens = 200;
+              last_latency_ms = 4000;
+            };
           paused = true;
           updated_at = Types.now_iso ();
         }
@@ -257,6 +270,26 @@ initiative_post_ttl_hours = 24
         (json |> member "initiative" |> member "status" |> to_string);
       Alcotest.(check bool) "initiative configured in source" true
         (json |> member "initiative" |> member "configured_in_source" |> to_bool);
+      Alcotest.(check int) "total input tokens surfaced" 1200
+        (json |> member "metrics" |> member "total_input_tokens" |> to_int);
+      Alcotest.(check int) "last latency surfaced" 4000
+        (json |> member "metrics" |> member "last_latency_ms" |> to_int);
+      Alcotest.(check (option (float 0.001))) "last total tokens per sec surfaced"
+        (Some 50.0)
+        (json |> member "metrics" |> member "last_total_tokens_per_sec" |> to_float_option);
+      Alcotest.(check (option (float 0.001))) "last output tokens per sec surfaced"
+        (Some 20.0)
+        (json |> member "metrics" |> member "last_output_tokens_per_sec" |> to_float_option);
+      Alcotest.(check string) "prompt block source surfaced" "default"
+        (json |> member "prompt" |> member "system_prompt_blocks"
+         |> member "world" |> member "source" |> to_string);
+      let effective_system_prompt =
+        json |> member "prompt" |> member "effective_system_prompt" |> to_string
+      in
+      Alcotest.(check bool) "effective system prompt includes goal" true
+        (contains_substring effective_system_prompt ("Goal: " ^ mutated.goal));
+      Alcotest.(check bool) "effective system prompt includes world block" true
+        (contains_substring effective_system_prompt "<world>");
       let ok, _ =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
           ~args:(`Assoc [ ("name", `String keeper_name) ])

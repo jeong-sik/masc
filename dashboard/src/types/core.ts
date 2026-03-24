@@ -427,6 +427,24 @@ export interface KeeperConfigPrompt {
   needs: string
   desires: string
   instructions: string
+  system_prompt_blocks: {
+    constitution: {
+      key: string
+      source: string
+      text: string
+    }
+    world: {
+      key: string
+      source: string
+      text: string
+    }
+    capabilities: {
+      key: string
+      source: string
+      text: string
+    }
+  }
+  effective_system_prompt: string
 }
 
 export interface KeeperConfigExecution {
@@ -525,8 +543,17 @@ export interface KeeperConfigSources {
 export interface KeeperConfigMetrics {
   generation: number
   total_turns: number
+  total_input_tokens: number
+  total_output_tokens: number
   total_tokens: number
   total_cost_usd: number
+  last_model_used: string
+  last_input_tokens: number
+  last_output_tokens: number
+  last_total_tokens: number
+  last_latency_ms: number
+  last_total_tokens_per_sec: number | null
+  last_output_tokens_per_sec: number | null
   compaction_count: number
 }
 

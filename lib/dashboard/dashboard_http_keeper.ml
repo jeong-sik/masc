@@ -10,6 +10,18 @@ open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail
 
+let prompt_block_json key =
+  `Assoc
+    [
+      ("key", `String key);
+      ("source", `String (Prompt_registry.prompt_source key));
+      ("text", `String (Prompt_registry.get_prompt key));
+    ]
+
+let tokens_per_sec_json ~tokens ~latency_ms =
+  if tokens <= 0 || latency_ms <= 0 then `Null
+  else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
+
 let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
   let history_fragment_filter_enabled =
@@ -502,6 +514,12 @@ let keeper_config_json (config : Room.config) (name : string)
        `Assoc [ ("error", `String (Printf.sprintf "keeper %S not found" name)) ])
   | Ok (Some (m : Keeper_types.keeper_meta)) ->
       let active_model = Keeper_exec_status.active_model_of_meta m in
+      let effective_system_prompt =
+        Keeper_prompt.build_keeper_system_prompt
+          ~goal:m.goal ~short_goal:m.short_goal ~mid_goal:m.mid_goal
+          ~long_goal:m.long_goal ~soul_profile:m.soul_profile ~will:m.will
+          ~needs:m.needs ~desires:m.desires ~instructions:m.instructions ()
+      in
       let prompt =
         `Assoc [
           ("goal", `String m.goal);
@@ -513,6 +531,14 @@ let keeper_config_json (config : Room.config) (name : string)
           ("needs", `String m.needs);
           ("desires", `String m.desires);
           ("instructions", `String m.instructions);
+          ( "system_prompt_blocks",
+            `Assoc
+              [
+                ("constitution", prompt_block_json "keeper.constitution");
+                ("world", prompt_block_json "keeper.world");
+                ("capabilities", prompt_block_json "keeper.capabilities");
+              ] );
+          ("effective_system_prompt", `String effective_system_prompt);
         ]
       in
       let execution =
@@ -555,8 +581,21 @@ let keeper_config_json (config : Room.config) (name : string)
         `Assoc [
           ("generation", `Int m.generation);
           ("total_turns", `Int m.usage.total_turns);
+          ("total_input_tokens", `Int m.usage.total_input_tokens);
+          ("total_output_tokens", `Int m.usage.total_output_tokens);
           ("total_tokens", `Int m.usage.total_tokens);
           ("total_cost_usd", `Float m.usage.total_cost_usd);
+          ("last_model_used", `String m.usage.last_model_used);
+          ("last_input_tokens", `Int m.usage.last_input_tokens);
+          ("last_output_tokens", `Int m.usage.last_output_tokens);
+          ("last_total_tokens", `Int m.usage.last_total_tokens);
+          ("last_latency_ms", `Int m.usage.last_latency_ms);
+          ( "last_total_tokens_per_sec",
+            tokens_per_sec_json ~tokens:m.usage.last_total_tokens
+              ~latency_ms:m.usage.last_latency_ms );
+          ( "last_output_tokens_per_sec",
+            tokens_per_sec_json ~tokens:m.usage.last_output_tokens
+              ~latency_ms:m.usage.last_latency_ms );
           ("compaction_count", `Int m.compaction.count);
         ]
       in

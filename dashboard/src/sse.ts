@@ -196,7 +196,10 @@ export function connectSSE(): void {
 
   es.onmessage = (e: MessageEvent) => {
     try {
-      const event = JSON.parse(e.data as string) as SSEEvent
+      const raw = JSON.parse(e.data as string)
+      // Unwrap JSON-RPC notifications: extract params as the actual event.
+      // Server wraps events as {"jsonrpc":"2.0","method":"masc/event","params":{type,agent,...}}
+      const event: SSEEvent = (raw.jsonrpc && raw.params?.type) ? raw.params : raw
       eventCount.value++
       lastEvent.value = event
       handleEvent(event)

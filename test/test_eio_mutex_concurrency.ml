@@ -28,8 +28,9 @@ let test_rate_limit_concurrent () =
       ignore (RL.check limiter ~key:"shared")
     done
   ));
-  (* Remaining tokens must be non-negative — mutex prevents underflow *)
+  (* burst=50, 1000 checks consumed tokens; remaining must be <= burst *)
   let rem = RL.remaining limiter ~key:"shared" in
+  check bool "remaining <= burst" true (rem <= 50);
   check bool "remaining >= 0" true (rem >= 0)
 
 let test_rate_limit_independent_keys () =
@@ -92,7 +93,9 @@ let test_prometheus_concurrent () =
     done
   ));
   let text = Prom.to_prometheus_text () in
-  check bool "has prometheus output" true (String.length text > 0)
+  check bool "has metric name" true
+    (try ignore (Str.search_forward (Str.regexp_string "test_concurrent_metric") text 0); true
+     with Not_found -> false)
 
 let test_prometheus_gauge_concurrent () =
   Eio.Fiber.all (List.init 5 (fun i -> fun () ->
@@ -103,7 +106,9 @@ let test_prometheus_gauge_concurrent () =
     done
   ));
   let text = Prom.to_prometheus_text () in
-  check bool "gauge output exists" true (String.length text > 0)
+  check bool "has gauge name" true
+    (try ignore (Str.search_forward (Str.regexp_string "test_concurrent_gauge") text 0); true
+     with Not_found -> false)
 
 (** {1 Streamable HTTP Session Concurrency} *)
 

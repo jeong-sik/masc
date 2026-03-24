@@ -222,8 +222,10 @@ soul_profile = "nonexistent"
     match KTP.profile_defaults_of_toml doc with
     | Ok _ -> fail "expected validation error for invalid soul_profile"
     | Error msg ->
-      check bool "contains 'invalid'" true
-        (String.length msg > 0)
+      check bool "mentions invalid or soul" true
+        (let lc = String.lowercase_ascii msg in
+         try ignore (Str.search_forward (Str.regexp "invalid\\|soul\\|unknown") lc 0); true
+         with Not_found -> false)
 
 (* ================================================================ *)
 (* File loading tests                                                *)

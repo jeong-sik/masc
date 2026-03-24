@@ -632,17 +632,17 @@ let test_keeper_fs_edit_policy_gates () =
       ~policy_shell_mode:"coding" ()
   in
   check_keeper_exec_tool_presence "heuristic fs_edit default" heuristic_disabled
-    ~tool_name:"keeper_fs_edit" ~expect_allowed:true;
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
   check_keeper_exec_tool_presence "heuristic fs_edit coding" heuristic_coding
-    ~tool_name:"keeper_fs_edit" ~expect_allowed:true;
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
   check_keeper_exec_tool_presence "learned fs_edit disabled" learned_disabled
     ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
   check_keeper_exec_tool_presence "learned fs_edit coding" learned_coding
     ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
   check_keeper_exec_tool_presence "explicit event fs_edit coding" explicit_event_coding
-    ~tool_name:"keeper_fs_edit" ~expect_allowed:true;
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
   check_keeper_exec_tool_presence "model deliberation fs_edit coding" deliberation_coding
-    ~tool_name:"keeper_fs_edit" ~expect_allowed:true
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:false
 
 let test_keeper_fs_edit_enforces_allowed_paths_and_modes () =
   Eio_main.run @@ fun _env ->

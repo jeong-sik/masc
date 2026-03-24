@@ -338,7 +338,10 @@ let test_transport_health_contracts () =
        {|Transport_metrics.set_ws_sessions|});
   check bool "transport metrics ws env parse matches runtime server" true
     (file_contains_pattern "lib/transport_metrics.ml"
-       {|Server_ws_standalone.is_enabled ()|})
+       {| | "0" | "false" -> false|});
+  check bool "standalone ws reuses transport metrics env parser" true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|Transport_metrics.ws_enabled ()|})
 let test_mermaid_xss_contracts () =
   check bool "mermaid securityLevel is strict (not loose)" true
     (file_contains_pattern "dashboard/src/components/command/helpers.ts"

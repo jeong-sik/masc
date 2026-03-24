@@ -31,9 +31,7 @@ let configured_port () =
 (** Check whether standalone WS is enabled (default: enabled).
     Disable with MASC_WS_ENABLED=0 or MASC_WS_ENABLED=false. *)
 let is_enabled () =
-  match Sys.getenv_opt "MASC_WS_ENABLED" with
-  | Some "0" | Some "false" -> false
-  | _ -> true
+  Transport_metrics.ws_enabled ()
 
 (** WebSocket handler factory.
 

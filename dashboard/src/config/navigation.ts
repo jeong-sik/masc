@@ -125,7 +125,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'agents',
       label: '에이전트 & 키퍼',
-      description: '로스터 및 활성 에이전트 상태를 탐색합니다.',
+      description: '일반 에이전트, 키퍼 런타임, 세션/실행 뷰를 나눠 봅니다.',
       params: { section: 'agents' },
     },
     {

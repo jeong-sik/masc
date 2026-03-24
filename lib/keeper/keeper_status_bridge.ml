@@ -201,7 +201,7 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
         | None -> false)
   |> add_if "proactive.enabled"
        (match defaults.proactive_enabled with
-        | Some value -> value <> meta.proactive_enabled
+        | Some value -> value <> meta.proactive.enabled
         | None -> false)
   |> List.rev
 

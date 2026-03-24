@@ -208,6 +208,9 @@ let test_policy_mode_is_deliberation () =
 (* ---------- Keeper meta deliberation fields ---------- *)
 
 let test_keeper_meta_deliberation_fields_roundtrip () =
+  (* deliberation_count/cost/ts removed from keeper_meta (live in
+     deliberation_meta). Verify that old JSON keys are silently ignored
+     and remaining fields parse correctly. *)
   let json =
     `Assoc
       [
@@ -216,6 +219,7 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
         ("goal", `String "test deliberation");
         ("models", `List [ `String "custom:test-model" ]);
         ("policy_mode", `String "model_deliberation");
+        (* legacy keys — should be ignored by meta_of_json *)
         ("deliberation_count", `Int 5);
         ("deliberation_cost_total_usd", `Float 0.03);
         ("last_deliberation_ts", `Float 1710000000.0);
@@ -225,13 +229,7 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
   match Keeper_types.meta_of_json json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
-      (* Mode removal: canonical_policy_mode always returns "heuristic" *)
       check string "policy mode" "heuristic" meta.policy_mode;
-      check int "deliberation count" 5 meta.deliberation_count;
-      check (float 0.001) "deliberation cost" 0.03
-        meta.deliberation_cost_total_usd;
-      check (float 0.1) "deliberation ts" 1710000000.0
-        meta.last_deliberation_ts;
       check string "triage triggers" "direct_mention"
         meta.last_triage_triggers
 
@@ -248,11 +246,6 @@ let test_keeper_meta_deliberation_fields_default () =
   match Keeper_types.meta_of_json json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
-      check int "default deliberation count" 0 meta.deliberation_count;
-      check (float 0.001) "default deliberation cost" 0.0
-        meta.deliberation_cost_total_usd;
-      check (float 0.001) "default deliberation ts" 0.0
-        meta.last_deliberation_ts;
       check string "default triage triggers" ""
         meta.last_triage_triggers
 

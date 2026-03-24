@@ -202,7 +202,7 @@ initiative_post_ttl_hours = 24
           meta with
           room_scope = "current";
           trigger_mode = "explicit_only";
-          proactive_enabled = false;
+          proactive = { meta.proactive with enabled = false };
           paused = true;
           updated_at = Types.now_iso ();
         }

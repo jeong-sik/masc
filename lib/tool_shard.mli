@@ -27,9 +27,6 @@ val shard_shell : shard
 val shard_governance : shard
 (** Governance workflow: cases, briefs, petitions, status/feed. *)
 
-val shard_weather : shard
-(** Weather queries. *)
-
 (** {1 Lookup} *)
 
 val get_shard : string -> shard option

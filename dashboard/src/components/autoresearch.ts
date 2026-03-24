@@ -34,15 +34,35 @@ const selectedLoop = computed<AutoresearchLoopSummary | null>(() => {
 
 // --- Data loading ---
 
-async function loadLoops() {
+function nextSelectedLoopId(data: AutoresearchLoopsResponse): string | null {
+  const currentId = selectedLoopId.value
+  if (currentId && data.loops.some(loop => loop.loop_id === currentId)) {
+    return currentId
+  }
+  return data.loops[0]?.loop_id ?? null
+}
+
+async function syncSelectedLoopDetail(data: AutoresearchLoopsResponse): Promise<void> {
+  const nextLoopId = nextSelectedLoopId(data)
+  selectedLoopId.value = nextLoopId
+  if (!nextLoopId) {
+    loopDetail.value = null
+    detailError.value = null
+    return
+  }
+  await loadDetail(nextLoopId)
+}
+
+async function loadLoops({ refreshDetail = false }: { refreshDetail?: boolean } = {}) {
   if (loopsLoading.value) return
   loopsLoading.value = true
   loopsError.value = null
   try {
     const data = await fetchAutoresearchLoops()
     loopsData.value = data
-    // Auto-select first loop if none selected
-    if (!selectedLoopId.value && data.loops.length > 0) {
+    if (refreshDetail) {
+      await syncSelectedLoopDetail(data)
+    } else if (!selectedLoopId.value && data.loops.length > 0) {
       const first = data.loops[0]
       if (first) {
         selectedLoopId.value = first.loop_id
@@ -53,6 +73,10 @@ async function loadLoops() {
   } finally {
     loopsLoading.value = false
   }
+}
+
+export async function refreshAutoresearchSurface(): Promise<void> {
+  await loadLoops({ refreshDetail: true })
 }
 
 async function loadDetail(loopId: string) {
@@ -120,6 +144,15 @@ function formatTimestamp(ts: number): string {
   })
 }
 
+function liveLabel(loop: Pick<AutoresearchLoopSummary, 'live'>): string {
+  return loop.live ? '실시간' : '저장됨'
+}
+
+function formatUpdatedAt(ts: number | null): string {
+  if (ts == null) return '알 수 없음'
+  return formatTimestamp(ts)
+}
+
 // --- Sub-components ---
 
 function LoopSelector() {
@@ -138,6 +171,7 @@ function LoopSelector() {
             <span class="${statusColor(loop.status)} mr-1">\u25CF</span>
             ${loop.loop_id.slice(0, 8)}
             <span class="ml-1 opacity-60">${statusLabel(loop.status)}</span>
+            <span class="ml-1 opacity-60">${liveLabel(loop)}</span>
           </button>
         `
       })}
@@ -172,6 +206,14 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           <div>
             <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">모델</div>
             <div class="text-[var(--text-body)] text-sm font-mono">${loop.model_model}</div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">소스</div>
+            <div class="text-[var(--text-body)] text-sm">${liveLabel(loop)}</div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">최근 갱신</div>
+            <div class="text-[var(--text-body)] text-sm font-mono">${formatUpdatedAt(loop.updated_at)}</div>
           </div>
         </div>
       </div>
@@ -362,14 +404,8 @@ function LoopDetailView() {
 
 export function Autoresearch() {
   useEffect(() => {
-    loadLoops()
+    void refreshAutoresearchSurface()
   }, [])
-
-  // Load detail when selected loop changes
-  useEffect(() => {
-    const id = selectedLoopId.value
-    if (id) loadDetail(id)
-  }, [selectedLoopId.value])
 
   if (loopsLoading.value && !loopsData.value) {
     return html`<${EmptyState} message="오토리서치 루프 데이터를 불러오는 중..." />`
@@ -405,7 +441,7 @@ export function Autoresearch() {
         </div>
         <button type="button"
           class="px-2.5 py-1 rounded text-[11px] text-[var(--text-muted)] border border-card-border hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"
-          onClick=${() => loadLoops()}
+          onClick=${() => { void refreshAutoresearchSurface() }}
         >
           새로고침
         </button>

@@ -454,10 +454,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_code.dispatch { Tool_code.config; agent_name } ~name ~args:arguments
     | Mod_code_write ->
         Tool_code_write.dispatch { Tool_code_write.config; agent_name } ~name ~args:arguments
-    | Mod_vote ->
-        Tool_vote.dispatch { Tool_vote.config; agent_name } ~name ~args:arguments
-    | Mod_social ->
-        Tool_social.dispatch { Tool_social.config; agent_name } ~name ~args:arguments
     | Mod_council ->
         let policy = Agent_sdk.Policy.create [
           { Agent_sdk.Policy.name = "governance_gate";

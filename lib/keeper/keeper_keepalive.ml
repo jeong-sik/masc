@@ -398,7 +398,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    with
                    | Error e ->
                        Log.Keeper.error "unified turn failed: %s" e;
-                       meta_after_triage
+                       (match read_meta ctx.config meta_after_triage.name with
+                        | Ok (Some latest) -> latest
+                        | _ -> meta_after_triage)
                    | Ok updated -> updated
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e

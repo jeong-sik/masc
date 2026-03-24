@@ -255,7 +255,7 @@ let test_unified_turn_runtime_defaults () =
       (KC.keeper_unified_temperature ());
     check int "unified max_tokens default" 2048
       (KC.keeper_unified_max_tokens ());
-    check int "unified max_turns default" 10
+    check int "unified max_turns default" 12
       (KC.keeper_unified_max_turns ()))))
 
 (* ---------- Metrics observation tests ---------- *)
@@ -314,6 +314,39 @@ let test_metrics_noop_response () =
   check int "autonomous unchanged" minimal_meta.autonomous_action_count
     updated.autonomous_action_count;
   check int "total_turns +1" (minimal_meta.total_turns + 1) updated.total_turns
+
+let test_metrics_failure_response () =
+  let reason = "Agent run failed: Max turns exceeded (turn 10, limit 10)" in
+  let updated =
+    UT.update_metrics_from_failure minimal_meta ~latency_ms:250 ~reason
+  in
+  check int "total_turns +1" (minimal_meta.total_turns + 1) updated.total_turns;
+  check int "latency recorded" 250 updated.last_latency_ms;
+  check bool "last_turn_ts updated" true (updated.last_turn_ts > 0.0);
+  check int "proactive count unchanged" minimal_meta.proactive_count_total
+    updated.proactive_count_total;
+  check bool "failure reason tagged" true
+    (let found =
+       try
+         ignore
+           (Str.search_forward
+              (Str.regexp_string "unified:error:")
+              updated.last_proactive_reason 0);
+         true
+       with Not_found -> false
+     in
+     found);
+  check bool "failure preview preserved" true
+    (let found =
+       try
+         ignore
+           (Str.search_forward
+              (Str.regexp_string "Max turns exceeded")
+              updated.last_proactive_preview 0);
+         true
+       with Not_found -> false
+     in
+     found)
 
 let test_metrics_mixed_response () =
   let result =
@@ -414,6 +447,7 @@ let () =
           test_case "text response" `Quick test_metrics_text_response;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
+          test_case "failure response" `Quick test_metrics_failure_response;
           test_case "mixed response" `Quick test_metrics_mixed_response;
           test_case "normalize passthrough" `Quick
             test_normalize_response_text_passthrough;

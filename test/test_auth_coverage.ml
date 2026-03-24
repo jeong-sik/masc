@@ -250,11 +250,6 @@ let test_permission_for_tool_worktree_remove () =
   | Some Types.CanRemoveWorktree -> ()
   | _ -> fail "expected CanRemoveWorktree"
 
-let test_permission_for_tool_vote_create () =
-  match Auth.permission_for_tool "masc_vote_create" with
-  | Some Types.CanVote -> ()
-  | _ -> fail "expected CanVote"
-
 let test_permission_for_tool_interrupt () =
   match Auth.permission_for_tool "masc_interrupt" with
   | Some Types.CanInterrupt -> ()
@@ -541,7 +536,6 @@ let () =
       test_case "portal_send" `Quick test_permission_for_tool_portal_send;
       test_case "worktree_create" `Quick test_permission_for_tool_worktree_create;
       test_case "worktree_remove" `Quick test_permission_for_tool_worktree_remove;
-      test_case "vote_create" `Quick test_permission_for_tool_vote_create;
       test_case "interrupt" `Quick test_permission_for_tool_interrupt;
       test_case "approve" `Quick test_permission_for_tool_approve;
       test_case "auth_enable" `Quick test_permission_for_tool_auth_enable;

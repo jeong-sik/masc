@@ -1096,3 +1096,9 @@
  (name test_eval_gate_evasion)
  (modules test_eval_gate_evasion)
  (libraries masc_mcp alcotest yojson))
+
+; Prompt registry defaults + override API tests
+(test
+ (name test_prompt_registry_defaults)
+ (modules test_prompt_registry_defaults)
+ (libraries masc_mcp alcotest str yojson unix))

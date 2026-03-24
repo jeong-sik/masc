@@ -160,6 +160,7 @@
    worker_verification
    safe_parse
    prompt_registry
+   prompt_defaults
    prompt_composer
    chain_types
    chain_trace_types

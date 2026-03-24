@@ -277,11 +277,7 @@ let handle_execute ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
-    let system_prompt =
-      "You are a governance deliberation agent for the MASC multi-agent system. \
-       Evaluate the following topic and produce a structured decision. \
-       Include: (1) your reasoning, (2) identified risks, (3) recommended action. \
-       Be concise and actionable." in
+    let system_prompt = Prompt_registry.get_prompt "governance.deliberation" in
     let agent_name = "council-deliberation" in
     let memory =
       Memory_oas_bridge.create_memory_full
@@ -307,11 +303,7 @@ let handle_execute_dry_run ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
-    let system_prompt =
-      "You are a governance analysis agent for the MASC multi-agent system (DRY RUN mode). \
-       Analyze the following topic WITHOUT committing any changes. \
-       Produce: (1) impact analysis, (2) risks and mitigations, (3) what WOULD happen if executed. \
-       This is analysis only — no actions will be taken." in
+    let system_prompt = Prompt_registry.get_prompt "governance.dry_run" in
     let agent_name = "council-dry-run" in
     let memory =
       Memory_oas_bridge.create_memory_full

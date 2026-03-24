@@ -31,6 +31,11 @@ describe('refreshPlanForRoute', () => {
       tab: 'command',
       params: { section: 'warroom' },
     })).toEqual(['roomTruth', 'commandCurrentSurface', 'commandChainSummary'])
+
+    expect(refreshPlanForRoute({
+      tab: 'command',
+      params: { section: 'governance' },
+    })).toEqual(['roomTruth', 'governance'])
   })
 
   it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {

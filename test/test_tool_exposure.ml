@@ -20,23 +20,30 @@ let () =
     [
       ( "hidden_tool_leak",
         [
-          test_case "no hidden tools in spawned_agent_public_tool_names" `Quick
+          test_case "no explicitly-hidden tools in spawned_agent_public_tool_names" `Quick
             (fun () ->
+              (* Only check tools with explicit Hidden metadata (not auto-classified).
+                 Auto-Hidden tools are just "not on public MCP surface" and may
+                 legitimately appear in other profiles like Managed_agent. *)
+              let explicit_hidden =
+                List.filter_map (fun (name, (meta : Tool_catalog.metadata)) ->
+                  match meta.visibility with
+                  | Tool_catalog.Hidden -> Some name
+                  | Tool_catalog.Default -> None)
+                Tool_catalog.explicit_metadata
+              in
               let names = Agent_tool_surfaces.spawned_agent_public_tool_names in
               let leaked =
-                List.filter
-                  (fun name ->
-                    not (Tool_catalog.is_visible ~include_hidden:false name))
-                  names
+                List.filter (fun name -> List.mem name explicit_hidden) names
               in
-              check (list string) "leaked hidden tools" [] leaked);
+              check (list string) "leaked explicitly-hidden tools" [] leaked);
         ] );
       ( "passthrough_dead_entries",
         [
           test_case "all passthrough names exist in visible schemas" `Quick
             (fun () ->
               let all_schemas =
-                Config.visible_tool_schemas ~include_hidden:false
+                Config.visible_tool_schemas ~include_hidden:true
                   ~include_deprecated:false ()
               in
               let schema_names =

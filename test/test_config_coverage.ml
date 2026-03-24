@@ -6,6 +6,7 @@
 open Alcotest
 
 module Config = Masc_mcp.Config
+module Tool_catalog = Masc_mcp.Tool_catalog
 
 let dummy_schema name : Types.tool_schema =
   {
@@ -49,7 +50,11 @@ let test_visible_tool_schemas_subset_of_all () =
     (List.length visible <= List.length Config.all_tool_schemas)
 
 let test_is_tool_visible_pause () =
-  check bool "pause visible" true (Config.is_tool_visible "masc_pause")
+  (* masc_pause is an internal tool, auto-classified as Hidden *)
+  check bool "pause hidden (not on public surface)" false
+    (Config.is_tool_visible "masc_pause");
+  check bool "pause visible with include_hidden" true
+    (Tool_catalog.is_visible ~include_hidden:true "masc_pause")
 
 let () =
   run "Config Coverage"

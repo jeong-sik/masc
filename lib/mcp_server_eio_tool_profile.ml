@@ -84,10 +84,12 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
   let schemas =
     match profile with
     | Full ->
+        let show_all = include_hidden || Tool_catalog.full_surface_override () in
         let all =
-          Config.visible_tool_schemas ~include_hidden ~include_deprecated ()
+          Config.visible_tool_schemas
+            ~include_hidden:show_all ~include_deprecated ()
         in
-        if include_hidden || Tool_catalog.full_surface_override () then all
+        if show_all then all
         else
           List.filter
             (fun (schema : Types.tool_schema) ->
@@ -95,7 +97,7 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
             all
     | Managed_agent ->
         let passthrough =
-          Config.visible_tool_schemas ~include_hidden:false ~include_deprecated:false ()
+          Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()
           |> List.filter (fun (schema : Types.tool_schema) ->
                  List.mem schema.name managed_agent_passthrough_tool_names
                  && Tool_catalog.is_visible schema.name)
@@ -110,8 +112,8 @@ let tool_allowed_in_profile state profile tool_name =
   match profile with
   | Full ->
       (* tools/call accepts any registered tool regardless of the public MCP
-         surface. tools/list is the discovery filter; tools/call is execution. *)
-      Config.visible_tool_schemas ~include_deprecated:true ()
+         surface or visibility. include_hidden ensures Hidden tools are callable. *)
+      Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
       |> List.exists (fun (schema : Types.tool_schema) ->
              String.equal schema.name tool_name)
   | Managed_agent ->

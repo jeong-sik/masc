@@ -149,9 +149,20 @@ let resolve_masc_base_path path =
 (* Environment helpers                          *)
 (* ============================================ *)
 
+let is_unresolved_template value =
+  let v = String.trim value in
+  (String.length v >= 2 && v.[0] = '{' && v.[1] = '{')
+  || (String.length v >= 5 && String.sub v 0 5 = "op://")
+
 let env_opt name =
   match Sys.getenv_opt name with
-  | Some value when String.trim value <> "" -> Some value
+  | Some value when String.trim value <> "" ->
+      if is_unresolved_template value then begin
+        Log.Backend.warn
+          "%s contains unresolved 1Password template; skipping" name;
+        None
+      end else
+        Some value
   | _ -> None
 
 let normalize_postgres_url url =

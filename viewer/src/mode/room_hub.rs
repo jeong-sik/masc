@@ -521,7 +521,7 @@ async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), Stri
     Ok((status, turn, phase))
 }
 
-fn load_known_rooms() -> Vec<String> {
+pub(super) fn load_known_rooms() -> Vec<String> {
     let raw = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|storage| storage.get_item(KNOWN_ROOMS_STORAGE_KEY).ok().flatten())
@@ -538,6 +538,16 @@ fn save_known_rooms(rooms: &[String]) {
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
         let _ = storage.set_item(KNOWN_ROOMS_STORAGE_KEY, &value);
     }
+}
+
+pub(super) fn candidate_room_ids() -> Vec<String> {
+    unique_non_empty(
+        std::iter::once(crate::config::current_room_id())
+            .chain(std::iter::once(crate::config::DEFAULT_ROOM_ID.to_string()))
+            .chain(load_recent_rooms().into_iter())
+            .chain(load_known_rooms().into_iter())
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn load_room_hub_visible() -> bool {
@@ -805,62 +815,22 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str, manual_inp
 pub(super) async fn refresh_rooms_from_server(
     doc: &web_sys::Document,
 ) -> Result<Vec<RoomSnapshot>, String> {
-    let payload = mcp_tool_call("masc_rooms_list", json!({})).await?;
-
-    let mut snapshots = payload
-        .get("rooms")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|row| {
-                    let id = row
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .or_else(|| row.as_str())
-                        .map(str::trim)
-                        .filter(|id| !id.is_empty())?;
-                    let agent_count = row.get("agent_count").and_then(Value::as_i64).unwrap_or(0);
-                    let task_count = row.get("task_count").and_then(Value::as_i64).unwrap_or(0);
-                    Some(RoomSnapshot {
-                        id: id.to_string(),
-                        status: "idle".to_string(),
-                        turn: 0,
-                        phase: "-".to_string(),
-                        agent_count,
-                        task_count,
-                    })
-                })
-                .collect::<Vec<RoomSnapshot>>()
-        })
-        .unwrap_or_default();
-
-    if let Some(current) = payload
-        .get("current_room")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-    {
-        if !snapshots.iter().any(|row| row.id == current) {
-            snapshots.push(RoomSnapshot {
-                id: current,
-                status: "idle".to_string(),
-                turn: 0,
-                phase: "-".to_string(),
-                agent_count: 0,
-                task_count: 0,
-            });
-        }
-    }
-    snapshots = dedup_room_snapshots(snapshots);
-
-    let room_ids = unique_non_empty(
-        snapshots
-            .iter()
-            .map(|row| row.id.clone())
-            .collect::<Vec<_>>(),
-    );
+    let room_ids = candidate_room_ids();
     if room_ids.is_empty() {
-        return Err("서버 room 목록이 비어 있습니다.".to_string());
+        return Err("추적할 room 후보가 없습니다.".to_string());
     }
+
+    let mut snapshots = room_ids
+        .iter()
+        .map(|room_id| RoomSnapshot {
+            id: room_id.clone(),
+            status: "idle".to_string(),
+            turn: 0,
+            phase: "-".to_string(),
+            agent_count: 0,
+            task_count: 0,
+        })
+        .collect::<Vec<_>>();
 
     for row in &mut snapshots {
         match fetch_room_runtime(&row.id).await {

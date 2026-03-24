@@ -1,347 +1,82 @@
-(** Multi-Room Tests - TDD for room management *)
-
 open Alcotest
 open Masc_mcp
 
-(* Test helpers *)
-let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path
-      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path
-    end else
-      Unix.unlink path
+let temp_dir () =
+  let dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-current-room-%06x" (Random.bits ()))
+  in
+  Unix.mkdir dir 0o755;
+  dir
 
-let setup_test_room () =
-  (* Use PID + timestamp for deterministic unique dir *)
-  let test_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_multi_room_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
-  Unix.mkdir test_dir 0o755;
-  let config = Room.default_config test_dir in
-  (config, test_dir)
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path
+        |> Array.iter (fun name -> rm (Filename.concat path name));
+        Unix.rmdir path
+      end else
+        Unix.unlink path
+  in
+  rm dir
 
-let cleanup_test_room test_dir =
-  (try rm_rf test_dir with _ -> ())
+let with_config f =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room.default_config dir in
+      ignore (Room.init config ~agent_name:None);
+      f config)
 
-let task_count config =
-  let backlog = Room.read_backlog config in
-  List.length backlog.tasks
+let select_room config room_id =
+  Room.write_current_room config room_id;
+  Room.ensure_room_bootstrap config room_id;
+  Room.config_with_resolved_scope config
 
-let extract_nickname result =
-  let prefix = "  Nickname: " in
-  try
-    let start_idx =
-      let idx = ref 0 in
-      while !idx < String.length result - String.length prefix &&
-            String.sub result !idx (String.length prefix) <> prefix do
-        incr idx
-      done;
-      !idx + String.length prefix
-    in
-    let end_idx = String.index_from result start_idx '\n' in
-    String.sub result start_idx (end_idx - start_idx)
-  with _ -> "unknown-agent"
+let test_current_room_defaults_to_default () =
+  with_config (fun config ->
+      check (option string) "default room" (Some "default")
+        (Room.read_current_room config))
 
-let extract_room_task_count json room_id =
-  match json with
-  | `Assoc fields ->
-      (match List.assoc_opt "rooms" fields with
-       | Some (`List rooms) ->
-           List.find_map (fun room ->
-             match room with
-             | `Assoc room_fields ->
-                 (match (List.assoc_opt "id" room_fields, List.assoc_opt "task_count" room_fields) with
-                  | Some (`String id), Some (`Int count) when id = room_id -> Some count
-                  | _ -> None)
-             | _ -> None
-           ) rooms
-       | _ -> None)
-  | _ -> None
+let test_current_room_write_and_resolve_scope () =
+  with_config (fun config ->
+      let focused = select_room config "focus-room" in
+      check (option string) "focused room selected" (Some "focus-room")
+        (Room.read_current_room config);
+      check bool "focused scope initialized" true (Room.is_initialized focused))
 
-(* ============================================ *)
-(* Room Registry Tests                          *)
-(* ============================================ *)
+let test_current_room_tasks_are_isolated () =
+  with_config (fun config ->
+      ignore (Room.add_task config ~title:"default task" ~priority:2 ~description:"");
+      let focused = select_room config "focus-room" in
+      ignore (Room.add_task focused ~title:"focus task" ~priority:1 ~description:"");
+      check int "default room task count" 1
+        (List.length (Room.get_tasks_raw_in_room config "default"));
+      check int "focus room task count" 1
+        (List.length (Room.get_tasks_raw_in_room config "focus-room"));
+      check int "current room task count follows pointer" 1
+        (List.length (Room.get_tasks_raw config)))
 
-let test_rooms_list_empty () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    (* init 전에는 빈 목록 *)
-    let result = Room.rooms_list config in
-    match result with
-    | `Assoc fields ->
-        let rooms = List.assoc_opt "rooms" fields in
-        (match rooms with
-        | Some (`List []) -> ()
-        | Some (`List _) -> fail "Expected empty room list before init"
-        | _ -> fail "Expected rooms field")
-    | _ -> fail "Expected JSON object"
-  )
-
-let test_rooms_list_after_init () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    (* init 하면 default 방이 생성됨 *)
-    let _ = Room.init config ~agent_name:None in
-    let result = Room.rooms_list config in
-    match result with
-    | `Assoc fields ->
-        let rooms = List.assoc_opt "rooms" fields in
-        (match rooms with
-        | Some (`List rooms_list) ->
-            check bool "has at least one room" true (List.length rooms_list >= 1);
-            (* default 방이 있어야 함 *)
-            let has_default = List.exists (fun r ->
-              match r with
-              | `Assoc r_fields ->
-                  (match List.assoc_opt "id" r_fields with
-                  | Some (`String id) -> id = "default"
-                  | _ -> false)
-              | _ -> false
-            ) rooms_list in
-            check bool "has default room" true has_default
-        | _ -> fail "Expected rooms list")
-    | _ -> fail "Expected JSON object"
-  )
-
-(* ============================================ *)
-(* Room Create Tests                            *)
-(* ============================================ *)
-
-let test_room_create () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    let _ = Room.init config ~agent_name:None in
-    (* 새 방 생성 *)
-    let result = Room.room_create config ~name:"My Project Dev" ~description:(Some "Development room") in
-    match result with
-    | `Assoc fields ->
-        (match List.assoc_opt "id" fields with
-        | Some (`String id) ->
-            check bool "id is slugified" true (id = "my-project-dev")
-        | _ -> fail "Expected id field");
-        (match List.assoc_opt "error" fields with
-        | Some _ -> fail "Unexpected error"
-        | None -> ())
-    | _ -> fail "Expected JSON object"
-  )
-
-let test_room_create_duplicate () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    let _ = Room.init config ~agent_name:None in
-    (* 첫 번째 생성 *)
-    let _ = Room.room_create config ~name:"Test Room" ~description:None in
-    (* 중복 생성 시도 *)
-    let result = Room.room_create config ~name:"Test Room" ~description:None in
-    match result with
-    | `Assoc fields ->
-        (match List.assoc_opt "error" fields with
-        | Some (`String err) -> check bool "error contains exists" true (String.length err > 0)
-        | _ -> fail "Expected error for duplicate room")
-    | _ -> fail "Expected JSON object"
-  )
-
-(* ============================================ *)
-(* Room Enter Tests                             *)
-(* ============================================ *)
-
-let test_room_enter () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    let _ = Room.init config ~agent_name:None in
-    (* 새 방 생성 *)
-    let _ = Room.room_create config ~name:"Other Room" ~description:None in
-    (* 방 입장 *)
-    let result = Room.room_enter config ~room_id:"other-room" ~agent_type:"claude" () in
-    match result with
-    | `Assoc fields ->
-        (match List.assoc_opt "current_room" fields with
-        | Some (`String room) -> check string "entered room" "other-room" room
-        | _ -> fail "Expected current_room field");
-        (* 닉네임이 부여되어야 함 *)
-        (match List.assoc_opt "nickname" fields with
-        | Some (`String nick) -> check bool "has nickname" true (String.length nick > 0)
-        | _ -> fail "Expected nickname field")
-    | _ -> fail "Expected JSON object"
-  )
-
-let test_room_enter_nonexistent () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    let _ = Room.init config ~agent_name:None in
-    (* 존재하지 않는 방 입장 시도 *)
-    let result = Room.room_enter config ~room_id:"nonexistent" ~agent_type:"claude" () in
-    match result with
-    | `Assoc fields ->
-        (match List.assoc_opt "error" fields with
-        | Some _ -> ()  (* 에러가 있어야 함 *)
-        | None -> fail "Expected error for nonexistent room")
-    | _ -> fail "Expected JSON object"
-  )
-
-(* ============================================ *)
-(* Room Context Tests                           *)
-(* ============================================ *)
-
-let test_current_room_after_enter () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    let _ = Room.init config ~agent_name:None in
-    (* 새 방 생성하고 입장 *)
-    let _ = Room.room_create config ~name:"New Room" ~description:None in
-    let _ = Room.room_enter config ~room_id:"new-room" ~agent_type:"claude" () in
-    (* rooms_list에서 current_room 확인 *)
-    let result = Room.rooms_list config in
-    match result with
-    | `Assoc fields ->
-        (match List.assoc_opt "current_room" fields with
-        | Some (`String room) -> check string "current room" "new-room" room
-        | _ -> fail "Expected current_room field")
-    | _ -> fail "Expected JSON object"
-  )
-
-(* ============================================ *)
-(* Room Isolation Tests                         *)
-(* ============================================ *)
-
-let test_room_enter_moves_agent () =
-  Eio_main.run @@ fun _env ->
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    ignore (Room.init config ~agent_name:None);
-
-    let join_result = Room.join config ~agent_name:"codex" ~capabilities:[] () in
-    let nickname = extract_nickname join_result in
-    check int "default room has agent" 1 (Room.count_agents_in_room config "default");
-
-    ignore (Room.room_create config ~name:"Move Room" ~description:None);
-    ignore (Room.room_enter config ~room_id:"move-room" ~agent_type:"codex" ~agent_name:nickname ());
-
-    check int "default room cleared after move" 0 (Room.count_agents_in_room config "default");
-    check int "move room has agent" 1 (Room.count_agents_in_room config "move-room");
-  )
-
-let test_join_in_room_keeps_current_room () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    ignore (Room.init config ~agent_name:None);
-    ignore (Room.room_create config ~name:"Presence Room" ~description:None);
-    ignore
-      (Room.join_in_room config ~room_id:"presence-room" ~agent_name:"sangsu"
-         ~capabilities:["keeper"] ());
-    check (option string) "current room unchanged" (Some "default")
-      (Room.read_current_room config);
-    check int "presence room has keeper" 1
-      (Room.count_agents_in_room config "presence-room");
-    check int "default room still empty" 0
-      (Room.count_agents_in_room config "default"))
-
-let test_room_task_isolation () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    ignore (Room.init config ~agent_name:None);
-
-    ignore (Room.add_task config ~title:"default-task" ~priority:3 ~description:"default room task");
-    check int "default room task count" 1 (task_count config);
-
-    ignore (Room.room_create config ~name:"Isolated Room" ~description:None);
-    ignore (Room.room_enter config ~room_id:"isolated-room" ~agent_type:"codex" ());
-
-    (* Re-resolve scope after room_enter wrote current_room file.
-       masc_dir no longer re-reads the file on every call. *)
-    let isolated_config = Room.config_with_resolved_scope config in
-
-    (* Default room tasks should not leak into the new room. *)
-    check int "isolated room starts empty" 0 (task_count isolated_config);
-
-    ignore (Room.add_task isolated_config ~title:"isolated-task" ~priority:3 ~description:"isolated room task");
-    check int "isolated room task count" 1 (task_count isolated_config);
-
-    ignore (Room.room_enter config ~room_id:"default" ~agent_type:"codex" ());
-    let default_config = Room.config_with_resolved_scope config in
-    check int "default room remains isolated" 1 (task_count default_config);
-  )
-
-let test_rooms_list_task_count_active_only () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    let init_result = Room.init config ~agent_name:(Some "codex") in
-    let nickname = extract_nickname init_result in
-
-    ignore (Room.add_task config ~title:"default-done" ~priority:2 ~description:"");
-    ignore (Room.add_task config ~title:"default-todo" ~priority:2 ~description:"");
-    ignore (Room.claim_task config ~agent_name:nickname ~task_id:"task-001");
-    ignore (Room.complete_task config ~agent_name:nickname ~task_id:"task-001" ~notes:"done");
-
-    ignore (Room.room_create config ~name:"Count Room" ~description:None);
-    ignore (Room.room_enter config ~room_id:"count-room" ~agent_type:"codex" ());
-    (* Re-resolve scope after room_enter wrote current_room file *)
-    let count_config = Room.config_with_resolved_scope config in
-    ignore (Room.add_task count_config ~title:"count-room-task" ~priority:3 ~description:"");
-
-    let result = Room.rooms_list config in
-    check (option int) "default counts only active tasks" (Some 1)
-      (extract_room_task_count result "default");
-    check (option int) "count-room active tasks" (Some 1)
-      (extract_room_task_count result "count-room");
-  )
-
-(* ============================================ *)
-(* Backward Compatibility Tests                 *)
-(* ============================================ *)
-
-let test_legacy_masc_as_default_room () =
-  let (config, test_dir) = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
-    (* Legacy 스타일로 init (rooms/ 없이) *)
-    let _ = Room.init config ~agent_name:None in
-    (* join이 default 방에서 작동해야 함 *)
-    let join_result = Room.join config ~agent_name:"claude" ~capabilities:[] () in
-    check bool "join succeeded" true (String.length join_result > 0);
-    (* join_result에 nickname이 포함되어 있어야 함 (claude-xxx 형태) *)
-    check bool "join result contains claude" true
-      (String.length join_result > 10 &&
-       String.sub join_result 0 6 = "\xE2\x9C\x85 " || (* ✅ *)
-       (let contains s sub =
-         let len_s = String.length s in
-         let len_sub = String.length sub in
-         if len_sub > len_s then false
-         else
-           let rec check i =
-             if i > len_s - len_sub then false
-             else if String.sub s i len_sub = sub then true
-             else check (i + 1)
-           in check 0
-       in contains join_result "claude-"))
-  )
-
-(* ============================================ *)
-(* Test Suite                                   *)
-(* ============================================ *)
+let test_current_room_agents_are_isolated () =
+  with_config (fun config ->
+      ignore (Room.join config ~agent_name:"default-agent" ~capabilities:[] ());
+      let focused = select_room config "focus-room" in
+      ignore (Room.join focused ~agent_name:"focus-agent" ~capabilities:[] ());
+      check int "default room agent count" 1
+        (List.length (Room.get_agents_raw_in_room config "default"));
+      check int "focus room agent count" 1
+        (List.length (Room.get_agents_raw_in_room config "focus-room")))
 
 let () =
-  run "Multi-Room" [
-    "rooms_list", [
-      test_case "empty before init" `Quick test_rooms_list_empty;
-      test_case "default room after init" `Quick test_rooms_list_after_init;
-    ];
-    "room_create", [
-      test_case "create new room" `Quick test_room_create;
-      test_case "duplicate room error" `Quick test_room_create_duplicate;
-    ];
-    "room_enter", [
-      test_case "enter room" `Quick test_room_enter;
-      test_case "enter nonexistent error" `Quick test_room_enter_nonexistent;
-      test_case "current room updates" `Quick test_current_room_after_enter;
-    ];
-    "room_isolation", [
-      test_case "agent moves between rooms" `Quick test_room_enter_moves_agent;
-      test_case "join_in_room keeps current room" `Quick test_join_in_room_keeps_current_room;
-      test_case "tasks are isolated per room" `Quick test_room_task_isolation;
-      test_case "rooms_list task_count uses active tasks" `Quick test_rooms_list_task_count_active_only;
-    ];
-    "backward_compat", [
-      test_case "legacy masc as default" `Quick test_legacy_masc_as_default_room;
-    ];
-  ]
+  run "current_room_compat"
+    [
+      ( "current_room",
+        [
+          test_case "defaults to default" `Quick test_current_room_defaults_to_default;
+          test_case "write and resolve scope" `Quick test_current_room_write_and_resolve_scope;
+          test_case "tasks are isolated" `Quick test_current_room_tasks_are_isolated;
+          test_case "agents are isolated" `Quick test_current_room_agents_are_isolated;
+        ] );
+    ]

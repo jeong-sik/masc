@@ -769,7 +769,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                       ~status:`Bad_request ~extra_headers:cors
                | Some room_id ->
                      Room.write_current_room config room_id;
-                     Room.ensure_room_entry config room_id;
+                     Room.ensure_room_bootstrap config room_id;
                      let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
                      h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors)
             with

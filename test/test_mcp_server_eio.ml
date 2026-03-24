@@ -1532,23 +1532,8 @@ let test_convo_start_uses_current_room () =
       ~arguments:(`Assoc [])
   in
   Alcotest.(check bool) "init success" true ok_init;
-
-  let (ok_create, _create_msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_room_create"
-      ~arguments:(`Assoc [("name", `String room_id)])
-  in
-  Alcotest.(check bool) "room create success" true ok_create;
-
-  let (ok_enter, _enter_msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_room_enter"
-      ~arguments:(`Assoc [
-        ("room_id", `String room_id);
-        ("agent_type", `String "codex");
-      ])
-  in
-  Alcotest.(check bool) "room enter success" true ok_enter;
+  Masc_mcp.Room.write_current_room state.room_config room_id;
+  Masc_mcp.Room.ensure_room_bootstrap state.room_config room_id;
 
   (* After entering a new room, convo tools are immediately available. *)
 

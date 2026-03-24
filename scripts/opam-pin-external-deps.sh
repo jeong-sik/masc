@@ -14,7 +14,7 @@ source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 
 include_bisect=false
 include_compact_protocol=false
-agent_sdk_pin_url="${AGENT_SDK_PIN_URL:-https://github.com/jeong-sik/oas.git#a9a1b9b002078981d01d890fb49919183e970e40}"
+agent_sdk_pin_url="${AGENT_SDK_PIN_URL:-https://github.com/jeong-sik/oas.git#1481466ac75e3a1925f7a0161cf0f69865527a3a}"
 
 for arg in "$@"; do
   case "$arg" in

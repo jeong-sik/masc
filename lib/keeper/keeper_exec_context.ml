@@ -278,19 +278,7 @@ let set_room_cursor meta room_id seq =
 let room_ids_for_meta config (meta : keeper_meta) : string list =
   match Keeper_contract.room_scope_of_string meta.room_scope with
   | Keeper_contract.All ->
-      let open Yojson.Safe.Util in
-      let listed =
-        match Room.rooms_list config |> member "rooms" with
-        | `List rooms ->
-            rooms
-            |> List.filter_map (fun room ->
-                   match room |> member "id" with
-                   | `String room_id when validate_name room_id -> Some room_id
-                   | _ -> None)
-        | _ -> []
-      in
-      let current = Room.current_room_id config in
-      dedupe_keep_order (current :: listed)
+      [ Room.current_room_id config ]
   | Keeper_contract.Current -> [ Room.current_room_id config ]
 
 let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =

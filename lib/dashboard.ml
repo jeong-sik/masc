@@ -223,24 +223,8 @@ let dedupe_keep_order strings =
   ) strings
 
 let ordered_room_ids (config : Room_utils.config) =
-  let open Yojson.Safe.Util in
   let current_room = Room.current_room_id config in
-  let result = Room.rooms_list config in
-  let listed =
-    match result |> member "rooms" with
-    | `List rooms ->
-        List.filter_map (fun room ->
-          match room |> member "id" with
-          | `String id when String.trim id <> "" -> Some id
-          | _ -> None
-        ) rooms
-    | _ -> []
-  in
-  let room_ids =
-    dedupe_keep_order (current_room :: "default" :: listed)
-  in
-  let others = List.filter (fun room_id -> not (String.equal room_id current_room)) room_ids in
-  (current_room, current_room :: List.sort String.compare others)
+  (current_room, [ current_room ])
 
 let room_snapshot (config : Room_utils.config) ~current_room room_id =
   {

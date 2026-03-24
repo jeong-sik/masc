@@ -136,13 +136,8 @@ let test_dashboard_execution_current_room_status () =
       let config = Room_utils.default_config dir in
       Eio_main.run @@ fun env ->
       ignore (Lib.Room.init config ~agent_name:None);
-      ignore (Lib.Room.room_create config ~name:"Focus Room" ~description:None);
-      let enter_result =
-        Lib.Room.room_enter config ~room_id:"focus-room" ~agent_type:"claude" ()
-      in
-      let open Yojson.Safe.Util in
-      check string "room enter current_room" "focus-room"
-        (enter_result |> member "current_room" |> to_string);
+      Lib.Room.write_current_room config "focus-room";
+      Lib.Room.ensure_room_bootstrap config "focus-room";
       check (option string) "room state current_room" (Some "focus-room")
         (Lib.Room.read_current_room config);
       Eio.Switch.run (fun sw ->
@@ -154,6 +149,7 @@ let test_dashboard_execution_current_room_status () =
             ~proc_mgr:None
             ()
         in
+        let open Yojson.Safe.Util in
         let status = json |> member "status" in
         check string "status room follows current room" "focus-room"
           (status |> member "room" |> to_string);
@@ -169,8 +165,8 @@ let test_dashboard_shell_current_room_status () =
       Eio_main.run @@ fun _env ->
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:None);
-      ignore (Lib.Room.room_create config ~name:"Focus Room" ~description:None);
-      ignore (Lib.Room.room_enter config ~room_id:"focus-room" ~agent_type:"claude" ());
+      Lib.Room.write_current_room config "focus-room";
+      Lib.Room.ensure_room_bootstrap config "focus-room";
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       let status = json |> member "status" in

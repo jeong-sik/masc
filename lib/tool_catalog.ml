@@ -123,15 +123,6 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_votes",
       hidden_active
         "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
-    ( "masc_rooms_list",
-      hidden_active
-        "Named-room inventory is an internal compatibility surface. Repo-root room semantics remain the canonical default workflow." );
-    ( "masc_room_create",
-      hidden_active
-        "Named-room creation is an internal compatibility surface. Repo-root room semantics remain the canonical default workflow." );
-    ( "masc_room_enter",
-      hidden_active
-        "Named-room switching is an internal compatibility surface. Repo-root room semantics remain the canonical default workflow." );
     ( "masc_operator_judgment_write",
       hidden_active
         "Internal resident-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );

@@ -210,31 +210,16 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
     ~include_tasks ~include_board:_ =
   let now = Time_compat.now () in
   let cutoff = now -. (since_hours *. 3600.0) in
-  let rooms =
-    let open Yojson.Safe.Util in
-    let result = Room.rooms_list config in
-    match result |> member "rooms" with
-    | `List rooms ->
-        List.filter_map
-          (fun room ->
-            match room |> member "id" with
-            | `String id when String.trim id <> "" -> Some id
-            | _ -> None)
-          rooms
-    | _ -> [ "default" ]
-  in
-  (* Collect events from all rooms *)
+  let room_id = Room.current_room_id config in
+  (* Collect events from the currently selected room only. *)
   let all_events =
-    List.concat_map
-      (fun room_id ->
-        let agent_evts = agent_events config ~agent_name ~room_id in
-        let task_evts =
-          if include_tasks then task_events config ~agent_name ~room_id
-          else []
-        in
-        let msg_evts = message_events config ~agent_name ~room_id ~limit:200 in
-        agent_evts @ task_evts @ msg_evts)
-      rooms
+    let agent_evts = agent_events config ~agent_name ~room_id in
+    let task_evts =
+      if include_tasks then task_events config ~agent_name ~room_id
+      else []
+    in
+    let msg_evts = message_events config ~agent_name ~room_id ~limit:200 in
+    agent_evts @ task_evts @ msg_evts
   in
   (* Filter by time cutoff and sort chronologically *)
   let filtered =
@@ -311,8 +296,8 @@ let schemas : Types.tool_schema list =
     {
       name = "masc_agent_timeline";
       description =
-        "Unified timeline of an agent's activity across all data sources \
-         (tasks, messages, joins). Answers: what has this agent been doing?";
+        "Unified timeline of an agent's activity in the currently selected room \
+         across tasks, messages, and joins.";
       input_schema =
         `Assoc
           [

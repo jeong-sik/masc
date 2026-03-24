@@ -57,7 +57,7 @@ else
 fi
 # Extract task_id from response
 task_text="$(printf "%s" "$r2" | extract_text)"
-task_id="$(printf "%s\n" "$task_text" | rg -o 'task-[0-9]+(-[0-9]+)?' | head -n1 || true)"
+task_id="$(printf "%s\n" "$task_text" | grep -oE 'task-[0-9]+(-[0-9]+)?' | head -n1 || true)"
 if [ -z "$task_id" ]; then
   step_fail "could not extract task_id from add_task response"
   echo "$r2"

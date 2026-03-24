@@ -681,21 +681,20 @@ let test_validate_task_id_r_valid () =
   check bool "ok result" true (is_ok result)
 
 let test_validate_room_id_valid () =
-  let result = Room_utils.validate_room_id "room-alpha_01" in
-  check (result string string) "valid room id" (Ok "room-alpha_01") result
+  let room_result = Room_utils.validate_room_id "room-alpha_01" in
+  check (result string string) "valid room id" (Ok "room-alpha_01") room_result
 
 let test_validate_room_id_trims_whitespace () =
-  let result = Room_utils.validate_room_id "  room-alpha_01  " in
-  check (result string string) "trimmed room id" (Ok "room-alpha_01") result
+  let room_result = Room_utils.validate_room_id "  room-alpha_01  " in
+  check (result string string) "trimmed room id" (Ok "room-alpha_01") room_result
 
 let test_validate_room_id_rejects_path_traversal () =
-  let result = Room_utils.validate_room_id "../../tmp/x" in
-  check bool "invalid traversal" true (is_error result)
+  let room_result = Room_utils.validate_room_id "../../tmp/x" in
+  check bool "invalid traversal" true (is_error room_result)
 
 let test_validate_room_id_rejects_invalid_chars () =
-  let result = Room_utils.validate_room_id "room id" in
-  check bool "invalid chars" true (is_error result)
-
+  let room_result = Room_utils.validate_room_id "room id" in
+  check bool "invalid chars" true (is_error room_result)
 let test_validate_file_path_valid () =
   let result = Room_utils.validate_file_path "src/main.ml" in
   check bool "valid" true (is_ok result)

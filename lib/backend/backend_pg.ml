@@ -283,12 +283,7 @@ let create_eio ~sw ~env (cfg : config) : (t, error) result =
                  with _ -> ());
                Ok { pool; namespace = cfg.cluster_name; clock = env#clock; _sw = sw })
 
-(** Lightweight pool creation for use in a different Eio domain.
-    Skips schema initialization (assumed already done by the main pool).
-    Uses max_size=1 since this is for read-heavy dashboard compute.
-    The caller's [sw] is captured by Caqti, making this pool safe to
-    use from the domain that owns [sw]. *)
-let[@warning "-32"] create_eio_readonly ~sw ~env (cfg : config) : (t, error) result =
+let create_eio_readonly ~sw ~env (cfg : config) : (t, error) result =
   match cfg.postgres_url with
   | None -> Error (ConnectionFailed "PostgreSQL URL not configured")
   | Some url ->

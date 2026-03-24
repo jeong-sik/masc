@@ -524,9 +524,7 @@ type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
 (** Type of recursive execute_node callback for open recursion *)
 type execute_node_fn = exec_context -> sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> exec_fn:exec_fn -> tool_exec:tool_exec -> Chain_types.node -> (string, string) result
 
-(** Calculate backoff delay in seconds.
-    Used by chain_executor_resilience via include. *)
-let[@warning "-32"] calculate_backoff_delay (strategy : Chain_types.backoff_strategy) (attempt : int) : float =
+let calculate_backoff_delay (strategy : Chain_types.backoff_strategy) (attempt : int) : float =
   match strategy with
   | Chain_types.Constant secs -> secs
   | Chain_types.Exponential base -> base *. (2.0 ** float_of_int attempt)
@@ -534,9 +532,7 @@ let[@warning "-32"] calculate_backoff_delay (strategy : Chain_types.backoff_stra
   | Chain_types.Jitter (min_sec, max_sec) ->
       min_sec +. Random.State.float executor_rng (max_sec -. min_sec)
 
-(** Check if error matches retry patterns.
-    Used by chain_executor_resilience via include. *)
-let[@warning "-32"] should_retry (retry_on : string list) (error_msg : string) : bool =
+let should_retry (retry_on : string list) (error_msg : string) : bool =
   match retry_on with
   | [] -> true
   | patterns ->

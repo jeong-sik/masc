@@ -160,11 +160,6 @@ let canonical_trigger_mode = function
   | "explicit_only" -> "explicit_only"
   | _ -> "explicit_only"
 
-(** Mode categorization removed. Always returns "heuristic" regardless of input.
-    Field kept for JSON backward compatibility. *)
-let canonical_policy_mode = function
-  | _ -> "heuristic"
-
 let canonical_voice_channel = function
   | "voice_only" -> "voice_only"
   | "text_only" -> "text_only"
@@ -367,9 +362,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
          models = strs "models";
          allowed_models = strs "allowed_models";
          active_model = str "active_model";
-         policy_mode =
-           str "policy_mode"
-           |> Option.map canonical_policy_mode;
+         policy_mode = Some "heuristic";
          policy_voice_enabled = bool_ "policy_voice_enabled";
          policy_shell_mode =
            str "policy_shell_mode"
@@ -479,8 +472,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 allowed_models = Safe_ops.json_string_list "allowed_models" keeper_json;
                 active_model = Safe_ops.json_string_opt "active_model" keeper_json;
                 policy_mode =
-                  Safe_ops.json_string_opt "policy_mode" keeper_json
-                  |> Option.map canonical_policy_mode;
+                  Some "heuristic";
                 policy_voice_enabled =
                   (match Yojson.Safe.Util.member "policy_voice_enabled" keeper_json with
                   | `Bool flag -> Some flag

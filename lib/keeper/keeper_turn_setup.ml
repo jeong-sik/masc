@@ -99,8 +99,7 @@ let ensure_keeper_exists
               | model :: _ -> model
               | [] -> "")
     in
-    (* Mode categorization removed: always use fixed values. *)
-    let policy_mode = canonical_policy_mode "heuristic" in
+    let policy_mode = "heuristic" in
     let policy_voice_enabled =
       profile_defaults.policy_voice_enabled
       |> Option.value ~default:false

@@ -21,7 +21,6 @@ let keeper_tool_audit_json_fields keeper agent_name =
   let fallback_source =
     match trim_to_option (string_field "tool_audit_source" keeper) with
     | Some _ as value -> value
-    | None when fallback_allowed <> [] -> Some "keeper_policy"
     | None -> None
   in
   let fallback_at =

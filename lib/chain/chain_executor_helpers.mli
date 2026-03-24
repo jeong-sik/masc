@@ -142,7 +142,5 @@ type execute_node_fn = exec_context -> sw:Eio.Switch.t -> clock:float Eio.Time.c
 val is_complex_prompt : string -> bool
 val is_glm_model : string -> bool
 
-(** {1 Backoff and Retry Helpers} *)
-
 val calculate_backoff_delay : Chain_types.backoff_strategy -> int -> float
 val should_retry : string list -> string -> bool

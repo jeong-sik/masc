@@ -150,8 +150,6 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
     In-memory only — first run after restart uses a 300s bootstrap window. *)
 let board_cursors : (string, float) Hashtbl.t = Hashtbl.create 8
 
-let reset_board_cursor name = Hashtbl.remove board_cursors name [@@warning "-32"]
-
 (** Collect recent board activity using cursor-based tracking.
     Returns (event summaries, new post count, mention count). *)
 let collect_board_events ~(meta : keeper_meta) : string list * int * int =

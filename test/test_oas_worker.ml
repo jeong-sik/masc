@@ -222,6 +222,7 @@ let test_mitosis_check_handoff () =
   | None -> Alcotest.fail "dispatch returned None"
 
 let test_mitosis_record_updates_cell () =
+  Eio_main.run @@ fun _env ->
   with_mitosis_base @@ fun base_path ->
   let ctx = make_mitosis_ctx ~base_path in
   let args = `Assoc [("task_done", `Bool true); ("tool_called", `Bool true)] in
@@ -241,6 +242,7 @@ let test_mitosis_record_updates_cell () =
   | None -> Alcotest.fail "dispatch returned None"
 
 let test_mitosis_prepare_empty_context_err () =
+  Eio_main.run @@ fun _env ->
   with_mitosis_base @@ fun base_path ->
   let ctx = make_mitosis_ctx ~base_path in
   let args = `Assoc [("full_context", `String "")] in
@@ -254,6 +256,7 @@ let test_mitosis_prepare_empty_context_err () =
   | None -> Alcotest.fail "dispatch returned None"
 
 let test_mitosis_prepare_success () =
+  Eio_main.run @@ fun _env ->
   with_mitosis_base @@ fun base_path ->
   let ctx = make_mitosis_ctx ~base_path in
   let args = `Assoc [("full_context", `String "This is a rich context for DNA extraction with enough detail.")] in
@@ -268,6 +271,7 @@ let test_mitosis_prepare_success () =
   | None -> Alcotest.fail "dispatch returned None"
 
 let test_mitosis_handoff_no_action () =
+  Eio_main.run @@ fun _env ->
   with_mitosis_base @@ fun base_path ->
   let ctx = make_mitosis_ctx ~base_path in
   let args = `Assoc [("context_ratio", `Float 0.1)] in

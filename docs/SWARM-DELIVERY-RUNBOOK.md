@@ -6,6 +6,7 @@
 
 - 구현 swarm의 SSOT는 `Team Session + Supervisor Mode`
 - canonical benchmark/swarm path는 여전히 `CPv2 direct`
+- native chain plane은 separate/manual substrate이며 SWARM canonical path가 아니다
 - model 선택은 항상 explicit
 - 기본 운영 형태는 supervised swarm
 
@@ -92,7 +93,7 @@ stale pending reviewer PID가 있으면 정리한 뒤 다시 시작한다.
 기본 프롬프트는 fresh-context diff-only reviewer로 동작하므로,
 티켓/회의 맥락 없이도 structural risk를 따로 잡는 fallback gate로 본다.
 
-`pr-review-pipeline` canonical path도 clean-context structural stage를 포함한다.
+SWARM canonical review path도 clean-context structural stage를 포함한다.
 즉 review stack은 다음 3층으로 본다:
 
 - context-aware multi-check review

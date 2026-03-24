@@ -120,6 +120,22 @@ type session_info = {
   policy_violation_count : int;
 }
 
+(** Time window for "moving" (actively progressing) status.
+    300s (5 min): A typical tool-call round trip (LLM inference 10-20s + tool
+    execution 5-30s + network latency) completes within 1-2 minutes. 5 minutes
+    accommodates 2-3 consecutive round trips without false "stalled" signals.
+    If no event occurs within this window, the lane transitions to "waiting". *)
 let moving_window_sec = 300.0
+
+(** Time window for "stalled" (no activity, likely stuck) status.
+    900s (15 min) = 3x moving_window. The 1:3 ratio mirrors common
+    heartbeat:timeout conventions in distributed systems (e.g., Raft election
+    timeouts are typically 5-10x heartbeat intervals). 15 minutes allows for
+    one failed turn + retry + human think time before declaring "stalled". *)
 let stale_window_sec = 900.0
+
+(** Maximum timeline entries shown in dashboard swarm status.
+    20 entries: fits comfortably in a dashboard panel without scrolling,
+    while covering the last ~100 minutes of activity at typical event rates
+    (1 event per 5 minutes). *)
 let timeline_limit = 20

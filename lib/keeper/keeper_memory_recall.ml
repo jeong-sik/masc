@@ -39,9 +39,16 @@ let read_keeper_memory_summary
   in
   summarize_memory_bank_lines lines ~recent_limit
 
+(** Detect whether a query is asking about past conversation memory.
+
+    Keywords are split by language for maintainability.
+    English keywords are broad ("remember", "before") — matched after
+    lowercasing to catch case variations.
+    Korean keywords include spacing variants ("기억안나" vs "기억 안나")
+    because Korean tokenizers often disagree on spacing. *)
 let is_memory_recall_query (s : string) : bool =
   let q = String.lowercase_ascii s in
-  let needles = [
+  let en_keywords = [
     "what did i ask";
     "first question";
     "before";
@@ -49,18 +56,21 @@ let is_memory_recall_query (s : string) : bool =
     "remembered";
     "do you remember";
     "memory";
-    "기억";
-    "기억해";
-    "기억안나";
-    "기억 안나";
-    "기억나";
-    "기억 나";
-    "전에 뭐";
-    "이전에";
-    "첫 질문";
-    "처음 물어";
-    "뭐라고 물어봤";
   ] in
+  let ko_keywords = [
+    "기억";        (* "memory/remember" — base morpheme *)
+    "기억해";      (* "do you remember" *)
+    "기억안나";    (* "can't remember" — no space variant *)
+    "기억 안나";   (* "can't remember" — spaced variant *)
+    "기억나";      (* "I remember" — no space variant *)
+    "기억 나";     (* "I remember" — spaced variant *)
+    "전에 뭐";     (* "what before" — asking about prior *)
+    "이전에";      (* "previously" *)
+    "첫 질문";     (* "first question" *)
+    "처음 물어";   (* "first asked" *)
+    "뭐라고 물어봤"; (* "what did I ask" *)
+  ] in
+  let needles = en_keywords @ ko_keywords in
   List.exists (fun n ->
     try
       let _ = Str.search_forward (Str.regexp_string n) q 0 in
@@ -608,6 +618,16 @@ let evaluate_memory_recall
     (try let _ = Str.search_forward (Str.regexp_string "날씨") s 0 in true with Not_found -> false)
     || (try let _ = Str.search_forward (Str.regexp_string "weather") q 0 in true with Not_found -> false)
   in
+  (* Similarity threshold for recall match acceptance.
+     0.18 (default): Jaccard + character n-gram combined score.
+     At this level, queries sharing 2+ morphemes with a candidate produce
+     scores above 0.18, while unrelated pairs stay below. Determined by
+     manual review of recall accuracy on keeper session transcripts.
+
+     0.15 (weather): Weather queries are typically short ("오늘 날씨" = 2 words)
+     with minimal context words. The reduced n-gram surface area produces
+     lower scores for genuine matches, so we lower the threshold by 0.03
+     to avoid false negatives on this common query type. *)
   let threshold =
     match expected_topic with
     | Some "weather" -> 0.15

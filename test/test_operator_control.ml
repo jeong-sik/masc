@@ -15,6 +15,10 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_snapshot_summary_view_can_omit_command_plane;
+          Alcotest.test_case "snapshot lightweight summary omits heavy activity"
+            `Quick
+            Test_operator_control_snapshot
+            .test_snapshot_lightweight_summary_omits_heavy_activity;
           Alcotest.test_case "orchestra room core shape" `Quick
             Test_operator_control_snapshot.test_orchestra_room_core_shape;
           Alcotest.test_case "orchestra session edge and pending signal" `Quick

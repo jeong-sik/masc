@@ -30,7 +30,8 @@ let run_cmd base_path =
     Server_runtime_bootstrap.create_server_state ~sw ~base_path ~clock
       ~mono_clock ~net ~proc_mgr ~fs
   in
-  Server_runtime_bootstrap.bootstrap_server_state state;
+  Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+  Server_runtime_bootstrap.bootstrap_chain_state state;
   Server_runtime_bootstrap.bootstrap_keepers ~sw ~clock state;
   Server_runtime_bootstrap.init_task_backend ();
   Server_runtime_bootstrap.inject_shared_pg_pool ();

@@ -328,6 +328,8 @@ let session_query_prefix config =
   | Some key when String.trim key <> "" -> key ^ ":"
   | _ -> "team-sessions:"
 
+let pg_recent_default_limit = 200
+
 (** List sessions, optionally filtering by mtime to avoid loading stale history.
     [~since_unix] skips directories whose mtime is older than the given Unix timestamp.
     [~limit] caps the number of returned sessions (0 = unlimited).

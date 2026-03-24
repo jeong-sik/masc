@@ -172,6 +172,35 @@ let test_snapshot_summary_view_can_omit_command_plane () =
       Alcotest.(check bool) "recommendation summary still present" true
         (Yojson.Safe.Util.member "recommendation_summary" json <> `Null))
 
+let test_snapshot_lightweight_summary_omits_heavy_activity () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let json =
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_keepers:true ~include_messages:true ~include_command_plane:false
+          ~lightweight_summary:true
+          (operator_ctx env sw config "owner")
+      in
+      let keepers =
+        Yojson.Safe.Util.(json |> member "keepers" |> member "items" |> to_list)
+      in
+      List.iter
+        (fun keeper ->
+          Alcotest.(check int) "lightweight recent_activity omitted" 0
+            Yojson.Safe.Util.(keeper |> member "recent_activity" |> to_list |> List.length))
+        keepers;
+      Alcotest.(check int) "lightweight recent_messages omitted" 0
+        Yojson.Safe.Util.(json |> member "recent_messages" |> to_list |> List.length);
+      Alcotest.(check int) "lightweight recent_actions omitted" 0
+        Yojson.Safe.Util.(json |> member "recent_actions" |> to_list |> List.length))
+
 let test_orchestra_room_core_shape () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->

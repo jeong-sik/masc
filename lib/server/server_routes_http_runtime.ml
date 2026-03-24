@@ -177,6 +177,7 @@ let make_health_json ?(listener = "http/1.1") request =
     ("transport", transport_json request);
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Sse.client_count ()));
+    ("startup", Server_startup_state.to_yojson ());
     ("pg_pool", let max_size = Backend_core.configured_max_pool_size () in
       let shared = Option.is_some (Board_dispatch.get_pg_pool ()) in
       Backend_core.pool_stats_to_yojson {

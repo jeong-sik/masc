@@ -174,10 +174,24 @@ let with_dashboard_timeout ~clock compute =
         ("generated_at", `String (Types.now_iso ()));
       ]
 
-let dashboard_active_or_recent_sessions config =
+let dashboard_session_list_timeout_s = 5.0
+
+let dashboard_active_or_recent_sessions ~clock config =
   let cutoff_unix = Time_compat.now () -. 86400.0 in
   let cutoff_iso = Dashboard_utils.iso_of_unix cutoff_unix in
-  Team_session_store.list_sessions ~since_unix:cutoff_unix config
+  let sessions =
+    match
+      Eio.Time.with_timeout clock dashboard_session_list_timeout_s (fun () ->
+          Ok (Team_session_store.list_sessions ~since_unix:cutoff_unix config))
+    with
+    | Ok rows -> rows
+    | Error `Timeout ->
+        Log.Dashboard.warn
+          "dashboard session list timed out after %.0fs; serving without session rows"
+          dashboard_session_list_timeout_s;
+        []
+  in
+  sessions
   |> List.filter (fun (session : Team_session_types.session) ->
          match session.status with
          | Running | Paused -> true
@@ -204,17 +218,17 @@ let with_projection_diagnostics ~surface ~started_at ~extra json =
   attach_projection_diagnostics json
     (projection_diagnostics_json ~surface ~started_at ~extra json)
 
-let initialized_json_opt = function
+let initialized_json_opt ?(allow_initializing = false) = function
   | `Assoc fields as json -> (
       match List.assoc_opt "status" fields with
-      | Some (`String "initializing") -> None
+      | Some (`String "initializing") when not allow_initializing -> None
       | _ -> Some json)
   | _ -> None
 
-let command_plane_summary_cache_parts ~state =
+let command_plane_summary_cache_parts ~allow_initializing ~state =
   match
     Server_command_plane_http_support.command_plane_summary_http_json ~state
-    |> initialized_json_opt
+    |> initialized_json_opt ~allow_initializing
   with
   | Some (`Assoc fields) ->
       let swarm_status =
@@ -429,7 +443,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     try
       let sessions =
         if Room.is_initialized config then
-          dashboard_active_or_recent_sessions config
+          dashboard_active_or_recent_sessions ~clock config
         else
           []
       in
@@ -438,10 +452,14 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
       in
       Operator_control.snapshot_json ~actor:"dashboard" ~view:"summary"
         ~include_messages:true ~include_sessions:true ~include_keepers:true
+        ~include_summary_fields:false
+        ~lightweight_summary:true
         ~include_command_plane:false ~sessions ctx
       |> with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
            ~extra:(operator_snapshot_extra sessions)
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       mark_cached_surface_error _operator_snapshot_cache exn;
       raise exn
   in
@@ -449,7 +467,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     ~config:{ (Proactive_refresh.default_config
                  ~label:"operator_snapshot"
                  ~interval_s:_operator_refresh_interval_s)
-              with timeout_s = 30.0 }
+              with timeout_s = 15.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _operator_snapshot_cache)
 
@@ -462,12 +480,12 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     try
       let sessions =
         if Room.is_initialized config then
-          Team_session_store.list_sessions ~limit:50 config
+          dashboard_active_or_recent_sessions ~clock config
         else
           []
       in
       let command_plane_summary, swarm_status =
-        command_plane_summary_cache_parts ~state
+        command_plane_summary_cache_parts ~allow_initializing:true ~state
       in
       let ctx : _ Operator_control.context =
         { config; agent_name = "dashboard"; sw; clock; proc_mgr; mcp_session_id = None }
@@ -480,7 +498,9 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
           with_projection_diagnostics ~surface:"operator_digest" ~started_at
             ~extra:(operator_snapshot_extra sessions) json
       | Error err -> failwith err
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       mark_cached_surface_error _operator_digest_cache exn;
       raise exn
   in
@@ -488,7 +508,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     ~config:{ (Proactive_refresh.default_config
                  ~label:"operator_digest"
                  ~interval_s:_operator_refresh_interval_s)
-              with timeout_s = 30.0 }
+              with timeout_s = 15.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _operator_digest_cache)
 
@@ -547,8 +567,10 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
                  mcp_session_id = None;
                }
              in
-             Operator_control.snapshot_json ?actor ?view
+            Operator_control.snapshot_json ?actor ?view
                ~include_messages ~include_sessions ~include_keepers
+               ~include_summary_fields:include_command_plane
+               ~lightweight_summary:(not include_command_plane)
                ~include_command_plane ctx))
     ) with
     | Ok json ->
@@ -615,7 +637,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
              in
              let command_plane_summary, swarm_status =
                if String.equal effective_target_type "room" then
-                 command_plane_summary_cache_parts ~state
+                 command_plane_summary_cache_parts ~allow_initializing:true ~state
                else
                  (None, None)
              in
@@ -684,13 +706,15 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     try
       run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config:room_config
         (fun ~config ~sw -> Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ())
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       mark_cached_surface_error _mission_cache exn;
       raise exn
   in
   Proactive_refresh.start ~sw ~clock
     ~config:{ (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0)
-              with timeout_s = 120.0 }
+              with timeout_s = 15.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _mission_cache)
 

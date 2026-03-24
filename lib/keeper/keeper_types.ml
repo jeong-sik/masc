@@ -502,7 +502,7 @@ type resident_keeper_spec = {
 }
 
 let resident_keeper_dir (config : Room.config) =
-  let d = Filename.concat (Filename.concat config.base_path ".masc") "resident-keepers" in
+  let d = Filename.concat (Room.masc_root_dir config) "resident-keepers" in
   mkdir_p d;
   d
 

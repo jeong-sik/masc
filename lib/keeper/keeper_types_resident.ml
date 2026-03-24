@@ -11,12 +11,12 @@ let mkdir_p_ path =
   Fs_compat.mkdir_p path
 
 let keeper_dir_ (config : Room.config) =
-  let d = Filename.concat (Filename.concat config.base_path ".masc") "perpetual-keepers" in
+  let d = Filename.concat (Room.masc_root_dir config) "perpetual-keepers" in
   mkdir_p_ d;
   d
 
 let session_base_dir_ (config : Room.config) =
-  Filename.concat (Filename.concat config.base_path ".masc") "perpetual"
+  Filename.concat (Room.masc_root_dir config) "perpetual"
 
 let env_present name =
   match Sys.getenv_opt name with

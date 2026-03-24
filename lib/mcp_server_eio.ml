@@ -25,10 +25,6 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
 
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
-(** {1 Logging} *)
-
-let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
-
 (** {1 Eio Context Wrappers} *)
 
 let set_net net = Eio_context.set_net net
@@ -41,17 +37,8 @@ let create_state ?test_mode:_ ~base_path () =
   Mcp_server.create_state ~base_path
 
 let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
-  let state = Mcp_server.create_state_eio ~sw ~env ~proc_mgr ~fs ~clock
-    ~net:(net :> Eio_context.eio_net) ~base_path in
-  (try Team_session_engine_eio.recover_running_sessions ~sw ~clock
-         ~config:state.Mcp_server.room_config
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_mcp_exn ~label:"team_session recovery skipped" exn);
-  (* Reconcile Prometheus active_agents gauge with existing agent files *)
-  (try
-     let masc_dir = Filename.concat state.Mcp_server.room_config.base_path ".masc" in
-     Prometheus.reconcile_active_agents_gauge masc_dir
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_mcp_exn ~label:"prometheus agent reconciliation skipped" exn);
-  state
+  Mcp_server.create_state_eio ~sw ~env ~proc_mgr ~fs ~clock
+    ~net:(net :> Eio_context.eio_net) ~base_path
 
 (** {1 Re-exported Mcp_server Functions} *)
 

@@ -13,6 +13,25 @@ let force_jsonl_fallback_env () =
   Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
   Array.iter (fun name -> Unix.putenv name "") pg_env_var_names
 
+let requested_backend_mode () =
+  match Sys.getenv_opt "MASC_STORAGE_TYPE" with
+  | Some raw -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "postgres" | "postgresql" | "postgres-native" -> "postgres-native"
+      | "filesystem" | "file" | "jsonl" -> "filesystem"
+      | "memory" -> "memory"
+      | other -> other)
+  | None ->
+      let has_pg =
+        Array.exists
+          (fun name ->
+            match Sys.getenv_opt name with
+            | Some value -> String.trim value <> ""
+            | None -> false)
+          pg_env_var_names
+      in
+      if has_pg then "postgres-native" else "filesystem"
+
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in
   let mono_clock = Eio.Stdenv.mono_clock env in
@@ -46,11 +65,20 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~net
       ~base_path
   in
-  server_state := Some state;
   state
 
-let bootstrap_server_state (state : Mcp_server.server_state) =
+let restore_persisted_sessions (state : Mcp_server.server_state) =
+  Session.restore_from_disk state.session_registry
+    ~agents_path:(Room.agents_dir state.room_config)
+
+let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
+  Prometheus.reconcile_active_agents_gauge (Room.masc_dir state.room_config)
+
+let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   let (_init_msg : string) = Room.init state.room_config ~agent_name:None in
+  Mcp_server.set_sse_callback state Sse.broadcast
+
+let bootstrap_chain_state (state : Mcp_server.server_state) =
   Chain_native_eio.ensure_bootstrap state.room_config;
   (* Initialize prompt registry with defaults and restore saved overrides *)
   Prompt_defaults.init ();
@@ -63,8 +91,9 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      Log.Misc.error "startup backfill failed: %s"
-       (Printexc.to_string exn));
-  (* Warm up Tool_registry from persistent telemetry.jsonl *)
+       (Printexc.to_string exn))
+
+let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
   (try
      let summary =
        Telemetry_eio.summarize_tool_usage state.room_config
@@ -77,14 +106,14 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      Log.Misc.error "tool registry warm-up failed: %s"
-       (Printexc.to_string exn));
-  (* Prune old date-split JSONL files on startup (default: 30 days).
-     Iterates known store directories and deletes day-files exceeding retention. *)
+       (Printexc.to_string exn))
+
+let startup_prune_jsonl (state : Mcp_server.server_state) =
   (try
      let days =
        Safe_ops.get_env_int_logged "MASC_JSONL_RETENTION_DAYS" ~default:30
      in
-     let masc = Filename.concat state.room_config.base_path ".masc" in
+     let masc = Room.masc_dir state.room_config in
      let prune_dir dir =
        if Sys.file_exists dir then
          Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
@@ -102,18 +131,16 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
             ) 0 (Sys.readdir keepers))
      in
      if total > 0 then
-       Log.Misc.info "startup prune: deleted %d old JSONL day-files (retention=%dd)"
+         Log.Misc.info "startup prune: deleted %d old JSONL day-files (retention=%dd)"
          total days
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Misc.error "startup prune failed: %s" (Printexc.to_string exn));
-  (* Prune old keeper checkpoint files: keep only latest 3 per trace session.
-     Prevents unbounded growth from AfterTurn hook saving every turn. *)
+   | exn -> Log.Misc.error "startup prune failed: %s" (Printexc.to_string exn))
+
+let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
   (try
      let perpetual_dir =
-       Filename.concat
-         (Filename.concat state.room_config.base_path ".masc") "perpetual"
+       Filename.concat (Room.masc_root_dir state.room_config) "perpetual"
      in
      if Sys.file_exists perpetual_dir then begin
        let total = ref 0 in
@@ -145,11 +172,8 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Log.Misc.error "startup checkpoint prune failed: %s" (Printexc.to_string exn));
-  (* Startup GC removed: Room.gc includes PG pubsub cleanup which can
-     block for seconds, delaying keeper bootstrap. The orchestrator's
-     periodic-gc Pulse consumer (hourly) handles cleanup instead. *)
-  Mcp_server.set_sse_callback state Sse.broadcast
+     Log.Misc.error "startup checkpoint prune failed: %s"
+       (Printexc.to_string exn))
 
 let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
   try
@@ -200,6 +224,10 @@ let init_memory_pg_schema () =
           Log.MemoryPg.error "Schema init failed: %s (long_term_backend will use no-op)" msg)
   | None ->
       Log.MemoryPg.info "No PG pool available; long_term_backend will use JSONL fallback"
+
+let install_tooling ~governance_level (state : Mcp_server.server_state) =
+  Governance_pipeline.install ~config:state.room_config ~governance_level;
+  Tool_permissions.install ~get_agent_name:(fun () -> None)
 
 let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
@@ -416,7 +444,7 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
       in
       loop ());
   let resolved_base = state.room_config.base_path in
-  let masc_dir = Filename.concat resolved_base ".masc" in
+  let masc_dir = Room.masc_root_dir state.room_config in
   A2a_tools.init ~masc_dir;
   (resolved_base, masc_dir)
 
@@ -706,55 +734,89 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       `Auto
   in
   let socket = listen_socket ~sw ~net config in
+  let initial_backend_mode = requested_backend_mode () in
+  server_state := None;
+  Server_startup_state.reset ~backend_mode:initial_backend_mode ();
 
   (* 2. All init in background fiber — protected so failures don't kill HTTP *)
   Eio.Fiber.fork ~sw (fun () ->
-    let init_state () =
+    let governance_level =
+      Sys.getenv_opt "MASC_GOVERNANCE_LEVEL"
+      |> Option.value ~default:"production"
+      |> String.lowercase_ascii
+    in
+    let init_state_blocking () =
       let state =
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       in
-      bootstrap_server_state state;
-      (* Install governance pipeline pre_hook before any tool calls are served.
-         Defaults to "production": Critical-risk tools (delete/reset/kill/destroy)
-         require operator confirmation. Set MASC_GOVERNANCE_LEVEL=development
-         to disable for local testing. *)
-      (let governance_level =
-         Sys.getenv_opt "MASC_GOVERNANCE_LEVEL"
-         |> Option.value ~default:"production"
-         |> String.lowercase_ascii
-       in
-       Governance_pipeline.install ~config:state.room_config ~governance_level);
-      (* Admin tool capability gate via Tool_dispatch pre-hooks.
-         execute_tool_eio tag-based dispatch now runs the shared
-         pre-hook path before module dispatch. *)
-      Tool_permissions.install ~get_agent_name:(fun () -> None);
-      bootstrap_keepers ~sw ~clock state;
+      bootstrap_server_state_blocking state;
+      install_tooling ~governance_level state;
       init_task_backend ();
       inject_shared_pg_pool ();
       init_memory_pg_schema ();
       state
     in
+    let run_lazy_task (task_name, task_fn) =
+      try
+        task_fn ();
+        Server_startup_state.finish_lazy_task ~task:task_name
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          let error = Printexc.to_string exn in
+          Log.Server.error "lazy startup task %s failed: %s" task_name error;
+          Server_startup_state.fail_lazy_task ~task:task_name ~error
+    in
+    let start_lazy_startup state =
+      let tasks =
+        [
+          ("restore_sessions", fun () -> restore_persisted_sessions state);
+          ("reconcile_active_agents", fun () -> reconcile_active_agents_gauge state);
+          ( "recover_running_team_sessions",
+            fun () ->
+              Team_session_engine_eio.recover_running_sessions ~sw ~clock
+                ~config:state.Mcp_server.room_config );
+          ("chain_bootstrap", fun () -> bootstrap_chain_state state);
+          ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);
+          ("jsonl_prune", fun () -> startup_prune_jsonl state);
+          ( "keeper_checkpoint_prune",
+            fun () -> startup_prune_keeper_checkpoints state );
+          ("keeper_bootstrap", fun () -> bootstrap_keepers ~sw ~clock state);
+        ]
+      in
+      let task_names = List.map fst tasks in
+      Server_startup_state.activate_lazy
+        ~backend_mode:(Room.backend_name state.room_config)
+        ~tasks:task_names;
+      Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task tasks)
+    in
     try
       let pg_init_timeout =
         Safe_ops.get_env_float_logged "MASC_PG_INIT_TIMEOUT_SEC" ~default:10.0
       in
+      Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
       let state =
-        let has_pg = match Sys.getenv_opt "MASC_POSTGRES_URL" with
-          | Some s when String.trim s <> "" -> true
-          | _ -> false
-        in
-        if has_pg then
+        if String.equal initial_backend_mode "postgres-native" then
           (try
-             Eio.Time.with_timeout_exn clock pg_init_timeout init_state
+             Eio.Time.with_timeout_exn clock pg_init_timeout init_state_blocking
            with Eio.Time.Timeout ->
+             let reason =
+               Printf.sprintf
+                 "PG init timed out after %.0fs, retrying with JSONL fallback"
+                 pg_init_timeout
+             in
              Log.Server.error
-               "PG init timed out after %.0fs, retrying with JSONL fallback"
-               pg_init_timeout;
+               "%s" reason;
+             Server_startup_state.note_fallback reason;
              force_jsonl_fallback_env ();
-             init_state ())
+             Server_startup_state.mark_blocking ~backend_mode:"filesystem";
+             init_state_blocking ())
         else
-          init_state ()
+          init_state_blocking ()
       in
+      server_state := Some state;
+      Server_startup_state.mark_state_ready
+        ~backend_mode:(Room.backend_name state.room_config);
       let resolved_base, masc_dir =
         start_background_maintenance ~sw ~clock state
       in
@@ -774,6 +836,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          shell is the only room-truth component without a proactive refresh loop. *)
       Server_dashboard_http.warm_shell_cache state;
       start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
+      start_lazy_startup state;
       (* gRPC coordination transport (opt-in via MASC_GRPC_ENABLED=1) *)
       let tool_dispatcher tool_name args_json =
         let arguments =
@@ -829,6 +892,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
+      Server_startup_state.mark_degraded ~error:(Printexc.to_string exn);
       Log.Server.error "Background init failed (HTTP still serving): %s"
         (Printexc.to_string exn));
 

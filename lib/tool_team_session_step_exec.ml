@@ -418,19 +418,40 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
       in
       match model_name with
       | None -> Error "local worker model resolution failed"
-      | Some model_name -> (
-          match
-            Local_runtime_pool.acquire
-              ?preferred_pool:spec.runtime_pool
-              ~model_name:(Some model_name) ()
-          with
-          | Ok assignment ->
-              Ok
-                ( Local_runtime_pool.model_label_of_assignment
-                    assignment,
-                  Some assignment.lease,
-                  Some assignment.runtime_id )
-          | Error err -> Error err)
+      | Some model_name ->
+          let runtime_pool =
+            match spec.runtime_pool with
+            | Some pool ->
+                let trimmed = String.trim pool in
+                if trimmed = "" then None else Some trimmed
+            | None -> None
+          in
+          let use_oas_balancing =
+            match runtime_pool with
+            | None -> true
+            | Some pool ->
+                String.equal pool Local_runtime_pool.default_pool_label
+                || String.equal pool "default"
+          in
+          if use_oas_balancing then
+            let base_url = Llm_provider.Provider_registry.next_llama_endpoint () in
+            Ok
+              ( Printf.sprintf "custom:%s@%s" model_name base_url,
+                None,
+                Some (Local_runtime_pool.runtime_id_of_base_url base_url) )
+          else (
+            match
+              Local_runtime_pool.acquire
+                ?preferred_pool:spec.runtime_pool
+                ~model_name:(Some model_name) ()
+            with
+            | Ok assignment ->
+                Ok
+                  ( Printf.sprintf "custom:%s@%s" assignment.model_name
+                      assignment.base_url,
+                    Some assignment.lease,
+                    Some assignment.runtime_id )
+            | Error err -> Error err)
     else
       let label, _model_id = Oas_model_resolve.default_local_model_label_and_id () in
       Ok (label, None, None)

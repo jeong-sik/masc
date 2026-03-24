@@ -164,14 +164,11 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let cwd = Sys.getcwd () in
-  let prompts_dir = Filename.concat cwd "config/prompts" in
   Fun.protect
     ~finally:(fun () ->
       Unix.chdir cwd;
       cleanup_dir base_dir)
     (fun () ->
-      Masc_mcp.Prompt_registry.set_markdown_dir prompts_dir;
-      Masc_mcp.Prompt_defaults.init ();
       Unix.chdir base_dir;
       let keepers_dir = Filename.concat (Filename.concat base_dir "config") "keepers" in
       Fs_compat.mkdir_p keepers_dir;

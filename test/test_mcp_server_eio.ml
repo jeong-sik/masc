@@ -2366,6 +2366,61 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
       Alcotest.(check bool) "pre-hook blocks tagged dispatch" false ok;
       Alcotest.(check string) "blocked message returned" "blocked-by-pre-hook" msg)
 
+let test_execute_tool_autoresearch_uses_resolved_session_agent () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let workdir_path = Filename.concat base_path "not-a-git-repo" in
+  Unix.mkdir workdir_path 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      Tool_dispatch.clear_hooks ();
+      Masc_mcp.Tool_permissions.set_capability_checker (fun _ _ -> false);
+      cleanup_dir base_path)
+    (fun () ->
+      Tool_dispatch.clear_hooks ();
+      Masc_mcp.Tool_permissions.set_capability_checker
+        (fun agent cap ->
+          cap = "admin"
+          && (String.equal agent "codex"
+              || (String.length agent > 6
+                  && String.sub agent 0 6 = "codex-")));
+      Masc_mcp.Tool_permissions.install ~get_agent_name:(fun () -> None);
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let sid = "mcp-autoresearch-session-agent" in
+      let (ok_init, _) =
+        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+          ~name:"masc_init" ~arguments:(`Assoc [])
+      in
+      Alcotest.(check bool) "init success" true ok_init;
+      let (ok_join, _) =
+        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+          ~name:"masc_join"
+          ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
+      in
+      Alcotest.(check bool) "join success" true ok_join;
+      let (ok_start, msg) =
+        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+          ~name:"masc_autoresearch_start"
+          ~arguments:
+            (`Assoc
+              [
+                ("goal", `String "permission regression");
+                ("metric_fn", `String "echo");
+                ("target_file", `String "target.txt");
+                ("workdir", `String workdir_path);
+                ("max_cycles", `Int 1);
+              ])
+      in
+      Alcotest.(check bool) "start fails on downstream validation" false ok_start;
+      Alcotest.(check bool) "pre-hook no longer loses agent identity" false
+        (contains_substring msg "permission denied: no agent identity");
+      Alcotest.(check bool) "reaches autoresearch validation" true
+        (contains_substring msg "workdir is not inside a git repository"))
+
 (* ===== Test Suites ===== *)
 
 let state_tests = [
@@ -2420,6 +2475,8 @@ let eio_tests = [
   "execute masc_tool_help", `Quick, test_execute_tool_help_tool;
   "execute tag dispatch respects pre-hooks", `Quick,
     test_execute_tool_tag_dispatch_respects_pre_hooks;
+  "execute autoresearch uses resolved session agent", `Quick,
+    test_execute_tool_autoresearch_uses_resolved_session_agent;
   "handle tools/list mdal descriptions", `Quick,
     test_handle_request_tools_list_mdal_descriptions;
   "handle tools/list filters requested names", `Quick,

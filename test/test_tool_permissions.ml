@@ -117,6 +117,22 @@ let test_hook_allows_non_admin () =
     Alcotest.(check bool) "allowed" true r.success
   | None -> Alcotest.fail "expected Some"
 
+let test_hook_uses_agent_name_from_args () =
+  setup ();
+  Tool_dispatch.register
+    ~tool_name:"masc_autoresearch_start"
+    ~handler:(fun ~name:_ ~args:_ -> Some (true, "allowed"));
+  Tool_permissions.set_capability_checker
+    (fun agent cap -> String.equal agent "admin_agent" && cap = "admin");
+  Tool_permissions.install ~get_agent_name:(fun () -> None);
+  match
+    Tool_dispatch.dispatch_structured ~name:"masc_autoresearch_start"
+      ~args:(`Assoc [ ("agent_name", `String "admin_agent") ])
+  with
+  | Some r ->
+      Alcotest.(check bool) "allowed from args" true r.success
+  | None -> Alcotest.fail "expected Some"
+
 let () =
   Alcotest.run "Tool_permissions" [
     "classification", [
@@ -133,5 +149,7 @@ let () =
       Alcotest.test_case "blocks no cap" `Quick test_hook_blocks_admin_no_cap;
       Alcotest.test_case "allows admin cap" `Quick test_hook_allows_admin_with_cap;
       Alcotest.test_case "allows non-admin" `Quick test_hook_allows_non_admin;
+      Alcotest.test_case "uses agent_name from args" `Quick
+        test_hook_uses_agent_name_from_args;
     ];
   ]

@@ -16,6 +16,7 @@ let get_agents_status config =
   else begin
     let agents = ref [] in
     Sys.readdir agents_path |> Array.iter (fun name ->
+        Room_query.safe_yield ();
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat agents_path name in
         let json = read_json config path in
@@ -166,6 +167,7 @@ let find_agents_by_capability config ~capability =
   else begin
     let matching = ref [] in
     Sys.readdir agents_path |> Array.iter (fun name ->
+        Room_query.safe_yield ();
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat agents_path name in
         let json = read_json config path in

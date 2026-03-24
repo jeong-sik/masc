@@ -180,6 +180,7 @@ let list_votes config =
   else begin
     let votes = ref [] in
     Sys.readdir votes_path |> Array.iter (fun name ->
+        Room_query.safe_yield ();
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat votes_path name in
         votes := read_json config path :: !votes

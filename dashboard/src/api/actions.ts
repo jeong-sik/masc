@@ -1,4 +1,4 @@
-import { get, fetchWithTimeout } from './core'
+import { get, post, fetchWithTimeout } from './core'
 import { callMcpTool } from './mcp'
 import { isRecord } from '../components/common/normalize'
 import { asString, asNumber, asInt } from './trpg'
@@ -288,4 +288,21 @@ export async function fetchActivityGraph(): Promise<import('../types').ActivityG
   } catch {
     return null
   }
+}
+
+// --- Dashboard delete actions ---
+
+export async function deleteBoardPost(postId: string): Promise<boolean> {
+  const resp = await post<{ ok: boolean }>('/api/v1/dashboard/board/delete', { post_id: postId })
+  return resp.ok
+}
+
+export async function deleteTask(taskId: string): Promise<boolean> {
+  const resp = await post<{ ok: boolean }>('/api/v1/dashboard/tasks/delete', { task_id: taskId })
+  return resp.ok
+}
+
+export async function deleteGoal(goalId: string): Promise<boolean> {
+  const resp = await post<{ ok: boolean }>('/api/v1/dashboard/goals/delete', { goal_id: goalId })
+  return resp.ok
 }

@@ -169,6 +169,78 @@ let add_routes ~sw ~clock router =
          let json = Transport_metrics.transport_health_json () in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+
+  (* ── Dashboard delete actions ── *)
+
+  |> Http.Router.post "/api/v1/dashboard/board/delete" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             let post_id =
+               json |> Yojson.Safe.Util.member "post_id"
+               |> Yojson.Safe.Util.to_string
+             in
+             match Board_dispatch.delete_post ~post_id with
+             | Ok () ->
+                 Http.Response.json ~compress:true ~request:req
+                   {|{"ok":true}|} reqd
+             | Error _ ->
+                 Http.Response.json ~status:`Not_found ~request:req
+                   {|{"ok":false,"error":"post not found or delete failed"}|} reqd
+           with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
+             Http.Response.json ~status:`Bad_request ~request:req
+               {|{"ok":false,"error":"invalid request: requires {\"post_id\":\"...\"}"}|} reqd
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/dashboard/tasks/delete" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             let task_id =
+               json |> Yojson.Safe.Util.member "task_id"
+               |> Yojson.Safe.Util.to_string
+             in
+             let config = state.Mcp_server.room_config in
+             match Task_dispatch.delete_task config ~task_id with
+             | Ok () ->
+                 Http.Response.json ~compress:true ~request:req
+                   {|{"ok":true}|} reqd
+             | Error _ ->
+                 Http.Response.json ~status:`Not_found ~request:req
+                   {|{"ok":false,"error":"task not found or delete failed"}|} reqd
+           with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
+             Http.Response.json ~status:`Bad_request ~request:req
+               {|{"ok":false,"error":"invalid request: requires {\"task_id\":\"...\"}"}|} reqd
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/dashboard/goals/delete" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             let goal_id =
+               json |> Yojson.Safe.Util.member "goal_id"
+               |> Yojson.Safe.Util.to_string
+             in
+             let config = state.Mcp_server.room_config in
+             match Goal_store.delete_goal config ~goal_id with
+             | Ok () ->
+                 Http.Response.json ~compress:true ~request:req
+                   {|{"ok":true}|} reqd
+             | Error msg ->
+                 Http.Response.json ~status:`Not_found ~request:req
+                   (Printf.sprintf {|{"ok":false,"error":"%s"}|} (String.escaped msg))
+                   reqd
+           with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
+             Http.Response.json ~status:`Bad_request ~request:req
+               {|{"ok":false,"error":"invalid request: requires {\"goal_id\":\"...\"}"}|} reqd
+         )
+       ) request reqd)
+
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg" (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

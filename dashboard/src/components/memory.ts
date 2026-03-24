@@ -21,6 +21,7 @@ import {
   commentPost,
   createPost,
 } from '../api'
+import { deleteBoardPost } from '../api/actions'
 import { navigate, navigateToPost, route } from '../router'
 import type { BoardComment, BoardPost, BoardSortMode } from '../types'
 
@@ -348,8 +349,11 @@ function MemorySummary() {
   `
 }
 
+const deletingPostId = signal<string | null>(null)
+
 function PostCard({ post }: { post: BoardPost }) {
   const kind = boardPostKind(post)
+  const isDeleting = deletingPostId.value === post.id
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
     event.stopPropagation()
@@ -358,6 +362,21 @@ function PostCard({ post }: { post: BoardPost }) {
       refreshBoard()
     } catch {
       showToast('투표에 실패했습니다', 'error')
+    }
+  }
+
+  const handleDelete = async (event: Event) => {
+    event.stopPropagation()
+    if (!confirm(`"${post.title}" 게시글을 삭제하시겠습니까?`)) return
+    deletingPostId.value = post.id
+    try {
+      await deleteBoardPost(post.id)
+      showToast('게시글을 삭제했습니다', 'success')
+      refreshBoard()
+    } catch {
+      showToast('게시글 삭제에 실패했습니다', 'error')
+    } finally {
+      deletingPostId.value = null
     }
   }
 
@@ -408,6 +427,15 @@ function PostCard({ post }: { post: BoardPost }) {
           ${kind !== 'human' ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(kind)}">${kind}</span>` : null}
           ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
           ${post.visibility && post.visibility !== 'public' ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]">${post.visibility}</span>` : null}
+
+          <!-- Delete button -->
+          <button type="button"
+            class="ml-auto px-2 py-0.5 rounded text-[10px] font-semibold border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.1)] text-[#f87171] hover:bg-[rgba(239,68,68,0.2)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick=${handleDelete}
+            disabled=${isDeleting}
+          >
+            ${isDeleting ? '삭제 중...' : '삭제'}
+          </button>
         </div>
       </div>
     </div>

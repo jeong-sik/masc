@@ -1,10 +1,13 @@
 // Goal sub-components: GoalRow, HorizonGroup, FilterBar, GoalsSummary
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { StatusBadge } from '../common/status-badge'
 import { TimeAgo } from '../common/time-ago'
 import { FilterChips } from '../common/filter-chips'
-import { goals } from '../../store'
+import { showToast } from '../common/toast'
+import { goals, refreshGoals } from '../../store'
+import { deleteGoal } from '../../api/actions'
 import type { Goal } from '../../types'
 import {
   type HorizonFilter,
@@ -17,7 +20,26 @@ import {
   statusFilterLabel,
 } from './goal-helpers'
 
+const deletingGoalId = signal<string | null>(null)
+
 export function GoalRow({ goal }: { goal: Goal }) {
+  const isDeleting = deletingGoalId.value === goal.id
+
+  async function handleDelete(e: Event) {
+    e.stopPropagation()
+    if (!confirm(`"${goal.title}" 목표를 삭제하시겠습니까?`)) return
+    deletingGoalId.value = goal.id
+    try {
+      await deleteGoal(goal.id)
+      showToast('목표를 삭제했습니다', 'success')
+      await refreshGoals()
+    } catch {
+      showToast('목표 삭제에 실패했습니다', 'error')
+    } finally {
+      deletingGoalId.value = null
+    }
+  }
+
   return html`
     <div class="goal-row flex justify-between items-start gap-4 p-4 rounded-xl border border-card-border/50 bg-card/40 backdrop-blur-md transition-all duration-200 hover:bg-card/60 hover:border-accent/30 shadow-sm hover:shadow-md hover:-translate-y-0.5 group">
       <div class="flex-1 min-w-0">
@@ -38,9 +60,16 @@ export function GoalRow({ goal }: { goal: Goal }) {
       </div>
       <div class="flex flex-col items-end gap-1.5 shrink-0 pt-0.5">
         <${StatusBadge} status=${goal.status} />
-        <div class="text-[11px] font-mono text-text-dim mt-auto">
+        <div class="text-[11px] font-mono text-text-dim">
           <${TimeAgo} timestamp=${goal.updated_at} />
         </div>
+        <button type="button"
+          class="mt-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold border border-bad/30 bg-bad/10 text-bad hover:bg-bad/25 transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick=${handleDelete}
+          disabled=${isDeleting}
+        >
+          ${isDeleting ? '삭제 중...' : '삭제'}
+        </button>
       </div>
     </div>
   `

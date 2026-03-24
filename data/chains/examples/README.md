@@ -9,7 +9,7 @@
 # 터미널에서
 curl -X POST http://localhost:8935/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"chain.run","arguments":{"mermaid":"graph LR\n    A[MODEL:ollama \"Hello\"]"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"chain.run","arguments":{"mermaid":"graph LR\n    A[MODEL:default \"Hello\"]"}}}'
 ```
 
 ### 2. 파일로 실행
@@ -24,7 +24,7 @@ chain.run --file examples/login-screen.mermaid
 ### 예제 1: Simple Pipeline (3 nodes)
 ```mermaid
 graph LR
-    A[MODEL:stub "input"] --> B[MODEL:ollama "process: {{A}}"] --> C[MODEL:ollama "summarize: {{B}}"]
+    A[MODEL:stub "input"] --> B[MODEL:default "process: {{A}}"] --> C[MODEL:default "summarize: {{B}}"]
 ```
 
 ### 예제 2: MAGI 합의 (5 nodes)
@@ -56,7 +56,7 @@ graph LR
 graph LR
     Q[Tool:echo "complex query"]
     Q --> Primary[MODEL:gemini "answer: {{Q}}"]
-    Q --> Backup[MODEL:ollama "answer: {{Q}}"]
+    Q --> Backup[MODEL:default "answer: {{Q}}"]
     Primary --> F{Fallback}
     Backup --> F
 ```
@@ -65,9 +65,9 @@ graph LR
 ```mermaid
 graph LR
     Q[Tool:echo "Is this code safe?"]
-    Q --> A[MODEL:ollama "YES or NO: {{Q}}"]
-    Q --> B[MODEL:ollama "YES or NO: {{Q}}"]
-    Q --> C[MODEL:ollama "YES or NO: {{Q}}"]
+    Q --> A[MODEL:default "YES or NO: {{Q}}"]
+    Q --> B[MODEL:default "YES or NO: {{Q}}"]
+    Q --> C[MODEL:default "YES or NO: {{Q}}"]
     A --> V{Quorum:2}
     B --> V
     C --> V
@@ -92,7 +92,7 @@ graph LR
 | 모델 | 설명 | 비용 |
 |------|------|------|
 | `stub` | 테스트용 (입력 그대로 반환) | 무료 |
-| `ollama` | 로컬 MODEL | 무료 |
+| `default` | 로컬 MODEL (cascade 위임) | 무료 |
 | `claude` | Claude (Anthropic) | $$ |
 | `codex` | Codex (OpenAI) | $$ |
 | `gemini` | Gemini (Google) | $ |
@@ -102,7 +102,7 @@ graph LR
 
 ```mermaid
 graph LR
-    A[MODEL:stub "hello"] --> B[MODEL:ollama "input was: {{A}}"]
+    A[MODEL:stub "hello"] --> B[MODEL:default "input was: {{A}}"]
     %% {{A}} = A 노드의 출력값
 ```
 
@@ -139,7 +139,7 @@ A --> C --> D
 
 ## 💡 Tips
 
-1. **테스트 먼저**: `stub`이나 `ollama`로 패턴 검증 후 클라우드 MODEL 사용
+1. **테스트 먼저**: `stub`이나 `default`로 패턴 검증 후 클라우드 MODEL 사용
 2. **타임아웃**: 복잡한 체인은 `timeout` 늘리기 (기본 60초)
 3. **비용 절감**: 중간 결과 확인용 노드에는 `haiku` 사용
 4. **디버깅**: `Tool:echo`로 중간 값 확인

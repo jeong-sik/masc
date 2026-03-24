@@ -26,7 +26,7 @@
       "id": "merge-answers",
       "type": "model",
       "model": {
-        "model": "ollama",
+        "model": "default",
         "prompt": "Codex said 2+2={{codex_answer}}. Gemini said 3+3={{gemini_answer}}. Sum both results and output just the final number."
       },
       "depends_on": ["ask-codex", "ask-gemini"],

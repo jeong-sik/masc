@@ -247,4 +247,4 @@ test_mitosis.ml: 22 tests
 ### 2026-02-01
 - `masc_mitosis_handoff` MCP 도구 추가 (tool_mitosis.ml)
 - 2-phase 자동 실행: context_ratio 기반으로 prepare/handoff 자동 판단
-- target_agent 파라미터로 successor 에이전트 선택 가능 (claude/gemini/codex/ollama)
+- target_agent 파라미터로 successor 에이전트 선택 가능 (claude/gemini/codex/default)

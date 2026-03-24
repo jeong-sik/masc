@@ -124,7 +124,7 @@ async function seedRoom() {
   await mcpCall('masc_keeper_up', {
     name: keeperName,
     goal: 'Guard fixture continuity while the mission dashboard is inspected.',
-    models: ['ollama:glm-4.7-flash'],
+    models: ['glm:glm-4.7-flash'],
     presence_keepalive: false,
     proactive_enabled: false,
     auto_handoff: false,

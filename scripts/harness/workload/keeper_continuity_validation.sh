@@ -630,7 +630,7 @@ real_run() {
   require_cmd python3 || { echo "python3 is required" >&2; return 1; }
 
   if [[ -z "$KEEPER_MODELS" ]]; then
-    echo "KEEPER_MODELS is required (example: KEEPER_MODELS='ollama:glm-4.7-flash')" >&2
+    echo "KEEPER_MODELS is required (example: KEEPER_MODELS='glm:glm-4.7-flash')" >&2
     return 1
   fi
 

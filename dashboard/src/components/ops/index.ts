@@ -154,13 +154,7 @@ export function Ops() {
 
   return html`
     <section class="flex flex-col gap-4">
-      <div class="${CARD_STANDARD} flex justify-between items-start gap-4 max-[880px]:flex-col">
-        <div>
-          <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">개입</h2>
-          <p class="text-[13px] text-[var(--text-muted)] max-w-[62ch] leading-relaxed">
-            방, 세션, 키퍼를 나눠 보고 바로 개입합니다.
-          </p>
-        </div>
+      <div class="${CARD_STANDARD} flex justify-end items-center gap-4 flex-wrap">
         <div class="flex items-end gap-3 flex-wrap max-[880px]:w-full">
           <label class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.06em] font-medium" for="ops-actor">개입 ID</label>
           <input

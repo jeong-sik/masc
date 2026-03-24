@@ -63,8 +63,7 @@ export function Worktrees() {
 
   return html`
     <div class="grid gap-5">
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold tracking-wide text-text-strong">활성 워크트리</h2>
+      <div class="flex items-center justify-end">
         <span class="text-xs font-medium px-2.5 py-1 bg-white/10 rounded-full text-text-muted border border-white/5">${worktrees.length}개</span>
       </div>
       

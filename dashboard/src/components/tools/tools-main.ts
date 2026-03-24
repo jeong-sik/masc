@@ -31,7 +31,6 @@ export function Tools() {
     <div>
       <${Card} title="시스템 도구 목록" class="section mb-4">
         <div class="mb-4">
-          <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">시스템 도구 목록</h2>
           <p class="text-[12px] text-[var(--text-muted)] leading-relaxed">
             ${showFullInventory.value
               ? 'hidden/deprecated 포함 전체 도구 surface를 봅니다.'

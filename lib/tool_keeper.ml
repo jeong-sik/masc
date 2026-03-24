@@ -10,7 +10,7 @@ open Keeper_runtime
 
 module Turn = Keeper_turn
 module Status = Keeper_status
-module Policy = Keeper_policy
+
 module Persona = Keeper_persona
 
 type 'a context = 'a Keeper_types.context = {
@@ -394,15 +394,15 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_status" -> Some (handle_resident_keeper_status ctx args)
   | "masc_keeper_msg" -> Some (handle_resident_keeper_msg ctx args)
   | "masc_keeper_model_set" -> Some (handle_resident_keeper_model_set ctx args)
-  | "masc_keeper_policy_set" -> Some (Policy.handle_keeper_policy_set ctx args)
-  | "masc_keeper_feedback_record" -> Some (Policy.handle_keeper_feedback_record ctx args)
-  | "masc_keeper_dataset_export" -> Some (Policy.handle_keeper_dataset_export ctx args)
-  | "masc_keeper_action_explain" -> Some (Policy.handle_keeper_action_explain ctx args)
-  | "masc_keeper_eval_replay" -> Some (Policy.handle_keeper_eval_replay ctx args)
+  | "masc_keeper_policy_set" -> Some (false, "policy_mode system has been removed")
+  | "masc_keeper_feedback_record" -> Some (false, "policy feedback system has been removed")
+  | "masc_keeper_dataset_export" -> Some (false, "policy dataset system has been removed")
+  | "masc_keeper_action_explain" -> Some (false, "policy action explain has been removed")
+  | "masc_keeper_eval_replay" -> Some (false, "policy eval replay has been removed")
   | "masc_keeper_down" -> Some (handle_resident_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_resident_keeper_list ctx args)
   | "masc_keeper_autonomy" -> Some (false, "autonomy_level has been removed")
-  | "masc_keeper_goals" -> Some (Policy.handle_keeper_goals ctx args)
+  | "masc_keeper_goals" -> Some (false, "policy goals system has been removed")
   | "masc_keeper_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
   | "masc_keeper_eval" -> Some (Status.handle_keeper_eval ctx args)
   | "masc_persistent_agent_create_from_persona" ->
@@ -411,19 +411,15 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_persistent_agent_status" -> Some (handle_persistent_agent_status ctx args)
   | "masc_persistent_agent_msg" -> Some (handle_persistent_agent_msg ctx args)
   | "masc_persistent_agent_model_set" -> Some (handle_persistent_agent_model_set ctx args)
-  | "masc_persistent_agent_policy_set" -> Some (Policy.handle_keeper_policy_set ctx args)
-  | "masc_persistent_agent_feedback_record" ->
-      Some (Policy.handle_keeper_feedback_record ctx args)
-  | "masc_persistent_agent_dataset_export" ->
-      Some (Policy.handle_keeper_dataset_export ctx args)
-  | "masc_persistent_agent_action_explain" ->
-      Some (Policy.handle_keeper_action_explain ctx args)
-  | "masc_persistent_agent_eval_replay" ->
-      Some (Policy.handle_keeper_eval_replay ctx args)
+  | "masc_persistent_agent_policy_set" -> Some (false, "policy_mode system has been removed")
+  | "masc_persistent_agent_feedback_record" -> Some (false, "policy feedback system has been removed")
+  | "masc_persistent_agent_dataset_export" -> Some (false, "policy dataset system has been removed")
+  | "masc_persistent_agent_action_explain" -> Some (false, "policy action explain has been removed")
+  | "masc_persistent_agent_eval_replay" -> Some (false, "policy eval replay has been removed")
   | "masc_persistent_agent_down" -> Some (handle_persistent_agent_down ctx args)
   | "masc_persistent_agent_list" -> Some (handle_persistent_agent_list ctx args)
   | "masc_persistent_agent_autonomy" -> Some (false, "autonomy_level has been removed")
-  | "masc_persistent_agent_goals" -> Some (Policy.handle_keeper_goals ctx args)
+  | "masc_persistent_agent_goals" -> Some (false, "policy goals system has been removed")
   | "masc_persistent_agent_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
   | "masc_persistent_agent_eval" -> Some (Status.handle_keeper_eval ctx args)
   (* Housekeeping: keepers maintain their own world *)

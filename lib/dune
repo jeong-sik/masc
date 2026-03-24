@@ -493,7 +493,7 @@
    keeper_status_detail
    keeper_status
    keeper_status_bridge
-   keeper_policy
+
    keeper_persona
    ;; Context management (used by keeper agents)
    masc_eio_env

@@ -30,8 +30,9 @@ type conversation_ctx = {
 
 (** {1 Token Estimation} *)
 
-(** Estimate token count from string (rough: ~4 chars per token) *)
-let estimate_tokens (s : string) : int = (String.length s + 3) / 4
+(** CJK-aware token estimate delegated to OAS Context_reducer. *)
+let estimate_tokens (s : string) : int =
+  if s = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens s
 
 (** Estimate total tokens in conversation *)
 let estimate_conversation_tokens (conv : conversation_ctx) : int =

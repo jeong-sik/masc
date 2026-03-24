@@ -20,7 +20,10 @@ type t = {
 
 let empty = { temperature = None; max_tokens = None }
 
-(* ── JSON cache (shares mtime-reload semantics with OAS) ────── *)
+(* ── JSON cache (mtime-based hot-reload) ────────────────────
+   Uses own cache because OAS Cascade_config.load_json is not
+   exposed in the public .mli (only load_profile is).
+   TODO: Expose load_json in OAS .mli, then delegate here. *)
 
 let json_cache : (string, float * Yojson.Safe.t) Hashtbl.t =
   Hashtbl.create 2
@@ -45,7 +48,8 @@ let load_json (path : string) : Yojson.Safe.t option =
       let json = Yojson.Safe.from_string content in
       Hashtbl.replace json_cache path (mtime, json);
       Some json
-  with _ -> None
+  with
+  | Sys_error _ | Unix.Unix_error _ | Yojson.Json_error _ | End_of_file -> None
 
 (* ── Field extraction helpers ──────────────────────────── *)
 

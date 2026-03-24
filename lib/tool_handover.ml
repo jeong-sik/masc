@@ -119,7 +119,6 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "agent_name"; `String "handover_id"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_handover_claim_and_spawn";
@@ -146,7 +145,6 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "handover_id"; `String "agent_name"]);
     ];
-    visibility = Public;
   };
 
   (* masc_handover_create *)
@@ -223,7 +221,6 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"; `String "reason"; `String "goal"]);
     ];
-    visibility = Public;
   };
 
   (* masc_handover_list *)
@@ -242,7 +239,6 @@ After finding a handover, call masc_handover_get for details, then masc_handover
         ]);
       ]);
     ];
-    visibility = Public;
   };
 
   (* masc_handover_get *)
@@ -261,7 +257,6 @@ Pair with masc_handover_list to browse available handovers first.";
       ]);
       ("required", `List [`String "handover_id"]);
     ];
-    visibility = Public;
   };
 
 ]

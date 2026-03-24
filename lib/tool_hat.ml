@@ -45,7 +45,6 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
 
   (* masc_hat_wear *)
@@ -73,7 +72,6 @@ Pair with masc_hat_status to see all agents' current hats.";
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
 
 ]

@@ -14,7 +14,6 @@ let schemas : tool_schema list = [
       ]);
       ("required", `List [`String "verification_id"]);
     ];
-    visibility = Public;
   };
 
   (* masc_bounded_run *)
@@ -83,7 +82,6 @@ Pair with masc_team_session_start for supervised sessions or masc_mdal_start for
       ]);
       ("required", `List [`String "agents"; `String "prompt"; `String "goal"]);
     ];
-    visibility = Public;
   };
 
   (* masc_verify_request *)
@@ -117,7 +115,6 @@ Follow up with masc_verify_submit to provide a verdict or masc_verify_auto for a
       ]);
       ("required", `List [`String "task_id"]);
     ];
-    visibility = Public;
   };
 
   (* masc_verify_submit *)
@@ -149,7 +146,6 @@ After masc_verify_request creates the verification; pair with masc_verify_status
       ]);
       ("required", `List [`String "verification_id"; `String "verdict"]);
     ];
-    visibility = Public;
   };
 
   (* masc_verify_pending *)
@@ -162,7 +158,6 @@ Follow up with masc_verify_submit to provide a verdict for each pending request.
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
 
   (* masc_verify_auto *)
@@ -181,6 +176,5 @@ After masc_verify_request creates the request; alternative to manual masc_verify
       ]);
       ("required", `List [`String "verification_id"]);
     ];
-    visibility = Public;
   };
 ]

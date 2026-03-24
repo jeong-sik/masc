@@ -26,7 +26,6 @@ Pair with masc_subscription to receive session-scoped event notifications.";
       ]);
       ("required", `List [`String "action"]);
     ];
-    visibility = Public;
   };
 
   (* masc_cancellation *)
@@ -54,7 +53,6 @@ Pair with masc_progress to track operation progress alongside cancellation state
       ]);
       ("required", `List [`String "action"]);
     ];
-    visibility = Public;
   };
 
   (* masc_subscription *)
@@ -91,7 +89,6 @@ After subscribing, poll with action=poll. Clean up with action=unsubscribe befor
       ]);
       ("required", `List [`String "action"]);
     ];
-    visibility = Public;
   };
 
   (* masc_progress *)
@@ -127,7 +124,6 @@ Pair with masc_cancellation to support cooperative abort during tracked operatio
       ]);
       ("required", `List [`String "action"; `String "task_id"]);
     ];
-    visibility = Public;
   };
 
   (* masc_governance_set *)
@@ -162,7 +158,6 @@ Pair with masc_governance_report to verify policy effects and masc_governance_st
         ]);
       ]);
     ];
-    visibility = Public;
   };
 
   (* masc_spawn *)
@@ -198,7 +193,6 @@ For llama, provide model explicitly. Pair with masc_add_task to create the task 
       ]);
       ("required", `List [`String "agent_name"; `String "prompt"]);
     ];
-    visibility = Public;
   };
 
   (* masc_memento_mori *)
@@ -234,6 +228,5 @@ Pair with masc_mitosis_status to see cell state, or masc_mitosis_handoff for asy
       ]);
       ("required", `List [`String "context_ratio"]);
     ];
-    visibility = Public;
   };
 ]

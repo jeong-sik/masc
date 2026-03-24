@@ -177,7 +177,6 @@ Requires admin privileges or room owner status.";
       ]);
       ("required", `List [`String "target_agent"; `String "reason"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_circuit_status";
@@ -194,7 +193,6 @@ Open state includes remaining cooldown time.";
         ]);
       ]);
     ];
-    visibility = Public;
   };
 ]
 

@@ -6,7 +6,6 @@
 
 - 구현 swarm의 SSOT는 `Team Session + Supervisor Mode`
 - canonical benchmark/swarm path는 여전히 `CPv2 direct`
-- native chain plane은 separate/manual substrate이며 SWARM canonical path가 아니다
 - model 선택은 항상 explicit
 - 기본 운영 형태는 supervised swarm
 
@@ -93,7 +92,7 @@ stale pending reviewer PID가 있으면 정리한 뒤 다시 시작한다.
 기본 프롬프트는 fresh-context diff-only reviewer로 동작하므로,
 티켓/회의 맥락 없이도 structural risk를 따로 잡는 fallback gate로 본다.
 
-SWARM canonical review path도 clean-context structural stage를 포함한다.
+`pr-review-pipeline` canonical path도 clean-context structural stage를 포함한다.
 즉 review stack은 다음 3층으로 본다:
 
 - context-aware multi-check review
@@ -148,7 +147,7 @@ LOCAL64_POOL_TARGET_SHARDS=6 \
 - 실제 proof 판단은 `configured_capacity`, `actual_slots`, `peak_hot_slots`를 분리해서 본다.
 - runtime viability는 harness 내부의 direct HTTP probe가 아니라 `masc_runtime_verify` 결과를 기준으로 읽는다.
 
-`scripts/llama-runtime-pool.sh print-env`는 `MASC_LLAMA_RUNTIMES_JSON`에 넣을 JSON을 출력한다.
+`scripts/llama-runtime-pool.sh print-env`는 OAS discovery가 읽는 `LLM_ENDPOINTS` 값을 출력한다.
 
 모델/양자화별 ceiling 비교는 matrix harness로 돌린다:
 

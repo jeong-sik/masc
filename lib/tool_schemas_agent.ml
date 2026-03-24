@@ -16,7 +16,6 @@ Prefer masc_heartbeat_start for automatic pings. Pair with masc_cleanup_zombies 
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_cleanup_zombies";
@@ -27,7 +26,6 @@ Pair with masc_gc for full room maintenance including old tasks and messages.";
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_heartbeat_start";
@@ -54,7 +52,6 @@ Smart mode skips beats when busy. Stop with masc_heartbeat_stop before masc_leav
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_heartbeat_stop";
@@ -71,7 +68,6 @@ Get heartbeat_id from masc_heartbeat_start response or masc_heartbeat_list.";
       ]);
       ("required", `List [`String "heartbeat_id"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_heartbeat_list";
@@ -82,7 +78,6 @@ Pair with masc_heartbeat_stop to cancel or masc_cleanup_zombies to reap dead age
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_gc";
@@ -99,7 +94,6 @@ Pair with masc_archive_view to inspect what was archived or masc_cleanup_zombies
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_agents";
@@ -110,7 +104,6 @@ Pair with masc_cleanup_zombies to remove stale agents or masc_find_by_capability
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
-    visibility = Public;
   };
   {
     name = "masc_agent_update";
@@ -131,7 +124,6 @@ Only modifies the calling agent's own record. Pair with masc_agents to verify th
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_agent_card";
@@ -148,7 +140,6 @@ Action 'get' returns current card; 'refresh' rebuilds it from live bindings. Pai
         ]);
       ]);
     ];
-    visibility = Public;
   };
   (* masc_heartbeat_result removed: canonical definition in tool_schemas_a2a.ml *)
   {
@@ -170,7 +161,6 @@ Pair with masc_select_agent for automated assignment or masc_agents for raw stat
         ]);
       ]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_select_agent";
@@ -199,7 +189,6 @@ Pair with masc_agent_fitness to review scores or masc_transition(action='claim')
       ]);
       ("required", `List [`String "available_agents"]);
     ];
-    visibility = Public;
   };
   (* masc_register_capabilities *)
   {
@@ -222,7 +211,6 @@ Pair with masc_find_by_capability to search others or masc_who to see the full r
       ]);
       ("required", `List [`String "agent_name"; `String "capabilities"]);
     ];
-    visibility = Public;
   };
 
   (* masc_find_by_capability *)
@@ -241,7 +229,6 @@ Pair with masc_broadcast to @mention the found agent or masc_portal_open for dir
       ]);
       ("required", `List [`String "capability"]);
     ];
-    visibility = Public;
   };
 
   (* masc_collaboration_graph *)
@@ -261,7 +248,6 @@ Pair with masc_consolidate_learning to prune weak connections, masc_select_agent
         ]);
       ]);
     ];
-    visibility = Public;
   };
 
   (* masc_consolidate_learning *)
@@ -280,7 +266,6 @@ Pair with masc_collaboration_graph to review the graph before and after consolid
         ]);
       ]);
     ];
-    visibility = Public;
   };
 
   (* masc_get_metrics *)
@@ -304,7 +289,6 @@ Pair with masc_agent_fitness for computed scores, masc_audit_stats for security-
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
 
   (* masc_agent_relations — proxy to Neo4j/GraphQL for relationship data *)
@@ -324,7 +308,6 @@ Pair with masc_agents for room-level status or masc_collaboration_graph for Hebb
         ]);
       ]);
     ];
-    visibility = Public;
   };
 
 ]

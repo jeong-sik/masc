@@ -64,7 +64,6 @@ let schemas : Types.tool_schema list = [
       ]);
       ("required", `List [`String "agent_name"]);
     ];
-    visibility = Public;
   };
   {
     name = "masc_rate_limit_config";
@@ -90,7 +89,6 @@ let schemas : Types.tool_schema list = [
         ]);
       ]);
     ];
-    visibility = Public;
   };
 ]
 

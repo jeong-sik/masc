@@ -177,7 +177,8 @@ async function refreshActiveRoute(): Promise<void> {
   try {
     const { refreshForRoute } = await import('./tab-refresh')
     refreshForRoute(route.value)
-  } catch {
+  } catch (err) {
+    console.debug('[SSE] tab-refresh unavailable, using fallback refreshes', err instanceof Error ? err.message : '')
     _refreshCommandPlaneFn?.()
     _refreshOperatorFn?.()
     _refreshMissionFn?.()
@@ -209,11 +210,15 @@ async function hydrateAfterReconnect(): Promise<void> {
   try {
     await refreshRoomTruth({ force: true })
     await refreshActiveRoute()
-  } catch {
-    // First attempt failed (server may still be warming up) — retry once.
+  } catch (err) {
+    console.warn('[SSE] reconnect hydration failed, retrying in 3s', err instanceof Error ? err.message : err)
     setTimeout(() => {
-      void refreshRoomTruth({ force: true })
-      void refreshActiveRoute()
+      void refreshRoomTruth({ force: true }).catch(retryErr =>
+        console.warn('[SSE] reconnect room-truth retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
+      )
+      void refreshActiveRoute().catch(retryErr =>
+        console.warn('[SSE] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
+      )
     }, 3000)
   }
 }
@@ -303,8 +308,12 @@ export function startPeriodicRefresh(): void {
     if (!connected.value) {
       invalidateDashboardCache()
     }
-    void refreshRoomTruth()
-    void refreshActiveRoute()
+    void refreshRoomTruth().catch(err =>
+      console.warn('[periodic] room-truth refresh failed', err instanceof Error ? err.message : err),
+    )
+    void refreshActiveRoute().catch(err =>
+      console.warn('[periodic] route refresh failed', err instanceof Error ? err.message : err),
+    )
   }, PERIODIC_REFRESH_MS)
 }
 

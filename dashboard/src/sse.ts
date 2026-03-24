@@ -156,6 +156,7 @@ function scheduleReconnect(): void {
   reconnectAttempts++
   const exp = Math.min(reconnectAttempts, 5)
   const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, exp))
+  console.debug(`[SSE] reconnect #${reconnectAttempts} in ${delay}ms`)
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
     connectSSE()
@@ -170,6 +171,7 @@ export function connectSSE(): void {
   }
 
   const sseUrl = buildDashboardSseUrl(getOrCreateSessionId())
+  console.debug('[SSE] connecting', sseUrl)
   const es = new EventSource(sseUrl)
   source = es
 
@@ -180,6 +182,9 @@ export function connectSSE(): void {
     connected.value = true
     if (wasDisconnected) {
       reconnectCount.value++
+      console.debug(`[SSE] reconnected (count=${reconnectCount.value})`)
+    } else {
+      console.debug('[SSE] connected')
     }
   }
 
@@ -188,6 +193,7 @@ export function connectSSE(): void {
     if (connected.value) {
       lastDisconnectedAt.value = Date.now()
     }
+    console.warn('[SSE] connection error, scheduling reconnect')
     connected.value = false
     es.close()
     source = null

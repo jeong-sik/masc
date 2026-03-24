@@ -7,7 +7,7 @@
 
     Sub-modules:
     - Keeper_turn_up: start/reconfigure
-    - Keeper_turn_session: team-session helpers (auto-interception removed)
+    - Keeper_turn_session: team-session helpers
     - Keeper_turn_setup: ensure_keeper_exists, apply_settings_update
     - Keeper_turn_lifecycle: model-set, shutdown *)
 
@@ -18,7 +18,6 @@ open Keeper_alerting [@@warning "-33"]
 open Keeper_exec_tools [@@warning "-33"]
 open Keeper_keepalive
 open Keeper_execution
-open Keeper_turn_session
 open Keeper_turn_setup
 
 type tool_result = Keeper_types.tool_result

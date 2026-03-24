@@ -51,7 +51,9 @@ let prune ~(session_dir : string) ~(keep : int) : int =
     List.iter (fun filename ->
       let path = Filename.concat session_dir filename in
       (try Sys.remove path
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()))
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+         Log.Keeper.warn "checkpoint cleanup failed for %s: %s"
+           path (Printexc.to_string exn)))
       to_remove;
     List.length to_remove
 

@@ -114,8 +114,10 @@ let make_handler (procedure : Procedural_memory.procedure) : Tool_dispatch.handl
         ~goal:query
         ~system_prompt
         ~max_turns:1
-        ~temperature:0.3
-        ~max_tokens:2048
+        ~temperature:(Cascade_inference.resolve_temperature
+          ~cascade_name:"materialized_procedure" ~fallback:(fun () -> 0.3))
+        ~max_tokens:(Cascade_inference.resolve_max_tokens
+          ~cascade_name:"materialized_procedure" ~fallback:(fun () -> 2048))
         ()
     with
     | Ok result ->

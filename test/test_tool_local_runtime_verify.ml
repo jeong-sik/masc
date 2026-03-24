@@ -27,6 +27,57 @@ let test_classify_runtime_blocker_prefers_slot_count_when_health_ok () =
     | Some msg -> String.contains msg '1' && String.contains msg '4'
     | None -> false)
 
+let make_endpoint ~url ~model_id ~ctx_size ~total_slots ~busy =
+  let module D = Llm_provider.Discovery in
+  {
+    D.url;
+    healthy = true;
+    models = [ { D.id = model_id; owned_by = "llamacpp" } ];
+    props = Some { D.total_slots; ctx_size; model = "" };
+    slots = Some { D.total = total_slots; busy; idle = total_slots - busy };
+    capabilities = Llm_provider.Capabilities.openai_chat_extended_capabilities;
+  }
+
+let test_runtime_verify_prefers_oas_discovery_cache () =
+  Eio_main.run @@ fun _env ->
+  let previous_endpoints = !(Masc_mcp.Discovery_cache.cached_endpoints) in
+  let previous_updated_at = !(Masc_mcp.Discovery_cache.cache_updated_at) in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Discovery_cache.cached_endpoints := previous_endpoints;
+      Masc_mcp.Discovery_cache.cache_updated_at := previous_updated_at)
+    (fun () ->
+      Masc_mcp.Discovery_cache.cached_endpoints :=
+        [
+          make_endpoint ~url:"http://127.0.0.1:8085"
+            ~model_id:"qwen3.5-35b-a3b-ud-q4-xl" ~ctx_size:262144
+            ~total_slots:4 ~busy:0;
+          make_endpoint ~url:"http://127.0.0.1:8086"
+            ~model_id:"qwen3.5-35b-a3b-ud-q4-xl" ~ctx_size:262144
+            ~total_slots:4 ~busy:1;
+          make_endpoint ~url:"http://127.0.0.1:8087"
+            ~model_id:"qwen3.5-35b-a3b-ud-q4-xl" ~ctx_size:262144
+            ~total_slots:4 ~busy:1;
+        ];
+      Masc_mcp.Discovery_cache.cache_updated_at := Time_compat.now ();
+      let result =
+        Masc_mcp.Tool_local_runtime.runtime_verify_json
+          ~expected_slots:12 ~expected_ctx:262144
+          ~expected_model:"qwen3.5-35b-a3b-ud-q4-xl" ()
+      in
+      let open Yojson.Safe.Util in
+      check string "source" "oas_discovery"
+        (result |> member "source" |> to_string);
+      check bool "provider reachable" true
+        (result |> member "provider_reachable" |> to_bool);
+      check bool "slot reachable" true
+        (result |> member "slot_reachable" |> to_bool);
+      check int "actual slots" 12 (result |> member "actual_slots" |> to_int);
+      check int "active slots now" 2
+        (result |> member "active_slots_now" |> to_int);
+      check bool "passes expected contract" true
+        (result |> member "pass" |> to_bool))
+
 let () =
   run "tool_local_runtime_verify"
     [
@@ -39,5 +90,7 @@ let () =
         [
           test_case "slot shortage beats provider_unreachable" `Quick
             test_classify_runtime_blocker_prefers_slot_count_when_health_ok;
+          test_case "runtime verify prefers oas discovery cache" `Quick
+            test_runtime_verify_prefers_oas_discovery_cache;
         ] );
     ]

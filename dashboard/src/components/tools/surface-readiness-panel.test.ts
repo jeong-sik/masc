@@ -115,7 +115,7 @@ describe('SurfaceReadinessPanel', () => {
     expect(groups[1]?.textContent).toContain('도구 & 실험')
 
     const text = container.textContent ?? ''
-    expect(text).toContain('판단 기준')
+    expect(text).toContain('검증 기준')
     expect(text).toContain('fixture + live spotcheck')
     expect(text).toContain('메인 메뉴 숨김')
     expect(text).toContain('검증 근거 보기')
@@ -141,7 +141,7 @@ describe('SurfaceReadinessPanel', () => {
     await flushUi()
 
     const openButton = Array.from(container.querySelectorAll('button'))
-      .find(button => button.textContent?.includes('이 화면 열기'))
+      .find(button => button.textContent?.includes('화면 열기'))
     openButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     expect(window.location.hash).toBe('#monitoring?section=sessions')

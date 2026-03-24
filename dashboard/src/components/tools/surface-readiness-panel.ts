@@ -13,14 +13,14 @@ const readinessError = signal<string | null>(null)
 const readinessLoading = signal(false)
 
 const SURFACE_SUMMARY_BY_ID: Record<string, string> = {
-  'monitoring.sessions': '세션 운영과 룸 현황을 바로 확인하는 기본 화면입니다.',
-  'monitoring.agents': '일반 에이전트와 키퍼 상태를 관찰하는 기본 화면입니다.',
-  'monitoring.activity': '실시간 활동 흐름과 이벤트 변화를 추적하는 화면입니다.',
-  'command.intervene': '방, 세션, 키퍼에 운영자가 직접 개입하는 화면입니다.',
+  'monitoring.sessions': '세션과 룸 상태를 바로 확인하는 기본 운영 화면입니다.',
+  'monitoring.agents': '에이전트와 키퍼 상태를 관찰하는 기본 운영 화면입니다.',
+  'monitoring.activity': '실시간 활동 흐름을 추적하는 기본 운영 화면입니다.',
+  'command.intervene': '방, 세션, 키퍼에 운영자가 바로 개입하는 운영 화면입니다.',
   'command.warroom': '오케스트라, 스웜, 체인 제어를 시험하는 실험 화면입니다.',
-  'command.governance': '판단과 판결 상태를 확인하는 운영 화면입니다.',
-  'workspace.evidence': '증빙과 audit trail을 확인하는 기본 화면입니다.',
-  'lab.tools': '도구 인벤토리와 준비도 감사를 보는 실험 화면입니다.',
+  'command.governance': '판단과 판결 흐름을 확인하는 운영 화면입니다.',
+  'workspace.evidence': '증빙과 작업 이력을 확인하는 기본 운영 화면입니다.',
+  'lab.tools': '도구 현황과 준비 상태를 점검하는 실험 화면입니다.',
 }
 
 const VERIFICATION_LABELS: Record<string, string> = {
@@ -59,7 +59,7 @@ function isMainOperationalSurface(item: DashboardSurfaceReadinessItem): boolean 
 function formatProofBar(value: string): string {
   return value
     .split('+')
-    .map(part => part.replaceAll('_', ' '))
+    .map(part => part.split('_').join(' '))
     .join(' + ')
 }
 
@@ -68,7 +68,7 @@ function surfaceSummary(item: DashboardSurfaceReadinessItem): string {
 }
 
 function surfaceStatusLabel(item: DashboardSurfaceReadinessItem): string {
-  if (isMainOperationalSurface(item)) return '메인 운영'
+  if (isMainOperationalSurface(item)) return '메인'
   if (item.exposure_status === 'lab') return '실험'
   if (item.exposure_status === 'hidden' || item.hidden_from_nav) return '숨김'
   return '보류'
@@ -102,14 +102,14 @@ function readinessGroups(items: DashboardSurfaceReadinessItem[]): SurfaceGroup[]
   return [
     {
       id: 'main',
-      title: '메인 운영',
-      description: '바로 들어가서 운영 판단과 관찰에 쓰는 surface입니다.',
+      title: '메인 화면',
+      description: '먼저 확인하는 기본 운영 화면입니다.',
       items: main,
     },
     {
       id: 'deferred',
-      title: '실험/보류',
-      description: 'Lab에 두거나 메인 메뉴에서 숨긴 surface입니다.',
+      title: '실험/보류 화면',
+      description: '실험실에 두거나 메인 메뉴에서 숨긴 화면입니다.',
       items: deferred,
     },
   ]
@@ -143,7 +143,7 @@ function SurfaceReadinessRow({ item }: { item: DashboardSurfaceReadinessItem }) 
                 class="shrink-0 px-3 py-1.5 rounded-lg text-[12px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
                 onClick=${() => openRouteHash(item.route_hash)}
               >
-                이 화면 열기
+                화면 열기
               </button>
             `
           : null}
@@ -186,7 +186,7 @@ function SurfaceReadinessGroup({ group }: { group: SurfaceGroup }) {
       ${group.items.length > 0
         ? group.items.map(item => html`<${SurfaceReadinessRow} key=${item.id} item=${item} />`)
         : html`<div class="rounded-xl border border-dashed border-[var(--card-border)] px-4 py-3 text-[12px] text-[var(--text-muted)]">
-            노출된 surface가 없습니다.
+            표시할 화면이 없습니다.
           </div>`}
     </section>
   `
@@ -221,13 +221,13 @@ export function SurfaceReadinessPanel() {
     <div class="grid gap-4">
       <div class="grid gap-2">
         <div class="text-[12px] text-[var(--text-muted)] leading-[1.6]">
-          운영자는 메인 surface부터 보고, 실험/보류 surface는 필요할 때만 근거를 펼쳐 확인하면 됩니다.
+          운영자는 메인 화면부터 보고, 실험 화면은 필요할 때만 검증 근거를 펼쳐 확인하면 됩니다.
         </div>
       </div>
 
       <div class="grid gap-3 sm:grid-cols-3">
         <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] px-4 py-3 grid gap-1">
-          <span class="text-[11px] uppercase tracking-[0.05em] text-[var(--text-muted)]">메인 운영</span>
+          <span class="text-[11px] uppercase tracking-[0.05em] text-[var(--text-muted)]">메인 화면</span>
           <strong class="text-[20px] text-[var(--text-strong)]">${mainCount}</strong>
         </div>
         <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] px-4 py-3 grid gap-1">
@@ -235,7 +235,7 @@ export function SurfaceReadinessPanel() {
           <strong class="text-[20px] text-[var(--text-strong)]">${deferredCount}</strong>
         </div>
         <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] px-4 py-3 grid gap-1">
-          <span class="text-[11px] uppercase tracking-[0.05em] text-[var(--text-muted)]">판단 기준</span>
+          <span class="text-[11px] uppercase tracking-[0.05em] text-[var(--text-muted)]">검증 기준</span>
           <strong class="text-[14px] text-[var(--text-strong)]">${formatProofBar(data.proof_bar)}</strong>
         </div>
       </div>

@@ -101,6 +101,11 @@ let load_state ~base_path loop_id =
   | None -> None
   | Some json ->
       (try
+         let has_required_string_field key =
+           match Yojson.Safe.Util.member key json with
+           | `String value -> String.trim value <> ""
+           | _ -> false
+         in
          match json with
          | `Assoc fields
            when List.mem_assoc "llm_model" fields
@@ -109,36 +114,16 @@ let load_state ~base_path loop_id =
                "unsupported legacy autoresearch state schema for %s: found llm_model; expected model_model"
                path;
              None
-         | `Assoc fields ->
-             let required_fields =
-               [
-                 "loop_id";
-                 "status";
-                 "current_cycle";
-                 "baseline";
-                 "best_score";
-                 "best_cycle";
-                 "goal";
-                 "metric_fn";
-                 "model_model";
-                 "target_file";
-                 "workdir";
-                 "cycle_timeout_s";
-                 "max_cycles";
-               ]
-             in
-             let missing_fields =
-               List.filter
-                 (fun key -> not (List.mem_assoc key fields))
-                 required_fields
-             in
-             if missing_fields <> [] then (
-               Log.Autoresearch.error
-                 "invalid autoresearch state schema for %s: missing [%s]"
-                 path (String.concat ", " missing_fields);
-               None
-             ) else
-               Some (Autoresearch_serde.state_of_yojson json)
+         | `Assoc _
+           when not (has_required_string_field "loop_id")
+                || not (has_required_string_field "goal")
+                || not (has_required_string_field "metric_fn")
+                || not (has_required_string_field "model_model")
+                || not (has_required_string_field "target_file") ->
+             Log.Autoresearch.error
+               "invalid autoresearch state schema for %s: missing required string fields"
+               path;
+             None
          | _ -> Some (Autoresearch_serde.state_of_yojson json)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

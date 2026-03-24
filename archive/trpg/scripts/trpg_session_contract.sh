@@ -7,7 +7,11 @@ CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 export CURL_RETRY_COUNT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../lib/test_framework.sh"
+TEST_FRAMEWORK_SH="${SCRIPT_DIR}/../lib/test_framework.sh"
+if [ ! -f "$TEST_FRAMEWORK_SH" ]; then
+  TEST_FRAMEWORK_SH="${SCRIPT_DIR}/../../../scripts/harness/lib/test_framework.sh"
+fi
+source "$TEST_FRAMEWORK_SH"
 
 echo "[1/6] trpg.preset.list"
 r1="$(call_tool 2001 "trpg.preset.list" "{}")"

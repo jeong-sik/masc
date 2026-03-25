@@ -205,8 +205,10 @@ let handle_agent_fitness ctx args =
 
 (** Pick random from list *)
 let pick_random lst =
-  let idx = Random.int (List.length lst) in  (* bounds-checked: idx < length *)
-  List.nth_opt lst idx |> Option.get
+  let idx = Random.int (List.length lst) in
+  match List.nth_opt lst idx with
+  | Some x -> x
+  | None -> assert false (* unreachable: idx < length *)
 
 (** Handle masc_select_agent *)
 let handle_select_agent ctx args =

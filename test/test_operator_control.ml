@@ -41,6 +41,11 @@ let () =
             `Quick
             Test_operator_control_judgment
             .test_digest_team_session_prefers_fresh_resident_judgment;
+          Alcotest.test_case
+            "parse session judgment ignores null recommended action"
+            `Quick
+            Test_operator_control_judgment
+            .test_parse_session_judgment_ignores_null_recommended_action;
           Alcotest.test_case "digest team session can skip workers" `Quick
             Test_operator_control_snapshot.test_digest_team_session_can_skip_workers;
           Alcotest.test_case "operator judgment write and latest roundtrip"

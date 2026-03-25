@@ -129,6 +129,43 @@ let test_digest_team_session_prefers_fresh_resident_judgment () =
         Yojson.Safe.Util.
           (digest |> member "active_summary" |> member "summary" |> to_string))
 
+let test_parse_session_judgment_ignores_null_recommended_action () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let session_id = start_session_exn (team_ctx env sw config "operator") in
+      let judgment =
+        Dashboard_operator_judge.parse_session_judgment
+          ~config
+          ~generated_at:(Types.now_iso ())
+          ~generated_at_unix:(Unix.gettimeofday ())
+          ~model_used:"glm:test"
+          (`Assoc
+            [
+              ("session_id", `String session_id);
+              ("summary", `String "Keep going.");
+              ("confidence", `Float 0.82);
+              ("recommended_action", `Null);
+            ])
+      in
+      let stored =
+        match
+          Operator_judgment.latest_active config ~surface:"command.swarm"
+            ~target_type:Operator_judgment.Team_session
+            ~target_id:(Some session_id)
+        with
+        | Some value -> value
+        | None -> Alcotest.fail "expected session judgment to be recorded"
+      in
+      Alcotest.(check bool) "judgment recorded" true (Option.is_some judgment);
+      Alcotest.(check bool) "recommended action omitted" true
+        (Option.is_none stored.Operator_judgment.recommended_action))
+
 let test_operator_judgment_write_and_latest_roundtrip () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->

@@ -114,49 +114,52 @@ let allowed_action_type = Operator_approval.is_allowed
 let confirm_required = Operator_approval.confirm_required
 
 let build_recommended_action ~actor ~target_type ~target_id json =
-  let action_type =
-    json |> member "action_type" |> to_string_option |> Option.map String.trim
-  in
-  match action_type with
-  | Some action_type when action_type <> "" && allowed_action_type action_type ->
-      let severity =
-        json |> member "severity" |> to_string_option
-        |> Option.value ~default:"warn"
+  match json with
+  | `Assoc _ ->
+      let action_type =
+        json |> member "action_type" |> to_string_option |> Option.map String.trim
       in
-      let reason =
-        normalize_text
-          (json |> member "reason" |> to_string_option |> Option.value ~default:"")
-      in
-      let suggested_payload =
-        match json |> member "suggested_payload" with
-        | `Assoc _ as value -> value
-        | _ -> `Assoc []
-      in
-      let preview =
-        `Assoc
-          [
-            ("actor", `String actor);
-            ("action_type", `String action_type);
-            ("target_type", `String target_type);
-            ("target_id", Option.fold ~none:`Null ~some:(fun v -> `String v) target_id);
-            ("payload", suggested_payload);
-          ]
-      in
-      Some
-        (`Assoc
-          [
-            ("action_type", `String action_type);
-            ("target_type", `String target_type);
-            ("target_id", Option.fold ~none:`Null ~some:(fun v -> `String v) target_id);
-            ("severity", `String severity);
-            ("reason", `String reason);
-            ("confirm_required", `Bool (confirm_required action_type));
-            ("suggested_payload", suggested_payload);
-            ("preview", preview);
-            ("provenance", `String "judgment");
-            ("decision_engine", `String "resident_operator_judge");
-            ("authoritative", `Bool true);
-          ])
+      (match action_type with
+      | Some action_type when action_type <> "" && allowed_action_type action_type ->
+          let severity =
+            json |> member "severity" |> to_string_option
+            |> Option.value ~default:"warn"
+          in
+          let reason =
+            normalize_text
+              (json |> member "reason" |> to_string_option |> Option.value ~default:"")
+          in
+          let suggested_payload =
+            match json |> member "suggested_payload" with
+            | `Assoc _ as value -> value
+            | _ -> `Assoc []
+          in
+          let preview =
+            `Assoc
+              [
+                ("actor", `String actor);
+                ("action_type", `String action_type);
+                ("target_type", `String target_type);
+                ("target_id", Option.fold ~none:`Null ~some:(fun v -> `String v) target_id);
+                ("payload", suggested_payload);
+              ]
+          in
+          Some
+            (`Assoc
+              [
+                ("action_type", `String action_type);
+                ("target_type", `String target_type);
+                ("target_id", Option.fold ~none:`Null ~some:(fun v -> `String v) target_id);
+                ("severity", `String severity);
+                ("reason", `String reason);
+                ("confirm_required", `Bool (confirm_required action_type));
+                ("suggested_payload", suggested_payload);
+                ("preview", preview);
+                ("provenance", `String "judgment");
+                ("decision_engine", `String "resident_operator_judge");
+                ("authoritative", `Bool true);
+              ])
+      | _ -> None)
   | _ -> None
 
 let prompt_for_facts facts_json =

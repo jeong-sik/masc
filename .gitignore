@@ -76,3 +76,4 @@ planning/
 # Stale build directories
 _build_cleanup/
 _build_pr*/
+.nvimlog

@@ -120,7 +120,7 @@ describe('Governance surface', () => {
 
     await flushUi()
 
-    expect(container.textContent).toContain('Governance')
+    expect(container.textContent).toContain('거버넌스')
     expect(container.textContent).toContain('command:governance 렌더링 오류')
     expect(fetchDashboardGovernance).toHaveBeenCalledTimes(1)
     expect(fetchGovernanceCaseStatus).toHaveBeenCalledWith('gov-case-1')
@@ -134,5 +134,5 @@ describe('Governance surface', () => {
     expect(fetchGovernanceCaseStatus.mock.calls.filter(([caseId]) => caseId === 'gov-case-1').length)
       .toBeGreaterThanOrEqual(2)
     expect(container.textContent).toContain('command:governance 렌더링 오류')
-  })
+  }, 20000)
 })

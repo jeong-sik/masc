@@ -5,8 +5,19 @@
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
 import type { Agent, Keeper } from '../types'
-import type { DashboardMissionKeeperBrief } from '../types/dashboard-mission'
-import { agents, keepers } from '../store'
+import type {
+  DashboardMissionAgentBrief,
+  DashboardMissionKeeperBrief,
+} from '../types/dashboard-mission'
+import {
+  agents,
+  keepers,
+  serverStatus,
+  executionLoaded,
+  executionLoading,
+  executionError,
+  shellCounts,
+} from '../store'
 import { missionKeeperBriefs, missionAgentBriefs } from '../mission-signals'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
@@ -14,6 +25,12 @@ import { EmptyState } from './common/empty-state'
 import { AgentAvatar } from './overview/agent-avatar'
 import { openAgentDetail } from './agent-detail'
 import { formatDuration, trimText } from './mission-utils'
+import { roomTruth } from '../room-truth-store'
+import {
+  resolveRuntimeCounts,
+  runtimeCountSourceLabel,
+  shouldShowExecutionFallbackState,
+} from '../runtime-counts'
 
 type StatusFilter = 'all' | 'active' | 'idle' | 'offline'
 
@@ -82,6 +99,15 @@ function findKeeper(agentName: string, keeperList: Keeper[], keeperBriefs: Dashb
 }
 
 type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
+
+function expectedCountForKeeperFilter(
+  keeperFilter: KeeperFilterMode,
+  counts: ReturnType<typeof resolveRuntimeCounts>,
+): number {
+  if (keeperFilter === 'keeper-only') return counts.keepers
+  if (keeperFilter === 'agent-only') return counts.agents
+  return counts.totalRuntimes
+}
 
 const FILTER_META: Record<StatusFilter, { label: string; description: string }> = {
   all: {
@@ -202,6 +228,22 @@ export function countAgentsByStatus(agentList: Agent[]): Record<StatusFilter, nu
   }
 }
 
+export function countRuntimeKinds(
+  agentList: Agent[],
+  keeperList: Keeper[],
+  keeperBriefs: DashboardMissionKeeperBrief[],
+): { agents: number; keepers: number; totalRuntimes: number } {
+  const rosterAgents = buildAgentRoster(agentList, keeperList, keeperBriefs)
+  const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, 'keeper-only').length
+  const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, 'agent-only').length
+
+  return {
+    agents: agentCount,
+    keepers: keeperCount,
+    totalRuntimes: rosterAgents.length,
+  }
+}
+
 export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFilterMode } = {}) {
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
@@ -210,10 +252,27 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const keeperList = keepers.value
   const briefs = missionAgentBriefs.value
   const keeperBriefs = missionKeeperBriefs.value
-
-  const briefMap = new Map(briefs.map(b => [b.agent_name, b]))
-  const hasKeeperRuntime = keeperFilter !== 'agent-only' && (keeperList.length > 0 || keeperBriefs.length > 0)
+  const liveRuntimeCounts = countRuntimeKinds(agentList, keeperList, keeperBriefs)
   const rosterAgents = buildAgentRoster(agentList, keeperList, keeperBriefs)
+  const runtimeCounts = resolveRuntimeCounts({
+    executionLoaded: executionLoaded.value,
+    agentsCount: liveRuntimeCounts.agents,
+    keepersCount: liveRuntimeCounts.keepers,
+    roomTruthCounts: roomTruth.value?.room.counts,
+    shellCounts: shellCounts.value,
+  })
+  const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
+  const countSourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
+  const roomStatus = roomTruth.value?.room.status ?? serverStatus.value
+  const roomName = roomStatus?.room ?? 'default'
+  const roomBasePath = roomStatus?.room_base_path ?? null
+
+  const briefMap = new Map<string, DashboardMissionAgentBrief>(
+    briefs.map(brief => [brief.agent_name, brief] as const),
+  )
+  const hasKeeperRuntime =
+    keeperFilter !== 'agent-only'
+    && (keeperList.length > 0 || keeperBriefs.length > 0 || runtimeCounts.keepers > 0)
   const scopedAgents = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, keeperFilter)
   const pageTitle = keeperFilter === 'keeper-only'
     ? '키퍼 런타임'
@@ -246,15 +305,48 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     })
 
   const counts = countAgentsByStatus(scopedAgents)
-  const resultCountLabel = filtered.length === scopedAgents.length
-    ? `${filtered.length}개 표시 중`
-    : `${filtered.length} / ${scopedAgents.length}개 표시 중`
+  const showExecutionFallbackState = shouldShowExecutionFallbackState({
+    executionLoaded: executionLoaded.value,
+    executionLoading: executionLoading.value,
+    executionError: executionError.value,
+    loadedCount: scopedAgents.length,
+    expectedCount: expectedScopedCount,
+  })
+  const resultCountLabel =
+    expectedScopedCount > scopedAgents.length
+      ? (
+          filtered.length === scopedAgents.length
+            ? `${filtered.length}개 로드됨 · 예상 ${expectedScopedCount}개`
+            : `${filtered.length} / ${scopedAgents.length}개 표시 · 예상 ${expectedScopedCount}개`
+        )
+      : (
+          filtered.length === scopedAgents.length
+            ? `${filtered.length}개 표시 중`
+            : `${filtered.length} / ${scopedAgents.length}개 표시 중`
+        )
   const statusChips = (['all', 'active', 'idle', 'offline'] as StatusFilter[]).map(key => ({
     key,
     label: FILTER_META[key].label,
-    count: counts[key],
+    count: executionLoaded.value || scopedAgents.length > 0 ? counts[key] : null,
     title: FILTER_META[key].description,
   }))
+  const scopeLabel = keeperFilter === 'keeper-only'
+    ? `키퍼 ${expectedScopedCount}개`
+    : keeperFilter === 'agent-only'
+      ? `일반 에이전트 ${expectedScopedCount}개`
+      : `런타임 ${expectedScopedCount}개`
+  const fallbackStateTitle =
+    executionError.value
+      ? 'execution 상세 불러오기 실패'
+      : executionLoaded.value
+        ? '상세 runtime 부분 동기화'
+        : '상세 runtime 동기화 중'
+  const fallbackStateMessage =
+    executionError.value
+      ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있지만 execution 상세 projection을 아직 가져오지 못했습니다.`
+      : executionLoaded.value
+        ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있고 일부만 상세 목록에 반영됐습니다.`
+        : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다. execution 상세 projection이 올라오면 상태별 분류와 카드가 채워집니다.`
   const legendCards = [
     {
       title: '온라인',
@@ -317,6 +409,25 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               />
             </div>
           </div>
+
+          ${showExecutionFallbackState
+            ? html`
+                <div class="rounded-2xl border ${executionError.value ? 'border-[rgba(251,191,36,0.28)] bg-[rgba(251,191,36,0.08)]' : 'border-[rgba(71,184,255,0.18)] bg-[rgba(71,184,255,0.08)]'} px-4 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.12)]">
+                  <div class="flex flex-col gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <strong class="text-[12px] font-semibold text-[var(--text-strong)]">${fallbackStateTitle}</strong>
+                      <span class="inline-flex items-center rounded-full border border-[var(--white-10)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">${countSourceLabel}</span>
+                    </div>
+                    <p class="m-0 text-[12px] leading-[1.55] text-[var(--text-body)]">${fallbackStateMessage}</p>
+                    <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+                      <span class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">room ${roomName}</span>
+                      ${roomBasePath ? html`<code class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px]">${roomBasePath}</code>` : null}
+                    </div>
+                  </div>
+                </div>
+              `
+            : null}
+
           <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             ${legendCards.map(card => html`
               <div class="rounded-2xl border border-[var(--card-border)] bg-[var(--bg-1)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.14)]">
@@ -418,7 +529,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         })}
         ${filtered.length === 0 ? html`
           <div class="col-span-full rounded-[24px] border border-dashed border-[var(--ff-border-subtle)] bg-[var(--white-2)] px-6 py-10">
-            <${EmptyState} message="조건에 맞는 에이전트가 없습니다." compact />
+            <${EmptyState}
+              message=${showExecutionFallbackState && expectedScopedCount > 0
+                ? `${fallbackStateTitle}: ${countSourceLabel} 기준 ${scopeLabel}가 보이지만, 현재 조건에 맞는 상세 카드는 아직 없습니다.`
+                : '조건에 맞는 에이전트가 없습니다.'}
+              compact
+            />
           </div>
         ` : null}
       </div>

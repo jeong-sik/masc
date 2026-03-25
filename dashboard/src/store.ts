@@ -86,6 +86,9 @@ export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
 export const executionSummary = signal<DashboardExecutionSummary | null>(null)
 export const executionLoaded = signal(false)
+export const executionLoading = signal(false)
+export const executionError = signal<string | null>(null)
+export const lastExecutionAttemptAt = signal<string | null>(null)
 export const executionQueue = signal<DashboardExecutionQueueItem[]>([])
 export const executionSessionBriefs = signal<DashboardExecutionSessionBrief[]>([])
 export const executionOperationBriefs = signal<DashboardExecutionOperationBrief[]>([])
@@ -440,6 +443,9 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
   if (inflightExecutionRefresh) return inflightExecutionRefresh
   if (!opts?.force && Date.now() - lastExecutionRefreshAt.value < EXECUTION_TTL_MS) return
   inflightExecutionRefresh = (async () => {
+    executionLoading.value = true
+    executionError.value = null
+    lastExecutionAttemptAt.value = new Date().toISOString()
     try {
       const data = await fetchDashboardExecution()
       const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
@@ -491,8 +497,10 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
       lastDashboardRefreshAt.value = new Date().toISOString()
     } catch (err) {
       console.warn('[Dashboard] execution fetch error:', err)
+      executionError.value = err instanceof Error ? err.message : 'Execution projection load failed'
       showToast('실행 데이터 로드 실패', 'error', 5000)
     } finally {
+      executionLoading.value = false
       inflightExecutionRefresh = null
     }
   })()

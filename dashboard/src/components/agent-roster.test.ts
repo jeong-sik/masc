@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent, Keeper } from '../types'
 import type { DashboardMissionKeeperBrief } from '../types/dashboard-mission'
-import { buildAgentRoster, countAgentsByStatus, scopeAgentsByKeeperFilter } from './agent-roster'
+import {
+  buildAgentRoster,
+  countAgentsByStatus,
+  countRuntimeKinds,
+  scopeAgentsByKeeperFilter,
+} from './agent-roster'
 
 const AGENTS: Agent[] = [
   { name: 'plain-agent', status: 'active', current_task: null },
@@ -91,6 +96,16 @@ describe('countAgentsByStatus', () => {
       active: 1,
       idle: 1,
       offline: 0,
+    })
+  })
+})
+
+describe('countRuntimeKinds', () => {
+  it('splits live runtimes into agent-only and keeper buckets without double-counting', () => {
+    expect(countRuntimeKinds(AGENTS, KEEPERS, KEEPER_BRIEFS)).toEqual({
+      agents: 2,
+      keepers: 2,
+      totalRuntimes: 4,
     })
   })
 })

@@ -122,42 +122,6 @@ let validate_ttl ttl_seconds =
   else if ttl_seconds > 86400 then 86400
   else ttl_seconds
 
-(** Safely parse JSON lock file, returning None on any error.
-    Also removes corrupted files to allow recovery. *)
-let safe_parse_lock_json file_path =
-  if not (Sys.file_exists file_path) then None
-  else
-    try
-      let content = In_channel.with_open_text file_path In_channel.input_all in
-      if String.length content = 0 then begin
-        Safe_ops.remove_file_logged ~context:"backend_lock" file_path;
-        None
-      end else
-        let json = Yojson.Safe.from_string content in
-        let open Yojson.Safe.Util in
-        let parse_float_field field =
-          match json |> member field with
-          | `Float f -> Some f
-          | `Int i -> Some (float_of_int i)
-          | `Intlit s -> float_of_string_opt s
-          | `String s -> float_of_string_opt s
-          | _ -> None
-        in
-        let parse_string_field field =
-          match json |> member field with
-          | `String s -> Some s
-          | _ -> None
-        in
-        match parse_string_field "owner", parse_float_field "expires_at" with
-        | Some own, Some exp -> Some (own, exp)
-        | _ ->
-            Safe_ops.remove_file_logged ~context:"backend_lock" file_path;
-            None
-    with
-    | _ ->
-        Safe_ops.remove_file_logged ~context:"backend_lock" file_path;
-        None
-
 (** Acquire exclusive file lock using Unix.lockf.
     Returns true if lock acquired, false if would block. *)
 let acquire_flock fd =

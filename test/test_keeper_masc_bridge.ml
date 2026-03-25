@@ -26,8 +26,8 @@ let test_inject_filters_allowlist () =
     ]
   in
   KET.inject_masc_schemas schemas;
-  let dummy_meta = Obj.magic () in
-  let names = KET.keeper_masc_tool_names dummy_meta in
+  let meta = make_meta () in
+  let names = KET.keeper_masc_tool_names meta in
   Alcotest.(check int) "2 curated masc tools" 2 (List.length names);
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_messages" true (List.mem "masc_messages" names);
@@ -45,8 +45,8 @@ let test_dispatch_unregistered () =
 (** Verify real schemas injection matches the curated keeper allowlist. *)
 let test_inject_real_schemas_match_curated_names () =
   KET.inject_masc_schemas Masc_mcp.Tools.all_schemas_extended;
-  let dummy_meta = Obj.magic () in
-  let names = KET.keeper_masc_tool_names dummy_meta in
+  let meta = make_meta () in
+  let names = KET.keeper_masc_tool_names meta in
   let expected =
     List.sort String.compare KET.keeper_passthrough_masc_tool_names
   in
@@ -56,9 +56,9 @@ let test_inject_real_schemas_match_curated_names () =
 (** Verify schemas and names are consistent. *)
 let test_schemas_match_names () =
   KET.inject_masc_schemas Masc_mcp.Tools.all_schemas_extended;
-  let dummy_meta = Obj.magic () in
-  let names = KET.keeper_masc_tool_names dummy_meta in
-  let schemas = KET.keeper_masc_tool_schemas dummy_meta in
+  let meta = make_meta () in
+  let names = KET.keeper_masc_tool_names meta in
+  let schemas = KET.keeper_masc_tool_schemas meta in
   Alcotest.(check int) "count matches"
     (List.length names) (List.length schemas);
   List.iter
@@ -70,8 +70,8 @@ let test_schemas_match_names () =
 (** Verify all bridged tools still have masc_ prefix. *)
 let test_all_have_prefix () =
   KET.inject_masc_schemas Masc_mcp.Tools.all_schemas_extended;
-  let dummy_meta = Obj.magic () in
-  let names = KET.keeper_masc_tool_names dummy_meta in
+  let meta = make_meta () in
+  let names = KET.keeper_masc_tool_names meta in
   List.iter
     (fun name ->
       Alcotest.(check bool) (name ^ " has masc_ prefix") true

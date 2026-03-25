@@ -277,22 +277,22 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   ]
 
   return html`
-    <div class="agent-page mx-auto flex max-w-[1200px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-0">
-      <section class="rounded-[28px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+    <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
+      <section class="rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(17,26,46,0.94),rgba(11,18,32,0.92))] p-5 shadow-[0_12px_30px_rgba(0,0,0,0.16)]">
         <div class="flex flex-col gap-5">
           <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div class="flex min-w-0 flex-col gap-3">
               <div class="flex flex-wrap items-center gap-3">
-                <h2 class="m-0 text-[20px] font-semibold text-[var(--ff-gold-bright)] tracking-[0.5px] [text-shadow:0_1px_4px_rgba(212,169,75,0.2)]">${pageTitle}</h2>
-                <span class="inline-flex items-center rounded-full border border-[rgba(200,168,78,0.22)] bg-[rgba(200,168,78,0.12)] px-2.5 py-1 text-[11px] font-medium text-[#e8d48b]">${resultCountLabel}</span>
+                <h2 class="m-0 text-[20px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">${pageTitle}</h2>
+                <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.2)] bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[#cfeaff]">${resultCountLabel}</span>
               </div>
-              <p class="m-0 max-w-[720px] text-[13px] leading-[1.6] text-[var(--white-30)]">${pageDescription}</p>
+              <p class="m-0 max-w-[720px] text-[13px] leading-[1.6] text-[var(--text-body)]">${pageDescription}</p>
             </div>
 
             <label class="flex w-full max-w-[320px] flex-col gap-2 text-[11px] font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">
               <span>에이전트 이름으로 찾기</span>
               <${TextInput}
-                class="rounded-2xl border-[var(--white-10)] bg-[var(--bg-1)] px-4 py-3 text-[14px] text-[var(--white-90)] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] placeholder:text-[var(--white-25)] focus:border-[var(--ff-gold)] focus:shadow-[0_0_0_2px_var(--ff-gold-dim)]"
+                class="rounded-2xl bg-[rgba(8,16,32,0.6)] px-4 py-3 text-[14px] text-[var(--text-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
                 name="agent_search"
                 ariaLabel="에이전트 이름 검색"
                 autoComplete="off"
@@ -303,7 +303,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             </label>
           </div>
 
-          <div class="rounded-2xl border border-[var(--white-6)] bg-[var(--white-2)] p-3.5 md:p-4">
+          <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(8,16,32,0.55)] p-3.5 md:p-4">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div class="flex flex-col gap-1">
                 <div class="text-[11px] font-semibold tracking-[0.08em] text-[var(--text-strong)] uppercase">연결 상태</div>
@@ -314,12 +314,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 value=${filter}
                 onChange=${(key: StatusFilter) => setFilter(key)}
                 size="md"
+                tone="accent"
               />
             </div>
           </div>
           <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             ${legendCards.map(card => html`
-              <div class="rounded-2xl border border-[var(--card-border)] bg-[var(--bg-1)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.14)]">
+              <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(8,16,32,0.55)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
                 <div class="text-[11px] font-semibold text-[var(--text-strong)]">${card.title}</div>
                 <p class="m-0 mt-2 text-[12px] leading-[1.55] text-[var(--text-muted)]">${card.body}</p>
               </div>
@@ -341,7 +342,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <button type="button"
-              class="group flex min-h-[308px] w-full flex-col gap-4 rounded-[24px] border border-[var(--card-border)] bg-[var(--bg-1)] p-5 text-left shadow-[0_16px_40px_rgba(0,0,0,0.16)] transition-all duration-200 cursor-pointer hover:border-[var(--accent-soft)] hover:bg-[var(--bg-0)] hover:-translate-y-0.5"
+              class="group flex min-h-[308px] w-full flex-col gap-4 rounded-[22px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(17,26,46,0.92),rgba(11,18,32,0.92))] p-5 text-left shadow-[0_10px_24px_rgba(0,0,0,0.14)] transition-all duration-200 cursor-pointer hover:border-[rgba(71,184,255,0.3)] hover:bg-[linear-gradient(180deg,rgba(20,30,52,0.96),rgba(12,19,35,0.94))] hover:-translate-y-0.5"
               key=${agent.name}
               aria-label=${`${agent.name} 상세 보기`}
               onClick=${() => openAgentDetail(agent.name)}

@@ -167,15 +167,23 @@ type module_tag =
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
 let tag_registry_initialized = ref false
 
+(** Schema registry — maps tool name → input_schema JSON.
+    Populated alongside tag_registry during server initialization.
+    Used by Tool_input_validation pre-hook to validate arguments
+    before dispatch (C-4 precondition validation). *)
+let schema_registry : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 512
+
 let register_module_tag ~(schemas : Types.tool_schema list) ~tag =
   List.iter (fun (s : Types.tool_schema) ->
-    Hashtbl.replace tag_registry s.name tag) schemas
+    Hashtbl.replace tag_registry s.name tag;
+    Hashtbl.replace schema_registry s.name s.input_schema) schemas
 
 (** Register a single tool name with a tag (for modules without schema exports). *)
 let register_name_tag ~tool_name ~tag =
   Hashtbl.replace tag_registry tool_name tag
 
 let lookup_tag name = Hashtbl.find_opt tag_registry name
+let lookup_schema name = Hashtbl.find_opt schema_registry name
 
 let tag_registry_count () = Hashtbl.length tag_registry
 

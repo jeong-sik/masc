@@ -392,6 +392,7 @@
    tool_catalog
    tool_result
    tool_dispatch
+   tool_input_validation
    tool_tag_init
    tool_permissions
    sse_room_filter

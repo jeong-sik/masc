@@ -248,55 +248,61 @@ let collect_recent_messages_from_pg config ~msgs_path ~since_seq ~limit =
                 |> take_first limit
               in
               Some messages
-          | Error _ -> None))
+          | Error err ->
+              Log.Room.warn "collect_recent_messages_from_pg failed: %s"
+                (Backend.show_error err);
+              None))
   | Memory _ | FileSystem _ -> None
 
 (** Read most-recent messages without parsing the entire history directory. *)
 let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
-  match collect_recent_messages_from_pg config ~msgs_path ~since_seq ~limit with
-  | Some rows -> rows
-  | None ->
-      let names =
-        Sys.readdir msgs_path
-        |> Array.to_list
-        |> List.filter is_valid_filename
-        |> List.sort (fun a b -> compare (extract_seq_from_filename b) (extract_seq_from_filename a))
-      in
-      let rec loop remaining acc = function
-        | _ when remaining <= 0 -> List.rev acc
-        | [] -> List.rev acc
-        | name :: rest ->
-            safe_yield ();
-            if extract_seq_from_filename name <= since_seq then List.rev acc
-            else
-              let path = Filename.concat msgs_path name in
-              match read_json config path with
-              | json ->
-                  (match message_of_yojson json with
-                   | Ok msg when msg.seq > since_seq -> loop (remaining - 1) (msg :: acc) rest
-                   | _ -> loop remaining acc rest)
-              | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-              | exception e ->
-                  Log.legacy_traceln ~level:Log.Warn ~module_name:"Room"
-                    (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
-                       name (Printexc.to_string e));
-                  loop remaining acc rest
-      in
-      loop limit [] names
+  match config.backend with
+  | PostgresNative _ -> (
+      match collect_recent_messages_from_pg config ~msgs_path ~since_seq ~limit with
+      | Some rows -> rows
+      | None -> [])
+  | Memory _ | FileSystem _ ->
+      if not (Sys.file_exists msgs_path) then []
+      else
+        let names =
+          Sys.readdir msgs_path
+          |> Array.to_list
+          |> List.filter is_valid_filename
+          |> List.sort (fun a b -> compare (extract_seq_from_filename b) (extract_seq_from_filename a))
+        in
+        let rec loop remaining acc = function
+          | _ when remaining <= 0 -> List.rev acc
+          | [] -> List.rev acc
+          | name :: rest ->
+              safe_yield ();
+              if extract_seq_from_filename name <= since_seq then List.rev acc
+              else
+                let path = Filename.concat msgs_path name in
+                match read_json config path with
+                | json ->
+                    (match message_of_yojson json with
+                     | Ok msg when msg.seq > since_seq -> loop (remaining - 1) (msg :: acc) rest
+                     | _ -> loop remaining acc rest)
+                | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+                | exception e ->
+                    Log.legacy_traceln ~level:Log.Warn ~module_name:"Room"
+                      (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
+                         name (Printexc.to_string e));
+                    loop remaining acc rest
+        in
+        loop limit [] names
 
 (** Get raw message list (for dashboard) *)
 let get_messages_raw config ~since_seq ~limit =
   ensure_initialized config;
   let msgs_path = messages_dir_in_room config (current_room_id config) in
-  if not (Sys.file_exists msgs_path) then []
-  else collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"message"
+  collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"message"
 
 let get_messages_raw_in_room config ~room_id ~since_seq ~limit =
   if not (root_is_initialized config) then []
   else
     let msgs_path = messages_dir_in_room config room_id in
-    if not (Sys.file_exists msgs_path) then []
-    else collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"room message"
+    collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"room message"
 
 (** List tasks *)
 let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status config =

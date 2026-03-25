@@ -17,9 +17,24 @@ let _executor_pool : Eio.Executor_pool.t option ref = ref None
 
 let set_executor_pool pool = _executor_pool := Some pool
 
+let isolated_readonly_dashboard_config ~sw ~clock ~(config : Room.config) =
+  match config.backend_config.Backend.backend_type with
+  | Backend.PostgresNative ->
+      let net = Eio_context.get_net () in
+      let mono_clock = Eio_context.get_mono_clock () in
+      Room_utils_backend_setup.with_domain_local_pg_backend
+        ~sw ~net ~clock ~mono_clock config
+  | Backend.Memory | Backend.FileSystem -> Some config
+
 let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
     ~(config : Room.config) compute =
   let fallback () = compute ~config ~sw in
+  let fallback_isolated_pg () =
+    match isolated_readonly_dashboard_config ~sw ~clock ~config with
+    | Some isolated -> compute ~config:isolated ~sw
+    | None ->
+        failwith "dashboard readonly backend unavailable"
+  in
   let run_in_pool pool_sw =
     match config.backend_config.Backend_types.backend_type with
     | Backend_types.PostgresNative ->
@@ -46,14 +61,21 @@ let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
            | `Fallback ->
                Log.Dashboard.warn
                  "dashboard offload fallback: domain-local backend unavailable";
-               fallback ()
+               (match config.backend_config.Backend.backend_type with
+                | Backend.PostgresNative -> fallback_isolated_pg ()
+                | Backend.Memory | Backend.FileSystem -> fallback ())
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Log.Dashboard.warn "dashboard offload failed, using inline compute: %s"
                (Printexc.to_string exn);
-             fallback ())
-    | None -> fallback ()
+             (match config.backend_config.Backend.backend_type with
+              | Backend.PostgresNative -> fallback_isolated_pg ()
+              | Backend.Memory | Backend.FileSystem -> fallback ()))
+    | None ->
+        (match config.backend_config.Backend.backend_type with
+         | Backend.PostgresNative -> fallback_isolated_pg ()
+         | Backend.Memory | Backend.FileSystem -> fallback ())
   in
   match mode with
   | Inline_shared -> fallback ()

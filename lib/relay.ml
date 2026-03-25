@@ -268,29 +268,40 @@ type checkpoint = {
 (** Checkpoint storage (in-memory, could be persisted) *)
 let checkpoints : checkpoint list ref = ref []
 let max_checkpoints = 500
+let checkpoint_mu = Eio.Mutex.create ()
+
+let with_checkpoint_rw f =
+  try Eio.Mutex.use_rw ~protect:true checkpoint_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
+let with_checkpoint_ro f =
+  try Eio.Mutex.use_ro checkpoint_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
 (** Save a checkpoint, capping at [max_checkpoints] to prevent unbounded growth. *)
 let save_checkpoint ~summary ~task ~todos ~pdca ~files ~metrics =
-  let cp = {
-    cp_timestamp = Time_compat.now ();
-    cp_summary = summary;
-    cp_task = task;
-    cp_todos = todos;
-    cp_pdca = pdca;
-    cp_files = files;
-    cp_metrics = metrics;
-  } in
-  let cps = cp :: !checkpoints in
-  checkpoints := List.filteri (fun i _ -> i < max_checkpoints) cps;
-  Printf.printf "[CHECKPOINT] Saved at %.1f%% context usage\n%!"
-    (metrics.usage_ratio *. 100.0);
-  cp
+  with_checkpoint_rw (fun () ->
+    let cp = {
+      cp_timestamp = Time_compat.now ();
+      cp_summary = summary;
+      cp_task = task;
+      cp_todos = todos;
+      cp_pdca = pdca;
+      cp_files = files;
+      cp_metrics = metrics;
+    } in
+    let cps = cp :: !checkpoints in
+    checkpoints := List.filteri (fun i _ -> i < max_checkpoints) cps;
+    Printf.printf "[CHECKPOINT] Saved at %.1f%% context usage\n%!"
+      (metrics.usage_ratio *. 100.0);
+    cp)
 
 (** Get latest checkpoint *)
 let get_latest_checkpoint () =
-  match !checkpoints with
-  | [] -> None
-  | cp :: _ -> Some cp
+  with_checkpoint_ro (fun () ->
+    match !checkpoints with
+    | [] -> None
+    | cp :: _ -> Some cp)
 
 (** Checkpoint to payload *)
 let checkpoint_to_payload cp generation =

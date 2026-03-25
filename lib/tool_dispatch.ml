@@ -16,19 +16,30 @@ type handler = name:string -> args:Yojson.Safe.t -> (bool * string) option
 (** Central registry — populated once during server initialisation. *)
 let registry : (string, handler) Hashtbl.t = Hashtbl.create 256
 
+(** Mutex protecting all mutable state in this module.
+    Uses Eio.Mutex with Effect.Unhandled fallback for non-Eio test contexts. *)
+let dispatch_mu = Eio.Mutex.create ()
+let with_dispatch_rw f =
+  try Eio.Mutex.use_rw ~protect:true dispatch_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_dispatch_ro f =
+  try Eio.Mutex.use_ro dispatch_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
 (** Register a single tool name → handler mapping. *)
 let register ~tool_name ~(handler : handler) =
-  Hashtbl.replace registry tool_name handler
+  with_dispatch_rw (fun () -> Hashtbl.replace registry tool_name handler)
 
 (** Bulk-register every tool name from a schema list to the same handler.
     This is the primary registration path — it extracts names from the
     module's published schemas, ensuring the registry is always in sync
     with the advertised tool list. *)
 let register_module ~(schemas : Types.tool_schema list) ~(handler : handler) =
-  List.iter
-    (fun (schema : Types.tool_schema) ->
-      Hashtbl.replace registry schema.name handler)
-    schemas
+  with_dispatch_rw (fun () ->
+    List.iter
+      (fun (schema : Types.tool_schema) ->
+        Hashtbl.replace registry schema.name handler)
+      schemas)
 
 (** O(1) dispatch.  Returns [Some (success, message)] when a handler is
     found, [None] when the tool name is unknown to the registry.
@@ -67,14 +78,13 @@ let pre_hooks : pre_hook list ref = ref []
 let post_hooks : post_hook list ref = ref []
 
 let register_pre_hook (hook : pre_hook) =
-  pre_hooks := !pre_hooks @ [hook]
+  with_dispatch_rw (fun () -> pre_hooks := !pre_hooks @ [hook])
 
 let register_post_hook (hook : post_hook) =
-  post_hooks := !post_hooks @ [hook]
+  with_dispatch_rw (fun () -> post_hooks := !post_hooks @ [hook])
 
 let clear_hooks () =
-  pre_hooks := [];
-  post_hooks := []
+  with_dispatch_rw (fun () -> pre_hooks := []; post_hooks := [])
 
 (** Run pre-hooks in order.  First [Some] wins (short-circuit). *)
 let run_pre_hooks ~name ~args =
@@ -130,13 +140,15 @@ let read_only_set : (string, unit) Hashtbl.t = Hashtbl.create 32
 let requires_join_set : (string, unit) Hashtbl.t = Hashtbl.create 64
 
 let init_read_only_set (names : string list) =
-  List.iter (fun name -> Hashtbl.replace read_only_set name ()) names
+  with_dispatch_rw (fun () ->
+    List.iter (fun name -> Hashtbl.replace read_only_set name ()) names)
 
 let init_requires_join_set (names : string list) =
-  List.iter (fun name -> Hashtbl.replace requires_join_set name ()) names
+  with_dispatch_rw (fun () ->
+    List.iter (fun name -> Hashtbl.replace requires_join_set name ()) names)
 
-let is_read_only name = Hashtbl.mem read_only_set name
-let is_join_required name = Hashtbl.mem requires_join_set name
+let is_read_only name = with_dispatch_ro (fun () -> Hashtbl.mem read_only_set name)
+let is_join_required name = with_dispatch_ro (fun () -> Hashtbl.mem requires_join_set name)
 
 (** {2 Module Tag Dispatch — O(1) two-level dispatch}
 
@@ -174,18 +186,19 @@ let tag_registry_initialized = ref false
 let schema_registry : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 512
 
 let register_module_tag ~(schemas : Types.tool_schema list) ~tag =
-  List.iter (fun (s : Types.tool_schema) ->
-    Hashtbl.replace tag_registry s.name tag;
-    Hashtbl.replace schema_registry s.name s.input_schema) schemas
+  with_dispatch_rw (fun () ->
+    List.iter (fun (s : Types.tool_schema) ->
+      Hashtbl.replace tag_registry s.name tag;
+      Hashtbl.replace schema_registry s.name s.input_schema) schemas)
 
 (** Register a single tool name with a tag (for modules without schema exports). *)
 let register_name_tag ~tool_name ~tag =
-  Hashtbl.replace tag_registry tool_name tag
+  with_dispatch_rw (fun () -> Hashtbl.replace tag_registry tool_name tag)
 
-let lookup_tag name = Hashtbl.find_opt tag_registry name
-let lookup_schema name = Hashtbl.find_opt schema_registry name
+let lookup_tag name = with_dispatch_ro (fun () -> Hashtbl.find_opt tag_registry name)
+let lookup_schema name = with_dispatch_ro (fun () -> Hashtbl.find_opt schema_registry name)
 
-let tag_registry_count () = Hashtbl.length tag_registry
+let tag_registry_count () = with_dispatch_ro (fun () -> Hashtbl.length tag_registry)
 
-let mark_tag_registry_initialized () = tag_registry_initialized := true
-let is_tag_registry_initialized () = !tag_registry_initialized
+let mark_tag_registry_initialized () = with_dispatch_rw (fun () -> tag_registry_initialized := true)
+let is_tag_registry_initialized () = with_dispatch_ro (fun () -> !tag_registry_initialized)

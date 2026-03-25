@@ -440,20 +440,26 @@ type cached_card = {
 
 let _cache : cached_card option ref = ref None
 let _cache_generation : int ref = ref 0
+let card_mu = Eio.Mutex.create ()
+
+let with_card_rw f =
+  try Eio.Mutex.use_rw ~protect:true card_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
 (** Get cached agent card, generating if needed.
     [schemas] is used only on first generation or after invalidation.
     Returns [(card, json_string)] for direct HTTP response. *)
 let get_cached ?(port=8935) ?(host="127.0.0.1") ~schemas () : agent_card * string =
-  let gen = !_cache_generation in
-  match !_cache with
-  | Some c when c.generation = gen -> (c.card, c.card_json)
-  | _ ->
-    let card = generate_default ~port ~host ~schemas () in
-    let json_str = to_json card |> Yojson.Safe.to_string in
-    _cache := Some { card; card_json = json_str; generation = gen };
-    (card, json_str)
+  with_card_rw (fun () ->
+    let gen = !_cache_generation in
+    match !_cache with
+    | Some c when c.generation = gen -> (c.card, c.card_json)
+    | _ ->
+      let card = generate_default ~port ~host ~schemas () in
+      let json_str = to_json card |> Yojson.Safe.to_string in
+      _cache := Some { card; card_json = json_str; generation = gen };
+      (card, json_str))
 
 (** Invalidate the cached agent card. Call when tools are added/removed. *)
 let invalidate_cache () =
-  incr _cache_generation
+  with_card_rw (fun () -> incr _cache_generation)

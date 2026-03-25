@@ -1,16 +1,15 @@
-(** Per-cascade inference parameters from cascade.json.
+(** Per-cascade inference parameters — thin delegation to OAS Cascade_config.
 
-    Reads optional temperature and max_tokens fields from the same
-    cascade.json used by OAS Cascade_config for model selection.
-    This allows keeper and other MASC modules to delegate inference
-    parameter decisions to the cascade configuration.
+    Delegates to OAS [Cascade_config.resolve_inference_params] (since v0.89.1).
+    JSON caching and field extraction are handled by OAS.
 
     Resolution order:
     1. cascade.json "{name}_temperature" / "{name}_max_tokens"
     2. cascade.json "default_temperature" / "default_max_tokens"
     3. Caller-provided fallback
 
-    @since v2.128.0 — #2408 Phase 3 keeper inference delegation *)
+    @since v2.128.0
+    @since v2.149.0 — delegated to OAS Cascade_config *)
 
 (** Inference parameters resolved from cascade config. *)
 type t = {
@@ -22,11 +21,7 @@ type t = {
 val empty : t
 
 (** Load inference parameters for a named cascade profile.
-
-    Reads from cascade.json located via {!Model_spec.cascade_config_path}.
-    Keys follow the pattern: "{name}_temperature", "{name}_max_tokens".
-    Falls back to "default_temperature" / "default_max_tokens" when the
-    named key is absent. Returns {!empty} when no config file is found. *)
+    Delegates to OAS [Cascade_config.resolve_inference_params]. *)
 val for_cascade : name:string -> t
 
 (** Extract inference parameters from a parsed JSON value.
@@ -41,11 +36,3 @@ val resolve_temperature : cascade_name:string -> fallback:(unit -> float) -> flo
 (** Resolve a max_tokens value with cascade config priority.
     Returns cascade config value if present, otherwise calls [fallback]. *)
 val resolve_max_tokens : cascade_name:string -> fallback:(unit -> int) -> int
-
-(** {1 Low-level helpers (exposed for testing)} *)
-
-(** Read a float field from a JSON object. Returns [None] if absent or wrong type. *)
-val read_float_field : Yojson.Safe.t -> string -> float option
-
-(** Read an int field from a JSON object. Returns [None] if absent or wrong type. *)
-val read_int_field : Yojson.Safe.t -> string -> int option

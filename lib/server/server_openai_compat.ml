@@ -1,0 +1,189 @@
+(** Server_openai_compat -- Optional OpenAI-compatible /v1/chat/completions endpoint.
+
+    Opt-in via MASC_OPENAI_COMPAT=1 environment variable.
+
+    Routes:
+    - model:"keeper:<name>" -> dispatches to Keeper_turn.handle_keeper_msg
+    - model:"default" or other -> direct OAS cascade via Oas_worker.run_named
+
+    Request/response format follows the OpenAI Chat Completions API spec. *)
+
+(** Whether the OpenAI-compatible endpoint is enabled (default: false). *)
+let is_enabled () =
+  match Sys.getenv_opt "MASC_OPENAI_COMPAT" with
+  | Some "1" | Some "true" -> true
+  | _ -> false
+
+(** Generate a random chat completion ID. *)
+let generate_completion_id () =
+  Printf.sprintf "chatcmpl-%08x%08x"
+    (Random.bits () land 0x7FFFFFFF)
+    (Random.bits () land 0x7FFFFFFF)
+
+(** Build an OpenAI-format error response JSON string. *)
+let error_response ~(status : string) ~(message : string) : string =
+  Yojson.Safe.to_string
+    (`Assoc [
+      ("error", `Assoc [
+        ("message", `String message);
+        ("type", `String status);
+        ("param", `Null);
+        ("code", `Null);
+      ]);
+    ])
+
+(** Build an OpenAI-format chat completion response JSON string. *)
+let completion_response ~model ~content : string =
+  let id = generate_completion_id () in
+  let created = int_of_float (Time_compat.now ()) in
+  Yojson.Safe.to_string
+    (`Assoc [
+      ("id", `String id);
+      ("object", `String "chat.completion");
+      ("created", `Int created);
+      ("model", `String model);
+      ("choices", `List [
+        `Assoc [
+          ("index", `Int 0);
+          ("message", `Assoc [
+            ("role", `String "assistant");
+            ("content", `String content);
+          ]);
+          ("finish_reason", `String "stop");
+        ];
+      ]);
+      ("usage", `Assoc [
+        ("prompt_tokens", `Int 0);
+        ("completion_tokens", `Int 0);
+        ("total_tokens", `Int 0);
+      ]);
+    ])
+
+(** Extract the last user message content from the messages array.
+    Returns the concatenation of all user messages if multiple exist,
+    or the last user message content. *)
+let extract_user_message (messages : Yojson.Safe.t) : string option =
+  let open Yojson.Safe.Util in
+  try
+    let msgs = to_list messages in
+    let user_msgs = List.filter (fun m ->
+      let role = m |> member "role" |> to_string in
+      String.equal role "user"
+    ) msgs in
+    match List.rev user_msgs with
+    | last :: _ -> Some (last |> member "content" |> to_string)
+    | [] -> None
+  with Type_error _ -> None
+
+(** Route to a keeper via Keeper_turn.handle_keeper_msg.
+    Constructs the args JSON and context, then extracts the reply. *)
+let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) result =
+  let ctx : _ Keeper_types.context = {
+    config;
+    agent_name = "openai-compat";
+    sw;
+    clock;
+    proc_mgr = None;
+  } in
+  let args = `Assoc [
+    ("name", `String keeper_name);
+    ("message", `String message);
+  ] in
+  let (ok, body) = Keeper_turn.handle_keeper_msg ctx args in
+  if ok then
+    (* body is JSON with "reply" field *)
+    (try
+      let json = Yojson.Safe.from_string body in
+      let reply = Yojson.Safe.Util.(json |> member "reply" |> to_string) in
+      Ok reply
+    with _ ->
+      (* If not JSON, use the body as-is *)
+      Ok body)
+  else
+    Error body
+
+(** Route to direct OAS cascade via Oas_worker.run_named. *)
+let route_cascade ~message ~system_prompt ~max_tokens ~temperature
+  : (string, string) result =
+  match
+    Oas_worker.run_named
+      ~cascade_name:"default_models"
+      ~goal:message
+      ~system_prompt
+      ~max_turns:1
+      ~temperature
+      ~max_tokens
+      ()
+  with
+  | Ok result ->
+    Ok (Oas_response.text_of_response result.response)
+  | Error e ->
+    Error e
+
+(** Handle a POST /v1/chat/completions request.
+    Parses the OpenAI-format request body, routes to keeper or cascade,
+    and returns an OpenAI-format response. *)
+let handle_chat_completions ~config ~sw ~clock (body : string)
+  : Httpun.Status.t * string =
+  let open Yojson.Safe.Util in
+  try
+    let json = Yojson.Safe.from_string body in
+    let model = json |> member "model" |> to_string in
+    let messages = json |> member "messages" in
+    let max_tokens = json |> member "max_tokens"
+      |> to_int_option |> Option.value ~default:4096 in
+    let temperature = json |> member "temperature"
+      |> to_float_option |> Option.value ~default:0.7 in
+    match extract_user_message messages with
+    | None ->
+      (`Bad_request,
+       error_response ~status:"invalid_request_error"
+         ~message:"No user message found in messages array")
+    | Some user_message ->
+      (* Check if this is a keeper route *)
+      let is_keeper_prefix =
+        String.length model > 7
+        && String.sub model 0 7 = "keeper:"
+      in
+      if is_keeper_prefix then begin
+        let keeper_name = String.sub model 7 (String.length model - 7) in
+        match route_keeper ~config ~sw ~clock ~keeper_name ~message:user_message with
+        | Ok reply ->
+          (`OK, completion_response ~model ~content:reply)
+        | Error e ->
+          (`Internal_server_error,
+           error_response ~status:"server_error"
+             ~message:(Printf.sprintf "Keeper error: %s" e))
+      end
+      else begin
+        (* Build system prompt from system messages *)
+        let system_prompt =
+          try
+            let msgs = to_list messages in
+            let sys_msgs = List.filter_map (fun m ->
+              let role = m |> member "role" |> to_string in
+              if String.equal role "system" then
+                Some (m |> member "content" |> to_string)
+              else None
+            ) msgs in
+            String.concat "\n" sys_msgs
+          with _ -> ""
+        in
+        match route_cascade ~message:user_message ~system_prompt
+                ~max_tokens ~temperature with
+        | Ok reply ->
+          (`OK, completion_response ~model ~content:reply)
+        | Error e ->
+          (`Internal_server_error,
+           error_response ~status:"server_error"
+             ~message:(Printf.sprintf "Cascade error: %s" e))
+      end
+  with
+  | Yojson.Json_error e ->
+    (`Bad_request,
+     error_response ~status:"invalid_request_error"
+       ~message:(Printf.sprintf "Invalid JSON: %s" e))
+  | Type_error (e, _) ->
+    (`Bad_request,
+     error_response ~status:"invalid_request_error"
+       ~message:(Printf.sprintf "Invalid request format: %s" e))

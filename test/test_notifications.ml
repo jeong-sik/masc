@@ -43,7 +43,8 @@ let extract_json body = Yojson.Safe.from_string body
 
 (* Run a test function inside Eio runtime *)
 let with_eio f () =
-  Eio_main.run @@ fun _env -> f ()
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env); f ()
 
 (* ── Tests ───────────────────────────────────── *)
 

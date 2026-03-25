@@ -173,7 +173,8 @@ let test_set_if_not_exists () =
 
 (** Test Memory backend basic operations *)
 let test_memory_backend () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let backend = Backend.Memory.create () in
 
   (* Set value *)

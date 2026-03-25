@@ -22,7 +22,8 @@ let cleanup_dir dir =
   rm dir
 
 let with_config f =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)

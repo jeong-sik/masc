@@ -116,7 +116,8 @@ let test_observe_uses_precollected_board_events () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       Unix.putenv "MASC_BASE_PATH" base_dir;
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();

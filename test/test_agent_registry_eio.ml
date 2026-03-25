@@ -6,12 +6,14 @@ open Masc_mcp
 (* All tests must run within Eio context due to Eio.Mutex usage *)
 
 let test_init () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   check bool "total count >= 0" true (Agent_registry_eio.total_count () >= 0)
 
 let test_get_or_create_new () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   let params = `Assoc [
     ("_agent_name", `String "test-new-agent");
@@ -23,7 +25,8 @@ let test_get_or_create_new () =
   check (option string) "room_id" (Some "test-room") identity.room_id
 
 let test_get_or_create_existing () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   let params = `Assoc [("_agent_name", `String "existing-agent")] in
   let id1 = Agent_registry_eio.get_or_create_identity params in
@@ -32,7 +35,8 @@ let test_get_or_create_existing () =
   check string "same agent_name" id1.agent_name id2.agent_name
 
 let test_mcp_session_persistence () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   let mcp_sid = Printf.sprintf "test-mcp-session-%d" (Random.int 10000) in
   let params = `Assoc [("_agent_name", `String "session-agent")] in
@@ -46,7 +50,8 @@ let test_mcp_session_persistence () =
   check string "same session_key" id1.session_key id2.session_key
 
 let test_get_by_name () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   let name = Printf.sprintf "lookup-agent-%d" (Random.int 10000) in
   let params = `Assoc [("_agent_name", `String name)] in
@@ -57,7 +62,8 @@ let test_get_by_name () =
   | None -> fail "agent not found by name"
 
 let test_active_count () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   let initial = Agent_registry_eio.active_count () in
   
@@ -70,7 +76,8 @@ let test_active_count () =
   check bool "count increased" true (after >= initial)
 
 let test_list_active () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   let name = Printf.sprintf "active-list-agent-%d" (Random.int 10000) in
   let _ = Agent_registry_eio.get_or_create_identity 
@@ -80,14 +87,16 @@ let test_list_active () =
   check bool "has active agents" true (List.length active > 0)
 
 let test_cleanup_stale () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   (* This should not fail even with nothing to clean *)
   let cleaned = Agent_registry_eio.cleanup_stale_sessions () in
   check bool "cleanup returned count" true (cleaned >= 0)
 
 let test_concurrent_access () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   
   (* Simulate concurrent access *)

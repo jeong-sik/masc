@@ -141,7 +141,8 @@ let make_test_dir () =
 
 let with_initialized_masc f =
   let tmp_dir = make_test_dir () in
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
   Fun.protect

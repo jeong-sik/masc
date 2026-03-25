@@ -14,7 +14,8 @@ let with_temp_dir prefix f =
     (fun () -> f dir)
 
 let make_ctx base_path =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config base_path in
   {
     Tool_improve_loop.config;

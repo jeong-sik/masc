@@ -48,7 +48,8 @@ let str_contains s substring =
 (** Create fresh test environment with cleanup.
     Wrapped in Eio_main.run because Room.init uses Eio.Mutex internally. *)
 let with_test_env f =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_coverage_%d_%d" (Unix.getpid ())
        (int_of_float (Unix.gettimeofday () *. 1000.))) in

@@ -387,7 +387,8 @@ let test_check_can_join_expired_blacklist () =
    ============================================================ *)
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Random.self_init ();
   run "Tool_suspend Coverage" [
     "get_string", [

@@ -52,7 +52,8 @@ let with_clean_loops f =
     f
 
 let with_eio_test f =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   f ()
 
 let legacy_state_json ?(loop_id = "legacy-loop") ?(model = "glm:legacy") () =

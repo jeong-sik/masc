@@ -36,7 +36,8 @@ let test_get_int_missing () =
    ============================================================ *)
 
 let test_context_creation () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test" in
   let ctx : Tool_plan.context = { config } in
   check bool "context created" true (ctx.config.Masc_mcp.Room.base_path = "/tmp/test")
@@ -46,7 +47,8 @@ let test_context_creation () =
    ============================================================ *)
 
 let make_ctx () : Tool_plan.context =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test-plan" in
   ({ config } : Tool_plan.context)
 

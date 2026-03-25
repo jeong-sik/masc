@@ -17,7 +17,8 @@ let test name f =
 let test_counter = ref 0
 
 let make_test_ctx () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   incr test_counter;
   let tmp =
     Filename.concat (Filename.get_temp_dir_name ())

@@ -305,7 +305,8 @@ let write_jsonl_lines path lines =
    policy_shell_mode, initiative_* removed in #2607. *)
 
 let test_keeper_shell_tool_policy_gates () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   (* policy_mode removed: all keepers use unified mode with full tools *)
   let unified = make_keeper_exec_meta () in
   let other = make_keeper_exec_meta ~name:"other-keeper" () in
@@ -315,7 +316,8 @@ let test_keeper_shell_tool_policy_gates () =
     ~expect_bash:true ~expect_shell_readonly:true
 
 let test_keeper_shell_readonly_enforces_allowed_paths () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> rm_rf base_dir)
@@ -365,14 +367,16 @@ let test_keeper_shell_readonly_enforces_allowed_paths () =
         (contains_substring error_text "path_not_in_allowed_paths"))
 
 let test_keeper_fs_read_policy_gates () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   (* policy_mode removed: all keepers get fs_read *)
   let unified = make_keeper_exec_meta () in
   check_keeper_exec_tool_presence "unified fs_read" unified
     ~tool_name:"keeper_fs_read" ~expect_allowed:true
 
 let test_keeper_fs_read_enforces_allowed_paths_and_truncation () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> rm_rf base_dir)
@@ -509,7 +513,8 @@ let test_keeper_bash_requires_cmd_and_runs () =
           code <> 0))
 
 let test_keeper_fs_edit_policy_gates () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   (* policy_mode removed: all keepers use unified mode.
      fs_edit is not in allowed tools by default *)
   let unified = make_keeper_exec_meta () in
@@ -517,7 +522,8 @@ let test_keeper_fs_edit_policy_gates () =
     ~tool_name:"keeper_fs_edit" ~expect_allowed:false
 
 let test_keeper_fs_edit_enforces_allowed_paths_and_modes () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> rm_rf base_dir)

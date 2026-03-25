@@ -56,7 +56,8 @@ let test_get_string_list_missing () =
    ============================================================ *)
 
 let test_context_creation () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test" in
   let ctx : Tool_handover.context = {
     config;
@@ -72,7 +73,8 @@ let test_context_creation () =
    ============================================================ *)
 
 let make_ctx () : Tool_handover.context =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test-handover" in
   ({ config; agent_name = "test-agent"; fs = None; proc_mgr = None; sw = None } : Tool_handover.context)
 

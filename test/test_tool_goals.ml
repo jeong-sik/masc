@@ -33,7 +33,8 @@ let upsert_goal_exn ctx args =
   |> Yojson.Safe.Util.to_string
 
 let test_goal_upsert_and_list () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
@@ -58,7 +59,8 @@ let test_goal_upsert_and_list () =
   cleanup_dir base_dir
 
 let test_goal_refresh_daily_reprioritizes () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
@@ -95,7 +97,8 @@ let test_goal_refresh_daily_reprioritizes () =
   cleanup_dir base_dir
 
 let test_goal_dispatch_requires_approval () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
@@ -141,7 +144,8 @@ let test_goal_dispatch_requires_approval () =
   cleanup_dir base_dir
 
 let test_goal_review_done_and_promote () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
@@ -178,7 +182,8 @@ let test_goal_review_done_and_promote () =
   cleanup_dir base_dir
 
 let test_goal_dispatch_runtime_validation () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
@@ -205,7 +210,8 @@ let test_goal_dispatch_runtime_validation () =
   cleanup_dir base_dir
 
 let test_goal_dispatch_task_runtime_requires_manual_current_task_binding () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
@@ -239,7 +245,8 @@ let test_goal_dispatch_task_runtime_requires_manual_current_task_binding () =
   cleanup_dir base_dir
 
 let test_goal_dispatch_unknown_goal_ids_fail () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));

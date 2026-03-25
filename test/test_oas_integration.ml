@@ -8,7 +8,8 @@ open Masc_mcp
 (* ================================================================ *)
 
 let test_event_bus_broadcast () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let bus = Event_bus.create () in
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_broadcast bus ~agent_name:"test-agent" ~content:"hello";
@@ -21,7 +22,8 @@ let test_event_bus_broadcast () =
   | _ -> Alcotest.fail "expected Custom masc:broadcast event"
 
 let test_event_bus_heartbeat () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let bus = Event_bus.create () in
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_heartbeat bus ~agent_name:"perpetual" ~turn:5 ~context_pct:0.42;
@@ -34,7 +36,8 @@ let test_event_bus_heartbeat () =
   | _ -> Alcotest.fail "expected Custom masc:heartbeat event"
 
 let test_event_bus_task_transition () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let bus = Event_bus.create () in
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_task_transition bus ~agent_name:"worker"

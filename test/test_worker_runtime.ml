@@ -3,7 +3,8 @@ module Lib = Masc_mcp
 open Alcotest
 
 let test_list_masc_tools_exposes_board_and_lodge_schemas () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     Eio.Switch.run (fun sw ->
         match
           Lib.Worker_runtime.list_masc_tools ~sw ~auth_token:None

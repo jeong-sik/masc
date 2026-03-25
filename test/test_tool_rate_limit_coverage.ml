@@ -35,7 +35,8 @@ let () = test "dispatch_unknown_tool" (fun () ->
 
 (* Test rate_limit_status dispatch - needs Eio for Session.get_rate_limit_status *)
 let () = test "dispatch_rate_limit_status" (fun () ->
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
   match Tool_rate_limit.dispatch ctx ~name:"masc_rate_limit_status" ~args with
@@ -45,7 +46,8 @@ let () = test "dispatch_rate_limit_status" (fun () ->
 
 (* Test handle_rate_limit_status - needs Eio *)
 let () = test "handle_rate_limit_status" (fun () ->
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
   let (success, result) = Tool_rate_limit.handle_rate_limit_status ctx args in

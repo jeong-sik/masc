@@ -44,7 +44,8 @@ let test_get_float_missing () =
    ============================================================ *)
 
 let test_context_creation () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test" in
   let ctx : Tool_tempo.context = { config; agent_name = "test-agent" } in
   check string "agent_name" "test-agent" ctx.agent_name
@@ -54,7 +55,8 @@ let test_context_creation () =
    ============================================================ *)
 
 let make_ctx () : Tool_tempo.context =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test-tempo" in
   ({ config; agent_name = "test-agent" } : Tool_tempo.context)
 

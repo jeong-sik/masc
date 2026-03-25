@@ -36,7 +36,8 @@ let test_get_string_opt_empty () =
    ============================================================ *)
 
 let test_context_creation () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test" in
   let ctx : Tool_portal.context = { config; agent_name = "test-agent" } in
   check string "agent_name" "test-agent" ctx.agent_name
@@ -46,7 +47,8 @@ let test_context_creation () =
    ============================================================ *)
 
 let make_ctx () : Tool_portal.context =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test-portal" in
   ({ config; agent_name = "test-agent" } : Tool_portal.context)
 

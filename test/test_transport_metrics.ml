@@ -196,7 +196,8 @@ let test_agent_stale_counter () =
    ============================================================ *)
 
 let test_transport_health_json () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   TM.init ();
   ignore (Masc_mcp.Sse.close_all_clients ());
   let base_dir = temp_dir () in

@@ -44,7 +44,8 @@ let make_ctx base_dir =
 (** {2 Group 1: Dispatch Routing} *)
 
 let test_dispatch_unknown_returns_none () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let result = dispatch_opt ctx ~name:"masc_goal_nonexistent" ~args:(`Assoc []) in
@@ -52,7 +53,8 @@ let test_dispatch_unknown_returns_none () =
   cleanup_dir base_dir
 
 let test_dispatch_all_tool_names () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let valid_names = [
@@ -85,7 +87,8 @@ let test_schemas_have_descriptions () =
 (** {2 Group 3: Goal Snapshot} *)
 
 let test_snapshot_manual_mode () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   (* Create a goal first *)
@@ -101,7 +104,8 @@ let test_snapshot_manual_mode () =
   cleanup_dir base_dir
 
 let test_snapshot_empty_goals () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok, body = dispatch_exn ctx ~name:"masc_goal_snapshot"
@@ -115,7 +119,8 @@ let test_snapshot_empty_goals () =
 (** {2 Group 4: Horizon / Status Validation} *)
 
 let test_list_invalid_horizon () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok, body = dispatch_exn ctx ~name:"masc_goal_list"
@@ -127,7 +132,8 @@ let test_list_invalid_horizon () =
   cleanup_dir base_dir
 
 let test_list_invalid_status () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok, body = dispatch_exn ctx ~name:"masc_goal_list"
@@ -139,7 +145,8 @@ let test_list_invalid_status () =
   cleanup_dir base_dir
 
 let test_list_valid_horizon_filter () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok1, _ = upsert_goal ctx
@@ -157,7 +164,8 @@ let test_list_valid_horizon_filter () =
   cleanup_dir base_dir
 
 let test_list_with_rollup () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok1, _ = upsert_goal ctx
@@ -176,7 +184,8 @@ let test_list_with_rollup () =
 (** {2 Group 5: Refresh Edge Cases} *)
 
 let test_refresh_invalid_mode () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok, body = dispatch_exn ctx ~name:"masc_goal_refresh"
@@ -188,7 +197,8 @@ let test_refresh_invalid_mode () =
   cleanup_dir base_dir
 
 let test_refresh_auto_no_due () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   (* Without force, auto mode may skip if no cadence window is due *)
@@ -202,7 +212,8 @@ let test_refresh_auto_no_due () =
   cleanup_dir base_dir
 
 let test_refresh_monthly_force () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok1, _ = upsert_goal ctx
@@ -219,7 +230,8 @@ let test_refresh_monthly_force () =
 (** {2 Group 6: Dispatch (dry-run / execute=false)} *)
 
 let test_dispatch_no_execute () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok1, _ = upsert_goal ctx
@@ -238,7 +250,8 @@ let test_dispatch_no_execute () =
 (** {2 Group 7: Review Edge Cases} *)
 
 let test_review_missing_fields () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok, body = dispatch_exn ctx ~name:"masc_goal_review"
@@ -250,7 +263,8 @@ let test_review_missing_fields () =
   cleanup_dir base_dir
 
 let test_review_nonexistent_goal () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok, body = dispatch_exn ctx ~name:"masc_goal_review"
@@ -262,7 +276,8 @@ let test_review_nonexistent_goal () =
   cleanup_dir base_dir
 
 let test_review_blocked_outcome () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let ctx, _ = make_ctx base_dir in
   let ok1, body1 = upsert_goal ctx

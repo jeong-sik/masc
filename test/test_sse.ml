@@ -40,7 +40,8 @@ let test_cleanup_stale_respects_touch () =
   unregister alive_sid
 
 let test_concurrent_register_unregister () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let open Masc_mcp.Sse in
   let n = 50 in
   let prefix = "conc_" ^ string_of_int (Random.int 1000000) ^ "_" in

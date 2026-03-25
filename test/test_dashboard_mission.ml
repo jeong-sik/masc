@@ -588,7 +588,8 @@ let test_dashboard_mission_http_cache_isolation () =
 
 let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
   let keeper_name = "audit-keeper-assembly-fixture" in
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Lib.A2a_tools.emit_heartbeat_task
     ~agent:keeper_name
     ~goal:"Mission keeper audit fixture"

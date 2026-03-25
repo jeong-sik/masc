@@ -325,7 +325,8 @@ let test_small_value () =
    ============================================================ *)
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   run "Prometheus Coverage" [
     "type_to_string", [
       test_case "counter" `Quick test_type_to_string_counter;

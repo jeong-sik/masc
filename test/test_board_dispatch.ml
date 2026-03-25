@@ -12,7 +12,8 @@ let test_base_path =
 
 (** Wrap test body in Eio runtime with isolated JSONL backend *)
 let with_eio f () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Unix.putenv "MASC_BASE_PATH" test_base_path;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();

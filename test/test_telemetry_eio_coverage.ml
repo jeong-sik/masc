@@ -357,7 +357,8 @@ let test_summarize_tool_usage_reads_date_split_store_without_fs () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config base_dir in
       Telemetry_eio.track_tool_called config ~tool_name:"masc_status"
         ~success:true ~duration_ms:42 ~agent_id:"codex" ();

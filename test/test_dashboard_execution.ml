@@ -162,7 +162,8 @@ let test_dashboard_shell_current_room_status () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:None);
       Lib.Room.write_current_room config "focus-room";
@@ -197,7 +198,8 @@ let test_dashboard_shell_counts_resident_keepers () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:None);
       ignore

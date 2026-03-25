@@ -271,7 +271,8 @@ let test_eio_atomic_update () =
 (* ============================================================ *)
 
 let test_eio_memory_list_keys () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let backend = Backend.Memory.create () in
   let _ = Backend.Memory.set backend "prefix:a" "1" in
   let _ = Backend.Memory.set backend "prefix:b" "2" in
@@ -282,7 +283,8 @@ let test_eio_memory_list_keys () =
   | Error _ -> fail "list_keys failed"
 
 let test_eio_memory_clear () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let backend = Backend.Memory.create () in
   let _ = Backend.Memory.set backend "key1" "1" in
   let _ = Backend.Memory.set backend "key2" "2" in
@@ -293,7 +295,8 @@ let test_eio_memory_clear () =
   check bool "cleared2" false (Backend.Memory.exists backend "key2")
 
 let test_eio_memory_delete_not_found () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let backend = Backend.Memory.create () in
   match Backend.Memory.delete backend "nonexistent" with
   | Error (Backend.NotFound _) -> ()
@@ -304,7 +307,8 @@ let test_eio_memory_delete_not_found () =
 (* ============================================================ *)
 
 let test_eio_unified_memory () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let mem = Backend.Memory.create () in
   let backend = Backend.Mem mem in
 
@@ -329,7 +333,8 @@ let test_eio_unified_memory () =
   check bool "unified not exists" false (Backend.exists backend "key")
 
 let test_eio_unified_set_if_not_exists () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let mem = Backend.Memory.create () in
   let backend = Backend.Mem mem in
 
@@ -344,7 +349,8 @@ let test_eio_unified_set_if_not_exists () =
   | _ -> fail "second set_if_not_exists should fail"
 
 let test_eio_unified_list_keys () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let mem = Backend.Memory.create () in
   let backend = Backend.Mem mem in
 
@@ -356,7 +362,8 @@ let test_eio_unified_list_keys () =
   | Error _ -> fail "list_keys failed"
 
 let test_eio_unified_lock_memory () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let mem = Backend.Memory.create () in
   let backend = Backend.Mem mem in
 
@@ -456,7 +463,8 @@ let test_eio_fs_list_keys_empty () =
 (* ============================================================ *)
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   run "Backend Coverage" [
     "validate_ttl", [
       test_case "zero TTL" `Quick test_validate_ttl_zero;

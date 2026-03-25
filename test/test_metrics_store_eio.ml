@@ -185,7 +185,8 @@ let test_generate_id () =
   print_endline "✓ test_generate_id passed"
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   print_endline "\n=== Metrics_store_eio Tests ===\n";
   test_create_metric ();
   test_complete_metric ();

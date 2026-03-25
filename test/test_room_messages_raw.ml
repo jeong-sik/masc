@@ -5,7 +5,8 @@ let with_test_env f =
     (Printf.sprintf "masc_room_messages_%d_%d" (Unix.getpid ())
        (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   try

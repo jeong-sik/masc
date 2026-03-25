@@ -343,7 +343,8 @@ let test_selection_entropy_empty () =
 (** {1 Test Runner} *)
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   run "Thompson_sampling" [
     "beta_sampling", [
       test_case "sample in [0,1] range" `Quick test_sample_beta_range;

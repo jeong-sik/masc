@@ -130,7 +130,8 @@ let test_session_concurrent_create_find () =
 (** {1 Test Runner} *)
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   run "Eio.Mutex Migration Concurrency" [
     "Rate Limit", [
       test_case "concurrent same key" `Quick test_rate_limit_concurrent;

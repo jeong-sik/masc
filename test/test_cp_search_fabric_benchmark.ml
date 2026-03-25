@@ -169,7 +169,8 @@ let run_scenario ~strategy =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config base_dir in
       setup_units config;
       let started_at = Unix.gettimeofday () in
@@ -289,7 +290,8 @@ let run_coding_scenario ?(strategy = "best_first_v1") ?(speculation = false) () 
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config base_dir in
       setup_coding_units config;
       if speculation then

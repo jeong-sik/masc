@@ -40,7 +40,8 @@ let make_endpoint ~url ~model_id ~ctx_size ~total_slots ~busy =
   }
 
 let test_runtime_verify_prefers_oas_discovery_cache () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let previous_endpoints = !(Masc_mcp.Discovery_cache.cached_endpoints) in
   let previous_updated_at = Atomic.get Masc_mcp.Discovery_cache.cache_updated_at in
   Fun.protect

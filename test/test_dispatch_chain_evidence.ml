@@ -77,7 +77,8 @@ let () =
 
 (* Test Tool_rate_limit dispatch *)
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_test_room () in
   let registry = Session.create () in
   let ctx : Tool_rate_limit.context = { config; agent_name = "evidence-agent"; registry } in

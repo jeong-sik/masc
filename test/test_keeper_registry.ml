@@ -19,7 +19,8 @@ let make_meta name =
 
 (** Wrap each test body in Eio_main.run for Eio.Mutex support. *)
 let eio_test name fn =
-  test_case name `Quick (fun () -> Eio_main.run @@ fun _env -> fn ())
+  test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env); fn ())
 
 (* ── Basic registry operations ─────────────────────────── *)
 

@@ -3,7 +3,8 @@
 
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   (* Clear state before each test group *)
   let reset () =
     List.iter (fun (hb : Heartbeat.t) -> ignore (Heartbeat.stop hb.id))

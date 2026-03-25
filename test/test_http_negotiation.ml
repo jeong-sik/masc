@@ -50,7 +50,8 @@ let test_classify_mcp_accept () =
   ()
 
 let test_protocol_continuity_allows_missing_header () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let module Session = Masc_mcp.Server_mcp_transport_http in
   let session_id = "compat-session-missing-header" in
   let headers = Httpun.Headers.of_list [] in
@@ -65,7 +66,8 @@ let test_protocol_continuity_allows_missing_header () =
           failf "expected missing protocol header to use session continuity, got %s" msg)
 
 let test_protocol_version_for_session_falls_back_to_negotiated_version () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let module Session = Masc_mcp.Server_mcp_transport_http in
   let session_id = "compat-session-negotiated-version" in
   let headers = Httpun.Headers.of_list [] in
@@ -78,7 +80,8 @@ let test_protocol_version_for_session_falls_back_to_negotiated_version () =
         (Session.get_protocol_version_for_session ~session_id request))
 
 let test_protocol_continuity_rejects_mismatch () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let module Session = Masc_mcp.Server_mcp_transport_http in
   let session_id = "compat-session-mismatch" in
   let headers =
@@ -166,7 +169,8 @@ let test_initialize_never_uses_sse () =
        Masc_mcp.Mcp_protocol.Http_negotiation.Streamable)
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   run "http_negotiation"
     [
       ("accepts_sse_header", [test_case "parses Accept" `Quick test_accepts_sse_header]);

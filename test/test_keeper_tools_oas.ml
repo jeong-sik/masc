@@ -26,7 +26,8 @@ let test_make_tools_returns_nonempty () =
         Sys.remove (Filename.concat dir f));
         Unix.rmdir dir with _ -> ()))
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
       check bool "tools nonempty" true (List.length tools > 0))
@@ -43,7 +44,8 @@ let test_tools_have_valid_schemas () =
         Sys.remove (Filename.concat dir f));
         Unix.rmdir dir with _ -> ()))
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
       List.iter (fun (tool : Agent_sdk.Tool.t) ->
@@ -65,7 +67,8 @@ let test_tool_count_matches_allowed () =
         Sys.remove (Filename.concat dir f));
         Unix.rmdir dir with _ -> ()))
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
       let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
@@ -103,7 +106,8 @@ let test_error_json_is_returned_as_tool_error () =
         Sys.remove (Filename.concat dir f));
         Unix.rmdir dir with _ -> ()))
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
       let tool = find_tool "keeper_fs_read" tools in
@@ -130,7 +134,8 @@ let test_repeated_error_results_are_blocked () =
         Sys.remove (Filename.concat dir f));
         Unix.rmdir dir with _ -> ()))
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
       let tool = find_tool "keeper_fs_read" tools in
@@ -162,7 +167,8 @@ let test_failure_count_resets_after_success () =
         Sys.remove (Filename.concat dir f));
         Unix.rmdir dir with _ -> ()))
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
       let tool = find_tool "keeper_fs_read" tools in
@@ -205,7 +211,8 @@ let test_failure_tracking_is_independent_per_args () =
         Sys.remove (Filename.concat dir f));
         Unix.rmdir dir with _ -> ()))
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
       let tool = find_tool "keeper_fs_read" tools in

@@ -45,7 +45,8 @@ let contains_substring haystack needle =
 (** {2 Group 1: Helper / Formatting Functions} *)
 
 let test_visibility_of_string () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   Alcotest.(check string) "public" "public"
     (match Tool_board.visibility_of_string "public" with
@@ -64,7 +65,8 @@ let test_visibility_of_string () =
      | None -> "none" | _ -> "other")
 
 let test_sort_order_of_string () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   Alcotest.(check string) "hot" "hot"
     (match Tool_board.sort_order_of_string "hot" with
@@ -86,7 +88,8 @@ let test_sort_order_of_string () =
      | Tool_board.Hot -> "hot" | _ -> "x")
 
 let test_board_error_to_string () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let s = Tool_board.board_error_to_string (Board.Post_not_found "test-id") in
   Alcotest.(check bool) "post_not_found has text" true (String.length s > 0);
@@ -94,7 +97,8 @@ let test_board_error_to_string () =
   Alcotest.(check bool) "validation_error" true (String.contains s2 'b')
 
 let test_is_agent () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   Alcotest.(check bool) "lowercase no space = lodge" true
     (Tool_board.is_agent "dreamer");
@@ -106,7 +110,8 @@ let test_is_agent () =
     (Tool_board.is_agent "")
 
 let test_format_timestamp_relative () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let now = Time_compat.now () in
   let s = Tool_board.format_timestamp_relative now in
@@ -121,7 +126,8 @@ let test_format_timestamp_relative () =
 (** {2 Group 2: JSON helper functions} *)
 
 let test_get_string () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let args = make_args [("key", `String "value")] in
   Alcotest.(check string) "get existing" "value"
@@ -130,7 +136,8 @@ let test_get_string () =
     (Tool_args.get_string args "missing" "default")
 
 let test_get_string_opt () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let args = make_args [("key", `String "value")] in
   Alcotest.(check (option string)) "get existing" (Some "value")
@@ -139,7 +146,8 @@ let test_get_string_opt () =
     (Tool_args.get_string_opt args "missing")
 
 let test_get_int () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let args = make_args [("n", `Int 42)] in
   Alcotest.(check int) "get existing" 42
@@ -148,7 +156,8 @@ let test_get_int () =
     (Tool_args.get_int args "missing" 0)
 
 let test_get_bool () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let args = make_args [("flag", `Bool true)] in
   Alcotest.(check bool) "get existing" true
@@ -159,7 +168,8 @@ let test_get_bool () =
 (** {2 Group 3: Post Create / List / Get} *)
 
 let test_post_create_success () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
     (make_args [("content", `String "Hello board"); ("author", `String "tester")]) in
@@ -167,7 +177,8 @@ let test_post_create_success () =
   Alcotest.(check bool) "body has post" true (String.length body > 0)
 
 let test_post_create_structured_payload () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
     (make_args
@@ -203,7 +214,8 @@ let test_post_create_structured_payload () =
     (Yojson.Safe.Util.(json |> member "meta" |> member "state_block") = `Null)
 
 let test_post_create_empty_content () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
     (make_args [("content", `String ""); ("author", `String "tester")]) in
@@ -214,7 +226,8 @@ let test_post_create_empty_content () =
       (String.length body > 0)
 
 let test_post_create_empty_title_rejected () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
     (make_args
@@ -225,7 +238,8 @@ let test_post_create_empty_title_rejected () =
     (contains_substring body "title" || contains_substring body "Title")
 
 let test_post_list_empty () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_list" (make_args []) in
   Alcotest.(check bool) "list ok" true ok;
@@ -233,7 +247,8 @@ let test_post_list_empty () =
     (String.length body > 0)
 
 let test_cleanup_clears_persisted_jsonl () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok1, _ =
     dispatch "masc_board_post"
@@ -247,7 +262,8 @@ let test_cleanup_clears_persisted_jsonl () =
     (contains_substring body "persist me")
 
 let test_post_list_with_posts () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok1, _ = dispatch "masc_board_post"
     (make_args [("content", `String "Post 1"); ("author", `String "a")]) in
@@ -262,7 +278,8 @@ let test_post_list_with_posts () =
     (String.length body > 20)
 
 let test_post_list_limit_clamping () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   (* Create 3 posts *)
   for _ = 1 to 3 do
@@ -276,7 +293,8 @@ let test_post_list_limit_clamping () =
   Alcotest.(check bool) "body has posts" true (String.length body > 0)
 
 let test_post_list_sort_orders () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   ignore (dispatch "masc_board_post"
     (make_args [("content", `String "sort test"); ("author", `String "a")]));
@@ -289,7 +307,8 @@ let test_post_list_sort_orders () =
   ) sorts
 
 let test_post_list_invalid_sort_rejected () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   ignore (dispatch "masc_board_post"
     (make_args [("content", `String "sort test"); ("author", `String "a")]));
@@ -300,7 +319,8 @@ let test_post_list_invalid_sort_rejected () =
     (contains_substring body "invalid sort. Valid: hot, trending, recent, updated, discussed")
 
 let test_post_get_success () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
     (make_args [("content", `String "Get me"); ("author", `String "tester")]) in
@@ -323,7 +343,8 @@ let test_post_get_success () =
   Alcotest.(check bool) "get has content" true (String.length body2 > 0)
 
 let test_post_get_not_found () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_get"
     (make_args [("post_id", `String "nonexistent-id")]) in
@@ -333,7 +354,8 @@ let test_post_get_not_found () =
 (** {2 Group 4: Voting} *)
 
 let test_vote_not_found () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_vote"
     (make_args [("post_id", `String "missing"); ("voter", `String "v"); ("direction", `String "up")]) in
@@ -343,7 +365,8 @@ let test_vote_not_found () =
 (** {2 Group 5: Comment} *)
 
 let test_comment_add_missing_post () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_comment"
     (make_args [("post_id", `String "missing"); ("content", `String "hi"); ("author", `String "a")]) in
@@ -351,7 +374,8 @@ let test_comment_add_missing_post () =
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
 let test_comment_vote_missing () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_comment_vote"
     (make_args [("comment_id", `String ""); ("voter", `String "v"); ("direction", `String "up")]) in
@@ -361,7 +385,8 @@ let test_comment_vote_missing () =
 (** {2 Group 6: Search / Stats / Profile / Hearths} *)
 
 let test_search_empty_query () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_search"
     (make_args [("query", `String "")]) in
@@ -369,7 +394,8 @@ let test_search_empty_query () =
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
 let test_search_no_results () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_search"
     (make_args [("query", `String "nonexistent_xyz_123")]) in
@@ -377,14 +403,16 @@ let test_search_no_results () =
   Alcotest.(check bool) "no results msg" true (String.length body > 0)
 
 let test_stats () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_stats" (make_args []) in
   Alcotest.(check bool) "stats ok" true ok;
   Alcotest.(check bool) "stats has content" true (String.length body > 0)
 
 let test_profile_empty_agent () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_profile"
     (make_args [("agent", `String "")]) in
@@ -392,7 +420,8 @@ let test_profile_empty_agent () =
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
 let test_profile_with_posts () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   ignore (dispatch "masc_board_post"
     (make_args [("content", `String "profiled"); ("author", `String "profiler")]));
@@ -404,7 +433,8 @@ let test_profile_with_posts () =
      with Not_found -> false)
 
 let test_hearth_list_empty () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_hearths" (make_args []) in
   Alcotest.(check bool) "hearth list ok" true ok;
@@ -413,7 +443,8 @@ let test_hearth_list_empty () =
 (** {2 Group 7: Dispatch Routing} *)
 
 let test_dispatch_unknown_tool () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_nonexistent" (make_args []) in
   Alcotest.(check bool) "unknown tool fails" false ok;
@@ -422,7 +453,8 @@ let test_dispatch_unknown_tool () =
      with Not_found -> false)
 
 let test_dispatch_migrate_without_pg () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   (* Default backend is JSONL, so migrate should fail *)
   let ok, body = dispatch "masc_board_migrate" (make_args []) in
@@ -434,19 +466,22 @@ let test_dispatch_migrate_without_pg () =
 (** {2 Group 8: Tool Schema Definitions} *)
 
 let test_tools_count () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   Alcotest.(check int) "11 tool schemas" 11 (List.length Tool_board.tools)
 
 let test_tools_names_unique () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let names = List.map (fun (t : Types.tool_schema) -> t.name) Tool_board.tools in
   let unique = List.sort_uniq String.compare names in
   Alcotest.(check int) "all names unique" (List.length names) (List.length unique)
 
 let test_tools_all_have_descriptions () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   List.iter (fun (t : Types.tool_schema) ->
     Alcotest.(check bool) (Printf.sprintf "%s has description" t.name) true

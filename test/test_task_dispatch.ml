@@ -1,7 +1,8 @@
 open Masc_mcp
 
 let with_temp_config f =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = Filename.temp_file "task_dispatch_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;

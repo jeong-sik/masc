@@ -336,8 +336,9 @@ let aggregate_task_profile_counts s   = aggregate_worker_counts s Team_session_t
 let aggregate_escalation_count s =
   all_planned_workers s |> Team_session_types.escalation_count
 
-(** Compute all 7 worker-count aggregates + escalation in a single pass
-    over [all_planned_workers], avoiding 8 separate list traversals. *)
+(** Compute all 7 worker-count aggregates + escalation with a single
+    [all_planned_workers] concat_map, avoiding 8 separate list allocations.
+    Each count_fn still iterates [workers] independently. *)
 let aggregate_all_worker_metrics sessions =
   let workers = all_planned_workers sessions in
   let to_json count_fn = count_fn workers |> Team_session_types.counts_to_json in

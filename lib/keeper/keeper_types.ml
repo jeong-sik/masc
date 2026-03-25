@@ -106,6 +106,10 @@ type keeper_meta = {
   initiative_idle_sec: int;
   initiative_cooldown_sec: int;
   paused: bool;
+  current_task_id: string option;
+  (** Currently claimed task ID for cost attribution.
+      Set when keeper claims a task; cleared on masc_done.
+      Propagated to trajectory accumulator for per-task cost tracking. *)
 }
 
 let now_iso () = Types.now_iso ()
@@ -202,6 +206,8 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("initiative_idle_sec", `Int m.initiative_idle_sec);
       ("initiative_cooldown_sec", `Int m.initiative_cooldown_sec);
       ("paused", `Bool m.paused);
+      ("current_task_id",
+        (match m.current_task_id with None -> `Null | Some s -> `String s));
     ]
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
@@ -426,6 +432,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let paused =
       Safe_ops.json_bool ~default:false "paused" json
     in
+    let current_task_id = Safe_ops.json_string_opt "current_task_id" json in
     if not (validate_name name) then
       Error "invalid keeper meta (bad name)"
     else if not (validate_name trace_id) then
@@ -525,6 +532,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           initiative_idle_sec;
           initiative_cooldown_sec;
           paused;
+          current_task_id;
         }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))

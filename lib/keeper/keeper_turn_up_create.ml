@@ -287,6 +287,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_team_session_started_at = "";
             team_session_start_count_total = 0;
             paused = false;
+            current_task_id = None;
          } in
          (try
             ignore

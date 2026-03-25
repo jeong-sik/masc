@@ -69,6 +69,20 @@ let inference_timeout =
     ~serialize:(fun v -> `Float v)
     ~deserialize:deserialize_float
 
+(* ── cost_policy surface ──────────────────────────────────────── *)
+
+(** Per-session cost ceiling in USD.
+    Default 0.50: based on observed keeper sessions averaging $0.02-0.15
+    (local llama + GLM fallback). 0.50 is ~3x worst-case observed session cost.
+    Governs Eval_gate.max_cost_usd pre-execution gating. *)
+let _cost_max_session_usd =
+  Runtime_params.register
+    ~key:"cost.max_session_usd"
+    ~default:(fun () -> 0.50)
+    ~validate:(validate_float_range ~min:0.01 ~max:50.0 "cost_max_session_usd")
+    ~serialize:(fun v -> `Float v)
+    ~deserialize:deserialize_float
+
 (* ── surface catalog ─────────────────────────────────────────── *)
 
 type surface = {
@@ -95,6 +109,12 @@ let surfaces =
           "inference.default_model";
           "inference.timeout_seconds";
         ];
+    };
+    {
+      id = "cost_policy";
+      description = "Per-session cost limits for keeper execution";
+      risk = "medium";
+      param_keys = [ "cost.max_session_usd" ];
     };
   ]
 

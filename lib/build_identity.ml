@@ -37,24 +37,30 @@ let executable_dir () =
   in
   Filename.dirname path
 
+(** Probe git commit via subprocess.
+    Offloaded to system thread to avoid blocking Eio scheduler. *)
 let git_probe_from_root repo_root =
-  let cmd =
-    Printf.sprintf "git -C %s rev-parse --short HEAD 2>/dev/null"
-      (Filename.quote repo_root)
+  let f () =
+    let cmd =
+      Printf.sprintf "git -C %s rev-parse --short HEAD 2>/dev/null"
+        (Filename.quote repo_root)
+    in
+    let ic = Unix.open_process_in cmd in
+    let output =
+      try In_channel.input_all ic with
+      | Sys_error msg ->
+          Log.Identity.warn "git_probe_from_root read failed: %s" msg;
+          ""
+      | exn ->
+          Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
+          ""
+    in
+    match Unix.close_process_in ic with
+    | Unix.WEXITED 0 -> trim_to_option output
+    | _ -> None
   in
-  let ic = Unix.open_process_in cmd in
-  let output =
-    try In_channel.input_all ic with
-    | Sys_error msg ->
-        Log.Identity.warn "git_probe_from_root read failed: %s" msg;
-        ""
-    | exn ->
-        Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
-        ""
-  in
-  match Unix.close_process_in ic with
-  | Unix.WEXITED 0 -> trim_to_option output
-  | _ -> None
+  try Eio_unix.run_in_systhread f
+  with Stdlib.Effect.Unhandled _ -> f ()
 
 let probe_git_commit () =
   [ Sys.getcwd (); executable_dir () ]

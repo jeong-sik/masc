@@ -1,19 +1,27 @@
+(** Run git subprocess and capture stdout lines.
+    Offloaded to a system thread via Eio_unix.run_in_systhread to avoid
+    blocking the Eio scheduler. Falls back to direct execution when
+    called without Eio context (tests, signal handlers). *)
 let run_git_capture_lines ~workdir args =
-  try
-    let ic =
-      Unix.open_process_args_in "git"
-        (Array.of_list ("git" :: "-C" :: workdir :: args))
-    in
-    let rec loop acc =
-      match input_line ic with
-      | line -> loop (line :: acc)
-      | exception End_of_file -> List.rev acc
-    in
-    let lines = loop [] in
-    match Unix.close_process_in ic with
-    | Unix.WEXITED 0 -> Some lines
-    | _ -> None
-  with Sys_error _ | Unix.Unix_error _ -> None
+  let f () =
+    try
+      let ic =
+        Unix.open_process_args_in "git"
+          (Array.of_list ("git" :: "-C" :: workdir :: args))
+      in
+      let rec loop acc =
+        match input_line ic with
+        | line -> loop (line :: acc)
+        | exception End_of_file -> List.rev acc
+      in
+      let lines = loop [] in
+      match Unix.close_process_in ic with
+      | Unix.WEXITED 0 -> Some lines
+      | _ -> None
+    with Sys_error _ | Unix.Unix_error _ -> None
+  in
+  try Eio_unix.run_in_systhread f
+  with Stdlib.Effect.Unhandled _ -> f ()
 
 let repo_root_for ~base_path =
   match run_git_capture_lines ~workdir:base_path [ "rev-parse"; "--show-toplevel" ] with

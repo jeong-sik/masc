@@ -148,20 +148,26 @@ type process_result = {
   stderr : string;
 }
 
+(** Run subprocess and capture stdout/stderr.
+    Offloaded to system thread to avoid blocking Eio scheduler. *)
 let run_process ~prog ~argv ~env =
-  let ic, oc, ec =
-    Unix.open_process_args_full prog (Array.of_list argv) env
+  let f () =
+    let ic, oc, ec =
+      Unix.open_process_args_full prog (Array.of_list argv) env
+    in
+    close_out_noerr oc;
+    let stdout = read_all ic in
+    let stderr = read_all ec in
+    let exit_code =
+      match Unix.close_process_full (ic, oc, ec) with
+      | Unix.WEXITED code -> code
+      | Unix.WSIGNALED code -> 128 + code
+      | Unix.WSTOPPED code -> 256 + code
+    in
+    { exit_code; stdout; stderr }
   in
-  close_out_noerr oc;
-  let stdout = read_all ic in
-  let stderr = read_all ec in
-  let exit_code =
-    match Unix.close_process_full (ic, oc, ec) with
-    | Unix.WEXITED code -> code
-    | Unix.WSIGNALED code -> 128 + code
-    | Unix.WSTOPPED code -> 256 + code
-  in
-  { exit_code; stdout; stderr }
+  try Eio_unix.run_in_systhread f
+  with Stdlib.Effect.Unhandled _ -> f ()
 
 let wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid =
   let start = Unix.gettimeofday () in

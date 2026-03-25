@@ -84,26 +84,52 @@ let reset_lock_stats () =
   Atomic.set lock_total_wait_ms 0.0;
   Atomic.set lock_max_wait_ms 0.0
 
-(** Transactional lock for graph operations - synchronous *)
+(** Run a blocking op in systhread when Eio context is available *)
+let run_blocking_op f =
+  try Eio_unix.run_in_systhread f
+  with Stdlib.Effect.Unhandled _ -> f ()
+
+(** Transactional lock for graph operations.
+    Uses F_TLOCK (non-blocking) from a systhread so the Eio scheduler stays
+    free.  The body [f] runs in the main Eio context (not in the systhread)
+    so it can use Eio.Path / Fs_compat safely. *)
 let with_graph_lock config f =
   ensure_synapses_dir config;
   let lock_file = synapses_lock_file config in
-  let fd = Unix.openfile lock_file [Unix.O_WRONLY; Unix.O_CREAT] 0o600 in
-  (* Track lock acquisition time *)
   let start_time = Time_compat.now () in
-  Unix.lockf fd Unix.F_LOCK 0;
+  (* Acquire lock in systhread (non-blocking F_TLOCK + retry) *)
+  let fd = run_blocking_op (fun () ->
+    let fd = Unix.openfile lock_file [Unix.O_WRONLY; Unix.O_CREAT] 0o600 in
+    let rec acquire attempts =
+      if attempts <= 0 then begin
+        Unix.close fd;
+        raise (Failure "hebbian_eio: graph lock timeout after 200 attempts")
+      end
+      else
+        try Unix.lockf fd Unix.F_TLOCK 0; fd
+        with
+        | Unix.Unix_error (Unix.EAGAIN, _, _)
+        | Unix.Unix_error (Unix.EACCES, _, _) ->
+            Unix.sleepf 0.01;
+            acquire (attempts - 1)
+    in
+    try acquire 200
+    with exn -> Unix.close fd; raise exn
+  ) in
+  (* Record lock metrics *)
   let wait_ms = (Time_compat.now () -. start_time) *. 1000.0 in
   Atomic.incr lock_acquisitions;
   cas_float lock_total_wait_ms (fun v -> v +. wait_ms);
   cas_float lock_max_wait_ms (fun v -> Float.max v wait_ms);
-  (* Log if wait was significant *)
   let warn_threshold = Level2_config.Lock.warn_threshold_ms () in
   if wait_ms > warn_threshold then
     Log.Misc.warn "Lock contention detected: %.1fms wait (threshold: %.0fms)" wait_ms warn_threshold;
+  (* Run body in Eio context, release lock in systhread *)
   Common.protect ~module_name:"hebbian_eio" ~finally_label:"finalizer"
     ~finally:(fun () ->
-      Unix.lockf fd Unix.F_ULOCK 0;
-      Unix.close fd)
+      run_blocking_op (fun () ->
+        (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
+        Unix.close fd))
     f
 
 (** Synapse to JSON *)

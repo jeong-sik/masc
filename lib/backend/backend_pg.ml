@@ -235,20 +235,36 @@ let create ~sw ~env ~url ~cluster_name ~node_id =
       Error (caqti_error_to_masc err)
   | Ok pool ->
       Log.Backend.info "[EioPG] pool created, initializing schema...";
-      (* Initialize schema including pubsub tables and indexes *)
-      let init_result = Caqti_eio.Pool.use (fun conn ->
-        let module C = (val conn : Caqti_eio.CONNECTION) in
-        let* () = C.exec create_schema_q () in
-        let* () = C.exec create_pubsub_table_q () in
-        let* () = C.exec create_index_q () in
-        let* () = C.exec create_pubsub_index_q () in
-        let* () = C.exec create_pubsub_created_at_index_q () in
-        Ok ()
-      ) pool in
+      (* Parallel DDL init: 2-phase to respect table→index dependency.
+         Each fiber gets its own connection from pool; all DDL uses IF NOT EXISTS. *)
+      let exec_ddl q =
+        match Caqti_eio.Pool.use (fun conn ->
+          let module C = (val conn : Caqti_eio.CONNECTION) in
+          C.exec q ()
+        ) pool with
+        | Ok () -> ()
+        | Error e -> raise (Failure (Caqti_error.show e))
+      in
+      let init_result =
+        try
+          (* Phase 1: create tables in parallel (independent) *)
+          let (_: unit * unit) = Eio.Fiber.pair
+            (fun () -> exec_ddl create_schema_q)
+            (fun () -> exec_ddl create_pubsub_table_q)
+          in
+          (* Phase 2: create indexes in parallel (tables now exist) *)
+          Eio.Fiber.all [
+            (fun () -> exec_ddl create_index_q);
+            (fun () -> exec_ddl create_pubsub_index_q);
+            (fun () -> exec_ddl create_pubsub_created_at_index_q);
+          ];
+          Ok ()
+        with Failure msg -> Error (IOError msg)
+      in
       (match init_result with
        | Error err ->
-           Log.Backend.error "[EioPG] schema init failed: %s" (Caqti_error.show err);
-           Error (caqti_error_to_masc err)
+           Log.Backend.error "[EioPG] schema init failed: %s" (show_error err);
+           Error err
        | Ok () ->
            Log.Backend.info "[EioPG] connected and schema ready";
            at_exit (fun () ->

@@ -176,7 +176,7 @@ Pair with masc_tool_stats to discover which tools exist.";
   };
   {
     name = "masc_tool_admin_snapshot";
-    description = "Return a unified admin snapshot of tool inventory, auth/RBAC, keeper policy, and command-plane surfaces. \
+    description = "Return a unified admin snapshot of tool inventory, auth/RBAC, and command-plane surfaces. \
 Use when auditing the full server configuration or diagnosing tool visibility issues. \
 Pair with masc_tool_admin_update to apply changes based on the snapshot.";
     input_schema = `Assoc [

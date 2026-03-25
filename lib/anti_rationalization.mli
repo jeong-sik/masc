@@ -9,6 +9,10 @@
     When the LLM reviewer is unavailable, falls back to local pattern matching
     only. Liveness takes priority over correctness.
 
+    Cross-model evaluation (#3067): use [~evaluator_cascade] to force
+    a different model family than the generator, providing genuine
+    adversarial tension rather than same-model self-evaluation.
+
     @since v2.145.0 *)
 
 (** Review request: task context + agent's completion claim. *)
@@ -24,11 +28,40 @@ type verdict =
   | Approve
   | Reject of string
 
-(** Review a task completion claim.
-    Returns [Approve] if notes are substantive and address the task.
-    Returns [Reject reason] if notes contain avoidance patterns or are vague.
-    On LLM failure, defaults to [Approve] (liveness > correctness). *)
-val review : review_request -> verdict
+(** Structured review result with audit metadata for cross-model tracking. *)
+type review_result = {
+  verdict : verdict;
+  evaluator_cascade : string;
+  generator_cascade : string option;
+  gate : string;
+}
+
+(** Review a task completion claim with optional cross-model separation.
+
+    @param evaluator_cascade Override cascade for LLM verification.
+      Default: ["verifier"]. Use a different cascade name to ensure
+      cross-model evaluation (e.g. ["cross_verifier"]).
+    @param generator_cascade Optional name of the generator's cascade.
+      Logged for auditing; not used in verification logic. *)
+val review :
+  ?evaluator_cascade:string ->
+  ?generator_cascade:string ->
+  ?completion_contract:string list ->
+  review_request -> review_result
+
+(** Backward-compatible wrapper returning only the verdict. *)
+val review_verdict :
+  ?evaluator_cascade:string ->
+  ?generator_cascade:string ->
+  ?completion_contract:string list ->
+  review_request -> verdict
+
+(** Check completion notes against a contract. Returns unmet items.
+    Used internally by Gate 2.5; exposed for testing. *)
+val check_contract : notes:string -> contract:string list -> string list
+
+(** Serialize review result to JSON for logging/calibration. *)
+val review_result_to_json : review_result -> Yojson.Safe.t
 
 (** Check notes for known excuse patterns (local, no LLM).
     Returns [Some (pattern, reason)] if a match is found.

@@ -220,6 +220,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                          ~message_count:(List.length c.messages)
                          ~token_count:c.token_count ~repetition_risk
                          ~goal_alignment ~response_alignment
+                         ()
                      in
                      let snapshot =
                        `Assoc

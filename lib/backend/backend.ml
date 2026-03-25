@@ -127,6 +127,21 @@ module FileSystem = struct
           ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0)
         @@ fun () -> f fd)
 
+  (** {2 Internal Helpers} *)
+
+  let _ensure_parent_dir path =
+    match Eio.Path.split path with
+    | Some (parent, _) ->
+      (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
+       with Eio.Cancel.Cancelled _ as e -> raise e
+          | e ->
+            Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
+              (Printf.sprintf "[WARN] mkdirs failed: %s" (Printexc.to_string e)))
+    | None -> ()
+
+  let _compress = Compression.compress_with_header
+  let _decompress = Compression.decompress_auto
+
   (** {2 Core Operations} *)
 
   (** Get value by key (auto-decompresses ZSTD if detected) *)
@@ -137,9 +152,7 @@ module FileSystem = struct
       | Ok path ->
           try
             let content = Eio.Path.load path in
-            (* Compact Protocol v4: Auto-decompress if ZSTD header present *)
-            let decompressed = Compression.decompress_auto content in
-            Ok decompressed
+            Ok (_decompress content)
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
               Error (NotFound key)
@@ -155,19 +168,8 @@ module FileSystem = struct
       | Error e -> Error e
       | Ok path ->
           try
-            (* Ensure parent directory exists *)
-            (match Eio.Path.split path with
-             | Some (parent, _) ->
-                 (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                  with Eio.Cancel.Cancelled _ as e -> raise e
-                   | e ->
-                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                         (Printf.sprintf "[WARN] mkdirs failed: %s"
-                            (Printexc.to_string e)))
-             | None -> ());
-            (* Compact Protocol v4: Compress before saving (if beneficial) *)
-            let compressed = Compression.compress_with_header value in
-            (* Write file *)
+            _ensure_parent_dir path;
+            let compressed = _compress value in
             Eio.Path.save ~create:(`Or_truncate 0o644) path compressed;
             Ok ()
           with
@@ -264,28 +266,16 @@ module FileSystem = struct
 
   (** Set if not exists (atomic, auto-compresses) *)
   let set_if_not_exists t key value =
-    (* Compact Protocol v4: Compress before saving *)
-    let compressed = Compression.compress_with_header value in
+    let compressed = _compress value in
     Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
       match key_to_path t key with
       | Error e -> Error e
       | Ok path ->
           try
-            (* Check if exists first *)
             match Eio.Path.kind ~follow:true path with
             | `Regular_file -> Error (AlreadyExists key)
             | _ ->
-                (* Ensure parent directory *)
-                (match Eio.Path.split path with
-                 | Some (parent, _) ->
-                     (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                      with Eio.Cancel.Cancelled _ as e -> raise e
-                   | e ->
-                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                         (Printf.sprintf "[WARN] mkdirs failed: %s"
-                            (Printexc.to_string e)))
-                 | None -> ());
-                (* Write with exclusive create *)
+                _ensure_parent_dir path;
                 Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
                 Ok true
           with
@@ -422,17 +412,7 @@ module FileSystem = struct
     | Error e -> Error e
     | Ok path ->
         try
-          (* Ensure parent directory exists *)
-          (match Eio.Path.split path with
-           | Some (parent, _) ->
-               (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                with Eio.Cancel.Cancelled _ as e -> raise e
-                   | e ->
-                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                         (Printf.sprintf "[WARN] mkdirs failed: %s"
-                            (Printexc.to_string e)))
-           | None -> ());
-
+          _ensure_parent_dir path;
           let path_str = Eio.Path.native_exn path in
           with_locked_rw_fd path_str @@ fun fd ->
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
@@ -494,17 +474,7 @@ module FileSystem = struct
     | Error e -> Error e
     | Ok path ->
         try
-          (* Ensure parent directory exists *)
-          (match Eio.Path.split path with
-           | Some (parent, _) ->
-               (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                with Eio.Cancel.Cancelled _ as e -> raise e
-                   | e ->
-                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                         (Printf.sprintf "[WARN] mkdirs failed: %s"
-                            (Printexc.to_string e)))
-           | None -> ());
-
+          _ensure_parent_dir path;
           let path_str = Eio.Path.native_exn path in
           with_locked_rw_fd path_str @@ fun fd ->
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
@@ -518,11 +488,11 @@ module FileSystem = struct
               if n = 0 then None
               else
                 let raw = Bytes.sub_string buf 0 n in
-                Some (Compression.decompress_auto raw)
+                Some (_decompress raw)
             end
           in
           let new_content = f current in
-          let compressed = Compression.compress_with_header new_content in
+          let compressed = _compress new_content in
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
           let _ = Unix.ftruncate fd 0 in
           let _ = Unix.write_substring fd compressed 0 (String.length compressed) in

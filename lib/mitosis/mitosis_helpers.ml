@@ -94,7 +94,7 @@ let queue_episode ~base_path ~session_id ~agent_name ~generation
   let file = Filename.concat dir (ep_id ^ ".json") in
   try
     Fs_compat.save_file file (Yojson.Safe.pretty_to_string json);
-    Printf.printf "[EPISODE/QUEUE] Queued episode %s (gen %d) → %s\n%!" ep_id generation file;
+    Log.Misc.info "[EPISODE/QUEUE] Queued episode %s (gen %d) -> %s" ep_id generation file;
     Some ep_id
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.error "episode queue failed: %s" (Printexc.to_string exn);

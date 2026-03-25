@@ -157,7 +157,7 @@ let record_human_label
 
 let string_field json key =
   try Yojson.Safe.Util.(json |> member key |> to_string)
-  with _ -> ""
+  with Yojson.Safe.Util.Type_error _ | Not_found -> ""
 
 (* ================================================================ *)
 (* Divergence analysis                                               *)
@@ -192,8 +192,9 @@ let find_divergences ?(since = "") ?(until = "") () : divergence list =
     | Some l_json ->
       let ev = string_field v_json "verdict" in
       let hv = string_field l_json "human_verdict" in
-      let ev_norm = if String.length ev >= 6 &&
-                       String.sub ev 0 6 = "reject" then "reject"
+      let ev_norm = if ev = "reject" ||
+                       (String.length ev >= 7 &&
+                        String.sub ev 0 7 = "reject:") then "reject"
                     else ev in
       if ev_norm <> hv then
         divergences := {
@@ -282,8 +283,9 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
     match Hashtbl.find_opt labeled_hashes hash with
     | None -> ()
     | Some hv ->
-      let ev_norm = if String.length ev >= 6 &&
-                       String.sub ev 0 6 = "reject" then "reject"
+      let ev_norm = if ev = "reject" ||
+                       (String.length ev >= 7 &&
+                        String.sub ev 0 7 = "reject:") then "reject"
                     else ev in
       if ev_norm = hv then incr agree
       else if ev_norm = "approve" && hv = "reject" then incr false_pos

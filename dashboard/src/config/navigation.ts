@@ -214,10 +214,6 @@ export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem
   return sectionItemsForTab(tabId).filter(item => item.hidden !== true)
 }
 
-export function surfaceForTab(tabId: TabId): SurfaceId {
-  return tabId
-}
-
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
   const next = { ...params }
 

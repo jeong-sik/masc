@@ -13,5 +13,3 @@ export function LabSurface() {
     </div>
   `
 }
-
-export const LabUnified = LabSurface

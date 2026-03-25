@@ -17,7 +17,7 @@ import type {
 
 // --- Types ---
 
-export type ObservatoryAgentState = 'working' | 'watching' | 'quiet' | 'offline'
+type ObservatoryAgentState = 'working' | 'watching' | 'quiet' | 'offline'
 
 export interface ObservatoryAgent {
   name: string
@@ -37,7 +37,7 @@ export interface ObservatoryAgent {
   relatedSessionId: string | null
 }
 
-export interface ObservatoryGroup {
+interface ObservatoryGroup {
   sessionId: string | null
   goal: string | null
   status: string | null
@@ -103,7 +103,7 @@ function buildObservatoryAgent(
 
 // --- Computed signal ---
 
-export const observatoryGroups: ReadonlySignal<ObservatoryGroup[]> = computed(() => {
+const observatoryGroups: ReadonlySignal<ObservatoryGroup[]> = computed(() => {
   const agentList = agents.value
   const workers = executionWorkerSupportBriefs.value
   const sessions = executionSessionBriefs.value

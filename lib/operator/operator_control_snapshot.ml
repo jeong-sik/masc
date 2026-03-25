@@ -430,10 +430,12 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
        json
    | _ ->
   let t0 = Time_compat.now () in
+  let timing_records = ref [] in
   let timed label f =
     let t_start = Time_compat.now () in
     let result = f () in
     let elapsed = Time_compat.now () -. t_start in
+    timing_records := (label, elapsed) :: !timing_records;
     if elapsed > 0.5 then
       Log.Dashboard.info "[snapshot_json] %s: %.0fms" label (elapsed *. 1000.0);
     result
@@ -543,39 +545,81 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("authoritative_judgment_available", `Bool false);
          ("provenance_summary", operator_surface_contract_json);
          ("room", room_json config);
-         ( "sessions",
-           timed "sessions_json" (fun () ->
-           if initialized && include_sessions then sessions_json ~status_cache config tracked_sessions
-           else `Assoc [ ("count", `Int 0); ("items", `List []) ]) );
-         ( "keepers",
-           timed "keepers_json" (fun () ->
-           if initialized && include_keepers then
-             keepers_json ~keeper_names
-               ~include_recent_activity:(not lightweight_summary) config
-           else `Assoc [ ("count", `Int 0); ("items", `List []) ]) );
-         ( "persistent_agents",
-           timed "persistent_agents_json" (fun () ->
-           if initialized && include_keepers then persistent_agents_json ~keeper_names config
-           else `Assoc [ ("count", `Int 0); ("items", `List []) ]) );
-         ("command_plane", command_plane_json);
+       ]
+      @ (
+         (* Parallelize independent I/O: sessions, keepers, persistent_agents.
+            Eio.Fiber.all runs all thunks as fibers within the current switch,
+            completing when all finish. On failure, remaining fibers are cancelled. *)
+         let empty_section = `Assoc [ ("count", `Int 0); ("items", `List []) ] in
+         let sessions_ref = ref empty_section in
+         let keepers_ref = ref empty_section in
+         let persistent_ref = ref empty_section in
+         Eio.Fiber.all [
+           (fun () ->
+             sessions_ref :=
+               timed "sessions_json" (fun () ->
+                 if initialized && include_sessions then
+                   sessions_json ~status_cache config tracked_sessions
+                 else empty_section));
+           (fun () ->
+             keepers_ref :=
+               timed "keepers_json" (fun () ->
+                 if initialized && include_keepers then
+                   keepers_json ~keeper_names
+                     ~include_recent_activity:(not lightweight_summary) config
+                 else empty_section));
+           (fun () ->
+             persistent_ref :=
+               timed "persistent_agents_json" (fun () ->
+                 if initialized && include_keepers then
+                   persistent_agents_json ~keeper_names config
+                 else empty_section));
+         ];
+         [
+           ("sessions", !sessions_ref);
+           ("keepers", !keepers_ref);
+           ("persistent_agents", !persistent_ref);
+           ("command_plane", command_plane_json);
+         ]
+      )
+      @ [
          ("swarm_status", swarm_status_json);
-         ("role_census", aggregate_worker_class_counts tracked_sessions);
-         ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
-         ("lane_census", aggregate_lane_counts tracked_sessions);
-         ("controller_census", aggregate_controller_counts tracked_sessions);
-         ("control_domains", aggregate_control_domain_counts tracked_sessions);
-         ("model_tiers", aggregate_tier_counts tracked_sessions);
-         ("task_profiles", aggregate_task_profile_counts tracked_sessions);
-         ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
+       ]
+      @ (let (role_census, runtime_pools, lane_census, controller_census,
+              control_domains, model_tiers, task_profiles, escalation_count) =
+           timed "aggregates" (fun () -> aggregate_all_worker_metrics tracked_sessions)
+         in
+         [
+           ("role_census", role_census);
+           ("runtime_pools", runtime_pools);
+           ("lane_census", lane_census);
+           ("controller_census", controller_census);
+           ("control_domains", control_domains);
+           ("model_tiers", model_tiers);
+           ("task_profiles", task_profiles);
+           ("escalation_count", `Int escalation_count);
+         ])
+      @ [
          ("local_runtime", aggregated_local_runtime_json tracked_sessions);
          ( "recent_messages",
            if initialized && include_messages && not lightweight_summary then
              recent_messages_json config
            else
              `List [] );
-         ("pending_confirms", pending_confirms_json ?actor config);
-         ("pending_confirm_envelope", pending_confirm_envelope_json ?actor config);
-         ("pending_confirm_summary", pending_confirm_summary_json ?actor config);
+       ]
+      @ (let confirm_scope = timed "pending_confirms" (fun () ->
+           pending_confirm_scope ?actor config) in
+         [
+           ("pending_confirms",
+             `List (List.map pending_confirm_to_yojson confirm_scope.visible_entries));
+           ("pending_confirm_envelope",
+             `Assoc [
+               ("items", `List (List.map pending_confirm_to_yojson confirm_scope.visible_entries));
+               ("summary", pending_confirm_summary_json_of_scope confirm_scope);
+             ]);
+           ("pending_confirm_summary", pending_confirm_summary_json_of_scope confirm_scope);
+         ])
+      @ [
          ("available_actions", available_actions_json);
          ( "recent_actions",
            if lightweight_summary then `List [] else recent_actions_json config );
@@ -583,9 +627,14 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       @ summary_fields)
   in
   let elapsed_total = Time_compat.now () -. t0 in
-  if elapsed_total > 1.0 then
+  if elapsed_total > 1.0 then begin
     Log.Dashboard.info "[snapshot_json] total: %.0fms (sessions=%d keepers=%d)"
       (elapsed_total *. 1000.0)
       (List.length tracked_sessions) (List.length keeper_names);
+    List.iter (fun (label, dt) ->
+      if dt > 0.1 then
+        Log.Dashboard.info "[snapshot_json]   %s: %.0fms" label (dt *. 1000.0))
+      (List.rev !timing_records)
+  end;
   _snapshot_cache := Some (cache_key, result, now);
   result)

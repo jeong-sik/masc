@@ -1439,6 +1439,40 @@ let test_keeper_up_persists_allowed_paths_to_status_policy () =
       check (list string) "allowed_paths roundtrip" allowed_paths persisted)
 (* test_keeper_policy_set_accepts_explicit_event_v1: removed — keeper policy_mode system removed *)
 
+(* Issue #3019: session dir must be created from scratch in filesystem fallback.
+   When PG is unavailable and keeper_up only registers in-memory, the session
+   directory under .masc/perpetual/<trace_id> might not exist. The fix ensures
+   all callers create the full directory tree before file I/O. *)
+let test_session_dir_mkdir_p_creates_full_tree () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      (* Simulate the path that session_base_dir returns:
+         <base_path>/.masc/perpetual *)
+      let session_base = Filename.concat
+        (Filename.concat base_dir ".masc") "perpetual" in
+      let trace_id = "trace-test-3019" in
+      let session_dir = Filename.concat session_base trace_id in
+      (* Before fix: only base_dir was mkdir_p'd, not session_dir.
+         After fix: mkdir_p session_dir creates the full tree. *)
+      check bool "session dir absent before mkdir_p" false
+        (Sys.file_exists session_dir);
+      (* Use the same mkdir_p that Keeper_types exposes *)
+      Masc_mcp.Keeper_types.mkdir_p session_dir;
+      check bool "session dir exists after mkdir_p" true
+        (Sys.file_exists session_dir);
+      check bool "session dir is directory" true
+        (Sys.is_directory session_dir);
+      (* Simulate persist_message writing history.jsonl *)
+      let history_path = Filename.concat session_dir "history.jsonl" in
+      let oc = open_out history_path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc "{\"role\":\"user\",\"content\":\"hello\"}\n");
+      check bool "history file written" true
+        (Sys.file_exists history_path))
+
 let test_resident_bootstrap_marks_stale_explicit_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1573,5 +1607,7 @@ let () =
            test_keeper_up_persists_allowed_paths_to_status_policy;
          test_case "resident bootstrap marks stale explicit keeper" `Quick
            test_resident_bootstrap_marks_stale_explicit_keeper;
+         test_case "session dir mkdir_p creates full tree from scratch (issue #3019)" `Quick
+           test_session_dir_mkdir_p_creates_full_tree;
        ]);
   ]

@@ -210,6 +210,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
         Keeper_unified_prompt.build_prompt ~meta ~observation
       in
       let base_dir = session_base_dir config in
+      (* Ensure session dir tree for filesystem fallback (issue #3019) *)
+      Keeper_types.mkdir_p (Filename.concat base_dir meta.trace_id);
       (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
       let temperature =
         Cascade_inference.resolve_temperature

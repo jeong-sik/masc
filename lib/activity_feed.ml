@@ -15,43 +15,29 @@
 
 type activity_item = {
   id: string;
-  kind: string;
-  agent_name: string;
-  summary: string;
-  detail_json: Yojson.Safe.t;
-  created_at: float;
-}
+  kind: string; [@default ""]
+  agent_name: string; [@default ""]
+  summary: string; [@default ""]
+  detail_json: Yojson.Safe.t; [@default `Null]
+  created_at: float; [@default 0.0]
+} [@@deriving yojson { strict = false }]
 
-(** {1 JSON Serialization} *)
+(** {1 JSON Serialization}
 
-let activity_item_to_json (item : activity_item) : Yojson.Safe.t =
-  `Assoc [
-    ("id", `String item.id);
-    ("kind", `String item.kind);
-    ("agent_name", `String item.agent_name);
-    ("summary", `String item.summary);
-    ("detail_json", item.detail_json);
-    ("created_at", `Float item.created_at);
-  ]
+    [activity_item_to_yojson] and [activity_item_of_yojson] are generated
+    by [ppx_deriving_yojson].  Legacy wrappers below keep the [option]
+    API for callers that haven't migrated to [result]. *)
+
+let activity_item_to_json : activity_item -> Yojson.Safe.t =
+  activity_item_to_yojson
 
 let activity_item_of_json (json : Yojson.Safe.t) : activity_item option =
-  try
-    let id = Safe_ops.json_string ~default:"" "id" json in
-    let kind = Safe_ops.json_string ~default:"" "kind" json in
-    let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
-    let summary = Safe_ops.json_string ~default:"" "summary" json in
-    let detail_json =
-      try Yojson.Safe.Util.member "detail_json" json
-      with Yojson.Safe.Util.Type_error _ -> `Null
-    in
-    let created_at = Safe_ops.json_float ~default:0.0 "created_at" json in
-    if id = "" then None
-    else Some { id; kind; agent_name; summary; detail_json; created_at }
-  with
-  | Yojson.Safe.Util.Type_error _ -> None
-  | exn ->
-      Log.Feed.warn "activity_item_of_json: %s" (Printexc.to_string exn);
-      None
+  match activity_item_of_yojson json with
+  | Ok item when item.id <> "" -> Some item
+  | Ok _ -> None
+  | Error msg ->
+    Log.Feed.warn "activity_item_of_json: %s" msg;
+    None
 
 (** {1 JSONL Helpers} *)
 

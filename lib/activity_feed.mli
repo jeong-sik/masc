@@ -16,11 +16,19 @@ type activity_item = {
   created_at: float;         (** Unix timestamp *)
 }
 
+val activity_item_to_yojson : activity_item -> Yojson.Safe.t
+(** PPX-generated serializer. *)
+
+val activity_item_of_yojson :
+  Yojson.Safe.t -> (activity_item, string) result
+(** PPX-generated deserializer.  Returns [Error msg] on parse failure. *)
+
 val activity_item_to_json : activity_item -> Yojson.Safe.t
-(** Serialize an activity item to JSON. *)
+(** Alias for {!activity_item_to_yojson}. *)
 
 val activity_item_of_json : Yojson.Safe.t -> activity_item option
-(** Deserialize an activity item from JSON. Returns None on parse failure. *)
+(** Wraps {!activity_item_of_yojson}. Returns None on parse failure
+    or when [id] is empty. *)
 
 val recent_activity :
   Room.config -> ?agent_name:string -> limit:int -> unit -> activity_item list

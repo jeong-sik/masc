@@ -22,6 +22,13 @@ type agent_reputation = {
   overall_score: float;       (** Weighted composite 0.0-1.0 *)
 }
 
+val agent_reputation_to_yojson : agent_reputation -> Yojson.Safe.t
+(** PPX-generated serializer. *)
+
+val agent_reputation_of_yojson :
+  Yojson.Safe.t -> (agent_reputation, string) result
+(** PPX-generated deserializer.  Returns [Error msg] on parse failure. *)
+
 val default_reputation : agent_name:string -> agent_reputation
 (** A zero-valued reputation for a given agent. *)
 
@@ -29,10 +36,11 @@ val compute_reputation : Room.config -> agent_name:string -> agent_reputation
 (** Compute reputation by reading tasks, mentions, board, and debate data. *)
 
 val reputation_to_json : agent_reputation -> Yojson.Safe.t
-(** Serialize reputation to JSON. *)
+(** Alias for {!agent_reputation_to_yojson}. *)
 
 val reputation_of_json : Yojson.Safe.t -> agent_reputation option
-(** Deserialize reputation from JSON. Returns None on parse failure. *)
+(** Wraps {!agent_reputation_of_yojson}. Returns None on parse failure
+    or when [agent_name] is empty. *)
 
 val compute_overall_score :
   completion_rate:float ->

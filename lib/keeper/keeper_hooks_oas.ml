@@ -149,13 +149,8 @@ let make_hooks
         (* Emit per-turn cost event for task attribution *)
         (match trajectory_acc with
          | Some acc ->
-           (* Rough per-turn cost estimate based on token count.
-              Local llama models are effectively free; cloud models
-              average ~$0.003/1K input + $0.015/1K output tokens.
-              This estimate errs conservative (uses cloud pricing). *)
-           let cost_usd =
-             (Float.of_int input_tok *. 0.000003)
-             +. (Float.of_int output_tok *. 0.000015)
+           let cost_usd = Trajectory.estimate_turn_cost
+             ~model ~input_tokens:input_tok ~output_tokens:output_tok
            in
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:(!meta_ref).name ~task_id:acc.task_id

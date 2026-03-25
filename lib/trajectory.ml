@@ -62,11 +62,76 @@ type trajectory = {
 (* Cost estimation                                                  *)
 (* ================================================================ *)
 
+(** Per-token pricing by model category (USD per token).
+
+    Three tiers:
+    - Local: llama-server / Qwen / Ollama — zero marginal cost (electricity only)
+    - GLM:   ZAI GLM-4/5 — discounted Chinese cloud pricing
+    - Cloud:  Claude / GPT / Gemini — standard API pricing
+
+    Prices sourced from public pricing pages (2026-03 snapshot).
+    Updated manually; check pricing pages before adjusting.
+
+    Returns (input_price_per_token, output_price_per_token). *)
+(** Simple substring check — avoids Str dependency. *)
+let contains (haystack : string) (needle : string) : bool =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen > hlen then false
+  else
+    let found = ref false in
+    for i = 0 to hlen - nlen do
+      if not !found && String.sub haystack i nlen = needle then found := true
+    done;
+    !found
+
+let starts_with (s : string) (prefix : string) : bool =
+  let plen = String.length prefix in
+  String.length s >= plen && String.sub s 0 plen = prefix
+
+let model_token_pricing (model : string) : float * float =
+  let m = String.lowercase_ascii model in
+  (* Local models: free *)
+  if starts_with m "qwen" || starts_with m "llama" || starts_with m "ollama"
+     || m = "local" || m = "auto" || m = ""
+  then (0.0, 0.0)
+  (* GLM models: ~$0.001/1K input, $0.002/1K output *)
+  else if starts_with m "glm"
+  then (0.000001, 0.000002)
+  (* Claude Haiku: $0.25/1M input, $1.25/1M output *)
+  else if contains m "haiku"
+  then (0.00000025, 0.00000125)
+  (* Claude Sonnet: $3/1M input, $15/1M output *)
+  else if contains m "sonnet"
+  then (0.000003, 0.000015)
+  (* Claude Opus: $15/1M input, $75/1M output *)
+  else if contains m "opus"
+  then (0.000015, 0.000075)
+  (* GPT-4o: $2.50/1M input, $10/1M output *)
+  else if contains m "gpt-4o"
+  then (0.0000025, 0.00001)
+  (* Gemini: $1.25/1M input, $5/1M output (Gemini 2.0 Flash) *)
+  else if contains m "gemini"
+  then (0.00000125, 0.000005)
+  (* Unknown: use conservative cloud pricing (Sonnet-level) *)
+  else (0.000003, 0.000015)
+
+(** Estimate cost in USD for a single LLM turn.
+    Uses [model_token_pricing] to look up per-token rates. *)
+let estimate_turn_cost ~(model : string) ~(input_tokens : int)
+    ~(output_tokens : int) : float =
+  let (in_price, out_price) = model_token_pricing model in
+  (Float.of_int input_tokens *. in_price)
+  +. (Float.of_int output_tokens *. out_price)
+
 (** Rough per-call cost estimates for keeper tools.
-    Most are local/free; only MODEL-calling tools have cost. *)
+    These are fixed estimates for tool-level overhead (not LLM turn cost).
+    Most tools are local/free; only MODEL-calling tools have cost.
+
+    For LLM turn-level cost, use [estimate_turn_cost] instead. *)
 let tool_cost_estimate (tool_name : string) : float =
   match tool_name with
-  (* MODEL-intensive tools *)
+  (* MODEL-intensive tools — rough fixed overhead *)
   | "keeper_board_post" -> 0.002
   | "keeper_board_comment" -> 0.001
   | "keeper_bash" -> 0.0001

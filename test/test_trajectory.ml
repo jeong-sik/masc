@@ -272,6 +272,60 @@ let test_task_id_null_when_none () =
     | _ -> Alcotest.fail "Expected task_id to be null when not set")
 
 (* ================================================================ *)
+(* Test: model-aware pricing                                         *)
+(* ================================================================ *)
+
+let test_local_model_free () =
+  let cost = Trajectory.estimate_turn_cost
+    ~model:"qwen3.5-35b-a3b" ~input_tokens:1000 ~output_tokens:500 in
+  Alcotest.(check (float 0.0001)) "local model free" 0.0 cost
+
+let test_llama_model_free () =
+  let cost = Trajectory.estimate_turn_cost
+    ~model:"llama-3.2-1b" ~input_tokens:1000 ~output_tokens:500 in
+  Alcotest.(check (float 0.0001)) "llama free" 0.0 cost
+
+let test_auto_model_free () =
+  let cost = Trajectory.estimate_turn_cost
+    ~model:"auto" ~input_tokens:1000 ~output_tokens:500 in
+  Alcotest.(check (float 0.0001)) "auto free" 0.0 cost
+
+let test_empty_model_free () =
+  let cost = Trajectory.estimate_turn_cost
+    ~model:"" ~input_tokens:1000 ~output_tokens:500 in
+  Alcotest.(check (float 0.0001)) "empty free" 0.0 cost
+
+let test_glm_model_cheap () =
+  let cost = Trajectory.estimate_turn_cost
+    ~model:"glm-4-flash" ~input_tokens:1000 ~output_tokens:1000 in
+  (* 1000 * 0.000001 + 1000 * 0.000002 = 0.003 *)
+  Alcotest.(check (float 0.0001)) "glm cheap" 0.003 cost
+
+let test_sonnet_model_priced () =
+  let cost = Trajectory.estimate_turn_cost
+    ~model:"claude-sonnet-4-20260514" ~input_tokens:1000 ~output_tokens:1000 in
+  (* 1000 * 0.000003 + 1000 * 0.000015 = 0.018 *)
+  Alcotest.(check (float 0.0001)) "sonnet priced" 0.018 cost
+
+let test_opus_model_expensive () =
+  let cost = Trajectory.estimate_turn_cost
+    ~model:"claude-opus-4-20260514" ~input_tokens:1000 ~output_tokens:1000 in
+  (* 1000 * 0.000015 + 1000 * 0.000075 = 0.090 *)
+  Alcotest.(check (float 0.001)) "opus expensive" 0.090 cost
+
+let test_haiku_model_cheap () =
+  let cost = Trajectory.estimate_turn_cost
+    ~model:"claude-haiku-4-20260514" ~input_tokens:1000 ~output_tokens:1000 in
+  (* 1000 * 0.00000025 + 1000 * 0.00000125 = 0.0015 *)
+  Alcotest.(check (float 0.0001)) "haiku cheap" 0.0015 cost
+
+let test_unknown_model_conservative () =
+  let cost = Trajectory.estimate_turn_cost
+    ~model:"future-model-v99" ~input_tokens:1000 ~output_tokens:1000 in
+  (* Uses Sonnet pricing as conservative default *)
+  Alcotest.(check (float 0.0001)) "unknown conservative" 0.018 cost
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -309,5 +363,16 @@ let () =
       Alcotest.test_case "finalize propagates" `Quick test_finalize_propagates_task_id;
       Alcotest.test_case "json with task_id" `Quick test_task_id_in_trajectory_json;
       Alcotest.test_case "json null when none" `Quick test_task_id_null_when_none;
+    ]);
+    ("model_pricing", [
+      Alcotest.test_case "local qwen free" `Quick test_local_model_free;
+      Alcotest.test_case "llama free" `Quick test_llama_model_free;
+      Alcotest.test_case "auto free" `Quick test_auto_model_free;
+      Alcotest.test_case "empty free" `Quick test_empty_model_free;
+      Alcotest.test_case "glm cheap" `Quick test_glm_model_cheap;
+      Alcotest.test_case "sonnet priced" `Quick test_sonnet_model_priced;
+      Alcotest.test_case "opus expensive" `Quick test_opus_model_expensive;
+      Alcotest.test_case "haiku cheap" `Quick test_haiku_model_cheap;
+      Alcotest.test_case "unknown conservative" `Quick test_unknown_model_conservative;
     ]);
   ]

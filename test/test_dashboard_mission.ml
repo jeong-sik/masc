@@ -461,6 +461,8 @@ let test_dashboard_mission_http_full_contract () =
       seed_room config session_id;
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio_main.run @@ fun env ->
+      Lib.Dashboard_cache.invalidate_all ();
+      Lib.Operator_control.invalidate_snapshot_cache ();
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_mission_http_json

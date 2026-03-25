@@ -47,6 +47,8 @@ val review :
   ?evaluator_cascade:string ->
   ?generator_cascade:string ->
   ?completion_contract:string list ->
+  ?on_verdict:(review_result -> unit) ->
+  ?few_shot_block:string ->
   review_request -> review_result
 
 (** Backward-compatible wrapper returning only the verdict. *)
@@ -54,6 +56,8 @@ val review_verdict :
   ?evaluator_cascade:string ->
   ?generator_cascade:string ->
   ?completion_contract:string list ->
+  ?on_verdict:(review_result -> unit) ->
+  ?few_shot_block:string ->
   review_request -> verdict
 
 (** Check completion notes against a contract. Returns unmet items.

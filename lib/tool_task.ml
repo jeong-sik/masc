@@ -286,12 +286,20 @@ let handle_transition ctx args =
     if action_lc = "done" && not force then
       match task_opt with
       | Some task ->
-        (match (Anti_rationalization.review {
-           task_title = task.title;
-           task_description = task.description;
-           completion_notes = notes;
-           agent_name = ctx.agent_name;
-         }).verdict with
+        let ar_req : Anti_rationalization.review_request = {
+          task_title = task.title;
+          task_description = task.description;
+          completion_notes = notes;
+          agent_name = ctx.agent_name;
+        } in
+        let on_verdict result =
+          Eval_calibration.record_verdict
+            ~task_id ~req:ar_req ~result in
+        let few_shot_block =
+          Eval_calibration.format_few_shot_block
+            (Eval_calibration.select_examples ~max_examples:3) in
+        (match (Anti_rationalization.review
+           ~on_verdict ~few_shot_block ar_req).verdict with
          | Anti_rationalization.Reject reason -> Some reason
          | Anti_rationalization.Approve -> None)
       | None -> None

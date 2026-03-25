@@ -78,7 +78,7 @@ let test_compact_drop_low_importance () =
   in
   let result, _tokens = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
-    ~strategies:[Compact.DropLowImportance] in
+    ~strategies:[Compact.DropLowImportance] () in
   check bool "some messages dropped" true
     (List.length result < List.length msgs)
 
@@ -91,7 +91,7 @@ let test_compact_summarize_old () =
   in
   let result, _tokens = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
-    ~strategies:[Compact.SummarizeOld] in
+    ~strategies:[Compact.SummarizeOld] () in
   check bool "message count reduced" true
     (List.length result < List.length msgs)
 

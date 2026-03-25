@@ -47,7 +47,7 @@ let audit_event_to_json (e : audit_event) : Yojson.Safe.t =
 
 (* Read audit events since given timestamp from the canonical date-split audit store. *)
 let read_audit_events (config : Room.config) ~since : audit_event list =
-  Audit_log.read_entries config
+  Audit_log.read_entries ~n:100_000 config
   |> List.filter (fun (entry : Audit_log.audit_entry) -> entry.timestamp >= since)
   |> List.map (fun (entry : Audit_log.audit_entry) ->
          let details = details_option entry.details in

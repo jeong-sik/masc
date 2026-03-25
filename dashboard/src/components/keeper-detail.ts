@@ -18,8 +18,8 @@ import { showToast } from './common/toast'
 import {
   ContextChart,
   EquipmentList,
-  FieldDictionary,
   KpiGrid,
+  RawDataDebug,
   RelationshipList,
   TraitsList,
   TrpgStats,
@@ -210,10 +210,6 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Detail sections grid ── */}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-          <${SectionCard} title="Field Dictionary">
-            <${FieldDictionary} keeper=${keeper} />
-          <//>
-
           <${SectionCard} title="Profile">
             <${TraitsList} traits=${keeper.traits ?? []} label="Traits" />
             <${TraitsList} traits=${keeper.interests ?? []} label="Interests" />
@@ -237,6 +233,13 @@ export function KeeperDetailOverlay() {
                   <span>Last heartbeat:</span>
                   <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                 </div>`
+              : null}
+            ${keeper.memory_recent_note
+              ? html`
+                <div class="mt-3 py-2 px-3 rounded-lg bg-[rgba(167,139,250,0.06)] border border-[rgba(167,139,250,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+                  ${keeper.memory_recent_note}
+                </div>
+              `
               : null}
           <//>
 
@@ -264,7 +267,7 @@ export function KeeperDetailOverlay() {
             `
             : null}
 
-          <${SectionCard} title="Runtime Signals">
+          <${SectionCard} title="Quality Signals">
             <${RuntimeSignals} keeper=${keeper} />
           <//>
 
@@ -275,31 +278,19 @@ export function KeeperDetailOverlay() {
           <${SectionCard} title="Config">
             <${KeeperConfigPanel} keeperName=${keeper.name} />
           <//>
-
-          <${SectionCard} title="Memory & Context">
-            <div class="flex flex-col gap-2">
-              <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-                <span class="text-xs text-[var(--text-muted)]">Context source</span>
-                <span class="text-xs font-medium text-[var(--text-strong)]">${keeper.context_source ?? keeper.context?.source ?? '-'}</span>
-              </div>
-              <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-                <span class="text-xs text-[var(--text-muted)]">Context tokens</span>
-                <span class="text-xs font-medium text-[var(--text-strong)]">
-                  ${keeper.context_tokens ?? keeper.context?.context_tokens ?? '-'}
-                  /
-                  ${keeper.context_max ?? keeper.context?.context_max ?? '-'}
-                </span>
-              </div>
-              ${keeper.memory_recent_note
-                ? html`
-                  <div class="py-2 px-3 rounded-lg bg-[rgba(167,139,250,0.06)] border border-[rgba(167,139,250,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
-                    ${keeper.memory_recent_note}
-                  </div>
-                `
-                : html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">No recent memory note</div>`}
-            </div>
-          <//>
         </div>
+
+        ${'' /* ── Raw Data (Debug) — collapsed by default ── */}
+        <details class="mt-4">
+          <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
+            Raw Data (Debug)
+          </summary>
+          <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+            <${RawDataDebug} keeper=${keeper} />
+          </div>
+        </details>
+
         </div>
       </div>
     </div>

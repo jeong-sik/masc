@@ -113,21 +113,21 @@ export function SwarmLivePanels() {
         ${swarm?.provider
           ? html`
               <div class="cmd-card rounded-xl-grid">
-                <span>Provider</span><span>${swarm.provider.provider_base_url ?? 'n/a'}</span>
-                <span>Provider Reachable</span><span>${swarm.provider.provider_reachable == null ? 'n/a' : swarm.provider.provider_reachable ? 'yes' : 'no'}</span>
-                <span>Requested Model</span><span>${swarm.provider.provider_model_id ?? 'n/a'}</span>
-                <span>Actual Model</span><span>${swarm.provider.actual_model_id ?? 'n/a'}</span>
-                <span>Slot URL</span><span>${swarm.provider.slot_url ?? 'n/a'}</span>
-                <span>Expected Slots</span><span>${swarm.provider.expected_slots ?? 'n/a'}</span>
-                <span>Actual Slots</span><span>${swarm.provider.actual_slots ?? swarm.provider.total_slots ?? 0}</span>
-                <span>Expected Ctx</span><span>${swarm.provider.expected_ctx ?? 'n/a'}</span>
-                <span>Actual Ctx</span><span>${swarm.provider.actual_ctx ?? swarm.provider.ctx_per_slot ?? 0}</span>
-                <span>Active Now</span><span>${swarm.provider.active_slots_now ?? 0}</span>
-                <span>Peak Active</span><span>${swarm.provider.peak_active_slots ?? 0}</span>
-                <span>Sample Count</span><span>${swarm.provider.sample_count ?? 0}</span>
-                <span>Last Sample</span><span>${swarm.provider.last_sample_at ? relativeTime(swarm.provider.last_sample_at) : 'n/a'}</span>
+                <span>프로바이더</span><span>${swarm.provider.provider_base_url ?? 'n/a'}</span>
+                <span>프로바이더 도달 가능</span><span>${swarm.provider.provider_reachable == null ? 'n/a' : swarm.provider.provider_reachable ? 'yes' : 'no'}</span>
+                <span>요청 모델</span><span>${swarm.provider.provider_model_id ?? 'n/a'}</span>
+                <span>실제 모델</span><span>${swarm.provider.actual_model_id ?? 'n/a'}</span>
+                <span>슬롯 URL</span><span>${swarm.provider.slot_url ?? 'n/a'}</span>
+                <span>예상 슬롯</span><span>${swarm.provider.expected_slots ?? 'n/a'}</span>
+                <span>실제 슬롯</span><span>${swarm.provider.actual_slots ?? swarm.provider.total_slots ?? 0}</span>
+                <span>예상 컨텍스트</span><span>${swarm.provider.expected_ctx ?? 'n/a'}</span>
+                <span>실제 컨텍스트</span><span>${swarm.provider.actual_ctx ?? swarm.provider.ctx_per_slot ?? 0}</span>
+                <span>현재 활성</span><span>${swarm.provider.active_slots_now ?? 0}</span>
+                <span>최대 활성</span><span>${swarm.provider.peak_active_slots ?? 0}</span>
+                <span>샘플 수</span><span>${swarm.provider.sample_count ?? 0}</span>
+                <span>마지막 샘플</span><span>${swarm.provider.last_sample_at ? relativeTime(swarm.provider.last_sample_at) : 'n/a'}</span>
                 <span>런타임 막힘</span><span>${swarm.provider.runtime_blocker ?? 'none'}</span>
-                <span>Doctor Checked</span><span>${swarm.provider.checked_at ? relativeTime(swarm.provider.checked_at) : 'n/a'}</span>
+                <span>닥터 체크</span><span>${swarm.provider.checked_at ? relativeTime(swarm.provider.checked_at) : 'n/a'}</span>
               </div>
               ${swarm.provider.detail
                 ? html`<div class="cmd-card rounded-xl-sub">${swarm.provider.detail}</div>`

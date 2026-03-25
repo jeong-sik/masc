@@ -266,10 +266,10 @@ export function OpsSessionColumn() {
             </div>
             ${selectedSession.linked_autoresearch ? html`
               <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
-                <span>Autoresearch: ${String(selectedSession.linked_autoresearch.status ?? 'unknown')}</span>
-                <span>Loop: ${String(selectedSession.linked_autoresearch.loop_id ?? 'n/a')}</span>
-                <span>Cycle: ${String(selectedSession.linked_autoresearch.current_cycle ?? 0)}</span>
-                <span>Best: ${String(selectedSession.linked_autoresearch.best_score ?? 'n/a')}</span>
+                <span>오토리서치: ${String(selectedSession.linked_autoresearch.status ?? 'unknown')}</span>
+                <span>루프: ${String(selectedSession.linked_autoresearch.loop_id ?? 'n/a')}</span>
+                <span>사이클: ${String(selectedSession.linked_autoresearch.current_cycle ?? 0)}</span>
+                <span>최고 점수: ${String(selectedSession.linked_autoresearch.best_score ?? 'n/a')}</span>
               </div>
               <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                 <span>파일: ${selectedSession.linked_autoresearch.target_file ?? 'n/a'}</span>
@@ -280,13 +280,13 @@ export function OpsSessionColumn() {
                   : null}
               </div>
               ${selectedSession.linked_autoresearch.program_note
-                ? html`<div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">Program note: ${selectedSession.linked_autoresearch.program_note}</div>`
+                ? html`<div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">프로그램 노트: ${selectedSession.linked_autoresearch.program_note}</div>`
                 : null}
               ${selectedSession.linked_autoresearch.queued_hypothesis
-                ? html`<div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">Queued hypothesis: ${selectedSession.linked_autoresearch.queued_hypothesis}</div>`
+                ? html`<div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">대기 가설: ${selectedSession.linked_autoresearch.queued_hypothesis}</div>`
                 : null}
               ${selectedSession.linked_autoresearch.warnings && selectedSession.linked_autoresearch.warnings.length > 0
-                ? html`<div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">Warnings: ${selectedSession.linked_autoresearch.warnings.join(', ')}</div>`
+                ? html`<div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">경고: ${selectedSession.linked_autoresearch.warnings.join(', ')}</div>`
                 : null}
               ${selectedSession.linked_autoresearch.error
                 ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">${selectedSession.linked_autoresearch.error}</div>`

@@ -227,7 +227,7 @@ export function OpsRoomColumn() {
 
         <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
           <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
-            <span>Room</span>
+            <span>룸</span>
             <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
           </div>
           <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
@@ -243,7 +243,7 @@ export function OpsRoomColumn() {
             <strong>${room.paused ? '일시정지' : '진행 중'}</strong>
           </div>
           <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1 ${runtimeJudgeTone(residentRuntime)}">
-            <span>Resident Judge</span>
+            <span>레지던트 판정기</span>
             <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
           </div>
         </div>

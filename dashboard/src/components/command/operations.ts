@@ -335,7 +335,7 @@ export function ChainsSurface() {
     <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
       <section class="${CARD_STANDARD} min-h-[240px]">
         <div class="pb-2 border-b border-[var(--card-border)] mb-3">
-          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Chains</h3>
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">체인</h3>
         </div>
         <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${chainStatusTone(summary?.connection.status)}">
           <div class="flex justify-between gap-3 items-start">

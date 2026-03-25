@@ -9,7 +9,7 @@ let test_operation_defaults_to_coding_task_best_first () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       let operation =
         start_operation_exn config ~actor:"owner"
@@ -32,7 +32,7 @@ let test_generic_alias_normalizes_to_coding_task_and_keeps_artifact_scope () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       let operation =
         start_operation_exn config ~actor:"owner"
@@ -64,7 +64,7 @@ let test_workload_template_defaults_apply_expected_profile_and_stage () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       let coding_op =
         start_operation_exn config ~actor:"owner"
@@ -120,7 +120,7 @@ let test_workload_template_rejects_mismatched_workload_profile () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       match
         Command_plane_v2.start_operation config ~actor:"owner"
@@ -147,7 +147,7 @@ let test_coding_verify_and_review_require_expected_dependencies () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       match
         Command_plane_v2.start_operation config ~actor:"owner"
@@ -223,7 +223,7 @@ let test_intent_create_update_and_operation_inheritance () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       let intent =
         unwrap_ok
@@ -280,7 +280,7 @@ let test_intent_forecast_advances_after_completed_operation () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       let intent =
         unwrap_ok
@@ -321,7 +321,7 @@ let test_intent_state_aggregates_across_parallel_operations () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       let intent =
         unwrap_ok
@@ -369,7 +369,7 @@ let test_intent_forecast_resolves_dependencies_against_all_operations () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       let shared_upstream =
         start_operation_exn config ~actor:"owner"

@@ -110,8 +110,8 @@ let test_run_dashboard_compute_without_pool_uses_isolated_pg_backend () =
           (fun ~config ~sw:_ ->
             match config.Room_utils.backend with
             | Room_utils.PostgresNative readonly_backend ->
-                Backend.PostgresNative.get_pool shared_backend
-                == Backend.PostgresNative.get_pool readonly_backend
+                Backend.Postgres.get_pool shared_backend
+                == Backend.Postgres.get_pool readonly_backend
             | Room_utils.Memory _ | Room_utils.FileSystem _ ->
                 Alcotest.fail "expected postgres backend during readonly compute")
       in

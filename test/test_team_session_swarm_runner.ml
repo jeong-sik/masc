@@ -74,6 +74,9 @@ let make_test_session ?(orchestration_mode = Team_session_types.Auto)
 
 let test_callbacks_all_some () =
   let tmp = Filename.temp_dir "masc-test" "" in
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp in
   let cbs = Team_session_swarm_callbacks.make_callbacks
     ~config ~session_id:"test-123" in
@@ -239,6 +242,9 @@ let test_apply_updates_stopped_at () =
 let test_empty_planned_workers () =
   let session = make_test_session "s-empty" in
   let tmp = Filename.temp_dir "masc-test" "" in
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp in
   let swarm_cfg = Team_session_oas_bridge.session_to_swarm_config
     ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
@@ -251,6 +257,9 @@ let test_auto_mode_produces_decentralized () =
   let session = make_test_session
     ~orchestration_mode:Team_session_types.Auto "s-auto" in
   let tmp = Filename.temp_dir "masc-test" "" in
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp in
   let swarm_cfg = Team_session_oas_bridge.session_to_swarm_config
     ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
@@ -264,6 +273,9 @@ let test_manual_mode_produces_supervisor () =
   let session = make_test_session
     ~orchestration_mode:Team_session_types.Manual "s-manual" in
   let tmp = Filename.temp_dir "masc-test" "" in
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp in
   let swarm_cfg = Team_session_oas_bridge.session_to_swarm_config
     ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))

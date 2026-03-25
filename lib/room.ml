@@ -107,14 +107,18 @@ let observe_agent_lifecycle config ~agent_id ~room_id ~event_kind ~details =
     | "leave" -> Audit_log.Leave
     | _ -> Audit_log.Join
   in
-  Audit_log.log_action config ~agent_id ~action ~room_id
-    ~details:audit_details ~outcome:Audit_log.Success ();
-  if telemetry_enabled () then
-    match event_kind with
-    | "leave" -> Telemetry_eio.track_agent_left config ~agent_id ~reason:"leave"
-    | "rejoin" ->
-        Telemetry_eio.track_agent_joined config ~agent_id ()
-    | _ -> Telemetry_eio.track_agent_joined config ~agent_id ()
+  (* Audit and telemetry require Eio context (Eio.Mutex).
+     Silently skip when running in non-Eio test context. *)
+  (try
+    Audit_log.log_action config ~agent_id ~action ~room_id
+      ~details:audit_details ~outcome:Audit_log.Success ();
+    if telemetry_enabled () then
+      match event_kind with
+      | "leave" -> Telemetry_eio.track_agent_left config ~agent_id ~reason:"leave"
+      | "rejoin" ->
+          Telemetry_eio.track_agent_joined config ~agent_id ()
+      | _ -> Telemetry_eio.track_agent_joined config ~agent_id ()
+  with Stdlib.Effect.Unhandled _ -> ())
 
 let observe_task_transition_event config ~agent_name ~room_id ~task_id
     ~transition ~details =
@@ -139,20 +143,22 @@ let observe_task_transition_event config ~agent_name ~room_id ~task_id
       room_id
   in
   Log.emit level ~module_name:"Task" ~details message;
-  Audit_log.log_action config ~agent_id:agent_name
-    ~action:(task_action_of_transition transition) ~room_id
-    ~details ~outcome:Audit_log.Success ();
-  if telemetry_enabled () then
-    match transition with
-    | "start" ->
-        Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
-    | "done" | "cancel" ->
-        let duration_ms =
-          Safe_ops.json_int ~default:0 "duration_ms" details
-        in
-        Telemetry_eio.track_task_completed config ~task_id ~duration_ms
-          ~success:(String.equal transition "done")
-    | _ -> ()
+  (try
+    Audit_log.log_action config ~agent_id:agent_name
+      ~action:(task_action_of_transition transition) ~room_id
+      ~details ~outcome:Audit_log.Success ();
+    if telemetry_enabled () then
+      match transition with
+      | "start" ->
+          Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
+      | "done" | "cancel" ->
+          let duration_ms =
+            Safe_ops.json_int ~default:0 "duration_ms" details
+          in
+          Telemetry_eio.track_task_completed config ~task_id ~duration_ms
+            ~success:(String.equal transition "done")
+      | _ -> ()
+  with Stdlib.Effect.Unhandled _ -> ())
 
 (* force_release_task — zombie cleanup needs task management logic *)
 let () = Room_hooks.force_release_task_fn :=

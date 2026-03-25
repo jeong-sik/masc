@@ -9,7 +9,7 @@ let test_intent_forecast_blocks_on_active_cross_intent_dependency () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       let shared_upstream =
         start_operation_exn config ~actor:"owner"
@@ -64,7 +64,7 @@ let test_intent_forecast_accepts_checkpointed_cross_intent_dependency () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       let shared_upstream =
         start_operation_exn config ~actor:"owner"
@@ -127,7 +127,7 @@ let test_checkpoint_preserves_terminal_intent_state () =
       let owner = "owner-root-node" in
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
       let intent =
         unwrap_ok

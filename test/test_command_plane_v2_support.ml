@@ -46,6 +46,13 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let with_eio_test base_dir f =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Room.default_config base_dir in
+  f config
+
 let unwrap_ok = function
   | Ok value -> value
   | Error message -> failwith message

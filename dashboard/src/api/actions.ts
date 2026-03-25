@@ -2,7 +2,7 @@ import { get, post, fetchWithTimeout } from './core'
 import { ACTIVITY_TIMEOUT_MS } from '../config/constants'
 import { callMcpTool } from './mcp'
 import { isRecord } from '../components/common/normalize'
-import { asString, asNumber, asInt } from '../components/common/normalize'
+import { asString, asNumber, asInt } from './parse-utils'
 import { toIsoTimestamp, normalizeGovernanceCaseBundle, normalizeGovernanceExecutionOrder } from './board'
 import type {
   GovernanceCaseBundle, GovernanceExecutionOrder, MdalIterationRecord, MdalLoop,

@@ -714,13 +714,6 @@ let json () =
                   ~agent_role:"에이전트가 실험용 visual asset을 구분해 설명한다."
                   ~ecosystem_function:"실험 자산을 sandbox 안에 격리한다."
                   [];
-                panel ~id:"lab.trpg" ~title:"TRPG"
-                  ~purpose:"Provides narrative room state and explicit world control."
-                  ~problem_solved:"Keeps world state, round progression, and intervention coherent without leaking into the main operator IA."
-                  ~when_active:"When a TRPG room is active inside Lab."
-                  ~agent_role:"Agents can act as DM, player, or observer and should know this is an experimental sandbox."
-                  ~ecosystem_function:"Provides a sandboxed narrative coordination environment."
-                  [];
               ];
           ] );
     ]

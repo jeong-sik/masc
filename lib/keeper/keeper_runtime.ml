@@ -143,11 +143,21 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     Called once from start_existing_keepalives after bootstrap. *)
 let supervisor_sweeps : (string, Pulse.t) Hashtbl.t =
   Hashtbl.create 4
+let supervisor_sweeps_mu = Eio.Mutex.create ()
+
+let with_sweeps_ro f =
+  try Eio.Mutex.use_ro supervisor_sweeps_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
+let with_sweeps_rw f =
+  try Eio.Mutex.use_rw ~protect:true supervisor_sweeps_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
 let supervisor_sweep_running base_path =
-  match Hashtbl.find_opt supervisor_sweeps base_path with
-  | Some pulse -> Pulse.is_alive pulse
-  | None -> false
+  with_sweeps_ro (fun () ->
+    match Hashtbl.find_opt supervisor_sweeps base_path with
+    | Some pulse -> Pulse.is_alive pulse
+    | None -> false)
 
 let start_supervisor_sweep ctx =
   let base_path = ctx.config.base_path in
@@ -174,7 +184,8 @@ let start_supervisor_sweep ctx =
       ~lifecycle:Perpetual
       ~consumers:[consumer]
     in
-    Hashtbl.replace supervisor_sweeps base_path p;
+    with_sweeps_rw (fun () ->
+      Hashtbl.replace supervisor_sweeps base_path p);
     Pulse.run ~sw:ctx.sw p;
     Log.Keeper.info "resident supervisor sweep started (interval %.0fs)"
       Env_config.KeeperResidentSupervisor.sweep_interval_sec
@@ -182,6 +193,11 @@ let start_supervisor_sweep ctx =
 
 let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
   Hashtbl.create 4
+let bootstrap_done_mu = Eio.Mutex.create ()
+
+let with_bootstrap_rw f =
+  try Eio.Mutex.use_rw ~protect:true bootstrap_done_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
   if stats.started > 0 || Keeper_registry.count_running () > 0
@@ -189,9 +205,17 @@ let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
 
 let start_existing_keepalives ctx =
   let base_path = ctx.config.base_path in
-  if Hashtbl.mem existing_keepalive_bootstrap_done base_path then ()
+  (* Atomic check-and-set: eliminates TOCTOU race on the gate. *)
+  let should_run =
+    with_bootstrap_rw (fun () ->
+      if Hashtbl.mem existing_keepalive_bootstrap_done base_path then false
+      else begin
+        Hashtbl.replace existing_keepalive_bootstrap_done base_path ();
+        true
+      end)
+  in
+  if not should_run then ()
   else begin
-    Hashtbl.replace existing_keepalive_bootstrap_done base_path ();
     try
       let stats = bootstrap_existing_keepers ctx in
       if keeper_debug then
@@ -201,7 +225,8 @@ let start_existing_keepalives ctx =
       maybe_start_supervisor_sweep ctx stats
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       (* Retry bootstrap on next keeper tool call if this attempt failed. *)
-      Hashtbl.remove existing_keepalive_bootstrap_done base_path;
+      with_bootstrap_rw (fun () ->
+        Hashtbl.remove existing_keepalive_bootstrap_done base_path);
       raise exn
   end
 

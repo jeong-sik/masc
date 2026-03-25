@@ -38,7 +38,7 @@ let default_drift_max_chars = 320
 let canonical_soul_profile raw =
   match String.lowercase_ascii (String.trim raw) with
   | "balanced" | "default" -> Some "balanced"
-  | "safety" | "guardian" -> Some "safety"
+  | "safety" -> Some "safety"
   | "delivery" | "executor" | "execution" -> Some "delivery"
   | "research" | "analyst" -> Some "research"
   | "relationship" | "companion" -> Some "relationship"

@@ -62,6 +62,7 @@ type board_signal_match = {
     Used by both the world observation builder and the deliberation triage
     in keepalive to populate board-related triggers. *)
 val collect_board_events :
+  base_path:string ->
   continuity_summary:string ->
   meta:Keeper_types.keeper_meta ->
   string list * int * int

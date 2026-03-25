@@ -351,7 +351,6 @@ let is_masc_tool_name tool_name =
 let is_protocol_canonical_tool_name tool_name =
   String.starts_with ~prefix:"decision." tool_name
   || String.starts_with ~prefix:"experiment." tool_name
-  || String.starts_with ~prefix:"trpg." tool_name
   || String.starts_with ~prefix:"client." tool_name
 
 (** Check permission for a tool call *)

@@ -48,7 +48,6 @@ let keeper_allowed_skills = [
   "masc-heartbeat";
   "lodge-social";
   "masc-keeper-autonomy";
-  "trpg-roleplay";
 ]
 
 let canonical_keeper_skill_token (raw : string) : string option =
@@ -61,8 +60,6 @@ let canonical_keeper_skill_token (raw : string) : string option =
   | "keeper"
   | "autonomy" ->
       Some "masc-keeper-autonomy"
-  | "trpg-roleplay" | "trpg_roleplay" | "trpg" | "roleplay" | "rp" ->
-      Some "trpg-roleplay"
   | _ -> None
 
 let unique_skills_preserve_order (xs : string list) : string list =

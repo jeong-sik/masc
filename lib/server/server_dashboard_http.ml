@@ -320,6 +320,7 @@ let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_j
 let dashboard_room_truth_http_json ~state ~sw ~clock request =
   with_dashboard_timeout ~clock (fun () ->
   let config = state.Mcp_server.room_config in
+  let started_at = Unix.gettimeofday () in
   let t0 = Time_compat.now () in
   (* Parallel fetch: shell, execution, and command_summary are independent. *)
   let shell_ref = ref (`Assoc []) in
@@ -349,8 +350,7 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
       command_ref := fiber_with_timeout "command"
         (fun () ->
           if Room.is_initialized config then
-            Dashboard_cache.get_or_compute "command_summary" ~ttl:15.0 (fun () ->
-              Server_command_plane_http.command_plane_summary_http_json ~state)
+            Server_command_plane_http.command_plane_summary_http_json ~state
           else `Assoc [])
         (`Assoc []));
   ];
@@ -531,7 +531,16 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
             ("provenance", `String "derived");
           ] );
       ("focus", focus_json);
-    ])
+    ]
+  |> with_projection_diagnostics ~surface:"room_truth" ~started_at
+       ~extra:
+         [
+           ("parallel_ms", `Int (int_of_float parallel_ms));
+           ( "execution_cache_state",
+             match execution_cache_state with
+             | Some value -> `String value
+             | None -> `Null );
+         ])
 
 let dashboard_memory_http_json request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in

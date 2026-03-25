@@ -31,6 +31,8 @@ type registry_entry = {
   mutable last_restart_ts : float;
   mutable crash_log : (float * string) list;
   mutable last_error : string option;
+  mutable last_agent_count : int;
+  board_wakeups : (string, float) Hashtbl.t;
 }
 
 val state_to_string : keeper_state -> string
@@ -98,6 +100,23 @@ val restore_supervisor_state :
   base_path:string -> string ->
   restart_count:int -> last_restart_ts:float ->
   crash_log:(float * string) list -> unit
+
+(** Last known agent count for roster-change detection. Returns 0 if not found. *)
+val get_last_agent_count : base_path:string -> string -> int
+
+(** Update last agent count for a keeper. No-op if not found. *)
+val set_last_agent_count : base_path:string -> string -> int -> unit
+
+(** Check if a board-reactive wakeup is allowed (debounce).
+    Records timestamp if allowed. Returns true for unregistered keepers. *)
+val board_wakeup_allowed :
+  base_path:string -> string -> post_id:string -> debounce_sec:float -> bool
+
+(** Clear all board wakeup timestamps for a keeper. No-op if not found. *)
+val clear_board_wakeups : base_path:string -> string -> unit
+
+(** Reset tracking state (agent count + board wakeups) for a keeper. *)
+val cleanup_tracking : base_path:string -> string -> unit
 
 (** Clear the registry. For testing only. *)
 val clear : unit -> unit

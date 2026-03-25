@@ -544,7 +544,8 @@ type resident_keeper_spec = {
   voice_enabled : bool;
   voice_channel : string;
   voice_agent_id : string;
-  seed_meta : Yojson.Safe.t;
+  persona_name : string;
+  seed_meta : Yojson.Safe.t;  (* legacy: kept for backward-compat reads only *)
   created_at : string;
   updated_at : string;
 }
@@ -566,7 +567,7 @@ let resident_keeper_to_json (spec : resident_keeper_spec) =
       ("voice_enabled", `Bool spec.voice_enabled);
       ("voice_channel", `String spec.voice_channel);
       ("voice_agent_id", `String spec.voice_agent_id);
-      ("seed_meta", spec.seed_meta);
+      ("persona_name", `String spec.persona_name);
       ("created_at", `String spec.created_at);
       ("updated_at", `String spec.updated_at);
     ]
@@ -604,6 +605,15 @@ let resident_keeper_of_json (json : Yojson.Safe.t) :
       | `Assoc _ as value -> value
       | _ -> `Assoc []
     in
+    let persona_name =
+      match json |> member "persona_name" |> to_string_option with
+      | Some pn -> pn
+      | None ->
+        (* Legacy: extract name from seed_meta or fall back to spec name *)
+        (match seed_meta with
+         | `Assoc _ -> Safe_ops.json_string ~default:name "name" seed_meta
+         | _ -> name)
+    in
     let created_at =
       json |> member "created_at" |> to_string_option
       |> Option.value ~default:(now_iso ())
@@ -620,6 +630,7 @@ let resident_keeper_of_json (json : Yojson.Safe.t) :
         voice_enabled;
         voice_channel;
         voice_agent_id;
+        persona_name;
         seed_meta;
         created_at;
         updated_at;
@@ -698,7 +709,8 @@ let register_resident_keeper_from_meta config (meta : keeper_meta) :
       voice_enabled = meta.voice_enabled;
       voice_channel = meta.voice_channel;
       voice_agent_id = meta.voice_agent_id;
-      seed_meta = meta_to_json meta;
+      persona_name = meta.name;
+      seed_meta = `Assoc [];
       created_at;
       updated_at = now_iso ();
     }

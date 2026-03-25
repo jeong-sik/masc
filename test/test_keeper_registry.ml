@@ -230,6 +230,44 @@ let test_spawn_slots () =
   R.clear ();
   check bool "slots available" true (R.spawn_slots_available ())
 
+(* ── Board tracking tests ─────────────────────────────── *)
+
+let test_last_agent_count_default () =
+  R.clear ();
+  check int "0 for unknown" 0 (R.get_last_agent_count ~base_path:bp "none")
+
+let test_last_agent_count_set_get () =
+  R.clear ();
+  ignore (R.register ~base_path:bp "ac1" (make_meta "ac1"));
+  R.set_last_agent_count ~base_path:bp "ac1" 42;
+  check int "set then get" 42 (R.get_last_agent_count ~base_path:bp "ac1")
+
+let test_board_wakeup_debounce () =
+  R.clear ();
+  ignore (R.register ~base_path:bp "bw1" (make_meta "bw1"));
+  let first = R.board_wakeup_allowed ~base_path:bp "bw1" ~post_id:"p1" ~debounce_sec:60.0 in
+  let second = R.board_wakeup_allowed ~base_path:bp "bw1" ~post_id:"p1" ~debounce_sec:60.0 in
+  check bool "first allowed" true first;
+  check bool "second blocked" false second
+
+let test_board_wakeup_different_post () =
+  R.clear ();
+  ignore (R.register ~base_path:bp "bw2" (make_meta "bw2"));
+  let first = R.board_wakeup_allowed ~base_path:bp "bw2" ~post_id:"p1" ~debounce_sec:60.0 in
+  let second = R.board_wakeup_allowed ~base_path:bp "bw2" ~post_id:"p2" ~debounce_sec:60.0 in
+  check bool "p1 allowed" true first;
+  check bool "p2 allowed" true second
+
+let test_cleanup_tracking () =
+  R.clear ();
+  ignore (R.register ~base_path:bp "ct1" (make_meta "ct1"));
+  R.set_last_agent_count ~base_path:bp "ct1" 10;
+  ignore (R.board_wakeup_allowed ~base_path:bp "ct1" ~post_id:"x" ~debounce_sec:60.0);
+  R.cleanup_tracking ~base_path:bp "ct1";
+  check int "agent count reset" 0 (R.get_last_agent_count ~base_path:bp "ct1");
+  let allowed = R.board_wakeup_allowed ~base_path:bp "ct1" ~post_id:"x" ~debounce_sec:60.0 in
+  check bool "wakeup allowed after cleanup" true allowed
+
 let () =
   run "Keeper_registry"
     [
@@ -260,5 +298,13 @@ let () =
           eio_test "fiber_health crashed" test_fiber_health_crashed;
           eio_test "shared refs" test_shared_refs;
           eio_test "spawn slots" test_spawn_slots;
+        ] );
+      ( "board_tracking",
+        [
+          eio_test "last_agent_count default 0" test_last_agent_count_default;
+          eio_test "last_agent_count set/get" test_last_agent_count_set_get;
+          eio_test "board wakeup debounce" test_board_wakeup_debounce;
+          eio_test "board wakeup different post" test_board_wakeup_different_post;
+          eio_test "cleanup_tracking resets" test_cleanup_tracking;
         ] );
     ]

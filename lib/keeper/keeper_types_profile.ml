@@ -208,9 +208,6 @@ type keeper_profile_defaults = {
   needs : string option;
   desires : string option;
   instructions : string option;
-  models : string list;
-  allowed_models : string list;
-  active_model : string option;
   policy_voice_enabled : bool option;
   room_scope : string option;
   scope_kind : string option;
@@ -240,9 +237,6 @@ let empty_keeper_profile_defaults = {
   needs = None;
   desires = None;
   instructions = None;
-  models = [];
-  allowed_models = [];
-  active_model = None;
   policy_voice_enabled = None;
   room_scope = None;
   scope_kind = None;
@@ -333,9 +327,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
          needs = str "needs";
          desires = str "desires";
          instructions = str "instructions";
-         models = strs "models";
-         allowed_models = strs "allowed_models";
-         active_model = str "active_model";
          policy_voice_enabled = bool_ "policy_voice_enabled";
          room_scope =
            str "room_scope"
@@ -429,9 +420,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 needs = Safe_ops.json_string_opt "needs" keeper_json;
                 desires = Safe_ops.json_string_opt "desires" keeper_json;
                 instructions = Safe_ops.json_string_opt "instructions" keeper_json;
-                models = Safe_ops.json_string_list "models" keeper_json;
-                allowed_models = Safe_ops.json_string_list "allowed_models" keeper_json;
-                active_model = Safe_ops.json_string_opt "active_model" keeper_json;
                 policy_voice_enabled =
                   (match Yojson.Safe.Util.member "policy_voice_enabled" keeper_json with
                   | `Bool flag -> Some flag

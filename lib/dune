@@ -129,6 +129,7 @@
    server_mcp_transport_ws
    server_ws_standalone
    server_webrtc_transport
+   server_openai_compat
    web_dashboard
    credits_dashboard
    cp_microarch_summary

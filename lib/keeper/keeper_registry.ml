@@ -29,6 +29,8 @@ type registry_entry = {
   mutable last_restart_ts : float;
   mutable crash_log : (float * string) list;
   mutable last_error : string option;
+  mutable last_agent_count : int;
+  board_wakeups : (string, float) Hashtbl.t;
 }
 
 let state_to_string = function
@@ -70,6 +72,8 @@ let register ~base_path name meta =
       last_restart_ts = 0.0;
       crash_log = [];
       last_error = None;
+      last_agent_count = 0;
+      board_wakeups = Hashtbl.create 8;
     } in
     Hashtbl.replace registry (registry_key ~base_path name) entry;
     entry)
@@ -200,6 +204,44 @@ let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts
         entry.restart_count <- restart_count;
         entry.last_restart_ts <- last_restart_ts;
         entry.crash_log <- crash_log
+    | None -> ())
+
+let get_last_agent_count ~base_path name =
+  with_lock_ro (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | Some entry -> entry.last_agent_count
+    | None -> 0)
+
+let set_last_agent_count ~base_path name count =
+  with_lock_rw (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | Some entry -> entry.last_agent_count <- count
+    | None -> ())
+
+let board_wakeup_allowed ~base_path name ~post_id ~debounce_sec =
+  with_lock_rw (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | None -> true
+    | Some entry ->
+        let now_ts = Time_compat.now () in
+        match Hashtbl.find_opt entry.board_wakeups post_id with
+        | Some last_ts when now_ts -. last_ts < debounce_sec -> false
+        | _ ->
+            Hashtbl.replace entry.board_wakeups post_id now_ts;
+            true)
+
+let clear_board_wakeups ~base_path name =
+  with_lock_rw (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | Some entry -> Hashtbl.reset entry.board_wakeups
+    | None -> ())
+
+let cleanup_tracking ~base_path name =
+  with_lock_rw (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | Some entry ->
+        entry.last_agent_count <- 0;
+        Hashtbl.reset entry.board_wakeups
     | None -> ())
 
 let clear () =

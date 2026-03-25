@@ -59,6 +59,16 @@ let get_tasks_raw_in_room config room_id =
 let safe_yield () =
   try Eio.Fiber.yield () with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
 
+let take_first n xs =
+  if n <= 0 then []
+  else
+    let rec loop acc remaining = function
+      | [] -> List.rev acc
+      | _ when remaining <= 0 -> List.rev acc
+      | x :: rest -> loop (x :: acc) (remaining - 1) rest
+    in
+    loop [] n xs
+
 (** Get raw agent list (for orchestrator) *)
 let get_agents_raw config =
   ensure_initialized config;
@@ -157,14 +167,12 @@ let audit_orphan_tasks config : (Types.task * string) list =
     ) backlog.tasks
 
 let is_agent_active_at_path config path =
-  if not (path_exists config path) then false
-  else
-    try
-      let json = read_json config path in
-      match agent_of_yojson json with
-      | Ok agent -> agent.status <> Inactive
-      | Error _ -> false
-    with Sys_error _ | Yojson.Json_error _ -> false
+  match read_json_opt config path with
+  | None -> false
+  | Some json ->
+      (match agent_of_yojson json with
+       | Ok agent -> agent.status <> Inactive
+       | Error _ -> false)
 
 let is_agent_joined_in_room config ~room_id ~agent_name =
   if not (root_is_initialized config) then false
@@ -201,35 +209,80 @@ let extract_seq_from_filename name =
   | None -> 0
   | Some idx -> Safe_ops.int_of_string_with_default ~default:0 (String.sub name 0 idx)
 
+let message_name_from_key key =
+  match List.rev (String.split_on_char ':' key) with
+  | name :: _ -> name
+  | [] -> key
+
+let collect_recent_messages_from_pg config ~msgs_path ~since_seq ~limit =
+  match config.backend with
+  | PostgresNative backend -> (
+      match key_of_path config msgs_path with
+      | None -> None
+      | Some key_prefix -> (
+          match
+            Backend.PostgresNative.get_all_matching_recent backend
+              ~prefix:(key_prefix ^ ":")
+              ~suffix:".json"
+              ~updated_since:0.0
+              ~limit:(max 64 (limit * 8))
+          with
+          | Ok pairs ->
+              let messages =
+                pairs
+                |> List.filter_map (fun (key, value) ->
+                       let name = message_name_from_key key in
+                       if extract_seq_from_filename name <= since_seq then
+                         None
+                       else
+                         match
+                           Safe_ops.parse_json_safe
+                             ~context:"collect_recent_messages_from_pg" value
+                         with
+                         | Ok json -> (
+                             match message_of_yojson json with
+                             | Ok msg when msg.seq > since_seq -> Some msg
+                             | _ -> None)
+                         | Error _ -> None)
+                |> List.sort (fun a b -> compare b.seq a.seq)
+                |> take_first limit
+              in
+              Some messages
+          | Error _ -> None))
+  | Memory _ | FileSystem _ -> None
+
 (** Read most-recent messages without parsing the entire history directory. *)
 let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
-  let names =
-    Sys.readdir msgs_path
-    |> Array.to_list
-    |> List.filter is_valid_filename
-    |> List.sort (fun a b -> compare (extract_seq_from_filename b) (extract_seq_from_filename a))
-  in
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | name :: rest ->
-        safe_yield ();
-        if extract_seq_from_filename name <= since_seq then List.rev acc
-        else
-          let path = Filename.concat msgs_path name in
-          match read_json config path with
-          | json ->
-              (match message_of_yojson json with
-               | Ok msg when msg.seq > since_seq -> loop (remaining - 1) (msg :: acc) rest
-               | _ -> loop remaining acc rest)
-          | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-          | exception e ->
-              Log.legacy_traceln ~level:Log.Warn ~module_name:"Room"
-                (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
-                   name (Printexc.to_string e));
-              loop remaining acc rest
-  in
-  loop limit [] names
+  match collect_recent_messages_from_pg config ~msgs_path ~since_seq ~limit with
+  | Some rows -> rows
+  | None ->
+      let names =
+        Sys.readdir msgs_path
+        |> Array.to_list
+        |> List.filter is_valid_filename
+        |> List.sort (fun a b -> compare (extract_seq_from_filename b) (extract_seq_from_filename a))
+      in
+      let rec loop remaining acc = function
+        | _ when remaining <= 0 -> List.rev acc
+        | [] -> List.rev acc
+        | name :: rest ->
+            safe_yield ();
+            if extract_seq_from_filename name <= since_seq then List.rev acc
+            else
+              let path = Filename.concat msgs_path name in
+              match read_json config path with
+              | json ->
+                  (match message_of_yojson json with
+                   | Ok msg when msg.seq > since_seq -> loop (remaining - 1) (msg :: acc) rest
+                   | _ -> loop remaining acc rest)
+              | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+              | exception e ->
+                  Log.legacy_traceln ~level:Log.Warn ~module_name:"Room"
+                    (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
+                       name (Printexc.to_string e));
+                  loop remaining acc rest
+      in
+      loop limit [] names
 
 (** Get raw message list (for dashboard) *)
 let get_messages_raw config ~since_seq ~limit =
@@ -314,26 +367,16 @@ let get_messages config ~since_seq ~limit =
   let buf = Buffer.create 256 in
   Buffer.add_string buf "💬 Recent Messages\n";
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-
-  let msgs_path = messages_dir config in
-  if Sys.file_exists msgs_path then begin
-    let files = Sys.readdir msgs_path |> Array.to_list
-      |> List.sort (fun a b -> compare (extract_seq_from_filename b) (extract_seq_from_filename a)) in
-    let count = ref 0 in
-    List.iter (fun name ->
-      if !count < limit then begin
-        let path = Filename.concat msgs_path name in
-        let json = read_json config path in
-        match message_of_yojson json with
-        | Ok msg when msg.seq > since_seq ->
-            let time_part = String.sub msg.timestamp 0 (min 16 (String.length msg.timestamp)) in
-            let time_str = String.map (function 'T' -> ' ' | c -> c) time_part in
-            Buffer.add_string buf (Printf.sprintf "[%s] %s: %s\n" time_str msg.from_agent msg.content);
-            incr count
-        | _ -> ()
-      end
-    ) files
-  end;
+  let messages = get_messages_raw config ~since_seq ~limit in
+  List.iter
+    (fun msg ->
+      let time_part =
+        String.sub msg.timestamp 0 (min 16 (String.length msg.timestamp))
+      in
+      let time_str = String.map (function 'T' -> ' ' | c -> c) time_part in
+      Buffer.add_string buf
+        (Printf.sprintf "[%s] %s: %s\n" time_str msg.from_agent msg.content))
+    messages;
 
   if Buffer.length buf = 73 then (* Only header *)
     Buffer.add_string buf "(no new messages)\n";

@@ -92,10 +92,15 @@ let set_if_not_exists_q =
   "INSERT INTO masc_kv (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING"
 
 let acquire_lock_q =
-  (Caqti_type.(t3 string string int) ->. Caqti_type.unit)
+  (Caqti_type.(t3 string string int) ->? Caqti_type.int)
   "INSERT INTO masc_kv (key, value, expires_at, updated_at) \
    VALUES ($1, $2, NOW() + $3 * INTERVAL '1 second', NOW()) \
-   ON CONFLICT DO NOTHING"
+   ON CONFLICT (key) DO UPDATE SET \
+     value = EXCLUDED.value, \
+     expires_at = EXCLUDED.expires_at, \
+     updated_at = NOW() \
+   WHERE masc_kv.expires_at IS NOT NULL AND masc_kv.expires_at <= NOW() \
+   RETURNING 1"
 
 let release_lock_q =
   (Caqti_type.(t2 string string) ->. Caqti_type.unit)
@@ -105,14 +110,6 @@ let extend_lock_q =
   (Caqti_type.(t3 string int string) ->. Caqti_type.unit)
   "UPDATE masc_kv SET expires_at = NOW() + $2 * INTERVAL '1 second', updated_at = NOW() \
    WHERE key = $1 AND value = $3"
-
-let cleanup_expired_q =
-  (Caqti_type.unit ->. Caqti_type.unit)
-  "DELETE FROM masc_kv WHERE expires_at IS NOT NULL AND expires_at < NOW()"
-
-(* Eio-native timeout for expired lock cleanup: cooperatively cancels
-   when PG is saturated instead of blocking the caller indefinitely *)
-let cleanup_timeout_sec = 2.0
 
 let health_check_q =
   (Caqti_type.unit ->! Caqti_type.int)
@@ -415,38 +412,13 @@ let compare_and_swap t ~key ~expected ~value =
 
 let acquire_lock t ~key ~ttl_seconds ~owner =
   let nkey = namespaced_key t.namespace ("lock:" ^ key) in
-  (* Clean up expired locks with Eio cooperative timeout.
-     If PG is saturated, cleanup times out after 2s instead of blocking. *)
-  (try
-     Eio.Time.with_timeout_exn t.clock cleanup_timeout_sec (fun () ->
-       match Caqti_eio.Pool.use (fun conn ->
-         let module C = (val conn : Caqti_eio.CONNECTION) in
-         C.exec cleanup_expired_q ()
-       ) t.pool with
-       | Ok () -> ()
-       | Error err ->
-           Log.Misc.error "[backend] expired lock cleanup failed: %s"
-             (Caqti_error.show err))
-   with
-   | Eio.Time.Timeout ->
-       Log.Misc.warn "[backend] expired lock cleanup timed out (%.0fs), skipping"
-         cleanup_timeout_sec
-   | exn ->
-       Log.Misc.error "[backend] expired lock cleanup error: %s"
-         (Printexc.to_string exn));
-  (* Try to acquire lock *)
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    let* existing = C.find_opt get_q nkey in
-    match existing with
-    | Some _ -> Ok false  (* Lock held by someone *)
-    | None ->
-        let* () = C.exec acquire_lock_q (nkey, owner, ttl_seconds) in
-        (* Verify we got it *)
-        let* check = C.find_opt get_q nkey in
-        Ok (check = Some owner)
+    let* acquired = C.find_opt acquire_lock_q (nkey, owner, ttl_seconds) in
+    Ok (Option.is_some acquired)
   ) t.pool with
-  | Ok b -> Ok b
+  | Ok true -> Ok true
+  | Ok false -> Ok false
   | Error err -> Error (caqti_error_to_masc err)
 
 let release_lock t ~key ~owner =

@@ -11,9 +11,6 @@ val get_bus : unit -> Agent_sdk.Event_bus.t option
     send heartbeat pings over the gRPC bidirectional stream. *)
 val set_grpc_client : Masc_grpc_client.t -> unit
 
-(** Clean up board-reactive wakeup and agent-count tracking for a keeper. *)
-val cleanup_keeper_tracking : string -> unit
-
 (** Wake up a specific keeper immediately. Used by broadcast notification
     when a @mention targets a running keeper. *)
 val wakeup_keeper : string -> unit

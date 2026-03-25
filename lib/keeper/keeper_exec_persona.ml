@@ -73,12 +73,6 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let errors = ref [] in
   let name = Safe_ops.json_string ~default:"" "name" json in
   let goal = Safe_ops.json_string ~default:"" "goal" json |> String.trim in
-  (* Legacy model fields no longer validated; cascade_name is the authority. *)
-  let _models = Safe_ops.json_string_list "models" json in
-  let _allowed_models = Safe_ops.json_string_list "allowed_models" json in
-  let _active_model =
-    Safe_ops.json_string ~default:"" "active_model" json |> String.trim
-  in
   let _policy_voice_enabled =
     Safe_ops.json_bool ~default:false "policy_voice_enabled" json
   in

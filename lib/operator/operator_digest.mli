@@ -99,6 +99,10 @@ val aggregate_control_domain_counts : Team_session_types.session list -> Yojson.
 val aggregate_tier_counts : Team_session_types.session list -> Yojson.Safe.t
 val aggregate_task_profile_counts : Team_session_types.session list -> Yojson.Safe.t
 val aggregate_escalation_count : Team_session_types.session list -> int
+val aggregate_all_worker_metrics :
+  Team_session_types.session list ->
+  Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t *
+  Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int
 val aggregated_local_runtime_json : Team_session_types.session list -> Yojson.Safe.t
 
 val session_card_to_yojson : actor:string -> session_digest -> Yojson.Safe.t

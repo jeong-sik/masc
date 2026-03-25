@@ -176,7 +176,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
               Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
             in
             let keepalive_running =
-              Keeper_keepalive.keeper_keepalive_running meta.name
+              Keeper_status_bridge.runtime_keepalive_running config meta
             in
             let agent_exists =
               match agent_json |> U.member "exists" with
@@ -185,7 +185,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
             in
             let now_ts = Time_compat.now () in
             let keepalive_started_at =
-              Keeper_keepalive.keeper_keepalive_started_at meta.name
+              Keeper_status_bridge.runtime_keepalive_started_at config meta
             in
             let diagnostic =
               Keeper_exec_status.keeper_diagnostic_json ~meta

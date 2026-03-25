@@ -202,7 +202,7 @@ let make_health_json ?(listener = "http/1.1") request =
       ("live_words", `Int s.live_words);
       ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
     ]);
-    ("keeper_fibers", `Int (Keeper_keepalive.running_keepers ()));
+    ("keeper_fibers", `Int (Keeper_registry.count_running ()));
   ]
 
 (** Health check handler *)

@@ -17,6 +17,12 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
 
+(** Wrap each test body in Eio_main.run for Eio.Mutex support. *)
+let eio_test name fn =
+  test_case name `Quick (fun () -> Eio_main.run @@ fun _env -> fn ())
+
+(* ── Basic registry operations ─────────────────────────── *)
+
 let test_register_and_get () =
   R.clear ();
   let meta = make_meta "k1" in
@@ -79,7 +85,9 @@ let test_record_restart () =
   R.record_restart ~base_path:bp "k5";
   match R.get ~base_path:bp "k5" with
   | None -> fail "expected k5"
-  | Some e -> check int "restart count" 2 e.restart_count
+  | Some e ->
+      check int "restart count" 2 e.restart_count;
+      check bool "last_restart_ts set" true (e.last_restart_ts > 0.0)
 
 let test_record_error () =
   R.clear ();
@@ -104,6 +112,9 @@ let test_noop_on_missing () =
   R.set_state ~base_path:bp "ghost" R.Paused;
   R.record_restart ~base_path:bp "ghost";
   R.record_error ~base_path:bp "ghost" "err";
+  R.record_crash ~base_path:bp "ghost" 0.0 "crash";
+  R.set_grpc_close ~base_path:bp "ghost" None;
+  R.wakeup ~base_path:bp "ghost";
   R.unregister ~base_path:bp "ghost";
   check bool "no crash on missing" true true
 
@@ -117,21 +128,137 @@ let test_register_replaces () =
   | Some e ->
     check int "restart count reset" 0 e.restart_count
 
+(* ── New fields: grpc_close, crash_log, wakeup, fiber_health ── *)
+
+let test_grpc_close () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "g1" (make_meta "g1") in
+  let called = ref false in
+  R.set_grpc_close ~base_path:bp "g1" (Some (fun () -> called := true));
+  (match R.get ~base_path:bp "g1" with
+   | Some e ->
+       (match !(e.grpc_close) with
+        | Some f -> f (); check bool "grpc_close called" true !called
+        | None -> fail "expected grpc_close")
+   | None -> fail "expected g1");
+  R.set_grpc_close ~base_path:bp "g1" None;
+  match R.get ~base_path:bp "g1" with
+  | Some e -> check bool "grpc_close cleared" true (Option.is_none !(e.grpc_close))
+  | None -> fail "expected g1"
+
+let test_crash_log () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "c1" (make_meta "c1") in
+  R.record_crash ~base_path:bp "c1" 1.0 "crash-1";
+  R.record_crash ~base_path:bp "c1" 2.0 "crash-2";
+  R.record_crash ~base_path:bp "c1" 3.0 "crash-3";
+  let log = R.crash_log_of ~base_path:bp "c1" in
+  check int "3 entries" 3 (List.length log);
+  check string "latest first" "crash-3" (snd (List.hd log));
+  R.record_crash ~base_path:bp "c1" 4.0 "crash-4";
+  R.record_crash ~base_path:bp "c1" 5.0 "crash-5";
+  R.record_crash ~base_path:bp "c1" 6.0 "crash-6";
+  let log2 = R.crash_log_of ~base_path:bp "c1" in
+  check int "capped at 5" 5 (List.length log2)
+
+let test_started_at () =
+  R.clear ();
+  check bool "none for missing" true (Option.is_none (R.started_at ~base_path:bp "nope"));
+  let _entry = R.register ~base_path:bp "s1" (make_meta "s1") in
+  check bool "some for existing" true (Option.is_some (R.started_at ~base_path:bp "s1"))
+
+let test_wakeup () =
+  R.clear ();
+  let entry = R.register ~base_path:bp "w1" (make_meta "w1") in
+  check bool "wakeup initially false" false !(entry.fiber_wakeup);
+  R.wakeup ~base_path:bp "w1";
+  check bool "wakeup set" true !(entry.fiber_wakeup)
+
+let test_wakeup_all () =
+  R.clear ();
+  let e1 = R.register ~base_path:bp "wa1" (make_meta "wa1") in
+  let e2 = R.register ~base_path:bp "wa2" (make_meta "wa2") in
+  let e3 = R.register ~base_path:bp "wa3" (make_meta "wa3") in
+  let e4 = R.register ~base_path:bp "wa4" (make_meta "wa4") in
+  R.set_state ~base_path:bp "wa3" R.Stopped;
+  R.set_state ~base_path:bp "wa4" R.Paused;
+  R.wakeup_all ();
+  check bool "wa1 woken" true !(e1.fiber_wakeup);
+  check bool "wa2 woken" true !(e2.fiber_wakeup);
+  check bool "wa3 not woken (stopped)" false !(e3.fiber_wakeup);
+  check bool "wa4 not woken (paused)" false !(e4.fiber_wakeup)
+
+let test_fiber_health_alive () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "fh1" (make_meta "fh1") in
+  match R.fiber_health_of ~base_path:bp "fh1" with
+  | Keeper_types.Fiber_alive -> ()
+  | _ -> fail "expected Fiber_alive"
+
+let test_fiber_health_unknown () =
+  R.clear ();
+  match R.fiber_health_of ~base_path:bp "nonexistent" with
+  | Keeper_types.Fiber_unknown -> ()
+  | _ -> fail "expected Fiber_unknown"
+
+let test_fiber_health_stopped () =
+  R.clear ();
+  let entry = R.register ~base_path:bp "fh2" (make_meta "fh2") in
+  Eio.Promise.resolve entry.done_r `Stopped;
+  match R.fiber_health_of ~base_path:bp "fh2" with
+  | Keeper_types.Fiber_unknown -> ()
+  | _ -> fail "expected Fiber_unknown for stopped"
+
+let test_fiber_health_crashed () =
+  R.clear ();
+  let entry = R.register ~base_path:bp "fh3" (make_meta "fh3") in
+  Eio.Promise.resolve entry.done_r (`Crashed "test crash");
+  match R.fiber_health_of ~base_path:bp "fh3" with
+  | Keeper_types.Fiber_zombie -> ()
+  | _ -> fail "expected Fiber_zombie for crashed"
+
+let test_shared_refs () =
+  R.clear ();
+  let entry = R.register ~base_path:bp "ref1" (make_meta "ref1") in
+  let entry_via_get = R.get_exn ~base_path:bp "ref1" in
+  entry.fiber_wakeup := true;
+  check bool "shared wakeup ref" true !(entry_via_get.fiber_wakeup);
+  entry_via_get.fiber_stop := true;
+  check bool "shared stop ref" true !(entry.fiber_stop)
+
+let test_spawn_slots () =
+  R.clear ();
+  check bool "slots available" true (R.spawn_slots_available ())
+
 let () =
   run "Keeper_registry"
     [
       ( "basic",
         [
-          test_case "register and get" `Quick test_register_and_get;
-          test_case "unregister" `Quick test_unregister;
-          test_case "all" `Quick test_all;
-          test_case "update meta" `Quick test_update_meta;
-          test_case "set state" `Quick test_set_state;
-          test_case "count running" `Quick test_count_running;
-          test_case "record restart" `Quick test_record_restart;
-          test_case "record error" `Quick test_record_error;
-          test_case "get_exn not found" `Quick test_get_exn_not_found;
-          test_case "noop on missing keys" `Quick test_noop_on_missing;
-          test_case "register replaces existing" `Quick test_register_replaces;
+          eio_test "register and get" test_register_and_get;
+          eio_test "unregister" test_unregister;
+          eio_test "all" test_all;
+          eio_test "update meta" test_update_meta;
+          eio_test "set state" test_set_state;
+          eio_test "count running" test_count_running;
+          eio_test "record restart" test_record_restart;
+          eio_test "record error" test_record_error;
+          eio_test "get_exn not found" test_get_exn_not_found;
+          eio_test "noop on missing keys" test_noop_on_missing;
+          eio_test "register replaces existing" test_register_replaces;
+        ] );
+      ( "extended",
+        [
+          eio_test "grpc_close" test_grpc_close;
+          eio_test "crash log" test_crash_log;
+          eio_test "started_at" test_started_at;
+          eio_test "wakeup" test_wakeup;
+          eio_test "wakeup_all" test_wakeup_all;
+          eio_test "fiber_health alive" test_fiber_health_alive;
+          eio_test "fiber_health unknown" test_fiber_health_unknown;
+          eio_test "fiber_health stopped" test_fiber_health_stopped;
+          eio_test "fiber_health crashed" test_fiber_health_crashed;
+          eio_test "shared refs" test_shared_refs;
+          eio_test "spawn slots" test_spawn_slots;
         ] );
     ]

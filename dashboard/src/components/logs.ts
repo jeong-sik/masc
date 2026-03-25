@@ -31,6 +31,7 @@ const SOURCE_LABELS: Record<string, string> = {
   structured: 'structured',
   legacy_stderr: 'legacy stderr',
   legacy_traceln: 'legacy traceln',
+  client_tool_host: 'client tool-host',
   sse: 'sse',
 }
 
@@ -66,8 +67,24 @@ function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? (source || 'structured')
 }
 
+function entryDetails(entry: LogEntry): Record<string, unknown> | null {
+  const details = entry.details
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
+  return details
+}
+
+function detailLabel(details: Record<string, unknown> | null, key: string): string | null {
+  if (!details) return null
+  const value = details[key]
+  if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return null
+}
+
 function sourceTone(source: string): string {
   switch (source) {
+    case 'client_tool_host':
+      return 'text-[#dff3ff] bg-[rgba(71,184,255,0.12)] border-[rgba(71,184,255,0.22)]'
     case 'legacy_stderr':
       return 'text-[#ffb4b4] bg-[rgba(224,80,80,0.12)] border-[rgba(224,80,80,0.18)]'
     case 'legacy_traceln':
@@ -117,6 +134,12 @@ function renderLogRow(entry: LogEntry) {
   const level = normalizedLevel(entry)
   const rawLevelChanged = entry.raw_level && entry.raw_level !== level
   const source = entry.source || 'structured'
+  const details = entryDetails(entry)
+  const clientName = detailLabel(details, 'client_name')
+  const toolName = detailLabel(details, 'tool_name')
+  const phase = detailLabel(details, 'phase')
+  const requestId = detailLabel(details, 'request_id')
+  const sessionId = detailLabel(details, 'session_id')
   const sourceClass = sourceTone(source)
   const backgroundClass =
     level === 'ERROR'
@@ -148,6 +171,21 @@ function renderLogRow(entry: LogEntry) {
           : null}
         ${rawLevelChanged
           ? html`<span class="rounded-full border border-[rgba(255,255,255,0.08)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${entry.raw_level}</span>`
+          : null}
+        ${clientName
+          ? html`<span class="rounded-full border border-[rgba(71,184,255,0.16)] px-2 py-0.5 text-[10px] text-[#dff3ff]">${clientName}</span>`
+          : null}
+        ${toolName
+          ? html`<span class="rounded-full border border-[rgba(255,255,255,0.08)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${toolName}</span>`
+          : null}
+        ${phase
+          ? html`<span class="rounded-full border border-[rgba(255,255,255,0.08)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${phase}</span>`
+          : null}
+        ${requestId
+          ? html`<span class="rounded-full border border-[rgba(255,255,255,0.08)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">req ${requestId}</span>`
+          : null}
+        ${sessionId
+          ? html`<span class="rounded-full border border-[rgba(255,255,255,0.08)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">session ${sessionId}</span>`
           : null}
       </div>
       <div

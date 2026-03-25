@@ -13,6 +13,7 @@ function entry(seq: number, overrides: Partial<LogEntry> = {}): LogEntry {
     legacy_classified: false,
     module: 'Dashboard',
     message: `entry-${seq}`,
+    details: null,
     ...overrides,
   }
 }

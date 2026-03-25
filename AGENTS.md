@@ -104,7 +104,7 @@ let with_lodge_lock f =
 (* Correct: local heartbeat model-pool config *)
 let heartbeat_action_models = [
   "llama:qwen3.5-35b-a3b-ud-q8-xl";
-  "glm:glm-4.7";
+  "glm:auto";
 ]
 ```
 

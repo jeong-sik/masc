@@ -139,7 +139,7 @@ and start_session_custom_exn ctx ~goal ~min_agents ~agents ~operation_id =
       ("min_agents", `Int min_agents);
       ("orchestration_mode", `String "assist");
       ("communication_mode", `String "hybrid");
-      ("model_cascade", `List [ `String "glm:glm-5" ]);
+      ("model_cascade", `List [ `String "glm:auto" ]);
       ("fallback_policy", `String "cascade_then_task");
       ("instruction_profile", `String "strict");
       ("alert_channel", `String "both");

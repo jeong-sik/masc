@@ -407,11 +407,10 @@ let call_named_tool_model (runtime : runtime) ~tool_name ~(args : Yojson.Safe.t)
         | Some value -> Ok ("llama:" ^ value)
         | None -> Provider_adapter.explicit_llama_model_label_result ())
     | "glm" ->
-        let default_model = Printf.sprintf "glm:%s" Env_config.Glm.default_model in
         Ok (match assoc_get_string_opt args "model" with
         | Some value when starts_with ~prefix:"glm:" (String.lowercase_ascii value) -> value
         | Some value -> "glm:" ^ value
-        | None -> default_model)
+        | None -> "glm:auto")
     | _ -> Ok tool_name
   in
   match model_result with

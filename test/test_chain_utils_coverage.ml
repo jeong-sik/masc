@@ -70,7 +70,7 @@ let test_is_complex_prompt () =
   check bool "long" true (Chain_utils.is_complex_prompt long)
 
 let test_is_glm_model () =
-  check bool "glm" true (Chain_utils.is_glm_model "glm:glm-4.7");
+  check bool "glm" true (Chain_utils.is_glm_model "glm:auto");
   check bool "claude" false (Chain_utils.is_glm_model "claude:opus")
 
 let test_string_contains () =

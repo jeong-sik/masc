@@ -98,7 +98,7 @@ let test_scoring_prefers_artifact_local_coding_candidate () =
             "artifact:test/test_command_plane_v2.ml";
             "tool:dune";
             "runtime:local64";
-            "model:glm-4.7-flash";
+            "model:auto";
           ];
         active_operation_cap = 4;
         active_operations = 1;

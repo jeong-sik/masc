@@ -155,10 +155,10 @@ let make_session ?(orchestration_mode = Team_session_types.Auto)
   }
 
 let test_cascade_explicit_model () =
-  let pw = make_pw ~spawn_model:(Some "glm:glm-4.5") () in
+  let pw = make_pw ~spawn_model:(Some "glm:auto") () in
   let c = Team_session_oas_bridge.cascade_of_worker
     ~session_cascade:["llama:qwen3.5"] pw in
-  Alcotest.(check string) "explicit model wins" "glm:glm-4.5" c
+  Alcotest.(check string) "explicit model wins" "glm:auto" c
 
 let test_cascade_session_fallback () =
   let pw = make_pw () in

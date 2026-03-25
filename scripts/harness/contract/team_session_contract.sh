@@ -18,7 +18,7 @@ r2="$(call_tool 4102 "masc_join" "{\"agent_name\":\"$AGENT_NAME\",\"capabilities
 require_ok "$r2"
 
 echo "[3/12] masc_team_session_start (base)"
-start_args_base="$(jq -cn --arg goal "contract-base" --argjson duration "$DURATION_SEC" '{goal:$goal,duration_seconds:$duration,checkpoint_interval_sec:10,min_agents:1,orchestration_mode:"assist",communication_mode:"hybrid",model_cascade:["glm:glm-5"],fallback_policy:"cascade_then_task",instruction_profile:"strict",alert_channel:"both",report_formats:["markdown","json"]}')"
+start_args_base="$(jq -cn --arg goal "contract-base" --argjson duration "$DURATION_SEC" '{goal:$goal,duration_seconds:$duration,checkpoint_interval_sec:10,min_agents:1,orchestration_mode:"assist",communication_mode:"hybrid",model_cascade:["glm:auto"],fallback_policy:"cascade_then_task",instruction_profile:"strict",alert_channel:"both",report_formats:["markdown","json"]}')"
 r3="$(call_tool 4103 "masc_team_session_start" "$start_args_base")"
 require_ok "$r3"
 s1="$(printf "%s" "$r3" | extract_result | jq -r '.session_id // empty')"

@@ -10,7 +10,6 @@ Current SSOTs:
 - Spec suite front door: `docs/spec/SPEC-INDEX.md`
 - Current system overview: `docs/spec/01-system-overview.md`
 - Public MCP surface and grouping: `docs/MCP-SURFACE-AUDIT.md`
-- Canonical public overview: `README.md`
 
 Notes:
 

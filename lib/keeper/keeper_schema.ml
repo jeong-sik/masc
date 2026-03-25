@@ -53,10 +53,6 @@ let resident_schemas : tool_schema list = [
           ("items", `Assoc [("type", `String "string")]);
         ]);
         ("active_model", `Assoc [("type", `String "string")]);
-        ("policy_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "heuristic"; `String "learned_offline_v1"]);
-        ]);
         ("room_scope", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "current"; `String "all"]);
@@ -143,11 +139,6 @@ let resident_schemas : tool_schema list = [
         ("active_model", `Assoc [
           ("type", `String "string");
           ("description", `String "Current persisted model label. Prefer 'default' for adapter-managed selection; explicit-only keepers may still pin a concrete provider:model label.");
-        ]);
-        ("policy_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "heuristic"; `String "learned_offline_v1"; `String "explicit_event_v1"]);
-          ("description", `String "Behavior selection mode persisted on the keeper. explicit_event_v1 disables heuristic routing and uses explicit lifecycle/timer events only.");
         ]);
         ("scope_kind", `Assoc [
           ("type", `String "string");

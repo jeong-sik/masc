@@ -217,7 +217,7 @@ let test_prompt_includes_triage_triggers () =
   let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
   check bool "has triage section" true
     (let found =
-       try ignore (Str.search_forward (Str.regexp_string "Triage Triggers") user 0); true
+       try ignore (Str.search_forward (Str.regexp_string "Action Triggers (triage)") user 0); true
        with Not_found -> false
      in found)
 

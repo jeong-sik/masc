@@ -86,16 +86,34 @@ let initiative_source_defaults_json (defaults : keeper_profile_defaults) :
 let initiative_configured_in_source (defaults : keeper_profile_defaults) =
   initiative_source_defaults_json defaults <> `Null
 
-let initiative_surface_json (defaults : keeper_profile_defaults) =
+let initiative_surface_json ?(meta : keeper_meta option) (defaults : keeper_profile_defaults) =
   let configured_in_source = initiative_configured_in_source defaults in
+  let runtime_enabled = match meta with
+    | Some m -> `Bool m.initiative_enabled
+    | None -> (match defaults.initiative_enabled with
+               | Some v -> `Bool v
+               | None -> `Bool true)
+  in
   `Assoc
     [
-      ("status", `String (unsupported_feature_status configured_in_source));
-      ("enabled", `Null);
-      ("scope", `Null);
-      ("idle_sec", `Null);
-      ("cooldown_sec", `Null);
-      ("context_mode", `Null);
+      ("status", `String "wired");
+      ("enabled", runtime_enabled);
+      ("scope",
+        match defaults.initiative_scope with
+        | Some v -> `String v | None -> `Null);
+      ("idle_sec",
+        match meta with
+        | Some m when m.initiative_idle_sec > 0 -> `Int m.initiative_idle_sec
+        | _ -> (match defaults.initiative_idle_sec with
+                | Some v -> `Int v | None -> `Null));
+      ("cooldown_sec",
+        match meta with
+        | Some m when m.initiative_cooldown_sec > 0 -> `Int m.initiative_cooldown_sec
+        | _ -> (match defaults.initiative_cooldown_sec with
+                | Some v -> `Int v | None -> `Null));
+      ("context_mode",
+        match defaults.initiative_context_mode with
+        | Some v -> `String v | None -> `Null);
       ("configured_in_source", `Bool configured_in_source);
       ("source_defaults", initiative_source_defaults_json defaults);
     ]
@@ -168,14 +186,6 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
   |> add_if "execution.active_model"
        (match defaults.active_model with
         | Some value -> value <> meta.active_model
-        | None -> false)
-  |> add_if "execution.policy_mode"
-       (match defaults.policy_mode with
-        | Some value -> value <> meta.policy_mode
-        | None -> false)
-  |> add_if "execution.policy_shell_mode"
-       (match defaults.policy_shell_mode with
-        | Some value -> value <> meta.policy_shell_mode
         | None -> false)
   |> add_if "coordination.room_scope"
        (match defaults.room_scope with

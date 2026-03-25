@@ -310,6 +310,54 @@ let keeper_tool_policy_json () =
       ("destructive_check_enabled", `Bool gate.destructive_check_enabled);
     ]
 
+let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
+  let status_json =
+    Keeper_exec_status.parse_agent_status ctx.config ~agent_name:meta.agent_name
+  in
+  let status =
+    match U.member "status" status_json with
+    | `String value -> value
+    | _ -> "unknown"
+  in
+  let policy_json =
+    match keeper_tool_policy_json () with
+    | `Assoc fields -> fields
+    | _ -> []
+  in
+  `Assoc
+    ([
+       ("name", `String meta.name);
+       ("runtime_class", `String runtime_class);
+       ("agent_name", `String meta.agent_name);
+       ("status", `String status);
+       ("policy_mode", `String "unified");
+       ("action_budget", `String "conversation");
+       ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
+       ("allowed_models", `List (List.map (fun model -> `String model) meta.allowed_models));
+       ("updated_at", `String meta.updated_at);
+     ]
+    @ policy_json)
+
+let keeper_policies_json ctx =
+  let resident_rows =
+    Keeper_types.resident_keeper_names ctx.config
+    |> List.filter_map (fun name ->
+           match Keeper_types.read_meta ctx.config name with
+           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"resident_keeper" meta)
+           | Ok None | Error _ -> None)
+  in
+  let persistent_rows =
+    Keeper_types.persistent_agent_names ctx.config
+    |> List.filter_map (fun name ->
+           match Keeper_types.read_meta ctx.config name with
+           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"persistent_agent" meta)
+           | Ok None | Error _ -> None)
+  in
+  `Assoc
+    [
+      ("resident_keepers", `List resident_rows);
+      ("persistent_agents", `List persistent_rows);
+    ]
 
 let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
   (* Build reverse index: tool_name -> surface string list.
@@ -439,12 +487,69 @@ let handle_tool_admin_snapshot ctx args =
               ("policy_status", Command_plane_v2.policy_status_json ctx.config);
               ("enforcement_summary", enforcement_summary_json ());
             ] );
+        ("keeper_policies", keeper_policies_json ctx);
         ( "tool_inventory",
           tool_inventory_json ctx ~include_hidden ~include_deprecated );
       ]
   in
   (true, Yojson.Safe.pretty_to_string payload)
 
+let apply_keeper_policy_update config ~runtime_class args =
+  let name = get_string args "name" "" |> String.trim in
+  let action_budget_opt = get_string_opt args "action_budget" |> Option.map String.trim in
+  let membership_ok =
+    match runtime_class with
+    | "resident_keeper" -> List.mem name (Keeper_types.resident_keeper_names config)
+    | "persistent_agent" -> List.mem name (Keeper_types.persistent_agent_names config)
+    | _ -> false
+  in
+  if not (Keeper_types.validate_name name) then
+    Error "invalid keeper name"
+  else if not membership_ok then
+    Error
+      (Printf.sprintf "%s not found in %s set" name runtime_class)
+  else
+    match Keeper_types.read_meta config name with
+    | Error err -> Error err
+    | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
+    | Ok (Some meta) ->
+        let action_budget =
+          match action_budget_opt with
+          | None -> Ok Keeper_contract.Conversation
+          | Some raw -> (
+              match Keeper_contract.parse_policy_action_budget raw with
+              | Some budget -> Ok budget
+              | None -> Error (Printf.sprintf "invalid action_budget: %s" raw))
+        in
+        (match action_budget with
+        | Error err -> Error err
+        | Ok action_budget ->
+                let updated =
+                  {
+                    meta with
+                    policy_mode = "unified";
+                    updated_at = Types.now_iso ();
+                  }
+                in
+                (match Keeper_types.write_meta config updated with
+                | Error err -> Error err
+                | Ok () ->
+                    let policy_json =
+                      match keeper_tool_policy_json () with
+                      | `Assoc fields -> fields
+                      | _ -> []
+                    in
+                    Ok
+                      (`Assoc
+                        ([
+                           ("status", `String "ok");
+                           ("runtime_class", `String runtime_class);
+                           ("name", `String updated.name);
+                           ("policy_mode", `String "unified");
+                           ("action_budget", `String (Keeper_contract.policy_action_budget_to_string action_budget));
+                         ]
+                        @ policy_json)))
+        )
 
 let handle_tool_admin_update ctx args =
   let section =
@@ -551,8 +656,18 @@ let handle_tool_admin_update ctx args =
               ]
           in
           (true, Yojson.Safe.pretty_to_string payload))
+  | "keeper_policy" ->
+      (match apply_keeper_policy_update ctx.config ~runtime_class:"resident_keeper" args with
+      | Ok json ->
+          (true, Yojson.Safe.pretty_to_string (`Assoc [ ("status", `String "ok"); ("section", `String "keeper_policy"); ("result", json) ]))
+      | Error err -> (false, "❌ " ^ err))
+  | "persistent_agent_policy" ->
+      (match apply_keeper_policy_update ctx.config ~runtime_class:"persistent_agent" args with
+      | Ok json ->
+          (true, Yojson.Safe.pretty_to_string (`Assoc [ ("status", `String "ok"); ("section", `String "persistent_agent_policy"); ("result", json) ]))
+      | Error err -> (false, "❌ " ^ err))
   | _ ->
-      (false, "❌ section must be one of: auth | unit_policy")
+      (false, "❌ section must be one of: auth | unit_policy | keeper_policy | persistent_agent_policy")
 
 (* Handlers *)
 

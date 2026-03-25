@@ -265,8 +265,6 @@ let test_keeper_model_set_persists_active_model () =
 
 let make_keeper_exec_meta
     ?(name = "sangsu")
-    ?(policy_mode = "heuristic")
-    ?(policy_shell_mode = "disabled")
     ?(allowed_paths = [])
     () =
   let json =
@@ -275,8 +273,6 @@ let make_keeper_exec_meta
         ("name", `String name);
         ("agent_name", `String name);
         ("trace_id", `String ("trace-" ^ name));
-        ("policy_mode", `String policy_mode);
-        ("policy_shell_mode", `String policy_shell_mode);
         ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
       ]
   in
@@ -335,33 +331,12 @@ let write_jsonl_lines path lines =
 
 let test_keeper_shell_tool_policy_gates () =
   Eio_main.run @@ fun _env ->
-  let heuristic = make_keeper_exec_meta () in
-  let learned_disabled =
-    make_keeper_exec_meta ~name:"learned-disabled"
-      ~policy_mode:"learned_offline_v1" ()
-  in
-  let learned_readonly =
-    make_keeper_exec_meta ~name:"learned-readonly"
-      ~policy_mode:"learned_offline_v1"
-      ~policy_shell_mode:"readonly" ()
-  in
-  let explicit_event =
-    make_keeper_exec_meta ~name:"explicit-event"
-      ~policy_mode:"explicit_event_v1" ()
-  in
-  let deliberation =
-    make_keeper_exec_meta ~name:"deliberation"
-      ~policy_mode:"model_deliberation" ()
-  in
-  check_keeper_shell_tool_presence "heuristic" heuristic
+  (* policy_mode removed: all keepers use unified mode with full tools *)
+  let unified = make_keeper_exec_meta () in
+  let other = make_keeper_exec_meta ~name:"other-keeper" () in
+  check_keeper_shell_tool_presence "unified" unified
     ~expect_bash:true ~expect_shell_readonly:true;
-  check_keeper_shell_tool_presence "learned disabled" learned_disabled
-    ~expect_bash:true ~expect_shell_readonly:true;
-  check_keeper_shell_tool_presence "learned readonly" learned_readonly
-    ~expect_bash:true ~expect_shell_readonly:true;
-  check_keeper_shell_tool_presence "explicit event" explicit_event
-    ~expect_bash:true ~expect_shell_readonly:true;
-  check_keeper_shell_tool_presence "model deliberation" deliberation
+  check_keeper_shell_tool_presence "other" other
     ~expect_bash:true ~expect_shell_readonly:true
 
 let test_keeper_shell_readonly_enforces_allowed_paths () =
@@ -376,8 +351,7 @@ let test_keeper_shell_readonly_enforces_allowed_paths () =
       write_file (Filename.concat base_dir allowed_rel) "keeper-ok\n";
       write_file (Filename.concat base_dir blocked_rel) "should-not-read\n";
       let meta =
-        make_keeper_exec_meta ~policy_mode:"learned_offline_v1"
-          ~policy_shell_mode:"readonly"
+        make_keeper_exec_meta
           ~allowed_paths:[ "allowed" ] ()
       in
       let ctx_work =
@@ -417,26 +391,9 @@ let test_keeper_shell_readonly_enforces_allowed_paths () =
 
 let test_keeper_fs_read_policy_gates () =
   Eio_main.run @@ fun _env ->
-  let heuristic = make_keeper_exec_meta () in
-  let learned_offline =
-    make_keeper_exec_meta ~name:"fs-read-learned"
-      ~policy_mode:"learned_offline_v1" ()
-  in
-  let explicit_event =
-    make_keeper_exec_meta ~name:"fs-read-explicit"
-      ~policy_mode:"explicit_event_v1" ()
-  in
-  let deliberation =
-    make_keeper_exec_meta ~name:"fs-read-deliberation"
-      ~policy_mode:"model_deliberation" ()
-  in
-  check_keeper_exec_tool_presence "heuristic fs_read" heuristic
-    ~tool_name:"keeper_fs_read" ~expect_allowed:true;
-  check_keeper_exec_tool_presence "learned fs_read" learned_offline
-    ~tool_name:"keeper_fs_read" ~expect_allowed:true;
-  check_keeper_exec_tool_presence "explicit event fs_read" explicit_event
-    ~tool_name:"keeper_fs_read" ~expect_allowed:true;
-  check_keeper_exec_tool_presence "model deliberation fs_read" deliberation
+  (* policy_mode removed: all keepers get fs_read *)
+  let unified = make_keeper_exec_meta () in
+  check_keeper_exec_tool_presence "unified fs_read" unified
     ~tool_name:"keeper_fs_read" ~expect_allowed:true
 
 let test_keeper_fs_read_enforces_allowed_paths_and_truncation () =
@@ -523,10 +480,7 @@ let test_keeper_bash_requires_cmd_and_runs () =
         ~cwd_default:(Eio.Stdenv.fs env)
         ~proc_mgr:(Eio.Stdenv.process_mgr env)
         ~clock:(Eio.Stdenv.clock env);
-      let meta =
-        make_keeper_exec_meta ~policy_mode:"learned_offline_v1"
-          ~policy_shell_mode:"coding" ()
-      in
+      let meta = make_keeper_exec_meta () in
       let ctx_work =
         Masc_mcp.Keeper_exec_context.create ~system_prompt:"test"
           ~max_tokens:4000
@@ -581,41 +535,10 @@ let test_keeper_bash_requires_cmd_and_runs () =
 
 let test_keeper_fs_edit_policy_gates () =
   Eio_main.run @@ fun _env ->
-  let heuristic_disabled = make_keeper_exec_meta () in
-  let heuristic_coding =
-    make_keeper_exec_meta ~name:"fs-edit-heuristic"
-      ~policy_shell_mode:"coding" ()
-  in
-  let learned_disabled =
-    make_keeper_exec_meta ~name:"fs-edit-learned-disabled"
-      ~policy_mode:"learned_offline_v1" ()
-  in
-  let learned_coding =
-    make_keeper_exec_meta ~name:"fs-edit-learned-coding"
-      ~policy_mode:"learned_offline_v1"
-      ~policy_shell_mode:"coding" ()
-  in
-  let explicit_event_coding =
-    make_keeper_exec_meta ~name:"fs-edit-explicit"
-      ~policy_mode:"explicit_event_v1"
-      ~policy_shell_mode:"coding" ()
-  in
-  let deliberation_coding =
-    make_keeper_exec_meta ~name:"fs-edit-deliberation"
-      ~policy_mode:"model_deliberation"
-      ~policy_shell_mode:"coding" ()
-  in
-  check_keeper_exec_tool_presence "heuristic fs_edit default" heuristic_disabled
-    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
-  check_keeper_exec_tool_presence "heuristic fs_edit coding" heuristic_coding
-    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
-  check_keeper_exec_tool_presence "learned fs_edit disabled" learned_disabled
-    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
-  check_keeper_exec_tool_presence "learned fs_edit coding" learned_coding
-    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
-  check_keeper_exec_tool_presence "explicit event fs_edit coding" explicit_event_coding
-    ~tool_name:"keeper_fs_edit" ~expect_allowed:false;
-  check_keeper_exec_tool_presence "model deliberation fs_edit coding" deliberation_coding
+  (* policy_mode removed: all keepers use unified mode.
+     fs_edit is not in allowed tools by default *)
+  let unified = make_keeper_exec_meta () in
+  check_keeper_exec_tool_presence "unified fs_edit" unified
     ~tool_name:"keeper_fs_edit" ~expect_allowed:false
 
 let test_keeper_fs_edit_enforces_allowed_paths_and_modes () =
@@ -634,8 +557,7 @@ let test_keeper_fs_edit_enforces_allowed_paths_and_modes () =
       let allowed_path = Filename.concat root_dir allowed_rel in
       let blocked_path = Filename.concat root_dir blocked_rel in
       let meta =
-        make_keeper_exec_meta ~policy_shell_mode:"coding"
-          ~allowed_paths:[ "allowed" ] ()
+        make_keeper_exec_meta ~allowed_paths:[ "allowed" ] ()
       in
       let ctx_work =
         Masc_mcp.Keeper_exec_context.create ~system_prompt:"test"
@@ -1187,9 +1109,8 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
          Test checks whichever mode is active. *)
       let voice_enabled =
         Yojson.Safe.Util.(json |> member "voice_enabled" |> to_bool) in
-      (* canonical_policy_mode maps all modes to "heuristic" since mode
-         categorization was removed — policy_mode is always heuristic *)
-      check string "policy mode" "heuristic"
+      (* policy_mode system removed — always "unified" *)
+      check string "policy mode" "unified"
         Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
       if voice_enabled then begin
         check string "voice channel" "voice_text"
@@ -1448,7 +1369,7 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       let stale_meta =
         {
           meta with
-          policy_mode = "explicit_event_v1";
+          policy_mode = "unified";
           presence_keepalive = true;
           proactive = { meta.proactive with enabled = false };
           usage = { meta.usage with last_turn_ts = 0.0 };

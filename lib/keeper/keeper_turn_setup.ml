@@ -99,12 +99,13 @@ let ensure_keeper_exists
               | model :: _ -> model
               | [] -> "")
     in
-    let policy_mode = "heuristic" in
+    (* Mode categorization removed: always use fixed values. *)
+    let policy_mode = "unified" in
     let policy_voice_enabled =
       profile_defaults.policy_voice_enabled
       |> Option.value ~default:false
     in
-    let policy_shell_mode = canonical_policy_shell_mode "coding" in
+    let policy_shell_mode = "coding" in
     let allowed_paths = [] in
     let room_scope =
       profile_defaults.room_scope |> Option.value ~default:"current"
@@ -218,6 +219,9 @@ let ensure_keeper_exists
       last_autonomous_action_at = "";
       autonomous_action_count = 0;
       last_triage_triggers = "";
+      initiative_enabled = true;
+      initiative_idle_sec = 0;
+      initiative_cooldown_sec = 0;
       active_team_session_id = None;
       last_team_session_started_at = "";
       team_session_start_count_total = 0;

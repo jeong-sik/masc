@@ -571,8 +571,8 @@ let keeper_config_json (config : Room.config) (name : string)
           ("models", `List (List.map (fun s -> `String s) m.models));
           ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
           ("active_model", `String active_model);
-          ("policy_mode", `String m.policy_mode);
-          ("policy_shell_mode", `String m.policy_shell_mode);
+          ("policy_mode", `String "unified");
+          ("policy_shell_mode", `String "coding");
           ("verify", `Bool false);
         ]
       in
@@ -594,7 +594,7 @@ let keeper_config_json (config : Room.config) (name : string)
       in
       let defaults_snapshot = Keeper_types.keeper_default_source_snapshot m.name in
       let drift = drift_surface_json () in
-      let initiative = initiative_surface_json defaults_snapshot.defaults in
+      let initiative = initiative_surface_json ~meta:m defaults_snapshot.defaults in
       let handoff =
         `Assoc [
           ("auto", `Bool m.auto_handoff);

@@ -464,18 +464,15 @@ let handle_keeper_status ctx args : tool_result =
            ]);
            ("drift", drift_surface_json ());
            ("policy", `Assoc [
-             ("mode", `String m.policy_mode);
+             ("mode", `String "unified");
              ("voice_enabled", `Bool m.policy_voice_enabled);
-             ("shell_mode", `String m.policy_shell_mode);
+             ("shell_mode", `String "coding");
              ("allowed_paths", string_list_to_json m.allowed_paths);
            ("allowed_tools", string_list_to_json allowed_tools);
             ("available_internal_tools", string_list_to_json all_internal_tools);
             ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
            ]);
-           ("initiative", initiative_surface_json defaults_snapshot.defaults);
-           ("auto_team_session", auto_team_session_surface_json ());
-           ("auto_team_session_enabled", `Bool false);
-           ("initiative", initiative_surface_json defaults_snapshot.defaults);
+           ("initiative", initiative_surface_json ~meta:m defaults_snapshot.defaults);
            ("auto_team_session", auto_team_session_surface_json ());
            ("auto_team_session_enabled", `Bool false);
            ("active_team_session_id",

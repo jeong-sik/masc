@@ -451,8 +451,6 @@ export interface KeeperConfigExecution {
   models: string[]
   allowed_models: string[]
   active_model: string
-  policy_mode: string
-  policy_shell_mode: string
   verify: boolean
 }
 

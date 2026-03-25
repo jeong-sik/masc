@@ -99,6 +99,9 @@ type keeper_meta = {
   last_autonomous_action_at: string;
   autonomous_action_count: int;
   last_triage_triggers: string;
+  initiative_enabled: bool;
+  initiative_idle_sec: int;
+  initiative_cooldown_sec: int;
   paused: bool;
 }
 
@@ -125,9 +128,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("models", `List (List.map (fun s -> `String s) m.models));
       ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
       ("active_model", `String m.active_model);
-      ("policy_mode", `String m.policy_mode);
+      ("policy_mode", `String "unified");
       ("policy_voice_enabled", `Bool m.policy_voice_enabled);
-      ("policy_shell_mode", `String m.policy_shell_mode);
+      ("policy_shell_mode", `String "coding");
       ("execution_scope", `String m.execution_scope);
       ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
       ("scope_kind", `String m.scope_kind);
@@ -189,6 +192,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("last_autonomous_action_at", `String m.last_autonomous_action_at);
       ("autonomous_action_count", `Int m.autonomous_action_count);
       ("last_triage_triggers", `String m.last_triage_triggers);
+      ("initiative_enabled", `Bool m.initiative_enabled);
+      ("initiative_idle_sec", `Int m.initiative_idle_sec);
+      ("initiative_cooldown_sec", `Int m.initiative_cooldown_sec);
       ("paused", `Bool m.paused);
     ]
 
@@ -243,13 +249,16 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       dedupe_keep_order base
     in
     let active_model = Safe_ops.json_string ~default:"" "active_model" json in
-    let policy_mode = "heuristic" in
+    let policy_mode =
+      ignore (Safe_ops.json_string ~default:"heuristic" "policy_mode" json);
+      "unified"
+    in
     let policy_voice_enabled =
       Safe_ops.json_bool ~default:(default_voice_enabled_for name) "policy_voice_enabled" json
     in
     let policy_shell_mode =
-      Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json
-      |> canonical_policy_shell_mode
+      ignore (Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json);
+      "coding"
     in
     let execution_scope =
       Safe_ops.json_string ~default:default_execution_scope "execution_scope" json
@@ -393,6 +402,15 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let last_triage_triggers =
       Safe_ops.json_string ~default:"" "last_triage_triggers" json
     in
+    let initiative_enabled =
+      Safe_ops.json_bool ~default:true "initiative_enabled" json
+    in
+    let initiative_idle_sec =
+      Safe_ops.json_int ~default:0 "initiative_idle_sec" json
+    in
+    let initiative_cooldown_sec =
+      Safe_ops.json_int ~default:0 "initiative_cooldown_sec" json
+    in
     let paused =
       Safe_ops.json_bool ~default:false "paused" json
     in
@@ -488,6 +506,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           last_autonomous_action_at;
           autonomous_action_count;
           last_triage_triggers;
+          initiative_enabled;
+          initiative_idle_sec;
+          initiative_cooldown_sec;
           paused;
         }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

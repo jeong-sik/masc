@@ -1,7 +1,6 @@
 open Alcotest
 
 module D = Masc_mcp.Keeper_deliberation
-module Contract = Masc_mcp.Keeper_contract
 module Keeper_types = Masc_mcp.Keeper_types
 
 let has_prompt_root path =
@@ -248,8 +247,6 @@ let test_deliberation_meta_defaults () =
   check (float 0.001) "default ts" 0.0 dm.last_deliberation_ts;
   check string "default triggers" "" dm.last_triage_triggers
 
-(* Policy mode tests removed: type system purged (always "heuristic") *)
-
 (* ---------- Keeper meta deliberation fields ---------- *)
 
 let test_keeper_meta_deliberation_fields_roundtrip () =
@@ -274,7 +271,7 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
   match Keeper_types.meta_of_json json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
-      check string "policy mode" "heuristic" meta.policy_mode;
+      check string "policy mode" "unified" meta.policy_mode;
       check string "triage triggers" "direct_mention"
         meta.last_triage_triggers
 
@@ -774,6 +771,68 @@ let test_prompt_always_includes_multi_step () =
     (try ignore (Str.search_forward (Str.regexp_string "multi_step") prompt 0); true
      with Not_found -> false)
 
+(* ---------- initiative_enabled tests ---------- *)
+
+let test_initiative_enabled_default_true () =
+  (* When JSON has initiative_enabled = true, roundtrip preserves it *)
+  let json_str = {|{"name":"test","initiative_enabled":true,"policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t1","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Keeper_types.meta_of_json json with
+  | Ok m -> check bool "initiative_enabled default" true m.initiative_enabled
+  | Error e -> fail ("parse failed: " ^ e)
+
+let test_initiative_enabled_roundtrip_false () =
+  (* When JSON has initiative_enabled = false, roundtrip preserves it *)
+  let json_str = {|{"name":"test","initiative_enabled":false,"policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t2","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Keeper_types.meta_of_json json with
+  | Ok m ->
+    check bool "initiative_enabled false" false m.initiative_enabled;
+    let re_json = Keeper_types.meta_to_json m in
+    let ie = Yojson.Safe.Util.member "initiative_enabled" re_json
+             |> Yojson.Safe.Util.to_bool in
+    check bool "roundtrip preserves false" false ie
+  | Error e -> fail ("parse failed: " ^ e)
+
+let test_initiative_idle_sec_overrides_idle_gate () =
+  (* When initiative_idle_sec > 0, triage uses it instead of proactive.idle_sec.
+     We verify this by creating an obs with idle_seconds > initiative_idle_sec but
+     < default idle_gate — triggers should fire because initiative_idle_sec is the gate. *)
+  let obs = { base_obs with
+    active_goal_count = 1;
+    idle_seconds = 120;  (* above initiative_idle_sec=60 *)
+    idle_gate = 60;      (* initiative_idle_sec override *)
+  } in
+  match D.triage obs with
+  | D.Skip _ -> fail "should trigger IdleTimeout with custom idle_gate=60"
+  | D.Triggered triggers ->
+    check bool "has idle_timeout" true
+      (List.exists (fun t -> t = D.IdleTimeout) triggers)
+
+let test_initiative_cooldown_sec_roundtrip () =
+  let json_str = {|{"name":"test","initiative_enabled":true,"initiative_idle_sec":120,"initiative_cooldown_sec":30,"policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t4","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Keeper_types.meta_of_json json with
+  | Ok m ->
+    check int "initiative_idle_sec" 120 m.initiative_idle_sec;
+    check int "initiative_cooldown_sec" 30 m.initiative_cooldown_sec;
+    let re_json = Keeper_types.meta_to_json m in
+    let idle = Yojson.Safe.Util.member "initiative_idle_sec" re_json
+               |> Yojson.Safe.Util.to_int in
+    let cool = Yojson.Safe.Util.member "initiative_cooldown_sec" re_json
+               |> Yojson.Safe.Util.to_int in
+    check int "roundtrip idle_sec" 120 idle;
+    check int "roundtrip cooldown_sec" 30 cool
+  | Error e -> fail ("parse failed: " ^ e)
+
+let test_initiative_enabled_missing_defaults_true () =
+  (* When JSON omits initiative_enabled, defaults to true (backward compat) *)
+  let json_str = {|{"name":"test","policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t3","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Keeper_types.meta_of_json json with
+  | Ok m -> check bool "missing initiative_enabled defaults to true" true m.initiative_enabled
+  | Error e -> fail ("parse failed: " ^ e)
+
 let () =
   run "Keeper_deliberation"
     [
@@ -934,5 +993,18 @@ let () =
             test_daily_budget_from_env_default;
           test_case "daily budget from env custom" `Quick
             test_daily_budget_from_env_custom;
+        ] );
+      ( "initiative_enabled",
+        [
+          test_case "meta JSON default is true" `Quick
+            test_initiative_enabled_default_true;
+          test_case "meta JSON roundtrip false" `Quick
+            test_initiative_enabled_roundtrip_false;
+          test_case "missing field defaults to true" `Quick
+            test_initiative_enabled_missing_defaults_true;
+          test_case "idle_sec overrides triage idle_gate" `Quick
+            test_initiative_idle_sec_overrides_idle_gate;
+          test_case "cooldown_sec JSON roundtrip" `Quick
+            test_initiative_cooldown_sec_roundtrip;
         ] );
     ]

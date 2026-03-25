@@ -135,11 +135,20 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
        Buffer.add_string ubuf summary;
        Buffer.add_string ubuf "\n"
    | _ -> ());
-  (* Triage triggers *)
+  (* Triage triggers — when present, signal urgency to the model *)
   let tt = String.trim observation.triage_triggers in
   if tt <> "" && not (String.length tt >= 5 && String.sub tt 0 5 = "skip:")
   then (
-    Buffer.add_string ubuf
-      (Printf.sprintf "\n### Triage Triggers\n%s\n" tt));
+    let trigger_list =
+      String.split_on_char ',' tt
+      |> List.map String.trim
+      |> List.filter (fun s -> s <> "")
+    in
+    Buffer.add_string ubuf "\n### Action Triggers (triage)\n";
+    Buffer.add_string ubuf "The following conditions require your attention:\n";
+    List.iter (fun t ->
+      Buffer.add_string ubuf (Printf.sprintf "- %s\n" t)
+    ) trigger_list;
+    Buffer.add_string ubuf "Prioritize responding to these before passive observation.\n");
   let user_message = Buffer.contents ubuf in
   (system_prompt, user_message)

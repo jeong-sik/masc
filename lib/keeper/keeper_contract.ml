@@ -1,5 +1,8 @@
-(** Keeper_contract — typed keeper runtime enums while preserving
-    current JSON and MCP string representations at the boundary. *)
+(** Keeper_contract — typed keeper policy/runtime enums while preserving
+    current JSON and MCP string representations at the boundary.
+
+    policy_mode was removed: all keepers use a unified mode.
+    Fields kept in JSON for backward compatibility. *)
 
 type policy_action_budget =
   | Conversation

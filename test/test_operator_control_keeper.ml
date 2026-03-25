@@ -268,7 +268,7 @@ initiative_post_ttl_hours = 24
         (List.mem "coordination.room_scope" override_fields);
       Alcotest.(check bool) "override field proactive" true
         (List.mem "proactive.enabled" override_fields);
-      Alcotest.(check string) "initiative source-only" "source_only"
+      Alcotest.(check string) "initiative wired" "wired"
         (json |> member "initiative" |> member "status" |> to_string);
       Alcotest.(check bool) "initiative configured in source" true
         (json |> member "initiative" |> member "configured_in_source" |> to_bool);

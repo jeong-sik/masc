@@ -159,11 +159,14 @@ let keeper_list_row_json ~runtime_class ~desired ~resident_registered config
             ("keepalive_running", `Bool keepalive_running);
             ("presence_keepalive", `Bool meta.presence_keepalive);
             ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
+            ("scope_kind", `String meta.scope_kind);
+            ("room_scope", `String meta.room_scope);
             ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-            ("policy_mode", `String meta.policy_mode);
-            ("trigger_mode", `String meta.trigger_mode);
+            ("initiative_enabled", `Bool meta.initiative_enabled);
+            ("initiative_idle_sec", `Int meta.initiative_idle_sec);
+            ("initiative_cooldown_sec", `Int meta.initiative_cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
             ("models", `List (List.map (fun model -> `String model) meta.models));
             ("created_at", `String meta.created_at);

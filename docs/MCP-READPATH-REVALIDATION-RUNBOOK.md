@@ -29,10 +29,11 @@
 - `/api/v1/dashboard/execution`과 `/api/v1/dashboard/transport-health`의 `projection_diagnostics.cache_state`가 `fresh`다.
 - `/health.startup.pending_lazy_tasks`가 빈 배열이다.
 - keeper list `items`에 다음 필드가 존재한다.
-  - `policy_mode`
-  - `trigger_mode`
+  - `scope_kind`
+  - `room_scope`
   - `presence_keepalive`
   - `proactive_enabled`
+  - `initiative_enabled`
 - `keepalive_running=false` 이고 `presence_keepalive=true` 이고 `proactive_enabled=true` 인 keeper는 `diagnostic.quiet_reason="disabled"`로 분류되지 않는다.
 
 ## Output

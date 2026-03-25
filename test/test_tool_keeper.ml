@@ -812,6 +812,8 @@ let test_resident_list_items_expose_runtime_config_summary () =
               ("name", `String "resident-demo");
               ("goal", `String "Stay resident");
               ("models", `List [ `String "custom:test-model" ]);
+              ("room_scope", `String "all");
+              ("scope_kind", `String "global");
               ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool true);
               ("trigger_mode", `String "explicit_only");
@@ -830,14 +832,20 @@ let test_resident_list_items_expose_runtime_config_summary () =
       in
       check string "runtime class" "resident_keeper"
         Yojson.Safe.Util.(row |> member "runtime_class" |> to_string);
-      check string "policy mode" "unified"
-        Yojson.Safe.Util.(row |> member "policy_mode" |> to_string);
-      check string "trigger mode" "explicit_only"
-        Yojson.Safe.Util.(row |> member "trigger_mode" |> to_string);
+      check string "scope kind" "global"
+        Yojson.Safe.Util.(row |> member "scope_kind" |> to_string);
+      check string "room scope" "all"
+        Yojson.Safe.Util.(row |> member "room_scope" |> to_string);
       check bool "presence keepalive true" true
         Yojson.Safe.Util.(row |> member "presence_keepalive" |> to_bool);
       check bool "proactive enabled true" true
-        Yojson.Safe.Util.(row |> member "proactive_enabled" |> to_bool))
+        Yojson.Safe.Util.(row |> member "proactive_enabled" |> to_bool);
+      check bool "initiative enabled true" true
+        Yojson.Safe.Util.(row |> member "initiative_enabled" |> to_bool);
+      check bool "policy mode removed" true
+        Yojson.Safe.Util.(row |> member "policy_mode" = `Null);
+      check bool "trigger mode removed" true
+        Yojson.Safe.Util.(row |> member "trigger_mode" = `Null))
 
 let test_keepalive_gap_reports_not_running_instead_of_disabled () =
   Eio_main.run @@ fun env ->

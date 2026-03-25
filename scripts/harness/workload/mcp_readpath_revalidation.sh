@@ -355,10 +355,11 @@ run_mode() {
       "false"
     else
       ([.items[] |
-        has("policy_mode")
-        and has("trigger_mode")
+        has("scope_kind")
+        and has("room_scope")
         and has("presence_keepalive")
         and has("proactive_enabled")
+        and has("initiative_enabled")
         and (.diagnostic | type == "object")
       ] | all | tostring)
     end

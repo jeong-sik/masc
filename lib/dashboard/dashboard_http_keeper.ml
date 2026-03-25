@@ -400,9 +400,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("primary_model", `String primary_model);
               ("active_model", `String active_model);
               ("next_model_hint", match next_model_hint with Some s -> `String s | None -> `Null);
-              ("policy_mode", `String m.policy_mode);
-              ("policy_shell_mode", `String m.policy_shell_mode);
-              ("trigger_mode", `String m.trigger_mode);
+              ("scope_kind", `String m.scope_kind);
+              ("room_scope", `String m.room_scope);
               ("presence_keepalive", `Bool m.presence_keepalive);
               ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
               ("keepalive_running", `Bool keepalive_running);
@@ -443,6 +442,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
+              ("initiative_enabled", `Bool m.initiative_enabled);
+              ("initiative_idle_sec", `Int m.initiative_idle_sec);
+              ("initiative_cooldown_sec", `Int m.initiative_cooldown_sec);
               ("proactive_count_total", `Int m.proactive.count_total);
               ("autonomous_turn_count", `Int m.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.autonomous_text_turn_count);

@@ -166,6 +166,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    Oas_model_resolve.resolve_primary_max_context cascade_models
                  in
                  let base_dir = session_base_dir ctx.config in
+                 (* Ensure session directory tree for filesystem fallback (issue #3019) *)
+                 Fs_compat.mkdir_p (Filename.concat base_dir meta_current.trace_id);
                  let _session, ctx_opt =
                    load_context_from_checkpoint
                      ~trace_id:meta_current.trace_id

@@ -182,6 +182,7 @@ let resident_keeper_spec name : Lib.Keeper_types.resident_keeper_spec =
   {
     name;
     persistent_name = name;
+    persona_name = name;
     desired = true;
     voice_enabled = false;
     voice_channel = "";

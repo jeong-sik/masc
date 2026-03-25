@@ -107,6 +107,11 @@ let test_key_validation () =
    | Error (Backend.InvalidKey _) -> ()
    | _ -> Alcotest.fail "key starting with colon should fail");
 
+  (* Consecutive colons should fail *)
+  (match Backend.FileSystem.set backend "test::key" "value" with
+   | Error (Backend.InvalidKey _) -> ()
+   | _ -> Alcotest.fail "consecutive colons should fail");
+
   (* Path traversal should fail *)
   (match Backend.FileSystem.set backend "..:..:etc:passwd" "value" with
    | Error (Backend.InvalidKey _) -> ()

@@ -9,6 +9,8 @@ export const DEFAULT_MCP_TIMEOUT_MS = 60_000
 export const ROOM_TRUTH_GET_TIMEOUT_MS = 30_000
 export const KEEPER_MESSAGE_TIMEOUT_MS = 90_000
 export const SOCIAL_SWEEP_TIMEOUT_MS = 45_000
+export const ACTIVITY_TIMEOUT_MS = 10_000
+export const MCP_INITIALIZE_TIMEOUT_MS = 10_000
 
 // --- SSE reconnection ---
 export const RECONNECT_BASE_MS = 1_000

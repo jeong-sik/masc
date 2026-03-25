@@ -904,7 +904,21 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
           json |> member "diagnostic" |> member "quiet_reason" |> to_string);
       check string "continuity state not_running" "not_running"
         Yojson.Safe.Util.(
-          json |> member "diagnostic" |> member "continuity_state" |> to_string))
+          json |> member "diagnostic" |> member "continuity_state" |> to_string);
+      check string "runtime registry state stopped" "stopped"
+        Yojson.Safe.Util.(
+          json |> member "runtime" |> member "registry_state" |> to_string);
+      let ok, _ =
+        dispatch "masc_keeper_down" (`Assoc [ ("name", `String "resident-demo") ])
+      in
+      check bool "keeper down ok" true ok;
+      let entry =
+        match Masc_mcp.Keeper_registry.get ~base_path:config.base_path "resident-demo" with
+        | Some entry -> entry
+        | None -> fail "missing registry entry after keeper_down"
+      in
+      check string "registry state paused" "paused"
+        (Masc_mcp.Keeper_registry.state_to_string entry.state))
 
 let test_resident_keeper_msg_bootstraps_then_requires_message () =
   Eio_main.run @@ fun env ->

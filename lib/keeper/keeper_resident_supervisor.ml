@@ -106,6 +106,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta) entry
       (fun () ->
         Keeper_keepalive.run_heartbeat_loop ~proactive_warmup_sec
           ctx meta entry.stop ~wakeup:entry.wakeup;
+        Keeper_registry.set_state ~base_path:ctx.config.base_path meta.name
+          Keeper_registry.Stopped;
         Eio.Promise.resolve entry.done_r `Stopped;
         publish_lifecycle "stopped" meta.name "normal exit")
       ~finally:(fun () ->
@@ -116,6 +118,9 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta) entry
             let msg = "fiber terminated without resolution" in
             entry.crash_log :=
               keep_last_n 5 (Time_compat.now (), msg) !(entry.crash_log);
+            Keeper_registry.record_error ~base_path:ctx.config.base_path meta.name msg;
+            Keeper_registry.set_state ~base_path:ctx.config.base_path meta.name
+              Keeper_registry.Stopped;
             Eio.Promise.resolve entry.done_r (`Crashed msg);
             publish_lifecycle "crashed" meta.name msg))
 
@@ -149,15 +154,28 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Keeper.error "supervisor room init failed: %s"
          (Printexc.to_string exn));
-    (* Presence sync *)
-    (try
-       let synced = ensure_keeper_room_presence ctx.config meta in
-       ignore (write_meta ctx.config synced)
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Keeper.error "supervisor presence sync failed: %s"
-         (Printexc.to_string exn));
+    let live_meta =
+      try
+        let synced = ensure_keeper_room_presence ctx.config meta in
+        ignore (write_meta ctx.config synced);
+        synced
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        Log.Keeper.error "supervisor presence sync failed: %s"
+          (Printexc.to_string exn);
+        meta
+    in
+    (match Keeper_registry.get ~base_path:ctx.config.base_path live_meta.name with
+     | Some _ ->
+         Keeper_registry.update_meta ~base_path:ctx.config.base_path live_meta.name
+           live_meta;
+         Keeper_registry.set_state ~base_path:ctx.config.base_path live_meta.name
+           Keeper_registry.Running
+     | None ->
+         ignore
+           (Keeper_registry.register ~base_path:ctx.config.base_path live_meta.name
+              live_meta));
     publish_lifecycle "started" meta.name "supervised";
-    launch_supervised_fiber ~proactive_warmup_sec ctx meta entry
+    launch_supervised_fiber ~proactive_warmup_sec ctx live_meta entry
   end
 
 (* ── Sweep and recover ───────────────────────────────────── *)

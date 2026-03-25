@@ -6,7 +6,6 @@ open Keeper_types
 open Keeper_memory
 open Keeper_alerting
 open Keeper_exec_tools
-open Keeper_keepalive
 open Keeper_execution
 open Keeper_exec_status
 open Keeper_exec_status_metrics
@@ -71,7 +70,7 @@ let handle_keeper_status ctx args : tool_result =
                  ("message_count", `Int (List.length c.messages));
                ]
          in
-         let keepalive_running = keeper_keepalive_running m.name in
+         let keepalive_running = runtime_keepalive_running ctx.config m in
          let agent_status = parse_agent_status ctx.config ~agent_name:m.agent_name in
          let now_ts = Time_compat.now () in
          let created_ts =
@@ -310,7 +309,7 @@ let handle_keeper_status ctx args : tool_result =
                 ~desired:(is_resident_keeper ctx.config m.name)
                 ~meta:m
                 ~keepalive_running
-                ~keepalive_started_at:(keeper_keepalive_started_at m.name)
+                ~keepalive_started_at:(runtime_keepalive_started_at ctx.config m)
                 ~now_ts
          in
          let compaction_history_tail =

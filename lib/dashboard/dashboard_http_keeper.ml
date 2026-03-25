@@ -30,7 +30,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
   let series_points = 120 in
   (* Prefer KeeperRegistry (in-memory SSOT) with file fallback for
      keepers not yet started in this server session. *)
-  let registry_entries = Keeper_registry.all () in
+  let registry_entries = Keeper_registry.all ~base_path:config.base_path () in
   let registry_names =
     List.map (fun (e : Keeper_registry.registry_entry) -> e.name) registry_entries
   in
@@ -255,8 +255,11 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | `List xs -> List.length xs
             | _ -> 0
           in
-          let keepalive_running =
-            Keeper_keepalive.keeper_keepalive_running m.name
+          let keepalive_running = runtime_keepalive_running config m in
+          let registry_state =
+            match Keeper_registry.get ~base_path:config.base_path m.name with
+            | Some entry -> Some (Keeper_registry.state_to_string entry.state)
+            | None -> None
           in
 
           let context =
@@ -339,8 +342,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                      ~desired:true
                      ~meta:m
                      ~keepalive_running
-                     ~keepalive_started_at:
-                       (Keeper_keepalive.keeper_keepalive_started_at m.name)
+                     ~keepalive_started_at:(runtime_keepalive_started_at config m)
                      ~now_ts
               in
               let detail_fields =
@@ -365,6 +367,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("runtime_class", `String "resident_keeper");
               ("desired", `Bool true);
               ("resident_registered", `Bool true);
+              ("registry_state",
+                match registry_state with
+                | Some state -> `String state
+                | None -> `Null);
               ("agent_name", `String m.agent_name);
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
               ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));
@@ -640,7 +646,7 @@ let keeper_config_json (config : Room.config) (name : string)
         let diagnostic_for_stage =
           Keeper_exec_status.keeper_diagnostic_json
             ~meta:m ~agent_status
-            ~keepalive_running:(Keeper_keepalive.keeper_keepalive_running m.name)
+            ~keepalive_running:(runtime_keepalive_running config m)
             ~history_items:[] ~now_ts
         in
         let surface =

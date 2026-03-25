@@ -68,7 +68,7 @@ let board_tools : Types.tool_schema list = [
       ("type", `String "object");
       ("properties", `Assoc [
         ("content", `Assoc [("type", `String "string"); ("description", `String "Post content (max 4000 chars)")]);
-        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic hearth name (e.g. trpg, code-review)")]);
+        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic hearth name (e.g. code-review, research)")]);
         ("thread_id", `Assoc [("type", `String "string"); ("description", `String "Linked conversation thread ID (optional)")]);
       ]);
       ("required", `List [`String "content"]);
@@ -80,7 +80,7 @@ let board_tools : Types.tool_schema list = [
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by hearth topic (e.g. trpg)")]);
+        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by hearth topic (e.g. code-review)")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 50)")]);
         ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort: recent (newest), hot (score+recency), updated (most active)")]);
       ]);

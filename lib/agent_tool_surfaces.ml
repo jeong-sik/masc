@@ -86,9 +86,6 @@ let spawned_agent_public_tool_names : string list =
     "masc_run_deliverable";
     "masc_run_get";
     "masc_spawn";
-    (* masc_trpg_dice_roll, masc_trpg_turn_advance, masc_trpg_stream,
-       masc_trpg_round_run removed: legacy aliases deprecated in
-       Tool_protocol_game_view; use canonical trpg.* names instead *)
   ]
 
 let spawned_agent_prefixed_tools : string list =

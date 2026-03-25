@@ -1,7 +1,7 @@
 (** Mitosis_helpers — Context types, constructors, episode/saga management,
     handoff verifier logic, and evidence analysis helpers.
 
-    This module is included by Mitosis_spawn which is included by Tool_mitosis. *)
+    This module is included by Mitosis_spawn. *)
 
 (** Tool handler context - extensible for future features *)
 type any_clock = Clock : _ Eio.Time.clock -> any_clock

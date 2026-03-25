@@ -1,5 +1,5 @@
 // MASC Dashboard — Experimental Surface
-// Keeps TRPG and avatar experiments outside the main operations surface.
+// Keeps experimental features outside the main operations surface.
 
 import { html } from 'htm/preact'
 import { Lab } from './lab'

@@ -290,7 +290,16 @@ let create_eio_readonly ~sw ~env (cfg : config) : (t, error) result =
   | None -> Error (ConnectionFailed "PostgreSQL URL not configured")
   | Some url ->
       let uri = Uri.of_string url in
-      let pool_config = Caqti_pool_config.create ~max_size:1 () in
+      (* Domain-local pools need >1 connection to avoid "Invalid concurrent
+         usage" when multiple Eio fibers within the same executor domain
+         call Pool.use concurrently (e.g. dashboard room-truth parallel
+         fetch).  Use half the main pool size, minimum 3. *)
+      let main_pool_max = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
+        | Some s -> (try max 1 (min (int_of_string s) 50) with _ -> 5)
+        | None -> 5
+      in
+      let max_pool = max 3 (main_pool_max / 2) in
+      let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
       match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
       | Error err -> Error (caqti_error_to_masc err)
       | Ok pool ->

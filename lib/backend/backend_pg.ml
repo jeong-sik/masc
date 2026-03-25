@@ -258,7 +258,7 @@ let create_readonly ~sw ~env ~url ~cluster_name ~node_id =
      usage" when multiple Eio fibers within the same executor domain
      call Pool.use concurrently. Use half the main pool size, minimum 3. *)
   let main_pool_max = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-    | Some s -> (try max 1 (min (int_of_string s) 50) with _ -> 10)
+    | Some s -> (match int_of_string_opt s with Some n -> max 1 (min n 50) | None -> 10)
     | None -> 10
   in
   let max_pool = max 3 (main_pool_max / 2) in

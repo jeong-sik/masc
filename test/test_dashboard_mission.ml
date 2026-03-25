@@ -467,7 +467,7 @@ let test_dashboard_mission_http_full_contract () =
             ~state
             ~sw
             ~clock:(Eio.Stdenv.clock env)
-            (request "/api/v1/dashboard/mission?agent_name=test-dashboard")
+            (request "/api/v1/dashboard/mission?agent_name=test-dashboard-http")
         in
         let open Yojson.Safe.Util in
         check bool "operator targets present in mission http payload" true

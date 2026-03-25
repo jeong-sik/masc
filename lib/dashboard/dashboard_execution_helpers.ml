@@ -319,7 +319,7 @@ let load_persona_profile (persona_name : string) : agent_profile option =
         let traits = match trait with Some t -> [t] | None -> [] in
         Some
           {
-            emoji = "🎭";  (* placeholder — enriched from Neo4j later *)
+            emoji = "🤖";  (* generic default — enriched from Neo4j later *)
             korean_name = name_val;
             model;
             traits;
@@ -428,31 +428,10 @@ let get_agent_profile (name : string) : agent_profile =
   | (Some persona, None) -> persona
   | (None, Some neo4j) -> neo4j
   | (None, None) ->
-      (* Hardcoded fallback *)
-      let contains s sub =
-        let len = String.length s in
-        let sub_len = String.length sub in
-        if sub_len > len then false
-        else
-          let rec loop i =
-            if i + sub_len > len then false
-            else if String.sub s i sub_len = sub then true
-            else loop (i + 1)
-          in
-          loop 0
-      in
-      let normalized = String.lowercase_ascii name in
-      let (emoji, korean_name) =
-        if contains normalized "claude" then ("🧠", "클로드")
-        else if contains normalized "gemini" then ("💎", "제미나이")
-        else if contains normalized "codex" then ("🤖", "코덱스")
-        else if contains normalized "review" then ("🔍", "리뷰어")
-        else if contains normalized "test" then ("🧪", "테스터")
-        else ("🤖", name)
-      in
+      (* Generic fallback — no persona or Neo4j data available *)
       {
-        emoji;
-        korean_name;
+        emoji = "🤖";
+        korean_name = name;
         model = None;
         traits = [];
         interests = [];

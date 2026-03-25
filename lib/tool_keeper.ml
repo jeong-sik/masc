@@ -82,6 +82,45 @@ let keeper_brief_meta_json (meta : keeper_meta) =
       ("updated_at", `String meta.updated_at);
     ]
 
+let keeper_list_skill_route_json config (meta : keeper_meta) =
+  let metrics_store = keeper_metrics_store config meta.name in
+  let metrics_path = keeper_metrics_path config meta.name in
+  let lines =
+    let dated = Dated_jsonl.read_recent_lines metrics_store 50 in
+    if dated <> [] then dated
+    else Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:16_000 ~max_lines:50
+  in
+  let open Yojson.Safe.Util in
+  let rec find_latest = function
+    | [] -> `Null
+    | line :: tl -> (
+        try
+          let json = Yojson.Safe.from_string line in
+          match Safe_ops.json_string_opt "skill_primary" json with
+          | Some primary when String.trim primary <> "" ->
+              let secondary =
+                match json |> member "skill_secondary" with
+                | `List xs ->
+                    xs
+                    |> List.filter_map (function
+                         | `String s when String.trim s <> "" -> Some (`String s)
+                         | _ -> None)
+                | _ -> []
+              in
+              `Assoc
+                [
+                  ("primary", `String primary);
+                  ("secondary", `List secondary);
+                  ( "reason",
+                    match Safe_ops.json_string_opt "skill_reason" json with
+                    | Some value -> `String value
+                    | None -> `Null );
+                ]
+          | _ -> find_latest tl
+        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> find_latest tl)
+  in
+  find_latest (List.rev lines)
+
 let keeper_list_row_json ~runtime_class ~desired ~resident_registered config
     name =
   match read_meta config name with
@@ -125,6 +164,7 @@ let keeper_list_row_json ~runtime_class ~desired ~resident_registered config
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
             ("policy_mode", `String meta.policy_mode);
             ("trigger_mode", `String meta.trigger_mode);
+            ("skill_route", keeper_list_skill_route_json config meta);
             ("models", `List (List.map (fun model -> `String model) meta.models));
             ("created_at", `String meta.created_at);
             ("updated_at", `String meta.updated_at);

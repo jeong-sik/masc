@@ -45,17 +45,17 @@ let git_capture_output ~repo_root args =
       (Array.of_list ("git" :: "-C" :: repo_root :: args))
       (Unix.environment ())
   in
-  Fun.protect
-    ~finally:(fun () ->
-      match Unix.close_process_full channels with
-      | Unix.WEXITED 0 -> ()
-      | _ -> ())
-    (fun () ->
-      let stdout, stdin, stderr = channels in
-      close_out_noerr stdin;
-      let output = In_channel.input_all stdout in
-      ignore (In_channel.input_all stderr);
-      output)
+  let stdout, stdin, stderr = channels in
+  try
+    close_out_noerr stdin;
+    let output = In_channel.input_all stdout in
+    ignore (In_channel.input_all stderr);
+    match Unix.close_process_full channels with
+    | Unix.WEXITED 0 -> Some output
+    | _ -> None
+  with exn ->
+    ignore (try Unix.close_process_full channels with _ -> Unix.WEXITED 1);
+    raise exn
 
 let git_probe_from_root repo_root =
   let f () =
@@ -63,16 +63,16 @@ let git_probe_from_root repo_root =
       try git_capture_output ~repo_root [ "rev-parse"; "--short"; "HEAD" ] with
       | Sys_error msg ->
           Log.Identity.warn "git_probe_from_root read failed: %s" msg;
-          ""
+          None
       | Unix.Unix_error (code, fn, arg) ->
           Log.Identity.warn "git_probe_from_root unix error: %s (%s %s)"
             (Unix.error_message code) fn arg;
-          ""
+          None
       | exn ->
           Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
-          ""
+          None
     in
-    trim_to_option output
+    Option.bind output trim_to_option
   in
   try Eio_unix.run_in_systhread f
   with Stdlib.Effect.Unhandled _ -> f ()

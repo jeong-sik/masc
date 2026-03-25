@@ -159,7 +159,7 @@ module FileSystem = struct
           match Eio.Path.kind ~follow:true path with
           | `Regular_file -> true
           | _ -> false
-        with Eio.Io _ -> false
+        with Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> false
 
   (** Delete key *)
   let delete t key =

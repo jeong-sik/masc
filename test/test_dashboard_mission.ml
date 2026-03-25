@@ -459,8 +459,13 @@ let test_dashboard_mission_http_full_contract () =
       let config = Room_utils.default_config dir in
       let session_id = "ts-mission-http-fixture-001" in
       seed_room config session_id;
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio_main.run @@ fun env ->
+      Eio_guard.enable ();
+      (* Clear stale cache entries from prior tests to avoid cross-test pollution.
+         Both dashboard-level and operator snapshot caches must be invalidated. *)
+      Lib.Dashboard_cache.invalidate_all ();
+      Lib.Operator_control.invalidate_snapshot_cache ();
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_mission_http_json

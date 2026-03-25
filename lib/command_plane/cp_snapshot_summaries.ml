@@ -571,9 +571,10 @@ let recent_operator_trace_events config ?trace_id limit =
   else
     (match trace_id with
      | None ->
-         (* Over-read to compensate for blank/malformed lines lost during filtering *)
+         (* Overfetch 3x to compensate for lines lost to JSON parse
+            failures, blank lines, or filter exclusions (#2945). *)
          read_jsonl_tail_lines (operator_action_log_path config)
-           ~max_lines:(max limit (limit * 2))
+           ~max_lines:(limit * 3)
      | Some _ ->
          Fs_compat.load_file (operator_action_log_path config)
          |> String.split_on_char '\n')

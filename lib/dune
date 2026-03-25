@@ -476,7 +476,6 @@
    keeper_alerting
    keeper_alerting_path
    keeper_exec_tools
-   keeper_exec_tools_recall
    keeper_voice_local
    keeper_exec_status_metrics
    keeper_exec_status
@@ -645,7 +644,6 @@
  env_config_governance
  env_config_keeper
   keeper_exec_tools
-  keeper_exec_tools_recall
   keeper_exec_status_metrics
   keeper_exec_status
   keeper_status_detail

@@ -50,7 +50,7 @@ export function GoalRow({ goal }: { goal: Goal }) {
           <span class="text-[15px] font-bold text-text-strong group-hover:text-accent transition-colors tracking-wide truncate">${goal.title}</span>
         </div>
         <div class="flex gap-3 flex-wrap items-center mt-2.5 text-[11px] font-medium text-text-muted/90">
-          <span class="text-amber-500 tracking-[1px] text-[13px] drop-shadow-sm" title="Priority ${goal.priority}">${priorityStars(goal.priority)}</span>
+          <span class="text-amber-500 tracking-[1px] text-[13px] drop-shadow-sm" title="우선순위 ${goal.priority}">${priorityStars(goal.priority)}</span>
           ${goal.metric ? html`<span class="flex items-center gap-1.5 px-2 py-0.5 bg-accent/10 text-accent rounded-md border border-accent/20"><span class="w-1.5 h-1.5 rounded-full bg-accent/60"></span>${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}</span>` : null}
           ${goal.due_date ? html`<span class="flex items-center gap-1.5 px-2 py-0.5 bg-bad/10 text-bad rounded-md border border-bad/20"><span>마감:</span><${TimeAgo} timestamp=${goal.due_date} /></span>` : null}
         </div>

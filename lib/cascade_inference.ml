@@ -47,12 +47,15 @@ let for_json ~(name : string) (json : Yojson.Safe.t) : t =
   { temperature; max_tokens }
 
 (** Load inference parameters for a named cascade profile.
-    Delegates to OAS Cascade_config.resolve_inference_params. *)
+    Delegates to OAS Cascade_config.resolve_inference_params.
+    Returns [empty] on any error (malformed config, read failure). *)
 let for_cascade ~(name : string) : t =
   match Oas_worker.default_config_path () with
   | None -> empty
   | Some config_path ->
-      of_oas (Llm_provider.Cascade_config.resolve_inference_params ~config_path ~name)
+      (try of_oas (Llm_provider.Cascade_config.resolve_inference_params ~config_path ~name)
+       with Eio.Cancel.Cancelled _ as e -> raise e
+          | _exn -> empty)
 
 (** Resolve a temperature value: cascade config -> fallback. *)
 let resolve_temperature ~(cascade_name : string) ~(fallback : unit -> float) : float =

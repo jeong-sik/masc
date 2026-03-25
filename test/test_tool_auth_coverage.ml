@@ -18,6 +18,7 @@ let test name f =
 
 (* Create test context *)
 let make_test_ctx () =
+  Eio_main.run @@ fun _env ->
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-auth-test-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;

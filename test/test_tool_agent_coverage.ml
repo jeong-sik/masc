@@ -32,6 +32,7 @@ let cleanup_dir dir =
   try rm dir with _ -> ()
 
 let make_ctx () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "test-agent"));

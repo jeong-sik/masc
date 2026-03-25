@@ -40,6 +40,7 @@ let reset_section_cache () =
 let test_basic_snapshot () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Eio_main.run @@ fun _env ->
   reset_section_cache ();
   let config = Room.default_config base in
   let _ = Room.init config ~agent_name:None in
@@ -54,6 +55,7 @@ let test_basic_snapshot () =
 let test_cache_hit_no_change () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Eio_main.run @@ fun _env ->
   reset_section_cache ();
   let config = Room.default_config base in
   let _ = Room.init config ~agent_name:None in
@@ -69,6 +71,7 @@ let test_cache_hit_no_change () =
 let test_partial_invalidation () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Eio_main.run @@ fun _env ->
   reset_section_cache ();
   let config = Room.default_config base in
   let _ = Room.init config ~agent_name:None in
@@ -95,6 +98,7 @@ let test_partial_invalidation () =
 let test_explicit_sessions_bypass () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Eio_main.run @@ fun _env ->
   reset_section_cache ();
   let config = Room.default_config base in
   let _ = Room.init config ~agent_name:None in

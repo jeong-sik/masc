@@ -32,6 +32,7 @@ let test_get_string_base_branch_default () =
    ============================================================ *)
 
 let test_context_creation () =
+  Eio_main.run @@ fun _env ->
   let config = Masc_mcp.Room.default_config "/tmp/test" in
   let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
   check string "agent_name" "test-agent" ctx.agent_name
@@ -41,8 +42,9 @@ let test_context_creation () =
    ============================================================ *)
 
 let make_ctx () : Tool_worktree.context =
+  Eio_main.run @@ fun _env ->
   let config = Masc_mcp.Room.default_config "/tmp/test-worktree" in
-  { config; agent_name = "test-agent" }
+  ({ config; agent_name = "test-agent" } : Tool_worktree.context)
 
 let test_dispatch_worktree_create () =
   let ctx = make_ctx () in

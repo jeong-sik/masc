@@ -52,6 +52,7 @@ let test_get_string_list_mixed () =
    ============================================================ *)
 
 let test_context_creation () =
+  Eio_main.run @@ fun _env ->
   let config = Masc_mcp.Room.default_config "/tmp/test" in
   let ctx : Tool_cache.context = { config } in
   check bool "context created" true (ctx.config.Masc_mcp.Room.base_path = "/tmp/test")
@@ -61,8 +62,9 @@ let test_context_creation () =
    ============================================================ *)
 
 let make_ctx () : Tool_cache.context =
+  Eio_main.run @@ fun _env ->
   let config = Masc_mcp.Room.default_config "/tmp/test-cache" in
-  { config }
+  ({ config } : Tool_cache.context)
 
 let test_dispatch_cache_set () =
   let ctx = make_ctx () in

@@ -19,6 +19,7 @@ let with_temp_masc_dir f =
       (Printf.sprintf "masc-cache-eio-%d-%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000000.)))
   in
   Unix.mkdir base 0o755;
+  Eio_main.run @@ fun _env ->
   let config = Room.default_config base in
   let _ = Room.init config ~agent_name:None in
   try

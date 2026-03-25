@@ -36,6 +36,7 @@ let test_get_string_opt_empty () =
    ============================================================ *)
 
 let test_context_creation () =
+  Eio_main.run @@ fun _env ->
   let config = Masc_mcp.Room.default_config "/tmp/test" in
   let ctx : Tool_run.context = { config } in
   check bool "context created" true (ctx.config.Masc_mcp.Room.base_path = "/tmp/test")
@@ -45,8 +46,9 @@ let test_context_creation () =
    ============================================================ *)
 
 let make_ctx () : Tool_run.context =
+  Eio_main.run @@ fun _env ->
   let config = Masc_mcp.Room.default_config "/tmp/test-run" in
-  { config }
+  ({ config } : Tool_run.context)
 
 let test_dispatch_run_init () =
   let ctx = make_ctx () in

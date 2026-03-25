@@ -17,11 +17,11 @@ let test name f =
 
 (* Create test context - initialize room to avoid "not initialized" error *)
 let make_test_ctx () =
+  Eio_main.run @@ fun _env ->
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-hat-test-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
-  (* Initialize the room to avoid "MASC not initialized" error *)
   let _ = Room.init config ~agent_name:None in
   { Tool_hat.config; agent_name = "test-agent" }
 

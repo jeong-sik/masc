@@ -88,6 +88,7 @@ let rec rm_rf path =
 let with_test_room f =
   let dir = make_test_dir () in
   Unix.mkdir dir 0o755;
+  Eio_main.run @@ fun _env ->
   let config = Room.default_config dir in
   let _ = Room.init config ~agent_name:(Some "test-agent") in
   Fun.protect

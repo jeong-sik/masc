@@ -48,6 +48,7 @@ let test_get_bool_missing () =
    ============================================================ *)
 
 let test_context_creation () =
+  Eio_main.run @@ fun _env ->
   let config = Masc_mcp.Room.default_config "/tmp/test" in
   let ctx : Tool_a2a.context = { config; agent_name = "test-agent" } in
   check string "agent_name" "test-agent" ctx.agent_name
@@ -57,8 +58,9 @@ let test_context_creation () =
    ============================================================ *)
 
 let make_ctx () : Tool_a2a.context =
+  Eio_main.run @@ fun _env ->
   let config = Masc_mcp.Room.default_config "/tmp/test-a2a" in
-  { config; agent_name = "test-agent" }
+  ({ config; agent_name = "test-agent" } : Tool_a2a.context)
 
 let test_dispatch_a2a_discover () =
   let ctx = make_ctx () in

@@ -74,6 +74,7 @@ let test_checkpoint_of_invalid_json () =
 let test_load_latest_checkpoint_empty () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Room.default_config base in
       let sid = "test-sess-empty" in
       Team_session_store.ensure_session_dirs config sid;
@@ -84,6 +85,7 @@ let test_load_latest_checkpoint_empty () =
 let test_load_latest_checkpoint_returns_latest () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Room.default_config base in
       let sid = "test-sess-ckpt" in
       Team_session_store.ensure_session_dirs config sid;
@@ -127,6 +129,7 @@ let test_event_entry_of_invalid_json () =
 let test_read_recent_events_empty () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Room.default_config base in
       let sid = "test-sess-no-events" in
       Team_session_store.ensure_session_dirs config sid;
@@ -138,6 +141,7 @@ let test_read_recent_events_empty () =
 let test_read_recent_events_capped () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Room.default_config base in
       let sid = "test-sess-events" in
       Team_session_store.ensure_session_dirs config sid;
@@ -210,6 +214,7 @@ let sample_session config ~session_id ~started_at ~updated_at_iso =
 let test_list_sessions_uses_recency_order_for_limit () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Room.default_config base in
       ignore (Room.init config ~agent_name:(Some "tester"));
       let sessions =
@@ -231,6 +236,7 @@ let test_list_sessions_uses_recency_order_for_limit () =
 let test_list_sessions_records_fallback_diagnostics () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Room.default_config base in
       ignore (Room.init config ~agent_name:(Some "tester"));
       Team_session_store.save_session config
@@ -252,6 +258,7 @@ let test_list_sessions_records_fallback_diagnostics () =
 let test_list_sessions_named_scope_uses_scoped_prefix () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Room.with_scope (Room.default_config base) (Room.Named "alpha-room") in
       Team_session_store.save_session config
         (sample_session config ~session_id:"sess-room" ~started_at:10.0
@@ -273,6 +280,7 @@ let test_list_sessions_memory_backend_uses_project_prefix () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
       with_storage_type "memory" (fun () ->
+          Eio_main.run @@ fun _env ->
           let config = Room.default_config base in
           Team_session_store.save_session config
             (sample_session config ~session_id:"sess-memory" ~started_at:10.0

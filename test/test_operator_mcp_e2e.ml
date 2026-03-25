@@ -415,6 +415,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let base_path = Filename.temp_file "operator-mcp-base-" "" in
   (try Sys.remove base_path with _ -> ());
   Unix.mkdir base_path 0o755;
+  Eio_main.run @@ fun _env ->
   let config = Masc_mcp.Room.default_config base_path in
   ignore (Masc_mcp.Room.init config ~agent_name:(Some "supervisor-root"));
   let supervisor_nickname =

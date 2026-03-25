@@ -172,8 +172,44 @@ let test_dashboard_shell_current_room_status () =
       let status = json |> member "status" in
       check string "shell room follows current room" "focus-room"
         (status |> member "room" |> to_string);
-        check string "shell current_room exposed" "focus-room"
-          (status |> member "current_room" |> to_string))
+      check string "shell current_room exposed" "focus-room"
+        (status |> member "current_room" |> to_string);
+      check string "shell diagnostics surface" "shell"
+        (json |> member "projection_diagnostics" |> member "surface" |> to_string))
+
+let resident_keeper_spec name : Lib.Keeper_types.resident_keeper_spec =
+  let now = "2026-03-25T08:05:54Z" in
+  {
+    name;
+    persistent_name = name;
+    desired = true;
+    voice_enabled = false;
+    voice_channel = "";
+    voice_agent_id = "";
+    seed_meta = `Assoc [];
+    created_at = now;
+    updated_at = now;
+  }
+
+let test_dashboard_shell_counts_resident_keepers () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      let config = Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:None);
+      ignore
+        (Lib.Keeper_types.write_resident_keeper config
+           (resident_keeper_spec "keeper-alpha"));
+      ignore
+        (Lib.Keeper_types.write_resident_keeper config
+           (resident_keeper_spec "keeper-beta"));
+      let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
+      let open Yojson.Safe.Util in
+      let counts = json |> member "counts" in
+      check int "shell keeper count from resident specs" 2
+        (counts |> member "keepers" |> to_int))
 
 let test_dashboard_execution_fresh_join_not_marked_stale () =
   let dir = test_dir () in
@@ -211,12 +247,14 @@ let () =
     [
       ( "read_model",
         [
-          Alcotest.test_case "fixture mode" `Quick test_dashboard_execution_fixture;
+          Alcotest.test_case "fixture response" `Quick test_dashboard_execution_fixture;
           Alcotest.test_case "live empty room is safe" `Quick test_dashboard_execution_live_empty_room;
           Alcotest.test_case "current room drives status" `Quick
             test_dashboard_execution_current_room_status;
           Alcotest.test_case "shell follows current room" `Quick
             test_dashboard_shell_current_room_status;
+          Alcotest.test_case "shell counts resident keepers cheaply" `Quick
+            test_dashboard_shell_counts_resident_keepers;
           Alcotest.test_case "fresh join is not stale" `Quick
             test_dashboard_execution_fresh_join_not_marked_stale;
         ] );

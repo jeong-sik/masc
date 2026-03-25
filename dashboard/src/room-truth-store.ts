@@ -10,11 +10,14 @@ import type {
 } from './types'
 import { asBoolean, asNumber, asString, asStringArray, isRecord, extractArray } from './components/common/normalize'
 import {
+  mergeServerStatus,
+  normalizeBuildIdentity,
   normalizeExecutionSummary,
   normalizeExecutionQueueItem,
   normalizeAttentionItem,
   normalizeRecommendedAction,
 } from './store-normalizers'
+import { serverStatus } from './store'
 
 export const roomTruth = signal<DashboardRoomTruthResponse | null>(null)
 export const roomTruthLoading = signal(false)
@@ -34,6 +37,7 @@ function normalizeServerStatus(raw: unknown): ServerStatus | null {
     paused: asBoolean(raw.paused),
     version: asString(raw.version),
     generated_at: asString(raw.generated_at),
+    build: normalizeBuildIdentity(raw.build),
     tempo_interval_s: asNumber(raw.tempo_interval_s),
   }
 }
@@ -181,7 +185,12 @@ export async function refreshRoomTruth(opts?: { force?: boolean }): Promise<void
         return
       }
       roomTruthInitializing.value = false
-      roomTruth.value = normalizeRoomTruth(raw)
+      const normalized = normalizeRoomTruth(raw)
+      roomTruth.value = normalized
+      serverStatus.value = mergeServerStatus(
+        serverStatus.value,
+        normalized.room.status ?? null,
+      )
       lastRoomTruthRefreshAt = Date.now()
     } catch (err) {
       const detail = err instanceof Error ? err.message : 'Failed to load room truth'

@@ -22,14 +22,7 @@ let tokens_per_sec_json ~tokens ~latency_ms =
   if tokens <= 0 || latency_ms <= 0 then `Null
   else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
 
-let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
-  let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
-  let history_fragment_filter_enabled =
-    bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
-  in
-  let series_points = 120 in
-  (* Prefer KeeperRegistry (in-memory SSOT) with file fallback for
-     keepers not yet started in this server session. *)
+let resident_keeper_registry_entries_and_names (config : Room.config) =
   let registry_entries = Keeper_registry.all ~base_path:config.base_path () in
   let registry_names =
     List.map (fun (e : Keeper_registry.registry_entry) -> e.name) registry_entries
@@ -39,7 +32,23 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
       (fun n -> not (List.mem n registry_names))
       (Keeper_types.resident_keeper_names config)
   in
-  let names = registry_names @ file_only_names in
+  (registry_entries, registry_names @ file_only_names)
+
+let resident_keeper_count (config : Room.config) : int =
+  let _, names = resident_keeper_registry_entries_and_names config in
+  List.length names
+
+let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
+  let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
+  let history_fragment_filter_enabled =
+    bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
+  in
+  let series_points = 120 in
+  (* Prefer KeeperRegistry (in-memory SSOT) with file fallback for
+     keepers not yet started in this server session. *)
+  let registry_entries, names =
+    resident_keeper_registry_entries_and_names config
+  in
   let registry_meta_of name =
     List.find_opt
       (fun (e : Keeper_registry.registry_entry) -> e.name = name)

@@ -101,9 +101,10 @@ module FileSystem = struct
         let path_part = String.map (function ':' -> '/' | c -> c) safe_key in
         Ok Eio.Path.(t.fs / path_part)
 
+  (** Run a blocking file operation in a system thread.
+      FileSystem backend requires Eio context — no fallback. *)
   let run_blocking_file_op f =
-    try Eio_unix.run_in_systhread f
-    with Stdlib.Effect.Unhandled _ -> f ()
+    Eio_unix.run_in_systhread f
 
   let with_locked_rw_fd path_str f =
     run_blocking_file_op (fun () ->

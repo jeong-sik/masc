@@ -372,6 +372,12 @@ jobs:
         env:
           OCAMLPARAM: "_,warn-error=+a"
 
+      - name: Check gRPC proto descriptor drift
+        run: |
+          sudo apt-get install -y -qq protobuf-compiler
+          chmod +x scripts/gen-grpc-descriptors.sh
+          scripts/gen-grpc-descriptors.sh --check
+
   docs:
     name: Documentation
     runs-on: ubuntu-latest

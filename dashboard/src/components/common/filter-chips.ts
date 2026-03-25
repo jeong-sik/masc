@@ -19,6 +19,7 @@ interface FilterChipsProps<T extends string> {
   onChange?: (key: T) => void
   class?: string
   size?: 'sm' | 'md'
+  tone?: 'gold' | 'accent'
 }
 
 export function FilterChips<T extends string>({
@@ -28,11 +29,18 @@ export function FilterChips<T extends string>({
   onChange,
   class: cx,
   size = 'sm',
+  tone = 'gold',
 }: FilterChipsProps<T>) {
   const activeKey = active?.value ?? value
   const chipClass = size === 'md'
     ? 'inline-flex min-h-9 items-center gap-1.5 rounded-2xl border px-3 py-2 text-[11px] font-medium'
     : 'inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[length:var(--fs-xs)]'
+  const activeToneClass = tone === 'accent'
+    ? 'border-[rgba(71,184,255,0.45)] bg-[var(--accent-soft)] text-[#d9f2ff]'
+    : 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
+  const idleToneClass = tone === 'accent'
+    ? 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(71,184,255,0.35)] hover:text-[var(--text-body)]'
+    : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'
 
   return html`
     <div class="flex flex-wrap gap-1.5 ${cx ?? ''}">
@@ -42,8 +50,8 @@ export function FilterChips<T extends string>({
           title=${chip.title}
           aria-pressed=${activeKey === chip.key}
           class="${chipClass} cursor-pointer transition-all duration-150 ${activeKey === chip.key
-            ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
-            : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'}"
+            ? activeToneClass
+            : idleToneClass}"
           onClick=${() => {
             if (active) active.value = chip.key
             onChange?.(chip.key)

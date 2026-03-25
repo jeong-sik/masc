@@ -354,6 +354,9 @@ export function TransportHealthPanel() {
   }
 
   if (!data) return null
+  if (!data.summary || !data.agent_health) {
+    return html`<div class="p-6 text-center text-text-muted text-sm">Transport data incomplete. <button class="underline" onClick=${() => void refreshTransportHealth()}>retry</button></div>`
+  }
 
   const sseStatus = queuePressureTone(data.summary.queue_pressure)
   const grpcStatus = grpcTone(data)

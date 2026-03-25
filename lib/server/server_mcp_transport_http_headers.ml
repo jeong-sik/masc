@@ -202,3 +202,34 @@ let respond_mcp_internal_error ?(extra_headers = []) ~(deps : deps) request reqd
   in
   let response = Httpun.Response.create ~headers `Internal_server_error in
   Httpun.Reqd.respond_with_string reqd response body
+
+let respond_not_ready ~(deps : deps) request reqd =
+  let origin = deps.get_origin request in
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("error",
+           `Assoc
+             [
+               ("code", `Int (-32002));
+               ("message", `String "Server is starting up, not ready yet");
+             ]);
+          ("id", `Null);
+        ])
+  in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("content-type", "application/json");
+        ("content-length", string_of_int (String.length body));
+        ("retry-after", "2");
+      ]
+    |> (fun h ->
+      List.fold_left
+        (fun acc (k, v) -> Httpun.Headers.add acc k v)
+        h (deps.cors_headers origin))
+  in
+  let response = Httpun.Response.create ~headers `Service_unavailable in
+  Httpun.Reqd.respond_with_string reqd response body

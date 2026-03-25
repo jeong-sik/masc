@@ -64,7 +64,7 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
       </div>
       <div class="flex flex-col gap-1.5 mt-2 text-[0.82rem]">
         <div class="flex items-center gap-1.5 text-[var(--text-dim,var(--white-55))]">
-          <span class="shrink-0 w-14 text-[11px] uppercase tracking-[0.04em] opacity-60">Step</span>
+          <span class="shrink-0 w-14 text-[11px] uppercase tracking-[0.04em] opacity-60">단계</span>
           <span>${lane.current_step}</span>
         </div>
         ${totalWorkers > 0
@@ -233,7 +233,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
   return html`
     <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-4 rounded-xl cmd-guide-card ${toneClass(tone)}">
       <div class="flex justify-between gap-3 items-start">
-        <strong>Run Resolution</strong>
+        <strong>실행 판정</strong>
         <${StatusChip} label=${runResolutionLabel(resolution?.status ?? recommendation?.recommended_kind ?? null)} tone=${toneClass(tone)} />
       </div>
       <p>
@@ -242,10 +242,10 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
           : recommendation?.reason ?? '이 run에 대한 별도 resolution recommendation은 아직 없습니다.'}
       </p>
       <div class="cmd-card rounded-xl-grid">
-        <span>Run</span><span>${runId}</span>
-        <span>Provenance</span><span><${ProvenanceChip} item=${{ kind: recommendation?.provenance ?? 'recorded' }} /></span>
-        <span>Engine</span><span>${recommendation?.decision_engine ?? 'operator_record'}</span>
-        <span>Authoritative</span><span>${recommendation?.authoritative ? 'yes' : 'no'}</span>
+        <span>실행</span><span>${runId}</span>
+        <span>출처</span><span><${ProvenanceChip} item=${{ kind: recommendation?.provenance ?? 'recorded' }} /></span>
+        <span>엔진</span><span>${recommendation?.decision_engine ?? 'operator_record'}</span>
+        <span>권위적</span><span>${recommendation?.authoritative ? 'yes' : 'no'}</span>
       </div>
       ${recommendation?.evidence
         ? html`

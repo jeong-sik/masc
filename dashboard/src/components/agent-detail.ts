@@ -142,17 +142,17 @@ export function AgentDetailOverlay() {
             </div>
             <div class="mt-2 flex gap-3 flex-wrap text-text-muted text-[13px] font-medium">
               ${agent?.current_task || missionBrief?.current_work
-                ? html`<span class="bg-card/40 px-3 py-1.5 rounded-lg border border-card-border shadow-sm">Task: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
+                ? html`<span class="bg-card/40 px-3 py-1.5 rounded-lg border border-card-border shadow-sm">태스크: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
                 : null}
-              ${lastSeenAt ? html`<span class="bg-card/40 px-3 py-1.5 rounded-lg border border-card-border shadow-sm">Last seen: <span class="text-text-strong"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
+              ${lastSeenAt ? html`<span class="bg-card/40 px-3 py-1.5 rounded-lg border border-card-border shadow-sm">마지막 확인: <span class="text-text-strong"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
             </div>
             ${keeper || continuitySummary || missionBrief?.related_session_id
               ? html`
                   <div class="mt-1 flex gap-3 flex-wrap text-text-muted text-[13px] font-medium">
                     ${keeper
-                      ? html`<span class="flex items-center gap-1.5">Linked keeper: <strong class="text-text-strong">${keeper.name}</strong>${keeperIdentity ? html`<span class="text-text-dim text-xs">· ${keeperIdentity}</span>` : ''}</span>`
+                      ? html`<span class="flex items-center gap-1.5">연결된 키퍼: <strong class="text-text-strong">${keeper.name}</strong>${keeperIdentity ? html`<span class="text-text-dim text-xs">· ${keeperIdentity}</span>` : ''}</span>`
                       : null}
-                    ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">Session: <strong class="font-mono text-text-strong text-xs bg-white/5 px-1.5 rounded">${missionBrief.related_session_id}</strong></span>` : null}
+                    ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-white/5 px-1.5 rounded">${missionBrief.related_session_id}</strong></span>` : null}
                     ${continuitySummary ? html`<span class="text-accent/90 bg-accent/10 px-2 py-0.5 rounded-md border border-accent/10">${continuitySummary}</span>` : null}
                   </div>
                 `

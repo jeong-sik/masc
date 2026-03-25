@@ -355,7 +355,7 @@ export function TransportHealthPanel() {
 
   if (!data) return null
   if (!data.summary || !data.agent_health) {
-    return html`<div class="p-6 text-center text-text-muted text-sm">Transport data incomplete. <button class="underline" onClick=${() => void refreshTransportHealth()}>retry</button></div>`
+    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 데이터 불완전. <button class="underline" onClick=${() => void refreshTransportHealth()}>재시도</button></div>`
   }
 
   const sseStatus = queuePressureTone(data.summary.queue_pressure)
@@ -370,7 +370,7 @@ export function TransportHealthPanel() {
       <div class="flex items-start justify-between gap-4">
         <div>
           <div class="flex items-center gap-2">
-            <span class="text-base text-text-strong">Transport</span>
+            <span class="text-base text-text-strong">트랜스포트</span>
             <span class="text-[10px] uppercase tracking-wider text-text-muted">${data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default' ? `${data.cluster.cluster} / ` : ''}${data.cluster.room_id}</span>
           </div>
           <div class="mt-1 text-sm text-text-body">

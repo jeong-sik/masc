@@ -138,7 +138,7 @@ function statusColor(status: string): string {
 }
 
 function decisionLabel(decision: string): string {
-  return decision === 'keep' ? 'Keep' : 'Discard'
+  return decision === 'keep' ? '유지' : '삭제'
 }
 
 function formatElapsed(seconds: number): string {
@@ -249,7 +249,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           </div>
         </div>
         <div>
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1">Keep / Discard</div>
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1">유지 / 삭제</div>
           <div class="flex items-center gap-2">
             <span class="text-green-400 text-sm font-mono font-semibold">${loop.total_keeps}</span>
             <span class="text-[var(--text-muted)] text-xs">/</span>

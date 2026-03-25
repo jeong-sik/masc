@@ -45,7 +45,7 @@ export function ActivityStream() {
   return html`
     <div class="grid gap-3 grid-rows-[auto_auto_1fr] min-h-0">
       <div class="activity-stream-head">
-        <h3 class="m-0 text-[0.95rem] font-semibold">Activity Stream</h3>
+        <h3 class="m-0 text-[0.95rem] font-semibold">활동 스트림</h3>
         <span class="text-xs text-[rgba(255,255,255,0.4)]">${entries.length} events</span>
       </div>
       <${FilterBar} />

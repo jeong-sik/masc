@@ -343,7 +343,7 @@ let test_snapshot_keeper_tool_audit_fallback () =
         (keeper |> member "diagnostic" <> `Null);
       Alcotest.(check string) "diagnostic health offline" "offline"
         (keeper |> member "diagnostic" |> member "health_state" |> to_string);
-      Alcotest.(check string) "diagnostic continuity offline" "offline"
+      Alcotest.(check string) "diagnostic continuity disabled" "disabled"
         (keeper |> member "diagnostic" |> member "continuity_state" |> to_string))
 
 let test_keeper_msg_auto_team_session_bridge () =

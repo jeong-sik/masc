@@ -39,6 +39,16 @@ let _execution_cache =
         ("message", `String "Execution data is being computed. Refresh in a few seconds.");
       ])
 
+let _transport_health_cache =
+  create_cached_surface
+    (`Assoc
+      [
+        ("status", `String "initializing");
+        ("generated_at", `String (Types.now_iso ()));
+        ( "message",
+          `String "Transport health data is warming up. Refresh in a few seconds." );
+      ])
+
 (** Start the proactive execution refresh loop.  When an Executor_pool
     is available, each refresh runs in a pool domain with a domain-local
     Caqti pool (the main domain's Caqti pool is domain-bound due to
@@ -76,6 +86,30 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
               with timeout_s = execution_refresh_timeout_s }
     ~compute
     ~on_result:(mark_cached_surface_success _execution_cache)
+
+let start_transport_health_refresh_loop ~state ~sw ~clock =
+  let timeout_s =
+    float_of_env_default "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
+      ~default:8.0 ~min_v:3.0 ~max_v:30.0
+  in
+  let compute () =
+    mark_cached_surface_attempt _transport_health_cache;
+    try
+      Transport_metrics.transport_health_json
+        ~config:state.Mcp_server.room_config
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        mark_cached_surface_error _transport_health_cache exn;
+        raise exn
+  in
+  Proactive_refresh.start ~sw ~clock
+    ~config:
+      { (Proactive_refresh.default_config
+           ~label:"transport_health" ~interval_s:15.0)
+        with timeout_s }
+    ~compute
+    ~on_result:(mark_cached_surface_success _transport_health_cache)
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let fixture = query_param request "fixture" in
@@ -118,10 +152,8 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
       ~clock ~timeout_sec:120.0 (compute ?actor ?fixture ~light)
 
-let dashboard_transport_health_http_json ~state =
-  Dashboard_cache.get_or_compute "transport_health" ~ttl:10.0 (fun () ->
-    Transport_metrics.transport_health_json
-      ~config:state.Mcp_server.room_config)
+let dashboard_transport_health_http_json ~state:_ =
+  cached_surface_json _transport_health_cache
 
 let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =

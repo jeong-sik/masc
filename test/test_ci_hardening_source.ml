@@ -406,9 +406,9 @@ let test_dashboard_timeout_guard_contracts () =
   check bool "h2 transport health route uses transport metrics" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        "Transport_metrics.transport_health_json");
-  check bool "server dashboard transport health helper uses dashboard cache" true
+  check bool "server dashboard transport health helper uses cached surface" true
     (file_contains_pattern "lib/server/server_dashboard_http.ml"
-       {|Dashboard_cache.get_or_compute "transport_health" ~ttl:10.0|});
+       {|cached_surface_json _transport_health_cache|});
   check bool "mission refresh dedupes inflight fetches" true
     (file_contains_pattern "dashboard/src/mission-actions.ts"
        "let inflightMissionSnapshotRefresh: Promise<void> | null = null");

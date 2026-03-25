@@ -227,8 +227,16 @@ let bootstrap_done_mu = Eio.Mutex.create ()
 
 let with_bootstrap_rw f = Eio_guard.with_mutex bootstrap_done_mu f
 
+let has_desired_resident_keepers config =
+  list_resident_keepers config
+  |> List.exists (fun (spec : resident_keeper_spec) -> spec.desired)
+
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
-  if stats.enabled then start_supervisor_sweep ctx
+  if stats.enabled
+     && (stats.started > 0
+         || Keeper_registry.count_running ~base_path:ctx.config.base_path () > 0
+         || has_desired_resident_keepers ctx.config)
+  then start_supervisor_sweep ctx
 
 let start_existing_keepalives ctx =
   let base_path = ctx.config.base_path in

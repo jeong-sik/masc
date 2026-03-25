@@ -285,6 +285,8 @@ let with_admin_auth handler request reqd =
 (** Public read access - no auth required (dashboard, health) *)
 let is_public_read_path path =
   String.equal path "/health"
+  || String.equal path "/health/live"
+  || String.equal path "/health/ready"
   || String.equal path "/"
   || String.equal path "/dashboard"
   || String.equal path "/dashboard/"

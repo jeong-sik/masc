@@ -237,6 +237,60 @@ let test_startup_state_json () =
   Alcotest.(check string) "last error recorded" "keeper failed"
     (json_string_field "last_error" json)
 
+let test_startup_state_liveness () =
+  Server_startup_state.reset ~backend_mode:"unknown" ();
+  Alcotest.(check bool) "is_live returns true even during init" true
+    (Server_startup_state.is_live ());
+  Alcotest.(check bool) "elapsed_since_start is non-negative" true
+    (Server_startup_state.elapsed_since_start () >= 0.0)
+
+let test_startup_state_readiness_before_init () =
+  Server_startup_state.reset ~backend_mode:"postgres-native" ();
+  let current = Server_startup_state.(!state) in
+  Alcotest.(check bool) "not ready before init" false current.state_ready;
+  Alcotest.(check string) "phase is blocking" "blocking"
+    (Server_startup_state.phase_to_string current.phase)
+
+let test_startup_state_readiness_after_init () =
+  Server_startup_state.reset ~backend_mode:"filesystem" ();
+  Server_startup_state.mark_state_ready ~backend_mode:"filesystem";
+  let current = Server_startup_state.(!state) in
+  Alcotest.(check bool) "ready after init" true current.state_ready;
+  Alcotest.(check string) "phase is ready" "ready"
+    (Server_startup_state.phase_to_string current.phase)
+
+let test_watchdog_timeout_env () =
+  with_env "MASC_STARTUP_WATCHDOG_SEC" (Some "90") (fun () ->
+      Alcotest.(check (float 0.1)) "reads env" 90.0
+        (Server_startup_state.watchdog_timeout_sec ()));
+  with_env "MASC_STARTUP_WATCHDOG_SEC" (Some "10") (fun () ->
+      Alcotest.(check (float 0.1)) "clamps to 30 min" 30.0
+        (Server_startup_state.watchdog_timeout_sec ()));
+  with_env "MASC_STARTUP_WATCHDOG_SEC" (Some "999") (fun () ->
+      Alcotest.(check (float 0.1)) "clamps to 600 max" 600.0
+        (Server_startup_state.watchdog_timeout_sec ()));
+  with_env "MASC_STARTUP_WATCHDOG_SEC" None (fun () ->
+      Alcotest.(check (float 0.1)) "default 120" 120.0
+        (Server_startup_state.watchdog_timeout_sec ()))
+
+let test_startup_state_json_includes_watchdog () =
+  Server_startup_state.reset ~backend_mode:"filesystem" ();
+  let json = Server_startup_state.to_yojson () in
+  let elapsed =
+    match Yojson.Safe.Util.member "elapsed_sec" json with
+    | `Float v -> v
+    | _ -> Alcotest.failf "elapsed_sec missing or not float"
+  in
+  Alcotest.(check bool) "elapsed_sec present and non-negative" true
+    (elapsed >= 0.0);
+  let watchdog =
+    match Yojson.Safe.Util.member "watchdog_timeout_sec" json with
+    | `Float v -> v
+    | _ -> Alcotest.failf "watchdog_timeout_sec missing or not float"
+  in
+  Alcotest.(check bool) "watchdog_timeout_sec is positive" true
+    (watchdog > 0.0)
+
 let test_prompt_markdown_dir_falls_back_to_repo_root () =
   with_temp_dir "startup-prompts" (fun dir ->
       let expected =
@@ -322,6 +376,16 @@ let () =
             test_keeper_paths_use_cluster_root;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
+          Alcotest.test_case "liveness probe is always true" `Quick
+            test_startup_state_liveness;
+          Alcotest.test_case "readiness false before init" `Quick
+            test_startup_state_readiness_before_init;
+          Alcotest.test_case "readiness true after init" `Quick
+            test_startup_state_readiness_after_init;
+          Alcotest.test_case "watchdog timeout env parsing" `Quick
+            test_watchdog_timeout_env;
+          Alcotest.test_case "startup json includes watchdog fields" `Quick
+            test_startup_state_json_includes_watchdog;
           Alcotest.test_case "prompt markdown dir falls back to repo root"
             `Quick test_prompt_markdown_dir_falls_back_to_repo_root;
           Alcotest.test_case "main_eio serves health before lazy startup"

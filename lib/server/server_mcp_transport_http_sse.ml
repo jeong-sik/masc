@@ -154,7 +154,10 @@ let send_raw info data =
       Sse.touch info.session_id;
       true
     with
-    | Eio.Cancel.Cancelled _ as e -> raise e
+    | Eio.Cancel.Cancelled _ as e ->
+      (try close_sse_conn info
+       with Eio.Cancel.Cancelled _ | Sys_error _ -> ());
+      raise e
     | exn ->
       Log.Misc.debug "SSE send_raw failed: %s" (Printexc.to_string exn);
       close_sse_conn info;

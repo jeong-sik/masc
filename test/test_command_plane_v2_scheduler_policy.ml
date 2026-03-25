@@ -10,7 +10,7 @@ let test_platoon_assignment_expands_detachments_and_tick_runs () =
       let alpha_lead = "alpha-lead-node" in
       let alpha_two = "alpha-two-node" in
       let beta_lead = "beta-lead-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       ignore (Room.init config ~agent_name:(Some "owner"));
       ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
       ignore (Room.join config ~agent_name:alpha_lead ~capabilities:[] ());
@@ -121,7 +121,7 @@ let test_freeze_requires_company_approval () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let owner = "owner-root-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       ignore (Room.init config ~agent_name:(Some "owner"));
       ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
       unit_update_exn config ~actor:"owner"

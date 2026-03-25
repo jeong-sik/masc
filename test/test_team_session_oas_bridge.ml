@@ -189,6 +189,9 @@ let test_session_to_swarm_config_health_contract () =
   in
   let session = make_session ~planned_workers:[ worker_a; worker_b ] () in
   let tmp = Filename.temp_dir "masc-test" "" in
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp in
   ignore (Room.init config ~agent_name:(Some "tester"));
   let swarm_cfg =

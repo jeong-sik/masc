@@ -1,5 +1,4 @@
 open Alcotest
-open Masc_mcp
 
 let cleanup_if_exists path =
   if Sys.file_exists path then

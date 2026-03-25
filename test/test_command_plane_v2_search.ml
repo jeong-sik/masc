@@ -9,7 +9,7 @@ let test_best_first_search_blocks_and_routes_research_pipeline () =
       let owner = "owner-root-node" in
       let normalize_lead = "normalize-lead-node" in
       let verify_lead = "verify-lead-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       ignore (Room.init config ~agent_name:(Some "owner"));
       ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
       ignore (Room.join config ~agent_name:normalize_lead ~capabilities:[] ());
@@ -194,7 +194,7 @@ let test_invalid_search_strategy_is_rejected () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let owner = "owner-root-node" in
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       ignore (Room.init config ~agent_name:(Some "owner"));
       ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
       unit_update_exn config ~actor:"owner"

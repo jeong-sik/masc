@@ -58,7 +58,7 @@ let test_operation_filter_reads_full_event_log () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       ignore (Room.init config ~agent_name:(Some "owner"));
       let older_match =
         make_cp_event ~event_id:"evt-old" ~trace_id:"trace-old"
@@ -87,7 +87,7 @@ let test_trace_filter_reads_full_operator_log () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
+      with_eio_test base_dir @@ fun config ->
       ignore (Room.init config ~agent_name:(Some "owner"));
       let older_match =
         make_operator_row ~trace_id:"trace-old" ~action_type:"operator_action"

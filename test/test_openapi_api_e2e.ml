@@ -123,6 +123,17 @@ let find_free_port () =
           None)
 
 let wait_for_health ~port ~timeout_s =
+  let has_ready_flag body =
+    let needle = "\"state_ready\":true" in
+    let needle_len = String.length needle in
+    let body_len = String.length body in
+    let rec loop idx =
+      if idx + needle_len > body_len then false
+      else if String.sub body idx needle_len = needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+  in
   let deadline = Unix.gettimeofday () +. timeout_s in
   let rec loop () =
     if Unix.gettimeofday () > deadline then
@@ -130,7 +141,7 @@ let wait_for_health ~port ~timeout_s =
     else
       let res = run_curl ~port ~path:"/health" () in
       match res.status with
-      | Some 200 -> true
+      | Some 200 when has_ready_flag res.body -> true
       | _ ->
           Unix.sleepf 0.1;
           loop ()

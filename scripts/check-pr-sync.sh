@@ -97,7 +97,25 @@ echo "[pr-sync] expected_head_sha=${EXPECTED_HEAD_SHA}"
 echo "[pr-sync] remote_head_sha=${REMOTE_HEAD_SHA}"
 
 if [[ "$REMOTE_HEAD_SHA" != "$EXPECTED_HEAD_SHA" ]]; then
-  echo "::error title=Stale PR run detected::workflow payload head ${EXPECTED_HEAD_SHA} is stale; remote ${HEAD_BRANCH} is now ${REMOTE_HEAD_SHA}"
+  echo "::warning title=Stale PR run detected::workflow payload head ${EXPECTED_HEAD_SHA} is stale; remote ${HEAD_BRANCH} is now ${REMOTE_HEAD_SHA}"
+
+  # Attempt to re-trigger CI for the current branch head.
+  # GitHub may drop the synchronize event on force push (race condition).
+  # gh CLI is available in GitHub Actions runners by default.
+  RETRIGGER_OK=false
+  if command -v gh >/dev/null 2>&1 && [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+    WORKFLOW_NAME="${GITHUB_WORKFLOW:-CI}"
+    echo "[pr-sync] re-triggering workflow '${WORKFLOW_NAME}' on branch ${HEAD_BRANCH}"
+    if gh workflow run "${WORKFLOW_NAME}" --ref "${HEAD_BRANCH}" 2>/dev/null; then
+      RETRIGGER_OK=true
+      echo "[pr-sync] re-trigger dispatched for ${HEAD_BRANCH} (HEAD: ${REMOTE_HEAD_SHA})"
+    else
+      echo "[pr-sync] re-trigger failed (gh workflow run returned non-zero)"
+    fi
+  else
+    echo "[pr-sync] gh CLI not available or not in GitHub Actions; skipping re-trigger"
+  fi
+
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
       echo "## PR Sync Check"
@@ -106,7 +124,11 @@ if [[ "$REMOTE_HEAD_SHA" != "$EXPECTED_HEAD_SHA" ]]; then
       echo "- Workflow payload head: \`${EXPECTED_HEAD_SHA}\`"
       echo "- Remote branch head: \`${REMOTE_HEAD_SHA}\`"
       echo ""
-      echo "This run is stale because the branch advanced after the workflow payload was created."
+      if [[ "$RETRIGGER_OK" == "true" ]]; then
+        echo "This run is stale. A new CI run has been dispatched for the current HEAD."
+      else
+        echo "This run is stale because the branch advanced after the workflow payload was created."
+      fi
     } >> "$GITHUB_STEP_SUMMARY"
   fi
   exit 1

@@ -111,7 +111,7 @@ let inflightTransportHealthRefresh: Promise<void> | null = null
 const PRACTICAL_CASES: PracticalCase[] = [
   {
     id: 'wallboard',
-    title: 'Wallboard / dashboard',
+    title: '월보드 / 대시보드',
     transport: 'SSE',
     endpoint: (data) => data.streamable_http.observer_stream,
     description: 'Observer SSE 읽기 전용 스트림.',
@@ -119,7 +119,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
   },
   {
     id: 'agent-fanout',
-    title: 'Agent fanout / heartbeat',
+    title: '에이전트 팬아웃 / 하트비트',
     transport: 'gRPC',
     endpoint: (data) => `:${data.grpc.port}`,
     description: '양방향 스트림. heartbeat, backlog replay 지원.',
@@ -127,7 +127,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
   },
   {
     id: 'duplex-ui',
-    title: 'Duplex UI / browser bridge',
+    title: '양방향 UI / 브라우저 브릿지',
     transport: 'WebSocket',
     endpoint: (_data) => '/ws',
     description: '양방향 소켓. operator UI 제어용.',
@@ -135,7 +135,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
   },
   {
     id: 'p2p-fastlane',
-    title: 'P2P fast lane',
+    title: 'P2P 패스트 레인',
     transport: 'WebRTC',
     endpoint: (_data) => '/webrtc/offer -> /webrtc/answer',
     description: 'DataChannel P2P. signaling 후 직접 연결.',
@@ -143,7 +143,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
   },
   {
     id: 'stateless-control',
-    title: 'Stateless scripting / queue trigger',
+    title: '스테이트리스 스크립팅 / 큐 트리거',
     transport: 'Streamable HTTP',
     endpoint: (data) => data.streamable_http.endpoint,
     description: 'Stateless POST. 세션 불필요.',

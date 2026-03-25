@@ -13,7 +13,7 @@ export function MitosisRing({ ratio, size = 40, stroke = 4 }: { ratio?: number; 
   else if (ratio >= 0.5) colorClass = 'mitosis-warn'
 
   return html`
-    <div class="relative inline-flex items-center justify-center ml-auto mr-2.5" title="Mitosis Context Load: ${Math.round(ratio * 100)}%">
+    <div class="relative inline-flex items-center justify-center ml-auto mr-2.5" title="분열 컨텍스트 부하: ${Math.round(ratio * 100)}%">
       <svg class="mitosis-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
         <circle class="mitosis-ring-bg" cx="${c}" cy="${c}" r="${r}" stroke-width="${stroke}" />
         <circle 

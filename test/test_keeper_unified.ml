@@ -44,6 +44,8 @@ let base_observation : WO.world_observation =
     failed_task_count = 0;
     active_agent_count = 0;
     triage_triggers = "";
+    autonomy_trigger = None;
+    allow_noop = true;
   }
 
 let test_observation_defaults () =
@@ -308,6 +310,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     tool_calls_made = List.length tools;
     usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0 };
     tools_used = tools;
+    checkpoint = None;
   }
 
 let test_metrics_text_response () =
@@ -316,7 +319,8 @@ let test_metrics_text_response () =
       ~model:"test-model" ~input_tok:100 ~output_tok:50
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:200 result
+    UT.update_metrics_from_result minimal_meta ~latency_ms:200
+      ~observation:base_observation result
   in
   check int "total_turns +1" (minimal_meta.usage.total_turns + 1) updated.usage.total_turns;
   check int "proactive_count +1"
@@ -332,7 +336,8 @@ let test_metrics_tool_response () =
       ~model:"test-model" ~input_tok:200 ~output_tok:80
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:500 result
+    UT.update_metrics_from_result minimal_meta ~latency_ms:500
+      ~observation:base_observation result
   in
   check int "proactive_count +1" (minimal_meta.proactive.count_total + 1)
     updated.proactive.count_total;
@@ -346,7 +351,8 @@ let test_metrics_noop_response () =
       ~model:"test-model" ~input_tok:50 ~output_tok:10
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:100 result
+    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+      ~observation:base_observation result
   in
   check int "proactive_count unchanged" minimal_meta.proactive.count_total
     updated.proactive.count_total;
@@ -393,7 +399,8 @@ let test_metrics_mixed_response () =
       ~model:"test-model" ~input_tok:150 ~output_tok:60
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:300 result
+    UT.update_metrics_from_result minimal_meta ~latency_ms:300
+      ~observation:base_observation result
   in
   check int "proactive +1" (minimal_meta.proactive.count_total + 1)
     updated.proactive.count_total;

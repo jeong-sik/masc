@@ -441,6 +441,13 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.proactive.count_total);
+              ("autonomous_turn_count", `Int m.autonomous_turn_count);
+              ("autonomous_text_turn_count", `Int m.autonomous_text_turn_count);
+              ("autonomous_tool_turn_count", `Int m.autonomous_tool_turn_count);
+              ("board_reactive_turn_count", `Int m.board_reactive_turn_count);
+              ("mention_reactive_turn_count", `Int m.mention_reactive_turn_count);
+              ("noop_turn_count", `Int m.noop_turn_count);
+              ("autonomous_action_count", `Int m.autonomous_action_count);
               ("last_proactive_ts", `Float m.proactive.last_ts);
               ("last_proactive_reason",
                 if String.trim m.proactive.last_reason = ""
@@ -571,8 +578,6 @@ let keeper_config_json (config : Room.config) (name : string)
           ("models", `List (List.map (fun s -> `String s) m.models));
           ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
           ("active_model", `String active_model);
-          ("policy_mode", `String "unified");
-          ("policy_shell_mode", `String "coding");
           ("verify", `Bool false);
         ]
       in
@@ -592,9 +597,7 @@ let keeper_config_json (config : Room.config) (name : string)
           ("cooldown_sec", `Int m.proactive.cooldown_sec);
         ]
       in
-      let defaults_snapshot = Keeper_types.keeper_default_source_snapshot m.name in
       let drift = drift_surface_json () in
-      let initiative = initiative_surface_json ~meta:m defaults_snapshot.defaults in
       let handoff =
         `Assoc [
           ("auto", `Bool m.auto_handoff);
@@ -650,7 +653,6 @@ let keeper_config_json (config : Room.config) (name : string)
          ("compaction", compaction);
          ("proactive", proactive);
          ("drift", drift);
-         ("initiative", initiative);
          ("auto_team_session", auto_team_session_surface_json ());
          ("handoff", handoff);
          ("runtime", runtime_surface_json config m);

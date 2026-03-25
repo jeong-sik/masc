@@ -101,11 +101,10 @@ val shard_autoresearch : shard
 
 val coding_tools : Types.tool_schema list
 (** Coding shard tools (keeper_github/keeper_bash + worktree/code inspection).
-    Always granted (policy_shell_mode is always "coding"). *)
+    Not in default shards. *)
 
 val shard_coding : shard
-(** Coding shard: github/shell bridge + worktree/code inspection.
-    Always granted. *)
+(** Coding shard: github/shell bridge + worktree/code inspection. *)
 
 val keeper_model_tools : Types.tool_schema list
 (** Default tool set from default shards — excludes coding tools. *)

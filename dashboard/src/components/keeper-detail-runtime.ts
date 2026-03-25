@@ -113,6 +113,12 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
   // Quality/rate metrics only — raw counts (handoffs, compactions, k2k, etc.)
   // are authoritative in KpiGrid to avoid duplication.
   const rows: Array<{ label: string; value: string | number }> = [
+    { label: '자율 턴', value: keeper.autonomous_turn_count ?? '-' },
+    { label: '도구 턴', value: keeper.autonomous_tool_turn_count ?? '-' },
+    { label: '텍스트 턴', value: keeper.autonomous_text_turn_count ?? '-' },
+    { label: '게시판 반응', value: keeper.board_reactive_turn_count ?? '-' },
+    { label: '멘션 반응', value: keeper.mention_reactive_turn_count ?? '-' },
+    { label: 'No-op 턴', value: keeper.noop_turn_count ?? '-' },
     { label: '모델 폴백', value: formatPct(typeof mw?.model_fallback_rate === 'number' ? mw.model_fallback_rate : undefined) },
     { label: '프로액티브 폴백', value: formatPct(typeof mw?.proactive_fallback_rate === 'number' ? mw.proactive_fallback_rate : undefined) },
     { label: '메모리 통과율', value: formatPct(typeof mw?.memory_pass_rate === 'number' ? mw.memory_pass_rate : undefined) },

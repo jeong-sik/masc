@@ -32,6 +32,9 @@ let grpc_client_ref : Masc_grpc_client.t option ref = ref None
 let set_grpc_client c = grpc_client_ref := Some c
 
 let keepalives : (string, keepalive_entry) Hashtbl.t = Hashtbl.create 8
+let board_reactive_wakeups : (string, float) Hashtbl.t = Hashtbl.create 32
+let board_reactive_debounce_sec = 60.0
+let board_reactive_threshold = 4
 
 let running_keepers () = Hashtbl.length keepalives
 
@@ -78,6 +81,73 @@ let wakeup_keeper name =
     or when a system-wide event requires immediate attention. *)
 let wakeup_all_keepers () =
   Hashtbl.iter (fun _name entry -> entry.wakeup := true) keepalives
+
+let board_reactive_wakeup_allowed ~keeper_name ~post_id =
+  let key = keeper_name ^ ":" ^ post_id in
+  let now_ts = Time_compat.now () in
+  match Hashtbl.find_opt board_reactive_wakeups key with
+  | Some last_ts when now_ts -. last_ts < board_reactive_debounce_sec -> false
+  | _ ->
+      Hashtbl.replace board_reactive_wakeups key now_ts;
+      true
+
+let wakeup_relevant_keeper_for_board_signal
+    ~(config : Room.config)
+    (signal : Board_dispatch.keeper_board_signal) =
+  let running_names =
+    Hashtbl.fold (fun name _ acc -> name :: acc) keepalives []
+  in
+  let candidates =
+    running_names
+    |> List.filter_map (fun name ->
+           match read_meta config name with
+           | Ok (Some meta) ->
+               let matched =
+                 Keeper_world_observation.board_signal_match
+                   ~continuity_summary:meta.continuity_summary
+                   ~meta
+                   ~signal
+               in
+               Some (meta, matched)
+           | _ -> None)
+  in
+  let explicit =
+    candidates
+    |> List.filter (fun (_meta, (matched : Keeper_world_observation.board_signal_match)) ->
+           matched.explicit_mention)
+  in
+  let wake_meta (meta : keeper_meta) reason =
+    if board_reactive_wakeup_allowed
+         ~keeper_name:meta.name
+         ~post_id:signal.post_id
+    then (
+      wakeup_keeper meta.name;
+      Log.Keeper.info "board signal wakeup: keeper=%s reason=%s post=%s"
+        meta.name reason signal.post_id)
+  in
+  match explicit with
+  | (_ :: _) ->
+      explicit
+      |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
+  | [] ->
+      let best : (keeper_meta * Keeper_world_observation.board_signal_match) list =
+        candidates
+        |> List.filter
+             (fun (_meta, (matched : Keeper_world_observation.board_signal_match)) ->
+               matched.score >= board_reactive_threshold)
+        |> List.sort
+             (fun
+               ((meta_a, matched_a) :
+                 keeper_meta * Keeper_world_observation.board_signal_match)
+               ((meta_b, matched_b) :
+                 keeper_meta * Keeper_world_observation.board_signal_match) ->
+               let by_score = compare matched_b.score matched_a.score in
+               if by_score <> 0 then by_score
+               else compare meta_a.proactive.last_ts meta_b.proactive.last_ts)
+      in
+      (match best with
+       | (meta, _matched) :: _ -> wake_meta meta "relevance_scored"
+       | [] -> ())
 
 let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
     (m : keeper_meta) (stop : bool ref) ~(wakeup : bool ref) : unit =
@@ -270,121 +340,109 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  Log.Keeper.error "heartbeat snapshot write failed: %s"
                    (Printexc.to_string exn));
               last_snapshot_ts := now_ts);
-            (* Deliberation triage: run when initiative is enabled (default: all keepers).
-               Initiative cooldown: skip triage if last proactive action was within cooldown_sec. *)
+            (* Triage is always computed. Tool gating is no longer mode-based. *)
             let meta_after_triage =
-              let cooldown_sec = meta_current.initiative_cooldown_sec in
-              let cooldown_elapsed =
-                cooldown_sec <= 0
-                || (let last_action_ts = meta_current.proactive.last_ts in
-                    last_action_ts <= 0.0
-                    || now_ts -. last_action_ts >= float_of_int cooldown_sec)
+              let obs =
+                Keeper_deliberation.empty_world_observation
+                  ~keeper_name:meta_current.name
               in
-              if meta_current.initiative_enabled && cooldown_elapsed then (
-                let obs =
-                  Keeper_deliberation.empty_world_observation
-                    ~keeper_name:meta_current.name
-                in
-                (* L2 enrichment: read room state for richer world observation *)
-                let unclaimed_count, failed_count =
-                  (try
-                     let backlog = Room.read_backlog ctx.config in
-                     let unclaimed =
-                       List.length
-                         (List.filter
-                            (fun (t : Types.task) ->
-                              t.task_status = Types.Todo)
-                            backlog.tasks)
-                     in
-                     let failed =
-                       List.length
-                         (List.filter
-                            (fun (t : Types.task) ->
-                              match t.task_status with
-                              | Types.Cancelled _ -> true
-                              | _ -> false)
-                            backlog.tasks)
-                     in
-                     (unclaimed, failed)
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | exn ->
-                     Log.Keeper.warn "keepalive: task count query failed: %s" (Printexc.to_string exn);
+              let unclaimed_count, failed_count =
+                (try
+                   let backlog = Room.read_backlog ctx.config in
+                   let unclaimed =
+                     List.length
+                       (List.filter
+                          (fun (t : Types.task) ->
+                            t.task_status = Types.Todo)
+                          backlog.tasks)
+                   in
+                   let failed =
+                     List.length
+                       (List.filter
+                          (fun (t : Types.task) ->
+                            match t.task_status with
+                            | Types.Cancelled _ -> true
+                            | _ -> false)
+                          backlog.tasks)
+                   in
+                   (unclaimed, failed)
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                     Log.Keeper.warn "keepalive: task count query failed: %s"
+                       (Printexc.to_string exn);
                      (0, 0))
-                in
-                let current_agent_count =
-                  (try
-                     List.length (Room.get_agents_raw ctx.config)
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | exn ->
-                     Log.Keeper.warn "keepalive: agent count query failed: %s" (Printexc.to_string exn);
+              in
+              let current_agent_count =
+                (try
+                   List.length (Room.get_agents_raw ctx.config)
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                     Log.Keeper.warn "keepalive: agent count query failed: %s"
+                       (Printexc.to_string exn);
                      0)
+              in
+              let agent_count_changed =
+                let last_count =
+                  Hashtbl.find_opt last_agent_counts meta_current.name
+                  |> Option.value ~default:0
                 in
-                let agent_count_changed =
-                  let last_count =
-                    Hashtbl.find_opt last_agent_counts meta_current.name
-                    |> Option.value ~default:0
-                  in
-                  let changed =
-                    last_count > 0 && current_agent_count <> last_count
-                  in
-                  Hashtbl.replace last_agent_counts
-                    meta_current.name current_agent_count;
-                  changed
+                let changed =
+                  last_count > 0 && current_agent_count <> last_count
                 in
-                (* Board activity enrichment *)
-                let board_new_post_count, board_mention_count =
-                  (try
-                     let _events, new_count, mention_count =
-                       Keeper_world_observation.collect_board_events
-                         ~meta:meta_current
-                     in
-                     (new_count, mention_count)
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | exn ->
+                Hashtbl.replace last_agent_counts
+                  meta_current.name current_agent_count;
+                changed
+              in
+              let board_new_post_count, board_mention_count =
+                (try
+                   let _events, new_count, mention_count =
+                     Keeper_world_observation.collect_board_events
+                       ~meta:meta_current
+                       ~continuity_summary:meta_current.continuity_summary
+                   in
+                   (new_count, mention_count)
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
                      Log.Keeper.warn "keepalive: board count query failed: %s"
                        (Printexc.to_string exn);
                      (0, 0))
-                in
-                let obs =
-                  { obs with
-                    active_goal_count = List.length meta_current.active_goal_ids;
-                    idle_seconds =
-                      (let activity_ts =
-                         max meta_current.usage.last_turn_ts
-                           meta_current.proactive.last_ts
-                       in
-                       if activity_ts <= 0.0 then 0
-                       else int_of_float (max 0.0 (now_ts -. activity_ts)));
-                    idle_gate =
-                      (if meta_current.initiative_idle_sec > 0
-                       then meta_current.initiative_idle_sec
-                       else meta_current.proactive.idle_sec);
-                    unclaimed_task_count = unclaimed_count;
-                    failed_task_count = failed_count;
-                    active_agent_count = current_agent_count;
-                    agent_count_changed;
-                    board_new_post_count;
-                    board_mention_count;
-                  }
-                in
-                let triage_result = Keeper_deliberation.triage obs in
-                let triggers_str =
-                  match triage_result with
-                  | Keeper_deliberation.Skip reason -> "skip:" ^ reason
-                  | Keeper_deliberation.Triggered triggers ->
-                      String.concat ","
-                        (List.map
-                           Keeper_deliberation.deliberation_trigger_to_string
-                           triggers)
-                in
-                if Keeper_types.keeper_debug then
-                  Log.KeeperExec.info "%s triage: %s"
-                    meta_current.name triggers_str;
-                { meta_current with last_triage_triggers = triggers_str })
-              else meta_current
+              in
+              let obs =
+                { obs with
+                  active_goal_count = List.length meta_current.active_goal_ids;
+                  idle_seconds =
+                    (let activity_ts =
+                       max meta_current.usage.last_turn_ts
+                         meta_current.proactive.last_ts
+                     in
+                     if activity_ts <= 0.0 then 0
+                     else int_of_float (max 0.0 (now_ts -. activity_ts)));
+                  idle_gate = meta_current.proactive.idle_sec;
+                  unclaimed_task_count = unclaimed_count;
+                  failed_task_count = failed_count;
+                  active_agent_count = current_agent_count;
+                  agent_count_changed;
+                  board_new_post_count;
+                  board_mention_count;
+                }
+              in
+              let triage_result = Keeper_deliberation.triage obs in
+              let triggers_str =
+                match triage_result with
+                | Keeper_deliberation.Skip reason -> "skip:" ^ reason
+                | Keeper_deliberation.Triggered triggers ->
+                    String.concat ","
+                      (List.map
+                         Keeper_deliberation.deliberation_trigger_to_string
+                         triggers)
+              in
+              if Keeper_types.keeper_debug then
+                Log.KeeperExec.info "%s triage: %s"
+                  meta_current.name triggers_str;
+              { meta_current with last_triage_triggers = triggers_str }
             in
             let proactive_warmup_elapsed =
               proactive_warmup_sec <= 0
@@ -398,18 +456,25 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                      Keeper_world_observation.observe
                        ~config:ctx.config ~meta:meta_after_triage
                    in
-                   match
-                     Keeper_unified_turn.run_unified_turn
-                       ~config:ctx.config ~meta:meta_after_triage
-                       ~observation:obs
-                       ~generation:meta_after_triage.generation
-                   with
-                   | Error e ->
-                       Log.Keeper.error "unified turn failed: %s" e;
-                       (match read_meta ctx.config meta_after_triage.name with
-                        | Ok (Some latest) -> latest
-                        | _ -> meta_after_triage)
-                   | Ok updated -> updated
+                   if
+                     Keeper_world_observation.should_run_unified_turn
+                       ~meta:meta_after_triage
+                       obs
+                   then
+                     match
+                       Keeper_unified_turn.run_unified_turn
+                         ~config:ctx.config ~meta:meta_after_triage
+                         ~observation:obs
+                         ~generation:meta_after_triage.generation
+                     with
+                     | Error e ->
+                         Log.Keeper.error "unified turn failed: %s" e;
+                         (match read_meta ctx.config meta_after_triage.name with
+                          | Ok (Some latest) -> latest
+                          | _ -> meta_after_triage)
+                     | Ok updated -> updated
+                   else
+                     meta_after_triage
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->

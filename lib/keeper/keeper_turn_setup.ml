@@ -99,13 +99,10 @@ let ensure_keeper_exists
               | model :: _ -> model
               | [] -> "")
     in
-    (* Mode categorization removed: always use fixed values. *)
-    let policy_mode = "unified" in
     let policy_voice_enabled =
       profile_defaults.policy_voice_enabled
       |> Option.value ~default:false
     in
-    let policy_shell_mode = "coding" in
     let allowed_paths = [] in
     let room_scope =
       profile_defaults.room_scope |> Option.value ~default:"current"
@@ -115,10 +112,6 @@ let ensure_keeper_exists
       profile_defaults.scope_kind
       |> Option.value ~default:(if room_scope = "all" then "global" else "local")
       |> canonical_scope_kind
-    in
-    let trigger_mode =
-      profile_defaults.trigger_mode |> Option.value ~default:"explicit_only"
-      |> canonical_trigger_mode
     in
     let mention_targets =
       let raw =
@@ -146,14 +139,11 @@ let ensure_keeper_exists
       models = inline_models;
       allowed_models;
       active_model;
-      policy_mode;
       policy_voice_enabled;
-      policy_shell_mode;
       execution_scope = default_execution_scope;
       allowed_paths;
       scope_kind;
       room_scope;
-      trigger_mode;
       voice_enabled = default_voice_enabled_for name;
       voice_channel = default_voice_channel_for name;
       voice_agent_id = default_voice_agent_id_for name;
@@ -166,13 +156,7 @@ let ensure_keeper_exists
       proactive = {
         enabled =
           Option.value
-            ~default:
-              (if
-                 trigger_mode
-                 |> Keeper_contract.trigger_mode_of_string
-                 |> Keeper_contract.trigger_mode_is_explicit_only
-               then false
-               else default_proactive_enabled)
+            ~default:default_proactive_enabled
             profile_defaults.proactive_enabled;
         idle_sec = default_proactive_idle_sec;
         cooldown_sec = default_proactive_cooldown_sec;
@@ -218,6 +202,12 @@ let ensure_keeper_exists
       active_goal_ids = [];
       last_autonomous_action_at = "";
       autonomous_action_count = 0;
+      autonomous_turn_count = 0;
+      autonomous_text_turn_count = 0;
+      autonomous_tool_turn_count = 0;
+      board_reactive_turn_count = 0;
+      mention_reactive_turn_count = 0;
+      noop_turn_count = 0;
       last_triage_triggers = "";
       initiative_enabled = true;
       initiative_idle_sec = 0;

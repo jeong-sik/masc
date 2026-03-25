@@ -52,7 +52,7 @@ Pair with masc_episode_flush to ensure episodes are persisted before querying.";
     name = "masc_self_introspect";
     description = "Agent self-awareness introspection: generation, context usage, siblings, parent episode, estimated lifespan. \
 Use when you need to understand your place in the agent lifecycle or check remaining capacity. \
-Pair with masc_mitosis_check for threshold-based action, or masc_recall_search for memory queries.";
+Pair with masc_memento_mori for lifecycle automation, or masc_recall_search for memory queries.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

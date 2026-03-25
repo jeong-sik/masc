@@ -313,8 +313,6 @@ let handle_keeper_status ctx args : tool_result =
                 ~keepalive_started_at:(keeper_keepalive_started_at m.name)
                 ~now_ts
          in
-         let defaults_snapshot = keeper_default_source_snapshot m.name in
-
          let compaction_history_tail =
            if not include_compaction_history then
              (`List [], 0)
@@ -464,17 +462,23 @@ let handle_keeper_status ctx args : tool_result =
            ]);
            ("drift", drift_surface_json ());
            ("policy", `Assoc [
-             ("mode", `String "unified");
              ("voice_enabled", `Bool m.policy_voice_enabled);
-             ("shell_mode", `String "coding");
              ("allowed_paths", string_list_to_json m.allowed_paths);
            ("allowed_tools", string_list_to_json allowed_tools);
             ("available_internal_tools", string_list_to_json all_internal_tools);
             ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
            ]);
-           ("initiative", initiative_surface_json ~meta:m defaults_snapshot.defaults);
            ("auto_team_session", auto_team_session_surface_json ());
            ("auto_team_session_enabled", `Bool false);
+           ("autonomy", `Assoc [
+             ("turn_count", `Int m.autonomous_turn_count);
+             ("tool_turn_count", `Int m.autonomous_tool_turn_count);
+             ("text_turn_count", `Int m.autonomous_text_turn_count);
+             ("board_reactive_turn_count", `Int m.board_reactive_turn_count);
+             ("mention_reactive_turn_count", `Int m.mention_reactive_turn_count);
+             ("noop_turn_count", `Int m.noop_turn_count);
+             ("tool_action_count", `Int m.autonomous_action_count);
+           ]);
            ("active_team_session_id",
              match m.active_team_session_id with
              | Some session_id -> `String session_id

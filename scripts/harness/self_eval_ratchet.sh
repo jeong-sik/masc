@@ -38,7 +38,7 @@ TOOLS=(
   "masc_broadcast"
   "masc_tasks"
   "masc_agents"
-  "masc_mitosis_status"
+  "masc_board_list"
   "masc_perpetual_status"
 )
 

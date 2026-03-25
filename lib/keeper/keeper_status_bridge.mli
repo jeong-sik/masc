@@ -21,13 +21,6 @@ val team_session_state_json :
 val team_session_bridge_json :
   Room_utils.config -> keeper_meta -> Yojson.Safe.t
 
-val unsupported_feature_status : bool -> string
-
-val initiative_surface_json :
-  ?meta:keeper_meta -> keeper_profile_defaults -> Yojson.Safe.t
-
-val initiative_configured_in_source : keeper_profile_defaults -> bool
-
 val drift_surface_json : unit -> Yojson.Safe.t
 
 val auto_team_session_surface_json : unit -> Yojson.Safe.t

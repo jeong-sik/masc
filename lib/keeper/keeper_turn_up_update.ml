@@ -57,15 +57,12 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
             | model :: _ -> model
             | [] -> "")
   in
-  (* Mode categorization removed: always use fixed values. *)
-  let policy_mode = "unified" in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
       (first_some (Some old.policy_voice_enabled) p.profile_defaults.policy_voice_enabled)
     |> Option.value ~default:false
   in
-  let policy_shell_mode = "coding" in
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
@@ -84,14 +81,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     |> first_some p.profile_defaults.scope_kind
     |> Option.value ~default:(if room_scope = "all" then "global" else "local")
     |> canonical_scope_kind
-  in
-  let trigger_mode =
-    p.trigger_mode_opt
-    |> first_some
-         (if String.trim old.trigger_mode <> "" then Some old.trigger_mode else None)
-    |> first_some p.profile_defaults.trigger_mode
-    |> Option.value ~default:"explicit_only"
-    |> canonical_trigger_mode
   in
   let mention_targets =
     resolve_mention_targets
@@ -153,13 +142,10 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     models;
     allowed_models;
     active_model;
-    policy_mode;
     policy_voice_enabled;
-    policy_shell_mode;
     allowed_paths;
     scope_kind;
     room_scope;
-    trigger_mode;
     voice_enabled =
       Option.value ~default:old.voice_enabled p.voice_enabled_opt;
     voice_channel =

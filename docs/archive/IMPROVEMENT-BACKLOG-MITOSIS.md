@@ -54,7 +54,7 @@
 | P2-2 | lib/env_config.ml, lib/tool_mitosis.ml | No A/B test support | **DONE** — `MASC_MITOSIS_EXPERIMENT_ENABLED` env var + run_sync_handoff guard |
 | P2-3 | lib/mitosis_metrics.ml, lib/prometheus.ml, lib/tool_mitosis.ml | No dashboard integration | **DONE** — 6 metrics (3 counters, 2 gauges, 1 histogram) + Prometheus text export |
 | P2-4 | lib/*.mli | Doc strings incomplete | **DONE** — Comprehensive odoc documentation for all 6 mitosis modules: mitosis.mli (created), tool_mitosis.mli, handoff_quality.mli, adaptive_thresholds.mli, generational_metrics.mli, mitosis_metrics.mli (created). Module-level docs, val docs, type/field docs, `@param`/`@return`/`@since` tags. |
-| P2-5 | bin/mitosis_cli.ml, bin/dune | No CLI for manual testing | **DONE** — `masc-mitosis-cli` binary with validate, simulate, config subcommands |
+| P2-5 | historical mitosis CLI path | No CLI for manual testing | **DONE 당시** — standalone mitosis debug CLI를 추가했으나, 현재 public/runtime surface에서는 제거됨 |
 
 ---
 
@@ -116,4 +116,3 @@
 
 ## Process Improvements
 - [x] [Process] Enforce Worktree Workflow: Prevent `git checkout -b` in root directory via git hooks or wrapper scripts. (Triggered by manual intervention incident)
-

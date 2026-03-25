@@ -24,6 +24,7 @@
 val update_metrics_from_result :
   Keeper_types.keeper_meta ->
   latency_ms:int ->
+  observation:Keeper_world_observation.world_observation ->
   Keeper_agent_run.run_result ->
   Keeper_types.keeper_meta
 

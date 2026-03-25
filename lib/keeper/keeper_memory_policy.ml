@@ -26,7 +26,6 @@ type keeper_policy_observation = {
   active_goal_count: int;
   joined_room_count: int;
   room_scope: Keeper_contract.room_scope;
-  trigger_mode: Keeper_contract.trigger_mode;
   last_turn_ago_s: float;
 }
 
@@ -80,7 +79,6 @@ let keeper_policy_observation_to_json (obs : keeper_policy_observation) : Yojson
       ("active_goal_count", `Int obs.active_goal_count);
       ("joined_room_count", `Int obs.joined_room_count);
       ("room_scope", `String (Keeper_contract.room_scope_to_string obs.room_scope));
-      ("trigger_mode", `String (Keeper_contract.trigger_mode_to_string obs.trigger_mode));
       ("last_turn_ago_s", `Float obs.last_turn_ago_s);
     ]
 
@@ -191,7 +189,6 @@ let keeper_policy_observation_of_room_message
     active_goal_count = List.length meta.active_goal_ids;
     joined_room_count = List.length meta.joined_room_ids;
     room_scope = Keeper_contract.room_scope_of_string meta.room_scope;
-    trigger_mode = Keeper_contract.trigger_mode_of_string meta.trigger_mode;
     last_turn_ago_s;
   }
 

@@ -10,9 +10,9 @@ Possible actions:
 - Work on active goals (use planning/execution tools)
 - Proactive observation (post findings to board)
 - Search knowledge library (keeper_library_search/read) for research references
-- Do nothing if the situation warrants it (respond with brief reasoning)
+- When blocked, emit a short explicit skip reason instead of a silent no-op
 
 Prefer a single moderate extend_turns request before read/edit/build/verify style work.
 When making claims or decisions, search the library first if relevant documents may exist.
 Do NOT explain your decision-making process at length.
-Act directly or state briefly why you chose not to act.
+Act directly and make the trigger visible in your response.

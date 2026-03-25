@@ -124,6 +124,121 @@ let save_oas_checkpoint
   Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint;
   checkpoint
 
+let sidecar_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
+  let open Yojson.Safe.Util in
+  match cp.working_context with
+  | Some (`Assoc _ as sidecar) ->
+      sidecar |> member "generation" |> to_int_option
+      |> Option.value ~default:fallback
+  | _ -> fallback
+
+type handoff_rollover = {
+  updated_meta : keeper_meta;
+  handoff_json : Yojson.Safe.t option;
+  context_ratio : float;
+  context_tokens : int;
+  context_max : int;
+  message_count : int;
+}
+
+let maybe_rollover_oas_handoff
+    ~(base_dir : string)
+    ~(meta : keeper_meta)
+    ~(model : string)
+    ~(primary_model_max_tokens : int)
+    ~(checkpoint : Agent_sdk.Checkpoint.t option) : handoff_rollover =
+  match checkpoint with
+  | None ->
+      {
+        updated_meta = meta;
+        handoff_json = None;
+        context_ratio = 0.0;
+        context_tokens = 0;
+        context_max = primary_model_max_tokens;
+        message_count = 0;
+      }
+  | Some cp ->
+      let ctx = context_of_oas_checkpoint cp ~primary_model_max_tokens in
+      let current_generation =
+        sidecar_generation cp ~fallback:meta.generation
+      in
+      let base_meta =
+        if current_generation = meta.generation then meta
+        else { meta with generation = current_generation }
+      in
+      let ratio = context_ratio ctx in
+      let cooldown_elapsed =
+        base_meta.last_handoff_ts <= 0.0
+        || Time_compat.now () -. base_meta.last_handoff_ts
+           >= float_of_int base_meta.handoff_cooldown_sec
+      in
+      let rollover_base =
+        {
+          updated_meta = base_meta;
+          handoff_json = None;
+          context_ratio = ratio;
+          context_tokens = ctx.token_count;
+          context_max = ctx.max_tokens;
+          message_count = List.length ctx.messages;
+        }
+      in
+      if
+        not base_meta.auto_handoff
+        || ratio < base_meta.handoff_threshold
+        || not cooldown_elapsed
+      then
+        rollover_base
+      else
+        let now_ts = Time_compat.now () in
+        let prev_trace_id = base_meta.trace_id in
+        let new_trace_id =
+          let ts = int_of_float (Time_compat.now () *. 1000.0) in
+          let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
+          Printf.sprintf "trace-%d-%05x" ts hash
+        in
+        let next_generation = current_generation + 1 in
+        let new_session =
+          create_session ~session_id:new_trace_id ~base_dir
+        in
+        try
+          ignore
+            (save_oas_checkpoint ~session:new_session
+               ~agent_name:base_meta.agent_name
+               ~model ~ctx ~generation:next_generation);
+          let updated_meta =
+            {
+              base_meta with
+              trace_id = new_trace_id;
+              trace_history =
+                dedupe_keep_order (prev_trace_id :: base_meta.trace_history);
+              generation = next_generation;
+              last_handoff_ts = now_ts;
+              updated_at = now_iso ();
+            }
+          in
+          let handoff_json =
+            `Assoc
+              [
+                ("performed", `Bool true);
+                ("from_generation", `Int current_generation);
+                ("to_generation", `Int next_generation);
+                ("prev_trace_id", `String prev_trace_id);
+                ("new_trace_id", `String new_trace_id);
+                ("to_model", `String model);
+                ("context_ratio", `Float ratio);
+              ]
+          in
+          Log.Keeper.info
+            "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f"
+            base_meta.name prev_trace_id new_trace_id current_generation
+            next_generation ratio;
+          { rollover_base with updated_meta; handoff_json = Some handoff_json }
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            log_keeper_exn ~label:"keeper OAS handoff rollover failed" exn;
+            rollover_base
+
 let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
   let oas_checkpoint =

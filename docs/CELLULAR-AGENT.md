@@ -158,6 +158,6 @@ This path comes from `lib/handover_eio.ml`.
 
 ## Related
 
-- `docs/MITOSIS.md` - two-phase proactive handoff flow
+- `docs/KEEPER-USER-MANUAL.md` - current keeper handoff and continuity flow
 - `docs/INTERRUPT-DESIGN.md` - approval and pause patterns
 - `docs/GLOSSARY.md` - preferred terminology

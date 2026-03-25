@@ -271,7 +271,6 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
   match Keeper_types.meta_of_json json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
-      check string "policy mode" "unified" meta.policy_mode;
       check string "triage triggers" "direct_mention"
         meta.last_triage_triggers
 

@@ -181,8 +181,8 @@ Client Request
 | Planning & Delivery | plan_*, note_add, deliver, error_add, error_resolve |
 | Execution Memory (Runs) | run_init, run_plan, run_log, run_deliverable, run_get, run_list |
 | Cache | cache_set/get/list/delete/clear/stats (+ internal MODEL response cache metrics) |
-| Relay & Memento | relay_status, relay_checkpoint, relay_now, relay_smart_check, memento_mori, verify_handoff |
-| Mitosis | mitosis_check, mitosis_prepare, mitosis_divide, mitosis_record, mitosis_status, mitosis_pool, mitosis_all |
+| Relay & Handoff | relay_status, relay_checkpoint, relay_now, relay_smart_check, handover_*, verify_handoff |
+| OAS Lifecycle | memento_mori, compact, keeper OAS checkpoint rollover |
 | Tempo & Dashboard | tempo_get/set/adjust/reset, dashboard |
 | Swarm | swarm_init/join/leave/status/vote/propose/trails/deposit/evolve |
 | Security & Governance | auth_*, rate_limit_*, encryption_*, governance_set, audit_query/audit_stats |
@@ -228,17 +228,6 @@ Client Request
 | `masc_tempo_set` | Set tempo manually |
 | `masc_tempo_adjust` | Auto-adjust based on tasks |
 | `masc_tempo_reset` | Reset to default |
-
-#### Mitosis (Agent Division)
-| Tool | Description |
-|------|-------------|
-| `masc_mitosis_status` | Get mitosis pool status |
-| `masc_mitosis_pool` | View available sub-agents |
-| `masc_mitosis_divide` | Split task into subtasks |
-| `masc_mitosis_check` | Check if division needed |
-| `masc_mitosis_record` | Record division result |
-| `masc_mitosis_prepare` | Prepare for division |
-| `masc_mitosis_all` | Cluster-wide mitosis status |
 
 #### Relay & Memento
 | Tool | Description |

@@ -30,12 +30,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     |> Option.value ~default:(if room_scope = "all" then "global" else "local")
     |> canonical_scope_kind
   in
-  let trigger_mode =
-    p.trigger_mode_opt
-    |> first_some p.profile_defaults.trigger_mode
-    |> Option.value ~default:"explicit_only"
-    |> canonical_trigger_mode
-  in
   let requested_models =
     if p.models_in <> [] then
       p.models_in
@@ -59,15 +53,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            | model :: _ -> model
             | [] -> "")
   in
-  (* Mode categorization removed: always use fixed values. *)
-  let policy_mode = "unified" in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
       p.profile_defaults.policy_voice_enabled
     |> Option.value ~default:false
   in
-  let policy_shell_mode = "coding" in
   let allowed_paths =
     Option.value ~default:[] p.allowed_paths_opt
   in
@@ -114,15 +105,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     let proactive_enabled =
       Option.value
         ~default:
-          (Option.value
-             ~default:
-               (if
-                  trigger_mode
-                  |> Keeper_contract.trigger_mode_of_string
-                  |> Keeper_contract.trigger_mode_is_explicit_only
-                then false
-                else default_proactive_enabled)
-             p.profile_defaults.proactive_enabled)
+          (Option.value ~default:default_proactive_enabled p.profile_defaults.proactive_enabled)
         p.proactive_enabled_opt
     in
     let proactive_idle_sec =
@@ -230,14 +213,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            models = requested_models;
            allowed_models;
            active_model;
-           policy_mode;
            policy_voice_enabled;
-           policy_shell_mode;
            execution_scope = default_execution_scope;
            allowed_paths;
            scope_kind;
            room_scope;
-           trigger_mode;
            voice_enabled;
            voice_channel;
            voice_agent_id;
@@ -293,13 +273,16 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             active_goal_ids = [];
             last_autonomous_action_at = "";
             autonomous_action_count = 0;
+            autonomous_turn_count = 0;
+            autonomous_text_turn_count = 0;
+            autonomous_tool_turn_count = 0;
+            board_reactive_turn_count = 0;
+            mention_reactive_turn_count = 0;
+            noop_turn_count = 0;
             last_triage_triggers = "";
-            initiative_enabled =
-              Option.value ~default:true p.profile_defaults.initiative_enabled;
-            initiative_idle_sec =
-              Option.value ~default:0 p.profile_defaults.initiative_idle_sec;
-            initiative_cooldown_sec =
-              Option.value ~default:0 p.profile_defaults.initiative_cooldown_sec;
+            initiative_enabled = true;
+            initiative_idle_sec = 0;
+            initiative_cooldown_sec = 0;
             active_team_session_id = None;
             last_team_session_started_at = "";
             team_session_start_count_total = 0;
@@ -336,7 +319,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              ("desires", `String meta.desires);
              ("instructions", `String meta.instructions);
              ("models", `List (List.map (fun s -> `String s) meta.models));
-             ("policy_mode", `String meta.policy_mode);
              ("voice_enabled", `Bool meta.voice_enabled);
              ("voice_channel", `String meta.voice_channel);
              ("voice_agent_id", `String meta.voice_agent_id);
@@ -345,7 +327,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              ("proactive_enabled", `Bool meta.proactive.enabled);
              ("proactive_idle_sec", `Int meta.proactive.idle_sec);
              ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-             ("policy_mode", `String meta.policy_mode);
              ("compaction_profile", `String meta.compaction.profile);
              ("compaction_ratio_gate", `Float meta.compaction.ratio_gate);
              ("compaction_message_gate", `Int meta.compaction.message_gate);

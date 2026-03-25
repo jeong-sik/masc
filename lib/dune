@@ -328,9 +328,6 @@
    tool_tempo
    mitosis_helpers
    mitosis_spawn
-   tool_mitosis_utils
-   tool_mitosis_schemas
-   tool_mitosis_oas
    tool_portal
    tool_worktree
    tool_a2a
@@ -558,7 +555,6 @@
  mitosis_dna
  mitosis_helpers
  mitosis_spawn
- tool_mitosis_utils
  mitosis_defaults
  board_core
  board_votes

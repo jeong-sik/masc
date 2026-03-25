@@ -52,7 +52,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
          else "");
       ]
   in
-  let system_prompt =
+  let base_system_prompt =
     match
       Prompt_registry.render_prompt_template "keeper.unified.system"
         [
@@ -65,9 +65,41 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     | Ok value -> value
     | Error _ -> Prompt_registry.get_prompt "keeper.unified.system"
   in
+  let turn_intent_block =
+    match observation.autonomy_trigger with
+    | Some "mention_reactive" ->
+        "This is a reactive turn caused by a direct mention.\n\
+         You must either reply directly, take one outward action, or emit `SKIP: <reason>` if action is impossible."
+    | Some "board_reactive" ->
+        "This is a reactive turn caused by relevant board activity.\n\
+         You must engage the board item, advance a related task, or emit `SKIP: <reason>` if action is impossible."
+    | Some "task_reactive" ->
+        "This is a reactive turn caused by task pressure.\n\
+         You must claim, inspect, broadcast a concrete next step, or emit `SKIP: <reason>` if action is impossible."
+    | Some "proactive_idle" ->
+        "This is a proactive idle-recovery turn.\n\
+         Advance a goal, publish a concise check-in, or report a concrete blocker. Avoid generic status chatter."
+    | Some other ->
+        Printf.sprintf
+          "This autonomous turn was triggered by `%s`.\n\
+           Take one concrete next step or emit `SKIP: <reason>` if action is impossible."
+          other
+    | None ->
+        "No autonomous trigger is active. If no concrete action is justified, keep the turn minimal."
+  in
+  let system_prompt =
+    Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block
+  in
   (* User message: structured world observation *)
   let ubuf = Buffer.create 1024 in
   Buffer.add_string ubuf "## Current World State\n\n";
+  (match observation.autonomy_trigger with
+   | Some trigger ->
+       Buffer.add_string ubuf
+         (Printf.sprintf "### Autonomous Trigger\n- %s\n- No-op allowed: %s\n\n"
+            trigger
+            (if observation.allow_noop then "yes" else "no"))
+   | None -> ());
   (* Pending mentions *)
   if observation.pending_mentions <> [] then (
     Buffer.add_string ubuf

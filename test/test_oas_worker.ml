@@ -181,184 +181,7 @@ let test_cascade_names_produce_models () =
   ) cascades
 
 (* ================================================================ *)
-(* Module 2: Tool_mitosis_oas tests                                 *)
-(* ================================================================ *)
-
-let reset_mitosis_state () =
-  Mcp_server.current_cell := Mitosis.create_stem_cell ~generation:0;
-  Mcp_server.stem_pool := Mitosis.init_pool ~config:Mitosis.default_config
-
-let noop_dispatch ~name:_ ~args:_ = (true, "{}")
-
-let make_mitosis_ctx ~base_path : Tool_mitosis_oas.context =
-  let config = Room.default_config base_path in
-  { config; agent_name = "test-agent"; masc_tools = []; dispatch = noop_dispatch }
-
-let with_mitosis_base f =
-  Eio_main.run @@ fun _env ->
-  let base_path = temp_dir "test_mitosis_oas" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-      reset_mitosis_state ();
-      f base_path)
-
-let test_mitosis_status_returns_json () =
-  with_mitosis_base @@ fun base_path ->
-  let ctx = make_mitosis_ctx ~base_path in
-  match Tool_mitosis_oas.dispatch ctx ~name:"masc_mitosis_status" ~args:(`Assoc []) with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "status ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check bool) "has cell" true
-      (Yojson.Safe.Util.member "cell" json <> `Null);
-    Alcotest.(check bool) "has pool" true
-      (Yojson.Safe.Util.member "pool" json <> `Null);
-    Alcotest.(check string) "runtime is oas" "oas"
-      (json |> field "runtime" |> Yojson.Safe.Util.to_string)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_mitosis_check_normal () =
-  with_mitosis_base @@ fun base_path ->
-  let ctx = make_mitosis_ctx ~base_path in
-  let args = `Assoc [("context_ratio", `Float 0.2)] in
-  match Tool_mitosis_oas.dispatch ctx ~name:"masc_mitosis_check" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "check ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check string) "phase normal" "normal"
-      (json |> field "phase" |> Yojson.Safe.Util.to_string);
-    Alcotest.(check bool) "should_prepare false" false
-      (json |> field "should_prepare" |> Yojson.Safe.Util.to_bool);
-    Alcotest.(check bool) "should_handoff false" false
-      (json |> field "should_handoff" |> Yojson.Safe.Util.to_bool)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_mitosis_check_prepare () =
-  with_mitosis_base @@ fun base_path ->
-  let ctx = make_mitosis_ctx ~base_path in
-  let args = `Assoc [("context_ratio", `Float 0.55)] in
-  match Tool_mitosis_oas.dispatch ctx ~name:"masc_mitosis_check" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "check ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check string) "phase prepare" "prepare"
-      (json |> field "phase" |> Yojson.Safe.Util.to_string);
-    Alcotest.(check bool) "should_prepare true" true
-      (json |> field "should_prepare" |> Yojson.Safe.Util.to_bool)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_mitosis_check_handoff () =
-  with_mitosis_base @@ fun base_path ->
-  let ctx = make_mitosis_ctx ~base_path in
-  let args = `Assoc [("context_ratio", `Float 0.85)] in
-  match Tool_mitosis_oas.dispatch ctx ~name:"masc_mitosis_check" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "check ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check string) "phase handoff" "handoff"
-      (json |> field "phase" |> Yojson.Safe.Util.to_string);
-    Alcotest.(check bool) "should_handoff true" true
-      (json |> field "should_handoff" |> Yojson.Safe.Util.to_bool)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_mitosis_record_updates_cell () =
-  Eio_main.run @@ fun _env ->
-  with_mitosis_base @@ fun base_path ->
-  let ctx = make_mitosis_ctx ~base_path in
-  let args = `Assoc [("task_done", `Bool true); ("tool_called", `Bool true)] in
-  match Tool_mitosis_oas.dispatch ctx ~name:"masc_mitosis_record" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "record ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check bool) "recorded true" true
-      (json |> field "recorded" |> Yojson.Safe.Util.to_bool);
-    Alcotest.(check int) "task_count incremented" 1
-      (json |> field "task_count" |> Yojson.Safe.Util.to_int);
-    Alcotest.(check int) "tool_call_count incremented" 1
-      (json |> field "tool_call_count" |> Yojson.Safe.Util.to_int);
-    let cell = !(Mcp_server.current_cell) in
-    Alcotest.(check int) "global task_count" 1 cell.Mitosis.task_count;
-    Alcotest.(check int) "global tool_call_count" 1 cell.Mitosis.tool_call_count
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_mitosis_prepare_empty_context_err () =
-  Eio_main.run @@ fun _env ->
-  with_mitosis_base @@ fun base_path ->
-  let ctx = make_mitosis_ctx ~base_path in
-  let args = `Assoc [("full_context", `String "")] in
-  match Tool_mitosis_oas.dispatch ctx ~name:"masc_mitosis_prepare" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "prepare fails with empty context" false ok;
-    let json = parse_json body in
-    let err = json |> field "error" |> Yojson.Safe.Util.to_string in
-    Alcotest.(check bool) "error mentions full_context" true
-      (String.length err > 0)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_mitosis_prepare_success () =
-  Eio_main.run @@ fun _env ->
-  with_mitosis_base @@ fun base_path ->
-  let ctx = make_mitosis_ctx ~base_path in
-  let args = `Assoc [("full_context", `String "This is a rich context for DNA extraction with enough detail.")] in
-  match Tool_mitosis_oas.dispatch ctx ~name:"masc_mitosis_prepare" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "prepare ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check bool) "prepared true" true
-      (json |> field "prepared" |> Yojson.Safe.Util.to_bool);
-    Alcotest.(check bool) "dna_length > 0" true
-      (json |> field "dna_length" |> Yojson.Safe.Util.to_int > 0)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_mitosis_handoff_no_action () =
-  Eio_main.run @@ fun _env ->
-  with_mitosis_base @@ fun base_path ->
-  let ctx = make_mitosis_ctx ~base_path in
-  let args = `Assoc [("context_ratio", `Float 0.1)] in
-  match Tool_mitosis_oas.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "handoff ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check string) "action is no_action" "no_action"
-      (json |> field "action" |> Yojson.Safe.Util.to_string)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_mitosis_handoff_force () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let net = Eio.Stdenv.net env in
-  Eio_context.set_net net;
-  Eio_context.set_switch sw;
-  with_mitosis_base @@ fun base_path ->
-  let ctx = make_mitosis_ctx ~base_path in
-  let args = `Assoc [
-    ("force", `Bool true);
-    ("summary", `String "Force handoff test");
-    ("context_ratio", `Float 0.1);
-  ] in
-  match Tool_mitosis_oas.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "force handoff ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check string) "action is handoff" "handoff"
-      (json |> field "action" |> Yojson.Safe.Util.to_string);
-    Alcotest.(check string) "runtime is oas" "oas"
-      (json |> field "runtime" |> Yojson.Safe.Util.to_string);
-    Alcotest.(check bool) "dna_length > 0" true
-      (json |> field "dna_length" |> Yojson.Safe.Util.to_int > 0);
-    let cell = !(Mcp_server.current_cell) in
-    Alcotest.(check int) "generation incremented" 1 cell.Mitosis.generation
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_mitosis_dispatch_unknown () =
-  with_mitosis_base @@ fun base_path ->
-  let ctx = make_mitosis_ctx ~base_path in
-  let result = Tool_mitosis_oas.dispatch ctx ~name:"nonexistent_tool" ~args:(`Assoc []) in
-  Alcotest.(check bool) "unknown tool returns None" true (Option.is_none result)
-
-(* ================================================================ *)
-(* Module 3: Tool_council_oas tests                                 *)
+(* Module 2: Tool_council_oas tests                                 *)
 (* ================================================================ *)
 
 let make_council_ctx ~base_path : Tool_council_oas.context =
@@ -743,6 +566,112 @@ let test_keeper_checkpoint_prefers_newer_legacy_during_migration () =
             (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
       | None -> Alcotest.fail "expected migration fallback context")
 
+let test_keeper_oas_handoff_rollover_increments_generation () =
+  let base_dir = temp_dir "keeper_oas_handoff_rollover" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let meta =
+        {
+          (make_keeper_meta ()) with
+          auto_handoff = true;
+          handoff_threshold = 0.5;
+          handoff_cooldown_sec = 0;
+        }
+      in
+      let session =
+        Keeper_exec_context.create_session ~session_id:meta.trace_id ~base_dir
+      in
+      let ctx =
+        Keeper_exec_context.create ~system_prompt:"rollover" ~max_tokens:100
+        |> fun ctx ->
+        Keeper_exec_context.append ctx
+          (Agent_sdk.Types.user_msg (String.make 800 'x'))
+        |> Keeper_exec_context.sync_oas_context
+      in
+      let checkpoint =
+        Keeper_exec_context.save_oas_checkpoint ~session
+          ~agent_name:meta.agent_name
+          ~model:"llama:auto"
+          ~ctx ~generation:meta.generation
+      in
+      let rollover =
+        Keeper_exec_context.maybe_rollover_oas_handoff ~base_dir ~meta
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:100
+          ~checkpoint:(Some checkpoint)
+      in
+      Alcotest.(check int) "generation incremented" 1
+        rollover.updated_meta.generation;
+      Alcotest.(check bool) "trace rotated" true
+        (rollover.updated_meta.trace_id <> meta.trace_id);
+      Alcotest.(check bool) "trace history contains previous trace" true
+        (List.mem meta.trace_id rollover.updated_meta.trace_history);
+      Alcotest.(check bool) "handoff json present" true
+        (Option.is_some rollover.handoff_json);
+      let new_session =
+        Keeper_exec_context.create_session
+          ~session_id:rollover.updated_meta.trace_id
+          ~base_dir
+      in
+      match
+        Keeper_checkpoint_store.load_oas ~session_dir:new_session.session_dir
+          ~session_id:rollover.updated_meta.trace_id
+      with
+      | Some loaded ->
+          let generation =
+            Option.bind loaded.working_context (fun json ->
+                Yojson.Safe.Util.(
+                  json |> member "generation" |> to_int_option))
+          in
+          Alcotest.(check (option int)) "new checkpoint generation preserved"
+            (Some 1) generation
+      | None -> Alcotest.fail "expected rollover checkpoint")
+
+let test_keeper_oas_handoff_rollover_below_threshold_noop () =
+  let base_dir = temp_dir "keeper_oas_handoff_noop" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let meta =
+        {
+          (make_keeper_meta ()) with
+          auto_handoff = true;
+          handoff_threshold = 0.9;
+          handoff_cooldown_sec = 0;
+        }
+      in
+      let session =
+        Keeper_exec_context.create_session ~session_id:meta.trace_id ~base_dir
+      in
+      let ctx =
+        Keeper_exec_context.create ~system_prompt:"stable" ~max_tokens:100
+        |> fun ctx ->
+        Keeper_exec_context.append ctx
+          (Agent_sdk.Types.user_msg "short")
+        |> Keeper_exec_context.sync_oas_context
+      in
+      let checkpoint =
+        Keeper_exec_context.save_oas_checkpoint ~session
+          ~agent_name:meta.agent_name
+          ~model:"llama:auto"
+          ~ctx ~generation:meta.generation
+      in
+      let rollover =
+        Keeper_exec_context.maybe_rollover_oas_handoff ~base_dir ~meta
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:100
+          ~checkpoint:(Some checkpoint)
+      in
+      Alcotest.(check string) "trace unchanged" meta.trace_id
+        rollover.updated_meta.trace_id;
+      Alcotest.(check int) "generation unchanged" meta.generation
+        rollover.updated_meta.generation;
+      Alcotest.(check bool) "handoff json absent" false
+        (Option.is_some rollover.handoff_json))
+
 (* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
@@ -773,28 +702,6 @@ let () =
       Alcotest.test_case "all cascade names produce models" `Quick
         test_cascade_names_produce_models;
     ];
-    "tool_mitosis_oas", [
-      Alcotest.test_case "status returns json" `Quick
-        test_mitosis_status_returns_json;
-      Alcotest.test_case "check normal phase" `Quick
-        test_mitosis_check_normal;
-      Alcotest.test_case "check prepare phase" `Quick
-        test_mitosis_check_prepare;
-      Alcotest.test_case "check handoff phase" `Quick
-        test_mitosis_check_handoff;
-      Alcotest.test_case "record updates cell" `Quick
-        test_mitosis_record_updates_cell;
-      Alcotest.test_case "prepare empty context error" `Quick
-        test_mitosis_prepare_empty_context_err;
-      Alcotest.test_case "prepare success" `Quick
-        test_mitosis_prepare_success;
-      Alcotest.test_case "handoff no_action" `Quick
-        test_mitosis_handoff_no_action;
-      Alcotest.test_case "handoff force" `Slow
-        test_mitosis_handoff_force;
-      Alcotest.test_case "dispatch unknown" `Quick
-        test_mitosis_dispatch_unknown;
-    ];
     "tool_council_oas", [
       Alcotest.test_case "petition creates case without decorative collaboration" `Quick
         test_petition_submit_creates_case;
@@ -820,6 +727,10 @@ let () =
         test_keeper_checkpoint_prefers_oas_checkpoint;
       Alcotest.test_case "legacy fallback still works" `Quick
         test_keeper_checkpoint_legacy_fallback;
+      Alcotest.test_case "OAS handoff rollover increments generation" `Quick
+        test_keeper_oas_handoff_rollover_increments_generation;
+      Alcotest.test_case "OAS handoff rollover noops below threshold" `Quick
+        test_keeper_oas_handoff_rollover_below_threshold_noop;
     ];
     "keeper_checkpoint_store", [
       Alcotest.test_case "OAS store roundtrip" `Quick
@@ -832,5 +743,9 @@ let () =
         test_keeper_checkpoint_legacy_fallback;
       Alcotest.test_case "prefers newer legacy during migration" `Quick
         test_keeper_checkpoint_prefers_newer_legacy_during_migration;
+      Alcotest.test_case "OAS handoff rollover increments generation" `Quick
+        test_keeper_oas_handoff_rollover_increments_generation;
+      Alcotest.test_case "OAS handoff rollover noops below threshold" `Quick
+        test_keeper_oas_handoff_rollover_below_threshold_noop;
     ];
   ]

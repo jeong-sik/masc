@@ -221,6 +221,13 @@ let handle_keeper_list ctx args : tool_result =
               ("continuity_compaction_cooldown_sec", `Int m.compaction.cooldown_sec);
               ("continuity_reflection_hold_s", `Float continuity_reflection_hold_s);
               ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
+              ("autonomous_turn_count", `Int m.autonomous_turn_count);
+              ("autonomous_text_turn_count", `Int m.autonomous_text_turn_count);
+              ("autonomous_tool_turn_count", `Int m.autonomous_tool_turn_count);
+              ("board_reactive_turn_count", `Int m.board_reactive_turn_count);
+              ("mention_reactive_turn_count", `Int m.mention_reactive_turn_count);
+              ("noop_turn_count", `Int m.noop_turn_count);
+              ("autonomous_action_count", `Int m.autonomous_action_count);
               ("active_team_session_id",
                 match m.active_team_session_id with
                 | Some session_id -> `String session_id

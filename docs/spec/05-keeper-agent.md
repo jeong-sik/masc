@@ -81,22 +81,19 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 
 **소스**: `keeper_types.ml` (lines 9-106)
 
-주요 필드 군 (16개 범주, ~100 필드):
+주요 필드 군:
 
 - **Identity**: `name`, `agent_name`, `trace_id`, `trace_history`
 - **Goal (3-horizon)**: `goal`, `short_goal`, `mid_goal`, `long_goal`
 - **Self-Model (BDI)**: `soul_profile`, `will`, `needs`, `desires`
 - **Model**: `models`, `allowed_models`, `active_model`
-- **Policy**: `policy_mode`, `policy_action_budget`, `policy_shell_mode`
-- **Initiative**: `initiative_enabled`, `initiative_idle_sec`, `initiative_cooldown_sec`
-- **Scope/Trigger**: `scope_kind`, `room_scope`, `trigger_mode`, `mention_targets`
+- **Capability**: `policy_voice_enabled`, `allowed_paths`
+- **Scope**: `scope_kind`, `room_scope`, `mention_targets`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
-- **Drift**: `drift_enabled`, `drift_min_turn_gap`, `drift_count_total`
 - **Compaction**: `compaction_profile`, `compaction_ratio_gate`, `compaction_message_gate`
 - **Handoff**: `auto_handoff`, `handoff_threshold`, `handoff_cooldown_sec`
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
-- **Deliberation**: `deliberation_count`, `deliberation_cost_total_usd`
-- **Team/Autonomy**: `auto_team_session_enabled`, `autonomy_level`, `active_goal_ids`
+- **Team/Autonomy**: `active_goal_ids`, `autonomous_turn_count`, `board_reactive_turn_count`, `mention_reactive_turn_count`
 
 직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증한다.
 
@@ -140,24 +137,16 @@ type session_context = {
 
 세션당 최대 3개 체크포인트가 유지된다(`max_checkpoints_retained = 3`). 세션 메시지는 `history.jsonl`에 영속화.
 
-### 3.4 Typed Policy Enums (keeper_contract.ml)
+### 3.4 Typed Coordination Enums (keeper_contract.ml)
 
 ```ocaml
-type policy_mode =
-  | Heuristic
-  | Learned_offline_v1
-  | Explicit_event_v1
-  | Model_deliberation
-
 type policy_action_budget = Conversation | Board
 type scope_kind = Local | Global
-type room_scope = Current
-
-`"all"` 입력은 deprecated compatibility alias로 받아들이지만 canonical stored value는 항상 `"current"`다.
-type trigger_mode = Legacy | Explicit_only
+type room_scope = Current | All
 ```
 
-JSON/MCP 경계에서는 문자열로 변환되지만, 내부 로직은 이 variant 타입으로 분기한다.
+`policy_mode`, `policy_shell_mode`, `trigger_mode`, `initiative_*`는 제거되었다.
+JSON/MCP 경계에는 `scope_kind`, `room_scope` 같은 coordination 값만 남는다.
 
 ### 3.5 fiber_health
 

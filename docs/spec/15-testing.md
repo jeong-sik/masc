@@ -267,10 +267,9 @@ Keeper 정책/런타임 열거형의 typed 정의. JSON 및 MCP 문자열 표현
 
 | 타입 | 값 | 설명 |
 |------|-----|------|
-| `policy_mode` | Heuristic, Learned_offline_v1, Explicit_event_v1, Model_deliberation | 정책 모드 |
 | `policy_action_budget` | Conversation, Board | 행동 예산 타입 |
 | `scope_kind` | Local, Global | 범위 |
-| `trigger_mode` | Legacy, Explicit_only | 트리거 방식 |
+| `room_scope` | Current, All | room 가시 범위 |
 
 ---
 

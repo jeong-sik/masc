@@ -142,7 +142,6 @@ let () =
   register_module_tag ~schemas:Tool_rate_limit.schemas ~tag:Mod_rate_limit;
   register_module_tag ~schemas:Tool_encryption.schemas ~tag:Mod_encryption;
   register_module_tag ~schemas:Tool_relay.schemas ~tag:Mod_relay;
-  register_module_tag ~schemas:Tool_mitosis_oas.schemas ~tag:Mod_mitosis;
   register_module_tag ~schemas:Tool_handover.schemas ~tag:Mod_handover;
   register_module_tag ~schemas:Tool_tempo.schemas ~tag:Mod_tempo;
   register_module_tag ~schemas:Tool_walph.schemas ~tag:Mod_walph;

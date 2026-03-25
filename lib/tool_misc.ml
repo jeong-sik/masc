@@ -330,7 +330,6 @@ let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
        ("runtime_class", `String runtime_class);
        ("agent_name", `String meta.agent_name);
        ("status", `String status);
-       ("policy_mode", `String "unified");
        ("action_budget", `String "conversation");
        ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
        ("allowed_models", `List (List.map (fun model -> `String model) meta.allowed_models));
@@ -495,7 +494,6 @@ let handle_tool_admin_snapshot ctx args =
 
 let apply_keeper_policy_update config ~runtime_class args =
   let name = get_string args "name" "" |> String.trim in
-  let action_budget_opt = get_string_opt args "action_budget" |> Option.map String.trim in
   let membership_ok =
     match runtime_class with
     | "resident_keeper" -> List.mem name (Keeper_types.resident_keeper_names config)
@@ -511,44 +509,8 @@ let apply_keeper_policy_update config ~runtime_class args =
     match Keeper_types.read_meta config name with
     | Error err -> Error err
     | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
-    | Ok (Some meta) ->
-        let action_budget =
-          match action_budget_opt with
-          | None -> Ok Keeper_contract.Conversation
-          | Some raw -> (
-              match Keeper_contract.parse_policy_action_budget raw with
-              | Some budget -> Ok budget
-              | None -> Error (Printf.sprintf "invalid action_budget: %s" raw))
-        in
-        (match action_budget with
-        | Error err -> Error err
-        | Ok action_budget ->
-                let updated =
-                  {
-                    meta with
-                    policy_mode = "unified";
-                    updated_at = Types.now_iso ();
-                  }
-                in
-                (match Keeper_types.write_meta config updated with
-                | Error err -> Error err
-                | Ok () ->
-                    let policy_json =
-                      match keeper_tool_policy_json () with
-                      | `Assoc fields -> fields
-                      | _ -> []
-                    in
-                    Ok
-                      (`Assoc
-                        ([
-                           ("status", `String "ok");
-                           ("runtime_class", `String runtime_class);
-                           ("name", `String updated.name);
-                           ("policy_mode", `String "unified");
-                           ("action_budget", `String (Keeper_contract.policy_action_budget_to_string action_budget));
-                         ]
-                        @ policy_json)))
-        )
+    | Ok (Some _meta) ->
+        Error "keeper policy update is removed; keepers use a fixed tool policy now"
 
 let handle_tool_admin_update ctx args =
   let section =

@@ -437,7 +437,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${SectionHeader} title="조율" />
       <${ConfigRow} label="룸 범위" value=${c.coordination.room_scope || '--'} />
       <${ConfigRow} label="범위 유형" value=${c.coordination.scope_kind || '--'} />
-      <${ConfigRow} label="트리거 모드" value=${c.coordination.trigger_mode || '--'} />
       <div class="mt-1.5">
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>
         <${ModelList} models=${c.coordination.mention_targets} />
@@ -456,30 +455,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="최소 턴 간격" value=${formatMaybeNumber(c.drift.min_turn_gap)} />
       <${ConfigRow} label="총 횟수" value=${formatMaybeNumber(c.drift.count_total)} />
       ${c.drift.last_reason ? html`<${ConfigRow} label="마지막 사유" value=${c.drift.last_reason} />` : null}
-
-      ${'' /* --- Initiative (read-only) --- */}
-      <${SectionHeader} title="이니셔티브" />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">상태</span>
-        <${FeatureBadge} status=${c.initiative.status} value=${c.initiative.enabled} />
-      </div>
-      <${ConfigRow} label="범위" value=${c.initiative.scope || '--'} />
-      <${ConfigRow} label="유휴 트리거" value=${formatMaybeNumber(c.initiative.idle_sec, 's')} />
-      <${ConfigRow} label="쿨다운" value=${formatMaybeNumber(c.initiative.cooldown_sec, 's')} />
-      <${ConfigRow} label="컨텍스트 모드" value=${c.initiative.context_mode || '--'} />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">기본값에 설정됨</span>
-        <${BoolBadge} value=${c.initiative.configured_in_source} />
-      </div>
-      ${c.initiative.source_defaults ? html`
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-1">소스 기본값</div>
-        <${ConfigRow} label="활성" value=${c.initiative.source_defaults.enabled === null ? '--' : String(c.initiative.source_defaults.enabled)} />
-        <${ConfigRow} label="범위" value=${c.initiative.source_defaults.scope || '--'} />
-        <${ConfigRow} label="유휴 트리거" value=${formatMaybeNumber(c.initiative.source_defaults.idle_sec, 's')} />
-        <${ConfigRow} label="쿨다운" value=${formatMaybeNumber(c.initiative.source_defaults.cooldown_sec, 's')} />
-        <${ConfigRow} label="컨텍스트 모드" value=${c.initiative.source_defaults.context_mode || '--'} />
-        <${ConfigRow} label="포스트 TTL" value=${formatMaybeNumber(c.initiative.source_defaults.post_ttl_hours, 'h')} />
-      ` : null}
 
       ${'' /* --- Team Session (read-only) --- */}
       <${SectionHeader} title="자동 팀 세션" />

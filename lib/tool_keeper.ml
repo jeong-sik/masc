@@ -394,7 +394,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_status" -> Some (handle_resident_keeper_status ctx args)
   | "masc_keeper_msg" -> Some (handle_resident_keeper_msg ctx args)
   | "masc_keeper_model_set" -> Some (handle_resident_keeper_model_set ctx args)
-  | "masc_keeper_policy_set" -> Some (false, "policy_mode system has been removed")
+  | "masc_keeper_policy_set" -> Some (false, "keeper policy update has been removed")
   | "masc_keeper_feedback_record" -> Some (false, "policy feedback system has been removed")
   | "masc_keeper_dataset_export" -> Some (false, "policy dataset system has been removed")
   | "masc_keeper_action_explain" -> Some (false, "policy action explain has been removed")
@@ -411,7 +411,8 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_persistent_agent_status" -> Some (handle_persistent_agent_status ctx args)
   | "masc_persistent_agent_msg" -> Some (handle_persistent_agent_msg ctx args)
   | "masc_persistent_agent_model_set" -> Some (handle_persistent_agent_model_set ctx args)
-  | "masc_persistent_agent_policy_set" -> Some (false, "policy_mode system has been removed")
+  | "masc_persistent_agent_policy_set" ->
+      Some (false, "keeper policy update has been removed")
   | "masc_persistent_agent_feedback_record" -> Some (false, "policy feedback system has been removed")
   | "masc_persistent_agent_dataset_export" -> Some (false, "policy dataset system has been removed")
   | "masc_persistent_agent_action_explain" -> Some (false, "policy action explain has been removed")

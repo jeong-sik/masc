@@ -24,11 +24,6 @@ let cleanup_dir dir =
 let request target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
 
-let dispatch_keeper_exn ctx ~name ~args =
-  match Lib.Tool_keeper.dispatch ctx ~name ~args with
-  | Some result -> result
-  | None -> failwith ("keeper dispatch missing: " ^ name)
-
 let contains str substr =
   try
     ignore (Str.search_forward (Str.regexp_string substr) str 0);
@@ -488,62 +483,96 @@ let test_dashboard_mission_http_full_contract () =
          |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));
       ))
 
-let test_dashboard_mission_keeper_tool_audit_fallback () =
-  let dir = test_dir () in
+let test_dashboard_mission_http_cache_isolation () =
+  let dir_a = test_dir () in
+  let dir_b = test_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
+    ~finally:(fun () ->
+      cleanup_dir dir_a;
+      cleanup_dir dir_b)
     (fun () ->
-      let config = Room_utils.default_config dir in
+      let actor = "test-dashboard-cache-isolation" in
+      let config_a = Room_utils.default_config dir_a in
+      let config_b = Room_utils.default_config dir_b in
+      let session_a = "ts-mission-cache-fixture-a" in
+      let session_b = "ts-mission-cache-fixture-b" in
+      seed_room config_a session_a;
+      seed_room config_b session_b;
+      let state_a =
+        Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir_a ()
+      in
+      let state_b =
+        Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir_b ()
+      in
       Eio_main.run @@ fun env ->
-      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       Eio.Switch.run (fun sw ->
-        let keeper_ctx : _ Lib.Tool_keeper.context =
-          { config; agent_name = "fixture-root"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        let request =
+          request ("/api/v1/dashboard/mission?agent_name=" ^ actor)
         in
-        let keeper_name = "audit-keeper" in
-        let ok, _ =
-          dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
-            ~args:
-              (`Assoc
-                [
-                  ("name", `String keeper_name);
-                  ("goal", `String "Dashboard mission keeper fallback");
-                  ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
-                  ("presence_keepalive", `Bool false);
-                  ("proactive_enabled", `Bool false);
-                ])
-        in
-        check bool "keeper up ok" true ok;
-        let json =
-          Lib.Dashboard_mission.json
-            ~actor:"test-dashboard"
-            ~config
+        let json_a =
+          Lib.Server_dashboard_http.dashboard_mission_http_json
+            ~state:state_a
             ~sw
             ~clock:(Eio.Stdenv.clock env)
-            ~proc_mgr:None
-            ()
+            request
+        in
+        let json_b =
+          Lib.Server_dashboard_http.dashboard_mission_http_json
+            ~state:state_b
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            request
         in
         let open Yojson.Safe.Util in
-        let briefs = json |> member "keeper_briefs" |> to_list in
-        let brief_opt =
-          List.find_opt (fun row -> row |> member "name" |> to_string = keeper_name) briefs
+        let has_session json expected_session =
+          json |> member "session_briefs" |> to_list
+          |> List.exists (fun row ->
+                 row |> member "session_id" |> to_string = expected_session)
         in
-        (* In filesystem backend mode, broadcast/pub-sub is unsupported so the
-           keeper may not appear in the dashboard projection.  The test
-           validates the audit fields only when the keeper brief is present. *)
-        match brief_opt with
-        | None ->
-            (* FS backend: keeper_briefs may be empty — broadcast limitation.
-               Verify the keeper was at least registered. *)
-            check bool "keeper up succeeded even without brief" true ok
-        | Some brief ->
-            check bool "fallback allowed tools present" true
-              ((brief |> member "allowed_tool_names" |> to_list) <> []);
-            check string "fallback source" "keeper_policy"
-              (brief |> member "tool_audit_source" |> to_string);
-            check bool "no observed tools without evidence" true
-              ((brief |> member "latest_tool_names" |> to_list) = []);
+        check bool "first room returns its own session brief" true
+          (has_session json_a session_a);
+        check bool "second room invalidates actor cache across rooms" true
+          (has_session json_b session_b);
+        check bool "second room does not reuse first room session brief" false
+          (has_session json_b session_a);
       ))
+
+let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
+  let keeper_name = "audit-keeper-assembly-fixture" in
+  Eio_main.run @@ fun _env ->
+  Lib.A2a_tools.emit_heartbeat_task
+    ~agent:keeper_name
+    ~goal:"Mission keeper audit fixture"
+    ~context:"dashboard mission assembly"
+    ~allowed_tools:[ "masc_board_get"; "masc_board_vote" ]
+    ();
+  let briefs =
+    Lib.Dashboard_mission_assembly.build_keeper_briefs
+      [
+        `Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String keeper_name);
+            ("status", `String "offline");
+            ("updated_at", `String (Types.now_iso ()));
+            ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_vote" ]);
+            ("latest_tool_names", `List []);
+            ("latest_tool_call_count", `Null);
+            ("tool_audit_source", `Null);
+            ("tool_audit_at", `Null);
+          ];
+      ]
+  in
+  let open Yojson.Safe.Util in
+  let brief =
+    briefs |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
+  in
+  check bool "heartbeat task allowed tools present" true
+    ((brief |> member "allowed_tool_names" |> to_list) <> []);
+  check string "heartbeat task source wins in keeper brief" "heartbeat_task"
+    (brief |> member "tool_audit_source" |> to_string);
+  check bool "no observed tools without evidence" true
+    ((brief |> member "latest_tool_names" |> to_list) = [])
 
 let () =
   Alcotest.run "Dashboard Mission"
@@ -554,7 +583,9 @@ let () =
             test_dashboard_mission_projection;
           Alcotest.test_case "http mission keeps full contract" `Quick
             test_dashboard_mission_http_full_contract;
-          Alcotest.test_case "keeper tool audit fallback" `Quick
-            test_dashboard_mission_keeper_tool_audit_fallback;
+          Alcotest.test_case "http mission cache stays room-scoped" `Quick
+            test_dashboard_mission_http_cache_isolation;
+          Alcotest.test_case "keeper brief prefers heartbeat task" `Quick
+            test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task;
         ] );
     ]

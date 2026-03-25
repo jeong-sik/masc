@@ -728,6 +728,12 @@
  (modules test_task_sandbox)
  (libraries masc_mcp masc_process alcotest eio eio_main unix yojson str mirage-crypto-rng mirage-crypto-rng.unix))
 
+; ppx_deriving_yojson roundtrip tests (#2964 migration)
+(test
+ (name test_governance_yojson_roundtrip)
+ (modules test_governance_yojson_roundtrip)
+ (libraries masc_mcp alcotest yojson))
+
 ; Error logging coverage tests (PR #466 silent failure fixes)
 (test
  (name test_error_logging_coverage)

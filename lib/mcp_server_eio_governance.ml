@@ -10,7 +10,7 @@ type governance_config = {
   level: string;
   audit_enabled: bool;
   anomaly_detection: bool;
-}
+} [@@deriving yojson { strict = false }]
 
 let governance_defaults level =
   let level_lc = String.lowercase_ascii level in
@@ -57,42 +57,29 @@ let load_governance (config : Room.config) : governance_config =
 
 let save_governance (config : Room.config) (g : governance_config) =
   ensure_masc_dir config;
-  let json = `Assoc [
-    ("level", `String g.level);
-    ("audit_enabled", `Bool g.audit_enabled);
-    ("anomaly_detection", `Bool g.anomaly_detection);
-    ("updated_at", `String (Types.now_iso ()));
-  ] in
+  let json = match governance_config_to_yojson g with
+    | `Assoc fields ->
+        `Assoc (fields @ [("updated_at", `String (Types.now_iso ()))])
+    | other -> other
+  in
   Room_utils.write_json config (governance_path config) json
 
 (** {1 MCP Sessions} *)
 
 type mcp_session_record = {
   id: string;
-  agent_name: string option;
+  agent_name: string option; [@default None]
   created_at: float;
   last_seen: float;
-}
+} [@@deriving yojson { strict = false }]
 
 let mcp_sessions_path (config : Room.config) =
   Filename.concat (Room_utils.masc_dir config) "mcp-sessions.json"
 
-let mcp_session_to_json (s : mcp_session_record) : Yojson.Safe.t =
-  `Assoc [
-    ("id", `String s.id);
-    ("agent_name", match s.agent_name with Some a -> `String a | None -> `Null);
-    ("created_at", `Float s.created_at);
-    ("last_seen", `Float s.last_seen);
-  ]
+let mcp_session_to_json = mcp_session_record_to_yojson
 
 let mcp_session_of_json (json : Yojson.Safe.t) : mcp_session_record option =
-  try
-    let id = match Json_util.get_string json "id" with Some v -> v | None -> raise Not_found in
-    let agent_name = Json_util.get_string json "agent_name" in
-    let created_at = match Json_util.get_float json "created_at" with Some v -> v | None -> raise Not_found in
-    let last_seen = match Json_util.get_float json "last_seen" with Some v -> v | None -> raise Not_found in
-    Some { id; agent_name; created_at; last_seen }
-  with Not_found | Yojson.Safe.Util.Type_error _ -> None
+  mcp_session_record_of_yojson json |> Result.to_option
 
 let load_mcp_sessions (config : Room.config) : mcp_session_record list =
   let path = mcp_sessions_path config in

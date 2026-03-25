@@ -417,7 +417,8 @@ let acquire_lock t ~key ~ttl_seconds ~owner =
     let* acquired = C.find_opt acquire_lock_q (nkey, owner, ttl_seconds) in
     Ok (Option.is_some acquired)
   ) t.pool with
-  | Ok b -> Ok b
+  | Ok true -> Ok true
+  | Ok false -> Ok false
   | Error err -> Error (caqti_error_to_masc err)
 
 let release_lock t ~key ~owner =

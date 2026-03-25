@@ -42,7 +42,7 @@ let verify_worker_result
     } in
     let verdict = Verifier_oas.verify req in
     match verdict with
-    | Verifier_oas.Pass ->
+    | Ok Verifier_oas.Pass ->
       let verified = Oas.Verified_output.verify unverified
         ~verifier:"verifier_oas"
         ~confidence:0.9
@@ -50,7 +50,7 @@ let verify_worker_result
       (match verified with
        | Some v -> Verified { run_result; verified_output = v }
        | None -> Unverified { run_result; reason = "verification threshold not met" })
-    | Verifier_oas.Warn reason ->
+    | Ok (Verifier_oas.Warn reason) ->
       let verified = Oas.Verified_output.verify unverified
         ~verifier:"verifier_oas"
         ~confidence:0.6
@@ -58,8 +58,10 @@ let verify_worker_result
       (match verified with
        | Some v -> Verified { run_result; verified_output = v }
        | None -> Unverified { run_result; reason })
-    | Verifier_oas.Fail reason ->
+    | Ok (Verifier_oas.Fail reason) ->
       Unverified { run_result; reason }
+    | Error reason ->
+      Unverified { run_result; reason = Printf.sprintf "verifier_error: %s" reason }
 
 let text_of_outcome = function
   | Verified vr -> Oas.Verified_output.text vr.verified_output

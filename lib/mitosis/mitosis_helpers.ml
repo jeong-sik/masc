@@ -456,14 +456,16 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
                   `Error (Printexc.to_string exn)
             in
             let status_of = function
-              | `Verdict Verifier_oas.Pass -> "pass"
-              | `Verdict (Verifier_oas.Warn _) -> "warn"
-              | `Verdict (Verifier_oas.Fail _) -> "fail"
+              | `Verdict (Ok Verifier_oas.Pass) -> "pass"
+              | `Verdict (Ok (Verifier_oas.Warn _)) -> "warn"
+              | `Verdict (Ok (Verifier_oas.Fail _)) -> "fail"
+              | `Verdict (Error _) -> "warn"
               | `Timeout -> "warn"
               | `Error _ -> "warn"
             in
             let verdict_text_of = function
-              | `Verdict v -> Verifier_oas.verdict_to_string v
+              | `Verdict (Ok v) -> Verifier_oas.verdict_to_string v
+              | `Verdict (Error e) -> Printf.sprintf "WARN: %s" e
               | `Timeout -> "WARN: verifier_timeout"
               | `Error _ -> "WARN: verifier_error"
             in

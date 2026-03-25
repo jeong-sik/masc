@@ -148,9 +148,9 @@ One line only.|}
 (* Core: verify                                                     *)
 (* ================================================================ *)
 
-let verify (req : verification_request) : verdict =
+let verify (req : verification_request) : (verdict, string) result =
   if should_skip ~action_description:req.action_description then
-    Pass
+    Ok Pass
   else
     let prompt = build_prompt req in
     match
@@ -163,10 +163,9 @@ let verify (req : verification_request) : verdict =
         ()
     with
     | Ok result ->
-      parse_verdict (Oas_response.text_of_response result.response)
+      Ok (parse_verdict (Oas_response.text_of_response result.response))
     | Error message ->
-      Log.Verifier.warn "OAS run failed: %s (defaulting to WARN)" message;
-      Warn ("verifier_unavailable: " ^ message)
+      Error message
 
 (* ================================================================ *)
 (* Verdict -> Hook Decision (OAS bridge)                            *)
@@ -219,15 +218,22 @@ let make_pre_tool_hook
       else
         let input_str =
           try Yojson.Safe.to_string input
-          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> "{}" in
+          with Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+                 Log.Verifier.warn "Failed to serialize input: %s" (Printexc.to_string exn);
+                 "{}" in
         let req : verification_request = {
           action_description;
           action_result = input_str;
           goal;
           context_summary;
         } in
-        let verdict = verify req in
-        verdict_to_hook_decision verdict
+        begin match verify req with
+        | Ok verdict -> verdict_to_hook_decision verdict
+        | Error msg ->
+            Log.Verifier.warn "OAS run failed: %s (defaulting to Continue)" msg;
+            Agent_sdk.Hooks.Continue
+        end
     | _ -> Agent_sdk.Hooks.Continue
 
 (** Install the verifier hook into an existing OAS hooks record.

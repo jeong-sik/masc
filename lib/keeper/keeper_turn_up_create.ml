@@ -30,29 +30,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     |> Option.value ~default:(if room_scope = "all" then "global" else "local")
     |> canonical_scope_kind
   in
-  let requested_models =
-    if p.models_in <> [] then
-      p.models_in
-    else if p.profile_defaults.models <> [] then
-      p.profile_defaults.models
-    else
-      p.profile_defaults.allowed_models
-  in
-  let allowed_models =
-    resolve_allowed_models
-      ~explicit_allowed_models:p.allowed_models_in
-      ~seed_allowed_models:p.profile_defaults.allowed_models
-      ~models:requested_models
-  in
-  let active_model =
-    p.active_model_opt
-    |> first_some p.profile_defaults.active_model
-    |> Option.value
-         ~default:
-           (match requested_models with
-           | model :: _ -> model
-            | [] -> "")
-  in
+  (* Legacy model fields: cascade_name is the authority.
+     These fields are kept empty; downstream reads cascade_name. *)
+  let requested_models = [] in
+  let allowed_models = [] in
+  let active_model = "" in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
@@ -81,8 +63,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   in
   if goal = "" then
     (false, "goal is required when creating a keeper")
-  else if requested_models = [] then
-    (false, "models is required when creating a keeper")
   else
     let presence_keepalive =
       Option.value
@@ -167,10 +147,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~fallback_message:env_message_gate
         ~fallback_token:env_token_gate
     in
-    (match ensure_api_keys_for_labels requested_models with
+    let cascade_models = Oas_model_resolve.models_of_cascade_name "keeper_unified" in
+    (match ensure_api_keys_for_labels cascade_models with
      | Error e -> (false, e)
      | Ok () ->
-       let primary_max_context = Oas_model_resolve.resolve_primary_max_context requested_models in
+       let primary_max_context = Oas_model_resolve.resolve_primary_max_context cascade_models in
        let trace_id = generate_trace_id () in
          let base_dir = session_base_dir ctx.config in
          mkdir_p base_dir;
@@ -318,7 +299,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              ("needs", `String meta.needs);
              ("desires", `String meta.desires);
              ("instructions", `String meta.instructions);
-             ("models", `List (List.map (fun s -> `String s) meta.models));
+             ("cascade_name", `String meta.cascade_name);
              ("voice_enabled", `Bool meta.voice_enabled);
              ("voice_channel", `String meta.voice_channel);
              ("voice_agent_id", `String meta.voice_agent_id);

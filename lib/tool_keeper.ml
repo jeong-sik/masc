@@ -168,7 +168,7 @@ let keeper_list_row_json ~runtime_class ~desired ~resident_registered config
             ("initiative_idle_sec", `Int meta.initiative_idle_sec);
             ("initiative_cooldown_sec", `Int meta.initiative_cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
-            ("models", `List (List.map (fun model -> `String model) meta.models));
+            ("cascade_name", `String meta.cascade_name);
             ("created_at", `String meta.created_at);
             ("updated_at", `String meta.updated_at);
           ])
@@ -267,17 +267,9 @@ let handle_resident_keeper_status ctx args : tool_result =
            (annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true
               ~resident_registered:true json))
 
-let inject_models_from_meta config name args =
-  match Safe_ops.json_string_list "models" args with
-  | _ :: _ -> args
-  | [] ->
-    match read_meta config name with
-    | Ok (Some meta) when meta.models <> [] ->
-      let models_json = `List (List.map (fun m -> `String m) meta.models) in
-      (match args with
-       | `Assoc fields -> `Assoc (("models", models_json) :: fields)
-       | _ -> args)
-    | _ -> args
+(* Legacy model injection removed: cascade_name is the authority.
+   Kept as a no-op to avoid changing call-site signatures. *)
+let inject_models_from_meta _config _name args = args
 
 let inject_goal_from_message args =
   match Safe_ops.json_string_opt "goal" args with

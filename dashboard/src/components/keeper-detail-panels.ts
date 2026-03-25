@@ -83,7 +83,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
 
   const ctxPct = keeper.context_ratio != null ? Math.round(keeper.context_ratio * 100) : null
   const ctxTone: KpiTone = ctxPct == null ? 'default' : ctxPct > 85 ? 'bad' : ctxPct > 70 ? 'warn' : ctxPct > 0 ? 'ok' : 'default'
-  const ctxHint = ctxPct != null && ctxPct > 80 ? 'Approaching limit' : undefined
+  const ctxHint = ctxPct != null && ctxPct > 80 ? '한계 접근 중' : undefined
 
   const actLevel = typeof keeper.activityLevel === 'number' ? keeper.activityLevel : null
   const actTone: KpiTone = actLevel == null ? 'default' : actLevel >= 4 ? 'ok' : actLevel >= 2 ? 'warn' : 'default'
@@ -112,7 +112,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         <${KpiCard}
           label="Activity"
           value=${keeper.activityLevel ?? '-'}
-          hint="Level 0-5"
+          hint="레벨 0-5"
           tone=${actTone}
         />
       </div>

@@ -203,10 +203,10 @@ export function PromptRegistryPanel() {
 
             <div class="mt-4 flex flex-wrap gap-2">
               <${ActionButton} variant="primary" size="md" disabled=${saving || loading || draft.trim().length === 0} onClick=${() => { void applyOverride() }}>
-                ${saving ? '저장 중...' : 'Apply override'}
+                ${saving ? '저장 중...' : '오버라이드 적용'}
               <//>
               <${ActionButton} variant="ghost" size="md" disabled=${saving || loading || !selectedPrompt.has_override} onClick=${() => { void clearOverride() }}>
-                Clear override
+                오버라이드 제거
               <//>
               <${ActionButton} variant="ghost" size="md" disabled=${saving || loading} onClick=${() => {
                 setDraft(normalizeDraft(selectedPrompt))

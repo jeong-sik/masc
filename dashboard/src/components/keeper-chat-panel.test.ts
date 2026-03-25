@@ -33,6 +33,6 @@ describe('normalizeKeeperChatErrorValue', () => {
   })
 
   it('falls back to a stable generic message', () => {
-    expect(normalizeKeeperChatErrorValue({ code: 500 })).toBe('Stream error')
+    expect(normalizeKeeperChatErrorValue({ code: 500 })).toBe('스트림 오류')
   })
 })

@@ -286,7 +286,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       editMode.value = false
       editDraft.value = null
     } catch (err) {
-      saveError.value = err instanceof Error ? err.message : 'Save failed'
+      saveError.value = err instanceof Error ? err.message : '저장 실패'
     } finally {
       saving.value = false
     }
@@ -320,22 +320,22 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
   // --- Prompt section (editable) ---
   const promptSection = isEditing ? html`
-    <${SectionHeader} title="Prompt (editing)" />
-    <${EditTextarea} field="goal" label="Goal" rows=${3} />
-    <${EditTextarea} field="short_goal" label="Short-term goal" rows=${2} />
-    <${EditTextarea} field="mid_goal" label="Mid-term goal" rows=${2} />
-    <${EditTextarea} field="long_goal" label="Long-term goal" rows=${2} />
-    <${EditSelect} field="soul_profile" label="Soul profile" options=${SOUL_PROFILES} />
-    <${EditTextarea} field="will" label="Will" rows=${2} />
-    <${EditTextarea} field="needs" label="Needs" rows=${2} />
-    <${EditTextarea} field="desires" label="Desires" rows=${2} />
-    <${EditTextarea} field="instructions" label="Instructions" rows=${4} />
+    <${SectionHeader} title="프롬프트 (편집)" />
+    <${EditTextarea} field="goal" label="목표" rows=${3} />
+    <${EditTextarea} field="short_goal" label="단기 목표" rows=${2} />
+    <${EditTextarea} field="mid_goal" label="중기 목표" rows=${2} />
+    <${EditTextarea} field="long_goal" label="장기 목표" rows=${2} />
+    <${EditSelect} field="soul_profile" label="소울 프로필" options=${SOUL_PROFILES} />
+    <${EditTextarea} field="will" label="의지" rows=${2} />
+    <${EditTextarea} field="needs" label="필요" rows=${2} />
+    <${EditTextarea} field="desires" label="욕구" rows=${2} />
+    <${EditTextarea} field="instructions" label="지시사항" rows=${4} />
   ` : html`
-    <${SectionHeader} title="Prompt" />
-    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Goal</div>
+    <${SectionHeader} title="프롬프트" />
+    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-0.5">목표</div>
     <${LongText} text=${c.prompt.goal} />
     ${c.prompt.short_goal ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Short-term goal</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">단기 목표</div>
       <${LongText} text=${c.prompt.short_goal} />
     ` : null}
     ${c.prompt.mid_goal ? html`
@@ -371,8 +371,8 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* --- Execution (read-only) --- */}
       ${'' /* Active model is shown in the header badge — not duplicated here */}
-      <${SectionHeader} title="Execution" />
-      <${ConfigRow} label="Active model" value=${c.execution.active_model || '--'} />
+      <${SectionHeader} title="실행" />
+      <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">Verify</span>
         <${BoolBadge} value=${c.execution.verify} />
@@ -392,52 +392,52 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ` : null}
 
       ${'' /* --- Compaction (read-only) --- */}
-      <${SectionHeader} title="Compaction" />
-      <${ConfigRow} label="Profile" value=${c.compaction.profile || '--'} />
-      <${ConfigRow} label="Ratio gate" value=${(c.compaction.ratio_gate * 100).toFixed(0) + '%'} />
-      <${ConfigRow} label="Message gate" value=${String(c.compaction.message_gate)} />
-      <${ConfigRow} label="Token gate" value=${formatTokens(c.compaction.token_gate)} />
-      <${ConfigRow} label="Cooldown" value=${c.compaction.cooldown_sec + 's'} />
+      <${SectionHeader} title="컴팩션" />
+      <${ConfigRow} label="프로필" value=${c.compaction.profile || '--'} />
+      <${ConfigRow} label="비율 게이트" value=${(c.compaction.ratio_gate * 100).toFixed(0) + '%'} />
+      <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
+      <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
+      <${ConfigRow} label="쿨다운" value=${c.compaction.cooldown_sec + 's'} />
 
       ${'' /* --- Proactive (read-only) --- */}
-      <${SectionHeader} title="Proactive" />
+      <${SectionHeader} title="프로액티브" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Enabled</span>
+        <span class="text-xs text-[var(--text-muted)]">활성</span>
         <${BoolBadge} value=${c.proactive.enabled} />
       </div>
-      <${ConfigRow} label="Idle trigger" value=${c.proactive.idle_sec + 's'} />
-      <${ConfigRow} label="Cooldown" value=${c.proactive.cooldown_sec + 's'} />
+      <${ConfigRow} label="유휴 트리거" value=${c.proactive.idle_sec + 's'} />
+      <${ConfigRow} label="쿨다운" value=${c.proactive.cooldown_sec + 's'} />
 
       ${'' /* --- Runtime (read-only) --- */}
-      <${SectionHeader} title="Runtime" />
+      <${SectionHeader} title="런타임" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Paused</span>
+        <span class="text-xs text-[var(--text-muted)]">일시정지</span>
         <${BoolBadge} value=${c.runtime.paused} />
       </div>
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Desired</span>
+        <span class="text-xs text-[var(--text-muted)]">원하는 상태</span>
         <${BoolBadge} value=${c.runtime.desired} />
       </div>
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Resident registered</span>
+        <span class="text-xs text-[var(--text-muted)]">레지던트 등록</span>
         <${BoolBadge} value=${c.runtime.resident_registered} />
       </div>
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Keepalive running</span>
+        <span class="text-xs text-[var(--text-muted)]">킵얼라이브 실행</span>
         <${BoolBadge} value=${c.runtime.keepalive_running} />
       </div>
-      <${ConfigRow} label="Fiber health" value=${c.runtime.fiber_health || '--'} />
+      <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Presence keepalive</span>
+        <span class="text-xs text-[var(--text-muted)]">프레즌스 킵얼라이브</span>
         <${BoolBadge} value=${c.runtime.presence_keepalive} />
       </div>
-      <${ConfigRow} label="Presence interval" value=${c.runtime.presence_keepalive_sec + 's'} />
+      <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
 
       ${'' /* --- Coordination (read-only) --- */}
-      <${SectionHeader} title="Coordination" />
-      <${ConfigRow} label="Room scope" value=${c.coordination.room_scope || '--'} />
-      <${ConfigRow} label="Scope kind" value=${c.coordination.scope_kind || '--'} />
-      <${ConfigRow} label="Trigger mode" value=${c.coordination.trigger_mode || '--'} />
+      <${SectionHeader} title="조율" />
+      <${ConfigRow} label="룸 범위" value=${c.coordination.room_scope || '--'} />
+      <${ConfigRow} label="범위 유형" value=${c.coordination.scope_kind || '--'} />
+      <${ConfigRow} label="트리거 모드" value=${c.coordination.trigger_mode || '--'} />
       <div class="mt-1.5">
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Mention targets</div>
         <${ModelList} models=${c.coordination.mention_targets} />

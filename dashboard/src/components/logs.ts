@@ -199,7 +199,7 @@ export function LogViewer() {
             <input
               class="logs-module-input min-w-[220px] rounded-md border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
               type="text"
-              placeholder="module filter"
+              placeholder="모듈 필터"
               value=${moduleFilter.value}
               onInput=${(e: Event) => {
                 moduleFilter.value = (e.target as HTMLInputElement).value

@@ -152,15 +152,15 @@ export function KeeperChatPanel({ name }: { name: string }) {
     <div class="overflow-hidden rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(11,18,34,0.95),rgba(6,11,22,0.92))] shadow-[0_24px_56px_rgba(0,0,0,0.24)]">
       <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
         <div class="min-w-[220px] flex-1">
-          <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Direct Chat</div>
+          <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
           <div class="mt-2 text-[15px] font-semibold text-[var(--text-strong)]">@${name}</div>
           <div class="mt-1 text-[13px] leading-[1.65] text-[var(--text-secondary)]">
-            Live direct conversation with this keeper. Streaming responses stay in the same transcript lane.
+            이 키퍼와의 실시간 직접 대화입니다. 스트리밍 응답은 동일한 대화 레인에 표시됩니다.
           </div>
         </div>
         <div class="flex items-center gap-2">
           <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.2)] bg-[rgba(71,184,255,0.08)] px-2.5 py-1 text-[11px] font-medium text-[#bfe8ff]">
-            ${entries.length} messages
+            ${entries.length}개 메시지
           </span>
         </div>
       </div>

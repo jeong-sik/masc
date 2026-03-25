@@ -333,7 +333,7 @@ export function ChatTranscript({
       ${entries.length === 0
         ? html`
             <div class="flex min-h-[220px] flex-col items-center justify-center rounded-[18px] border border-dashed border-[rgba(148,163,184,0.18)] bg-[rgba(255,255,255,0.03)] px-6 text-center">
-              <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">No Direct Messages</div>
+              <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 메시지 없음</div>
               <div class="mt-3 max-w-[34rem] text-[13px] leading-[1.7] text-[var(--text-secondary)]">${emptyText}</div>
             </div>
           `
@@ -382,8 +382,8 @@ export function ChatComposer({
   return html`
     <div class="chat-composer flex flex-col gap-3">
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Message</div>
-        <div class="text-[11px] text-[var(--text-muted)]">Enter to send, Shift+Enter for newline</div>
+        <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">메시지</div>
+        <div class="text-[11px] text-[var(--text-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
       </div>
       <textarea
         class="control-textarea min-h-[96px] rounded-[18px] border border-[rgba(148,163,184,0.16)] bg-[rgba(255,255,255,0.04)] px-3 py-3 text-[14px] leading-[1.6]"

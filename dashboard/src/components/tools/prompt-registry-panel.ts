@@ -121,7 +121,7 @@ export function PromptRegistryPanel() {
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div class="min-h-[260px] rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] p-2">
           <div class="mb-2 flex items-center justify-between gap-2 px-2">
-            <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">Registered prompts</div>
+            <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">등록된 프롬프트</div>
             <${ActionButton} variant="ghost" size="sm" disabled=${loading || saving} onClick=${() => { void loadPrompts(selectedPrompt?.key ?? null) }}>
               ${loading ? '새로고침 중' : '새로고침'}
             <//>
@@ -156,24 +156,24 @@ export function PromptRegistryPanel() {
               <div class="font-mono text-[13px] text-[var(--text-strong)]">${selectedPrompt.key}</div>
               <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${sourceBadgeClass(selectedPrompt.source)}">${selectedPrompt.source}</span>
               ${selectedPrompt.has_override
-                ? html`<span class="rounded-full border border-[rgba(250,204,21,0.28)] bg-[rgba(250,204,21,0.08)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[#fde68a]">override active</span>`
+                ? html`<span class="rounded-full border border-[rgba(250,204,21,0.28)] bg-[rgba(250,204,21,0.08)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[#fde68a]">오버라이드 활성</span>`
                 : null}
             </div>
 
             <div class="mb-4 grid gap-3 md:grid-cols-2">
               <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
-                <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">Markdown file</div>
-                <div class="mt-1 break-all font-mono text-[12px] text-[var(--text-body)]">${selectedPrompt.file_path ?? 'not configured'}</div>
+                <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">마크다운 파일</div>
+                <div class="mt-1 break-all font-mono text-[12px] text-[var(--text-body)]">${selectedPrompt.file_path ?? '미설정'}</div>
               </div>
               <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
-                <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">Character count</div>
+                <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">문자 수</div>
                 <div class="mt-1 font-mono text-[12px] text-[var(--text-body)]">${selectedPrompt.char_count}</div>
               </div>
             </div>
 
             ${selectedPrompt.template_variables.length > 0 ? html`
               <div class="mb-4 rounded-lg border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
-                <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">Allowed placeholders</div>
+                <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">허용된 플레이스홀더</div>
                 <div class="mt-2 flex flex-wrap gap-2">
                   ${selectedPrompt.template_variables.map(variable => html`
                     <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-body)]">${`{{${variable}}}`}</span>
@@ -183,13 +183,13 @@ export function PromptRegistryPanel() {
             ` : null}
 
             <div class="mb-4">
-              <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">File baseline</div>
-              <pre class="max-h-[220px] overflow-auto rounded-lg border border-[var(--card-border)] bg-[rgba(6,12,24,0.72)] px-3 py-3 text-[12px] leading-relaxed whitespace-pre-wrap break-words text-[var(--text-body)]">${selectedPrompt.file_value ?? 'missing'}</pre>
+              <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">파일 기준값</div>
+              <pre class="max-h-[220px] overflow-auto rounded-lg border border-[var(--card-border)] bg-[rgba(6,12,24,0.72)] px-3 py-3 text-[12px] leading-relaxed whitespace-pre-wrap break-words text-[var(--text-body)]">${selectedPrompt.file_value ?? '없음'}</pre>
             </div>
 
             <div class="mb-2 flex items-center justify-between gap-2">
-              <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">Runtime override</div>
-              <div class="text-[11px] text-[var(--text-muted)]">effective preview follows the override after save</div>
+              <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">런타임 오버라이드</div>
+              <div class="text-[11px] text-[var(--text-muted)]">저장 후 effective 미리보기가 오버라이드를 반영합니다</div>
             </div>
             <${TextArea}
               rows=${18}
@@ -212,7 +212,7 @@ export function PromptRegistryPanel() {
                 setDraft(normalizeDraft(selectedPrompt))
                 setStatus(null)
               }}>
-                Reset draft
+                초안 초기화
               <//>
             </div>
           ` : html`

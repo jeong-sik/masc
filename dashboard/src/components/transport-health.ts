@@ -346,7 +346,7 @@ export function TransportHealthPanel() {
   const data = transportHealth.value
 
   if (loading.value && !data) {
-    return html`<div class="p-6 text-center text-text-muted text-sm">Transport health loading...</div>`
+    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 상태 로딩 중...</div>`
   }
 
   if (error.value && !data) {
@@ -431,7 +431,7 @@ export function TransportHealthPanel() {
         ? html`
             <div class="rounded-xl border border-card-border/70 bg-card/35 p-4">
               <div class="flex items-center justify-between gap-3 mb-3">
-                <span class="text-xs font-semibold text-text-strong uppercase tracking-wider">Hot Queues</span>
+                <span class="text-xs font-semibold text-text-strong uppercase tracking-wider">핫 큐</span>
                 <span class="text-[10px] text-text-muted">backpressure candidates</span>
               </div>
               <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
@@ -452,7 +452,7 @@ export function TransportHealthPanel() {
 
       <div class="rounded-xl border border-card-border/70 bg-card/35 p-4">
         <div class="flex items-center justify-between gap-3 mb-3">
-          <span class="text-xs font-semibold text-text-strong uppercase tracking-wider">Practical Paths</span>
+          <span class="text-xs font-semibold text-text-strong uppercase tracking-wider">실용 경로</span>
           <span class="text-[10px] text-text-muted">${data.generated_at}</span>
         </div>
         <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">

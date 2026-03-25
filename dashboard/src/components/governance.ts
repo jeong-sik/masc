@@ -57,7 +57,7 @@ function GovernanceSummaryStrip() {
     ` : null}
     <div class="mb-2.5 flex items-center justify-between px-0.5">
       <div class="flex items-center gap-3">
-        <h2 class="text-lg font-bold text-text-strong tracking-wide">Governance</h2>
+        <h2 class="text-lg font-bold text-text-strong tracking-wide">거버넌스</h2>
         <span class="rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-muted">진행 중 ${itemCount}건 / 활동 ${activityCount}건</span>
       </div>
       ${data?.generated_at ? html`<span class="text-[11px] text-text-dim font-mono">${data.generated_at}</span>` : null}

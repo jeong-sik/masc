@@ -240,7 +240,7 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
       <input
         class="w-full py-2 px-3 mb-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-xs text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--ok-40)]"
         type="text"
-        placeholder="Search fields..."
+        placeholder="필드 검색..."
         value=${fieldSearch.value}
         onInput=${(e: Event) => { fieldSearch.value = (e.target as HTMLInputElement).value }}
       />
@@ -314,7 +314,7 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
 }
 
 export function EquipmentList({ items }: { items: string[] }) {
-  if (items.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">No equipment</div>`
+  if (items.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">장비 없음</div>`
 
   return html`
     <div class="flex flex-col gap-1.5">
@@ -330,7 +330,7 @@ export function EquipmentList({ items }: { items: string[] }) {
 
 export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   const entries = Object.entries(rels)
-  if (entries.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">No relationships</div>`
+  if (entries.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">관계 없음</div>`
 
   return html`
     <div class="max-h-[220px] overflow-y-auto flex flex-col gap-1.5">

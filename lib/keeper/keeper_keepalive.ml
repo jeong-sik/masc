@@ -646,5 +646,6 @@ let stop_keepalive name =
   | Some entry ->
       entry.stop := true;
       (match entry.grpc_close with
-       | Some close_fn -> (try close_fn () with _ -> ())
+       (* cleanup: best-effort gRPC close, ignore transport errors *)
+       | Some close_fn -> (try close_fn () with exn -> ignore exn)
        | None -> ())

@@ -236,7 +236,7 @@ let create_eio ~sw ~env (cfg : config) : (t, error) result =
          12+ concurrent keepers need ~12 connections.
          Supabase Pro supports 500+ max_connections. *)
       let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-        | Some s -> (try max 1 (min (int_of_string s) 50) with _ -> 5)
+        | Some s -> (try max 1 (min (int_of_string s) 50) with Failure _ -> 5)
         | None -> 5
       in
       let pool_config = Caqti_pool_config.create

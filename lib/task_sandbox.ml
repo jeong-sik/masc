@@ -118,7 +118,7 @@ let changed_files sandbox =
     @ git_lines ~cwd:sandbox.worktree_path
         ["diff"; "--name-only"; "--cached"; "HEAD"]
     |> List.sort_uniq String.compare
-  with _ -> []
+  with Eio.Cancel.Cancelled _ as e -> raise e | Failure _ | Sys_error _ -> []
 
 let cleanup ~config ~agent_name sandbox =
   (* Capture changed files before removal *)
@@ -128,7 +128,7 @@ let cleanup ~config ~agent_name sandbox =
     try
       git_lines ~cwd:sandbox.worktree_path
         ["diff"; "--name-only"; "origin/main...HEAD"]
-    with _ -> []
+    with Eio.Cancel.Cancelled _ as e -> raise e | Failure _ | Sys_error _ -> []
   in
   let all_files =
     (files @ committed_files)

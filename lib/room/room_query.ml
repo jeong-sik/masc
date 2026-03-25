@@ -57,7 +57,7 @@ let get_tasks_raw_in_room config room_id =
     backlog.tasks
 
 let safe_yield () =
-  try Eio.Fiber.yield () with _ -> ()
+  try Eio.Fiber.yield () with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
 
 (** Get raw agent list (for orchestrator) *)
 let get_agents_raw config =

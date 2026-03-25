@@ -102,7 +102,7 @@ let caqti_error_to_masc err =
 let create ~sw ~env ~url ~cluster_name ~node_id =
   let uri = Uri.of_string url in
   let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-    | Some s -> (try int_of_string s with _ -> 10)
+    | Some s -> (try int_of_string s with Failure _ -> 10)
     | None -> 10
   in
   let pool_config = Caqti_pool_config.create

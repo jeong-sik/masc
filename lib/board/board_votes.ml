@@ -214,7 +214,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
       | `Null -> None
       | _ -> (
           match json |> member "meta_json" |> to_string_option with
-          | Some raw -> (try Some (Yojson.Safe.from_string raw) with _ -> None)
+          | Some raw -> (try Some (Yojson.Safe.from_string raw) with Yojson.Json_error _ -> None)
           | None -> None)
     in
     match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with

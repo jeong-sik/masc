@@ -61,7 +61,7 @@ let default_recovery_config = {
 let recovery_config_from_env () = {
   max_consecutive_failures =
     (match Sys.getenv_opt "MASC_PULSE_MAX_CONSUMER_FAILURES" with
-     | Some s -> (try max 1 (int_of_string s) with _ -> 3)
+     | Some s -> (try max 1 (int_of_string s) with Failure _ -> 3)
      | None -> 3);
 }
 

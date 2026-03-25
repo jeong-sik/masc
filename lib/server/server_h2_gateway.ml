@@ -547,7 +547,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let base_path = state.Mcp_server.room_config.base_path in
           let limit =
             match Server_utils.query_param httpun_request "limit" with
-            | Some raw -> (try int_of_string raw with _ -> 20)
+            | Some raw -> (try int_of_string raw with Failure _ -> 20)
             | None -> 20
           in
           let json =

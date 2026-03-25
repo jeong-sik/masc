@@ -74,7 +74,8 @@ let cleanup_session session_id =
     | None -> ()
     | Some session ->
       session.closed <- true;
-      (try Httpun_ws.Wsd.close session.wsd with _ -> ());
+      (* cleanup: best-effort close, ignore any transport error *)
+      (try Httpun_ws.Wsd.close session.wsd with exn -> ignore exn);
       Hashtbl.remove sessions session_id);
   Transport_metrics.set_ws_sessions
     (with_sessions_rw (fun () -> Hashtbl.length sessions));

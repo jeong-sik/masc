@@ -277,27 +277,6 @@ let test_eio_status_json_fields () =
   ignore (json |> member "started_at");
   ignore (json |> member "last_stop_reason")
 
-(** Test: walph_loop is removed and leaves state idle *)
-let test_eio_loop_removed () =
-  with_test_config "error_cutoff" @@ fun env _fs config ->
-  let state = Room_walph_eio.get_walph_state_exn config ~agent_name:"error-agent" in
-  let result =
-    Room_walph_eio.walph_loop config
-      ~clock:(Eio.Stdenv.clock env)
-      ~agent_name:"error-agent"
-      ~preset:"coverage"
-      ~max_iterations:10
-      ~max_consecutive_errors:2
-      ~error_backoff_sec:0
-      ~model_dispatch:(fun ~tool_name:_ ~model:_ ~prompt:_ ~timeout_sec:_ ~max_chars:_ () -> "")
-      ()
-  in
-  check bool "removed message" true
-    (contains result "Walph loop has been removed");
-  check bool "state remains idle" false state.running;
-  check int "iterations unchanged" 0 state.iterations;
-  check int "errors unchanged" 0 state.errors
-
 let test_eio_default_dispatch_uses_shared_cascade () =
   (* Verify old direct MODEL dispatch paths remain absent from Room. *)
   check bool "legacy direct dispatch removed" false
@@ -320,7 +299,6 @@ let eio_tests = [
   "multi-agent with review preset", `Quick, test_eio_multi_agent_with_review;
   "list walph states", `Quick, test_eio_list_walph_states;
   "status json fields", `Quick, test_eio_status_json_fields;
-  "loop removed", `Quick, test_eio_loop_removed;
   "default dispatch uses shared cascade", `Quick,
   test_eio_default_dispatch_uses_shared_cascade;
 ]

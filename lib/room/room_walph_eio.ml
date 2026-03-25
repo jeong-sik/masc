@@ -227,43 +227,6 @@ let walph_control config ~from_agent ~command ~args ?(target_agent=None) () =
   let _ = Room_state.broadcast config ~from_agent:"walph" ~content:response in
   response
 
-(** {1 Legacy Loop Stub} *)
-
-(** Walph loop execution has been removed.
-    Keep a stub for transitional direct callers so they get a clear, non-mutating response. *)
-let walph_loop config ~clock:_ ~agent_name
-    ?(preset="drain") ?(max_iterations=10) ?target
-    ?(max_consecutive_errors=5) ?(error_backoff_sec=2)
-    ?(default_model="explicit-model-required")
-    ~model_dispatch:_ () =
-  Room_utils_ops.ensure_initialized config;
-  let _ = get_walph_state_exn config ~agent_name in
-  let details =
-    [
-      ("preset", `String preset);
-      ("max_iterations", `Int max_iterations);
-      ( "target",
-        match target with
-        | Some value -> `String value
-        | None -> `Null );
-      ("max_consecutive_errors", `Int max_consecutive_errors);
-      ("error_backoff_sec", `Int error_backoff_sec);
-      ("default_model", `String default_model);
-      ("ts", `String (Types.now_iso ()));
-    ]
-  in
-  Room_utils_ops.log_event config
-    (Yojson.Safe.to_string
-       (`Assoc
-         (("type", `String "walph_loop_removed_call")
-          :: ("agent", `String agent_name)
-          :: details)));
-  let result =
-    "🚫 Walph loop has been removed. Use Team Session + Supervisor for supervised swarm execution."
-  in
-  let _ = Room_state.broadcast config ~from_agent:"walph" ~content:result in
-  result
-
 (** {1 Swarm Walph - Multi-Agent Coordination} *)
 
 (** Swarm status summary for all active Walph instances in a room *)

@@ -136,6 +136,34 @@ let respond_mcp_internal_error ?(extra_headers = []) ~deps request reqd
   let response = Httpun.Response.create ~headers `Internal_server_error in
   Httpun.Reqd.respond_with_string reqd response body
 
+let respond_not_ready ~deps request reqd =
+  let origin = deps.get_origin request in
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("error",
+           `Assoc
+             [
+               ("code", `Int (-32002));
+               ("message", `String "Server is starting up, not ready yet");
+             ]);
+          ("id", `Null);
+        ])
+  in
+  let headers =
+    Httpun.Headers.of_list
+      ([
+         ("content-type", "application/json");
+         ("content-length", string_of_int (String.length body));
+         ("retry-after", "2");
+       ]
+      @ deps.cors_headers origin)
+  in
+  let response = Httpun.Response.create ~headers `Service_unavailable in
+  Httpun.Reqd.respond_with_string reqd response body
+
 type sse_conn_info = {
   session_id : string;
   client_id : int;
@@ -357,6 +385,10 @@ let should_stream_post_tools_call request body_str accept_mode =
   | _ -> false
 
 let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
+  (* Readiness gate: reject before session/auth if server state is not ready *)
+  if Option.is_none (deps.get_server_state_opt ()) then
+    respond_not_ready ~deps request reqd
+  else
   let session_id_opt = get_session_id_any request in
   let session_was_provided = Option.is_some session_id_opt in
   let session_id =
@@ -630,6 +662,10 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
 
 let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
     ?(sse_kind = Sse.Coordinator) request reqd =
+  (* Readiness gate: reject before session/auth if server state is not ready *)
+  if Option.is_none (deps.get_server_state_opt ()) then
+    respond_not_ready ~deps request reqd
+  else
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
@@ -813,6 +849,9 @@ let handle_get_operator_mcp ~deps request reqd =
       handle_get_mcp ~deps ~profile:Mcp_eio.Operator_remote request reqd
 
 let handle_post_messages ~deps request reqd =
+  if Option.is_none (deps.get_server_state_opt ()) then
+    respond_not_ready ~deps request reqd
+  else
   let origin = deps.get_origin request in
   let legacy_headers = legacy_transport_deprecation_headers in
   match get_session_id_any request with
@@ -870,6 +909,9 @@ let handle_post_messages ~deps request reqd =
                   Httpun.Reqd.respond_with_string reqd response "")))
 
 let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
+  if Option.is_none (deps.get_server_state_opt ()) then
+    respond_not_ready ~deps request reqd
+  else
   let base_path =
     match deps.get_server_state_opt () with
     | Some s -> s.Mcp_server.room_config.base_path

@@ -165,11 +165,11 @@ let next_heartbeat_snapshot_seq () =
   !heartbeat_snapshot_seq
 
 let latest_heartbeat_task agent =
-  Eio.Mutex.use_ro heartbeat_mutex (fun () ->
+  Eio_guard.with_mutex heartbeat_mutex (fun () ->
     Hashtbl.find_opt latest_heartbeat_tasks agent)
 
 let latest_heartbeat_result agent =
-  Eio.Mutex.use_ro heartbeat_mutex (fun () ->
+  Eio_guard.with_mutex heartbeat_mutex (fun () ->
     Hashtbl.find_opt latest_heartbeat_results agent)
 
 let remote_agent_card_paths =

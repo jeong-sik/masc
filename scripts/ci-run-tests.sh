@@ -25,6 +25,8 @@ CI_TEST_ALLOW_CLEAN_RETRY="${CI_TEST_ALLOW_CLEAN_RETRY:-1}"
 CI_TEST_CLEAN_RETRY_DONE=0
 CI_TEST_ALLOW_RPC_RETRY="${CI_TEST_ALLOW_RPC_RETRY:-1}"
 CI_TEST_RPC_RETRY_DONE=0
+CI_TEST_ALLOW_FLAKY_RETRY="${CI_TEST_ALLOW_FLAKY_RETRY:-1}"
+CI_TEST_FLAKY_RETRY_DONE=0
 CI_TEST_ISOLATED_BUILD_DIR="${CI_TEST_ISOLATED_BUILD_DIR:-.ci_build}"
 ACTIVE_TEST_BUILD_DIR="${DUNE_BUILD_DIR:-_build}"
 
@@ -250,6 +252,21 @@ if [[ "${status}" -eq 124 ]]; then
   diag_dump "timeout"
   log_line "[ci-run] ERROR: test command timed out after ${TEST_TIMEOUT_SEC}s"
   exit 124
+fi
+
+# Flaky test retry: one clean retry on any test failure not caught above.
+# Targets intermittent CI-only failures (e.g. operator.032, #2957).
+if [[ "${status}" -ne 0 ]] \
+  && [[ "${CI_TEST_ALLOW_FLAKY_RETRY}" = "1" ]] \
+  && [[ "${CI_TEST_FLAKY_RETRY_DONE}" -eq 0 ]]; then
+  CI_TEST_FLAKY_RETRY_DONE=1
+  diag_dump "flaky_retry_trigger"
+  log_line "[ci-run] WARN: test failed (exit=${status}); retrying once for flaky mitigation"
+  log_line "[ci-run] flaky_retry_started_at=$(iso_now)"
+  set +e
+  run_with_timeout "${run_cmd}"
+  status=$?
+  set -e
 fi
 
 if [[ "${status}" -ne 0 ]]; then

@@ -53,7 +53,18 @@ let keeper_tool_audit_json_fields keeper agent_name =
           Some "heartbeat_result",
           Some result.updated_at )
     | None, None ->
-        (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
+        (* Use per-keeper tool tracking as last-resort fallback *)
+        let tracked = Keeper_tools_oas.tool_usage_for_keeper agent_name in
+        if tracked <> [] then
+          let names = List.map fst tracked in
+          let total = List.fold_left (fun acc (_, e) -> acc + e.Keeper_tools_oas.count) 0 tracked in
+          let latest_at = List.fold_left (fun acc (_, e) ->
+            max acc e.Keeper_tools_oas.last_used_at) 0.0 tracked in
+          let at_str = if latest_at > 0.0
+            then Some (Dashboard_utils.iso_of_unix latest_at) else None in
+          (fallback_allowed, names, Some total, Some "keeper_dispatch", at_str)
+        else
+          (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
   in
   [
     ("allowed_tool_names", string_list_json allowed_tool_names);

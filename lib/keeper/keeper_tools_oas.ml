@@ -9,6 +9,66 @@
 
     @since Phase 4 — Keeper → Agent.run() migration *)
 
+(* ── Per-keeper tool usage tracking ──────────────────────────── *)
+
+type tool_call_entry = {
+  mutable count : int;
+  mutable successes : int;
+  mutable failures : int;
+  mutable last_used_at : float;
+}
+
+(** Per-keeper tool usage: keeper_name → (tool_name → entry). *)
+let usage_by_keeper : (string, (string, tool_call_entry) Hashtbl.t) Hashtbl.t =
+  Hashtbl.create 8
+
+let record_tool_use ~keeper_name ~tool_name ~success =
+  let keeper_tbl = match Hashtbl.find_opt usage_by_keeper keeper_name with
+    | Some t -> t
+    | None ->
+      let t = Hashtbl.create 16 in
+      Hashtbl.replace usage_by_keeper keeper_name t; t
+  in
+  let entry = match Hashtbl.find_opt keeper_tbl tool_name with
+    | Some e -> e
+    | None ->
+      let e = { count = 0; successes = 0; failures = 0; last_used_at = 0.0 } in
+      Hashtbl.replace keeper_tbl tool_name e; e
+  in
+  entry.count <- entry.count + 1;
+  if success then entry.successes <- entry.successes + 1
+  else entry.failures <- entry.failures + 1;
+  entry.last_used_at <- Unix.gettimeofday ()
+
+let tool_usage_for_keeper keeper_name : (string * tool_call_entry) list =
+  match Hashtbl.find_opt usage_by_keeper keeper_name with
+  | None -> []
+  | Some tbl ->
+    Hashtbl.fold (fun name entry acc -> (name, entry) :: acc) tbl []
+    |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
+
+let tool_usage_json keeper_name : Yojson.Safe.t =
+  `List (List.map (fun (name, e) ->
+    `Assoc [
+      ("tool_name", `String name);
+      ("count", `Int e.count);
+      ("successes", `Int e.successes);
+      ("failures", `Int e.failures);
+      ("last_used_at", `Float e.last_used_at);
+    ]
+  ) (tool_usage_for_keeper keeper_name))
+
+let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
+  tool_usage_for_keeper keeper_name
+  |> List.sort (fun (_, a) (_, b) -> Float.compare b.last_used_at a.last_used_at)
+  |> (fun l -> let rec take n acc = function
+    | [] -> List.rev acc
+    | _ when n <= 0 -> List.rev acc
+    | (name, _) :: rest -> take (n - 1) (name :: acc) rest
+    in take limit [] l)
+
+(* ── end tracking ────────────────────────────────────────────── *)
+
 (** Build OAS Tool.t list from keeper's allowed tools.
 
     Each tool delegates to [execute_keeper_tool_call] with the current
@@ -104,6 +164,7 @@ let make_tools
                 let count = prior_fails + 1 in
                 with_failure_counts (fun () ->
                   Hashtbl.replace failure_counts key count);
+                record_tool_use ~keeper_name:meta.name ~tool_name:td.name ~success:false;
                 Log.Keeper.warn
                   "tool %s returned error result (%d/%d) for same args"
                   td.name count max_consecutive_failures;
@@ -111,12 +172,14 @@ let make_tools
               end else begin
                 with_failure_counts (fun () ->
                   Hashtbl.remove failure_counts key);
+                record_tool_use ~keeper_name:meta.name ~tool_name:td.name ~success:true;
                 (true, result)
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               let count = prior_fails + 1 in
               with_failure_counts (fun () ->
                 Hashtbl.replace failure_counts key count);
+              record_tool_use ~keeper_name:meta.name ~tool_name:td.name ~success:false;
               let msg = Printf.sprintf "tool %s failed (%d/%d): %s"
                 td.name count max_consecutive_failures
                 (Printexc.to_string exn) in

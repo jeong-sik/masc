@@ -173,7 +173,16 @@ let make_tools
                 with_failure_counts (fun () ->
                   Hashtbl.remove failure_counts key);
                 record_tool_use ~keeper_name:meta.name ~tool_name:td.name ~success:true;
-                (true, result)
+                (* PR#814 Gap 1: Capture git status delta after successful tool execution.
+                   If the working tree changed, log it so the keeper is aware of
+                   file-system side effects from its tool calls. *)
+                (match Worktree_live_context.capture_change_block
+                         ~base_path:config.base_path ~actor_key:meta.name with
+                 | Some change_block ->
+                     Log.Keeper.info "post-tool git delta detected for %s after %s"
+                       meta.name td.name;
+                     (true, result ^ "\n" ^ change_block)
+                 | None -> (true, result))
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               let count = prior_fails + 1 in

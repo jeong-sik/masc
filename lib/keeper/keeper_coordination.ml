@@ -64,10 +64,13 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
             not
               (Room.is_agent_joined_in_room config ~room_id
                  ~agent_name:meta.agent_name)
-          then
+          then begin
+            let scoped = Room.with_scope config (Room.Named room_id) in
+            Room.ensure_room_bootstrap scoped room_id;
             ignore
-              (Room.join_in_room config ~room_id ~agent_name:meta.agent_name
-                 ~capabilities:[ "keeper" ] ());
+              (Room.join scoped ~agent_name:meta.agent_name
+                 ~capabilities:[ "keeper" ] ())
+          end;
           ignore
             (Room.heartbeat_in_room config ~room_id ~agent_name:meta.agent_name);
           room_id :: acc

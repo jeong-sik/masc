@@ -237,19 +237,34 @@ let extract_delta ~config ~full_context ~since_len =
 
 let prepare_for_division ~config ~cell ~full_context =
   let dna = extract_dna ~config ~parent_cell:cell ~full_context in
-  let context_len = String.length full_context in
-  let prepared_cell = { cell with
-    state = Prepared;
-    phase = ReadyForHandoff dna;
-    prepared_dna = Some dna;
-    prepare_context_len = context_len;
-  } in
-  log_state_transition
-    ~old_state:cell.state ~new_state:Prepared
-    ~agent_name:cell.id
-    ~reason:(Printf.sprintf "DNA extracted (%d chars) at %.0f%% threshold"
-      context_len (config.prepare_threshold *. 100.0));
-  prepared_cell
+  let continuity_anchors = Mitosis_dna.build_continuity_anchors full_context in
+  let quality = Mitosis_dna.validate_dna ~dna ~anchors:continuity_anchors in
+  if quality.Mitosis_dna.score < 0.3 then begin
+    Log.Mitosis_log.warn
+      "[mitosis] DNA quality too low (%.2f): goal=%b task=%b recent=%b truncation=%d. Skipping division."
+      quality.score quality.has_goal_anchor quality.has_task_anchor
+      quality.has_recent_context quality.truncation_artifacts;
+    { cell with state = Active; phase = Idle }
+  end else begin
+    (if quality.Mitosis_dna.score < 0.6 then
+      Log.Mitosis_log.info
+        "[mitosis] DNA quality marginal (%.2f): goal=%b task=%b recent=%b truncation=%d"
+        quality.score quality.has_goal_anchor quality.has_task_anchor
+        quality.has_recent_context quality.truncation_artifacts);
+    let context_len = String.length full_context in
+    let prepared_cell = { cell with
+      state = Prepared;
+      phase = ReadyForHandoff dna;
+      prepared_dna = Some dna;
+      prepare_context_len = context_len;
+    } in
+    log_state_transition
+      ~old_state:cell.state ~new_state:Prepared
+      ~agent_name:cell.id
+      ~reason:(Printf.sprintf "DNA extracted (%d chars, quality=%.2f) at %.0f%% threshold"
+        context_len quality.Mitosis_dna.score (config.prepare_threshold *. 100.0));
+    prepared_cell
+  end
 let activate_stem ~pool ~dna =
   match List.find_opt (fun c -> c.state = Stem) pool.cells with
   | None ->

@@ -262,13 +262,13 @@ initiative_post_ttl_hours = 24
       in
       Alcotest.(check bool) "trigger_mode canonicalized so not flagged as override" false
         (List.mem "coordination.trigger_mode" override_fields);
-      (* profile_defaults_of_toml canonicalizes legacy TOML room_scope values
-         like "all" to "current", so this field should not remain overridden. *)
+      (* room_scope "all" is canonicalized to "current" (#2901), matching
+         live meta — no longer flagged as override. *)
       Alcotest.(check bool) "room_scope canonicalized so not flagged" false
         (List.mem "coordination.room_scope" override_fields);
       Alcotest.(check bool) "override field proactive" true
         (List.mem "proactive.enabled" override_fields);
-      Alcotest.(check string) "initiative source-only" "source_only"
+      Alcotest.(check string) "initiative wired" "wired"
         (json |> member "initiative" |> member "status" |> to_string);
       Alcotest.(check bool) "initiative configured in source" true
         (json |> member "initiative" |> member "configured_in_source" |> to_bool);

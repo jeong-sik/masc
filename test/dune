@@ -423,6 +423,11 @@
  (modules test_room_messages_raw)
  (libraries masc_mcp alcotest unix))
 
+(test
+ (name test_room_messages_pg)
+ (modules test_room_messages_pg)
+ (libraries masc_mcp alcotest eio eio_main unix))
+
 
 (test
  (name test_tool_goals)

@@ -3,6 +3,7 @@ open Test_operator_control_support
 
 let test_digest_room_prefers_fresh_resident_judgment () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -59,6 +60,7 @@ let test_digest_room_prefers_fresh_resident_judgment () =
 
 let test_digest_room_ignores_stale_resident_judgment () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -88,6 +90,7 @@ let test_digest_room_ignores_stale_resident_judgment () =
 
 let test_digest_team_session_prefers_fresh_resident_judgment () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -131,6 +134,7 @@ let test_digest_team_session_prefers_fresh_resident_judgment () =
 
 let test_parse_session_judgment_ignores_null_recommended_action () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -168,6 +172,7 @@ let test_parse_session_judgment_ignores_null_recommended_action () =
 
 let test_operator_judgment_write_and_latest_roundtrip () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -210,6 +215,7 @@ let test_operator_judgment_write_and_latest_roundtrip () =
 
 let test_confirm_keeps_pending_token_when_delegated_action_fails () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -255,6 +261,7 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
 
 let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect

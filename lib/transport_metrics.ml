@@ -18,7 +18,7 @@ type hot_queue_session = {
   idle_seconds : float;
 }
 
-let sse_hot_sessions : hot_queue_session list ref = ref []
+let sse_hot_sessions : hot_queue_session list Atomic.t = Atomic.make []
 
 let register_sse_metrics () =
   Prometheus.register_gauge ~name:"masc_sse_sessions_total"
@@ -51,7 +51,7 @@ let set_sse_queue_depth ~session_id depth =
 let set_sse_queue_snapshot ~avg_depth ~max_depth ~hot_sessions =
   Prometheus.set_gauge "masc_sse_queue_depth_avg" avg_depth;
   Prometheus.set_gauge "masc_sse_queue_depth_max" (float_of_int max_depth);
-  sse_hot_sessions := hot_sessions
+  Atomic.set sse_hot_sessions hot_sessions
 
 let set_sse_external_subscribers count =
   Prometheus.set_gauge "masc_sse_external_subscribers_total" (float_of_int count)
@@ -279,7 +279,7 @@ let transport_health_json ~config =
       ("broadcast_count", `Int (int_of_float broadcast_count));
       ("queue_avg_depth", `Float sse_queue_avg);
       ("queue_max_depth", `Int sse_queue_max);
-      ("hot_sessions", `List (List.map hot_session_json !sse_hot_sessions));
+      ("hot_sessions", `List (List.map hot_session_json (Atomic.get sse_hot_sessions)));
     ]);
     ("grpc", `Assoc [
       ("enabled", `Bool grpc_configured);

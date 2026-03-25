@@ -292,7 +292,7 @@ let create_eio_readonly ~sw ~env (cfg : config) : (t, error) result =
          call Pool.use concurrently (e.g. dashboard room-truth parallel
          fetch).  Use half the main pool size, minimum 3. *)
       let main_pool_max = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-        | Some s -> (try max 1 (min (int_of_string s) 50) with _ -> 5)
+        | Some s -> (match int_of_string_opt s with Some n -> max 1 (min n 50) | None -> 5)
         | None -> 5
       in
       let max_pool = max 3 (main_pool_max / 2) in

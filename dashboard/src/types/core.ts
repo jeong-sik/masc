@@ -1,7 +1,5 @@
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
 
-import type { TrpgCharacterStats } from './trpg'
-
 // --- Core entities ---
 
 export interface Agent {
@@ -415,8 +413,6 @@ export interface Keeper {
   }
   // Metrics time-series (from backend metrics_series)
   metrics_series?: KeeperMetricPoint[]
-  // TRPG-specific keeper fields
-  trpg_stats?: TrpgCharacterStats
   inventory?: string[]
   relationships?: Record<string, string>
 }

@@ -152,8 +152,7 @@ function parseSegments(
   const tabFromPath = segments[0]
   const tabFromQuery = params.tab
 
-  // Lab tab removed (#2898). Redirect legacy lab bookmarks (e.g. #lab?surface=trpg)
-  // to command tab. No valid lab section exists to fall back to.
+  // Lab tab removed (#2898). Redirect legacy lab bookmarks to command tab.
   if ((tabFromPath === 'lab' || tabFromQuery === 'lab') && params.surface && !params.section) {
     const nextParams = { ...params, section: 'command' }
     return {

@@ -33,6 +33,7 @@ module FileSystem = struct
     config: config;
     fs: Eio.Fs.dir_ty Eio.Path.t;
     mutex: Eio.Mutex.t;
+    pubsub: Backend_core.Pubsub_mem.t;
   }
 
   (** Create a new FileSystem backend *)
@@ -49,6 +50,7 @@ module FileSystem = struct
       config;
       fs = path;
       mutex = Eio.Mutex.create ();
+      pubsub = Backend_core.Pubsub_mem.create ();
     }
 
   (** {2 Key Validation} *)
@@ -70,7 +72,9 @@ module FileSystem = struct
       let rec check_segments = function
         | [] -> Ok key
         | seg :: rest ->
-            if seg = "." || seg = ".." then
+            if String.length seg = 0 then
+              Error (InvalidKey "Consecutive colons not allowed")
+            else if seg = "." || seg = ".." then
               Error (InvalidKey "Path traversal detected")
             else if String.length seg >= 2 && String.sub seg 0 2 = ".." then
               Error (InvalidKey "Path traversal detected")
@@ -339,6 +343,11 @@ module FileSystem = struct
         (match get t lock_key with
          | Ok json ->
              (match lock_info_of_json json with
+              | Some existing when existing.owner = owner ->
+                  (* Same owner reacquire: renew the lock *)
+                  (match set t lock_key (lock_info_to_json info) with
+                   | Ok () -> Ok true
+                   | Error e -> Error e)
               | Some existing when existing.expires_at < now ->
                   (* Expired, try to take over *)
                   (match set t lock_key (lock_info_to_json info) with
@@ -378,6 +387,7 @@ module FileSystem = struct
               | Ok () -> Ok true
               | Error e -> Error e)
          | _ -> Ok false)
+    | Error (NotFound _) -> Ok false
     | Error e -> Error e
 
   (** {2 Atomic Operations (Cross-Process Safe)} *)
@@ -561,6 +571,27 @@ module FileSystem = struct
          | Ok () -> Ok { latency_ms = 0.0; is_healthy = true }
          | Error _ -> Ok { latency_ms = 0.0; is_healthy = false })
     | Error e -> Error e
+
+  (** {2 Bulk Operations} *)
+
+  let get_all t ~prefix =
+    match list_keys t ~prefix with
+    | Error e -> Error e
+    | Ok keys ->
+        let pairs = List.filter_map (fun k ->
+          match get t k with
+          | Ok v -> Some (k, v)
+          | Error _ -> None
+        ) keys in
+        Ok pairs
+
+  (** {2 Pub/Sub (in-memory, delegates to Backend_core.Pubsub_mem)} *)
+
+  let publish t ~channel ~message =
+    Backend_core.Pubsub_mem.publish t.pubsub ~channel ~message
+
+  let subscribe t ~channel ~callback =
+    Backend_core.Pubsub_mem.subscribe t.pubsub ~channel ~callback
 
 end
 

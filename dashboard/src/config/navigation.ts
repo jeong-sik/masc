@@ -90,7 +90,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'lab',
     label: '실험실',
     icon: '🧪',
-    description: '시스템 도구 테스트 및 TRPG 실험',
+    description: '시스템 도구 테스트',
     defaultTab: 'lab',
     defaultParams: { section: 'tools' },
     tabs: ['lab'],

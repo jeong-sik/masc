@@ -9,12 +9,12 @@
 
 (* ── Eio capability refs (set once at server init) ───────── *)
 
-let sw_ref : Eio.Switch.t option ref = ref None
-let net_ref : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t option ref = ref None
+let sw_ref : Eio.Switch.t option Atomic.t = Atomic.make None
+let net_ref : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t option Atomic.t = Atomic.make None
 
 let set_env ~sw ~(net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t) =
-  sw_ref := Some sw;
-  net_ref := Some net
+  Atomic.set sw_ref (Some sw);
+  Atomic.set net_ref (Some net)
 
 (* ── Cache state (Eio.Mutex-protected) ───────────────────── *)
 
@@ -22,28 +22,28 @@ type endpoint_info = Llm_provider.Discovery.endpoint_status
 
 let cache_mu = Eio.Mutex.create ()
 let cached_endpoints : endpoint_info list ref = ref []
-let cache_updated_at : float ref = ref 0.0
+let cache_updated_at : float Atomic.t = Atomic.make 0.0
 let cache_ttl = 30.0
 
 let refresh_cache_unlocked () =
-  match !sw_ref, !net_ref with
+  match Atomic.get sw_ref, Atomic.get net_ref with
   | Some sw, Some net ->
     let endpoints = Llm_provider.Provider_registry.active_llama_endpoints () in
     let results = Llm_provider.Discovery.discover ~sw ~net ~endpoints in
     cached_endpoints := results;
-    cache_updated_at := Time_compat.now ()
+    Atomic.set cache_updated_at (Time_compat.now ())
   | _ ->
     ()
 
 let get_cached_or_refresh () =
   Eio.Mutex.use_rw ~protect:true cache_mu (fun () ->
     let now = Time_compat.now () in
-    if now -. !cache_updated_at > cache_ttl || !cached_endpoints = [] then
+    if now -. Atomic.get cache_updated_at > cache_ttl || !cached_endpoints = [] then
       refresh_cache_unlocked ();
     !cached_endpoints)
 
 let cache_age_seconds () =
-  Time_compat.now () -. !cache_updated_at
+  Time_compat.now () -. Atomic.get cache_updated_at
 
 (* ── Convenience queries ─────────────────────────────────── *)
 

@@ -10,7 +10,7 @@ module Http_negotiation = Mcp_protocol.Http_negotiation
    Brings in Mcp_eio alias, Hashtbl tables, mutex, and all session functions. *)
 include Server_mcp_transport_http_session
 
-type deps = {
+type deps = Server_mcp_transport_http_types.deps = {
   get_origin : Httpun.Request.t -> string;
   cors_headers : string -> (string * string) list;
   auth_token_from_request : Httpun.Request.t -> string option;

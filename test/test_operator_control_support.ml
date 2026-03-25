@@ -8,6 +8,12 @@ let temp_dir () =
   Unix.mkdir dir 0o755;
   dir
 
+(** Ensure Fs_compat has the Eio fs handle set.
+    Call inside Eio_main.run before creating Room config. *)
+let ensure_fs env =
+  if not (Fs_compat.has_fs ()) then
+    Fs_compat.set_fs (Eio.Stdenv.fs env)
+
 let cleanup_dir dir =
   let rec rm path =
     if Sys.file_exists path then

@@ -1,3 +1,6 @@
+// Parse utilities for unknown API/SSE payloads (with default fallback values).
+// Kept here for backward compatibility — imported by dashboard.ts, actions.ts, board.ts.
+
 import { isRecord } from '../components/common/normalize'
 
 export function asString(value: unknown, fallback = ''): string {

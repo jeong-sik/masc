@@ -81,6 +81,7 @@ let test_recover_orphan_session () =
   cleanup_dir base_dir
 
 let test_read_events_limit () =
+  with_eio @@ fun _env ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));

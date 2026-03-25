@@ -426,7 +426,7 @@ let add_fallback_task ctx node err =
       Log.Misc.error "add_fallback_task failed: %s" (Printexc.to_string exn);
       None
 
-let run_keeper_call ctx ~models ~keeper_prefix ?(fallback_to_task = true) node =
+let run_keeper_call ctx ~models:_models_ignored ~keeper_prefix ?(fallback_to_task = true) node =
   let keeper_name =
     sanitize_keeper_name
       (Printf.sprintf "%s-%s-%s" keeper_prefix node.Goal_orchestrator.goal_id
@@ -471,7 +471,7 @@ let run_keeper_call ctx ~models ~keeper_prefix ?(fallback_to_task = true) node =
             ("mid_goal", `String node.title);
             ("long_goal", `String node.title);
             ("message", `String message);
-            ("models", `List (List.map (fun m -> `String m) models));
+            ("models", `List []);
             ("new_soul_profile", `String "delivery");
             ("presence_keepalive", `Bool true);
             ("auto_handoff", `Bool true);
@@ -553,10 +553,9 @@ let handle_goal_dispatch ctx args =
   in
   let runtime_opt = normalize_runtime runtime_raw in
   let goal_ids = get_string_list args "goal_ids" in
-  let models =
-    let explicit = get_string_list args "models" in
-    if explicit <> [] then explicit else default_keeper_models ()
-  in
+  (* Legacy model field: cascade_name is the authority.
+     Callers still accept "models" in args but the value is ignored. *)
+  let _models_ignored = get_string_list args "models" in
   let fallback_to_task = get_bool args "fallback_to_task" true in
   let keeper_prefix = get_string args "keeper_prefix" "goal" in
   let active_goals = Goal_store.active_goals ctx.config in
@@ -620,7 +619,7 @@ let handle_goal_dispatch ctx args =
         ] )
   else
     let keeper_exec =
-      run_keeper_dispatch ctx ~plan ~models ~fallback_to_task ~keeper_prefix
+      run_keeper_dispatch ctx ~plan ~models:[] ~fallback_to_task ~keeper_prefix
     in
     ( true,
       tool_result_json

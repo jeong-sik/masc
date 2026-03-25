@@ -73,9 +73,10 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let errors = ref [] in
   let name = Safe_ops.json_string ~default:"" "name" json in
   let goal = Safe_ops.json_string ~default:"" "goal" json |> String.trim in
-  let models = Safe_ops.json_string_list "models" json in
-  let allowed_models = Safe_ops.json_string_list "allowed_models" json in
-  let active_model =
+  (* Legacy model fields no longer validated; cascade_name is the authority. *)
+  let _models = Safe_ops.json_string_list "models" json in
+  let _allowed_models = Safe_ops.json_string_list "allowed_models" json in
+  let _active_model =
     Safe_ops.json_string ~default:"" "active_model" json |> String.trim
   in
   let _policy_voice_enabled =
@@ -84,9 +85,6 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let mention_targets = Safe_ops.json_string_list "mention_targets" json in
   if not (validate_name name) then errors := "invalid keeper name" :: !errors;
   if goal = "" then errors := "goal is required" :: !errors;
-  if models = [] then errors := "models is required" :: !errors;
-  if active_model <> "" && not (List.mem active_model (allowed_models @ models)) then
-    errors := "active_model must be included in models or allowed_models" :: !errors;
   if mention_targets = [] then
     errors := "mention_targets is required" :: !errors;
   List.rev !errors
@@ -161,32 +159,13 @@ let resolved_keeper_args_from_persona args :
               |> first_some defaults.desires
               |> Option.value ~default:default_keeper_desires
             in
-            let explicit_models = get_string_list args "models" in
-            let explicit_allowed_models = get_string_list args "allowed_models" in
-            let active_model_opt = get_string_opt args "active_model" in
-            let base_models =
-              if explicit_models <> [] then explicit_models
-              else if defaults.models <> [] then defaults.models
-              else
-                match active_model_opt |> first_some defaults.active_model with
-                | Some model -> [ model ]
-                | None -> []
-            in
-            let allowed_models =
-              resolve_allowed_models
-                ~explicit_allowed_models
-                ~seed_allowed_models:defaults.allowed_models
-                ~models:base_models
-            in
-            let active_model =
-              active_model_opt
-              |> first_some defaults.active_model
-              |> Option.value
-                   ~default:
-                     (match base_models with
-                     | model :: _ -> model
-                     | [] -> "")
-            in
+            (* Legacy model fields: cascade_name is the authority. *)
+            let _explicit_models = get_string_list args "models" in
+            let _explicit_allowed_models = get_string_list args "allowed_models" in
+            let _active_model_opt = get_string_opt args "active_model" in
+            let base_models = [] in
+            let allowed_models = [] in
+            let active_model = "" in
             let policy_voice_enabled =
               first_some
                 (get_bool_opt args "policy_voice_enabled")

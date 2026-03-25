@@ -185,8 +185,10 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "provenance" "fallback" resolved.provenance;
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
+(* Model-set now returns cascade_name instead of active_model/allowed_models.
+   cascade_name is the authority for model resolution. *)
 let test_keeper_model_set_persists_active_model () =
-  let provider_model = "custom:test-model@http://127.0.0.1:9999" in
+  let _provider_model = "custom:test-model@http://127.0.0.1:9999" in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -211,8 +213,6 @@ let test_keeper_model_set_persists_active_model () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Maintain Sangsu persona");
-              ("models", `List [ `String provider_model ]);
-              ("active_model", `String provider_model);
               ("room_scope", `String "all");
               ("trigger_mode", `String "explicit_only");
               ("mention_targets", `List [ `String "sangsu" ]);
@@ -226,38 +226,13 @@ let test_keeper_model_set_persists_active_model () =
           (`Assoc
             [
               ("name", `String "sangsu");
-              ("model", `String provider_model);
-              ("allowed_models", `List [ `String provider_model ]);
+              ("model", `String "any-model");
             ])
       in
       check bool "model set ok" true ok;
       let json = Yojson.Safe.from_string body in
-      check string "active model updated" provider_model
-        Yojson.Safe.Util.(json |> member "active_model" |> to_string);
-      let allowed_models =
-        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> filter_string)
-      in
-      check bool "allowed models contains target model" true
-        (List.mem provider_model allowed_models);
-      check int "allowed models are deduped" (List.length allowed_models)
-        (List.sort_uniq String.compare allowed_models |> List.length);
-      let ok, status_body =
-        dispatch "masc_keeper_status"
-          (`Assoc
-            [
-              ("name", `String "sangsu");
-              ("fast", `Bool true);
-              ("include_context", `Bool false);
-              ("include_metrics_overview", `Bool false);
-              ("include_memory_bank", `Bool false);
-              ("include_history_tail", `Bool false);
-              ("include_compaction_history", `Bool false);
-            ])
-      in
-      check bool "status ok" true ok;
-      let status_json = Yojson.Safe.from_string status_body in
-      check string "status active model" provider_model
-        Yojson.Safe.Util.(status_json |> member "active_model" |> to_string))
+      check string "cascade_name present" "keeper_unified"
+        Yojson.Safe.Util.(json |> member "cascade_name" |> to_string))
 
 (* write_persona_profile removed: persona concept deleted, see CLAUDE.md *)
 
@@ -1080,8 +1055,9 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
       in
       check bool "persistent model set ok" true ok;
       let model_set_json = parse_json_exn model_set_body in
-      check string "persistent active model updated" "custom:alt-model"
-        Yojson.Safe.Util.(model_set_json |> member "active_model" |> to_string);
+      (* model_set now returns cascade_name instead of active_model *)
+      check string "persistent cascade_name" "keeper_unified"
+        Yojson.Safe.Util.(model_set_json |> member "cascade_name" |> to_string);
       let ok, persistent_status_body =
         dispatch "masc_persistent_agent_status"
           (`Assoc

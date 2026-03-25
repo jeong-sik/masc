@@ -314,7 +314,8 @@ let collect_board_events ~(continuity_summary : string) ~(meta : keeper_meta) :
       (Printexc.to_string exn);
     ([], 0, 0)
 
-let observe ?pending_board_events ~(config : Room.config) ~(meta : keeper_meta) :
+let observe ~(pending_board_events : string list option) ~(config : Room.config)
+    ~(meta : keeper_meta) :
     world_observation =
   let pending_mentions = collect_pending_mentions ~config ~meta in
   let unclaimed_task_count, failed_task_count =

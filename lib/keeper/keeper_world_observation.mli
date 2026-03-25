@@ -83,7 +83,7 @@ val board_signal_match :
     @param config Room configuration for I/O operations
     @param meta Current keeper metadata *)
 val observe :
-  ?pending_board_events:string list ->
+  pending_board_events:string list option ->
   config:Room.config ->
   meta:Keeper_types.keeper_meta ->
   world_observation

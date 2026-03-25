@@ -134,7 +134,8 @@ let test_observe_uses_precollected_board_events () =
           ~meta:minimal_meta
       in
       let obs =
-        WO.observe ~config ~meta:minimal_meta ~pending_board_events:events
+        WO.observe ~pending_board_events:(Some events)
+          ~config ~meta:minimal_meta
       in
       check int "precollected board events preserved" (List.length events)
         (List.length obs.pending_board_events);

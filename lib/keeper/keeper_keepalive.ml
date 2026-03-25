@@ -367,7 +367,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    (Printexc.to_string exn));
               last_snapshot_ts := now_ts);
             (* Triage is always computed. Tool gating is no longer mode-based. *)
-            let meta_after_triage =
+            let pending_board_events, meta_after_triage =
               let obs =
                 Keeper_deliberation.empty_world_observation
                   ~keeper_name:meta_current.name
@@ -470,7 +470,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               if Keeper_types.keeper_debug then
                 Log.KeeperExec.info "%s triage: %s"
                   meta_current.name triggers_str;
-              { meta_current with last_triage_triggers = triggers_str }
+              (pending_board_events,
+               { meta_current with last_triage_triggers = triggers_str })
             in
             let proactive_warmup_elapsed =
               proactive_warmup_sec <= 0
@@ -482,9 +483,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                 (try
                    let obs =
                      Keeper_world_observation.observe
+                       ~pending_board_events:(Some pending_board_events)
                        ~config:ctx.config ~meta:meta_after_triage
-                       ~pending_board_events
-                   in
+                    in
                    if
                      Keeper_world_observation.should_run_unified_turn
                        ~meta:meta_after_triage

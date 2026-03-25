@@ -39,7 +39,7 @@ let default ?(repo = default_repo_config ()) () : t =
     time_budget_per_experiment_sec = 600.0;
     results_file = "research_results.tsv";
     cascade_name = "research";
-    cascade_defaults = ["llama:auto"; "glm:auto"];
+    cascade_defaults = ["llama:auto"];
     timeout_sec = 120;
     max_tokens = 8192;
     system_prompt =

@@ -116,7 +116,8 @@ let any_mentioned ~targets content =
   |> List.filter (fun target -> String.trim target <> "")
   |> List.exists (fun target -> is_mentioned target content)
 
-(** Agent types that can be auto-spawned by Auto-Responder *)
+(** Agent types that can be auto-spawned by Auto-Responder.
+    Mirrors Provider_adapter.direct_adapters short aliases. *)
 let spawnable_agents = ["gemini"; "codex"; "claude"; "llama"; "glm"]
 
 (** Check if an agent type is spawnable *)

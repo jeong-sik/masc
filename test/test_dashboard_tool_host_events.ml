@@ -55,7 +55,7 @@ let test_report_of_yojson_accepts_stringish_ids () =
       check (option int) "timeout_ms" (Some 120000) report.timeout_ms;
       check (option string) "trace_id" (Some "trace-1") report.trace_id
 
-let test_record_writes_audit_and_ring () =
+let test_record_writes_audit_ring_and_telemetry () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -76,7 +76,7 @@ let test_record_writes_audit_and_ring () =
           timeout_ms = Some 120000;
         }
       in
-      Dashboard_tool_host_events.record config report;
+      Dashboard_tool_host_events.record ~fs:() config report;
       let entries = Audit_log.read_entries ~n:20 config in
       let matching =
         List.find_opt
@@ -103,7 +103,19 @@ let test_record_writes_audit_and_ring () =
       check string "ring source" "client_tool_host" latest.source;
       check string "ring module" "ToolHost" latest.module_name;
       check bool "ring details object" true
-        (match latest.details with `Assoc _ -> true | _ -> false))
+        (match latest.details with `Assoc _ -> true | _ -> false);
+      let telemetry_events = Telemetry_eio.read_all_events config in
+      let has_client_error =
+        List.exists
+          (fun (entry : Telemetry_eio.event_record) ->
+            match entry.event with
+            | Telemetry_eio.Error_occurred { code; context; _ } ->
+                String.equal code "client_tool_host_failure"
+                && String.contains context '='
+            | _ -> false)
+          telemetry_events
+      in
+      check bool "telemetry error recorded" true has_client_error)
 
 let () =
   run "Dashboard_tool_host_events"
@@ -113,7 +125,7 @@ let () =
           test_case "report defaults" `Quick test_report_of_yojson_defaults;
           test_case "report stringish ids" `Quick
             test_report_of_yojson_accepts_stringish_ids;
-          test_case "record writes audit and ring" `Quick
-            test_record_writes_audit_and_ring;
+          test_case "record writes audit ring and telemetry" `Quick
+            test_record_writes_audit_ring_and_telemetry;
         ] );
     ]

@@ -7,6 +7,11 @@ open Types
 open Room_utils [@@warning "-33"]
 open Room_state [@@warning "-33"]
 
+let room_id_of_config (config : Room_utils_backend_setup.config) =
+  match config.scope with
+  | Default -> "default"
+  | Named id -> id
+
 (** Join room - with auto-generated nickname and metadata *)
 let join config ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
@@ -98,7 +103,16 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
                    ~content:(Printf.sprintf "👋 %s rejoined the room" nickname) in
          log_event config (Printf.sprintf
            "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
-           nickname agent_type new_session_id (now_iso ()))
+           nickname agent_type new_session_id (now_iso ()));
+         !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
+           ~room_id:(room_id_of_config config) ~event_kind:"rejoin"
+           ~details:
+             (`Assoc
+               [
+                 ("agent_type", `String agent_type);
+                 ("session_id", `String new_session_id);
+                 ("rejoin", `Bool true);
+               ]);
        end
      | Error e ->
          Log.Room.warn "agent rejoin: invalid agent JSON for %s: %s" nickname e);
@@ -155,6 +169,16 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     session_id
     (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
     (now_iso ()));
+  !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
+    ~room_id:(room_id_of_config config) ~event_kind:"join"
+    ~details:
+      (`Assoc
+        [
+          ("agent_type", `String agent_type);
+          ("session_id", `String session_id);
+          ( "capabilities",
+            `List (List.map (fun s -> `String s) capabilities) );
+        ]);
 
   Printf.sprintf "✅ %s joined\n  Nickname: %s\n  Type: %s\n  Session: %s"
     nickname nickname agent_type session_id
@@ -216,7 +240,10 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
                 ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname room_id) in
       log_event scoped (Printf.sprintf
         "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
-        room_id nickname (now_iso ()))
+        room_id nickname (now_iso ()));
+      !Room_hooks.observe_agent_lifecycle_fn scoped ~agent_id:nickname ~room_id
+        ~event_kind:"rejoin"
+        ~details:(`Assoc [ ("rejoin", `Bool true) ]);
     end;
     Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname room_id
   end else begin
@@ -260,6 +287,16 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
       session_id
       (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
       (now_iso ()));
+    !Room_hooks.observe_agent_lifecycle_fn scoped ~agent_id:nickname ~room_id
+      ~event_kind:"join"
+      ~details:
+        (`Assoc
+          [
+            ("agent_type", `String agent_type);
+            ("session_id", `String session_id);
+            ( "capabilities",
+              `List (List.map (fun s -> `String s) capabilities) );
+          ]);
     Printf.sprintf "✅ %s joined room %s" nickname room_id
   end
 
@@ -322,6 +359,9 @@ let leave config ~agent_name =
     log_event config (Printf.sprintf
       "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
       actual_name (now_iso ()));
+    !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:actual_name
+      ~room_id:(room_id_of_config config) ~event_kind:"leave"
+      ~details:`Null;
 
     (* Record co-presence relationships via hook (async, non-blocking) *)
     (try !Room_hooks.relation_on_leave_fn

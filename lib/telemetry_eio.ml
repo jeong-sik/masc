@@ -126,13 +126,13 @@ let event_to_json event =
 
 (** Track an event - appends to date-split telemetry store.
     Thread-safe via Dated_jsonl internal mutex. *)
-let track ~fs:_ config event : unit =
+let track ?fs:_ config event : unit =
   let store = get_telemetry_store config in
   Dated_jsonl.append store (event_to_json event)
 
 (** Read all events.
     Tries date-split store first; falls back to legacy single file. *)
-let read_all_events ~fs:_ config : event_record list =
+let read_all_events ?fs:_ config : event_record list =
   let store = get_telemetry_store config in
   let jsons = Dated_jsonl.read_recent store 100_000 in
   if jsons <> [] then
@@ -149,11 +149,7 @@ let summarize_tool_usage ?fs config : tool_usage_summary =
   in
   let stats_by_tool = Hashtbl.create 32 in
   let total_calls = ref 0 in
-  let records =
-    match fs with
-    | Some fs -> read_all_events ~fs config
-    | None -> read_all_events_from_path telemetry_path
-  in
+  let records = read_all_events ?fs config in
   List.iter (fun (record : event_record) ->
     match record.event with
     | Tool_called { tool_name; success; _ } ->
@@ -180,11 +176,7 @@ type agent_activity = {
 }
 
 let summarize_agent_activity ?fs config ~since : agent_activity list =
-  let records =
-    match fs with
-    | Some fs -> read_all_events ~fs config
-    | None -> read_all_events_from_path (telemetry_file config)
-  in
+  let records = read_all_events ?fs config in
   let by_agent : (string, agent_activity) Hashtbl.t = Hashtbl.create 16 in
   List.iter (fun (record : event_record) ->
     if record.timestamp >= since then
@@ -233,8 +225,8 @@ let tool_usage_fields summary tool_name =
 
 (** Read events since a timestamp.
     With date-split storage, reads recent entries and filters by timestamp. *)
-let read_events_since ~fs config ~since : event_record list =
-  let all = read_all_events ~fs config in
+let read_events_since ?fs config ~since : event_record list =
+  let all = read_all_events ?fs config in
   List.filter (fun r -> r.timestamp >= since) all
 
 (** Metrics calculation functions (pure) *)
@@ -310,10 +302,10 @@ let calculate_error_rate events =
   else float_of_int errors /. float_of_int total
 
 (** Get aggregated metrics for last 24 hours *)
-let get_metrics ~fs config : metrics =
+let get_metrics ?fs config : metrics =
   let now = Time_compat.now () in
   let since_24h = now -. 86400.0 in
-  let events = read_events_since ~fs config ~since:since_24h in
+  let events = read_events_since ?fs config ~since:since_24h in
   {
     active_agents = count_active_agents events;
     tasks_in_progress = count_tasks_in_progress events;
@@ -324,26 +316,26 @@ let get_metrics ~fs config : metrics =
   }
 
 (** Convenience tracking functions *)
-let track_agent_joined ~fs config ~agent_id ?(capabilities=[]) () =
-  track ~fs config (Agent_joined { agent_id; capabilities })
+let track_agent_joined ?fs config ~agent_id ?(capabilities=[]) () =
+  track ?fs config (Agent_joined { agent_id; capabilities })
 
-let track_agent_left ~fs config ~agent_id ~reason =
-  track ~fs config (Agent_left { agent_id; reason })
+let track_agent_left ?fs config ~agent_id ~reason =
+  track ?fs config (Agent_left { agent_id; reason })
 
-let track_task_started ~fs config ~task_id ~agent_id =
-  track ~fs config (Task_started { task_id; agent_id })
+let track_task_started ?fs config ~task_id ~agent_id =
+  track ?fs config (Task_started { task_id; agent_id })
 
-let track_task_completed ~fs config ~task_id ~duration_ms ~success =
-  track ~fs config (Task_completed { task_id; duration_ms; success })
+let track_task_completed ?fs config ~task_id ~duration_ms ~success =
+  track ?fs config (Task_completed { task_id; duration_ms; success })
 
-let track_handoff ~fs config ~from_agent ~to_agent ~reason =
-  track ~fs config (Handoff_triggered { from_agent; to_agent; reason })
+let track_handoff ?fs config ~from_agent ~to_agent ~reason =
+  track ?fs config (Handoff_triggered { from_agent; to_agent; reason })
 
-let track_error ~fs config ~code ~message ~context =
-  track ~fs config (Error_occurred { code; message; context })
+let track_error ?fs config ~code ~message ~context =
+  track ?fs config (Error_occurred { code; message; context })
 
-let track_tool_called ~fs config ~tool_name ~success ~duration_ms ?agent_id () =
-  track ~fs config (Tool_called { tool_name; success; duration_ms; agent_id })
+let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id () =
+  track ?fs config (Tool_called { tool_name; success; duration_ms; agent_id })
 
 (** Prune telemetry entries older than [max_age_days] days.
     Replaces the old rotate function; date-split makes rewriting unnecessary. *)

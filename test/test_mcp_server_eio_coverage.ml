@@ -384,6 +384,7 @@ let test_audit_event_to_json_full () =
     event_type = "tool_call";
     success = true;
     detail = Some "masc_status";
+    details = Some (`Assoc [("tool_name", `String "masc_status")]);
   } in
   let json = Tool_audit.audit_event_to_json event in
   let open Yojson.Safe.Util in
@@ -400,6 +401,7 @@ let test_audit_event_to_json_no_detail () =
     event_type = "join";
     success = false;
     detail = None;
+    details = None;
   } in
   let json = Tool_audit.audit_event_to_json event in
   let open Yojson.Safe.Util in

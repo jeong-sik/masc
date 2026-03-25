@@ -84,6 +84,34 @@ let relation_on_task_done_fn
   : (assignee:string -> active_agents:string list -> unit) ref
   = ref (fun ~assignee:_ ~active_agents:_ -> ())
 
+(** Shared observability hook for join/rejoin/leave events.
+    Upper layers can mirror state transitions to audit, telemetry, and logs
+    without introducing circular dependencies into room sub-modules. *)
+let observe_agent_lifecycle_fn
+  : (Room_utils_backend_setup.config ->
+     agent_id:string ->
+     room_id:string ->
+     event_kind:string ->
+     details:Yojson.Safe.t ->
+     unit) ref
+  = ref
+      (fun _config ~agent_id:_ ~room_id:_ ~event_kind:_ ~details:_ -> ())
+
+(** Shared observability hook for task transitions.
+    Used by room task modules so every successful state transition is logged
+    consistently regardless of which tool or transport triggered it. *)
+let observe_task_transition_fn
+  : (Room_utils_backend_setup.config ->
+     agent_name:string ->
+     room_id:string ->
+     task_id:string ->
+     transition:string ->
+     details:Yojson.Safe.t ->
+     unit) ref
+  = ref
+      (fun _config ~agent_name:_ ~room_id:_ ~task_id:_ ~transition:_
+           ~details:_ -> ())
+
 (** Board artifact cleanup — wraps Board_dispatch.list_posts + delete_post.
     Returns number of deleted posts. *)
 let cleanup_board_artifacts_fn

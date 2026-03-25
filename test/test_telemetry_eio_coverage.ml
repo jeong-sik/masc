@@ -10,6 +10,24 @@
 open Alcotest
 
 module Telemetry_eio = Masc_mcp.Telemetry_eio
+module Room = Masc_mcp.Room
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_telemetry_eio_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
 
 (* ============================================================
    event Type Tests
@@ -334,6 +352,25 @@ let test_calculate_error_rate_some_errors () =
   let rate = Telemetry_eio.calculate_error_rate events in
   check bool "positive" true (rate > 0.0)
 
+let test_summarize_tool_usage_reads_date_split_store_without_fs () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      let config = Room.default_config base_dir in
+      Telemetry_eio.track_tool_called config ~tool_name:"masc_status"
+        ~success:true ~duration_ms:42 ~agent_id:"codex" ();
+      let summary = Telemetry_eio.summarize_tool_usage config in
+      check int "total calls" 1 summary.total_calls;
+      let stats =
+        match Hashtbl.find_opt summary.stats_by_tool "masc_status" with
+        | Some stats -> stats
+        | None -> fail "missing stats for masc_status"
+      in
+      check int "usage count" 1 stats.count;
+      check bool "telemetry available" true summary.telemetry_available)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -393,5 +430,9 @@ let () =
       test_case "empty" `Quick test_calculate_error_rate_empty;
       test_case "no errors" `Quick test_calculate_error_rate_no_errors;
       test_case "some errors" `Quick test_calculate_error_rate_some_errors;
+    ];
+    "store_reads", [
+      test_case "summarize_tool_usage reads date-split store" `Quick
+        test_summarize_tool_usage_reads_date_split_store_without_fs;
     ];
   ]

@@ -314,16 +314,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn -> log_mcp_exn ~label:"session register (nickname) failed" exn);
-        (* Prometheus + Telemetry: track auto-join *)
-        Prometheus.inc_gauge "masc_active_agents" ();
-        (match state.Mcp_server.fs with
-         | Some fs ->
-             (try Telemetry_eio.track_agent_joined ~fs config ~agent_id:nickname ()
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Telemetry.debug "track_agent_joined (auto): %s" (Printexc.to_string exn))
-         | None -> ());
         nickname
       end
     end else

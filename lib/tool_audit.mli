@@ -11,6 +11,7 @@ type audit_event = {
   event_type: string;
   success: bool;
   detail: string option;
+  details: Yojson.Safe.t option;
 }
 
 (** {1 Governance Report Types} *)
@@ -60,4 +61,3 @@ val report_to_json : governance_report -> Yojson.Safe.t
 
 (** Tool schemas for MCP tools/list *)
 val schemas : Types.tool_schema list
-

@@ -92,6 +92,19 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
   in
   Audit_log.log_tool_call state.Mcp_server.room_config
     ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
+  if not success then
+    Log.emit Log.Error ~module_name:"Keeper"
+      ~details:
+        (`Assoc
+          [
+            ("event_family", `String "tool_call_failure");
+            ("tool_name", `String "masc_keeper_msg");
+            ("agent_name", `String agent_name);
+            ("duration_ms", `Int duration_ms);
+            ("timeout_hit", `Bool !timeout_hit);
+            ("streaming", `Bool false);
+          ])
+      "keeper tool call failed: masc_keeper_msg";
   let telemetry_enabled =
     match Sys.getenv_opt "MASC_TELEMETRY_ENABLED" with
     | Some "false" | Some "0" -> false
@@ -293,6 +306,19 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
   in
   Audit_log.log_tool_call state.Mcp_server.room_config ~agent_id:agent_name
     ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
+  if not success then
+    Log.emit Log.Error ~module_name:"Keeper"
+      ~details:
+        (`Assoc
+          [
+            ("event_family", `String "tool_call_failure");
+            ("tool_name", `String "masc_keeper_msg");
+            ("agent_name", `String agent_name);
+            ("duration_ms", `Int duration_ms);
+            ("timeout_hit", `Bool !timeout_hit);
+            ("streaming", `Bool true);
+          ])
+      "keeper tool call failed: masc_keeper_msg";
   let telemetry_enabled =
     match Sys.getenv_opt "MASC_TELEMETRY_ENABLED" with
     | Some "false" | Some "0" -> false

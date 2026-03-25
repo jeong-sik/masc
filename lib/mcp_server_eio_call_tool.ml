@@ -258,6 +258,19 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let error_msg = if success then None else Some (Printf.sprintf "timeout=%d|duration_ms=%d" (if !timeout_hit then 1 else 0) duration_ms) in
   Audit_log.log_tool_call state.Mcp_server.room_config
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg ();
+  if not success then
+    Log.emit Log.Error ~module_name:"MCP"
+      ~details:
+        (`Assoc
+          [
+            ("event_family", `String "tool_call_failure");
+            ("tool_name", `String name);
+            ("agent_name", `String agent_name);
+            ("duration_ms", `Int duration_ms);
+            ("timeout_hit", `Bool !timeout_hit);
+            ("attempts", `Int attempts);
+          ])
+      (Printf.sprintf "tool call failed: %s" name);
 
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled =

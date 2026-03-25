@@ -8,6 +8,7 @@ module Tool_args = Masc_mcp.Tool_args
 
 module Tool_audit = Masc_mcp.Tool_audit
 module Room = Masc_mcp.Room
+module Audit_log = Masc_mcp.Audit_log
 
 let test_counter = ref 0
 
@@ -30,6 +31,7 @@ let cleanup_dir dir =
   try rm dir with _ -> ()
 
 let make_ctx () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "test-agent"));
@@ -112,6 +114,7 @@ let test_event_to_json_with_detail () =
     event_type = "tool_call";
     success = true;
     detail = Some "test detail";
+    details = Some (`Assoc [("tool_name", `String "masc_status")]);
   } in
   let json = Tool_audit.audit_event_to_json event in
   let open Yojson.Safe.Util in
@@ -129,11 +132,14 @@ let test_event_to_json_no_detail () =
     event_type = "auth_success";
     success = true;
     detail = None;
+    details = None;
   } in
   let json = Tool_audit.audit_event_to_json event in
   let open Yojson.Safe.Util in
   Alcotest.(check bool) "detail is null" true
-    (json |> member "detail" = `Null)
+    (json |> member "detail" = `Null);
+  Alcotest.(check bool) "details is null" true
+    (json |> member "details" = `Null)
 
 (* ============================================================
    read_audit_events tests
@@ -141,10 +147,71 @@ let test_event_to_json_no_detail () =
 
 let test_read_audit_events_empty () =
   let ctx, base_dir = make_ctx () in
-  let events = Tool_audit.read_audit_events ctx.config ~since:0.0 in
-  Alcotest.(check (list unit)) "empty events" []
-    (List.map (fun _ -> ()) events);
-  cleanup_dir base_dir
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      let events =
+        Tool_audit.read_audit_events ctx.config
+          ~since:(Unix.gettimeofday () +. 0.001)
+      in
+      Alcotest.(check (list unit)) "no later events" []
+        (List.map (fun _ -> ()) events))
+
+let test_read_audit_events_reads_canonical_store_and_normalizes_tool_call () =
+  let ctx, base_dir = make_ctx () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      Audit_log.log_action ctx.config ~agent_id:"test-agent"
+        ~action:(Audit_log.ToolCall "masc_status")
+        ~room_id:"default"
+        ~details:(`Assoc [("tool_name", `String "masc_status")])
+        ~outcome:Audit_log.Success ();
+      let events = Tool_audit.read_audit_events ctx.config ~since:0.0 in
+      let tool_calls =
+        List.filter
+          (fun (event : Tool_audit.audit_event) ->
+            String.equal event.event_type "tool_call")
+          events
+      in
+      match tool_calls with
+      | [event] ->
+          Alcotest.(check string) "normalized event type" "tool_call"
+            event.event_type;
+          Alcotest.(check (option string)) "detail remains empty" None event.detail;
+          Alcotest.(check bool) "details preserved" true
+            (match event.details with Some (`Assoc _) -> true | _ -> false)
+      | _ -> Alcotest.fail "expected one normalized tool_call event")
+
+let test_audit_stats_counts_tool_call_prefixes () =
+  let ctx, base_dir = make_ctx () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      Audit_log.log_action ctx.config ~agent_id:"test-agent"
+        ~action:(Audit_log.ToolCall "masc_status")
+        ~room_id:"default" ~details:`Null ~outcome:Audit_log.Success ();
+      let (ok, msg) = Tool_audit.handle_audit_stats ctx (`Assoc []) in
+      Alcotest.(check bool) "stats succeeds" true ok;
+      let json = Yojson.Safe.from_string msg in
+      let open Yojson.Safe.Util in
+      let agents = json |> member "agents" |> to_list in
+      let matching =
+        List.find_opt
+          (fun agent_json ->
+            match agent_json |> member "agent_id" with
+            | `String "test-agent" -> true
+            | _ -> false)
+          agents
+      in
+      match matching with
+      | Some agent_json ->
+          Alcotest.(check int) "tool call counted" 1
+            (agent_json |> member "tool_calls" |> to_int)
+      | None -> Alcotest.fail "expected stats for test-agent")
 
 (* ============================================================
    Helper function tests
@@ -198,8 +265,6 @@ let test_get_float_missing () =
 (* ============================================================
    Audit trail (trace_id linking) tests
    ============================================================ *)
-
-module Audit_log = Masc_mcp.Audit_log
 
 let test_audit_entry_trace_id_in_json () =
   let entry : Audit_log.audit_entry = {
@@ -319,6 +384,8 @@ let () =
     ("audit_stats", [
       Alcotest.test_case "empty stats" `Quick test_audit_stats_empty;
       Alcotest.test_case "with agent filter" `Quick test_audit_stats_with_agent;
+      Alcotest.test_case "counts tool_call prefixes" `Quick
+        test_audit_stats_counts_tool_call_prefixes;
     ]);
     ("audit_event_to_json", [
       Alcotest.test_case "with detail" `Quick test_event_to_json_with_detail;
@@ -326,6 +393,8 @@ let () =
     ]);
     ("read_audit_events", [
       Alcotest.test_case "empty log" `Quick test_read_audit_events_empty;
+      Alcotest.test_case "canonical store + normalization" `Quick
+        test_read_audit_events_reads_canonical_store_and_normalizes_tool_call;
     ]);
     ("helpers", [
       Alcotest.test_case "get_string present" `Quick test_get_string_present;

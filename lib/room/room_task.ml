@@ -25,6 +25,45 @@ let emit_task_activity config ~agent_name ~task_id ~kind ~payload =
       Log.Misc.warn "task activity emit failed (%s %s): %s" kind task_id
         (Printexc.to_string exn)
 
+let task_status_to_string = function
+  | Types.Todo -> "todo"
+  | Types.Claimed _ -> "claimed"
+  | Types.InProgress _ -> "in_progress"
+  | Types.Done _ -> "done"
+  | Types.Cancelled _ -> "cancelled"
+
+let task_started_at_unix status =
+  let default_time = Time_compat.now () in
+  match status with
+  | Types.Claimed { claimed_at; _ } ->
+      Types.parse_iso8601 ~default_time claimed_at
+  | Types.InProgress { started_at; _ } ->
+      Types.parse_iso8601 ~default_time started_at
+  | _ -> default_time
+
+let task_transition_details ~from_status ~to_status ?notes ?reason ?duration_ms
+    ?(forced = false) () =
+  let optional_field name = function
+    | Some value -> [ (name, value) ]
+    | None -> []
+  in
+  `Assoc
+    ([
+       ("from_status", `String (task_status_to_string from_status));
+       ("to_status", `String (task_status_to_string to_status));
+       ("forced", `Bool forced);
+     ]
+    @ optional_field "notes"
+        (Option.map (fun value -> `String value) notes)
+    @ optional_field "reason"
+        (Option.map (fun value -> `String value) reason)
+    @ optional_field "duration_ms"
+        (Option.map (fun value -> `Int value) duration_ms))
+
+let observe_task_transition config ~agent_name ~task_id ~transition ~details =
+  !Room_hooks.observe_task_transition_fn config ~agent_name
+    ~room_id:(activity_room_id config) ~task_id ~transition ~details
+
 (** Add task — file-locked to prevent task ID collision under concurrency *)
 let add_task config ~title ~priority ~description =
   ensure_initialized config;
@@ -210,6 +249,14 @@ let claim_task config ~agent_name ~task_id =
             log_event config (Printf.sprintf
               "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}"
               agent_name task_id (now_iso ()));
+            observe_task_transition config ~agent_name ~task_id
+              ~transition:"claim"
+              ~details:
+                (task_transition_details ~from_status:Types.Todo
+                   ~to_status:
+                     (Types.Claimed
+                        { assignee = agent_name; claimed_at = now_iso () })
+                   ());
             Printf.sprintf "✅ %s claimed %s" agent_name task_id
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -294,6 +341,17 @@ let claim_task_r config ~agent_name ~task_id
                   emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
                     ~payload:(`Assoc [ ("task_id", `String task_id) ]);
                   log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_claim"); ("agent", `String agent_name); ("task", `String task_id); ("ts", `String (now_iso ()))]));
+                  observe_task_transition config ~agent_name ~task_id
+                    ~transition:"claim"
+                    ~details:
+                      (task_transition_details ~from_status:Types.Todo
+                         ~to_status:
+                           (Types.Claimed
+                              {
+                                assignee = agent_name;
+                                claimed_at = now_iso ();
+                              })
+                         ());
                   Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
           end)
       with
@@ -325,14 +383,8 @@ let transition_task_r config ~agent_name ~task_id ~action
                  | None -> Error (Types.TaskNotFound task_id)
                  | Some task ->
                      let now = now_iso () in
+                     let now_ts = Time_compat.now () in
                      let action = String.lowercase_ascii action in
-                     let status_to_string = function
-                       | Types.Todo -> "todo"
-                       | Types.Claimed _ -> "claimed"
-                       | Types.InProgress _ -> "in_progress"
-                       | Types.Done _ -> "done"
-                       | Types.Cancelled _ -> "cancelled"
-                     in
                      let transition =
                        match action, task.task_status with
                        | "claim", Types.Todo ->
@@ -365,7 +417,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                        | _ ->
                            Error (Types.TaskInvalidState
                              (Printf.sprintf "Invalid transition: %s -> %s (%s)"
-                               (status_to_string task.task_status) action task_id))
+                               (task_status_to_string task.task_status) action task_id))
                      in
                      (match transition with
                       | Error e -> Error e
@@ -400,8 +452,8 @@ let transition_task_r config ~agent_name ~task_id ~action
                           log_event config (Printf.sprintf
                             "{\"type\":\"task_transition\",\"agent\":\"%s\",\"task\":\"%s\",\"action\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"ts\":\"%s\"}"
                             agent_name task_id action
-                            (status_to_string task.task_status)
-                            (status_to_string new_status)
+                            (task_status_to_string task.task_status)
+                            (task_status_to_string new_status)
                             now);
                           (match action with
                            | "claim" ->
@@ -435,9 +487,28 @@ let transition_task_r config ~agent_name ~task_id ~action
                                  ~kind:"task.released"
                                  ~payload:(`Assoc [ ("task_id", `String task_id) ])
                            | _ -> ());
+                          let duration_ms =
+                            match action with
+                            | "done" | "cancel" ->
+                                Some
+                                  (max 0
+                                     (int_of_float
+                                        ((now_ts
+                                         -. task_started_at_unix task.task_status)
+                                        *. 1000.0)))
+                            | _ -> None
+                          in
+                          observe_task_transition config ~agent_name ~task_id
+                            ~transition:action
+                            ~details:
+                              (task_transition_details
+                                 ~from_status:task.task_status ~to_status:new_status
+                                 ?notes:(if notes = "" then None else Some notes)
+                                 ?reason:(if reason = "" then None else Some reason)
+                                 ?duration_ms ~forced:force ());
                           Ok (Printf.sprintf "✅ %s %s → %s" task_id
-                                (status_to_string task.task_status)
-                                (status_to_string new_status))
+                                (task_status_to_string task.task_status)
+                                (task_status_to_string new_status))
                      ))
           with
       | Eio.Cancel.Cancelled _ as e -> raise e
@@ -516,6 +587,25 @@ let complete_task config ~agent_name ~task_id ~notes =
               agent_name task_id
               (if notes = "" then "null" else Printf.sprintf "\"%s\"" notes)
               (now_iso ()));
+            observe_task_transition config ~agent_name ~task_id
+              ~transition:"done"
+              ~details:
+                (task_transition_details ~from_status:task.task_status
+                   ~to_status:
+                     (Types.Done
+                        {
+                          assignee = agent_name;
+                          completed_at = now_iso ();
+                          notes = if notes = "" then None else Some notes;
+                        })
+                   ?notes:(if notes = "" then None else Some notes)
+                   ~duration_ms:
+                     (max 0
+                        (int_of_float
+                           ((Time_compat.now ()
+                            -. task_started_at_unix task.task_status)
+                           *. 1000.0)))
+                   ());
             (* Record task collaboration via hook (async, non-blocking) *)
             (try
                let active = (Room_state.read_state config).active_agents in
@@ -596,6 +686,25 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                       ("notes", if notes = "" then `Null else `String notes);
                     ]);
               log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_done"); ("agent", `String agent_name); ("task", `String task_id); ("notes", if notes = "" then `Null else `String notes); ("ts", `String (now_iso ()))]));
+              observe_task_transition config ~agent_name ~task_id
+                ~transition:"done"
+                ~details:
+                  (task_transition_details ~from_status:task.task_status
+                     ~to_status:
+                       (Types.Done
+                          {
+                            assignee = agent_name;
+                            completed_at = now_iso ();
+                            notes = if notes = "" then None else Some notes;
+                          })
+                     ?notes:(if notes = "" then None else Some notes)
+                     ~duration_ms:
+                       (max 0
+                          (int_of_float
+                             ((Time_compat.now ()
+                              -. task_started_at_unix task.task_status)
+                             *. 1000.0)))
+                     ());
               (* Agent Economy: earn credits via hook *)
               !Room_hooks.agent_economy_earn_fn
                 ~base_path:config.base_path ~agent_name
@@ -664,6 +773,25 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                       ("reason", if reason = "" then `Null else `String reason);
                     ]);
               log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_cancelled"); ("agent", `String agent_name); ("task", `String task_id); ("reason", if reason = "" then `Null else `String reason); ("ts", `String (now_iso ()))]));
+              observe_task_transition config ~agent_name ~task_id
+                ~transition:"cancel"
+                ~details:
+                  (task_transition_details ~from_status:task.task_status
+                     ~to_status:
+                       (Types.Cancelled
+                          {
+                            cancelled_by = agent_name;
+                            cancelled_at = now_iso ();
+                            reason = if reason = "" then None else Some reason;
+                          })
+                     ?reason:(if reason = "" then None else Some reason)
+                     ~duration_ms:
+                       (max 0
+                          (int_of_float
+                             ((Time_compat.now ()
+                              -. task_started_at_unix task.task_status)
+                             *. 1000.0)))
+                     ());
               Ok (Printf.sprintf "🚫 %s cancelled %s" agent_name task_id)
             end
       with

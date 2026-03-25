@@ -108,6 +108,23 @@ let handle_suspend ctx args =
       ~agent_id:target_agent
       ~opened:true
       ~reason:("Suspended by " ^ caller) ();
+    let details =
+      `Assoc
+        [
+          ("event_family", `String "agent_suspension");
+          ("caller_agent", `String caller);
+          ("target_agent", `String target_agent);
+          ("reason", `String reason);
+          ("duration_hours", `Float duration_hours);
+          ("rooms_affected", `Int rooms_affected);
+          ("is_self_suspend", `Bool is_self);
+        ]
+    in
+    Log.emit Log.Warn ~module_name:"Session" ~details
+      (Printf.sprintf "agent suspended: %s by %s" target_agent caller);
+    Telemetry_eio.track_error ctx.config ~code:"agent_suspended"
+      ~message:(Printf.sprintf "%s suspended by %s" target_agent caller)
+      ~context:"tool_suspend";
 
     Log.Session.warn "[Suspend] Agent '%s' suspended by '%s': %s (%.1fh, %d rooms)"
       target_agent caller reason duration_hours rooms_affected;

@@ -34,6 +34,9 @@ val timestamp : unit -> string
 val log : level -> ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 (** Log a message at the given level with optional context. *)
 
+val emit : level -> ?module_name:string -> ?details:Yojson.Safe.t -> string -> unit
+(** Log a preformatted structured message with optional JSON details. *)
+
 val debug : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 val info : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 val warn : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a

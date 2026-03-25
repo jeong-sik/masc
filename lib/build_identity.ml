@@ -39,25 +39,34 @@ let executable_dir () =
 
 (** Probe git commit via subprocess.
     Offloaded to system thread to avoid blocking Eio scheduler. *)
+let git_capture_output ~repo_root args =
+  let ic =
+    Unix.open_process_args_in "git"
+      (Array.of_list ("git" :: "-C" :: repo_root :: args))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      match Unix.close_process_in ic with
+      | Unix.WEXITED 0 -> ()
+      | _ -> ())
+    (fun () -> In_channel.input_all ic)
+
 let git_probe_from_root repo_root =
   let f () =
-    let cmd =
-      Printf.sprintf "git -C %s rev-parse --short HEAD 2>/dev/null"
-        (Filename.quote repo_root)
-    in
-    let ic = Unix.open_process_in cmd in
     let output =
-      try In_channel.input_all ic with
+      try git_capture_output ~repo_root [ "rev-parse"; "--short"; "HEAD" ] with
       | Sys_error msg ->
           Log.Identity.warn "git_probe_from_root read failed: %s" msg;
+          ""
+      | Unix.Unix_error (code, fn, arg) ->
+          Log.Identity.warn "git_probe_from_root unix error: %s (%s %s)"
+            (Unix.error_message code) fn arg;
           ""
       | exn ->
           Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
           ""
     in
-    match Unix.close_process_in ic with
-    | Unix.WEXITED 0 -> trim_to_option output
-    | _ -> None
+    trim_to_option output
   in
   try Eio_unix.run_in_systhread f
   with Stdlib.Effect.Unhandled _ -> f ()

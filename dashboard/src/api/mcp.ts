@@ -1,11 +1,47 @@
 // MASC Dashboard — MCP-over-HTTP client with session lifecycle
 
 import { fetchWithTimeout, DEFAULT_MCP_TIMEOUT_MS } from './core'
+import { reportToolHostFailure } from './dashboard'
 
 // --- MCP Session Management ---
 
 let mcpSessionId: string | null = null
 let initPromise: Promise<void> | null = null
+
+async function bestEffortReportToolHostFailure(payload: {
+  toolName: string
+  message: string
+  phase: string
+  requestId?: string
+  timeoutMs?: number
+}) {
+  try {
+    await reportToolHostFailure({
+      client_name: 'masc-dashboard',
+      tool_name: payload.toolName,
+      transport: 'mcp_http',
+      phase: payload.phase,
+      message: payload.message,
+      request_id: payload.requestId,
+      session_id: mcpSessionId ?? undefined,
+      timeout_ms: payload.timeoutMs,
+    })
+  } catch {
+    // Best-effort only. The original MCP error should surface unchanged.
+  }
+}
+
+function shouldReportToolHostFailure(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('timeout after')
+    || normalized.includes('timed out awaiting tools/call')
+    || normalized.includes('failed to fetch')
+    || normalized.includes('networkerror')
+    || normalized.includes('load failed')
+    || normalized.includes('error decoding response body')
+  )
+}
 
 function mcpHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = {
@@ -113,18 +149,35 @@ function extractMcpText(res: McpCallResponse): string {
 }
 
 export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
-  await ensureSession()
-  const text = await mcpPost({
-    jsonrpc: '2.0',
-    method: 'tools/call',
-    params: {
-      name: toolName,
-      arguments: args,
-    },
-    id: Math.floor(Date.now() % 1000000),
-  })
-  const parsed = parseMcpHttpResponse(text)
-  return extractMcpText(parsed)
+  const requestId = String(Math.floor(Date.now() % 1000000))
+  let phase = mcpSessionId ? 'tools/call' : 'initialize'
+  try {
+    await ensureSession()
+    phase = 'tools/call'
+    const text = await mcpPost({
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: {
+        name: toolName,
+        arguments: args,
+      },
+      id: Number.parseInt(requestId, 10),
+    })
+    const parsed = parseMcpHttpResponse(text)
+    return extractMcpText(parsed)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (shouldReportToolHostFailure(message)) {
+      await bestEffortReportToolHostFailure({
+        toolName,
+        message,
+        phase,
+        requestId: phase === 'tools/call' ? requestId : undefined,
+        timeoutMs: phase === 'initialize' ? 10000 : DEFAULT_MCP_TIMEOUT_MS,
+      })
+    }
+    throw err
+  }
 }
 
 function parseMcpJsonText(text: string): Record<string, unknown> {

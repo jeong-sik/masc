@@ -98,6 +98,29 @@ let add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/logs/tool-host-failures" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           let fallback_agent = agent_from_request request in
+           let report_result =
+             try
+               let json = Yojson.Safe.from_string body_str in
+               Dashboard_tool_host_events.report_of_yojson ?fallback_agent json
+             with Yojson.Json_error err ->
+               Error ("invalid json: " ^ err)
+           in
+           match report_result with
+           | Ok report ->
+               Dashboard_tool_host_events.record state.Mcp_server.room_config
+                 report;
+               Http.Response.json ~compress:true ~request:req {|{"ok":true}|}
+                 reqd
+           | Error message ->
+               Http.Response.json ~status:`Bad_request ~request:req
+                 (Yojson.Safe.to_string
+                    (`Assoc [ ("ok", `Bool false); ("error", `String message) ]))
+                 reqd)
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/room-truth" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_room_truth_http_json ~state ~sw ~clock req in

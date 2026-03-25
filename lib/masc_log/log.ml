@@ -12,6 +12,7 @@ type source =
   | Structured
   | Legacy_stderr
   | Legacy_traceln
+  | Client_tool_host
 
 (** Current log level (Atomic for thread safety in OCaml 5) *)
 let current_level = Atomic.make 1 (* Info = 1 *)
@@ -43,6 +44,7 @@ let source_to_string = function
   | Structured -> "structured"
   | Legacy_stderr -> "legacy_stderr"
   | Legacy_traceln -> "legacy_traceln"
+  | Client_tool_host -> "client_tool_host"
 
 let has_prefix ~prefix value =
   let prefix_len = String.length prefix in
@@ -118,6 +120,7 @@ module Ring = struct
     legacy_classified : bool;
     module_name : string;
     message : string;
+    details : Yojson.Safe.t;
   }
 
   let capacity = 5000
@@ -132,6 +135,7 @@ module Ring = struct
       legacy_classified = false;
       module_name = "";
       message = "";
+      details = `Null;
     }
   let total = Atomic.make 0 (* total entries ever written *)
 
@@ -139,6 +143,7 @@ module Ring = struct
       ?raw_level
       ?(source = Structured)
       ?(legacy_classified = false)
+      ?(details = `Null)
       ~normalized_level
       ~module_name
       ~message
@@ -158,6 +163,7 @@ module Ring = struct
         legacy_classified;
         module_name;
         message;
+        details;
       }
 
   let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")
@@ -206,6 +212,7 @@ module Ring = struct
       ("legacy_classified", `Bool e.legacy_classified);
       ("module", `String e.module_name);
       ("message", `String e.message);
+      ("details", e.details);
     ]
 
   let to_json entries =
@@ -256,6 +263,11 @@ let legacy_stderr ?level ?module_name message =
 
 let legacy_traceln ?level ?module_name message =
   emit_legacy_raw ?level ?module_name ~source:Legacy_traceln message
+
+let client_tool_host_error ?(module_name = "ToolHost") ?(details = `Null) message =
+  Printf.eprintf "%s\n%!" message;
+  Ring.push ~raw_level:"ERROR" ~normalized_level:"ERROR" ~source:Client_tool_host
+    ~module_name ~message ~details ()
 
 (** Module-specific loggers.
     Each module checks MASC_LOG_{NAME}_LEVEL env var for per-module override,

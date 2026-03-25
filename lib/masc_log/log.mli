@@ -57,6 +57,7 @@ module Ring : sig
     legacy_classified : bool;
     module_name : string;
     message : string;
+    details : Yojson.Safe.t;
   }
 
   val recent :
@@ -70,6 +71,10 @@ module Ring : sig
 
   val to_json : entry list -> Yojson.Safe.t
 end
+
+val client_tool_host_error :
+  ?module_name:string -> ?details:Yojson.Safe.t -> string -> unit
+(** Mirror a client/tool-host failure into the dashboard log ring with its own source. *)
 
 (** Functor for creating module-specific loggers.
     [M.name] controls the env-var key MASC_LOG_{NAME}_LEVEL

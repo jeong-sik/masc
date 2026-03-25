@@ -54,6 +54,7 @@ export interface LogEntry {
   legacy_classified: boolean
   module: string
   message: string
+  details?: Record<string, unknown> | null
 }
 
 export interface LogsResponse {
@@ -76,6 +77,25 @@ export function fetchLogs(opts?: {
   }
   const qs = params.toString()
   return get(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
+}
+
+export interface ToolHostFailureReport {
+  agent_name?: string
+  client_name?: string
+  tool_name: string
+  transport?: string
+  phase?: string
+  message: string
+  request_id?: string
+  session_id?: string
+  trace_id?: string
+  timeout_ms?: number
+}
+
+export function reportToolHostFailure(
+  report: ToolHostFailureReport,
+): Promise<{ ok: boolean }> {
+  return post('/api/v1/dashboard/logs/tool-host-failures', report, undefined, 3000)
 }
 
 export interface AgentActivityEntry {

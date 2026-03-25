@@ -281,6 +281,25 @@ let log_tool_call config ~agent_id ~tool_name ~success ~error_msg ?cost_estimate
   let outcome = if success then Success else Failure (Option.value error_msg ~default:"unknown") in
   log_action config ~agent_id ~action:(ToolCall tool_name) ?cost_estimate ?token_count ~outcome ()
 
+let log_client_tool_host_failure config ~agent_id ~client_name ~tool_name
+    ~transport ~message ?phase ?request_id ?session_id ?trace_id ?timeout_ms () =
+  let details =
+    `Assoc
+      (List.filter_map
+         Fun.id
+         [
+           Some ("client_name", `String client_name);
+           Some ("tool_name", `String tool_name);
+           Some ("transport", `String transport);
+           Option.map (fun value -> ("phase", `String value)) phase;
+           Option.map (fun value -> ("request_id", `String value)) request_id;
+           Option.map (fun value -> ("session_id", `String value)) session_id;
+           Option.map (fun value -> ("timeout_ms", `Int value)) timeout_ms;
+         ])
+  in
+  log_action config ~agent_id ~action:(Custom "client_tool_host_failure")
+    ~details ?trace_id ~outcome:(Failure message) ()
+
 let log_auth_attempt config ~agent_id ~success ~method_name ?cost_estimate ?token_count () =
   let action = if success then AuthSuccess else AuthFailure in
   log_action config ~agent_id ~action

@@ -54,6 +54,7 @@
    dashboard_agent_relations
    dashboard_attention
    dashboard_cache
+   dashboard_tool_host_events
    dashboard_collaboration_evidence
    dashboard_governance
    dashboard_governance_judge

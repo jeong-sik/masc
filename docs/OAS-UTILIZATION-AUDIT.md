@@ -1,7 +1,7 @@
 # MASC-MCP OAS Utilization Audit
 
-Date: 2026-03-24
-OAS Version: 0.89.0 (CI/runtime pin on `jeong-sik/oas@7319cf6d09d971079d1b9018d8c485f294feed5f`, aligned with tag `v0.89.0`)
+Date: 2026-03-25
+OAS Version: 0.89.1 floor (CI/runtime pin on `jeong-sik/oas@f2ed189eed67beb24e3efb296768dabfacdcf7dd`, latest tagged floor `v0.89.1`)
 Snapshot: `main` audit aligned to the current upstream `agent_sdk.opam`; drift is checked against upstream `refs/heads/main`, not GitHub releases
 
 ## Current Read
@@ -15,7 +15,7 @@ The main remaining problems are no longer “missing migration” at large. They
 
 ## Pin Policy
 
-`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the latest tagged SDK version. As of this audit, `refs/heads/main` and `v0.89.0` resolve to the same SHA.
+`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the latest tagged SDK version. As of this audit, the runtime pin is ahead of the latest tag `v0.89.1`, while the dependency floor remains pinned to `0.89.1`.
 
 ## Status by Area
 

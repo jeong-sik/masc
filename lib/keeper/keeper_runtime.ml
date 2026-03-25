@@ -199,8 +199,15 @@ let with_bootstrap_rw f =
   try Eio.Mutex.use_rw ~protect:true bootstrap_done_mu (fun () -> f ())
   with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
+let has_desired_resident_keepers config =
+  list_resident_keepers config
+  |> List.exists (fun (spec : resident_keeper_spec) -> spec.desired)
+
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
-  if stats.started > 0 || Keeper_registry.count_running () > 0
+  if stats.enabled
+     && (stats.started > 0
+         || Keeper_registry.count_running ~base_path:ctx.config.base_path () > 0
+         || has_desired_resident_keepers ctx.config)
   then start_supervisor_sweep ctx
 
 let start_existing_keepalives ctx =

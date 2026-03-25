@@ -98,10 +98,28 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
 
 (* ── Sweep and recover ───────────────────────────────────── *)
 
+let reconcile_missing_resident_keepers (ctx : _ context) =
+  list_resident_keepers ctx.config
+  |> List.filter (fun (spec : resident_keeper_spec) -> spec.desired)
+  |> List.iter (fun spec ->
+         match read_meta ctx.config spec.persistent_name with
+         | Ok (Some meta)
+           when (not meta.paused)
+                && meta.presence_keepalive
+                && not
+                     (Keeper_registry.is_running ~base_path:ctx.config.base_path
+                        meta.name) ->
+             supervise_keepalive ~proactive_warmup_sec:0 ctx meta
+         | Ok _ -> ()
+         | Error err ->
+             Log.Keeper.warn "resident reconcile skipped for %s: %s"
+               spec.persistent_name err)
+
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Env_config.KeeperResidentSupervisor.max_restarts in
   let base_path = ctx.config.base_path in
+  reconcile_missing_resident_keepers ctx;
   let entries = Keeper_registry.all ~base_path () in
   let to_restart = ref [] in
   let to_unregister = ref [] in

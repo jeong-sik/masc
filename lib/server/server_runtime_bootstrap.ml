@@ -830,7 +830,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     in
     try
       let pg_init_timeout =
-        Safe_ops.get_env_float_logged "MASC_PG_INIT_TIMEOUT_SEC" ~default:10.0
+        Safe_ops.get_env_float_logged "MASC_PG_INIT_TIMEOUT_SEC" ~default:30.0
       in
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
       let state =

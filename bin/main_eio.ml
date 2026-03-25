@@ -314,12 +314,10 @@ let run_cmd host port base_path =
   (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
   Mirage_crypto_rng_unix.use_default ();
 
-  (* Enable Eio-aware locking in modules with dual-mode mutex guards *)
-  Masc_mcp.Prometheus.enable_eio ();
+  (* Enable Eio-aware locking globally (single call replaces per-module enable_eio) *)
+  Eio_guard.enable ();
   Masc_mcp.Transport_metrics.init ();
-  Masc_mcp.Chain_telemetry.enable_eio ();
-  Masc_mcp.Generational_metrics.enable_eio ();
-  Masc_mcp.Dashboard_cache.enable_eio ~clock:(Eio.Stdenv.clock env) ();
+  Masc_mcp.Dashboard_cache.set_clock (Eio.Stdenv.clock env);
 
   (* Set global clock for Time_compat (Eio-native timestamps) *)
   Time_compat.set_clock (Eio.Stdenv.clock env);

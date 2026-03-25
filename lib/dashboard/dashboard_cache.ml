@@ -37,8 +37,6 @@ type slot =
 
 let table : (string, slot) Hashtbl.t = Hashtbl.create 16
 let mu = Eio.Mutex.create ()
-let eio_available = ref false
-
 (** Background revalidation switch — must be set via [set_sw] before
     stale-while-revalidate can fork background fibers. *)
 let _bg_sw : Eio.Switch.t option ref = ref None
@@ -47,11 +45,7 @@ type any_clock = Clock : _ Eio.Time.clock -> any_clock
 
 let clock_ref : any_clock option ref = ref None
 
-let enable_eio ?clock () =
-  eio_available := true;
-  match clock with
-  | Some clk -> clock_ref := Some (Clock clk)
-  | None -> ()
+let set_clock clk = clock_ref := Some (Clock clk)
 
 let set_sw sw = _bg_sw := Some sw
 
@@ -263,7 +257,7 @@ let timeout_error_json key timeout_sec =
   ]
 
 let get_or_compute key ~ttl compute =
-  if !eio_available then get_or_compute_eio key ~ttl compute
+  if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute
   else get_or_compute_simple key ~ttl compute
 
 (** Compute with Eio timeout.  Stale-while-revalidate applies here too:
@@ -294,7 +288,7 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
     timeout_error_json k timeout_sec
 
 let invalidate key =
-  if !eio_available then
+  if Eio_guard.is_ready () then
     let cond_opt =
       Eio.Mutex.use_rw ~protect:true mu (fun () ->
         let c =
@@ -309,7 +303,7 @@ let invalidate key =
   else Hashtbl.remove table key
 
 let invalidate_all () =
-  if !eio_available then
+  if Eio_guard.is_ready () then
     let conds =
       Eio.Mutex.use_rw ~protect:true mu (fun () ->
         let cs =
@@ -360,5 +354,5 @@ let stats () =
         ("expired", `Int (total - fresh - stale - computing));
       ]
   in
-  if !eio_available then Eio.Mutex.use_rw ~protect:true mu compute
+  if Eio_guard.is_ready () then Eio.Mutex.use_rw ~protect:true mu compute
   else compute ()

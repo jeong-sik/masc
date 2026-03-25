@@ -318,7 +318,7 @@ let test_dashboard_mission_projection () =
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_mission.json
-            ~actor:"test-dashboard"
+            ~actor:"test-dashboard-projection"
             ~config
             ~sw
             ~clock:(Eio.Stdenv.clock env)
@@ -428,7 +428,7 @@ let test_dashboard_mission_projection () =
                 row |> member "target_type" |> to_string = "room"));
         let session_detail =
           Lib.Dashboard_mission.session_json
-            ~actor:"test-dashboard"
+            ~actor:"test-dashboard-projection"
             ~session_id
             ~config
             ~sw
@@ -479,6 +479,42 @@ let test_dashboard_mission_http_full_contract () =
         check bool "command focus retained in mission http payload" true
           (json |> member "command_focus" <> `Null);
         check bool "session brief survives mission http payload" true
+          (json |> member "session_briefs" |> to_list
+         |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));
+      ))
+
+let test_dashboard_mission_http_default_bootstraps_first_success () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room_utils.default_config dir in
+      let session_id = "ts-mission-http-default-001" in
+      seed_room config session_id;
+      Eio_main.run @@ fun env ->
+      Eio_guard.enable ();
+      Lib.Dashboard_cache.invalidate_all ();
+      Lib.Operator_control.invalidate_snapshot_cache ();
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_mission_http_json
+            ~state
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/mission")
+        in
+        let open Yojson.Safe.Util in
+        check string "default mission cache becomes fresh" "fresh"
+          (json |> member "projection_diagnostics" |> member "cache_state"
+          |> to_string);
+        check bool "default mission records first success" true
+          (json |> member "projection_diagnostics" |> member "last_success_at"
+           <> `Null);
+        check bool "default mission leaves initializing placeholder" true
+          (json |> member "summary" |> member "room_health" |> to_string
+           <> "initializing");
+        check bool "default mission includes session briefs" true
           (json |> member "session_briefs" |> to_list
          |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));
       ))
@@ -583,6 +619,8 @@ let () =
             test_dashboard_mission_projection;
           Alcotest.test_case "http mission keeps full contract" `Quick
             test_dashboard_mission_http_full_contract;
+          Alcotest.test_case "http mission default bootstraps first success"
+            `Quick test_dashboard_mission_http_default_bootstraps_first_success;
           Alcotest.test_case "http mission cache stays room-scoped" `Quick
             test_dashboard_mission_http_cache_isolation;
           Alcotest.test_case "keeper brief prefers heartbeat task" `Quick

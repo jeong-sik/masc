@@ -196,18 +196,27 @@ let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
   let timeout_s =
     Safe_ops.get_env_float_logged "MASC_KEEPER_BOOTSTRAP_TIMEOUT_S" ~default:15.0
   in
+  let keeper_ctx : _ Tool_keeper.context =
+    {
+      config = state.room_config;
+      agent_name = "keeper-bootstrap";
+      sw;
+      clock;
+      proc_mgr = state.Mcp_server.proc_mgr;
+    }
+  in
+  let fallback_stats : Keeper_runtime.keeper_bootstrap_stats =
+    {
+      enabled = Env_config.KeeperBootstrap.enabled;
+      scanned = 0;
+      started = 0;
+      stale = 0;
+      recovering = 0;
+    }
+  in
   try
     match
       Eio.Time.with_timeout clock timeout_s (fun () ->
-        let keeper_ctx : _ Tool_keeper.context =
-          {
-            config = state.room_config;
-            agent_name = "keeper-bootstrap";
-            sw;
-            clock;
-            proc_mgr = state.Mcp_server.proc_mgr;
-          }
-        in
         let stats = Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
         Keeper_runtime.maybe_start_supervisor_sweep keeper_ctx stats;
         if stats.enabled then
@@ -216,13 +225,19 @@ let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
         Ok ())
     with
     | Ok () -> ()
-    | Error `Timeout ->
-        Log.Server.warn "keeper bootstrap timed out after %.0fs" timeout_s
+    | Error `Timeout -> begin
+        Keeper_runtime.maybe_start_supervisor_sweep keeper_ctx fallback_stats;
+        Log.Server.warn
+          "keeper bootstrap timed out after %.0fs; resident supervisor sweep will retry recovery"
+          timeout_s
+      end
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  | exn -> begin
+      Keeper_runtime.maybe_start_supervisor_sweep keeper_ctx fallback_stats;
       Log.Server.error "keeper bootstrap failed: %s"
         (Printexc.to_string exn)
+    end
 
 let init_task_backend () =
   match Board_dispatch.get_pg_pool () with
@@ -994,6 +1009,23 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_startup_state.mark_degraded ~error:(Printexc.to_string exn);
       Log.Server.error "Background init failed (HTTP still serving): %s"
         (Printexc.to_string exn));
+
+  (* 2b. Startup watchdog: if init does not reach state_ready within timeout,
+     log and exit so external process managers can restart the server.
+     Prevents zombie-listener state where the socket is open but HTTP
+     requests hang because init is stuck. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
+    Eio.Time.sleep clock timeout_sec;
+    let current = Server_startup_state.(!state) in
+    if not current.state_ready then (
+      let elapsed = Server_startup_state.elapsed_since_start () in
+      Log.Server.error
+        "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s, backend=%s). Exiting."
+        timeout_sec elapsed
+        (Server_startup_state.phase_to_string current.phase)
+        current.backend_mode;
+      exit 1));
 
   (* 3. Start serving -- /health responds before init completes *)
   match http_mode with

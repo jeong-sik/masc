@@ -215,7 +215,7 @@ let wait_for_health ~port ~timeout_s =
     else
       let res = run_curl_get ~max_time_sec:1 ~port ~path:"/health" () in
       match res.status with
-      | Some 200 -> true
+      | Some 200 when contains_substr "\"state_ready\":true" res.body -> true
       | _ ->
           Unix.sleepf 0.1;
           loop ()
@@ -349,11 +349,16 @@ let rec call_until_ready ~port ~retries_left =
          && contains_substr "Server state not initialized" result.body ->
       Unix.sleepf 0.5;
       call_until_ready ~port ~retries_left:(retries - 1)
+  | Some 503, retries
+    when retries > 0
+         && contains_substr "Server is starting up, not ready yet" result.body ->
+      Unix.sleepf 0.5;
+      call_until_ready ~port ~retries_left:(retries - 1)
   | _ -> result
 
 let test_post_tools_call_streams_keepalive_before_result () =
   with_server @@ fun ~port ->
-  let result = call_until_ready ~port ~retries_left:10 in
+  let result = call_until_ready ~port ~retries_left:40 in
   require_http_ok "streaming tools/call" result;
   check int "curl exits cleanly" 0 result.curl_exit;
   check bool "prime event sent" true (contains_substr "retry: 3000" result.body);

@@ -155,6 +155,14 @@ let fixed_rhythm base_s =
 let orchestrator_pulse : Pulse.t option ref = ref None
 let zombie_pulse : Pulse.t option ref = ref None
 
+let pulse_mu = Eio.Mutex.create ()
+let with_pulse_rw f =
+  try Eio.Mutex.use_rw ~protect:true pulse_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_pulse_ro f =
+  try Eio.Mutex.use_ro pulse_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
 (** Build the orchestrator check consumer.
     Checks if orchestration is needed and spawns coordinator if so. *)
 let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config ()
@@ -233,7 +241,7 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: %.0fs)" neo4j_interval;
   let zombie_consumer = make_zero_zombie_consumer ~room_config in
   let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Perpetual ~consumers:[zombie_consumer] in
-  zombie_pulse := Some zp;
+  with_pulse_rw (fun () -> zombie_pulse := Some zp);
   Eio.Fiber.fork ~sw (fun () -> Pulse.run ~sw zp);
 
   (* Orchestrator check: respects enabled flag via should_act *)
@@ -245,10 +253,12 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
 
   let orch_consumer = make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config () in
   let op = Pulse.create ~clock ~rhythm:(fixed_rhythm config.check_interval_s) ~lifecycle:Perpetual ~consumers:[orch_consumer] in
-  orchestrator_pulse := Some op;
+  with_pulse_rw (fun () -> orchestrator_pulse := Some op);
   Eio.Fiber.fork ~sw (fun () -> Pulse.run ~sw op);
 
   (* Return cancel function — shuts down both Pulse engines *)
   fun () ->
-    (match !orchestrator_pulse with Some p -> Pulse.shutdown p | None -> ());
-    (match !zombie_pulse with Some p -> Pulse.shutdown p | None -> ())
+    with_pulse_ro (fun () ->
+      (match !orchestrator_pulse with Some p -> Pulse.shutdown p | None -> ()));
+    with_pulse_ro (fun () ->
+      (match !zombie_pulse with Some p -> Pulse.shutdown p | None -> ()))

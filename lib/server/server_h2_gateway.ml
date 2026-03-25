@@ -157,6 +157,38 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd body ~extra_headers:cors
 
+      | `GET, "/health/live" ->
+          let body =
+            Yojson.Safe.to_string
+              (`Assoc [
+                 ("live", `Bool true);
+                 ("startup", Server_startup_state.to_yojson ());
+               ])
+          in
+          h2_respond_json h2_reqd body ~extra_headers:cors
+
+      | `GET, "/health/ready" ->
+          let current = Server_startup_state.(!state) in
+          let body, status =
+            if current.state_ready then
+              (Yojson.Safe.to_string
+                 (`Assoc [
+                    ("ready", `Bool true);
+                    ("phase", `String (Server_startup_state.phase_to_string current.phase));
+                    ("backend_mode", `String current.backend_mode);
+                  ]),
+               `OK)
+            else
+              (Yojson.Safe.to_string
+                 (`Assoc [
+                    ("ready", `Bool false);
+                    ("phase", `String (Server_startup_state.phase_to_string current.phase));
+                    ("elapsed_sec", `Float (Server_startup_state.elapsed_since_start ()));
+                  ]),
+               `Service_unavailable)
+          in
+          h2_respond_json ~status h2_reqd body ~extra_headers:cors
+
       | `GET, "/ws" ->
           let body =
             Server_routes_http_runtime.websocket_discovery_json httpun_request

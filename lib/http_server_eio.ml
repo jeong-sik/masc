@@ -504,7 +504,8 @@ let mcp_post_handler
           Httpun.Reqd.respond_with_string reqd response json_str
 
       | Streamable_http.Sse_upgrade ->
-          Response.text "SSE upgrade not yet implemented" reqd
+          Response.text ~status:`Not_implemented
+            "SSE upgrade is not supported on this transport" reqd
 
       | Streamable_http.Error_response (code, message) ->
           let status = match code with

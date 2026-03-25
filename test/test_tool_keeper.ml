@@ -1597,6 +1597,66 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
           status_json |> member "diagnostic" |> member "continuity_state"
           |> to_string))
 
+let test_resident_supervisor_recovers_missing_desired_keeper () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("goal", `String "Stay resident");
+              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+              ("presence_keepalive", `Bool true);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      check bool "keepalive stopped before recovery" false
+        (Masc_mcp.Keeper_registry.is_running ~base_path:config.base_path "sangsu");
+      Masc_mcp.Keeper_resident_supervisor.sweep_and_recover keeper_ctx;
+      check bool "keepalive recovered by sweep" true
+        (Masc_mcp.Keeper_registry.is_running ~base_path:config.base_path "sangsu");
+      let ok, status_body =
+        dispatch "masc_keeper_status"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("include_history_tail", `Bool false);
+              ("include_compaction_history", `Bool false);
+              ("include_context", `Bool false);
+              ("include_metrics_overview", `Bool false);
+              ("include_memory_bank", `Bool false);
+            ])
+      in
+      check bool "status ok" true ok;
+      let status_json = Yojson.Safe.from_string status_body in
+      check bool "keepalive running after supervisor recovery" true
+        Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool);
+      check bool "continuity state reaches recovering or healthy" true
+        Yojson.Safe.Util.(
+          match status_json |> member "diagnostic" |> member "continuity_state"
+                |> to_string with
+          | "recovering" | "healthy" -> true
+          | _ -> false))
+
 let () =
   run "Tool_keeper" [
     ("read_file_tail_lines", [
@@ -1658,6 +1718,8 @@ let () =
            test_parse_agent_status_reads_compressed_filesystem_backend;
          test_case "resident bootstrap marks stale explicit keeper" `Quick
            test_resident_bootstrap_marks_stale_explicit_keeper;
+         test_case "resident supervisor recovers missing desired keeper" `Quick
+           test_resident_supervisor_recovers_missing_desired_keeper;
          test_case "session dir mkdir_p creates full tree from scratch (issue #3019)" `Quick
            test_session_dir_mkdir_p_creates_full_tree;
        ]);

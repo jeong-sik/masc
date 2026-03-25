@@ -58,6 +58,8 @@ let webrtc_signaling_handler ~tool_name signaling_fn request reqd =
 let add_routes ~port ~host router =
   router
   |> Http.Router.get "/health" health_handler
+  |> Http.Router.get "/health/live" liveness_handler
+  |> Http.Router.get "/health/ready" readiness_handler
   |> Http.Router.get "/ws" websocket_discovery_handler
   |> Http.Router.get "/metrics" (fun request reqd ->
        with_read_auth (fun _state _req reqd ->

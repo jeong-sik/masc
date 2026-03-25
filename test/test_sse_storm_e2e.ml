@@ -2,6 +2,7 @@ open Alcotest
 
 type http_result = {
   status: int option;
+  body: string;
   curl_exit: int;
   stderr: string;
 }
@@ -123,10 +124,11 @@ let run_curl ?(headers=[]) ?max_time ~port ~path () =
     | Unix.WSTOPPED code -> 256 + code
   in
   let header_raw = read_file header_file in
+  let body = read_file body_file in
   (try Sys.remove header_file with _ -> ());
   (try Sys.remove body_file with _ -> ());
   let (status, _headers) = parse_headers header_raw in
-  { status; curl_exit; stderr }
+  { status; body; curl_exit; stderr }
 
 let find_main_eio_exe () =
   let env_override = Sys.getenv_opt "MASC_MAIN_EIO_EXE" in
@@ -170,6 +172,17 @@ let find_free_port () =
       | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) -> None)
 
 let wait_for_health ~port ~timeout_s =
+  let has_ready_flag body =
+    let needle = "\"state_ready\":true" in
+    let needle_len = String.length needle in
+    let body_len = String.length body in
+    let rec loop idx =
+      if idx + needle_len > body_len then false
+      else if String.sub body idx needle_len = needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+  in
   let deadline = Unix.gettimeofday () +. timeout_s in
   let rec loop () =
     if Unix.gettimeofday () > deadline then
@@ -177,7 +190,7 @@ let wait_for_health ~port ~timeout_s =
     else
       let res = run_curl ~max_time:0.2 ~port ~path:"/health" () in
       match res.status with
-      | Some 200 -> true
+      | Some 200 when has_ready_flag res.body -> true
       | _ ->
           Unix.sleepf 0.1;
           loop ()

@@ -115,11 +115,11 @@ let reconcile_desired_resident_keepers (ctx : _ context) =
                Log.Keeper.info "%s: reconciled late resident keeper" meta.name
              end
          | _ -> ())
-
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Env_config.KeeperResidentSupervisor.max_restarts in
   let base_path = ctx.config.base_path in
+  reconcile_desired_resident_keepers ctx;
   let entries = Keeper_registry.all ~base_path () in
   let to_restart = ref [] in
   let to_unregister = ref [] in

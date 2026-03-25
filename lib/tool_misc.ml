@@ -589,6 +589,7 @@ let handle_tool_admin_update ctx args =
                   [
                     ("field", `String "tool_allowlist");
                     ("status", `String "advisory_only");
+                    ("enforcement", `String "none");
                     ("reason",
                      `String
                        "Stored in CPv2 policy but not yet enforced by runtime tool dispatch.");
@@ -600,6 +601,7 @@ let handle_tool_admin_update ctx args =
                   [
                     ("field", `String "model_allowlist");
                     ("status", `String "advisory_only");
+                    ("enforcement", `String "none");
                     ("reason",
                      `String
                        "Stored in CPv2 policy but not yet enforced by runtime model selection.");

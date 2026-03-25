@@ -699,11 +699,13 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
   let full_json =
     match actor with
     | None ->
-        (* Default mission reads should stay fast even during cold start.
-           Heavy mission recompute is handled by the proactive refresh loop;
-           HTTP serves the last successful snapshot, or the initializing
-           placeholder when bootstrap is still in flight. *)
-        cached_surface_json _mission_cache
+        (* Mirror execution surface behavior: serve cached mission instantly
+           after the first success, but let the very first default read
+           bootstrap that success instead of staying "initializing" forever
+           when proactive warm-up misses its first build window. *)
+        cached_surface_or_first_success_json _mission_cache
+          ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:120.0
+          (fun () -> compute ())
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =

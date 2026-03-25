@@ -19,3 +19,14 @@ let with_mutex mutex f =
     Eio.Mutex.use_rw ~protect:true mutex (fun () -> f ())
   else
     f ()
+
+(** Read-write guard that falls back to direct execution when
+    Eio runtime is unavailable (e.g. unit tests). *)
+let with_rw mutex f =
+  try Eio.Mutex.use_rw ~protect:true mutex (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
+(** Read-only guard with the same fallback. *)
+let with_ro mutex f =
+  try Eio.Mutex.use_ro mutex (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()

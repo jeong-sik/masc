@@ -90,12 +90,8 @@ let keeper_passthrough_masc_tool_names =
 let masc_schemas_ref : Types.tool_schema list ref = ref []
 
 let masc_schemas_mu = Eio.Mutex.create ()
-let with_schemas_rw f =
-  try Eio.Mutex.use_rw ~protect:true masc_schemas_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-let with_schemas_ro f =
-  try Eio.Mutex.use_ro masc_schemas_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_schemas_rw f = Eio_guard.with_rw masc_schemas_mu f
+let with_schemas_ro f = Eio_guard.with_ro masc_schemas_mu f
 
 let inject_masc_schemas (schemas : Types.tool_schema list) =
   with_schemas_rw (fun () ->

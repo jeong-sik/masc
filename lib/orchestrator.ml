@@ -156,12 +156,8 @@ let orchestrator_pulse : Pulse.t option ref = ref None
 let zombie_pulse : Pulse.t option ref = ref None
 
 let pulse_mu = Eio.Mutex.create ()
-let with_pulse_rw f =
-  try Eio.Mutex.use_rw ~protect:true pulse_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-let with_pulse_ro f =
-  try Eio.Mutex.use_ro pulse_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_pulse_rw f = Eio_guard.with_rw pulse_mu f
+let with_pulse_ro f = Eio_guard.with_ro pulse_mu f
 
 (** Build the orchestrator check consumer.
     Checks if orchestration is needed and spawns coordinator if so. *)

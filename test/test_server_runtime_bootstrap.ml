@@ -245,7 +245,7 @@ let test_prompt_markdown_dir_falls_back_to_repo_root () =
       Alcotest.(check bool) "repo prompt dir exists" true
         (Sys.file_exists expected && Sys.is_directory expected);
       let resolved =
-        Server_runtime_bootstrap.resolve_prompt_markdown_dir
+        Prompt_defaults.resolve_prompt_markdown_dir
           ~workspace_path:dir ~base_path:dir
       in
       Alcotest.(check string) "temp room falls back to repo prompt dir"

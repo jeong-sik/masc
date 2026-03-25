@@ -513,6 +513,9 @@ let keeper_config_json (config : Room.config) (name : string)
       (`Not_found,
        `Assoc [ ("error", `String (Printf.sprintf "keeper %S not found" name)) ])
   | Ok (Some (m : Keeper_types.keeper_meta)) ->
+      ignore
+        (Prompt_defaults.bootstrap_runtime ~workspace_path:config.workspace_path
+           ~base_path:config.base_path);
       let active_model = Keeper_exec_status.active_model_of_meta m in
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt

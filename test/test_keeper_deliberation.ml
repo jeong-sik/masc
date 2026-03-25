@@ -260,7 +260,6 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
         ("trace_id", `String "trace-1");
         ("goal", `String "test deliberation");
         ("models", `List [ `String "custom:test-model" ]);
-        ("policy_mode", `String "model_deliberation");
         (* legacy keys — should be ignored by meta_of_json *)
         ("deliberation_count", `Int 5);
         ("deliberation_cost_total_usd", `Float 0.03);
@@ -774,7 +773,7 @@ let test_prompt_always_includes_multi_step () =
 
 let test_initiative_enabled_default_true () =
   (* When JSON has initiative_enabled = true, roundtrip preserves it *)
-  let json_str = {|{"name":"test","initiative_enabled":true,"policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t1","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json_str = {|{"name":"test","initiative_enabled":true,"trace_id":"t1","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
   let json = Yojson.Safe.from_string json_str in
   match Keeper_types.meta_of_json json with
   | Ok m -> check bool "initiative_enabled default" true m.initiative_enabled
@@ -782,7 +781,7 @@ let test_initiative_enabled_default_true () =
 
 let test_initiative_enabled_roundtrip_false () =
   (* When JSON has initiative_enabled = false, roundtrip preserves it *)
-  let json_str = {|{"name":"test","initiative_enabled":false,"policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t2","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json_str = {|{"name":"test","initiative_enabled":false,"trace_id":"t2","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
   let json = Yojson.Safe.from_string json_str in
   match Keeper_types.meta_of_json json with
   | Ok m ->
@@ -809,7 +808,7 @@ let test_initiative_idle_sec_overrides_idle_gate () =
       (List.exists (fun t -> t = D.IdleTimeout) triggers)
 
 let test_initiative_cooldown_sec_roundtrip () =
-  let json_str = {|{"name":"test","initiative_enabled":true,"initiative_idle_sec":120,"initiative_cooldown_sec":30,"policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t4","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json_str = {|{"name":"test","initiative_enabled":true,"initiative_idle_sec":120,"initiative_cooldown_sec":30,"trace_id":"t4","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
   let json = Yojson.Safe.from_string json_str in
   match Keeper_types.meta_of_json json with
   | Ok m ->
@@ -826,7 +825,7 @@ let test_initiative_cooldown_sec_roundtrip () =
 
 let test_initiative_enabled_missing_defaults_true () =
   (* When JSON omits initiative_enabled, defaults to true (backward compat) *)
-  let json_str = {|{"name":"test","policy_mode":"heuristic","policy_shell_mode":"coding","trace_id":"t3","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json_str = {|{"name":"test","trace_id":"t3","goal":"g","cascade_name":"local","models":["m"],"presence_keepalive":true,"presence_keepalive_sec":30,"proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
   let json = Yojson.Safe.from_string json_str in
   match Keeper_types.meta_of_json json with
   | Ok m -> check bool "missing initiative_enabled defaults to true" true m.initiative_enabled

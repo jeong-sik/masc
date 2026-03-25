@@ -16,7 +16,6 @@ open Masc_mcp
 
 (** Build a keeper_meta via JSON round-trip, overriding key policy fields. *)
 let make_meta
-    ?(policy_shell_mode = "coding")
     ?(policy_voice_enabled = false)
     ?(soul_profile = "default")
     ?(name = "test-keeper")
@@ -25,7 +24,6 @@ let make_meta
     ("name", `String name);
     ("agent_name", `String name);
     ("trace_id", `String "safety-test-trace");
-    ("policy_shell_mode", `String policy_shell_mode);
     ("policy_voice_enabled", `Bool policy_voice_enabled);
     ("soul_profile", `String soul_profile);
   ] in
@@ -180,7 +178,7 @@ let test_safe_empty () =
    Safety is enforced through eval_gate deny lists. *)
 
 let test_write_done_kills_all () =
-  let meta = make_meta ~policy_shell_mode:"readonly"
+  let meta = make_meta
     ~policy_voice_enabled:true ~soul_profile:"research" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names ~write_done:true meta in
   check (list string) "write_done returns empty" [] tools
@@ -242,8 +240,8 @@ let test_all_keepers_have_shell_and_coding () =
 
 let test_all_modes_produce_same_tools () =
   (* policy_mode and policy_shell_mode are always "unified" and "coding" respectively *)
-  let meta_a = make_meta ~policy_shell_mode:"sandboxed" () in
-  let meta_b = make_meta ~policy_shell_mode:"coding" () in
+  let meta_a = make_meta () in
+  let meta_b = make_meta () in
   let tools_a = Keeper_exec_tools.keeper_allowed_tool_names meta_a in
   let tools_b = Keeper_exec_tools.keeper_allowed_tool_names meta_b in
   check int "same tool count" (List.length tools_a) (List.length tools_b)

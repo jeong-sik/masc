@@ -23,8 +23,6 @@ module Tool_code_write = Masc_mcp.Tool_code_write
 
 let make_meta
     ?(name = "test-keeper")
-    ?(policy_mode = "Heuristic")
-    ?(policy_shell_mode = "disabled")
     ?(policy_voice_enabled = false)
     ?(soul_profile = "safety")
     ()
@@ -35,8 +33,6 @@ let make_meta
       ("agent_name", `String name);
       ("trace_id", `String "test-isolation-001");
       ("soul_profile", `String soul_profile);
-      ("policy_mode", `String policy_mode);
-      ("policy_shell_mode", `String policy_shell_mode);
       ("policy_voice_enabled", `Bool policy_voice_enabled);
     ]) with
   | Ok meta -> meta
@@ -75,7 +71,7 @@ let known_shared_agent_keeper_tool_names : string list =
    ============================================================ *)
 
 let test_heuristic_only_keeper_prefixed () =
-  let meta = make_meta ~policy_mode:"Heuristic" () in
+  let meta = make_meta () in
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected =
@@ -85,8 +81,7 @@ let test_heuristic_only_keeper_prefixed () =
     "heuristic keeper only has keeper_* or curated masc_* tools" [] unexpected
 
 let test_learned_only_keeper_prefixed () =
-  let meta = make_meta ~policy_mode:"Learned_offline_v1"
-      ~policy_shell_mode:"readonly" ~policy_voice_enabled:true () in
+  let meta = make_meta ~policy_voice_enabled:true () in
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected =
@@ -100,8 +95,7 @@ let test_learned_only_keeper_prefixed () =
    ============================================================ *)
 
 let test_research_extra_tools_are_research_only () =
-  let meta = make_meta ~policy_mode:"Learned_offline_v1"
-      ~policy_shell_mode:"coding" ~policy_voice_enabled:true
+  let meta = make_meta ~policy_voice_enabled:true
       ~soul_profile:"research" () in
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
@@ -111,8 +105,7 @@ let test_research_extra_tools_are_research_only () =
     "non-keeper tools come from known sources" [] unexpected
 
 let test_write_done_returns_empty () =
-  let meta = make_meta ~policy_mode:"Learned_offline_v1"
-      ~policy_shell_mode:"coding" () in
+  let meta = make_meta () in
   let names = Keeper_exec_tools.keeper_allowed_tool_names ~write_done:true meta in
   Alcotest.(check (list string)) "write_done returns empty" [] names
 
@@ -135,7 +128,7 @@ let test_mdal_surface_no_keeper_tools () =
    ============================================================ *)
 
 let test_no_overlap_heuristic_vs_agent () =
-  let meta = make_meta ~policy_mode:"Heuristic" () in
+  let meta = make_meta () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
   (* Mode removal: all keepers now get worktree tools that overlap with agent surface.
@@ -152,8 +145,7 @@ let test_no_overlap_heuristic_vs_agent () =
     [] overlap
 
 let test_no_overlap_research_vs_agent () =
-  let meta = make_meta ~policy_mode:"Learned_offline_v1"
-      ~policy_shell_mode:"coding" ~policy_voice_enabled:true
+  let meta = make_meta ~policy_voice_enabled:true
       ~soul_profile:"research" () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
@@ -188,8 +180,7 @@ let test_shard_tools_overlap_with_agent_documented () =
 
 let test_research_admin_overlap_documented () =
   let admin = Tool_permissions.admin_tools in
-  let meta = make_meta ~policy_mode:"Learned_offline_v1"
-      ~policy_shell_mode:"coding" ~soul_profile:"research" () in
+  let meta = make_meta ~soul_profile:"research" () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
   (* These research tools are intentionally in both lists.
@@ -207,8 +198,7 @@ let test_research_admin_overlap_documented () =
 
 let test_non_research_admin_tools_documented () =
   let admin = Tool_permissions.admin_tools in
-  let meta = make_meta ~policy_mode:"Learned_offline_v1"
-      ~policy_shell_mode:"coding" ~policy_voice_enabled:true () in
+  let meta = make_meta ~policy_voice_enabled:true () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
   (* Mode removal: all keepers get all tools. Admin-listed tools that
@@ -223,9 +213,8 @@ let test_non_research_admin_tools_documented () =
    ============================================================ *)
 
 let test_heuristic_has_fewer_tools_than_learned () =
-  let heuristic = make_meta ~policy_mode:"Heuristic" () in
-  let learned = make_meta ~policy_mode:"Learned_offline_v1"
-      ~policy_shell_mode:"coding" ~policy_voice_enabled:true
+  let heuristic = make_meta () in
+  let learned = make_meta ~policy_voice_enabled:true
       ~soul_profile:"research" () in
   let h_count = List.length (Keeper_exec_tools.keeper_allowed_tool_names heuristic) in
   let l_count = List.length (Keeper_exec_tools.keeper_allowed_tool_names learned) in

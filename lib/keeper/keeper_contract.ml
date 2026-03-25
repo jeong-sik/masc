@@ -1,10 +1,6 @@
 (** Keeper_contract — typed keeper coordination/runtime enums while preserving
     current JSON and MCP string representations at the boundary. *)
 
-type policy_action_budget =
-  | Conversation
-  | Board
-
 type scope_kind =
   | Local
   | Global
@@ -12,19 +8,6 @@ type scope_kind =
 type room_scope =
   | Current
   | All
-
-let policy_action_budget_of_string = function
-  | "board" -> Board
-  | _ -> Conversation
-
-let parse_policy_action_budget = function
-  | "conversation" -> Some Conversation
-  | "board" -> Some Board
-  | _ -> None
-
-let policy_action_budget_to_string = function
-  | Conversation -> "conversation"
-  | Board -> "board"
 
 let scope_kind_of_string = function
   | "global" -> Global

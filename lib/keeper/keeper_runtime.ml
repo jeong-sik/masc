@@ -29,7 +29,30 @@ let maybe_promote_live_persistent_keeper config name =
 
 let ensure_resident_meta config (spec : resident_keeper_spec) =
   match read_meta config spec.persistent_name with
-  | Ok (Some meta) -> Ok meta
+  | Ok (Some meta) ->
+    (* Re-sync proactive_enabled from persona defaults on bootstrap.
+       Persisted meta may have stale values from a previous session;
+       persona config is the source of truth for declarative settings. *)
+    let defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
+    let target_proactive =
+      match defaults.proactive_enabled with
+      | Some v -> v
+      | None -> Keeper_config.default_proactive_enabled
+    in
+    if meta.proactive.enabled <> target_proactive then begin
+      Log.Keeper.info "ensure_resident_meta: re-syncing proactive.enabled %b -> %b for %s"
+        meta.proactive.enabled target_proactive meta.name;
+      let updated = { meta with
+        proactive = { meta.proactive with enabled = target_proactive };
+        updated_at = now_iso ();
+      } in
+      match write_meta config updated with
+      | Ok () -> Ok updated
+      | Error e ->
+        Log.Keeper.warn "ensure_resident_meta: write_meta re-sync failed: %s" e;
+        Ok meta
+    end
+    else Ok meta
   | Ok None ->
     (* No persistent meta on disk. Try legacy seed_meta for backward compat,
        otherwise require manual keeper_up (which loads fresh from template). *)

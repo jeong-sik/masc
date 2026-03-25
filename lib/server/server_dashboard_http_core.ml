@@ -514,17 +514,17 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     mark_cached_surface_attempt _operator_digest_cache;
     let started_at = Unix.gettimeofday () in
     try
-      let sessions =
-        if Room.is_initialized config then
-          dashboard_active_or_recent_sessions ~clock config
-        else
-          []
-      in
       let command_plane_summary, swarm_status =
         command_plane_summary_cache_parts ~allow_initializing:false ~state
       in
       run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config
         (fun ~config ~sw ->
+          let sessions =
+            if Room.is_initialized config then
+              dashboard_active_or_recent_sessions ~clock config
+            else
+              []
+          in
           let ctx : _ Operator_control.context =
             {
               config;
@@ -661,13 +661,9 @@ let operator_digest_http_json ~state ~sw ~clock request =
     let effective_target_type =
       Option.value ~default:"room" target_type
     in
-    let mode =
-      if String.equal effective_target_type "room" then Inline_shared
-      else Offloaded_readonly
-    in
     match Eio.Time.with_timeout clock 30.0 (fun () ->
       Ok
-        (run_dashboard_compute ~mode ~sw ~clock
+        (run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
            ~config:state.Mcp_server.room_config
            (fun ~config ~sw ->
              let ctx : _ Operator_control.context =
@@ -686,9 +682,18 @@ let operator_digest_http_json ~state ~sw ~clock request =
                else
                  (None, None)
              in
+             let sessions =
+               if String.equal effective_target_type "room"
+                  && Room.is_initialized config
+               then
+                 Some (dashboard_active_or_recent_sessions ~clock config)
+               else
+                 None
+             in
              match
                Operator_control.digest_json ?actor ~target_type:effective_target_type
-                 ?target_id ?include_workers ?command_plane_summary ?swarm_status
+                 ?target_id ?include_workers ?sessions
+                 ?command_plane_summary ?swarm_status
                  ctx
              with
              | Ok json -> json

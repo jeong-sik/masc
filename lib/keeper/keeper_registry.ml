@@ -3,9 +3,9 @@
     Consolidates keeper_keepalive Hashtbl, keeper_resident_supervisor
     Hashtbl, and file-based meta into one registry.
 
-    All operations are serialized via Stdlib.Mutex (safe in Eio's
-    cooperative scheduler since operations are non-blocking Hashtbl
-    lookups — no I/O under lock). *)
+    All operations are serialized via Eio.Mutex (allows other fibers
+    to run while waiting, unlike Stdlib.Mutex which blocks the domain).
+    Falls back to unprotected access in non-Eio test contexts. *)
 
 open Keeper_types
 
@@ -31,14 +31,18 @@ let state_to_string = function
   | Stopped -> "stopped"
 
 let registry : (string, registry_entry) Hashtbl.t = Hashtbl.create 16
-let mu = Mutex.create ()
+let mu = Eio.Mutex.create ()
 
-let with_lock f =
-  Mutex.lock mu;
-  Fun.protect ~finally:(fun () -> Mutex.unlock mu) f
+let with_lock_rw f =
+  try Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
+let with_lock_ro f =
+  try Eio.Mutex.use_ro mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
 let register name meta =
-  with_lock (fun () ->
+  with_lock_rw (fun () ->
     let entry = {
       name;
       meta;
@@ -53,10 +57,10 @@ let register name meta =
     entry)
 
 let unregister name =
-  with_lock (fun () -> Hashtbl.remove registry name)
+  with_lock_rw (fun () -> Hashtbl.remove registry name)
 
 let get name =
-  with_lock (fun () -> Hashtbl.find_opt registry name)
+  with_lock_ro (fun () -> Hashtbl.find_opt registry name)
 
 let get_exn name =
   match get name with
@@ -64,29 +68,29 @@ let get_exn name =
   | None -> raise Not_found
 
 let all () =
-  with_lock (fun () ->
+  with_lock_ro (fun () ->
     Hashtbl.fold (fun _k v acc -> v :: acc) registry [])
 
 let update_meta name meta =
-  with_lock (fun () ->
+  with_lock_rw (fun () ->
     match Hashtbl.find_opt registry name with
     | Some entry -> entry.meta <- meta
     | None -> ())
 
 let set_state name state =
-  with_lock (fun () ->
+  with_lock_rw (fun () ->
     match Hashtbl.find_opt registry name with
     | Some entry -> entry.state <- state
     | None -> ())
 
 let record_restart name =
-  with_lock (fun () ->
+  with_lock_rw (fun () ->
     match Hashtbl.find_opt registry name with
     | Some entry -> entry.restart_count <- entry.restart_count + 1
     | None -> ())
 
 let record_error name err =
-  with_lock (fun () ->
+  with_lock_rw (fun () ->
     match Hashtbl.find_opt registry name with
     | Some entry -> entry.last_error <- Some err
     | None -> ())
@@ -97,10 +101,10 @@ let is_running name =
   | _ -> false
 
 let count_running () =
-  with_lock (fun () ->
+  with_lock_ro (fun () ->
     Hashtbl.fold
       (fun _k v acc -> if v.state = Running then acc + 1 else acc)
       registry 0)
 
 let clear () =
-  with_lock (fun () -> Hashtbl.clear registry)
+  with_lock_rw (fun () -> Hashtbl.clear registry)

@@ -13,6 +13,9 @@ let test_config () = {
   pubsub_max_messages = 1000;
 }
 
+let unique_suffix () =
+  Printf.sprintf "%d-%.0f" (Unix.getpid ()) (Unix.gettimeofday () *. 1_000_000.)
+
 (* Test: generate unique node IDs *)
 let test_node_id_generation () =
   let id1 = Backend.generate_node_id () in
@@ -160,6 +163,33 @@ let test_memory_backend_lock_extend () =
       (match Backend.MemoryBackend.extend_lock backend ~key:"ext" ~ttl_seconds:60 ~owner:"other" with
       | Ok false -> ()
       | _ -> fail "non-owner extend should fail")
+
+let test_postgres_native_expired_lock_reacquire () =
+  match Sys.getenv_opt "MASC_POSTGRES_URL" with
+  | None | Some "" -> ()
+  | Some url ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let suffix = unique_suffix () in
+      let cfg = {
+        Backend.default_config with
+        backend_type = Backend.PostgresNative;
+        cluster_name = "test-pg-native-" ^ suffix;
+        postgres_url = Some url;
+      } in
+      match Backend.PostgresNative.create_eio ~sw ~env:(env :> Caqti_eio.stdenv) cfg with
+      | Error e -> fail (Backend.show_error e)
+      | Ok backend ->
+          let key = "expired-lock-" ^ suffix in
+          (match Backend.PostgresNative.acquire_lock backend ~key ~ttl_seconds:0 ~owner:"owner-a" with
+           | Ok true -> ()
+           | Ok false -> fail "initial expired lock acquire should succeed"
+           | Error e -> fail (Backend.show_error e));
+          Eio.Time.sleep env#clock 0.01;
+          match Backend.PostgresNative.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner-b" with
+          | Ok true -> ()
+          | Ok false -> fail "expired postgres-native lock should be reacquired"
+          | Error e -> fail (Backend.show_error e)
 
 (* Test: Memory backend - list and get_all *)
 let test_memory_backend_list () =
@@ -439,5 +469,9 @@ let () =
     ];
     "errors", [
       test_case "error messages" `Quick test_error_messages;
+    ];
+    "postgres", [
+      test_case "expired lock can be reacquired" `Quick
+        test_postgres_native_expired_lock_reacquire;
     ];
   ]

@@ -17,6 +17,9 @@ let make_test_dir () =
   (try Unix.mkdir tmp_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   tmp_dir
 
+let unique_suffix () =
+  Printf.sprintf "%d-%.0f" (Unix.getpid ()) (Unix.gettimeofday () *. 1_000_000.)
+
 (** Run test with Eio environment *)
 let with_eio_env f =
   Eio_main.run @@ fun env ->
@@ -264,6 +267,32 @@ let test_postgres_backend () =
            
           Alcotest.(check bool) "pg not exists" false (Backend_eio.Postgres.exists backend key)
 
+let test_postgres_expired_lock_reacquire () =
+  match Sys.getenv_opt "MASC_POSTGRES_URL" with
+  | None | Some "" -> ()
+  | Some url ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let suffix = unique_suffix () in
+      let config = Backend_eio.{
+        base_path = ".masc";
+        node_id = "test_pg_lock_node";
+        cluster_name = "test_pg_lock_" ^ suffix;
+      } in
+      match Backend_eio.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
+      | Error _ -> Alcotest.fail "Postgres create failed"
+      | Ok backend ->
+          let key = "expired-lock-" ^ suffix in
+          (match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-a" ~ttl_seconds:0 with
+           | Ok true -> ()
+           | Ok false -> Alcotest.fail "initial lock acquire should succeed"
+           | Error _ -> Alcotest.fail "initial lock acquire failed");
+          Eio.Time.sleep env#clock 0.01;
+          match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-b" ~ttl_seconds:60 with
+          | Ok true -> ()
+          | Ok false -> Alcotest.fail "expired postgres lock should be reacquired"
+          | Error _ -> Alcotest.fail "expired postgres lock reacquire failed"
+
 let () =
   Alcotest.run "Backend_eio" [
     "basic", [
@@ -291,5 +320,7 @@ let () =
     ];
     "postgres", [
       Alcotest.test_case "postgres backend" `Quick test_postgres_backend;
+      Alcotest.test_case "expired lock can be reacquired" `Quick
+        test_postgres_expired_lock_reacquire;
     ];
   ]

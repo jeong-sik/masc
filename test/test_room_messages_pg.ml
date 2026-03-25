@@ -42,6 +42,8 @@ let with_pg_test_env f =
           with_env "SB_PG_URL" "" @@ fun () ->
           Eio_main.run @@ fun env ->
           Eio.Switch.run @@ fun sw ->
+          Eio_context.set_net (Eio.Stdenv.net env);
+          Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
           let config =
             Room_utils.default_config_eio ~sw ~env:(env :> Caqti_eio.stdenv) dir
           in

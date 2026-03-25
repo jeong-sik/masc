@@ -16,13 +16,7 @@ let now_ms () = Int64.of_float (Unix.gettimeofday () *. 1000.0)
 
 (** Read a file to string. Returns "" on error. *)
 let read_file_safe path =
-  try
-    let ic = open_in path in
-    let n = in_channel_length ic in
-    let s = Bytes.create n in
-    really_input ic s 0 n;
-    close_in ic;
-    Bytes.to_string s
+  try Fs_compat.load_file path
   with exn -> Log.Transport.warn "read_file_safe failed for %s: %s" path (Printexc.to_string exn); ""
 
 (** Safe filename: replace non-alphanumeric chars with underscores. *)
@@ -262,9 +256,8 @@ let handle_heartbeat
                   tm.tm_hour tm.tm_min tm.tm_sec
               in
               let updated = { agent with Types.last_seen = iso_now } in
-              let oc = open_out agent_file in
-              output_string oc (Yojson.Safe.to_string (Types.agent_to_yojson updated));
-              close_out oc
+              Fs_compat.save_file agent_file
+                (Yojson.Safe.to_string (Types.agent_to_yojson updated))
             | Error e ->
                 Log.Transport.warn "gRPC heartbeat: invalid agent JSON for %s: %s"
                   ping.agent_name e
@@ -337,29 +330,26 @@ let handle_subscribe
       "backlog.jsonl"
   in
   if Sys.file_exists backlog_file then begin
-    let ic = open_in backlog_file in
+    let content = Fs_compat.load_file backlog_file in
+    let lines = String.split_on_char '\n' content in
     let seq = ref 1L in
-    (try
-      while true do
-        let line = input_line ic in
-        if String.length line > 0 then begin
-          let msg_seq = !seq in
-          if Int64.compare msg_seq req.since_seq > 0 then begin
-            let event = T.Event.{
-              seq = msg_seq;
-              event_type = "message";
-              source_agent = "";
-              timestamp_ms = now_ms ();
-              payload_json = line;
-            } in
-            Grpc_eio.Stream.add stream (T.Event.to_bytes event);
-            incr events_count
-          end;
-          seq := Int64.add !seq 1L
-        end
-      done
-    with End_of_file -> ());
-    close_in_noerr ic
+    List.iter (fun line ->
+      if String.length line > 0 then begin
+        let msg_seq = !seq in
+        if Int64.compare msg_seq req.since_seq > 0 then begin
+          let event = T.Event.{
+            seq = msg_seq;
+            event_type = "message";
+            source_agent = "";
+            timestamp_ms = now_ms ();
+            payload_json = line;
+          } in
+          Grpc_eio.Stream.add stream (T.Event.to_bytes event);
+          incr events_count
+        end;
+        seq := Int64.add !seq 1L
+      end
+    ) lines
   end;
   (* Record delivered events from backlog replay *)
   Transport_metrics.inc_grpc_events_delivered ~delta:!events_count ();

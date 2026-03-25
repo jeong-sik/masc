@@ -136,10 +136,7 @@ let default_question_set_path ~repo_root =
 let write_json_file path json =
   Fs_compat.mkdir_p (Filename.dirname path);
   let tmp = path ^ ".tmp" in
-  let oc = open_out_bin tmp in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> Yojson.Safe.pretty_to_channel oc json);
+  Fs_compat.save_file tmp (Yojson.Safe.pretty_to_string json);
   Unix.rename tmp path
 
 let read_json_file_opt path =

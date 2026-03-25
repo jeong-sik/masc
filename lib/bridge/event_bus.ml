@@ -36,7 +36,5 @@ let to_json = function
 let broadcast event =
   let json = to_json event in
   let log_path = "logs/game_events.jsonl" in
-  let oc = open_out_gen [Open_append; Open_creat] 0o666 log_path in
-  output_string oc (json ^ "\n");
-  close_out oc;
+  Fs_compat.append_file log_path (json ^ "\n");
   Log.debug ~ctx:"event_bus" "Event Broadcasted: %s" json

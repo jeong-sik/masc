@@ -267,17 +267,14 @@ let apply_patch ~(worktree_path : string) ~(hypothesis : hypothesis) : bool =
       if not (Sys.file_exists target) then false
       else if has_search_replace then begin
         (* Search-replace mode: read file, substitute old_text → new_text *)
-        let ic = open_in target in
-        let content = In_channel.input_all ic in
-        close_in ic;
+        let content = Fs_compat.load_file target in
         if String.length content > 0 &&
            (try ignore (Re.Str.search_forward (Re.Str.regexp_string hypothesis.old_text) content 0); true
             with Not_found -> false)
         then begin
           let replaced = Re.Str.global_replace
             (Re.Str.regexp_string hypothesis.old_text) hypothesis.new_text content in
-          let oc = open_out target in
-          output_string oc replaced; close_out oc;
+          Fs_compat.save_file target replaced;
           true
         end else begin
           Log.Server.warn "research: old_text not found in %s" hypothesis.target_file;
@@ -291,8 +288,7 @@ let apply_patch ~(worktree_path : string) ~(hypothesis : hypothesis) : bool =
         if is_diff then begin
           (* Unified diff — write to temp file, git apply *)
           let patch_file = Printf.sprintf "%s/.research_patch.diff" worktree_path in
-          let oc = open_out patch_file in
-          output_string oc patch; close_out oc;
+          Fs_compat.save_file patch_file patch;
           let status, _ = Process_eio.run_argv_with_status ~timeout_sec:10.0
             [ "git"; "-C"; worktree_path; "apply"; "--check"; patch_file ] in
           let ok = match status with Unix.WEXITED 0 -> true | _ -> false in
@@ -304,14 +300,12 @@ let apply_patch ~(worktree_path : string) ~(hypothesis : hypothesis) : bool =
           end else begin
             (try Sys.remove patch_file with Sys_error _ -> ());
             (* Fallback: treat as full file replacement *)
-            let oc = open_out target in
-            output_string oc patch; close_out oc;
+            Fs_compat.save_file target patch;
             true
           end
         end else begin
           (* Full file content replacement *)
-          let oc = open_out target in
-          output_string oc patch; close_out oc;
+          Fs_compat.save_file target patch;
           true
         end
     with exn ->

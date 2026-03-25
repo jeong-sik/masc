@@ -160,7 +160,7 @@ let local_playback_argv ?path_value ~audio_file () =
 
 let start_local_playback ~sw ~agent_id ~audio_file =
   match load_voice_config () with
-  | Error _ -> ()
+  | Error e -> Log.Misc.warn "voice config load failed, skipping playback for %s: %s" agent_id e
   | Ok config ->
       if not (Voice_config.local_playback_enabled_for_agent config agent_id) then
         ()

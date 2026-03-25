@@ -21,17 +21,48 @@ import {
   normalizeMissionSessionDetail,
   normalizeMissionBriefing,
 } from './mission-normalizers'
+import type { DashboardMissionResponse } from './types'
 
 let inflightMissionSnapshotRefresh: Promise<void> | null = null
+let lastMissionSnapshotRefreshAt = 0
 
-export async function refreshMissionSnapshot(): Promise<void> {
+const MISSION_TTL_MS = 3_000
+
+interface MissionRefreshOptions {
+  force?: boolean
+}
+
+function isMissionInitializingPayload(value: DashboardMissionResponse): boolean {
+  return (
+    value.summary.room_health === 'initializing'
+    && value.sessions.length === 0
+    && value.session_briefs.length === 0
+    && value.agent_briefs.length === 0
+    && value.keeper_briefs.length === 0
+    && value.attention_queue.length === 0
+    && value.internal_signals.length === 0
+  )
+}
+
+export async function refreshMissionSnapshot(
+  opts?: MissionRefreshOptions,
+): Promise<void> {
   if (inflightMissionSnapshotRefresh) return inflightMissionSnapshotRefresh
+  if (!opts?.force && Date.now() - lastMissionSnapshotRefreshAt < MISSION_TTL_MS) {
+    return
+  }
   missionLoading.value = true
   missionError.value = null
   inflightMissionSnapshotRefresh = (async () => {
     try {
       const raw = await fetchDashboardMission()
-      missionSnapshot.value = normalizeMission(raw)
+      const normalized = normalizeMission(raw)
+      if (isMissionInitializingPayload(normalized) && missionSnapshot.value) {
+        lastMissionSnapshotRefreshAt = Date.now()
+        return
+      }
+      missionSnapshot.value = normalized
+      lastMissionSnapshotRefreshAt = Date.now()
     } catch (err) {
       missionError.value = err instanceof Error ? err.message : 'Failed to load mission snapshot'
     } finally {

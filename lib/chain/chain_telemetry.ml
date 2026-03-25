@@ -17,17 +17,8 @@ open Chain_category
 
 (** {1 Eio-aware Mutex Guard}
 
-    Follows the dual-mode pattern from prometheus.ml:
-    Before Eio runtime starts (module init), runs unlocked (single-threaded).
-    After {!enable_eio} is called inside [Eio_main.run], uses [Eio.Mutex]. *)
-let eio_available = ref false
-let enable_eio () = eio_available := true
-
-let with_mutex mutex f =
-  if !eio_available then
-    Eio.Mutex.use_rw ~protect:true mutex (fun () -> f ())
-  else
-    f ()
+    Delegates to {!Eio_guard.with_mutex} for dual-mode locking. *)
+let with_mutex mutex f = Eio_guard.with_mutex mutex f
 
 (** {1 History Persistence} *)
 

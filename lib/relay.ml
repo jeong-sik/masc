@@ -292,7 +292,7 @@ let save_checkpoint ~summary ~task ~todos ~pdca ~files ~metrics =
     } in
     let cps = cp :: !checkpoints in
     checkpoints := List.filteri (fun i _ -> i < max_checkpoints) cps;
-    Printf.printf "[CHECKPOINT] Saved at %.1f%% context usage\n%!"
+    Log.info ~ctx:"checkpoint" "Saved at %.1f%% context usage"
       (metrics.usage_ratio *. 100.0);
     cp)
 

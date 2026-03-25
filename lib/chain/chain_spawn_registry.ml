@@ -40,25 +40,35 @@ let env_int ~name ~default =
 let max_inflight = env_int ~name:"MASC_SPAWN_MAX_INFLIGHT" ~default:16
 let max_age_sec = env_int ~name:"MASC_SPAWN_MAX_AGE_SEC" ~default:900
 
-let next_id = ref 0
+(** Consolidated mutable state — all fields accessed only under [state_mutex]. *)
+type registry_state = {
+  mutable next_id: int;
+  mutable total: int;
+  mutable failed: int;
+  mutable max_inflight_seen: int;
+  mutable last_error: string option;
+  mutable latency_idx: int;
+  mutable latency_filled: bool;
+}
+
+let st = {
+  next_id = 0; total = 0; failed = 0;
+  max_inflight_seen = 0; last_error = None;
+  latency_idx = 0; latency_filled = false;
+}
+
 let active : (int, spawn_info) Hashtbl.t = Hashtbl.create 64
-let total = ref 0
-let failed = ref 0
-let max_inflight_seen = ref 0
-let last_error = ref None
 
 let latency_size = 256
 let latency_values = Array.make latency_size 0.0
-let latency_idx = ref 0
-let latency_filled = ref false
 
 let record_latency ms =
-  latency_values.(!latency_idx) <- ms;
-  latency_idx := (!latency_idx + 1) mod latency_size;
-  if !latency_idx = 0 then latency_filled := true
+  latency_values.(st.latency_idx) <- ms;
+  st.latency_idx <- (st.latency_idx + 1) mod latency_size;
+  if st.latency_idx = 0 then st.latency_filled <- true
 
 let latency_snapshot () =
-  let count = if !latency_filled then latency_size else !latency_idx in
+  let count = if st.latency_filled then latency_size else st.latency_idx in
   if count = 0 then
     {
       count = 0;
@@ -106,21 +116,21 @@ let try_start ~label =
   with_lock (fun () ->
     let removed = cleanup_stale now_sec in
     if removed > 0 then begin
-      failed := !failed + removed;
-      last_error := Some "spawn_timeout"
+      st.failed <- st.failed + removed;
+      st.last_error <- Some "spawn_timeout"
     end;
     let inflight = Hashtbl.length active in
     if max_inflight > 0 && inflight >= max_inflight then begin
-      last_error := Some "spawn_inflight_limit";
+      st.last_error <- Some "spawn_inflight_limit";
       Error (sprintf "spawn inflight limit reached (%d)" max_inflight)
     end else begin
-      incr next_id;
-      let id = !next_id in
+      st.next_id <- st.next_id + 1;
+      let id = st.next_id in
       Hashtbl.add active id { label; started_at = now_sec };
-      total := !total + 1;
+      st.total <- st.total + 1;
       let inflight' = inflight + 1 in
-      if inflight' > !max_inflight_seen then
-        max_inflight_seen := inflight';
+      if inflight' > st.max_inflight_seen then
+        st.max_inflight_seen <- inflight';
       Ok id
     end
   )
@@ -134,8 +144,8 @@ let finish ~id ~ok ~error =
          record_latency ((now_sec -. info.started_at) *. 1000.0)
      | None -> ());
     if not ok then begin
-      failed := !failed + 1;
-      last_error := (match error with Some e -> Some e | None -> Some "spawn_failed")
+      st.failed <- st.failed + 1;
+      st.last_error <- (match error with Some e -> Some e | None -> Some "spawn_failed")
     end
   )
 
@@ -144,8 +154,8 @@ let snapshot () =
   with_lock (fun () ->
     let removed = cleanup_stale now_sec in
     if removed > 0 then begin
-      failed := !failed + removed;
-      last_error := Some "spawn_timeout"
+      st.failed <- st.failed + removed;
+      st.last_error <- Some "spawn_timeout"
     end;
     let oldest =
       Hashtbl.fold (fun _ info acc ->
@@ -157,12 +167,12 @@ let snapshot () =
     in
     {
       inflight = Hashtbl.length active;
-      total = !total;
-      failed = !failed;
-      max_inflight = !max_inflight_seen;
+      total = st.total;
+      failed = st.failed;
+      max_inflight = st.max_inflight_seen;
       oldest_inflight_sec = oldest;
       latency = latency_snapshot ();
-      last_error = !last_error;
+      last_error = st.last_error;
       updated_at = now_sec;
     }
   )

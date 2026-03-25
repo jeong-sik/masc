@@ -196,11 +196,11 @@ cd dashboard && npm run build  # Production build → ../assets/dashboard/
 
 ### Architecture
 
-- **Router**: Hash-based (`#overview`, `#board`, `#agents`, `#trpg`) via `useRoute()` hook
+- **Router**: Hash-based (`#overview`, `#board`, `#agents`) via `useRoute()` hook
 - **State**: `@preact/signals` — SSE events update signals, only affected components re-render
 - **SSE**: `useSSE()` hook with auto-reconnect, dispatches to signal stores
 - **API**: Typed fetch client in `api.ts` — 13 endpoints, all under `/api/v1/`
-- **Components**: `src/components/` — overview, board, agents, agent-detail, trpg, common/
+- **Components**: `src/components/` — overview, board, agents, agent-detail, common/
 
 ### Modifying the Dashboard
 

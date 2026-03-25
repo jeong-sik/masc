@@ -5,13 +5,6 @@
 
 open Server_utils
 
-(** Perpetual agent system removed. Returns empty dashboard. *)
-let perpetual_dashboard_json () : Yojson.Safe.t =
-  `Assoc [
-    ("agents", `List []);
-    ("total", `Int 0);
-  ]
-
 let mdal_status_string (status : Mdal.status) : string =
   Mdal.status_to_string status
 

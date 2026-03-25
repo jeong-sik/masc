@@ -1,7 +1,7 @@
 (** Mitosis_helpers — Context types, constructors, episode/saga management,
     handoff verifier logic, and evidence analysis helpers.
 
-    This module is included by Mitosis_spawn which is included by Tool_mitosis. *)
+    This module is included by Mitosis_spawn. *)
 
 (** Tool handler context - extensible for future features *)
 type any_clock = Clock : _ Eio.Time.clock -> any_clock
@@ -94,7 +94,7 @@ let queue_episode ~base_path ~session_id ~agent_name ~generation
   let file = Filename.concat dir (ep_id ^ ".json") in
   try
     Fs_compat.save_file file (Yojson.Safe.pretty_to_string json);
-    Printf.printf "[EPISODE/QUEUE] Queued episode %s (gen %d) → %s\n%!" ep_id generation file;
+    Log.debug ~ctx:"episode/queue" "Queued episode %s (gen %d) -> %s" ep_id generation file;
     Some ep_id
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.error "episode queue failed: %s" (Printexc.to_string exn);

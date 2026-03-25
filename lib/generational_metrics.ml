@@ -67,18 +67,10 @@ type generation_comparison = {
 
 (** {1 Eio-aware Mutex Guard}
 
-    Follows the dual-mode pattern from prometheus.ml:
-    Before Eio runtime starts, runs unlocked (single-threaded).
-    After {!enable_eio}, uses [Eio.Mutex]. *)
+    Uses {!Eio_guard.with_mutex} for dual-mode locking (pre/post Eio). *)
 let mu = Eio.Mutex.create ()
-let eio_available = ref false
-let enable_eio () = eio_available := true
 
-let with_lock f =
-  if !eio_available then
-    Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
-  else
-    f ()
+let with_lock f = Eio_guard.with_mutex mu f
 
 (** In-memory store — also backed by JSONL for restart survival *)
 let task_records : task_record list ref = ref []

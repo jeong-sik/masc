@@ -97,8 +97,13 @@ let run_turn
         (* Keep under Cloudflare tunnel 100s timeout: 2048 / 35 tok/s ~ 59s *)
         ~fallback:(fun () -> 2048)
   in
-  (* 1. Ensure session directory *)
-  Keeper_types.mkdir_p base_dir;
+  (* 1. Ensure session directory tree exists.
+     Both the base perpetual dir AND the trace-specific session dir must
+     exist before any file I/O (checkpoint load, history persist).
+     In filesystem fallback mode (PG unavailable), these directories may
+     not have been created by keeper_up if it only registered in-memory. *)
+  let session_dir = Filename.concat base_dir meta.trace_id in
+  Keeper_types.mkdir_p session_dir;
   (* 2. Load checkpoint *)
   let (session, ctx_opt) =
     Keeper_exec_context.load_context_from_checkpoint

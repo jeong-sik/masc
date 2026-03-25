@@ -34,19 +34,7 @@ type metric = {
 let metrics : (string, metric) Hashtbl.t = Hashtbl.create 64
 let metrics_mutex = Eio.Mutex.create ()
 
-(** Whether Eio runtime is available.  Set to [true] by {!enable_eio}
-    which should be called once inside [Eio_main.run]. *)
-let eio_available = ref false
-
-let enable_eio () = eio_available := true
-
-let with_lock f =
-  if !eio_available then
-    Eio.Mutex.use_rw ~protect:true metrics_mutex (fun () -> f ())
-  else
-    (* No Eio runtime (module init or non-Eio tests) — run unlocked.
-       Single-threaded in those contexts, so no race. *)
-    f ()
+let with_lock f = Eio_guard.with_mutex metrics_mutex f
 
 (** {1 Metric Registration} *)
 

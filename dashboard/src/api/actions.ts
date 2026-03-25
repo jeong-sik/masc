@@ -1,7 +1,8 @@
 import { get, post, fetchWithTimeout } from './core'
+import { ACTIVITY_TIMEOUT_MS } from '../config/constants'
 import { callMcpTool } from './mcp'
 import { isRecord } from '../components/common/normalize'
-import { asString, asNumber, asInt } from './trpg'
+import { asString, asNumber, asInt } from './parse-utils'
 import { toIsoTimestamp, normalizeGovernanceCaseBundle, normalizeGovernanceExecutionOrder } from './board'
 import type {
   GovernanceCaseBundle, GovernanceExecutionOrder, MdalIterationRecord, MdalLoop,
@@ -287,7 +288,7 @@ export async function fetchGoals(): Promise<import('../types').Goal[]> {
 export async function fetchActivityGraph(since?: string): Promise<import('../types').ActivityGraphResponse | null> {
   try {
     const params = since ? `?since=${since}` : ''
-    const resp = await fetchWithTimeout(`/api/v1/activity/graph${params}`, {}, 10000)
+    const resp = await fetchWithTimeout(`/api/v1/activity/graph${params}`, {}, ACTIVITY_TIMEOUT_MS)
     if (!resp.ok) return null
     return (await resp.json()) as import('../types').ActivityGraphResponse
   } catch (err) {
@@ -299,7 +300,7 @@ export async function fetchActivityGraph(since?: string): Promise<import('../typ
 export async function fetchSwimlane(since?: string): Promise<import('../types').SwimlaneResponse | null> {
   try {
     const params = since ? `?since=${since}` : ''
-    const resp = await fetchWithTimeout(`/api/v1/activity/swimlane${params}`, {}, 10000)
+    const resp = await fetchWithTimeout(`/api/v1/activity/swimlane${params}`, {}, ACTIVITY_TIMEOUT_MS)
     if (!resp.ok) return null
     return (await resp.json()) as import('../types').SwimlaneResponse
   } catch (err) {

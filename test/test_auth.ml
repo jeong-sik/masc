@@ -309,7 +309,7 @@ let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
     | Ok (raw_token, _) ->
         with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
             Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
-              ~tool_name:"trpg.unlisted_tool")
+              ~tool_name:"decision.unlisted_tool")
     | Error e -> Error e
   in
   cleanup_test_room dir;

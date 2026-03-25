@@ -10,6 +10,7 @@ import { refreshRoomTruth } from './room-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshForRoute } from './tab-refresh'
 import { refreshMissionSnapshot } from './mission-store'
+import { refreshShell } from './store'
 import {
   BuildIdentityBadge,
   ConnectionStatus,
@@ -32,10 +33,10 @@ export function App() {
     // Connect SSE and start data fetching
     connectSSE()
 
-    // room-truth is the single source — it includes shell + execution data.
-    // Removed redundant refreshShell(), refreshExecution(), refreshMissionSnapshot()
-    // that caused 5 concurrent API calls (server computes same data 3-6x).
-    refreshRoomTruth()
+    // Prime the lightweight shell status first so build/version metadata lands
+    // while room-truth warms heavier execution/command projections.
+    void refreshShell()
+    void refreshRoomTruth()
 
     // Register mission refresh for periodic recovery from transient failures.
     // Uses registration pattern to avoid circular imports.

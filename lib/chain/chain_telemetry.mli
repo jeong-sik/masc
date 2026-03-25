@@ -12,12 +12,6 @@
     @since 2026-01
 *)
 
-(** {1 Eio Runtime Activation} *)
-
-(** [enable_eio ()] activates Eio.Mutex guards.
-    Must be called once inside [Eio_main.run] before any concurrent access. *)
-val enable_eio : unit -> unit
-
 (** {1 Event Payload Types} *)
 
 (** Chain start event payload *)

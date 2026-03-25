@@ -1,6 +1,11 @@
 (** Server_mcp_transport_http — SSE/POST MCP transport handler. *)
 
 include Server_mcp_transport_http_protocol
+include Server_mcp_transport_http_conn
+include Server_mcp_transport_http_respond
+include Server_mcp_transport_http_agui
+
+let env_float_or = Server_mcp_transport_http_sse.env_float_or
 
 let sse_retry_ms = 3000
 
@@ -10,32 +15,10 @@ let sse_prime_event () =
 
 let sse_ping_interval_s = 30.0
 
-let env_float_or ~name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw -> (
-      try float_of_string raw with Failure _ -> default)
-
-let env_int_or ~name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw -> (
-      try int_of_string raw with Failure _ -> default)
-
 let post_sse_keepalive_interval_s =
   env_float_or ~name:"MASC_POST_SSE_KEEPALIVE_SEC"
     ~default:sse_ping_interval_s
   |> Float.max 0.1
-
-let sse_reconnect_min_interval_s =
-  env_float_or ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S" ~default:0.0
-  |> Float.max 0.0
-
-let sse_connect_window_s =
-  env_float_or ~name:"MASC_SSE_CONNECT_WINDOW_S" ~default:0.0 |> Float.max 0.0
-
-let sse_connect_max_in_window =
-  env_int_or ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW" ~default:0 |> max 0
 
 let get_last_event_id (request : Httpun.Request.t) =
   match Httpun.Headers.get request.headers "last-event-id" with
@@ -60,9 +43,6 @@ let body_jsonrpc_id body_str =
     | _ -> None
   with Yojson.Json_error _ -> None
 
-let mcp_headers session_id protocol_version =
-  [ ("mcp-session-id", session_id); ("mcp-protocol-version", protocol_version) ]
-
 let session_cookie_header session_id =
   ( "set-cookie",
     Printf.sprintf
@@ -86,233 +66,6 @@ let sse_stream_headers ~deps session_id protocol_version origin =
   ]
   @ mcp_headers session_id protocol_version
   @ deps.cors_headers origin
-
-let json_headers ~deps session_id protocol_version origin =
-  [ ("content-type", "application/json") ]
-  @ mcp_headers session_id protocol_version
-  @ deps.cors_headers origin
-
-let respond_mcp_auth_error ?(extra_headers = []) ~deps request reqd ~session_id
-    ~protocol_version msg =
-  let origin = deps.get_origin request in
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ( "error",
-            `Assoc
-              [ ("code", `Int (-32001)); ("message", `String msg) ] );
-        ])
-  in
-  let headers =
-    Httpun.Headers.of_list
-      ((("content-length", string_of_int (String.length body))
-       :: ("www-authenticate", "Bearer")
-       :: extra_headers)
-      @ json_headers ~deps session_id protocol_version origin)
-  in
-  let response = Httpun.Response.create ~headers `Unauthorized in
-  Httpun.Reqd.respond_with_string reqd response body
-
-let respond_mcp_internal_error ?(extra_headers = []) ~deps request reqd
-    ~session_id ~protocol_version msg =
-  let origin = deps.get_origin request in
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ( "error",
-            `Assoc
-              [ ("code", `Int (-32603)); ("message", `String msg) ] );
-        ])
-  in
-  let headers =
-    Httpun.Headers.of_list
-      ((("content-length", string_of_int (String.length body)) :: extra_headers)
-      @ json_headers ~deps session_id protocol_version origin)
-  in
-  let response = Httpun.Response.create ~headers `Internal_server_error in
-  Httpun.Reqd.respond_with_string reqd response body
-
-let respond_not_ready ~deps request reqd =
-  let origin = deps.get_origin request in
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ("error",
-           `Assoc
-             [
-               ("code", `Int (-32002));
-               ("message", `String "Server is starting up, not ready yet");
-             ]);
-          ("id", `Null);
-        ])
-  in
-  let headers =
-    Httpun.Headers.of_list
-      ([
-         ("content-type", "application/json");
-         ("content-length", string_of_int (String.length body));
-         ("retry-after", "2");
-       ]
-      @ deps.cors_headers origin)
-  in
-  let response = Httpun.Response.create ~headers `Service_unavailable in
-  Httpun.Reqd.respond_with_string reqd response body
-
-type sse_conn_info = {
-  session_id : string;
-  client_id : int;
-  writer : Httpun.Body.Writer.t;
-  mutex : Eio.Mutex.t;
-  stop : bool ref;
-  mutable closed : bool;
-}
-
-let sse_conn_by_session : (string, sse_conn_info) Hashtbl.t = Hashtbl.create 128
-
-type sse_connect_guard_state = {
-  mutable last_connect_at : float;
-  mutable connect_times : float list;
-}
-
-let sse_connect_guard_by_session :
-    (string, sse_connect_guard_state) Hashtbl.t =
-  Hashtbl.create 256
-
-let prune_connect_times ~now times =
-  if sse_connect_window_s <= 0.0 then times
-  else List.filter (fun ts -> now -. ts <= sse_connect_window_s) times
-
-let check_sse_connect_guard session_id =
-  let now = Time_compat.now () in
-  let state =
-    match Hashtbl.find_opt sse_connect_guard_by_session session_id with
-    | Some v -> v
-    | None -> { last_connect_at = -.1.0; connect_times = [] }
-  in
-  let recent = prune_connect_times ~now state.connect_times in
-  state.connect_times <- recent;
-  let session_wait_s =
-    if sse_reconnect_min_interval_s <= 0.0 then
-      0.0
-    else
-      sse_reconnect_min_interval_s -. (now -. state.last_connect_at)
-  in
-  if session_wait_s > 0.0 then
-    Error ("session_cooldown", session_wait_s)
-  else
-    let window_wait_s =
-      if sse_connect_window_s <= 0.0 || sse_connect_max_in_window <= 0 then
-        0.0
-      else if List.length recent >= sse_connect_max_in_window then
-        match List.rev recent with
-        | oldest :: _ -> sse_connect_window_s -. (now -. oldest)
-        | [] -> 0.0
-      else
-        0.0
-    in
-    if window_wait_s > 0.0 then
-      Error ("window_limit", window_wait_s)
-    else (
-      state.last_connect_at <- now;
-      state.connect_times <- now :: recent;
-      Hashtbl.replace sse_connect_guard_by_session session_id state;
-      Ok ())
-
-let respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
-    ~reason ~retry_after_s reqd =
-  let retry_after_s = Float.max retry_after_s 0.001 in
-  let retry_after_header =
-    retry_after_s |> Float.ceil |> int_of_float |> max 1 |> string_of_int
-  in
-  let body =
-    `Assoc
-      [
-        ("error", `String "sse_connection_rate_limited");
-        ("reason", `String reason);
-        ("retry_after_seconds", `Float retry_after_s);
-      ]
-    |> Yojson.Safe.to_string
-  in
-  let headers =
-    Httpun.Headers.of_list
-      (("content-length", string_of_int (String.length body))
-      :: ("retry-after", retry_after_header)
-      :: json_headers ~deps session_id protocol_version origin)
-  in
-  let response = Httpun.Response.create ~headers `Too_many_requests in
-  Httpun.Reqd.respond_with_string reqd response body
-
-let close_sse_conn info =
-  if not info.closed then (
-    info.closed <- true;
-    info.stop := true;
-    (try Httpun.Body.Writer.close info.writer
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Misc.debug "close_sse_conn: %s"
-         (Printexc.to_string exn));
-    Sse.unregister_if_current info.session_id info.client_id)
-
-let stop_sse_session session_id =
-  match Hashtbl.find_opt sse_conn_by_session session_id with
-  | None -> ()
-  | Some info ->
-      Hashtbl.remove sse_conn_by_session session_id;
-      Hashtbl.remove sse_connect_guard_by_session session_id;
-      close_sse_conn info
-
-let is_active_sse_session session_id =
-  Hashtbl.mem sse_conn_by_session session_id
-
-let reap_stale_guards () =
-  let stale =
-    Hashtbl.fold (fun sid _ acc ->
-      if not (Hashtbl.mem sse_conn_by_session sid) then sid :: acc
-      else acc
-    ) sse_connect_guard_by_session []
-  in
-  List.iter (Hashtbl.remove sse_connect_guard_by_session) stale;
-  List.length stale
-
-let close_all_sse_connections () =
-  let sessions = Hashtbl.fold (fun k _ acc -> k :: acc) sse_conn_by_session [] in
-  List.iter stop_sse_session sessions;
-  Log.Server.info "MASC MCP: Closed %d SSE connections"
-    (List.length sessions)
-
-let send_raw info data =
-  if info.closed || !(info.stop) || Httpun.Body.Writer.is_closed info.writer then (
-    close_sse_conn info;
-    false)
-  else
-    try
-      Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
-          Httpun.Body.Writer.write_string info.writer data;
-          Httpun.Body.Writer.flush info.writer (fun _ -> ()));
-      Sse.touch info.session_id;
-      true
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _exn ->
-      close_sse_conn info;
-      false
-
-let make_inline_sse_conn ~session_id writer =
-  {
-    session_id;
-    client_id = -1;
-    writer;
-    mutex = Eio.Mutex.create ();
-    stop = ref false;
-    closed = false;
-  }
 
 let stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version
     ~accept_warn_headers =
@@ -366,14 +119,6 @@ let stream_post_sse_json info (json : Yojson.Safe.t) =
   ignore
     (send_raw info
        (Sse.format_event ~event_type:"message" (Yojson.Safe.to_string json)))
-
-let mcp_internal_error_json ?id msg =
-  `Assoc
-    [
-      ("jsonrpc", `String "2.0");
-      ("id", Option.value ~default:`Null id);
-      ("error", `Assoc [ ("code", `Int (-32603)); ("message", `String msg) ]);
-    ]
 
 let should_stream_post_tools_call request body_str accept_mode =
   should_use_sse_for_body request body_str accept_mode
@@ -504,8 +249,6 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                           respond_mcp_internal_error ~deps request reqd
                             ~session_id ~protocol_version msg
                       | Ok (state, sw, clock) ->
-                          (* Fork a fiber so Eio I/O in handle_request does not
-                             block httpun's schedule_read callback chain. *)
                           Eio.Fiber.fork ~sw (fun () ->
                             let response_protocol_version =
                               match protocol_version_from_body body_str with
@@ -662,7 +405,6 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
 
 let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
     ?(sse_kind = Sse.Coordinator) request reqd =
-  (* Readiness gate: reject before session/auth if server state is not ready *)
   if Option.is_none (deps.get_server_state_opt ()) then
     respond_not_ready ~deps request reqd
   else
@@ -757,10 +499,6 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
              (deps.get_sw (), deps.get_clock ())
            with
           | Some sw, Some clock ->
-              (* Drain fiber: reads from per-session event stream, writes to
-                 the HTTP body writer.  Decouples broadcast from per-client I/O.
-                 [Eio.Stream.take] suspends until an event is available; switch
-                 cancellation terminates the fiber when the connection closes. *)
               Eio.Fiber.fork ~sw (fun () ->
                   let rec drain () =
                     let event = Eio.Stream.take event_stream in
@@ -778,7 +516,6 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
                      | exn ->
                        Log.Server.error "drain loop error: %s"
                          (Printexc.to_string exn));
-              (* Ping fiber: keeps the connection alive *)
               Eio.Fiber.fork ~sw (fun () ->
                   let is_cancelled exn =
                     match exn with
@@ -966,7 +703,7 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
               Sse.unregister session_id;
               Mcp_eio.clear_resource_subscriptions_for_session session_id;
               forget_mcp_session session_id;
-              Printf.printf "🔚 Session terminated: %s\n%!" session_id;
+              Log.info ~ctx:"mcp_transport" "Session terminated: %s" session_id;
               let headers =
                 Httpun.Headers.of_list
                   (("content-length", "0")
@@ -982,126 +719,3 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
           in
           let response = Httpun.Response.create ~headers `Bad_request in
           Httpun.Reqd.respond_with_string reqd response body)
-
-let ag_ui_event_of_masc_event ~room_id event =
-  try
-    let lines = String.split_on_char '\n' event in
-    let data_line =
-      List.find_opt
-        (fun l -> String.length l > 6 && String.sub l 0 6 = "data: ")
-        lines
-    in
-    match data_line with
-    | Some dl ->
-        let json_str = String.sub dl 6 (String.length dl - 6) in
-        let json = Yojson.Safe.from_string json_str in
-        let ag_event = Ag_ui.of_custom ~room_id ~name:"MASC_EVENT" json in
-        Ag_ui.event_to_sse ag_event
-    | None -> event
-  with
-  | Yojson.Json_error _ -> event
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      Log.Transport.warn "ag_ui_event_of_masc_event failed: %s" (Printexc.to_string exn);
-      event
-
-let handle_ag_ui_events ~deps request reqd =
-  let origin = deps.get_origin request in
-  let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
-  let protocol_version = get_protocol_version_for_session ~session_id request in
-  let room_id = Option.value ~default:"default" (query_param request "room") in
-  let last_event_id = get_last_event_id request in
-  match check_sse_connect_guard session_id with
-  | Error (reason, retry_after_s) ->
-      respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
-        ~reason ~retry_after_s reqd
-  | Ok () ->
-      stop_sse_session session_id;
-      let headers =
-        Httpun.Headers.of_list
-          (sse_stream_headers ~deps session_id protocol_version origin)
-      in
-      let response = Httpun.Response.create ~headers `OK in
-      let writer = Httpun.Reqd.respond_with_streaming reqd response in
-      let mutex = Eio.Mutex.create () in
-      let info_ref : sse_conn_info option ref = ref None in
-      let push event =
-        match !info_ref with
-        | None -> ()
-        | Some info -> ignore (send_raw info (ag_ui_event_of_masc_event ~room_id event))
-      in
-      let client_id, event_stream, evicted =
-        Sse.register session_id ~push
-          ~last_event_id:(Option.value ~default:0 last_event_id)
-      in
-      (match evicted with
-      | Some evicted_sid -> stop_sse_session evicted_sid
-      | None -> ());
-      let info =
-        {
-          session_id;
-          client_id;
-          writer;
-          mutex;
-          stop = ref false;
-          closed = false;
-        }
-      in
-      info_ref := Some info;
-      Hashtbl.replace sse_conn_by_session session_id info;
-      let prime =
-        Ag_ui.(
-          make_event ~thread_id:room_id ~run_id:(Some session_id) Run_started
-          |> event_to_sse)
-      in
-      ignore (send_raw info prime);
-      (match last_event_id with
-      | Some last_id ->
-          let missed = Sse.get_events_after last_id in
-          List.iter (fun ev -> ignore (send_raw info ev)) missed
-      | None -> ());
-      (match
-         (deps.get_sw (), deps.get_clock ())
-       with
-      | Some sw, Some clock ->
-          (* Drain fiber for per-session event stream *)
-          Eio.Fiber.fork ~sw (fun () ->
-              let rec drain () =
-                let event = Eio.Stream.take event_stream in
-                (try
-                  if not (info.closed || !(info.stop)) then
-                    ignore (send_raw info event)
-                with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                  Log.Server.error "ag-ui drain write error: %s"
-                    (Printexc.to_string exn);
-                  stop_sse_session info.session_id);
-                if not !(info.stop) then drain ()
-              in
-              try drain ()
-              with Eio.Cancel.Cancelled _ -> ()
-                 | exn ->
-                   Log.Server.error "ag-ui drain loop error: %s"
-                     (Printexc.to_string exn));
-          (* Ping fiber *)
-          Eio.Fiber.fork ~sw (fun () ->
-              let rec loop () =
-                if not !(info.stop) then (
-                  (try Eio.Time.sleep clock sse_ping_interval_s
-                   with Eio.Cancel.Cancelled _ as exn -> raise exn
-                      | exn -> Log.Server.debug "SSE ping sleep interrupted: %s" (Printexc.to_string exn));
-                  (try
-                     if info.closed then
-                       stop_sse_session info.session_id
-                     else if not !(info.stop) then
-                       ignore (send_raw info ": ping\n\n")
-                   with Eio.Cancel.Cancelled _ as exn -> raise exn
-                      | exn ->
-                          Log.Server.warn "SSE ping send failed for session %s: %s" info.session_id (Printexc.to_string exn);
-                          stop_sse_session info.session_id);
-                  loop ())
-              in
-              try loop () with Eio.Cancel.Cancelled _ as exn -> raise exn
-                | exn ->
-                    Log.Server.error "SSE ping loop exited for session %s: %s" info.session_id (Printexc.to_string exn);
-                    stop_sse_session info.session_id)
-      | _ -> ())

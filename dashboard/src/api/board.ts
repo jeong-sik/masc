@@ -1,6 +1,6 @@
 import { get, post, withRetries, defaultBoardVoter } from './core'
 import { isRecord } from '../components/common/normalize'
-import { asString, asNumber, asInt, asStringList } from './trpg'
+import { asString, asNumber, asInt, asStringList } from './parse-utils'
 import type {
   BoardPost, BoardComment, BoardHearth, BoardFlair, BoardSortMode,
   GovernanceCaseBrief, GovernanceCaseBundle, GovernanceContextRef,
@@ -483,4 +483,3 @@ export function commentPost(postId: string, author: string, content: string): Pr
     content,
   })
 }
-

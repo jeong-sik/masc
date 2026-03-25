@@ -42,11 +42,11 @@ let make_endpoint ~url ~model_id ~ctx_size ~total_slots ~busy =
 let test_runtime_verify_prefers_oas_discovery_cache () =
   Eio_main.run @@ fun _env ->
   let previous_endpoints = !(Masc_mcp.Discovery_cache.cached_endpoints) in
-  let previous_updated_at = !(Masc_mcp.Discovery_cache.cache_updated_at) in
+  let previous_updated_at = Atomic.get Masc_mcp.Discovery_cache.cache_updated_at in
   Fun.protect
     ~finally:(fun () ->
       Masc_mcp.Discovery_cache.cached_endpoints := previous_endpoints;
-      Masc_mcp.Discovery_cache.cache_updated_at := previous_updated_at)
+      Atomic.set Masc_mcp.Discovery_cache.cache_updated_at previous_updated_at)
     (fun () ->
       Masc_mcp.Discovery_cache.cached_endpoints :=
         [
@@ -60,7 +60,7 @@ let test_runtime_verify_prefers_oas_discovery_cache () =
             ~model_id:"qwen3.5-35b-a3b-ud-q4-xl" ~ctx_size:262144
             ~total_slots:4 ~busy:1;
         ];
-      Masc_mcp.Discovery_cache.cache_updated_at := Time_compat.now ();
+      Atomic.set Masc_mcp.Discovery_cache.cache_updated_at (Time_compat.now ());
       let result =
         Masc_mcp.Tool_local_runtime.runtime_verify_json
           ~expected_slots:12 ~expected_ctx:262144

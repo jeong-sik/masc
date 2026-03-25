@@ -10,7 +10,6 @@ import type {
   Keeper,
   BoardPost,
   ServerStatus,
-  PerpetualStatus,
   BoardSortMode,
   KeeperLifecycleState,
   Goal,
@@ -85,7 +84,6 @@ export const tasks = signal<Task[]>([])
 export const messages = signal<Message[]>([])
 export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
-export const perpetualStatus = signal<PerpetualStatus | null>(null)
 export const executionSummary = signal<DashboardExecutionSummary | null>(null)
 export const executionLoaded = signal(false)
 export const executionQueue = signal<DashboardExecutionQueueItem[]>([])
@@ -488,7 +486,6 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
         .map(normalizeExecutionWorkerSupportBrief)
         .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
       setArrayByKeyIfChanged(executionOfflineWorkerBriefs, normalizedOfflineBriefs, w => w.name)
-      perpetualStatus.value = null
       executionLoaded.value = true
       lastExecutionRefreshAt.value = Date.now()
       lastDashboardRefreshAt.value = new Date().toISOString()

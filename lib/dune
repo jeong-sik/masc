@@ -95,6 +95,7 @@
    dashboard_provider_runs
    proactive_refresh
    server_dashboard_http
+   server_dashboard_http_cache
    server_dashboard_http_core
    server_routes_http
    server_routes_http_common
@@ -121,6 +122,9 @@
    server_command_plane_http_help
    server_activity_http
    server_mcp_transport_http
+   server_mcp_transport_http_conn
+   server_mcp_transport_http_respond
+   server_mcp_transport_http_agui
    server_mcp_transport_http_protocol
    server_mcp_transport_http_types
    server_mcp_transport_http_session
@@ -144,6 +148,9 @@
    graphql_endpoint
    graphql_api
    activity_graph
+   activity_graph_types
+   activity_graph_registry
+   activity_graph_reducer
    handover_eio
    hat
    hebbian_eio
@@ -322,6 +329,10 @@
    tool_schemas_a2a
    tool_schemas_misc
    tool_improve_loop_schemas
+   tool_improve_loop_types
+   tool_improve_loop_gh
+   tool_improve_loop_planner
+   tool_improve_loop_executor
    tool_plan
    tool_run
    tool_bridge
@@ -533,6 +544,10 @@
    autoresearch_codegen
    autoresearch_knowledge
    tool_autoresearch_schemas
+   tool_autoresearch_registry
+   tool_autoresearch_broadcast
+   tool_autoresearch_repo_synthesis
+   tool_autoresearch_cycle
    tool_autoresearch
    ;; Code Research Loop — automated self-improvement via LLM
    research_config
@@ -581,6 +596,7 @@
  tool_team_session_routing_workers
  cp_lifecycle_search
  cp_lifecycle_intents
+ server_dashboard_http_cache
  dashboard_http_helpers
  dashboard_http_monitoring
  dashboard_http_keeper
@@ -607,6 +623,9 @@
  server_mcp_transport_http_session
  server_mcp_transport_http_headers
  server_mcp_transport_http_sse
+ server_mcp_transport_http_conn
+ server_mcp_transport_http_respond
+ server_mcp_transport_http_agui
  server_command_plane_http_support
  server_command_plane_http_stream
  server_command_plane_http_mutations
@@ -686,6 +705,10 @@
   autoresearch_codegen
   autoresearch_knowledge
   tool_autoresearch_schemas
+  tool_autoresearch_registry
+  tool_autoresearch_broadcast
+  tool_autoresearch_repo_synthesis
+  tool_autoresearch_cycle
   dashboard_proof_events
   dashboard_proof_actors
   dashboard_proof_verdict
@@ -700,7 +723,16 @@
   ;; tool_inline_dispatch sub-modules
   tool_inline_dispatch_types
   tool_inline_dispatch_room
-  tool_inline_dispatch_comm)
+  tool_inline_dispatch_comm
+  ;; activity_graph sub-modules
+  activity_graph_types
+  activity_graph_registry
+  activity_graph_reducer
+  ;; tool_improve_loop sub-modules
+  tool_improve_loop_types
+  tool_improve_loop_gh
+  tool_improve_loop_planner
+  tool_improve_loop_executor)
  (libraries
    yojson
    base64

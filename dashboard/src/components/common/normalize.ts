@@ -5,16 +5,36 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-export function asString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+export function asString(value: unknown): string | undefined
+export function asString(value: unknown, fallback: string): string
+export function asString(value: unknown, fallback?: string): string | undefined {
+  if (typeof value === 'string') {
+    if (fallback === undefined) {
+      const trimmed = value.trim()
+      return trimmed !== '' ? trimmed : undefined
+    }
+    return value
+  }
+  return fallback ?? undefined
 }
 
-export function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+export function asNumber(value: unknown): number | undefined
+export function asNumber(value: unknown, fallback: number): number
+export function asNumber(value: unknown, fallback?: number): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : (fallback ?? undefined)
 }
 
-export function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
+export function asBoolean(value: unknown): boolean | undefined
+export function asBoolean(value: unknown, fallback: boolean): boolean
+export function asBoolean(value: unknown, fallback?: boolean): boolean | undefined {
+  return typeof value === 'boolean' ? value : (fallback ?? undefined)
+}
+
+export function asInt(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value)
+  if (typeof value !== 'string') return undefined
+  const parsed = Number.parseInt(value.trim(), 10)
+  return Number.isFinite(parsed) ? parsed : undefined
 }
 
 export function asStringArray(value: unknown): string[] {

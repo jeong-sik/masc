@@ -203,7 +203,8 @@ let ensure_keeper_exists
       current_task_id = None;
     } in
     let base_dir = session_base_dir ctx.config in
-    mkdir_p base_dir;
+    (* Ensure full session dir tree, not just base_dir (issue #3019) *)
+    mkdir_p (Filename.concat base_dir trace_id);
     let cascade_models = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
     (match ensure_api_keys_for_labels cascade_models with
      | Error e -> Error e

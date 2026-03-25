@@ -3,6 +3,7 @@ open Test_operator_control_support
 
 let test_task_inject_executes_immediately () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -49,6 +50,7 @@ let test_task_inject_executes_immediately () =
 
 let test_team_turn_falls_back_to_session_actor () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -87,6 +89,7 @@ let test_team_turn_falls_back_to_session_actor () =
 
 let test_team_note_records_action_log () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -131,6 +134,7 @@ let test_team_note_records_action_log () =
 
 let test_team_broadcast_records_event () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -165,6 +169,7 @@ let test_team_broadcast_records_event () =
 
 let test_team_task_inject_requires_confirm_then_executes () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -227,6 +232,7 @@ let test_team_task_inject_requires_confirm_then_executes () =
 
 let test_team_worker_spawn_batch_requires_confirm_then_executes () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect

@@ -394,7 +394,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                              stop_sse_session session_id;
                              Sse.unregister session_id;
                              forget_mcp_session session_id;
-                             Printf.printf "🔚 Session terminated: %s\n%!" session_id;
+                             Log.info ~ctx:"h2_gateway" "Session terminated: %s" session_id;
                              let mcp_hdrs = mcp_headers session_id (get_protocol_version httpun_request) in
                              h2_respond_empty h2_reqd ~extra_headers:mcp_hdrs))
                 | None ->
@@ -773,10 +773,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             |> Yojson.Safe.to_string
           in
           h2_respond_json h2_reqd json ~extra_headers:cors
-
-      | `GET, p when String.starts_with ~prefix:"/api/v1/trpg/" p ->
-          let json = `Assoc [("error", `String "TRPG module archived"); ("status", `Int 410)] in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~status:`Gone ~extra_headers:cors
 
       | `GET, "/api/v1/room/current" ->
           let state = get_server_state () in

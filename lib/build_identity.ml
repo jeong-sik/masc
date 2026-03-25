@@ -55,7 +55,8 @@ let git_probe_from_root repo_root =
           Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
           ""
     in
-    match Unix.close_process_in ic with
+    (* Wrap close in try/with to prevent resource leak on close failure *)
+    match (try Unix.close_process_in ic with _ -> Unix.WEXITED 1) with
     | Unix.WEXITED 0 -> trim_to_option output
     | _ -> None
   in

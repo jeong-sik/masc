@@ -336,6 +336,21 @@ let aggregate_task_profile_counts s   = aggregate_worker_counts s Team_session_t
 let aggregate_escalation_count s =
   all_planned_workers s |> Team_session_types.escalation_count
 
+(** Compute all 7 worker-count aggregates + escalation with a single
+    [all_planned_workers] concat_map, avoiding 8 separate list allocations.
+    Each count_fn still iterates [workers] independently. *)
+let aggregate_all_worker_metrics sessions =
+  let workers = all_planned_workers sessions in
+  let to_json count_fn = count_fn workers |> Team_session_types.counts_to_json in
+  ( to_json Team_session_types.worker_class_counts,
+    to_json Team_session_types.runtime_pool_counts,
+    to_json Team_session_types.lane_counts,
+    to_json Team_session_types.controller_level_counts,
+    to_json Team_session_types.control_domain_counts,
+    to_json Team_session_types.model_tier_counts,
+    to_json Team_session_types.task_profile_counts,
+    Team_session_types.escalation_count workers )
+
 let aggregated_local_runtime_json (sessions : Team_session_types.session list) =
   if
     List.exists

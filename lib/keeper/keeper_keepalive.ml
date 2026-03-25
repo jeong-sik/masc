@@ -166,6 +166,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    Oas_model_resolve.resolve_primary_max_context cascade_models
                  in
                  let base_dir = session_base_dir ctx.config in
+                 (* Ensure session directory tree for filesystem fallback (issue #3019) *)
+                 Fs_compat.mkdir_p (Filename.concat base_dir meta_current.trace_id);
                  let _session, ctx_opt =
                    load_context_from_checkpoint
                      ~trace_id:meta_current.trace_id
@@ -370,6 +372,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                 (try
                    let events, new_count, mention_count =
                      Keeper_world_observation.collect_board_events
+                       ~base_path:ctx.config.base_path
                        ~meta:meta_current
                        ~continuity_summary:meta_current.continuity_summary
                    in
@@ -580,7 +583,9 @@ let stop_keepalive name =
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
       entry.fiber_stop := true;
       (match !(entry.grpc_close) with
-       | Some close_fn -> (try close_fn () with _ -> ())
+       | Some close_fn ->
+         (try close_fn ()
+          with Eio.Cancel.Cancelled _ as e -> raise e | _exn -> ())
        | None -> ());
       Keeper_registry.set_state ~base_path:entry.base_path name
         Keeper_registry.Stopped;

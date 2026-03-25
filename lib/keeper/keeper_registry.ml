@@ -31,6 +31,8 @@ type registry_entry = {
   mutable last_error : string option;
   mutable last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
+  mutable board_cursor_ts : float;
+  tool_usage : (string, tool_call_entry) Hashtbl.t;
 }
 
 let state_to_string = function
@@ -74,6 +76,8 @@ let register ~base_path name meta =
       last_error = None;
       last_agent_count = 0;
       board_wakeups = Hashtbl.create 8;
+      board_cursor_ts = 0.0;
+      tool_usage = Hashtbl.create 16;
     } in
     Hashtbl.replace registry (registry_key ~base_path name) entry;
     entry)
@@ -241,8 +245,70 @@ let cleanup_tracking ~base_path name =
     match Hashtbl.find_opt registry (registry_key ~base_path name) with
     | Some entry ->
         entry.last_agent_count <- 0;
-        Hashtbl.reset entry.board_wakeups
+        Hashtbl.reset entry.board_wakeups;
+        entry.board_cursor_ts <- 0.0;
+        Hashtbl.reset entry.tool_usage
     | None -> ())
 
 let clear () =
   with_lock_rw (fun () -> Hashtbl.clear registry)
+
+(* ── Board cursor ────────────────────────────────────────────── *)
+
+let get_board_cursor_ts ~base_path name =
+  with_lock_ro (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | Some entry -> entry.board_cursor_ts
+    | None -> 0.0)
+
+let set_board_cursor_ts ~base_path name ts =
+  with_lock_rw (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | Some entry -> entry.board_cursor_ts <- ts
+    | None -> ())
+
+(* ── Tool usage tracking ─────────────────────────────────────── *)
+
+let record_tool_use ~base_path name ~tool_name ~success =
+  with_lock_rw (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | None -> ()
+    | Some entry ->
+      let e =
+        match Hashtbl.find_opt entry.tool_usage tool_name with
+        | Some e -> e
+        | None ->
+          let e = { count = 0; successes = 0; failures = 0;
+                    last_used_at = 0.0 } in
+          Hashtbl.replace entry.tool_usage tool_name e; e
+      in
+      e.count <- e.count + 1;
+      (if success then e.successes <- e.successes + 1
+       else e.failures <- e.failures + 1);
+      e.last_used_at <- Time_compat.now ())
+
+let tool_usage_of ~base_path name =
+  with_lock_ro (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | None -> []
+    | Some entry ->
+      Hashtbl.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
+      |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count))
+
+(** Look up a keeper by name across all base_paths (O(n) scan). *)
+let find_by_name name =
+  with_lock_ro (fun () ->
+    Hashtbl.fold
+      (fun _k v acc ->
+        match acc with
+        | Some _ -> acc
+        | None -> if String.equal v.name name then Some v else None)
+      registry None)
+
+let tool_usage_of_by_name name =
+  with_lock_ro (fun () ->
+    match find_by_name name with
+    | None -> []
+    | Some entry ->
+      Hashtbl.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
+      |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count))

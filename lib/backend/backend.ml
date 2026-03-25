@@ -70,7 +70,9 @@ module FileSystem = struct
       let rec check_segments = function
         | [] -> Ok key
         | seg :: rest ->
-            if seg = "." || seg = ".." then
+            if seg = "" then
+              Error (InvalidKey "Consecutive colons not allowed")
+            else if seg = "." || seg = ".." then
               Error (InvalidKey "Path traversal detected")
             else if String.length seg >= 2 && String.sub seg 0 2 = ".." then
               Error (InvalidKey "Path traversal detected")

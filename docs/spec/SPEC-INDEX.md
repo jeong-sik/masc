@@ -1,25 +1,27 @@
 # MASC Specification Index
 
 > Supersedes: `docs/SPEC.md`, `docs/MERGED-ARCHITECTURE-SSOT.md`
-> Status: Draft
-> Last Updated: 2026-03-23
+> Status: Living draft
+> Last Updated: 2026-03-25
+> Snapshot baseline: `dune-project` version `2.148.0`
 
 MASC (Multi-Agent Streaming Coordination)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 AI 에이전트(Claude, Gemini, Codex, 로컬 LLM 등)가 동일 코드베이스에서 동시에 작업할 때 발생하는 조율 문제를 해결한다. Room 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper 자율 에이전트, Command Plane 오케스트레이션을 제공하며, MCP JSON-RPC 프로토콜을 통해 모든 주요 AI IDE/CLI와 통합된다.
 
-## Vital Statistics
+## Snapshot Metadata
 
 | 항목 | 값 |
 |------|-----|
-| Version | 2.138.0 |
+| Release baseline | 2.148.0 |
 | Language | OCaml 5.x (Eio-native, effect-based concurrency) |
-| LOC (lib, .ml + .mli) | ~194K |
-| LOC (test) | ~97K |
-| Modules (.ml, lib/) | 616 |
-| Sub-libraries | 12 (masc_types, masc_core, masc_log, masc_backend, masc_room, masc_process, masc_eio_context, council, dated_jsonl, time_compat, fs_compat, event_bridge) |
-| MCP Tool modules (tool_*.ml) | 125 |
-| .mli interfaces | 144 |
-| Test files | 318 |
+| LOC (lib, `.ml` + `.mli`) | ~192K |
+| LOC (test, `.ml` + `.mli`) | ~97K |
+| OCaml modules under `lib/` (`.ml`) | 599 |
+| `.mli` interfaces under `lib/` | 134 |
+| MCP tool modules (`tool_*.ml`) | 118 |
+| Test files (`test/*.ml`) | 324 |
 | Executables | 5 (main_eio, main_stdio_eio, masc_cost, masc_tui, mitosis_cli) |
+
+숫자는 repo snapshot 기준이며 drift 가능하다. 최신 truth는 `dune-project`, `git ls-files`, `rg --files`로 다시 계산한다.
 
 ## Layer Diagram
 
@@ -48,21 +50,22 @@ graph TB
 | `00-glossary.md` | Glossary | 용어 정의, 약어 목록 | Draft |
 | `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
 | `02-types-and-invariants.md` | Types and Invariants | 핵심 타입 정의, 상태 전이, 불변식 | Draft |
-| `03-room.md` | Room Subsystem | Room 생명주기, session 관리, agent join/leave | Draft |
+| `03-room-coordination.md` | Room Coordination | Room 생명주기, session 관리, agent join/leave | Draft |
 | `04-chain-engine.md` | Chain Engine | Multi-step chain DSL, execution, snapshot | Draft |
 | `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
 | `06-command-plane.md` | Command Plane v2 | Units, operations, search fabric, detachments, policy, orchestra | Draft |
 | `07-team-session.md` | Team Session | Supervised collaboration, OAS swarm bridge, worker dispatch, proof | Draft |
-| `09-server.md` | MCP Server | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
+| `08-council-governance.md` | Council and Governance | 의사결정, 합의, governance surface | Draft |
+| `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
 | `11-board.md` | Board System | Posts, comments, votes, PG/JSONL backend | Draft |
 | `12-memory-systems.md` | Memory Systems | Memory bank, institution, procedural, context budget, OAS Memory bridge | Draft |
 | `13-oas-integration.md` | OAS Integration | OAS Agent SDK bridge, cascade config, verifier, event bus, boundary rules | Draft |
-| `14-council.md` | Council | 의사결정 합의, voting, deliberation | Draft |
-| `15-external-integrations.md` | External Integrations | Neo4j, Supabase, GraphQL, Langfuse | Draft |
-| `A-error-catalog.md` | Error Catalog | 에러 코드 목록, 원인, 복구 방법 | Draft |
+| `14-configuration.md` | Configuration | env, profile, prompt, runtime 설정 | Draft |
+| `15-testing.md` | Testing | 검증 계층, contract suites, fixture/manual 분리 | Draft |
+| `A-existing-doc-index.md` | Existing Doc Index | 현재 문서 inventory와 cleanup ledger | Draft |
 | `B-migration-targets.md` | Migration Targets | OAS 이관 대상 모듈, deprecation 일정 | Draft |
-| `C-implementation-status.md` | Implementation Status | 12 서브시스템 구현 수준 체크 (IMPL/CODE/STUB/MISS) | Draft |
+| `C-implementation-status.md` | Implementation Status | 구현 상태와 coverage snapshot | Draft |
 
 ## Conventions
 
@@ -99,7 +102,7 @@ graph TB
 
 ### Cross-Reference Format
 
-- Spec 간: `[Section Title](./NN-filename.md#section-anchor)`
+- Spec 간: `./NN-filename.md#section-anchor`
 - 코드: `lib/module_name.ml:L123`
 - Invariant: `INV-ROOM-001`
 - 외부 문서: `docs/DOCUMENT-NAME.md`

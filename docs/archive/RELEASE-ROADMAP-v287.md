@@ -5,8 +5,8 @@
 기준 시점:
 - current release SemVer: `2.86.0`
 - next release target: `2.87.0`
-- release automation: tag push `v*` -> [`.github/workflows/release.yml`](../.github/workflows/release.yml)
-- version bump script: [`scripts/bump-version.sh`](../scripts/bump-version.sh)
+- release automation: tag push `v*` -> [`.github/workflows/release.yml`](../../.github/workflows/release.yml)
+- version bump script: [`scripts/bump-version.sh`](../../scripts/bump-version.sh)
 
 ## Goal
 

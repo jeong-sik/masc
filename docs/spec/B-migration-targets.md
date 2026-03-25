@@ -115,9 +115,10 @@ Source: `ROADMAP.md` Mid-term
 | Worktree diff broadcast | IDEAS #7 | Owner 없음 |
 | Lodge identity v2 Tier 1 | docs/lodge-identity-v2/ | 설계 완료, 구현 미착수 |
 
-### Mode System 상세
+### Historical Mode/Profile Proposal
 
-현재 모든 에이전트에게 371개 tool이 노출된다. MODE-SYSTEM.md 설계에 따르면:
+이 항목은 현재 tree에 없는 historical `MODE-SYSTEM` 설계 메모를 요약한 것이다.
+즉시 구현 SSOT가 아니라 tool-discovery 축소 아이디어의 출처로만 읽는다.
 
 | Profile | Tool count | 대상 |
 |---------|-----------|------|

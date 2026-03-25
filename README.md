@@ -1,6 +1,6 @@
 # masc-mcp
 
-[![Version](https://img.shields.io/badge/version-2.146.0-blue.svg)](https://github.com/jeong-sik/masc-mcp)
+[![Version](https://img.shields.io/badge/version-2.148.0-blue.svg)](https://github.com/jeong-sik/masc-mcp)
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![Status](https://img.shields.io/badge/status-Personal%20Project-lightgrey.svg)]()
 
@@ -77,6 +77,9 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 }
 ```
 
+서버 시작, 상태 확인, MCP 연결, 첫 workflow까지 한 번에 보려면 `docs/QUICK-START.md`를 먼저 본다.
+HTTP/stdio 설정 예시는 `docs/MCP-TEMPLATE.md`에 따로 정리돼 있다.
+
 ## Streamable HTTP 기본 정책
 
 - 기본 bind host는 `127.0.0.1` 입니다.
@@ -145,7 +148,9 @@ keeper_runtime → keeper_keepalive → keeper_resident_supervisor
 
 ## Architecture Map
 
-merged 기준 아키텍처 한 장 요약은 [MERGED-ARCHITECTURE-SSOT.md](./docs/MERGED-ARCHITECTURE-SSOT.md)를 본다.
+현재 아키텍처 SSOT는 [docs/spec/SPEC-INDEX.md](./docs/spec/SPEC-INDEX.md)와
+[docs/spec/01-system-overview.md](./docs/spec/01-system-overview.md)다.
+`docs/MERGED-ARCHITECTURE-SSOT.md`는 짧은 historical snapshot으로 남겨 둔다.
 
 - canonical swarm / benchmark path: `CPv2 direct`
 - canonical implementation path: `Team Session + Supervisor`
@@ -172,7 +177,7 @@ proof/read path notes:
 
 ## Release Governance
 
-`v2.86.1` stabilization 기준과 patch lane 운영 규칙은 [RELEASE-ROADMAP.md](./docs/RELEASE-ROADMAP.md)를 따른다.
+release train, patch lane, versioning 규칙은 [VERSIONED-ROADMAP.md](./docs/VERSIONED-ROADMAP.md)를 따른다.
 
 ## 기본 사용 흐름
 
@@ -312,7 +317,7 @@ MCP 표면, 내부 prompt plane, operator surface의 경계는 [MCP-SURFACE-AUDI
 | 백엔드 | 용도 | 설정 |
 |--------|------|------|
 | FileSystem | 기본, `.masc/` 하위 | 기본값 |
-| PostgreSQL | 분산 클러스터 모드, Board | `MASC_POSTGRES_URL` 환경변수, `docs/SETUP.md` 참고 |
+| PostgreSQL | 분산 클러스터 모드, Board | `MASC_POSTGRES_URL` 환경변수로 명시적 설정 |
 | Neo4j | 에이전트 그래프, GraphQL API | `GRAPHQL_API_KEY` 환경변수 |
 | Supabase pgvector | 벡터 임베딩 (Lodge memory) | `SB_PG_URL` 환경변수 |
 
@@ -357,21 +362,20 @@ MCP 표면, 내부 prompt plane, operator surface의 경계는 [MCP-SURFACE-AUDI
 |------|------|
 | `llms.txt` | AI/MODEL용 최소 canonical front door |
 | `llms-full.txt` | AI/MODEL용 확장 orchestration contract |
-| `docs/QUICKSTART.md` | 빠른 시작 |
-| `docs/SETUP.md` | 설치/실행/백엔드 설정 |
-| `docs/SPEC.md` | 동작 스펙과 데이터 모델 |
-| `docs/MODE-SYSTEM.md` | 모드/카테고리 |
-| `docs/INTERRUPT-DESIGN.md` | 승인/중단 패턴 |
-| `docs/MITOSIS.md` | 컨텍스트 한계 대응 |
-| `docs/TEAM-SESSION.md` | 1시간 팀플레이 세션 오케스트레이션/보고 |
-| `docs/MDAL.md` | MDAL 선택 기준: deterministic numeric metric + auditable tool evidence가 있을 때만 사용, strict worker 계약, 명시적 `metric_fn` 가이드 |
-| `docs/TRPG-MVP-BLUEPRINT.md` | TRPG 엔진/뷰어 분리 MVP 설계 |
-| `docs/TRPG-KEEPER-SPECTATOR-QUICKSTART.md` | keeper 자동 진행 관전 Quickstart |
-| `docs/TRPG-EXPERIMENT-PLAYBOOK.md` | 사회실험 템플릿 3종 실행 가이드 |
-| `docs/TRPG-DEVELOPMENT-PLAN.md` | TRPG MVP 단계별 개발 계획 |
+| `docs/QUICK-START.md` | 설치/실행/health check/첫 workflow front door |
+| `docs/MCP-TEMPLATE.md` | HTTP/stdio MCP 설정 템플릿 |
+| `docs/spec/SPEC-INDEX.md` | 현재 spec suite 진입점 |
+| `docs/COMMAND-PLANE-RUNBOOK.md` | CPv2 direct 운영 레시피 |
+| `docs/BENCHMARK-RUNBOOK.md` | single-agent vs swarm 비교 레시피 |
+| `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` | control/search/local64 통합 benchmark wrapper |
+| `docs/SUPERVISOR-MODE.md` | supervised team-session/operator 경로 |
+| `docs/SWARM-DELIVERY-RUNBOOK.md` | swarm-driven 구현 delivery 기준 |
+| `docs/TEAM-SESSION.md` | team-session tool contract와 artifact 요약 |
+| `docs/KEEPER-USER-MANUAL.md` | keeper lifecycle / dashboard field / troubleshooting |
 | `docs/TRANSPORT-PRACTICAL-PLAYBOOK.md` | gRPC / WS / WebRTC / SSE / h2c 실사용 경로와 운영 예시 |
-| `docs/MCP-TEMPLATE.md` | MCP 설정 템플릿 |
-| `docs/GLOSSARY.md` | 용어 정리 |
+| `docs/MCP-SURFACE-AUDIT.md` | public vs hidden tool surface 감사 |
+
+historical snapshot 문서(`docs/SPEC.md`, `docs/MERGED-ARCHITECTURE-SSOT.md`, `docs/GLOSSARY.md`)는 인트리 안에 남아 있지만 front-door SSOT는 아니다.
 
 ## 운영 메모
 

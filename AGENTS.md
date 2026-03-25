@@ -6,14 +6,16 @@ Multi-Agent Streaming Coordination server.
 
 Current SSOTs:
 
+- Public overview: `README.md`
+- Spec suite front door: `docs/spec/SPEC-INDEX.md`
+- Current system overview: `docs/spec/01-system-overview.md`
 - Public MCP surface and grouping: `docs/MCP-SURFACE-AUDIT.md`
-- Current merged architecture: `docs/MERGED-ARCHITECTURE-SSOT.md`
 - Canonical public overview: `README.md`
 
 Notes:
 
 - Tool counts and module snapshots in this file are approximate and may drift.
-- Prefer script-based local start flows. The `launchctl` example below is historical, not the default recommendation.
+- Prefer script-based local start flows.
 
 ## Commands
 
@@ -26,10 +28,7 @@ dune runtest --root .
 make test
 
 # Run (dev)
-dune exec --root . masc_mcp -- --port 8935
-
-# Run (prod via launchd)
-launchctl kickstart -k gui/$(id -u)/com.jeong-sik.masc-mcp
+./start-masc-mcp.sh --http --port 8935
 
 # Type check only
 dune build --root . @check
@@ -38,30 +37,20 @@ dune build --root . @check
 ## Project Structure
 
 ```
-lib/                    # Core library (~200 .ml files)
-  lodge_heartbeat.ml    # Agent autonomous activity (45min tick, Thompson Sampling)
-  lodge_cascade.ml      # MODEL cascade routing (GLM → Claude → Ollama)
-  lodge_memory.ml       # Agent experience recall (thread + stream + Neo4j)
-  lodge_selection.ml    # Thompson Sampling agent selection with fairness
-  board.ml              # Mastodon-style post board (crypto IDs, TTL sweeper)
-  room.ml               # State machine (file locks + PostgreSQL persistence)
-  mcp_server_eio.ml     # MCP JSON-RPC over SSE + POST
-  agent_card.ml         # A2A Agent Card (/.well-known/agent-card.json)
-  a2a_tools.ml          # A2A protocol: discover, delegate, subscribe
-  tool_task.ml          # Task CRUD (add, claim, done, transition)
-  tool_library.ml       # Agent Knowledge Library (~/me/docs/library/)
-  metrics_store_eio.ml  # JSONL metrics (task completion, error rates)
-  gardener.ml           # Ecosystem manager (spawn/retire, circuit breaker)
-  spawn_eio.ml          # Agent subprocess spawning with token tracking
-  types.ml              # Domain model (Agent_id, Task_id, Post_id newtypes)
-  model_direct.ml         # Direct MODEL API calls (GLM, Claude CLI, Ollama)
-  bounded.ml            # Multi-agent loop with formal constraints
-  env_config.ml         # Centralized env var management (12-Factor)
-bin/                    # Executable entry points
-config/
-  cascade.json           # Local heartbeat model-pool config (provider:model, hot-reload)
-  lodge.env             # Heartbeat config (tick interval, quiet hours)
-test/                   # Test suite
+bin/
+  main_eio.ml           # Primary HTTP server entry point
+  main_stdio_eio.ml     # stdio compatibility entry point
+lib/
+  command_plane/        # command-plane subsystems
+  keeper/               # keeper runtime and turn loop
+  team_session/         # team-session engine and artifacts
+  dashboard/            # dashboard providers and read models
+  board/                # board and social surface helpers
+  room/                 # room/session/task coordination
+dashboard/              # Preact/TypeScript dashboard source
+docs/spec/              # living specification suite
+scripts/                # harnesses, CI helpers, local review helpers
+test/                   # Alcotest suites and fixtures
 ```
 
 ## Tech Stack

@@ -1,5 +1,6 @@
 import { asBoolean, asNumber, asString, asStringArray, isRecord, extractArray } from './components/common/normalize'
 import {
+  normalizeBuildIdentity,
   normalizeExecutionSummary,
   normalizeExecutionQueueItem,
   normalizeAttentionItem,
@@ -24,6 +25,7 @@ function normalizeServerStatus(raw: unknown): ServerStatus | null {
     paused: asBoolean(raw.paused),
     version: asString(raw.version),
     generated_at: asString(raw.generated_at),
+    build: normalizeBuildIdentity(raw.build),
     tempo_interval_s: asNumber(raw.tempo_interval_s),
   }
 }

@@ -795,59 +795,8 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     ~compute
     ~on_result:(mark_cached_surface_success _mission_cache)
 
-(* Trim a full mission JSON to a lightweight snapshot:
-   summary, session_briefs (goal/elapsed/blocker only), attention_queue (top 5), counts.
-   Target: <20KB vs ~483KB full. *)
-let mission_snapshot_of_full (full : Yojson.Safe.t) : Yojson.Safe.t =
-  let field key = Yojson.Safe.Util.member key full in
-  let briefs =
-    match field "session_briefs" with
-    | `List items ->
-        `List
-          (List.map
-             (fun item ->
-               let f k = Yojson.Safe.Util.member k item in
-               `Assoc
-                 [
-                   ("session_id", f "session_id");
-                   ("goal", f "goal");
-                   ("status", f "status");
-                   ("health", f "health");
-                   ("elapsed_sec", f "elapsed_sec");
-                   ("blocker_summary", f "blocker_summary");
-                 ])
-             items)
-    | other -> other
-  in
-  let attention_top5 =
-    match field "attention_queue" with
-    | `List items -> `List (List.filteri (fun i _ -> i < 5) items)
-    | other -> other
-  in
-  `Assoc
-    [
-      ("generated_at", field "generated_at");
-      ("summary", field "summary");
-      ("session_briefs", briefs);
-      ("attention_queue", attention_top5);
-      ("session_count",
-       `Int
-         (match field "sessions" with `List l -> List.length l | _ -> 0));
-      ("agent_count",
-       `Int
-         (match field "agent_briefs" with
-         | `List l -> List.length l
-         | _ -> 0));
-      ("keeper_count",
-       `Int
-         (match field "keeper_briefs" with
-         | `List l -> List.length l
-         | _ -> 0));
-    ]
-
 let dashboard_mission_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
-  let mode = query_param request "mode" in
   let compute ?actor () =
     let command_plane_summary, swarm_status =
       command_plane_summary_cache_parts ~allow_initializing:false ~state
@@ -862,12 +811,11 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
   let full_json =
     match actor with
     | None ->
-      (* Default: stay instant after first success, but don't pin the UI to
-         the empty bootstrap payload when the proactive refresh loop has not
-         landed yet. *)
-      cached_surface_or_first_success_json _mission_cache
-        ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:120.0
-        compute
+        (* Default mission reads should stay fast even during cold start.
+           Heavy mission recompute is handled by the proactive refresh loop;
+           HTTP serves the last successful snapshot, or the initializing
+           placeholder when bootstrap is still in flight. *)
+        cached_surface_json _mission_cache
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
@@ -876,9 +824,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
         ~clock ~timeout_sec:120.0 (compute ?actor)
   in
-  match mode with
-  | Some "snapshot" -> mission_snapshot_of_full full_json
-  | _ -> full_json
+  full_json
 
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
@@ -1011,21 +957,31 @@ let provider_capacity_json () : Yojson.Safe.t =
   `Assoc []
 
 let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
-  Dashboard_cache.get_or_compute "shell" ~ttl:15.0 (fun () ->
+  let current_room = dashboard_current_room_id config in
+  let cache_key =
+    Printf.sprintf "shell:%s:%s" config.base_path current_room
+  in
+  Dashboard_cache.get_or_compute cache_key ~ttl:15.0 (fun () ->
+    let started_at = Unix.gettimeofday () in
     let agents = dashboard_agents_safe config in
-  let tasks = dashboard_tasks_safe config in
-  let keepers_json = keepers_dashboard_json ~compact:true config in
-  let keepers_total = json_int_field "total" keepers_json ~default:0 in
-  `Assoc
-    [
-      ("generated_at", `String (Types.now_iso ()));
-      ("status", dashboard_shell_status_json config);
-      ( "counts",
-        `Assoc
-          [
-            ("agents", `Int (List.length agents));
-            ("tasks", `Int (List.length tasks));
-            ("keepers", `Int keepers_total);
-          ] );
-      ("providers", provider_capacity_json ());
-      ])
+    let tasks = dashboard_tasks_safe config in
+    let keepers_total = resident_keeper_count config in
+    `Assoc
+      [
+        ("generated_at", `String (Types.now_iso ()));
+        ("status", dashboard_shell_status_json config);
+        ( "counts",
+          `Assoc
+            [
+              ("agents", `Int (List.length agents));
+              ("tasks", `Int (List.length tasks));
+              ("keepers", `Int keepers_total);
+            ] );
+        ("providers", provider_capacity_json ());
+      ]
+    |> with_projection_diagnostics ~surface:"shell" ~started_at
+         ~extra:
+           [
+             ("current_room", `String current_room);
+             ("keeper_count_source", `String "resident_registry");
+           ])

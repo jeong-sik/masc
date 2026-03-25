@@ -144,9 +144,9 @@ let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
     (file_contains_pattern "lib/server/server_dashboard_http.ml"
        "cached_surface_or_first_success_json _execution_cache");
-  check bool "mission default route hydrates cache on first success" true
+  check bool "mission default route serves cached surface immediately" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "cached_surface_or_first_success_json _mission_cache");
+       "cached_surface_json _mission_cache");
   check bool "room truth advertises initializing while execution warms" true
     (file_contains_pattern "lib/server/server_dashboard_http.ml"
        {|("status", `String "initializing")|});

@@ -21,6 +21,9 @@ let cleanup_dir dir =
   in
   rm dir
 
+let request target =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
+
 let dispatch_keeper_exn ctx ~name ~args =
   match Lib.Tool_keeper.dispatch ctx ~name ~args with
   | Some result -> result
@@ -448,6 +451,38 @@ let test_dashboard_mission_projection () =
           ((session_detail |> member "operations" |> to_list) <> []);
       ))
 
+let test_dashboard_mission_http_full_contract () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room_utils.default_config dir in
+      let session_id = "ts-mission-http-fixture-001" in
+      seed_room config session_id;
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_mission_http_json
+            ~state
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/mission?agent_name=test-dashboard")
+        in
+        let open Yojson.Safe.Util in
+        check bool "operator targets present in mission http payload" true
+          (json |> member "operator_targets" <> `Null);
+        check bool "operator target sessions retained in mission http payload" true
+          ((json |> member "operator_targets" |> member "sessions" |> to_list) <> []);
+        check bool "internal signals retained in mission http payload" true
+          ((json |> member "internal_signals" |> to_list) <> []);
+        check bool "command focus retained in mission http payload" true
+          (json |> member "command_focus" <> `Null);
+        check bool "session brief survives mission http payload" true
+          (json |> member "session_briefs" |> to_list
+         |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));
+      ))
+
 let test_dashboard_mission_keeper_tool_audit_fallback () =
   let dir = test_dir () in
   Fun.protect
@@ -512,6 +547,8 @@ let () =
         [
           Alcotest.test_case "projection groups root-cause lanes" `Quick
             test_dashboard_mission_projection;
+          Alcotest.test_case "http mission keeps full contract" `Quick
+            test_dashboard_mission_http_full_contract;
           Alcotest.test_case "keeper tool audit fallback" `Quick
             test_dashboard_mission_keeper_tool_audit_fallback;
         ] );

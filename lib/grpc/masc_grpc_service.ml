@@ -182,7 +182,7 @@ let handle_get_status (room_config : Room_utils_backend_setup.config) (_bytes : 
             title = json |> member "title" |> to_string_option |> Option.value ~default:"";
             status = json |> member "status" |> to_string_option |> Option.value ~default:"";
             assigned_to = json |> member "assigned_to" |> to_string_option |> Option.value ~default:"";
-            priority = (try json |> member "priority" |> to_int with _ -> 0);
+            priority = (try json |> member "priority" |> to_int with Yojson.Safe.Util.Type_error _ -> 0);
           } : T.task_info)
         with exn -> Log.Transport.debug "task parse skip: %s" (Printexc.to_string exn); None)
     else []

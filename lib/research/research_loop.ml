@@ -299,10 +299,10 @@ let apply_patch ~(worktree_path : string) ~(hypothesis : hypothesis) : bool =
           if ok then begin
             let _ = Process_eio.run_argv_with_status ~timeout_sec:10.0
               [ "git"; "-C"; worktree_path; "apply"; patch_file ] in
-            (try Sys.remove patch_file with _ -> ());
+            (try Sys.remove patch_file with Sys_error _ -> ());
             true
           end else begin
-            (try Sys.remove patch_file with _ -> ());
+            (try Sys.remove patch_file with Sys_error _ -> ());
             (* Fallback: treat as full file replacement *)
             let oc = open_out target in
             output_string oc patch; close_out oc;

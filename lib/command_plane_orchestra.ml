@@ -12,7 +12,7 @@ let string_opt json key =
 let int_opt json key =
   match U.member key json with
   | `Int value -> Some value
-  | `Intlit value -> (try Some (int_of_string value) with _ -> None)
+  | `Intlit value -> (try Some (int_of_string value) with Failure _ -> None)
   | `Float value -> Some (int_of_float value)
   | _ -> None
 
@@ -20,7 +20,7 @@ let float_opt json key =
   match U.member key json with
   | `Float value -> Some value
   | `Int value -> Some (float_of_int value)
-  | `Intlit value -> (try Some (float_of_string value) with _ -> None)
+  | `Intlit value -> (try Some (float_of_string value) with Failure _ -> None)
   | _ -> None
 
 let bool_opt json key =

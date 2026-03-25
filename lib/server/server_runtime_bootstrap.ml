@@ -886,7 +886,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let tool_dispatcher tool_name args_json =
         let arguments =
           try Yojson.Safe.from_string args_json
-          with _ -> `Assoc []
+          with Yojson.Json_error _ -> `Assoc []
         in
         let (success, result_str) =
           Mcp_server_eio_execute.execute_tool_eio ~sw ~clock state

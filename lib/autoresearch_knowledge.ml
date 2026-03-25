@@ -68,14 +68,14 @@ let finding_of_yojson (json : Yojson.Safe.t) : (finding, string) result =
       confidence = confidence_of_string
         (match str_opt "confidence" with Some s -> s | None -> "medium");
       tags = (try member "tags" json |> to_list |> List.map to_string
-              with _ -> []);
+              with Yojson.Safe.Util.Type_error _ -> []);
       related_findings = (try member "related_findings" json |> to_list |> List.map to_string
-                          with _ -> []);
+                          with Yojson.Safe.Util.Type_error _ -> []);
       cycle_range = (match member "cycle_range" json with
         | `List [`Int a; `Int b] -> Some (a, b)
         | _ -> None);
       timestamp = (try member "timestamp" json |> to_float
-                   with _ -> Unix.gettimeofday ());
+                   with Yojson.Safe.Util.Type_error _ -> Unix.gettimeofday ());
     }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

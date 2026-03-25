@@ -22,7 +22,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
     match Sys.getenv_opt name with
     | None -> default
     | Some s ->
-        (try int_of_string (String.trim s) with _ -> default)
+        (try int_of_string (String.trim s) with Failure _ -> default)
   in
   max min_v (min max_v v)
 
@@ -31,7 +31,7 @@ let float_of_env_default name ~default ~min_v ~max_v =
     match Sys.getenv_opt name with
     | None -> default
     | Some s ->
-        (try float_of_string (String.trim s) with _ -> default)
+        (try float_of_string (String.trim s) with Failure _ -> default)
   in
   max min_v (min max_v v)
 
@@ -68,7 +68,7 @@ let parse_tool_call_detail (detail_opt : string option)
           | Some ("timeout", v) ->
               timeout := bool_of_tag_value v
           | Some ("duration_ms", v) ->
-              (try duration_ms := Some (max 0 (int_of_string v)) with _ ->
+              (try duration_ms := Some (max 0 (int_of_string v)) with Failure _ ->
                 Log.Dashboard.warn "invalid duration_ms value: %s" v)
           | _ -> ())
         tags;

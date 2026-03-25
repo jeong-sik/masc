@@ -420,7 +420,7 @@ let add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let hours =
            match Server_utils.query_param req "hours" with
-           | Some h -> (try float_of_string h with _ -> 24.0)
+           | Some h -> (try float_of_string h with Failure _ -> 24.0)
            | None -> 24.0
          in
          let since = Time_compat.now () -. (hours *. 3600.0) in
@@ -463,12 +463,12 @@ let add_routes ~sw ~clock router =
          else
            let since_hours =
              match Server_utils.query_param req "since_hours" with
-             | Some h -> (try float_of_string h with _ -> 4.0)
+             | Some h -> (try float_of_string h with Failure _ -> 4.0)
              | None -> 4.0
            in
            let limit =
              match Server_utils.query_param req "limit" with
-             | Some l -> (try int_of_string l with _ -> 20)
+             | Some l -> (try int_of_string l with Failure _ -> 20)
              | None -> 20
            in
            let json =
@@ -559,7 +559,7 @@ let add_routes ~sw ~clock router =
          let base_path = state.Mcp_server.room_config.base_path in
          let limit =
            match Server_utils.query_param req "limit" with
-           | Some raw -> (try int_of_string raw with _ -> 20)
+           | Some raw -> (try int_of_string raw with Failure _ -> 20)
            | None -> 20
          in
          let json =

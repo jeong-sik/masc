@@ -116,7 +116,7 @@ let port_listening port =
           match result with
           | Ok v -> v
           | Error `Timeout -> false)
-      with _ -> false)
+      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false)
   | _ ->
       (* Fallback: Eio not yet initialized (startup-time readiness check) *)
       (try

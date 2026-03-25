@@ -392,7 +392,7 @@ let keeper_toml_path_opt name =
   let candidates =
     let cwd_path = Filename.concat (Filename.concat "config" "keepers") (name ^ ".toml") in
     match
-      try Some (Env_config.me_root ()) with _ -> None
+      try Some (Env_config.me_root ()) with Not_found -> None
     with
     | Some me_root ->
       let me_path =

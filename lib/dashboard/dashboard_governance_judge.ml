@@ -34,17 +34,24 @@ let judgments_path base_path =
 (** Date-split store: [.masc/governance/judgments/YYYY-MM/DD.jsonl].
     Cached per base_dir so all callers share the same Eio.Mutex. *)
 let judgments_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
+let states : (string, state) Hashtbl.t = Hashtbl.create 4
+
+(** Mutex for outer [states] and [judgments_store_cache] Hashtbls.
+    Inner per-state mutex protects per-keeper operations. *)
+let outer_mu = Eio.Mutex.create ()
+let with_outer_rw f =
+  try Eio.Mutex.use_rw ~protect:true outer_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
 let get_judgments_store base_path : Dated_jsonl.t =
-  let dir = Filename.concat (governance_dir base_path) "judgments" in
-  match Hashtbl.find_opt judgments_store_cache dir with
-  | Some store -> store
-  | None ->
-    let store = Dated_jsonl.create ~base_dir:dir () in
-    Hashtbl.replace judgments_store_cache dir store;
-    store
-
-let states : (string, state) Hashtbl.t = Hashtbl.create 4
+  with_outer_rw (fun () ->
+    let dir = Filename.concat (governance_dir base_path) "judgments" in
+    match Hashtbl.find_opt judgments_store_cache dir with
+    | Some store -> store
+    | None ->
+      let store = Dated_jsonl.create ~base_dir:dir () in
+      Hashtbl.replace judgments_store_cache dir store;
+      store)
 
 let with_lock (st : state) f =
   Eio.Mutex.use_rw ~protect:true st.mutex f
@@ -77,26 +84,27 @@ let enabled () =
 let keeper_name = "operator-judge"
 
 let get_state base_path =
-  match Hashtbl.find_opt states base_path with
-  | Some st -> st
-  | None ->
-      let st =
-        {
-          mutex = Eio.Mutex.create ();
-          started = false;
-          refreshing = false;
-          judge_online = false;
-          generated_at_unix = None;
-          expires_at_unix = None;
-          generated_at = None;
-          expires_at = None;
-          model_used = None;
-          last_error = None;
+  with_outer_rw (fun () ->
+    match Hashtbl.find_opt states base_path with
+    | Some st -> st
+    | None ->
+        let st =
+          {
+            mutex = Eio.Mutex.create ();
+            started = false;
+            refreshing = false;
+            judge_online = false;
+            generated_at_unix = None;
+            expires_at_unix = None;
+            generated_at = None;
+            expires_at = None;
+            model_used = None;
+            last_error = None;
           judgments = Hashtbl.create 32;
         }
       in
       Hashtbl.add states base_path st;
-      st
+      st)
 
 let key_of kind id = kind ^ ":" ^ id
 

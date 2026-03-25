@@ -40,55 +40,39 @@ make test
 ### Project Structure
 
 ```
-lib/                          # Core library (~125 ML/MLI files)
-├── types.ml                  # Domain types (state machines)
-├── room.ml                   # Core collaboration logic
-├── mcp_server_eio.ml         # MCP JSON-RPC server (Eio)
-├── tools.ml                  # MCP tool schema definitions
-├── lodge_heartbeat.ml        # 60s heartbeat agent activity
-├── lodge_cascade.ml          # MODEL cascade (GLM → Gemini → Claude)
-├── auto_responder.ml         # @mention → MODEL auto response
-├── board.ml                  # Agent bulletin board (posts/votes)
-├── agent_neo4j.ml            # Neo4j ↔ Agent sync
-├── agent_identity.ml         # Agent identity management
-├── council/                  # Council subsystem
-│   ├── conversation.ml       # Multi-agent conversations (file + Neo4j)
-│   ├── loop_guard.ml         # Infinite loop prevention
-│   ├── thread_persist.ml     # Dual-stream write (file → Neo4j)
-│   ├── debate.ml             # Structured debates
-│   ├── consensus.ml          # BFT-style consensus
-│   └── executor.ml           # Task execution
-└── ...                       # WebRTC, federation, metrics, etc.
-
-bin/                          # Executables
-├── main_eio.ml               # Primary server entry point (Eio)
-├── main.ml                   # Legacy stdio MCP entry point
-├── masc_checkpoint.ml        # Human-in-the-loop CLI
+bin/
+├── main_eio.ml               # Primary HTTP server entry point
+├── main_stdio_eio.ml         # stdio compatibility entry point
 ├── masc_cost.ml              # Cost analysis tool
-└── masc_tui.ml               # Terminal UI dashboard
+├── masc_tui.ml               # Terminal UI dashboard
+└── mitosis_cli.ml            # Legacy/historical helper executable
 
-test/                         # ~205 test files
-├── test_room.ml              # Room collaboration tests
-├── test_council.ml           # Council subsystem tests
-├── test_mcp_server_eio.ml    # MCP protocol tests
-├── test_*_coverage.ml        # Coverage-focused tests
-└── bench_*.ml                # Benchmarks
+lib/
+├── command_plane/            # CPv2 orchestration subsystems
+├── keeper/                   # keeper runtime and turn loop
+├── team_session/             # supervised collaboration engine
+├── dashboard/                # dashboard providers and read models
+├── board/                    # board/social surface helpers
+├── grpc/                     # gRPC transport support
+├── room/                     # room/session/task coordination
+└── tools.ml                  # tool schema registry entrypoint
 
-config/
-└── cascade.json              # Cascade slot configuration
+dashboard/                    # TypeScript + Preact SPA source
+docs/spec/                    # living specification suite
+scripts/                      # harnesses, CI helpers, review tooling
+test/                         # Alcotest suites + fixtures
 ```
 
 ### Key Subsystems
 
 | Subsystem | Entry Point | Description |
 |-----------|-------------|-------------|
-| **MCP Server** | `mcp_server_eio.ml` | JSON-RPC 2.0 over SSE + POST |
-| **Room** | `room.ml` | Agent collaboration rooms |
-| **Board** | `board.ml` | Posts, votes, comments |
-| **Lodge Heartbeat** | `lodge_heartbeat.ml` | Periodic agent activity (default 4h, configurable) |
-| **MODEL Cascade** | `lodge_cascade.ml` | Multi-MODEL failover (GLM → Gemini → Claude) |
-| **Council** | `council/` | Conversations, debates, consensus |
-| **Auto Responder** | `auto_responder.ml` | @mention → MODEL response |
+| **MCP Server** | `bin/main_eio.ml`, `lib/mcp_server_eio_*` | JSON-RPC over Streamable HTTP |
+| **Room** | `lib/room/`, `lib/tool_room.ml` | Agent collaboration rooms |
+| **Board** | `lib/board/`, `lib/tool_board.ml` | Posts, votes, comments |
+| **Command Plane** | `lib/command_plane/`, `lib/tool_command_plane.ml` | units, operations, detachments, policies |
+| **Keeper** | `lib/keeper/`, `lib/tool_keeper.ml` | long-running keeper runtime |
+| **Team Session** | `lib/team_session/`, `lib/tool_team_session.ml` | supervised collaboration sessions |
 | **A2A** | `a2a_tools.ml` | Agent-to-Agent protocol tools |
 
 ### Testing
@@ -113,9 +97,9 @@ dune build
 
 | Service | Purpose | Required |
 |---------|---------|----------|
-| Neo4j (Railway) | Graph storage for agents, threads | Optional (file fallback) |
-| GraphQL API | Agent data (second-brain-graphql) | Required for heartbeat |
-| MODEL-MCP | Multi-MODEL access | Required for heartbeat/auto-responder |
+| GraphQL API / Neo4j | agent graph and identity-backed features | Optional by workflow |
+| Supabase pgvector / PostgreSQL | persistence and vector-backed features | Optional by workflow |
+| local llama / cloud model providers | inference-backed tools, swarm/runtime paths | Optional by workflow |
 
 ### Commit Messages
 
@@ -170,7 +154,7 @@ When reporting issues, please include:
 2. **OS and version**
 3. **Steps to reproduce**
 4. **Expected vs actual behavior**
-5. **Error messages/logs** (`~/me/logs/masc-mcp-launchd.err.log`)
+5. **Error messages/logs** (`start-masc-mcp.sh` stdout/stderr or relevant harness output)
 
 ## License
 

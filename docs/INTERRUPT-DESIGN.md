@@ -145,7 +145,7 @@ let handle_interrupt ~task_id ~step ~message ~agent =
 
 ## 관련 문서
 
-- [CHECKPOINT-SCHEMA.md](./CHECKPOINT-SCHEMA.md) - 체크포인트 스키마
+- [docs/spec/03-room-coordination.md](./spec/03-room-coordination.md) - 현재 checkpoint 관련 spec
 - [LangGraph Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts) - 원본 패턴
 
 ---

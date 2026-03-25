@@ -62,8 +62,8 @@ The detailed design documents remain the implementation references.
 
 | Source document | Role in this roadmap |
 |-----------------|----------------------|
-| `docs/RELEASE-ROADMAP.md` | Patch stabilization policy that led into the `v2.87.0` closeout lane |
-| `docs/IMPROVEMENT-PLAN-2026-01.md` | Swarm reliability and recovery improvements |
+| `docs/archive/RELEASE-ROADMAP-v287.md` | Patch stabilization policy that led into the `v2.87.0` closeout lane |
+| `docs/archive/IMPROVEMENT-PLAN-2026-01.md` | Swarm reliability and recovery improvements |
 | `docs/IMMORTAL-SERVER-ROADMAP.md` | Server HA and self-healing follow-up |
 
 ## Milestone 1: v2.87.0 — Release Closeout

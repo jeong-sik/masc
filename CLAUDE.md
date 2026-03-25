@@ -19,7 +19,8 @@ OCaml (5.x + Eio) 기반 MCP 서버. 멀티 AI 에이전트 협업 조율.
 검색 순서: `$MASC_PERSONAS_DIR` → `$MASC_BASE_PATH/config/personas/` → `$ME_ROOT/personas/` (legacy).
 모델 필드는 persona에 넣지 않는다 (cascade가 관리).
 
-**Lodge**: 제거됨. keeper 자동 기동 없음. `masc_keeper_up`으로 수동 시작.
+**Lodge / social surface**: repo 안에는 관련 코드와 문서가 남아 있다.
+front-door usage 판단은 `README.md`와 `docs/MCP-SURFACE-AUDIT.md`를 먼저 본다.
 
 **Agent 목록**: Neo4j → GraphQL API를 통해 로드:
 - Endpoint: `https://second-brain-graphql-production.up.railway.app/graphql`

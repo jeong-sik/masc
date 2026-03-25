@@ -148,21 +148,34 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
 (** Per-keeper cursor for board event collection.
     Tracks the last check timestamp so no posts are missed between heartbeats.
     In-memory only — first run after restart uses a 300s bootstrap window. *)
+let board_cursors_mu = Eio.Mutex.create ()
 let board_cursors : (string, float) Hashtbl.t = Hashtbl.create 8
+let bootstrap_window_sec = 300.0
 
+let reset_board_cursor name =
+  Eio.Mutex.use_rw ~protect:true board_cursors_mu (fun () ->
+      Hashtbl.remove board_cursors name)
+[@@warning "-32"]
 (** Collect recent board activity using cursor-based tracking.
     Returns (event summaries, new post count, mention count). *)
 let collect_board_events ~(meta : keeper_meta) : string list * int * int =
   try
     let since_ts =
-      match Hashtbl.find_opt board_cursors meta.name with
-      | Some ts -> ts
-      | None -> Time_compat.now () -. 300.0
+      Eio.Mutex.use_ro board_cursors_mu (fun () ->
+          match Hashtbl.find_opt board_cursors meta.name with
+          | Some ts -> ts
+          | None -> Time_compat.now () -. bootstrap_window_sec)
     in
-    Hashtbl.replace board_cursors meta.name (Time_compat.now ());
+    (* Capture the watermark before fetch so posts created during the read
+       window are included on the next pass instead of being skipped. *)
+    let cursor_watermark = Time_compat.now () in
     let posts =
       Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:20 ()
     in
+    (* Update the cursor only after a successful read to avoid losing events
+       when the board fetch fails mid-turn. *)
+    Eio.Mutex.use_rw ~protect:true board_cursors_mu (fun () ->
+        Hashtbl.replace board_cursors meta.name cursor_watermark);
     let recent =
       List.filter (fun (p : Board.post) -> p.created_at >= since_ts) posts
     in

@@ -46,13 +46,11 @@ let mu = Eio.Mutex.create ()
 let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 
-let with_lock_rw f =
-  try Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_lock_rw f = Eio_guard.with_mutex mu f
 
 let with_lock_ro f =
-  try Eio.Mutex.use_ro mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+  if not (Eio_guard.is_ready ()) then f ()
+  else Eio.Mutex.use_ro mu (fun () -> f ())
 
 let max_crash_log_entries = 5
 

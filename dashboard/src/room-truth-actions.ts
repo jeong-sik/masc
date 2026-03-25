@@ -1,5 +1,6 @@
 import { fetchDashboardRoomTruth } from './api'
 import { asString, isRecord } from './components/common/normalize'
+import { serverStatus } from './store'
 import {
   roomTruth,
   roomTruthLoading,
@@ -7,6 +8,7 @@ import {
   roomTruthInitializing,
 } from './room-truth-signals'
 import { normalizeRoomTruth } from './room-truth-normalizers'
+import { mergeServerStatus } from './store-normalizers'
 
 let inflightRoomTruthRefresh: Promise<void> | null = null
 let lastRoomTruthRefreshAt = 0
@@ -34,7 +36,12 @@ export async function refreshRoomTruth(opts?: { force?: boolean }): Promise<void
         return
       }
       roomTruthInitializing.value = false
-      roomTruth.value = normalizeRoomTruth(raw)
+      const normalized = normalizeRoomTruth(raw)
+      roomTruth.value = normalized
+      serverStatus.value = mergeServerStatus(
+        serverStatus.value,
+        normalized.room.status ?? null,
+      )
       lastRoomTruthRefreshAt = Date.now()
     } catch (err) {
       const detail = err instanceof Error ? err.message : 'Failed to load room truth'

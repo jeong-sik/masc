@@ -141,7 +141,6 @@ Action 'get' returns current card; 'refresh' rebuilds it from live bindings. Pai
       ]);
     ];
   };
-  (* masc_heartbeat_result removed: canonical definition in tool_schemas_a2a.ml *)
   {
     name = "masc_agent_fitness";
     description = "Get fitness scores for agents based on performance metrics (completion rate, reliability, speed). \

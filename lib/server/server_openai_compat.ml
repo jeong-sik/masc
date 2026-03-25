@@ -96,7 +96,7 @@ let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) res
       let json = Yojson.Safe.from_string body in
       let reply = Yojson.Safe.Util.(json |> member "reply" |> to_string) in
       Ok reply
-    with _ ->
+    with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
       (* If not JSON, use the body as-is *)
       Ok body)
   else
@@ -167,7 +167,7 @@ let handle_chat_completions ~config ~sw ~clock (body : string)
               else None
             ) msgs in
             String.concat "\n" sys_msgs
-          with _ -> ""
+          with Yojson.Safe.Util.Type_error _ | Failure _ -> ""
         in
         match route_cascade ~message:user_message ~system_prompt
                 ~max_tokens ~temperature with

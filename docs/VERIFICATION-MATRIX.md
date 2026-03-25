@@ -74,8 +74,6 @@ make test-contract
   - `scripts/harness_supervisor_team_session.sh`
   - `docs/SWARM-DELIVERY-RUNBOOK.md`
   - `docs/SUPERVISOR-MODE.md`
-- TRPG workload / smoke
-  - `scripts/run_trpg_grimland_smoke.sh`
 - local64 / runtime matrix
   - `scripts/harness_team_session_local64_smoke.sh`
   - `scripts/harness_local64_model_matrix.sh`

@@ -523,7 +523,7 @@ let test_voice_public_config_json () =
   | Ok json ->
       let open Yojson.Safe.Util in
       check string "status" "ok" (json |> member "status" |> to_string);
-      check string "preview url" "/api/v1/trpg/tts"
+      check string "preview url" "/api/v1/voice/tts"
         (json |> member "tts" |> member "preview_url" |> to_string);
       check string "active endpoint id" "railway-proxy"
         (json |> member "tts" |> member "active_endpoint" |> member "id" |> to_string);

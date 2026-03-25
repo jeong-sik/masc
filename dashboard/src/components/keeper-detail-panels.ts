@@ -1,10 +1,10 @@
 // Keeper detail sub-components — KPIs, charts, field dictionary,
-// TRPG stats, equipment, relationships, traits
+// equipment, relationships, traits
 // Redesigned: individual KPI cards, clean table, proper spacing.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import type { Keeper, KeeperMetricPoint, TrpgCharacterStats } from '../types'
+import type { Keeper, KeeperMetricPoint } from '../types'
 
 // ── Utility functions ────────────────────────────────────
 
@@ -263,55 +263,7 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   `
 }
 
-// ── TRPG, Equipment, Relationships, Traits ───────────────
-
-export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
-  const hpPct = stats.max_hp > 0 ? Math.round((stats.hp / stats.max_hp) * 100) : 0
-  const mpPct = stats.max_mp > 0 ? Math.round((stats.mp / stats.max_mp) * 100) : 0
-
-  return html`
-    <div>
-      <div class="flex gap-3 mb-3">
-        <div class="flex-1">
-          <div class="flex justify-between text-[11px] text-[var(--text-muted)] mb-1">
-            <span>HP</span>
-            <span>${stats.hp}/${stats.max_hp}</span>
-          </div>
-          <div class="h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
-            <div class="h-full rounded-full transition-all" style="width:${hpPct}%; background:${hpPct > 50 ? '#4ade80' : hpPct > 25 ? '#fbbf24' : '#ef4444'};" />
-          </div>
-        </div>
-        <div class="flex-1">
-          <div class="flex justify-between text-[11px] text-[var(--text-muted)] mb-1">
-            <span>MP</span>
-            <span>${stats.mp}/${stats.max_mp}</span>
-          </div>
-          <div class="h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
-            <div class="h-full rounded-full" style="width:${mpPct}%; background:#818cf8;" />
-          </div>
-        </div>
-      </div>
-      <div class="grid grid-cols-3 gap-2">
-        ${[
-          { label: 'STR', value: stats.strength },
-          { label: 'DEX', value: stats.dexterity },
-          { label: 'CON', value: stats.constitution },
-          { label: 'INT', value: stats.intelligence },
-          { label: 'WIS', value: stats.wisdom },
-          { label: 'CHA', value: stats.charisma },
-        ].map(s => html`
-          <div class="text-center py-2 px-1.5 bg-[var(--white-3)] rounded-lg border border-[var(--card-border)]">
-            <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">${s.label}</div>
-            <div class="text-lg font-bold text-[var(--text-strong)] mt-0.5">${s.value}</div>
-          </div>
-        `)}
-      </div>
-      <div class="mt-3 text-xs text-[var(--text-muted)]">
-        Level ${stats.level} -- XP ${stats.xp}
-      </div>
-    </div>
-  `
-}
+// ── Equipment, Relationships, Traits ───────────────
 
 export function EquipmentList({ items }: { items: string[] }) {
   if (items.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">장비 없음</div>`

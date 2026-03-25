@@ -33,6 +33,8 @@ type registry_entry = {
   mutable last_error : string option;
   mutable last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
+  mutable board_cursor_ts : float;
+  tool_usage : (string, Keeper_types.tool_call_entry) Hashtbl.t;
 }
 
 val state_to_string : keeper_state -> string
@@ -120,3 +122,24 @@ val cleanup_tracking : base_path:string -> string -> unit
 
 (** Clear the registry. For testing only. *)
 val clear : unit -> unit
+
+(** Get board event cursor timestamp. Returns 0.0 if not found. *)
+val get_board_cursor_ts : base_path:string -> string -> float
+
+(** Update board event cursor timestamp. No-op if not found. *)
+val set_board_cursor_ts : base_path:string -> string -> float -> unit
+
+(** Record a tool call for a keeper. No-op if not found. *)
+val record_tool_use :
+  base_path:string -> string -> tool_name:string -> success:bool -> unit
+
+(** Get tool usage sorted by call count descending. *)
+val tool_usage_of : base_path:string -> string ->
+  (string * Keeper_types.tool_call_entry) list
+
+(** Look up a keeper by name across all base_paths (O(n) scan). *)
+val find_by_name : string -> registry_entry option
+
+(** Get tool usage by keeper name (scans all base_paths). *)
+val tool_usage_of_by_name : string ->
+  (string * Keeper_types.tool_call_entry) list

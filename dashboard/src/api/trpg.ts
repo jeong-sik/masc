@@ -1,5 +1,5 @@
 import { get } from './core'
-import { isRecord } from '../components/common/normalize'
+import { isRecord, asString, asNumber, asBoolean, asInt } from '../components/common/normalize'
 import type {
   TrpgActor,
   TrpgCharacterStats,
@@ -19,25 +19,6 @@ interface TrpgRawStateResponse {
 
 interface TrpgRawEventsResponse {
   events?: unknown
-}
-
-export function asString(value: unknown, fallback = ''): string {
-  return typeof value === 'string' ? value : fallback
-}
-
-export function asNumber(value: unknown, fallback = 0): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
-export function asInt(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value)
-  if (typeof value !== 'string') return undefined
-  const parsed = Number.parseInt(value.trim(), 10)
-  return Number.isFinite(parsed) ? parsed : undefined
-}
-
-function asBoolean(value: unknown, fallback = false): boolean {
-  return typeof value === 'boolean' ? value : fallback
 }
 
 export function asStringList(value: unknown): string[] {

@@ -1,7 +1,7 @@
 import { get, post, fetchWithTimeout } from './core'
 import { callMcpTool } from './mcp'
 import { isRecord } from '../components/common/normalize'
-import { asString, asNumber, asInt } from './trpg'
+import { asString, asNumber, asInt } from '../components/common/normalize'
 import { toIsoTimestamp, normalizeGovernanceCaseBundle, normalizeGovernanceExecutionOrder } from './board'
 import type {
   GovernanceCaseBundle, GovernanceExecutionOrder, MdalIterationRecord, MdalLoop,

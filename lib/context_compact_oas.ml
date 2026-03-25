@@ -49,8 +49,35 @@ let starts_with ~prefix s =
   let lp = String.length prefix in
   String.length s >= lp && String.sub s 0 lp = prefix
 
-(** Score a list of messages by importance.
-    Returns [(index, score)] pairs where score is in [0.0, 1.0]. *)
+(** Score a list of messages by importance for context compaction.
+    Returns [(index, score)] pairs where score is in [0.0, 1.0].
+
+    The score is a weighted sum of 4 factors:
+
+    - recency (0.40): Quadratic decay from newest (1.0) to oldest (0.0).
+      Quadratic rather than linear because recent context is disproportionately
+      important — the keeper's current task depends on the last few turns,
+      while early context is often superseded.
+
+    - role_weight (0.25): System (1.0) > Tool (0.7) > User (0.6) > Assistant (0.4).
+      System prompts are never dropped. Tool results contain ground truth.
+      User messages carry intent. Assistant messages are reproducible via re-inference.
+
+    - content_weight (0.20): Length-based heuristic for information density.
+      <20 chars (0.3): acknowledgements ("ok", "done") — low info.
+      <100 chars (0.6): short commands or status — medium.
+      <500 chars (0.8): substantive content — high.
+      500+ chars (0.7): diminishing returns, often verbose tool output.
+
+    - tool_weight (0.15): Messages with ToolUse/ToolResult (0.8) vs plain text (0.5).
+      Tool interactions represent actions taken and should be preserved for
+      trajectory coherence.
+
+    Special cases: Memory summaries and goal messages are boosted to 0.95
+    regardless of computed score — they anchor the keeper's purpose.
+
+    TODO(#2886): Extract generic scoring to OAS with ~boost_predicate injection
+    for MASC-specific prefixes (goal_prefix, memory_summary_prefix). *)
 let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
   let n = List.length msgs in
   List.mapi (fun i (m : Agent_sdk.Types.message) ->

@@ -204,6 +204,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       let module U = Yojson.Safe.Util in
       let query = match Json_util.get_string arguments "query" with Some v -> v | None -> raise Not_found in
       let limit = arguments |> U.member "limit" |> U.to_int_option |> Option.value ~default:5 in
+      (* PR#814 Gap 3: format=grep returns compact grep-like output for LLM parsing *)
+      let format = arguments |> U.member "format" |> U.to_string_option
+        |> Option.value ~default:"json" in
 
       (match state.Mcp_server.env with
        | None ->
@@ -224,32 +227,36 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
            let grep_projection =
              Auto_recall.format_for_injection result
            in
-           let response = `Assoc [
-             ("success", `Bool true);
-             ("query", `String query);
-             ("items", `List (List.map (fun (item : Auto_recall.recall_item) ->
-               `Assoc [
-                 ("source", `String (match item.source with
-                   | Auto_recall.Masc_cache -> "cache"
-                   | Auto_recall.Recent_broadcasts -> "broadcast"
-                   | Auto_recall.File_context -> "file"));
-                 ("content", `String item.content);
-                 ("relevance", `Float item.relevance);
-                 ("metadata", item.metadata);
-               ]
-             ) result.items));
-             ("total_tokens", `Int result.total_tokens);
-             ("truncated", `Bool result.truncated);
-             ("grep_projection", `String grep_projection);
-             ("message", `String (Printf.sprintf "Found %d relevant items for query: %s"
-               (List.length result.items) query));
-           ] in
            let agent_name = Safe_ops.json_string ~default:"unknown" "agent_name" arguments in
            Audit_log.log_action config ~agent_id:agent_name ~action:Audit_log.SearchRefinement
              ~room_id:(Filename.basename config.base_path)
              ~details:(`Assoc [("query", `String query); ("results", `Int (List.length result.items))])
              ~outcome:Audit_log.Success ();
-           Some (true, Yojson.Safe.pretty_to_string response))
+           if format = "grep" then
+             (* Compact grep-like format — LLM in-distribution output *)
+             Some (true, if grep_projection = "" then "No results" else grep_projection)
+           else
+             let response = `Assoc [
+               ("success", `Bool true);
+               ("query", `String query);
+               ("items", `List (List.map (fun (item : Auto_recall.recall_item) ->
+                 `Assoc [
+                   ("source", `String (match item.source with
+                     | Auto_recall.Masc_cache -> "cache"
+                     | Auto_recall.Recent_broadcasts -> "broadcast"
+                     | Auto_recall.File_context -> "file"));
+                   ("content", `String item.content);
+                   ("relevance", `Float item.relevance);
+                   ("metadata", item.metadata);
+                 ]
+               ) result.items));
+               ("total_tokens", `Int result.total_tokens);
+               ("truncated", `Bool result.truncated);
+               ("grep_projection", `String grep_projection);
+               ("message", `String (Printf.sprintf "Found %d relevant items for query: %s"
+                 (List.length result.items) query));
+             ] in
+             Some (true, Yojson.Safe.pretty_to_string response))
 
   | "masc_board_post" ->
       let (success, message) as result = Tool_board.handle_tool name arguments in

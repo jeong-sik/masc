@@ -636,10 +636,8 @@ module Memory = struct
 
   let get_all t ~prefix =
     with_lock t (fun () ->
-      let prefix_len = String.length prefix in
       let pairs = Hashtbl.fold (fun k v acc ->
-        if String.length k >= prefix_len &&
-           String.sub k 0 prefix_len = prefix then
+        if String.starts_with ~prefix k then
           (k, v) :: acc
         else acc
       ) t.data [] in

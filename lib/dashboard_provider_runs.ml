@@ -180,9 +180,7 @@ let default_model_for_provider provider =
   | "claude-api" -> trim_nonempty Env_config_governance.Claude.default_model
   | "codex-api" -> trim_nonempty Env_config_governance.OpenAI.default_model
   | "gemini-api" -> trim_nonempty Env_config_governance.Gemini.default_model
-  | "glm" ->
-      let configured = trim_nonempty Env_config_governance.Glm.default_model in
-      Some (Option.value configured ~default:"auto")
+  | "glm" -> Some "auto"
   | _ -> None
 
 let candidate_models_for_provider provider =
@@ -198,13 +196,7 @@ let candidate_models_for_provider provider =
           Env_config_governance.Gemini.default_model;
           Env_config_governance.Gemini.flash_model;
         ]
-  | "glm" ->
-      dedupe_keep_order
-        [
-          Env_config_governance.Glm.default_model;
-          Env_config_governance.Glm.flash_model;
-          "auto";
-        ]
+  | "glm" -> ["auto"]
   | _ -> []
 
 let llama_snapshot () =

@@ -56,14 +56,14 @@ viewer-local-e2e-check.sh
   --dm-preset-id ID          smoke DM preset
   --party-size N             smoke party size (기본 4)
   --pool-size N              smoke pool size (기본 6)
-  --keeper-models CSV        smoke keeper 모델 (예: glm:glm-4.7)
+  --keeper-models CSV        smoke keeper 모델 (예: glm:auto)
   --mcp-url URL              MCP endpoint (기본 http://127.0.0.1:8935/mcp)
   --help                     도움말
 
 예시:
   scripts/viewer-local-e2e-check.sh
   scripts/viewer-local-e2e-check.sh --build-viewer
-  scripts/viewer-local-e2e-check.sh --run-smoke --keeper-models "glm:glm-4.7"
+  scripts/viewer-local-e2e-check.sh --run-smoke --keeper-models "glm:auto"
   scripts/viewer-local-e2e-check.sh --run-round --rounds 2 --keeper-models "gemini:gemini-2.5-flash"
 EOF
 }

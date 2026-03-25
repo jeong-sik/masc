@@ -54,7 +54,7 @@ success=0
 failure=0
 for i in $(seq 1 "$ROUNDS"); do
   echo "[soak] round=$i/$ROUNDS"
-  start_args="$(jq -cn --arg goal "soak-round-$i" --argjson duration "$DURATION_SEC" '{goal:$goal,duration_seconds:$duration,checkpoint_interval_sec:10,min_agents:1,orchestration_mode:"assist",communication_mode:"hybrid",model_cascade:["glm:glm-5"],fallback_policy:"cascade_then_task",instruction_profile:"standard",alert_channel:"both"}')"
+  start_args="$(jq -cn --arg goal "soak-round-$i" --argjson duration "$DURATION_SEC" '{goal:$goal,duration_seconds:$duration,checkpoint_interval_sec:10,min_agents:1,orchestration_mode:"assist",communication_mode:"hybrid",model_cascade:["glm:auto"],fallback_policy:"cascade_then_task",instruction_profile:"standard",alert_channel:"both"}')"
   start_raw="$(call_tool $((4300 + i)) "masc_team_session_start" "$start_args")"
   session_id="$(printf "%s" "$start_raw" | extract_result | jq -r '.session_id // empty')"
   if [ -z "$session_id" ]; then

@@ -58,15 +58,14 @@ end
 (** {1 GLM Configuration} *)
 
 module Glm = struct
-  (** Default GLM model for Z.ai API calls.
-      Empty = let GLM provider select at runtime. *)
+  (** GLM model label.  OAS cascade resolves "auto" to the concrete
+      model via ZAI_DEFAULT_MODEL env var.
+      MASC never hardcodes a model name — cascade is the SSOT. *)
   let default_model =
-    get_string ~default:"glm-4.7" "MASC_GLM_DEFAULT_MODEL"
+    get_string ~default:"auto" "MASC_GLM_DEFAULT_MODEL"
 
-  (** Default GLM flash model for lightweight tasks.
-      Empty = provider decides. *)
   let flash_model =
-    get_string ~default:"glm-4.7-flash" "MASC_GLM_FLASH_MODEL"
+    get_string ~default:"auto" "MASC_GLM_FLASH_MODEL"
 end
 
 (** {1 Gemini Configuration} *)

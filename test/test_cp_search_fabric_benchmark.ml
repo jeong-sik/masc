@@ -141,7 +141,7 @@ let setup_coding_units config =
               `String "artifact:test/test_command_plane_v2.ml";
               `String "tool:dune";
               `String "runtime:local64";
-              `String "model:glm-4.7-flash";
+              `String "model:auto";
             ] );
       ]);
   unit_update_exn config ~actor:"owner"
@@ -160,7 +160,7 @@ let setup_coding_units config =
               `String "role:reviewer";
               `String "artifact:test/test_command_plane_v2.ml";
               `String "runtime:local64";
-              `String "model:glm-4.7-flash";
+              `String "model:auto";
             ] );
       ])
 

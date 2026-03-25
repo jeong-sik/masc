@@ -57,16 +57,16 @@ let test_default_cli_agent_name () =
     (Adapter.default_cli_agent_name ())
 
 let test_default_local_model_label () =
-  with_env "MASC_DEFAULT_PROVIDER" (Some "glm") (fun () ->
-      with_env "MASC_DEFAULT_MODEL" (Some "glm-4.7") (fun () ->
-          check string "default local label" "glm:glm-4.7"
+  with_env "MASC_DEFAULT_PROVIDER" (Some "test-provider") (fun () ->
+      with_env "MASC_DEFAULT_MODEL" (Some "test-model") (fun () ->
+          check string "default local label" "test-provider:test-model"
             (Adapter.default_local_model_label ())))
 
 let test_default_model_provider_prefix_result () =
-  with_env "MASC_DEFAULT_PROVIDER" (Some "glm") (fun () ->
-      with_env "MASC_DEFAULT_MODEL" (Some "glm-4.7") (fun () ->
+  with_env "MASC_DEFAULT_PROVIDER" (Some "test-provider") (fun () ->
+      with_env "MASC_DEFAULT_MODEL" (Some "test-model") (fun () ->
           match Adapter.default_model_provider_prefix_result () with
-          | Ok prefix -> check string "default provider prefix" "glm" prefix
+          | Ok prefix -> check string "default provider prefix" "test-provider" prefix
           | Error msg -> fail msg))
 
 let test_default_model_override_label_result () =

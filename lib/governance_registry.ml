@@ -54,7 +54,7 @@ let message_max_count =
 let inference_default_model =
   Runtime_params.register
     ~key:"inference.default_model"
-    ~default:(fun () -> Env_config_governance.Glm.default_model)
+    ~default:(fun () -> "auto")
     ~validate:(fun v ->
       if String.length v > 0 && String.length v <= 100 then Ok ()
       else Error "model name must be 1-100 chars")

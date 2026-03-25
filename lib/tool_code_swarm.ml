@@ -163,7 +163,7 @@ let schemas : Types.tool_schema list =
                         ( "description",
                           `String
                             "Model spec for verification (e.g., \
-                             'glm:glm-4.7-flash'). Uses default verifier if \
+                             'glm:auto'). Uses default verifier if \
                              omitted." );
                       ] );
                 ] );

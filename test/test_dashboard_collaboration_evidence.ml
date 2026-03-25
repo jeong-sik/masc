@@ -17,7 +17,7 @@ let test_collaboration_evidence_counts_runtime_signals () =
           ~created_by:"tester" ~agent_names:[ "alice"; "bob" ] ~min_agents:1
           ~checkpoint_interval_sec:30 ~started_at ~planned_end_at
           ~fallback_policy:Team_session_types.Fallback_cascade_then_task
-          ~model_cascade:[ "glm:glm-5" ]
+          ~model_cascade:[ "glm:auto" ]
       in
       ignore
         (Team_session_store.update_session config session.session_id (fun s ->

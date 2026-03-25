@@ -32,7 +32,7 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
                 ("orchestration_mode", `String "assist");
                 ("communication_mode", `String "hybrid");
                 ("scale_profile", `String "local64");
-                ("model_cascade", `List [ `String "glm:glm-5" ]);
+                ("model_cascade", `List [ `String "glm:auto" ]);
                 ("fallback_policy", `String "strict_local_only");
                 ("instruction_profile", `String "strict");
                 ("alert_channel", `String "both");

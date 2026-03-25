@@ -76,7 +76,7 @@ let resolve_primary_model_id (labels : string list) : string =
     Uses Provider_adapter for configured label, then validates via OAS registry.
     Returns (label, model_id) or falls back to "glm:auto". *)
 let default_local_model_label_and_id () : string * string =
-  let fallback = ("glm:auto", Env_config.Glm.default_model) in
+  let fallback = ("glm:auto", "auto") in
   let try_label label =
     match provider_name_of_label label with
     | None -> None

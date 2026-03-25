@@ -107,7 +107,7 @@ start_args="$(jq -cn \
      min_agents:$min_agents,
      orchestration_mode:"assist",
      communication_mode:"hybrid",
-     model_cascade:["glm:glm-5","gemini:gemini-2.5-pro"],
+     model_cascade:["glm:auto","gemini:gemini-2.5-pro"],
      fallback_policy:"cascade_then_task",
      instruction_profile:"strict",
      alert_channel:"both",

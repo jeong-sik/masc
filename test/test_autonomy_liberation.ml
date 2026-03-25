@@ -111,7 +111,7 @@ let test_compose_identity () =
     Prompt_composer.compose
       [
         Prompt_composer.Identity
-          { name = "w1"; role = "dev"; model = "glm-4.7" };
+          { name = "w1"; role = "dev"; model = "auto" };
         Prompt_composer.Task "Do something";
       ]
   in

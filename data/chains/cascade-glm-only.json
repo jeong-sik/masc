@@ -7,19 +7,19 @@
     {
       "id": "glm_light",
       "type": "model",
-      "model": "glm:glm-4.5",
+      "model": "glm:auto",
       "prompt": "{{input}}"
     },
     {
       "id": "glm_mid",
       "type": "model",
-      "model": "glm:glm-4.7",
+      "model": "glm:auto",
       "prompt": "{{input}}"
     },
     {
       "id": "glm_heavy",
       "type": "model",
-      "model": "glm:glm-5",
+      "model": "glm:auto",
       "prompt": "{{input}}"
     },
     {
@@ -63,7 +63,7 @@
   "metadata": {
     "category": "routing",
     "use_case": "Zero-cost GLM cascade for Second Brain search pipeline auxiliary MODEL tasks",
-    "tier_models": ["glm-4.5", "glm-4.7", "glm-5"],
+    "tier_models": ["auto"],
     "api_endpoint": "https://api.z.ai/api/coding/paas/v4/chat/completions"
   }
 }

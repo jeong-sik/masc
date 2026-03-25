@@ -114,22 +114,59 @@ let normalize_command (cmd : string) : string =
   ) cmd;
   String.trim (Buffer.contents buf)
 
+(** Suspicious shell meta-patterns that indicate possible evasion attempts.
+    These don't match specific destructive commands but flag constructs
+    that could hide destructive intent from substring matching.
+
+    Each entry is (regex_pattern, description). Checked on the raw
+    (un-normalized) command to catch patterns that normalization would strip. *)
+let evasion_indicators : (string * string) list = [
+  ({|\$[({]|}, "variable expansion or command substitution");
+  ({|\\x[0-9a-fA-F]|}, "hex escape sequence");
+  ({|\\[0-7][0-7]|}, "octal escape sequence");
+  ({|base64.*-d|}, "base64 decode pipe (possible payload obfuscation)");
+  ({|eval |}, "eval invocation (arbitrary code execution)");
+  ({|xargs.*rm\|xargs.*kill|}, "xargs with destructive command");
+]
+
+(** Check for shell evasion indicators in the raw (un-normalized) command.
+    Returns Some(pattern, description) if a suspicious construct is found.
+    This supplements [detect_destructive] by catching meta-patterns that
+    normalization-based substring matching cannot handle. *)
+let detect_evasion (command : string) : (string * string) option =
+  let cmd_lower = String.lowercase_ascii command in
+  List.find_opt (fun (pattern, _desc) ->
+    try
+      let re = Str.regexp pattern in
+      ignore (Str.search_forward re cmd_lower 0);
+      true
+    with Not_found -> false
+  ) evasion_indicators
+
 (** Check if a bash command contains destructive patterns.
     Returns None if safe, Some(pattern, description) if dangerous.
 
-    Applies normalization (quote stripping, whitespace collapse,
-    backslash removal) before substring matching. *)
+    Two-pass detection:
+    1. Normalized substring matching against [destructive_patterns]
+    2. Raw regex matching against [evasion_indicators] for meta-patterns
+       that normalization cannot catch (hex escapes, variable expansion, etc.)
+
+    Both passes must clear for the command to be considered safe. *)
 let detect_destructive (command : string) : (string * string) option =
   let cmd_lower = String.lowercase_ascii (normalize_command command) in
-  List.find_opt (fun (pattern, _desc) ->
-    let pat_lower = String.lowercase_ascii pattern in
-    let rec find_at i =
-      if i + String.length pat_lower > String.length cmd_lower then false
-      else if String.sub cmd_lower i (String.length pat_lower) = pat_lower then true
-      else find_at (i + 1)
-    in
-    find_at 0
-  ) destructive_patterns
+  match
+    List.find_opt (fun (pattern, _desc) ->
+      let pat_lower = String.lowercase_ascii pattern in
+      let rec find_at i =
+        if i + String.length pat_lower > String.length cmd_lower then false
+        else if String.sub cmd_lower i (String.length pat_lower) = pat_lower then true
+        else find_at (i + 1)
+      in
+      find_at 0
+    ) destructive_patterns
+  with
+  | Some _ as hit -> hit
+  | None -> detect_evasion command
 
 (* ================================================================ *)
 (* Pre-execution gate                                                *)

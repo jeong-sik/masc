@@ -451,6 +451,11 @@
  (modules test_cp_section_cache)
  (libraries masc_mcp alcotest yojson unix))
 
+(test
+ (name test_cp_jsonl_tail)
+ (modules test_cp_jsonl_tail)
+ (libraries masc_mcp masc_mcp.fs_compat alcotest yojson unix eio eio_main))
+
 (executable
  (name test_cp_search_fabric_benchmark)
  (modules test_cp_search_fabric_benchmark)

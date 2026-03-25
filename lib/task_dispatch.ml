@@ -21,12 +21,8 @@ type backend_state =
 let backend_state : backend_state ref = ref Uninitialized
 
 let task_mu = Eio.Mutex.create ()
-let with_task_rw f =
-  try Eio.Mutex.use_rw ~protect:true task_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-let with_task_ro f =
-  try Eio.Mutex.use_ro task_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_task_rw f = Eio_guard.with_rw task_mu f
+let with_task_ro f = Eio_guard.with_ro task_mu f
 
 let is_initialized () =
   with_task_ro (fun () ->

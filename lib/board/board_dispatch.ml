@@ -40,12 +40,8 @@ type keeper_board_signal = {
 let backend_state : backend_state ref = ref Uninitialized
 
 let board_mu = Eio.Mutex.create ()
-let with_board_rw f =
-  try Eio.Mutex.use_rw ~protect:true board_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-let with_board_ro f =
-  try Eio.Mutex.use_ro board_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_board_rw f = Eio_guard.with_rw board_mu f
+let with_board_ro f = Eio_guard.with_ro board_mu f
 
 let keeper_board_signal_hook : (keeper_board_signal -> unit) option ref = ref None
 

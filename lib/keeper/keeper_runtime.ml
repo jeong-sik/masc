@@ -200,8 +200,7 @@ let with_bootstrap_rw f =
   with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
-  if stats.started > 0 || Keeper_registry.count_running () > 0
-  then start_supervisor_sweep ctx
+  if stats.enabled then start_supervisor_sweep ctx
 
 let start_existing_keepalives ctx =
   let base_path = ctx.config.base_path in

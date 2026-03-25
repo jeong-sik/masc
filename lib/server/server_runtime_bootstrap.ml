@@ -1010,6 +1010,23 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Log.Server.error "Background init failed (HTTP still serving): %s"
         (Printexc.to_string exn));
 
+  (* 2b. Startup watchdog: if init does not reach state_ready within timeout,
+     log and exit so external process managers can restart the server.
+     Prevents zombie-listener state where the socket is open but HTTP
+     requests hang because init is stuck. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
+    Eio.Time.sleep clock timeout_sec;
+    let current = Server_startup_state.(!state) in
+    if not current.state_ready then (
+      let elapsed = Server_startup_state.elapsed_since_start () in
+      Log.Server.error
+        "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s, backend=%s). Exiting."
+        timeout_sec elapsed
+        (Server_startup_state.phase_to_string current.phase)
+        current.backend_mode;
+      exit 1));
+
   (* 3. Start serving -- /health responds before init completes *)
   match http_mode with
   | `H2_only ->

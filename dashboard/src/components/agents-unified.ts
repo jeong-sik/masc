@@ -4,33 +4,15 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { CountBadge } from './common/badge'
+import { FilterChips } from './common/filter-chips'
 import { navigate, route } from '../router'
 import { agents, keepers } from '../store'
 import { missionKeeperBriefs } from '../mission-signals'
-import { AgentRoster } from './agent-roster'
+import { AgentRoster, buildAgentRoster, scopeAgentsByKeeperFilter } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 type AgentsView = 'all' | 'agents' | 'keepers'
 
 const activeView = signal<AgentsView>('all')
-
-/** Determine which agents have keeper runtime from keepers store + mission snapshot.
- *  Adds BOTH name ("dm-keeper") and agent_name ("keeper-dm-keeper-agent")
- *  so agent list filtering matches regardless of which key the agent uses. */
-function keeperNameSet(): Set<string> {
-  const names = new Set<string>()
-  for (const k of keepers.value) {
-    const typed = k as { name?: string; agent_name?: string }
-    if (typed.name) names.add(typed.name)
-    if (typed.agent_name) names.add(typed.agent_name)
-  }
-  for (const kb of missionKeeperBriefs.value) {
-    const typed = kb as { name?: string; agent_name?: string }
-    if (typed.name) names.add(typed.name)
-    if (typed.agent_name) names.add(typed.agent_name)
-  }
-  return names
-}
 
 const CHIPS: { id: AgentsView; label: string; description: string }[] = [
   { id: 'all', label: '전체 보기', description: '등록된 모든 런타임을 함께 봅니다.' },
@@ -59,15 +41,20 @@ export function AgentsUnified() {
   }, [routeView])
 
   // Compute counts for chip badges.
-  // When agents store is empty (not yet loaded), fall back to keepers store
-  // so the tab badge matches Room Pulse sidebar counts.
-  const kNames = keeperNameSet()
-  const agentList = agents.value
-  const totalCount = agentList.length
-  const keeperCountFromAgents = agentList.filter((a: { name: string }) => kNames.has(a.name)).length
-  const keeperCountFallback = Math.max(keepers.value.length, missionKeeperBriefs.value.length)
-  const keeperCount = totalCount > 0 ? keeperCountFromAgents : keeperCountFallback
-  const agentOnlyCount = totalCount > 0 ? totalCount - keeperCountFromAgents : 0
+  const rosterAgents = buildAgentRoster(agents.value, keepers.value, missionKeeperBriefs.value)
+  const totalCount = rosterAgents.length
+  const keeperCount = scopeAgentsByKeeperFilter(
+    rosterAgents,
+    keepers.value,
+    missionKeeperBriefs.value,
+    'keeper-only',
+  ).length
+  const agentOnlyCount = scopeAgentsByKeeperFilter(
+    rosterAgents,
+    keepers.value,
+    missionKeeperBriefs.value,
+    'agent-only',
+  ).length
   const currentViewMeta = CHIPS.find(chip => chip.id === currentView) ?? {
     id: 'all' as const,
     label: '전체 보기',
@@ -87,25 +74,24 @@ export function AgentsUnified() {
       : currentView === 'agents'
         ? `지속 실행용 키퍼가 없는 일반 에이전트 ${agentOnlyCount}개만 표시합니다.`
         : `장기 컨텍스트를 유지하는 키퍼 런타임 ${keeperCount}개만 표시합니다.`
+  const viewChips = CHIPS.map(chip => ({
+    key: chip.id,
+    label: chip.label,
+    count: chipCount(chip.id),
+    title: chip.description,
+  }))
 
   return html`
     <div class="flex flex-col gap-4">
-      <div class="flex gap-1 p-1 bg-[var(--white-3)] rounded-lg w-fit">
-        ${CHIPS.map(c => html`
-          <button type="button"
-            key=${c.id}
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer border-0 ${currentView === c.id ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-body)]'}"
-            title=${c.description}
-            onClick=${() => {
-              activeView.value = c.id
-              navigate('status', c.id === 'all' ? { section: 'agents' } : { section: 'agents', view: c.id })
-            }}
-          >
-            ${c.label}
-            ${chipCount(c.id) != null ? html`<${CountBadge}>${chipCount(c.id)}<//>` : null}
-          </button>
-        `)}
-      </div>
+      <${FilterChips}
+        chips=${viewChips}
+        active=${activeView}
+        onChange=${(key: AgentsView) => {
+          navigate('status', key === 'all' ? { section: 'agents' } : { section: 'agents', view: key })
+        }}
+        size="md"
+        class="w-fit rounded-xl bg-[var(--white-3)] p-1"
+      />
       <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-4 py-3 text-[12px] leading-[1.5] text-[var(--text-muted)]">
         <strong class="mr-2 text-[var(--text-strong)]">${currentViewMeta.label}</strong>
         <span>${currentViewMeta.description} ${currentViewSummary}</span>

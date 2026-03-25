@@ -10,6 +10,10 @@ interface TextInputProps {
   placeholder?: string
   disabled?: boolean
   class?: string
+  type?: string
+  name?: string
+  ariaLabel?: string
+  autoComplete?: string
   onInput?: (e: Event) => void
   onKeyDown?: (e: KeyboardEvent) => void
 }
@@ -19,16 +23,23 @@ export function TextInput({
   placeholder,
   disabled,
   class: cx,
+  type = 'text',
+  name,
+  ariaLabel,
+  autoComplete,
   onInput,
   onKeyDown,
 }: TextInputProps) {
   return html`
     <input
-      type="text"
+      type=${type}
       class="${INPUT_BASE} px-3 py-2 text-[13px] ${cx ?? ''}"
       value=${value}
       placeholder=${placeholder}
       disabled=${disabled}
+      name=${name}
+      aria-label=${ariaLabel}
+      autocomplete=${autoComplete}
       onInput=${onInput}
       onKeyDown=${onKeyDown}
     />

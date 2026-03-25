@@ -8,6 +8,9 @@ import type { Agent, Keeper } from '../types'
 import type { DashboardMissionKeeperBrief } from '../types/dashboard-mission'
 import { agents, keepers } from '../store'
 import { missionKeeperBriefs, missionAgentBriefs } from '../mission-signals'
+import { FilterChips } from './common/filter-chips'
+import { TextInput } from './common/input'
+import { EmptyState } from './common/empty-state'
 import { AgentAvatar } from './overview/agent-avatar'
 import { openAgentDetail } from './agent-detail'
 import { formatDuration, trimText } from './mission-utils'
@@ -120,6 +123,76 @@ export function scopeAgentsByKeeperFilter(
     matchesKeeperFilter(agent.name, keeperList, keeperBriefs, keeperFilter))
 }
 
+function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'> | DashboardMissionKeeperBrief): string {
+  const runtimeName = source.agent_name?.trim()
+  return runtimeName && runtimeName.length > 0 ? runtimeName : source.name
+}
+
+function synthesizeAgentFromKeeper(source: Keeper | DashboardMissionKeeperBrief): Agent | null {
+  const runtimeName = keeperRuntimeName(source)
+  if (!runtimeName) return null
+
+  const typed = source as Keeper & DashboardMissionKeeperBrief
+  const linkedAgent = typed.agent
+
+  return {
+    name: runtimeName,
+    agent_type: linkedAgent?.agent_type,
+    status: (linkedAgent?.status as Agent['status'] | undefined) ?? (typed.status as Agent['status'] | undefined),
+    current_task: linkedAgent?.current_task ?? typed.current_work ?? null,
+    context_ratio: typed.context_ratio ?? undefined,
+    joined_at: linkedAgent?.joined_at,
+    last_seen: linkedAgent?.last_seen,
+    capabilities: linkedAgent?.capabilities,
+    emoji: typed.emoji,
+    koreanName: typed.koreanName,
+    model: typed.model,
+    traits: typed.traits,
+    activityLevel: typed.activityLevel,
+    primaryValue: typed.primaryValue,
+  }
+}
+
+function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agent {
+  if (!existing) return next
+  return {
+    ...existing,
+    agent_type: existing.agent_type ?? next.agent_type,
+    status: existing.status ?? next.status,
+    current_task: existing.current_task ?? next.current_task,
+    context_ratio: existing.context_ratio ?? next.context_ratio,
+    joined_at: existing.joined_at ?? next.joined_at,
+    last_seen: existing.last_seen ?? next.last_seen,
+    capabilities: existing.capabilities?.length ? existing.capabilities : next.capabilities,
+    emoji: existing.emoji ?? next.emoji,
+    koreanName: existing.koreanName ?? next.koreanName,
+    model: existing.model ?? next.model,
+    traits: existing.traits?.length ? existing.traits : next.traits,
+    activityLevel: existing.activityLevel ?? next.activityLevel,
+    primaryValue: existing.primaryValue ?? next.primaryValue,
+  }
+}
+
+export function buildAgentRoster(
+  agentList: Agent[],
+  keeperList: Keeper[],
+  keeperBriefs: DashboardMissionKeeperBrief[],
+): Agent[] {
+  const roster = new Map<string, Agent>()
+
+  for (const agent of agentList) {
+    roster.set(agent.name, agent)
+  }
+
+  for (const source of [...keeperList, ...keeperBriefs]) {
+    const synthetic = synthesizeAgentFromKeeper(source)
+    if (!synthetic) continue
+    roster.set(synthetic.name, mergeRosterAgent(roster.get(synthetic.name), synthetic))
+  }
+
+  return Array.from(roster.values())
+}
+
 export function countAgentsByStatus(agentList: Agent[]): Record<StatusFilter, number> {
   return {
     all: agentList.length,
@@ -140,7 +213,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   const briefMap = new Map(briefs.map(b => [b.agent_name, b]))
   const hasKeeperRuntime = keeperFilter !== 'agent-only' && (keeperList.length > 0 || keeperBriefs.length > 0)
-  const scopedAgents = scopeAgentsByKeeperFilter(agentList, keeperList, keeperBriefs, keeperFilter)
+  const rosterAgents = buildAgentRoster(agentList, keeperList, keeperBriefs)
+  const scopedAgents = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, keeperFilter)
   const pageTitle = keeperFilter === 'keeper-only'
     ? '키퍼 런타임'
     : keeperFilter === 'agent-only'
@@ -175,64 +249,86 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const resultCountLabel = filtered.length === scopedAgents.length
     ? `${filtered.length}개 표시 중`
     : `${filtered.length} / ${scopedAgents.length}개 표시 중`
+  const statusChips = (['all', 'active', 'idle', 'offline'] as StatusFilter[]).map(key => ({
+    key,
+    label: FILTER_META[key].label,
+    count: counts[key],
+    title: FILTER_META[key].description,
+  }))
+  const legendCards = [
+    {
+      title: '온라인',
+      body: '응답을 받을 수 있는 연결 상태입니다. active, busy, listening, working 값을 한데 묶습니다.',
+    },
+    {
+      title: '작업 없음',
+      body: '연결은 살아 있지만 지금 카드에 보여줄 현재 작업이 없는 상태입니다.',
+    },
+    {
+      title: '연결 끊김',
+      body: '하트비트가 없거나 런타임이 내려간 상태입니다.',
+    },
+    ...(hasKeeperRuntime
+      ? [{
+          title: '세대 / 컨텍스트 사용량',
+          body: '세대는 키퍼 핸드오프가 일어날 때 올라가는 런타임 번호입니다. 컨텍스트 사용량은 현재 창을 얼마나 쓰고 있는지 보여줍니다.',
+        }]
+      : []),
+  ]
 
   return html`
-    <div class="p-[var(--space-lg,24px)] max-w-[1200px] agent-page">
-      <div class="mb-6">
-        <div class="flex flex-wrap items-center gap-3 mb-[var(--space-md,16px)]">
-          <h2 class="m-0 text-[20px] font-semibold text-[var(--ff-gold-bright)] tracking-[0.5px] [text-shadow:0_1px_4px_rgba(212,169,75,0.2)]">${pageTitle}</h2>
-          <span class="inline-flex items-center rounded-full border border-[rgba(200,168,78,0.22)] bg-[rgba(200,168,78,0.12)] px-2.5 py-1 text-[11px] font-medium text-[#e8d48b]">${resultCountLabel}</span>
-        </div>
-        <p class="text-[13px] text-[var(--white-30)] mt-1">${pageDescription}</p>
-        <div class="flex gap-4 items-center flex-wrap">
-          <input
-            type="text"
-            class="py-1.5 px-3 border border-[var(--ff-border-subtle)] bg-[var(--ff-navy)] text-[var(--white-90)] text-base w-[200px] rounded transition-colors duration-200 focus:outline-none focus:border-[var(--ff-gold)] focus:shadow-[0_0_0_2px_var(--ff-gold-dim)] placeholder:text-[var(--white-25)]"
-            name="agent_search"
-            aria-label="에이전트 이름 검색"
-            autocomplete="off"
-            placeholder="에이전트 이름으로 찾기"
-            value=${search}
-            onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
-          />
-          <div class="flex gap-1.5">
-            ${(['all', 'active', 'idle', 'offline'] as StatusFilter[]).map(f => html`
-              <button type="button"
-                key=${f}
-                title=${FILTER_META[f].description}
-                class="px-2.5 py-1 text-[11px] rounded-xl border cursor-pointer transition-all duration-150 ${filter === f
-                  ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
-                  : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'}"
-                onClick=${() => setFilter(f)}
-              >
-                ${FILTER_META[f].label} ${counts[f]}
-              </button>
+    <div class="agent-page mx-auto flex max-w-[1200px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-0">
+      <section class="rounded-[28px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+        <div class="flex flex-col gap-5">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div class="flex min-w-0 flex-col gap-3">
+              <div class="flex flex-wrap items-center gap-3">
+                <h2 class="m-0 text-[20px] font-semibold text-[var(--ff-gold-bright)] tracking-[0.5px] [text-shadow:0_1px_4px_rgba(212,169,75,0.2)]">${pageTitle}</h2>
+                <span class="inline-flex items-center rounded-full border border-[rgba(200,168,78,0.22)] bg-[rgba(200,168,78,0.12)] px-2.5 py-1 text-[11px] font-medium text-[#e8d48b]">${resultCountLabel}</span>
+              </div>
+              <p class="m-0 max-w-[720px] text-[13px] leading-[1.6] text-[var(--white-30)]">${pageDescription}</p>
+            </div>
+
+            <label class="flex w-full max-w-[320px] flex-col gap-2 text-[11px] font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">
+              <span>에이전트 이름으로 찾기</span>
+              <${TextInput}
+                class="rounded-2xl border-[var(--white-10)] bg-[var(--bg-1)] px-4 py-3 text-[14px] text-[var(--white-90)] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] placeholder:text-[var(--white-25)] focus:border-[var(--ff-gold)] focus:shadow-[0_0_0_2px_var(--ff-gold-dim)]"
+                name="agent_search"
+                ariaLabel="에이전트 이름 검색"
+                autoComplete="off"
+                placeholder="에이전트 이름으로 찾기"
+                value=${search}
+                onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
+              />
+            </label>
+          </div>
+
+          <div class="rounded-2xl border border-[var(--white-6)] bg-[var(--white-2)] p-3.5 md:p-4">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div class="flex flex-col gap-1">
+                <div class="text-[11px] font-semibold tracking-[0.08em] text-[var(--text-strong)] uppercase">연결 상태</div>
+                <p class="m-0 text-[12px] leading-[1.5] text-[var(--text-muted)]">상태별로 카드를 좁혀 보면서 현재 응답 가능 런타임과 유휴 런타임을 구분합니다.</p>
+              </div>
+              <${FilterChips}
+                chips=${statusChips}
+                value=${filter}
+                onChange=${(key: StatusFilter) => setFilter(key)}
+                size="md"
+              />
+            </div>
+          </div>
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            ${legendCards.map(card => html`
+              <div class="rounded-2xl border border-[var(--card-border)] bg-[var(--bg-1)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.14)]">
+                <div class="text-[11px] font-semibold text-[var(--text-strong)]">${card.title}</div>
+                <p class="m-0 mt-2 text-[12px] leading-[1.55] text-[var(--text-muted)]">${card.body}</p>
+              </div>
             `)}
           </div>
         </div>
-        <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
-            <div class="text-[11px] font-semibold text-[var(--text-strong)]">온라인</div>
-            <p class="mt-1 text-[12px] leading-[1.5] text-[var(--text-muted)]">응답을 받을 수 있는 연결 상태입니다. active, busy, listening, working 값을 한데 묶습니다.</p>
-          </div>
-          <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
-            <div class="text-[11px] font-semibold text-[var(--text-strong)]">작업 없음</div>
-            <p class="mt-1 text-[12px] leading-[1.5] text-[var(--text-muted)]">연결은 살아 있지만 지금 카드에 보여줄 현재 작업이 없는 상태입니다.</p>
-          </div>
-          <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
-            <div class="text-[11px] font-semibold text-[var(--text-strong)]">연결 끊김</div>
-            <p class="mt-1 text-[12px] leading-[1.5] text-[var(--text-muted)]">하트비트가 없거나 런타임이 내려간 상태입니다.</p>
-          </div>
-          ${hasKeeperRuntime ? html`
-            <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
-              <div class="text-[11px] font-semibold text-[var(--text-strong)]">세대 / 컨텍스트 사용량</div>
-              <p class="mt-1 text-[12px] leading-[1.5] text-[var(--text-muted)]">세대는 키퍼 핸드오프가 일어날 때 올라가는 런타임 번호입니다. 컨텍스트 사용량은 현재 창을 얼마나 쓰고 있는지 보여줍니다.</p>
-            </div>
-          ` : null}
-        </div>
-      </div>
+      </section>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         ${filtered.map((agent: Agent) => {
           const brief = briefMap.get(agent.name)
           const keeper = findKeeper(agent.name, keeperList, keeperBriefs)
@@ -245,7 +341,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <button type="button"
-              class="group flex w-full flex-col gap-4 p-5 bg-[var(--bg-1)] border border-[var(--card-border)] rounded-2xl hover:border-[var(--accent-soft)] hover:bg-[var(--bg-0)] transition-all duration-200 shadow-sm cursor-pointer text-left"
+              class="group flex min-h-[308px] w-full flex-col gap-4 rounded-[24px] border border-[var(--card-border)] bg-[var(--bg-1)] p-5 text-left shadow-[0_16px_40px_rgba(0,0,0,0.16)] transition-all duration-200 cursor-pointer hover:border-[var(--accent-soft)] hover:bg-[var(--bg-0)] hover:-translate-y-0.5"
               key=${agent.name}
               aria-label=${`${agent.name} 상세 보기`}
               onClick=${() => openAgentDetail(agent.name)}
@@ -263,12 +359,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </div>
                 
                 <div class="flex flex-col min-w-0 flex-1 justify-center py-1">
-                  <div class="flex items-center gap-2 flex-wrap mb-1">
-                    <strong class="text-[17px] text-[var(--text-strong)] font-semibold break-all leading-[1.35] group-hover:text-[var(--accent)] transition-colors">${agent.name}</strong>
-                    <span class="roster-badge ${statusBadgeClass(agent.status)}" title=${statusDescription(agent.status)}>${statusLabel(agent.status)}</span>
-                  </div>
+                  <strong class="mb-2 min-w-0 overflow-hidden text-[17px] text-[var(--text-strong)] font-semibold leading-[1.3] group-hover:text-[var(--accent)] transition-colors [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow-wrap:anywhere]">${agent.name}</strong>
                   
                   <div class="flex items-center gap-1.5 flex-wrap mt-1">
+                    <span class="roster-badge ${statusBadgeClass(agent.status)}" title=${statusDescription(agent.status)}>${statusLabel(agent.status)}</span>
                     <span class="text-[11px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-2 py-0.5 rounded-full">${isKeeper ? '키퍼 런타임' : '일반 에이전트'}</span>
                     ${keeper?.model ? html`<span class="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-1.5 py-px rounded">${keeper.model}</span>` : null}
                     ${keeper?.generation != null ? html`<span class="text-[11px] text-[var(--accent)] font-medium bg-[var(--accent-10)] px-1.5 py-px rounded border border-[rgba(71,184,255,0.15)]" title="키퍼 핸드오프가 일어날 때 올라가는 런타임 세대입니다.">세대 ${keeper.generation}</span>` : null}
@@ -276,8 +370,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </div>
               </div>
 
-              <div class="flex flex-col gap-3 pt-3 border-t border-[var(--border-slate-12)]">
-                <div class="rounded-xl border border-[var(--white-6)] bg-[var(--white-2)] px-3 py-3">
+              <div class="flex flex-1 flex-col gap-3 border-t border-[var(--border-slate-12)] pt-3">
+                <div class="rounded-2xl border border-[var(--white-6)] bg-[var(--white-2)] px-3 py-3">
                   <div class="text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">현재 하는 일</div>
                   <p class="mt-1 text-[13px] leading-[1.5] text-[var(--text-strong)] break-words" title=${currentWork ?? ''}>${workPreview}</p>
                 </div>
@@ -294,26 +388,38 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </div>
 
                 ${isKeeper ? html`
-                  <div class="rounded-xl border border-[var(--white-6)] bg-[var(--white-2)] px-3 py-3">
-                    <div class="mb-2 flex items-center justify-between gap-3 text-[11px]">
-                      <span class="text-[var(--text-muted)]">컨텍스트 사용량</span>
-                      <strong class="text-[var(--text-strong)]">${ctxPct != null ? `${ctxPct}%` : '수집 전'}</strong>
+                  ${ctxPct != null ? html`
+                    <div class="rounded-2xl border border-[var(--white-6)] bg-[var(--white-2)] px-3 py-3">
+                      <div class="mb-2 flex items-center justify-between gap-3 text-[11px]">
+                        <span class="text-[var(--text-muted)]">컨텍스트 사용량</span>
+                        <strong class="text-[var(--text-strong)]">${ctxPct}%</strong>
+                      </div>
+                      <div class="h-2 overflow-hidden rounded-full bg-[var(--white-6)]">
+                        <div
+                          class="h-full rounded-full bg-linear-to-r from-[var(--accent)] to-[var(--ok)]"
+                          style=${{ width: `${ctxPct}%` }}
+                        ></div>
+                      </div>
+                      <p class="mt-2 text-[11px] leading-[1.45] text-[var(--text-muted)]">키퍼가 현재 컨텍스트 창을 얼마나 쓰고 있는지 보여줍니다.</p>
                     </div>
-                    <div class="h-2 overflow-hidden rounded-full bg-[var(--white-6)]">
-                      <div
-                        class="h-full rounded-full bg-linear-to-r from-[var(--accent)] to-[var(--ok)]"
-                        style=${{ width: `${ctxPct ?? 0}%` }}
-                      ></div>
+                  ` : html`
+                    <div class="rounded-2xl border border-dashed border-[var(--white-8)] bg-[var(--white-2)] px-3 py-3">
+                      <div class="flex items-center justify-between gap-3 text-[11px]">
+                        <span class="text-[var(--text-muted)]">컨텍스트 사용량</span>
+                        <strong class="text-[var(--text-strong)]">수집 전</strong>
+                      </div>
+                      <p class="mt-2 text-[11px] leading-[1.45] text-[var(--text-muted)]">키퍼가 아직 컨텍스트 메트릭을 보고하지 않았습니다.</p>
                     </div>
-                    <p class="mt-2 text-[11px] leading-[1.45] text-[var(--text-muted)]">키퍼가 현재 컨텍스트 창을 얼마나 쓰고 있는지 보여줍니다.</p>
-                  </div>
+                  `}
                 ` : null}
               </div>
             </button>
           `
         })}
         ${filtered.length === 0 ? html`
-          <div class="py-[var(--space-xl,32px)] text-center text-[var(--white-20)] text-sm border border-dashed border-[var(--ff-border-subtle)] rounded-md col-span-full">조건에 맞는 에이전트가 없습니다.</div>
+          <div class="col-span-full rounded-[24px] border border-dashed border-[var(--ff-border-subtle)] bg-[var(--white-2)] px-6 py-10">
+            <${EmptyState} message="조건에 맞는 에이전트가 없습니다." compact />
+          </div>
         ` : null}
       </div>
     </div>

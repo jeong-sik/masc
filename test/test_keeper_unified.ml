@@ -130,7 +130,8 @@ let test_observe_uses_precollected_board_events () =
       | Ok _ -> ()
       | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e));
       let events, _, _ =
-        WO.collect_board_events ~continuity_summary:"goal test-keeper"
+        WO.collect_board_events ~base_path:base_dir
+          ~continuity_summary:"goal test-keeper"
           ~meta:minimal_meta
       in
       let obs =

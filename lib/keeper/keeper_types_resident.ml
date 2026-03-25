@@ -79,15 +79,20 @@ let keeper_metrics_path config name =
 (** Date-split metrics store: [.masc/perpetual-keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
 let metrics_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
+let metrics_store_mu = Eio.Mutex.create ()
 
 let keeper_metrics_store config name : Dated_jsonl.t =
   let dir = Filename.concat (keeper_dir_ config) (name ^ "/metrics") in
-  match Hashtbl.find_opt metrics_store_cache dir with
-  | Some store -> store
-  | None ->
-    let store = Dated_jsonl.create ~base_dir:dir () in
-    Hashtbl.replace metrics_store_cache dir store;
-    store
+  let lookup () =
+    match Hashtbl.find_opt metrics_store_cache dir with
+    | Some store -> store
+    | None ->
+      let store = Dated_jsonl.create ~base_dir:dir () in
+      Hashtbl.replace metrics_store_cache dir store;
+      store
+  in
+  try Eio.Mutex.use_rw ~protect:true metrics_store_mu lookup
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> lookup ()
 
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")

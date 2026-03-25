@@ -372,6 +372,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                 (try
                    let events, new_count, mention_count =
                      Keeper_world_observation.collect_board_events
+                       ~base_path:ctx.config.base_path
                        ~meta:meta_current
                        ~continuity_summary:meta_current.continuity_summary
                    in

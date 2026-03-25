@@ -72,7 +72,9 @@ module FileSystem = struct
       let rec check_segments = function
         | [] -> Ok key
         | seg :: rest ->
-            if seg = "." || seg = ".." then
+            if String.length seg = 0 then
+              Error (InvalidKey "Consecutive colons not allowed")
+            else if seg = "." || seg = ".." then
               Error (InvalidKey "Path traversal detected")
             else if String.length seg >= 2 && String.sub seg 0 2 = ".." then
               Error (InvalidKey "Path traversal detected")
@@ -337,12 +339,17 @@ module FileSystem = struct
     | Ok true -> Ok true
     | Ok false -> Ok false
     | Error (AlreadyExists _) ->
-        (* Check if expired *)
+        (* Check if expired or same owner *)
         (match get t lock_key with
          | Ok json ->
              (match lock_info_of_json json with
               | Some existing when existing.expires_at < now ->
                   (* Expired, try to take over *)
+                  (match set t lock_key (lock_info_to_json info) with
+                   | Ok () -> Ok true
+                   | Error e -> Error e)
+              | Some existing when existing.owner = owner ->
+                  (* Same owner reacquire: refresh the lock *)
                   (match set t lock_key (lock_info_to_json info) with
                    | Ok () -> Ok true
                    | Error e -> Error e)
@@ -380,6 +387,7 @@ module FileSystem = struct
               | Ok () -> Ok true
               | Error e -> Error e)
          | _ -> Ok false)
+    | Error (NotFound _) -> Ok false  (* No lock to extend *)
     | Error e -> Error e
 
   (** {2 Atomic Operations (Cross-Process Safe)} *)

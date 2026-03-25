@@ -446,6 +446,9 @@ export interface OperatorKeeperSnapshot {
   context_tokens?: number
   keepalive_running?: boolean
   autonomous_action_count?: number
+  autonomous_turn_count?: number
+  autonomous_text_turn_count?: number
+  autonomous_tool_turn_count?: number
   last_model_used?: string
   active_model?: string
   diagnostic?: Record<string, unknown>

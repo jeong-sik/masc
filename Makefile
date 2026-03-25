@@ -6,16 +6,17 @@
 # Default target — OCaml + dashboard
 all: build-all
 
-# Build OCaml only
+# Build OCaml + dashboard (dashboard rebuilds only when sources changed)
 build:
 	dune build --root .
+	@scripts/build-dashboard-if-needed.sh
 
-# Build dashboard SPA (Vite)
+# Build dashboard SPA (Vite) — force rebuild
 dashboard:
 	cd dashboard && npm ci && npm run build
 
-# Build everything (OCaml + dashboard)
-build-all: build dashboard
+# Build everything (alias for build)
+build-all: build
 
 # Run tests (alias for test-unit)
 test:

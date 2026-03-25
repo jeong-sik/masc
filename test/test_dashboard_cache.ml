@@ -223,7 +223,8 @@ let test_timeout_no_stale_returns_error ~clock () =
 let () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
-  Dashboard_cache.enable_eio ~clock ();
+  Eio_guard.enable ();
+  Dashboard_cache.set_clock clock;
   let open Alcotest in
   run ~and_exit:false "Dashboard_cache"
     [

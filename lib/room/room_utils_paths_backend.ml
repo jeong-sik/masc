@@ -79,107 +79,169 @@ let is_pg_backend config =
   | PostgresNative _ -> true
   | Memory _ | FileSystem _ -> false
 
-let backend_get config ~key =
-  match config.backend with
-  | Memory t -> Backend.MemoryBackend.get t ~key
-  | FileSystem t ->
+let backend_fs_get t ~key =
+  match t with
+  | Eio t ->
       (match Backend_eio.FileSystem.get t key with
        | Ok v -> Ok (Some v)
        | Error (Backend_eio.NotFound _) -> Ok None
        | Error e -> Error (eio_to_backend_error e))
+  | Compat t -> Backend.FileSystemBackend.get t ~key
+
+let backend_fs_set t ~key ~value =
+  match t with
+  | Eio t ->
+      Backend_eio.FileSystem.set t key value |> Result.map_error eio_to_backend_error
+  | Compat t -> Backend.FileSystemBackend.set t ~key ~value
+
+let backend_fs_delete t ~key =
+  match t with
+  | Eio t ->
+      (match Backend_eio.FileSystem.delete t key with
+       | Ok () -> Ok true
+       | Error (Backend_eio.NotFound _) -> Ok false
+       | Error e -> Error (eio_to_backend_error e))
+  | Compat t -> Backend.FileSystemBackend.delete t ~key
+
+let backend_fs_exists t ~key =
+  match t with
+  | Eio t -> Backend_eio.FileSystem.exists t key
+  | Compat t -> Backend.FileSystemBackend.exists t ~key
+
+let backend_fs_list_keys t ~prefix =
+  match t with
+  | Eio t ->
+      Backend_eio.FileSystem.list_keys t ~prefix |> Result.map_error eio_to_backend_error
+  | Compat t -> Backend.FileSystemBackend.list_keys t ~prefix
+
+let backend_fs_get_all t ~prefix =
+  match t with
+  | Eio t ->
+      Backend_eio.FileSystem.get_all t ~prefix |> Result.map_error eio_to_backend_error
+  | Compat t -> Backend.FileSystemBackend.get_all t ~prefix
+
+let backend_fs_set_if_not_exists t ~key ~value =
+  match t with
+  | Eio t ->
+      Backend_eio.FileSystem.set_if_not_exists t key value
+      |> Result.map_error eio_to_backend_error
+  | Compat t -> Backend.FileSystemBackend.set_if_not_exists t ~key ~value
+
+let backend_fs_acquire_lock t ~key ~ttl_seconds ~owner =
+  match t with
+  | Eio t ->
+      Backend_eio.FileSystem.acquire_lock t ~key ~owner ~ttl_seconds
+      |> Result.map_error eio_to_backend_error
+  | Compat t -> Backend.FileSystemBackend.acquire_lock t ~key ~ttl_seconds ~owner
+
+let backend_fs_release_lock t ~key ~owner =
+  match t with
+  | Eio t ->
+      Backend_eio.FileSystem.release_lock t ~key ~owner
+      |> Result.map_error eio_to_backend_error
+  | Compat t -> Backend.FileSystemBackend.release_lock t ~key ~owner
+
+let backend_fs_extend_lock t ~key ~ttl_seconds ~owner =
+  match t with
+  | Eio t ->
+      Backend_eio.FileSystem.extend_lock t ~key ~owner ~ttl_seconds
+      |> Result.map_error eio_to_backend_error
+  | Compat t -> Backend.FileSystemBackend.extend_lock t ~key ~ttl_seconds ~owner
+
+let backend_fs_health_check t =
+  match t with
+  | Eio t ->
+      (match Backend_eio.FileSystem.health_check t with
+       | Ok status -> Ok status.Backend_eio.is_healthy
+       | Error e -> Error (eio_to_backend_error e))
+  | Compat t -> Backend.FileSystemBackend.health_check t
+
+let backend_fs_publish t ~channel ~message =
+  match t with
+  | Eio t -> Backend_eio.FileSystem.publish t ~channel ~message
+  | Compat t -> Backend.FileSystemBackend.publish t ~channel ~message
+
+let backend_fs_subscribe t ~channel ~callback =
+  match t with
+  | Eio t -> Backend_eio.FileSystem.subscribe t ~channel ~callback
+  | Compat t -> Backend.FileSystemBackend.subscribe t ~channel ~callback
+
+let backend_get config ~key =
+  match config.backend with
+  | Memory t -> Backend.MemoryBackend.get t ~key
+  | FileSystem t -> backend_fs_get t ~key
   | PostgresNative t -> Backend.PostgresNative.get t ~key
 
 let backend_set config ~key ~value =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.set t ~key ~value
-  | FileSystem t ->
-      Backend_eio.FileSystem.set t key value
-      |> Result.map_error eio_to_backend_error
+  | FileSystem t -> backend_fs_set t ~key ~value
   | PostgresNative t -> Backend.PostgresNative.set t ~key ~value
 
 let backend_delete config ~key =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.delete t ~key
-  | FileSystem t ->
-      (match Backend_eio.FileSystem.delete t key with
-       | Ok () -> Ok true
-       | Error (Backend_eio.NotFound _) -> Ok false
-       | Error e -> Error (eio_to_backend_error e))
+  | FileSystem t -> backend_fs_delete t ~key
   | PostgresNative t -> Backend.PostgresNative.delete t ~key
 
 let backend_exists config ~key =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.exists t ~key
-  | FileSystem t -> Backend_eio.FileSystem.exists t key
+  | FileSystem t -> backend_fs_exists t ~key
   | PostgresNative t -> Backend.PostgresNative.exists t ~key
 
 let backend_list_keys config ~prefix =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.list_keys t ~prefix
-  | FileSystem t ->
-      Backend_eio.FileSystem.list_keys t ~prefix
-      |> Result.map_error eio_to_backend_error
+  | FileSystem t -> backend_fs_list_keys t ~prefix
   | PostgresNative t -> Backend.PostgresNative.list_keys t ~prefix
 
 let backend_get_all config ~prefix =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.get_all t ~prefix
-  | FileSystem t ->
-      Backend_eio.FileSystem.get_all t ~prefix
-      |> Result.map_error eio_to_backend_error
+  | FileSystem t -> backend_fs_get_all t ~prefix
   | PostgresNative t -> Backend.PostgresNative.get_all t ~prefix
 
 let backend_set_if_not_exists config ~key ~value =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.set_if_not_exists t ~key ~value
-  | FileSystem t ->
-      Backend_eio.FileSystem.set_if_not_exists t key value
-      |> Result.map_error eio_to_backend_error
+  | FileSystem t -> backend_fs_set_if_not_exists t ~key ~value
   | PostgresNative t -> Backend.PostgresNative.set_if_not_exists t ~key ~value
 
 let backend_acquire_lock config ~key ~ttl_seconds ~owner =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.acquire_lock t ~key ~ttl_seconds ~owner
-  | FileSystem t ->
-      Backend_eio.FileSystem.acquire_lock t ~key ~owner ~ttl_seconds
-      |> Result.map_error eio_to_backend_error
+  | FileSystem t -> backend_fs_acquire_lock t ~key ~ttl_seconds ~owner
   | PostgresNative t -> Backend.PostgresNative.acquire_lock t ~key ~ttl_seconds ~owner
 
 let backend_release_lock config ~key ~owner =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.release_lock t ~key ~owner
-  | FileSystem t ->
-      Backend_eio.FileSystem.release_lock t ~key ~owner
-      |> Result.map_error eio_to_backend_error
+  | FileSystem t -> backend_fs_release_lock t ~key ~owner
   | PostgresNative t -> Backend.PostgresNative.release_lock t ~key ~owner
 
 let backend_extend_lock config ~key ~ttl_seconds ~owner =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.extend_lock t ~key ~ttl_seconds ~owner
-  | FileSystem t ->
-      Backend_eio.FileSystem.extend_lock t ~key ~owner ~ttl_seconds
-      |> Result.map_error eio_to_backend_error
+  | FileSystem t -> backend_fs_extend_lock t ~key ~ttl_seconds ~owner
   | PostgresNative t -> Backend.PostgresNative.extend_lock t ~key ~ttl_seconds ~owner
 
 let backend_health_check config =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.health_check t
-  | FileSystem t ->
-      (match Backend_eio.FileSystem.health_check t with
-       | Ok status -> Ok status.Backend_eio.is_healthy
-       | Error e -> Error (eio_to_backend_error e))
+  | FileSystem t -> backend_fs_health_check t
   | PostgresNative t -> Backend.PostgresNative.health_check t
 
 let backend_publish config ~channel ~message =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.publish t ~channel ~message
-  | FileSystem t -> Backend_eio.FileSystem.publish t ~channel ~message
+  | FileSystem t -> backend_fs_publish t ~channel ~message
   | PostgresNative t -> Backend.PostgresNative.publish t ~channel ~message
 
 let backend_subscribe config ~channel ~callback =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.subscribe t ~channel ~callback
-  | FileSystem t -> Backend_eio.FileSystem.subscribe t ~channel ~callback
+  | FileSystem t -> backend_fs_subscribe t ~channel ~callback
   | PostgresNative t -> Backend.PostgresNative.subscribe t ~channel ~callback
 
 let backend_name config =

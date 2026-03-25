@@ -1,9 +1,14 @@
 (** Room Utilities - Shared helpers for Room module *)
 
+(** FileSystem backend runtime implementation *)
+type filesystem_backend =
+  | Eio of Backend_eio.FileSystem.t
+  | Compat of Backend.FileSystemBackend.t
+
 (** Storage backend type - unified interface *)
 type storage_backend =
   | Memory of Backend.MemoryBackend.t
-  | FileSystem of Backend_eio.FileSystem.t
+  | FileSystem of filesystem_backend
   | PostgresNative of Backend.PostgresNative.t
 
 (** Room scope — determines which directory tree is active.
@@ -281,11 +286,12 @@ let create_backend cfg =
              Backend_eio.node_id = cfg.Backend.node_id;
              Backend_eio.cluster_name = cfg.Backend.cluster_name;
            } in
-           Ok (FileSystem (Backend_eio.FileSystem.create ~fs eio_cfg))
+           Ok (FileSystem (Eio (Backend_eio.FileSystem.create ~fs eio_cfg)))
        | None ->
-           Log.Backend.warn "No Eio fs available for FileSystem backend; falling back to Memory";
-           (match Backend.MemoryBackend.create cfg with
-            | Ok backend -> Ok (Memory backend)
+           Log.Backend.info
+             "No Eio fs available for FileSystem backend; using compatibility filesystem path";
+           (match Backend.FileSystemBackend.create cfg with
+            | Ok backend -> Ok (FileSystem (Compat backend))
             | Error e -> Error e))
   | Backend.PostgresNative ->
       (* PostgresNative requires Eio context - use create_backend_eio instead *)
@@ -314,7 +320,7 @@ let default_config base_path =
   let backend =
     match create_backend backend_config with
     | Ok backend ->
-        Log.Backend.info "Backend initialized: %s"
+           Log.Backend.info "Backend initialized: %s"
           (match backend with
            | Memory _ -> "Memory"
            | FileSystem _ -> "FileSystem"
@@ -329,15 +335,14 @@ let default_config base_path =
         (match Fs_compat.get_fs_opt () with
          | Some fs ->
              let eio_cfg = {
-               Backend_eio.base_path = fallback_cfg.Backend.base_path;
-               Backend_eio.node_id = fallback_cfg.Backend.node_id;
-               Backend_eio.cluster_name = fallback_cfg.Backend.cluster_name;
-             } in
-             FileSystem (Backend_eio.FileSystem.create ~fs eio_cfg)
+             Backend_eio.base_path = fallback_cfg.Backend.base_path;
+             Backend_eio.node_id = fallback_cfg.Backend.node_id;
+             Backend_eio.cluster_name = fallback_cfg.Backend.cluster_name;
+           } in
+             FileSystem (Eio (Backend_eio.FileSystem.create ~fs eio_cfg))
          | None ->
-             (* No Eio fs: final fallback to in-memory *)
-             (match Backend.MemoryBackend.create fallback_cfg with
-              | Ok mem -> Memory mem
+             (match Backend.FileSystemBackend.create fallback_cfg with
+              | Ok fs -> FileSystem (Compat fs)
               | Error e -> invalid_arg (Printf.sprintf "Failed to initialize any MASC backend: %s" (Backend.show_error e))))
   in
   {
@@ -377,14 +382,14 @@ let default_config_eio ~sw ~env ?(on_backend_ready = fun _backend -> ()) base_pa
         (match Fs_compat.get_fs_opt () with
          | Some fs ->
              let eio_cfg = {
-               Backend_eio.base_path = fallback_cfg.Backend.base_path;
-               Backend_eio.node_id = fallback_cfg.Backend.node_id;
-               Backend_eio.cluster_name = fallback_cfg.Backend.cluster_name;
-             } in
-             FileSystem (Backend_eio.FileSystem.create ~fs eio_cfg)
+             Backend_eio.base_path = fallback_cfg.Backend.base_path;
+             Backend_eio.node_id = fallback_cfg.Backend.node_id;
+             Backend_eio.cluster_name = fallback_cfg.Backend.cluster_name;
+           } in
+             FileSystem (Eio (Backend_eio.FileSystem.create ~fs eio_cfg))
          | None ->
-             (match Backend.MemoryBackend.create fallback_cfg with
-              | Ok mem -> Memory mem
+             (match Backend.FileSystemBackend.create fallback_cfg with
+              | Ok fs -> FileSystem (Compat fs)
               | Error e -> invalid_arg (Printf.sprintf "Failed to initialize any MASC backend: %s" (Backend.show_error e))))
   in
   {

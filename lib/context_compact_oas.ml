@@ -15,11 +15,27 @@
 (* Strategy Type                                                     *)
 (* ================================================================ *)
 
+(** Observation context for dynamic strategy selection (#3070).
+    Mirrors key fields from [Keeper_world_observation.world_observation]
+    but without the module dependency — callers map their observation
+    into this lightweight record. *)
+type observation_context = {
+  context_ratio : float;          (** [0.0, 1.0] — current context window utilization *)
+  active_agent_count : int;       (** Agents currently active in the room *)
+  unclaimed_task_count : int;     (** Pending tasks in the backlog *)
+  is_single_focused_task : bool;  (** Keeper working on exactly one task *)
+  model_family : string;          (** "small_local", "medium_cloud", "large_cloud", "unknown" *)
+}
+
 type strategy =
   | PruneToolOutputs
   | MergeContiguous
   | DropLowImportance
   | SummarizeOld
+  | Dynamic of (observation_context -> strategy list)
+  (** Select strategies at runtime based on observation context.
+      Resolves to a list of concrete strategies (no nested Dynamic).
+      @since #3070 *)
 
 (* ================================================================ *)
 (* Token Estimation                                                  *)
@@ -137,6 +153,17 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
         | Some score -> score >= threshold
         | None -> true
       ) msgs)
+  | Dynamic _ ->
+    (* Dynamic is resolved before reaching oas_strategy_of.
+       If it leaks here, fall back to DropLowImportance. *)
+    Agent_sdk.Context_reducer.Custom (fun msgs ->
+      let scores = score_messages msgs in
+      let threshold = 0.3 in
+      List.filteri (fun i _m ->
+        match List.assoc_opt i scores with
+        | Some score -> score >= threshold
+        | None -> true
+      ) msgs)
   | SummarizeOld ->
     Agent_sdk.Context_reducer.Summarize_old {
       keep_recent = 5;
@@ -182,12 +209,74 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
     Messages are passed directly — no role conversion needed since
     MASC and OAS share the same [Agent_sdk.Types.message] type with
     the same 4 roles (System, User, Assistant, Tool). *)
+(* ================================================================ *)
+(* Dynamic strategy resolution (#3070)                               *)
+(* ================================================================ *)
+
+(** Resolve Dynamic strategies into concrete strategy lists.
+    Non-Dynamic strategies pass through unchanged. *)
+let resolve_strategies
+    ~(obs : observation_context option)
+    (strategies : strategy list) : strategy list =
+  List.concat_map (fun s ->
+    match s with
+    | Dynamic selector ->
+      let obs_val = match obs with
+        | Some o -> o
+        | None ->
+          (* Fallback: minimal observation when none provided *)
+          { context_ratio = 0.5; active_agent_count = 1;
+            unclaimed_task_count = 0; is_single_focused_task = true;
+            model_family = "unknown" }
+      in
+      (* Resolve once — no recursive Dynamic *)
+      selector obs_val
+      |> List.filter (function Dynamic _ -> false | _ -> true)
+    | other -> [other]
+  ) strategies
+
+(** Default dynamic strategy selector.
+    Chooses strategies based on observation context:
+    - High context + multi-agent: aggressive compaction (preserve coordination)
+    - High context + single task: summarize old + drop low importance
+    - Small local model: prefer pruning (cheaper, faster)
+    - Normal: standard DropLowImportance *)
+let default_dynamic_selector (obs : observation_context) : strategy list =
+  if obs.context_ratio >= 0.80 && obs.active_agent_count > 1 then
+    (* Dense coordination: preserve recent turns, aggressive pruning *)
+    [PruneToolOutputs; DropLowImportance; MergeContiguous]
+  else if obs.context_ratio >= 0.70 && obs.is_single_focused_task then
+    (* Focused work near budget: summarize old context *)
+    [PruneToolOutputs; SummarizeOld]
+  else if obs.model_family = "small_local" then
+    (* Small models: lightweight compaction only *)
+    [PruneToolOutputs; MergeContiguous]
+  else
+    (* Default: importance-based *)
+    [DropLowImportance]
+
+(* ================================================================ *)
+(* Public API                                                       *)
+(* ================================================================ *)
+
+(** Apply compaction via OAS Context_reducer.
+
+    Messages are passed directly — no role conversion needed since
+    MASC and OAS share the same [Agent_sdk.Types.message] type with
+    the same 4 roles (System, User, Assistant, Tool).
+
+    @param observation Optional observation context for Dynamic strategies.
+      When a strategy list contains [Dynamic], this context determines
+      which concrete strategies are applied. *)
 let compact
     ~(system_prompt : string)
     ~(messages : Agent_sdk.Types.message list)
     ~(strategies : strategy list)
+    ?(observation : observation_context option)
+    ()
   : Agent_sdk.Types.message list * int =
-  let oas_strategies = List.map oas_strategy_of strategies in
+  let resolved = resolve_strategies ~obs:observation strategies in
+  let oas_strategies = List.map oas_strategy_of resolved in
   let reducer = Agent_sdk.Context_reducer.compose
     (List.map (fun s -> { Agent_sdk.Context_reducer.strategy = s }) oas_strategies) in
   let reduced = Agent_sdk.Context_reducer.reduce reducer messages in

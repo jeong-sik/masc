@@ -487,7 +487,6 @@ let handle_tool_admin_snapshot ctx args =
               ("policy_status", Command_plane_v2.policy_status_json ctx.config);
               ("enforcement_summary", enforcement_summary_json ());
             ] );
-        ("keeper_policies", keeper_policies_json ctx);
         ( "tool_inventory",
           tool_inventory_json ctx ~include_hidden ~include_deprecated );
       ]
@@ -656,18 +655,10 @@ let handle_tool_admin_update ctx args =
               ]
           in
           (true, Yojson.Safe.pretty_to_string payload))
-  | "keeper_policy" ->
-      (match apply_keeper_policy_update ctx.config ~runtime_class:"resident_keeper" args with
-      | Ok json ->
-          (true, Yojson.Safe.pretty_to_string (`Assoc [ ("status", `String "ok"); ("section", `String "keeper_policy"); ("result", json) ]))
-      | Error err -> (false, "❌ " ^ err))
-  | "persistent_agent_policy" ->
-      (match apply_keeper_policy_update ctx.config ~runtime_class:"persistent_agent" args with
-      | Ok json ->
-          (true, Yojson.Safe.pretty_to_string (`Assoc [ ("status", `String "ok"); ("section", `String "persistent_agent_policy"); ("result", json) ]))
-      | Error err -> (false, "❌ " ^ err))
+  | "keeper_policy" | "persistent_agent_policy" ->
+      (false, "keeper_policy and persistent_agent_policy sections removed with policy_mode purge")
   | _ ->
-      (false, "❌ section must be one of: auth | unit_policy | keeper_policy | persistent_agent_policy")
+      (false, "section must be one of: auth | unit_policy")
 
 (* Handlers *)
 

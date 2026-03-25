@@ -3,5 +3,5 @@
  (name council)
  (public_name masc_mcp.council)
  (modules router debate consensus balance executor conversation governance_v2 governance_v2_types governance_v2_serde loop_guard thread_persist council)
- (libraries str yojson base64 unix eio cohttp cohttp-eio uuidm time_compat masc_log fs_compat)
+ (libraries str yojson base64 unix eio eio.unix cohttp cohttp-eio uuidm time_compat masc_log fs_compat)
  (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

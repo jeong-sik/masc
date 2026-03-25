@@ -11,20 +11,42 @@
     Distributed backend paths (Some key in room_utils_ops.ml) are not
     affected — this only replaces the local filesystem lock path. *)
 
-let table : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 64
+type lock_entry = {
+  mu : Eio.Mutex.t;
+  mutable last_used : float;
+}
+
+let max_lock_entries = 512
+let stale_lock_seconds = 600.0
+
+let table : (string, lock_entry) Hashtbl.t = Hashtbl.create 64
 let table_mu = Eio.Mutex.create ()
+
+(** Remove entries unused for [stale_lock_seconds] when table exceeds
+    [max_lock_entries].  Called under [table_mu]. *)
+let prune_stale_entries () =
+  if Hashtbl.length table > max_lock_entries then begin
+    let now = Time_compat.now () in
+    Hashtbl.filter_map_inplace (fun _path entry ->
+      if now -. entry.last_used > stale_lock_seconds then None
+      else Some entry
+    ) table
+  end
 
 (** Get or create a mutex for the given file path.
     Falls back to direct Hashtbl access when no Eio context is available
     (e.g. in unit tests that don't use Eio_main.run). *)
 let get_lock path =
   let f () =
+    prune_stale_entries ();
     match Hashtbl.find_opt table path with
-    | Some mu -> mu
+    | Some entry ->
+      entry.last_used <- Time_compat.now ();
+      entry.mu
     | None ->
-      let mu = Eio.Mutex.create () in
-      Hashtbl.replace table path mu;
-      mu
+      let entry = { mu = Eio.Mutex.create (); last_used = Time_compat.now () } in
+      Hashtbl.replace table path entry;
+      entry.mu
   in
   try Eio.Mutex.use_rw ~protect:true table_mu f
   with Stdlib.Effect.Unhandled _ -> f ()

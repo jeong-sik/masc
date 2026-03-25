@@ -252,6 +252,38 @@ let init_memory_pg_schema () =
   | None ->
       Log.MemoryPg.info "No PG pool available; long_term_backend will use JSONL fallback"
 
+(** Run independent PG schema inits in parallel via Eio fibers.
+    Each init only needs the shared PG pool (created in create_server_state).
+    Parallel execution reduces worst-case 3x RTT to 1x RTT. *)
+let init_pg_schemas_parallel () =
+  let errors = Atomic.make [] in
+  let record_error label exn =
+    let msg = Printf.sprintf "%s: %s" label (Printexc.to_string exn) in
+    let rec loop () =
+      let old = Atomic.get errors in
+      if not (Atomic.compare_and_set errors old (msg :: old)) then loop ()
+    in
+    loop ()
+  in
+  Eio.Fiber.all [
+    (fun () ->
+      try init_task_backend ()
+      with Eio.Cancel.Cancelled _ as e -> raise e
+         | exn -> record_error "task_backend" exn);
+    (fun () ->
+      try inject_shared_pg_pool ()
+      with Eio.Cancel.Cancelled _ as e -> raise e
+         | exn -> record_error "shared_pg_pool" exn);
+    (fun () ->
+      try init_memory_pg_schema ()
+      with Eio.Cancel.Cancelled _ as e -> raise e
+         | exn -> record_error "memory_pg_schema" exn);
+  ];
+  let errs = Atomic.get errors in
+  if errs <> [] then
+    Log.Server.warn "PG schema init completed with errors: %s"
+      (String.concat "; " errs)
+
 let install_tooling ~governance_level (state : Mcp_server.server_state) =
   Governance_pipeline.install ~config:state.room_config ~governance_level;
   Tool_permissions.install ~get_agent_name:(fun () -> None)
@@ -789,9 +821,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       bootstrap_server_state_blocking state;
       install_tooling ~governance_level state;
-      init_task_backend ();
-      inject_shared_pg_pool ();
-      init_memory_pg_schema ();
+      init_pg_schemas_parallel ();
       state
     in
     let run_lazy_task (task_name, task_fn) =
@@ -830,7 +860,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     in
     try
       let pg_init_timeout =
-        Safe_ops.get_env_float_logged "MASC_PG_INIT_TIMEOUT_SEC" ~default:10.0
+        Safe_ops.get_env_float_logged "MASC_PG_INIT_TIMEOUT_SEC" ~default:30.0
       in
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
       let state =

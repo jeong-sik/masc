@@ -227,48 +227,54 @@ let parse_event_lines lines =
         | Error _ -> None)
     lines
 
+(** Read the last [max_lines] from a file by reading the tail [max_bytes].
+    Offloaded to system thread to avoid blocking the Eio scheduler. *)
 let read_tail_lines path ~max_bytes ~max_lines =
   if max_lines <= 0 || max_bytes <= 0 || not (Fs_compat.file_exists path) then
     []
   else
-    try
-      let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
-      Fun.protect
-        ~finally:(fun () -> Unix.close fd)
-        (fun () ->
-          let stats = Unix.fstat fd in
-          let file_size = stats.Unix.st_size in
-          if file_size <= 0 then []
-          else
-            let bytes_to_read = min file_size max_bytes in
-            let start_pos = max 0 (file_size - bytes_to_read) in
-            ignore (Unix.lseek fd start_pos Unix.SEEK_SET);
-            let buf = Bytes.create bytes_to_read in
-            let rec read_loop offset remaining =
-              if remaining <= 0 then offset
-              else
-                match Unix.read fd buf offset remaining with
-                | 0 -> offset
-                | n -> read_loop (offset + n) (remaining - n)
-            in
-            let read_len = read_loop 0 bytes_to_read in
-            if read_len <= 0 then []
+    let f () =
+      try
+        let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
+        Fun.protect
+          ~finally:(fun () -> Unix.close fd)
+          (fun () ->
+            let stats = Unix.fstat fd in
+            let file_size = stats.Unix.st_size in
+            if file_size <= 0 then []
             else
-              let chunk = Bytes.sub_string buf 0 read_len in
-              let normalized =
-                if start_pos = 0 then chunk
+              let bytes_to_read = min file_size max_bytes in
+              let start_pos = max 0 (file_size - bytes_to_read) in
+              ignore (Unix.lseek fd start_pos Unix.SEEK_SET);
+              let buf = Bytes.create bytes_to_read in
+              let rec read_loop offset remaining =
+                if remaining <= 0 then offset
                 else
-                  match String.index_opt chunk '\n' with
-                  | Some idx ->
-                      String.sub chunk (idx + 1) (String.length chunk - idx - 1)
-                  | None -> ""
+                  match Unix.read fd buf offset remaining with
+                  | 0 -> offset
+                  | n -> read_loop (offset + n) (remaining - n)
               in
-              normalized
-              |> String.split_on_char '\n'
-              |> List.filter (fun line -> String.trim line <> "")
-              |> take_last max_lines)
-    with
-    | Unix.Unix_error _ | Sys_error _ -> []
+              let read_len = read_loop 0 bytes_to_read in
+              if read_len <= 0 then []
+              else
+                let chunk = Bytes.sub_string buf 0 read_len in
+                let normalized =
+                  if start_pos = 0 then chunk
+                  else
+                    match String.index_opt chunk '\n' with
+                    | Some idx ->
+                        String.sub chunk (idx + 1) (String.length chunk - idx - 1)
+                    | None -> ""
+                in
+                normalized
+                |> String.split_on_char '\n'
+                |> List.filter (fun line -> String.trim line <> "")
+                |> take_last max_lines)
+      with
+      | Unix.Unix_error _ | Sys_error _ -> []
+    in
+    try Eio_unix.run_in_systhread f
+    with Stdlib.Effect.Unhandled _ -> f ()
 
 let read_events ?max_events config session_id : Yojson.Safe.t list =
   let path = events_jsonl_path config session_id in

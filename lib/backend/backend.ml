@@ -136,19 +136,21 @@ module FileSystemBackend : BACKEND = struct
       | Error e -> Error e
       | Ok path ->
           ensure_dir path;
-          try
-            (* Atomic write: write to temp file, then rename.
-               Sys.rename is atomic on POSIX, so concurrent lock-free
-               reads always see complete file content. *)
+          let write_file () =
             let tmp_path = Printf.sprintf "%s.%d.tmp" path (Unix.getpid ()) in
             Out_channel.with_open_text tmp_path (fun oc ->
               Out_channel.output_string oc value
             );
-            Sys.rename tmp_path path;
+            Sys.rename tmp_path path
+          in
+          (try
+            (* Atomic write via system thread to avoid blocking Eio scheduler *)
+            (try Eio_unix.run_in_systhread write_file
+             with Stdlib.Effect.Unhandled _ -> write_file ());
             Ok ()
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
-          | e -> Error (OperationFailed (Printexc.to_string e))
+          | e -> Error (OperationFailed (Printexc.to_string e)))
     )
 
   let delete t ~key =
@@ -395,24 +397,28 @@ module FileSystemBackend : BACKEND = struct
           end else begin
             let result =
               try
-                let content = In_channel.with_open_text file_path In_channel.input_all in
-                let json = Yojson.Safe.from_string content in
-                let open Yojson.Safe.Util in
-                let own = json |> member "owner" |> to_string in
-                if own = owner then begin
-                  let now = Time_compat.now () in
-                  let expires_at = now +. float_of_int safe_ttl in
-                  let new_json = `Assoc [
-                    ("owner", `String owner);
-                    ("expires_at", `Float expires_at);
-                    ("acquired_at", json |> member "acquired_at");
-                  ] in
-                  Out_channel.with_open_text file_path (fun oc ->
-                    Out_channel.output_string oc (Yojson.Safe.to_string new_json)
-                  );
-                  Ok true
-                end else
-                  Ok false
+                let do_io () =
+                  let content = In_channel.with_open_text file_path In_channel.input_all in
+                  let json = Yojson.Safe.from_string content in
+                  let open Yojson.Safe.Util in
+                  let own = json |> member "owner" |> to_string in
+                  if own = owner then begin
+                    let now = Time_compat.now () in
+                    let expires_at = now +. float_of_int safe_ttl in
+                    let new_json = `Assoc [
+                      ("owner", `String owner);
+                      ("expires_at", `Float expires_at);
+                      ("acquired_at", json |> member "acquired_at");
+                    ] in
+                    Out_channel.with_open_text file_path (fun oc ->
+                      Out_channel.output_string oc (Yojson.Safe.to_string new_json)
+                    );
+                    Ok true
+                  end else
+                    Ok false
+                in
+                (try Eio_unix.run_in_systhread do_io
+                 with Stdlib.Effect.Unhandled _ -> do_io ())
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | e ->
@@ -438,10 +444,14 @@ module FileSystemBackend : BACKEND = struct
   let health_check t =
     try
       let test_path = Filename.concat t.base_path ".health_check" in
-      Out_channel.with_open_text test_path (fun oc ->
-        Out_channel.output_string oc "ok"
-      );
-      Sys.remove test_path;
+      let do_io () =
+        Out_channel.with_open_text test_path (fun oc ->
+          Out_channel.output_string oc "ok"
+        );
+        Sys.remove test_path
+      in
+      (try Eio_unix.run_in_systhread do_io
+       with Stdlib.Effect.Unhandled _ -> do_io ());
       Ok true
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

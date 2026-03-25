@@ -102,7 +102,9 @@ let institution_as_json (config : Room_utils.config) : Yojson.Safe.t option =
 let seed_institution ~(memory : Agent_sdk.Memory.t) ~(config : Room_utils.config) : bool =
   match institution_as_json config with
   | Some json ->
-    ignore (Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "institution" json);
+    (match Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "institution" json with
+     | Ok () -> ()
+     | Error msg -> Logs.warn (fun m -> m "Failed to store institution memory: %s" msg));
     true
   | None -> false
 
@@ -119,7 +121,9 @@ let seed_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limi
       ("procedures", `List (List.map Procedural_memory.to_json procs));
       ("count", `Int (List.length procs));
     ] in
-    ignore (Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "procedures" json);
+    (match Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "procedures" json with
+    | Ok () -> ()
+    | Error msg -> Logs.warn (fun m -> m "Failed to store procedures memory: %s" msg));
     List.length procs
   end
 
@@ -281,7 +285,8 @@ let seed_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
   let episodes = Institution_eio.load_recent_episodes_jsonl ~limit in
   List.iter
     (fun episode ->
-      ignore (Agent_sdk.Memory.store_episode memory (oas_episode_of_institution episode)))
+      (try Agent_sdk.Memory.store_episode memory (oas_episode_of_institution episode)
+       with exn -> Logs.warn (fun m -> m "Failed to store episode memory: %s" (Printexc.to_string exn))))
     episodes;
   List.length episodes
 
@@ -341,7 +346,8 @@ let seed_procedures_as_oas ~(memory : Agent_sdk.Memory.t)
     ~(agent_name : string) ~(limit : int) : int =
   let procs = Procedural_memory.top_procedures ~agent_name ~limit in
   List.iter (fun p ->
-    ignore (Agent_sdk.Memory.store_procedure memory (oas_procedure_of_masc p))
+    (try Agent_sdk.Memory.store_procedure memory (oas_procedure_of_masc p)
+     with exn -> Logs.warn (fun m -> m "Failed to store procedure memory: %s" (Printexc.to_string exn)))
   ) procs;
   List.length procs
 

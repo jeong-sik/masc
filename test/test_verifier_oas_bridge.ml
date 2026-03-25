@@ -226,7 +226,7 @@ let test_verify_skips_readonly () =
     context_summary = "test context";
   } in
   Alcotest.(check bool) "read-only skips to Pass" true
-    (Verifier_oas.verify req = Pass)
+    (Verifier_oas.verify req = Ok Pass)
 
 (* ================================================================ *)
 (* Roundtrip: keeper_default_gate_config -> guardrails               *)

@@ -235,28 +235,39 @@ let create ~sw ~env ~url ~cluster_name ~node_id =
       Error (caqti_error_to_masc err)
   | Ok pool ->
       Log.Backend.info "[EioPG] pool created, initializing schema...";
-      (* Initialize schema including pubsub tables and indexes *)
-      let init_result = Caqti_eio.Pool.use (fun conn ->
-        let module C = (val conn : Caqti_eio.CONNECTION) in
-        let* () = C.exec create_schema_q () in
-        let* () = C.exec create_pubsub_table_q () in
-        let* () = C.exec create_index_q () in
-        let* () = C.exec create_pubsub_index_q () in
-        let* () = C.exec create_pubsub_created_at_index_q () in
-        Ok ()
-      ) pool in
-      (match init_result with
-       | Error err ->
-           Log.Backend.error "[EioPG] schema init failed: %s" (Caqti_error.show err);
-           Error (caqti_error_to_masc err)
-       | Ok () ->
-           Log.Backend.info "[EioPG] connected and schema ready";
-           at_exit (fun () ->
-             try Caqti_eio.Pool.drain pool
-             with exn ->
-               Log.Backend.warn "[EioPG] pool drain failed: %s"
-                 (Printexc.to_string exn));
-           Ok { pool; namespace = cluster_name; node_id })
+      (* Initialize schema: tables first, then indexes (parallel within each phase).
+         Each DDL uses its own pool connection so Eio fibers run concurrently.
+         Reduces startup from 5 sequential RTTs to 2 phases. *)
+      let exec_ddl q () =
+        match Caqti_eio.Pool.use (fun conn ->
+          let module C = (val conn : Caqti_eio.CONNECTION) in
+          C.exec q ()
+        ) pool with
+        | Ok () -> ()
+        | Error err -> failwith (Caqti_error.show err)
+      in
+      (try
+        (* Phase 1: create tables in parallel *)
+        Eio.Fiber.all [
+          exec_ddl create_schema_q;
+          exec_ddl create_pubsub_table_q;
+        ];
+        (* Phase 2: create indexes in parallel (tables must exist) *)
+        Eio.Fiber.all [
+          exec_ddl create_index_q;
+          exec_ddl create_pubsub_index_q;
+          exec_ddl create_pubsub_created_at_index_q;
+        ];
+        Log.Backend.info "[EioPG] connected and schema ready";
+        at_exit (fun () ->
+          try Caqti_eio.Pool.drain pool
+          with exn ->
+            Log.Backend.warn "[EioPG] pool drain failed: %s"
+              (Printexc.to_string exn));
+        Ok { pool; namespace = cluster_name; node_id }
+      with Failure msg ->
+        Log.Backend.error "[EioPG] schema init failed: %s" msg;
+        Error (IOError msg))
 
 let create_readonly ~sw ~env ~url ~cluster_name ~node_id =
   let uri = Uri.of_string url in

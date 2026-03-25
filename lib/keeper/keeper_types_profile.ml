@@ -536,7 +536,9 @@ let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
 let session_base_dir (config : Room.config) =
-  Filename.concat (Room.masc_root_dir config) "perpetual"
+  let d = Filename.concat (Room.masc_root_dir config) "perpetual" in
+  mkdir_p d;
+  d
 
 let keeper_agent_name name =
   Printf.sprintf "keeper-%s-agent" name

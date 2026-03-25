@@ -453,6 +453,24 @@ let _operator_refresh_interval_s =
     ~min_v:2.0
     ~max_v:600.0
 
+(* Shared session list cache between snapshot and digest refresh loops.
+   Both loops run as fibers in the same Eio domain (cooperative scheduling),
+   so no mutex needed for the mutable ref. TTL = 80% of refresh interval
+   to avoid serving stale data across interval boundaries. *)
+let _shared_sessions : Team_session_types.session list option ref = ref None
+let _shared_sessions_at : float ref = ref 0.0
+
+let dashboard_active_or_recent_sessions_cached ~clock config =
+  let now = Time_compat.now () in
+  match !_shared_sessions with
+  | Some cached when now -. !_shared_sessions_at < _operator_refresh_interval_s *. 0.8 ->
+      cached
+  | _ ->
+    let sessions = dashboard_active_or_recent_sessions ~clock config in
+    _shared_sessions := Some sessions;
+    _shared_sessions_at := now;
+    sessions
+
 let operator_snapshot_extra sessions =
   [
     ("session_count", `Int (List.length sessions));
@@ -471,7 +489,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
         (fun ~config ~sw ->
           let sessions =
             if Room.is_initialized config then
-              dashboard_active_or_recent_sessions ~clock config
+              dashboard_active_or_recent_sessions_cached ~clock config
             else
               []
           in
@@ -520,7 +538,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
         (fun ~config ~sw ->
           let sessions =
             if Room.is_initialized config then
-              dashboard_active_or_recent_sessions ~clock config
+              dashboard_active_or_recent_sessions_cached ~clock config
             else
               []
           in

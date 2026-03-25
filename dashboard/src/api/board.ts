@@ -483,4 +483,3 @@ export function commentPost(postId: string, author: string, content: string): Pr
     content,
   })
 }
-

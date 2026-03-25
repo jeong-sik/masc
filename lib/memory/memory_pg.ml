@@ -137,9 +137,10 @@ let make_backend ~(pool : pool) ~(agent_name : string)
     match !errors with
     | [] -> Ok ()
     | errs ->
+      let first_err = match errs with e :: _ -> e | [] -> "unknown" in
       let msg = Printf.sprintf "batch_persist: %d/%d failed: %s"
         (List.length errs) (List.length pairs)
-        (List.hd errs) in
+        first_err in
       Error msg
   in
   let query ~prefix ~limit =

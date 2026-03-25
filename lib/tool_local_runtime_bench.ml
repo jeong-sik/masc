@@ -14,7 +14,7 @@ let pctl percentile values =
           (Float.floor
              (percentile *. float_of_int (max 0 (len - 1))))
       in
-      Some (List.nth sorted index)
+      List.nth_opt sorted index
 
 let raw_completion_at ~server_url ~model_id ~prompt ~max_tokens ~timeout_sec () =
   let url = String.trim server_url ^ "/v1/chat/completions" in

@@ -231,7 +231,7 @@ let manual_help_entry name =
         {
           name;
           short_description =
-            "Return a unified admin snapshot covering tool inventory, auth, mode, keeper policy, and command-plane policy surfaces.";
+            "Return a unified admin snapshot covering tool inventory, auth, and command-plane policy surfaces.";
           when_to_use =
             "Use when you need one truthful view of what tools exist, what is visible, what auth/RBAC applies, and which policy surfaces are enforced versus advisory.";
           key_constraints =
@@ -240,7 +240,7 @@ let manual_help_entry name =
               "Command-plane tool/model allowlists are reported as advisory until runtime enforcement is wired.";
             ];
           details_markdown =
-            "Provides a room-scoped control snapshot: current mode/category gates, auth config and credentials, keeper policy-derived tool gates, command-plane policy topology, and the full tool inventory with metadata and permission hints.";
+            "Provides a room-scoped control snapshot: auth config and credentials, command-plane policy topology, and the full tool inventory with metadata and permission hints.";
           doc_refs =
             [
               "docs/COMMAND-PLANE-RUNBOOK.md";
@@ -248,7 +248,7 @@ let manual_help_entry name =
             ];
           prompt_hints =
             [
-              "Use before changing auth, mode, unit policy, or keeper policy to confirm what is actually enforced.";
+              "Use before changing auth or unit policy to confirm what is actually enforced.";
             ];
         }
   | "masc_tool_admin_update" ->
@@ -256,12 +256,12 @@ let manual_help_entry name =
         {
           name;
           short_description =
-            "Apply mode, auth, unit-policy, or keeper-policy updates through a single admin entrypoint.";
+            "Apply auth, unit-policy, or keeper-policy updates through a single admin entrypoint.";
           when_to_use =
-            "Use when you need to change mode/auth settings, update a unit policy envelope, or adjust keeper policy without bouncing between multiple tools.";
+            "Use when you need to change auth settings, update a unit policy envelope, or adjust keeper policy without bouncing between multiple tools.";
           key_constraints =
             [
-              "Section must be one of mode, auth, unit_policy.";
+              "Section must be one of auth, unit_policy, keeper_policy, or persistent_agent_policy.";
               "Unit tool/model allowlists are stored and surfaced, but remain advisory until runtime enforcement is added.";
             ];
           details_markdown =

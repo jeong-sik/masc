@@ -25,6 +25,8 @@ CI_TEST_ALLOW_CLEAN_RETRY="${CI_TEST_ALLOW_CLEAN_RETRY:-1}"
 CI_TEST_CLEAN_RETRY_DONE=0
 CI_TEST_ALLOW_RPC_RETRY="${CI_TEST_ALLOW_RPC_RETRY:-1}"
 CI_TEST_RPC_RETRY_DONE=0
+CI_TEST_ALLOW_FLAKY_RETRY="${CI_TEST_ALLOW_FLAKY_RETRY:-1}"
+CI_TEST_FLAKY_RETRY_DONE=0
 CI_TEST_ISOLATED_BUILD_DIR="${CI_TEST_ISOLATED_BUILD_DIR:-.ci_build}"
 ACTIVE_TEST_BUILD_DIR="${DUNE_BUILD_DIR:-_build}"
 
@@ -59,6 +61,8 @@ diag_dump() {
   echo "[ci-diag] log_file=${TEST_LOG_FILE}"
   echo "[ci-diag] build_dir=${ACTIVE_TEST_BUILD_DIR}"
 
+  echo "[ci-diag] ulimit -n (open files): $(ulimit -n 2>/dev/null || echo unknown)"
+  echo "[ci-diag] tmpdir usage: $(du -sh "${TMPDIR:-/tmp}" 2>/dev/null | cut -f1 || echo unknown)"
   echo "[ci-diag] process snapshot (dune/ocaml/test):"
   ps -eo pid,ppid,etime,%cpu,%mem,comm,args \
     | grep -Ei 'dune|ocaml|alcotest|test_' \
@@ -250,6 +254,29 @@ if [[ "${status}" -eq 124 ]]; then
   diag_dump "timeout"
   log_line "[ci-run] ERROR: test command timed out after ${TEST_TIMEOUT_SEC}s"
   exit 124
+fi
+
+# Flaky-test retry: if the test failed for reasons not caught by the
+# specific retry handlers above (RPC lock, interface mismatch), retry
+# once with an isolated build dir. This covers CI-only resource
+# exhaustion (fd/tmpdir) that cannot be reproduced locally.
+# See: https://github.com/jeong-sik/masc-mcp/issues/2957
+if [[ "${status}" -ne 0 ]] \
+  && [[ "${CI_TEST_ALLOW_FLAKY_RETRY}" = "1" ]] \
+  && [[ "${CI_TEST_FLAKY_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
+  && test_cmd_needs_dune_sanitization; then
+  CI_TEST_FLAKY_RETRY_DONE=1
+  diag_dump "flaky_pre_retry_${status}"
+  ACTIVE_TEST_BUILD_DIR="${CI_TEST_ISOLATED_BUILD_DIR}_flaky"
+  run_cmd="$(isolated_build_dir_cmd "${effective_cmd}")"
+  log_line "[ci-run] WARN: test failed (exit=${status}); retrying once with isolated build dir ${ACTIVE_TEST_BUILD_DIR} (flaky-test mitigation)"
+  log_line "[ci-run] flaky_retry_started_at=$(iso_now)"
+  set +e
+  run_with_timeout "${run_cmd}"
+  status=$?
+  set -e
 fi
 
 if [[ "${status}" -ne 0 ]]; then

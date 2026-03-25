@@ -65,7 +65,7 @@ let filter_healthy (agents : (string * 'a) list) : (string * 'a) list * (string 
         healthy := (name, data) :: !healthy
     | Unhealthy reason ->
         skipped := (name, reason) :: !skipped;
-        Log.Misc.info "[agent_health] Skipping %s: %s" name reason
+        Log.debug ~ctx:"agent_health" "Skipping %s: %s" name reason
   ) agents;
   (List.rev !healthy, List.rev !skipped)
 

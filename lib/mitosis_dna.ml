@@ -179,7 +179,7 @@ let merge_dna_with_delta ~prepared_dna ~delta =
     let deduped_len = String.length deduped_delta in
     let original_len = String.length delta in
     if deduped_len < original_len then
-      Log.Misc.info "[MITOSIS/MERGE] Deduplication: %d -> %d chars (-%d%% overlap)"
+      Log.debug ~ctx:"mitosis/merge" "Deduplication: %d -> %d chars (-%d%% overlap)"
         original_len deduped_len ((original_len - deduped_len) * 100 / original_len);
     if String.length (String.trim deduped_delta) = 0 then
       prepared_dna

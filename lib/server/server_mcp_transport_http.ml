@@ -966,7 +966,7 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
               Sse.unregister session_id;
               Mcp_eio.clear_resource_subscriptions_for_session session_id;
               forget_mcp_session session_id;
-              Printf.printf "🔚 Session terminated: %s\n%!" session_id;
+              Log.info ~ctx:"mcp_transport" "Session terminated: %s" session_id;
               let headers =
                 Httpun.Headers.of_list
                   (("content-length", "0")

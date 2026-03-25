@@ -168,7 +168,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     |> List.filter (fun tool -> List.mem tool.Types.name allowed)
 
 let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
-  let voice = Voice_bridge.get_voice_for_agent agent_id in
+  let voice = Voice_bridge_eio.get_voice_for_agent agent_id in
   `Assoc
     [
       ("status", `String "text_fallback");
@@ -574,7 +574,7 @@ let execute_keeper_tool_call
          with
         | Some sw, Some clock, Some net -> (
             match
-              Voice_bridge.agent_speak ~sw ~clock ~net ~agent_id:meta.name
+              Voice_bridge_eio.agent_speak ~sw ~clock ~net ~agent_id:meta.name
                 ~message ?provider ~priority ()
             with
             | Ok json -> Yojson.Safe.to_string json
@@ -591,7 +591,7 @@ let execute_keeper_tool_call
               (keeper_text_fallback_json ~agent_id:meta.name ~message))
   | "keeper_voice_agent" ->
       (* No net required — reads local voice config *)
-      (match Voice_bridge.get_agent_voice ~agent_id:meta.name with
+      (match Voice_bridge_eio.get_agent_voice ~agent_id:meta.name with
       | Ok json -> Yojson.Safe.to_string json
       | Error err ->
           Yojson.Safe.to_string

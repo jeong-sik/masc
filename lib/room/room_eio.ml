@@ -59,9 +59,12 @@ let now_iso () =
 (** Create Eio-native room configuration *)
 let create_config ~fs base_path =
   let backend_config = Backend_eio.{
+    backend_type = FileSystem;
     base_path = Filename.concat base_path ".masc";
+    postgres_url = None;
     node_id = Printf.sprintf "node_%d" (Unix.getpid ());
     cluster_name = "default";
+    pubsub_max_messages = Backend_eio.pubsub_max_messages_from_env ();
   } in
   let backend = Backend_eio.FileSystem.create ~fs backend_config in
   {
@@ -74,9 +77,12 @@ let create_config ~fs base_path =
 (** Create test configuration (isolated) *)
 let test_config ~fs base_path =
   let backend_config = Backend_eio.{
+    backend_type = FileSystem;
     base_path = Filename.concat base_path ".masc";
+    postgres_url = None;
     node_id = Printf.sprintf "test_node_%04x" (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF);
     cluster_name = "test";
+    pubsub_max_messages = 1000;
   } in
   let backend = Backend_eio.FileSystem.create ~fs backend_config in
   {
@@ -165,7 +171,8 @@ let log_event config ~event_type ~agent ~payload =
    | Error e ->
        let msg = match e with
          | Backend_eio.IOError m -> m | Backend_eio.NotFound k -> "not found: " ^ k
-         | Backend_eio.AlreadyExists k -> "already exists: " ^ k | Backend_eio.InvalidKey k -> "invalid key: " ^ k in
+         | Backend_eio.AlreadyExists k -> "already exists: " ^ k | Backend_eio.InvalidKey k -> "invalid key: " ^ k
+         | Backend_eio.ConnectionFailed m -> "connection failed: " ^ m | Backend_eio.BackendNotSupported m -> "not supported: " ^ m in
        Log.Room.warn "append_event set failed for seq %d: %s" seq msg);
   event
 
@@ -263,7 +270,9 @@ let read_state config =
         | Backend_eio.IOError msg -> msg
         | Backend_eio.NotFound k -> "Not found: " ^ k
         | Backend_eio.AlreadyExists k -> "Already exists: " ^ k
-        | Backend_eio.InvalidKey k -> "Invalid key: " ^ k)
+        | Backend_eio.InvalidKey k -> "Invalid key: " ^ k
+        | Backend_eio.ConnectionFailed m -> "Connection failed: " ^ m
+        | Backend_eio.BackendNotSupported m -> "Not supported: " ^ m)
 
 (** Write room state *)
 let write_state config state =
@@ -306,7 +315,9 @@ let atomic_update_state config ~f =
         | Backend_eio.IOError msg -> msg
         | Backend_eio.NotFound k -> "Not found: " ^ k
         | Backend_eio.AlreadyExists k -> "Already exists: " ^ k
-        | Backend_eio.InvalidKey k -> "Invalid key: " ^ k)
+        | Backend_eio.InvalidKey k -> "Invalid key: " ^ k
+        | Backend_eio.ConnectionFailed m -> "Connection failed: " ^ m
+        | Backend_eio.BackendNotSupported m -> "Not supported: " ^ m)
 
 (** {1 Agent Operations} *)
 

@@ -422,16 +422,16 @@ let list_sessions ?(since_unix = 0.0) ?(limit = 0) config : Team_session_types.s
           else 10_000
         in
         ( true,
-          Backend.PostgresNative.get_all_matching_recent backend
+          Backend_eio.Postgres.get_all_matching_recent backend
             ~prefix:query_prefix ~suffix:":session.json"
             ~updated_since:(max 0.0 since_unix) ~limit:row_limit )
-    | _ -> (false, Error (Backend.BackendNotSupported "pg recent path unavailable"))
+    | _ -> (false, Error (Backend_eio_types.BackendNotSupported "pg recent path unavailable"))
   in
   let fallback_reason = ref None in
   let last_error = ref None in
   let set_fallback reason err =
     fallback_reason := Some reason;
-    last_error := Some (Backend.show_error err)
+    last_error := Some (Backend_eio_types.show_error err)
   in
   match
     match pg_recent_result with
@@ -439,7 +439,7 @@ let list_sessions ?(since_unix = 0.0) ?(limit = 0) config : Team_session_types.s
     | Error err -> (
         if pg_recent_attempted then
           Log.Session.warn "list_sessions PG recent fallback: %s"
-            (Backend.show_error err);
+            (Backend_eio_types.show_error err);
         set_fallback
           (if pg_recent_attempted then "pg_recent_failed"
            else "pg_recent_unavailable")

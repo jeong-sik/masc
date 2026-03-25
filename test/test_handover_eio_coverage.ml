@@ -165,7 +165,6 @@ let test_generate_id_unique () =
    Eio Helpers
    ============================================================ *)
 
-module Backend = Backend
 module Room_utils = Room_utils
 
 let rec rm_rf path =
@@ -185,25 +184,15 @@ let make_test_dir () =
   tmp_dir
 
 let make_test_config ~base_path : Room_utils.config =
-  let backend_config : Backend.config = {
-    backend_type = Backend.Memory;
+  let backend_config : Backend_eio_types.config = {
+    backend_type = Backend_eio_types.Memory;
     base_path;
     postgres_url = None;
     node_id = "test-node";
     cluster_name = "test";
     pubsub_max_messages = 1000;
   } in
-  let error_to_string = function
-    | Backend.ConnectionFailed s -> "ConnectionFailed: " ^ s
-    | Backend.KeyNotFound s -> "KeyNotFound: " ^ s
-    | Backend.OperationFailed s -> "OperationFailed: " ^ s
-    | Backend.BackendNotSupported s -> "BackendNotSupported: " ^ s
-    | Backend.InvalidKey s -> "InvalidKey: " ^ s
-  in
-  let memory_backend = match Backend.MemoryBackend.create backend_config with
-    | Ok t -> t
-    | Error e -> failwith (Printf.sprintf "Failed to create memory backend: %s" (error_to_string e))
-  in
+  let memory_backend = Backend_eio.Memory.create () in
   {
     base_path;
     workspace_path = base_path;

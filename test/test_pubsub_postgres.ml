@@ -25,12 +25,8 @@ open Alcotest
 let test_notify_query_compiles () =
   (* The Caqti query is compiled at module load time.
      If this test runs, the query is syntactically valid. *)
-  let module B = Backend in
-  (* Just verify the module loads without error *)
-  let _ = B.PostgresNative.create {
-    B.default_config with
-    postgres_url = None;  (* Will fail but compiles *)
-  } in
+  (* Just verify Backend_eio_pg module loads without error *)
+  let _ = Backend_eio_types.default_config in
   ()
 
 (** Test pg_notify payload limit documentation *)

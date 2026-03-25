@@ -21,7 +21,7 @@
 ; ============================================================
 (tests
  (names test_room test_types test_auth test_http_negotiation
-        test_sse test_encryption test_backend test_cancellation test_graphql_api
+        test_sse test_encryption test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_mitosis test_spawn
         test_validation test_response test_voice_stream
@@ -48,7 +48,7 @@
         test_tool_input_validation
 )
  (modules test_room test_types test_auth test_http_negotiation
-          test_sse test_encryption test_backend test_cancellation test_graphql_api
+          test_sse test_encryption test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_mitosis test_spawn
           test_validation test_response test_voice_stream

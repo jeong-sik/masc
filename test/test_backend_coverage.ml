@@ -1,13 +1,12 @@
-(** Comprehensive coverage tests for Backend and Backend_eio modules
+(** Comprehensive coverage tests for Backend_eio modules
 
     Target: Fill coverage gaps identified in existing tests.
     Focus areas:
-    - Backend.ml: FileSystem edge cases, validate_ttl, key validation, lock edge cases
+    - Backend_eio_types: validate_ttl, config, status
     - Backend_eio.ml: Compression, lock operations, atomic operations, unified interface
 *)
 
 open Alcotest
-module Backend = Backend
 module Backend_eio = Backend_eio
 
 (* ============================================================ *)
@@ -37,382 +36,53 @@ let make_test_dir base =
 (* ============================================================ *)
 
 let test_validate_ttl_zero () =
-  let result = Backend.validate_ttl 0 in
+  let result = Backend_eio_types.validate_ttl 0 in
   check int "zero TTL clamped to 1" 1 result
 
 let test_validate_ttl_negative () =
-  let result = Backend.validate_ttl (-100) in
+  let result = Backend_eio_types.validate_ttl (-100) in
   check int "negative TTL clamped to 1" 1 result
 
 let test_validate_ttl_normal () =
-  let result = Backend.validate_ttl 60 in
+  let result = Backend_eio_types.validate_ttl 60 in
   check int "normal TTL unchanged" 60 result
 
 let test_validate_ttl_large () =
-  let result = Backend.validate_ttl 999999 in
+  let result = Backend_eio_types.validate_ttl 999999 in
   check int "large TTL clamped to 86400" 86400 result
 
 let test_validate_ttl_boundary () =
-  check int "TTL at max boundary" 86400 (Backend.validate_ttl 86400);
-  check int "TTL just above max" 86400 (Backend.validate_ttl 86401);
-  check int "TTL at min boundary" 1 (Backend.validate_ttl 1)
+  check int "TTL at max boundary" 86400 (Backend_eio_types.validate_ttl 86400);
+  check int "TTL just above max" 86400 (Backend_eio_types.validate_ttl 86401);
+  check int "TTL at min boundary" 1 (Backend_eio_types.validate_ttl 1)
 
 (* ============================================================ *)
-(* Backend.ml - Key Validation Edge Cases                        *)
-(* ============================================================ *)
-
-let test_fs_backend () =
-  { Backend.default_config with base_path = make_test_dir "masc_key_test" }
-  |> Backend.FileSystemBackend.create
-
-let test_key_with_nul_byte () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test\x00key" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "NUL byte in key should be rejected"
-
-let test_key_consecutive_colons () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test::key" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "Consecutive colons should be rejected"
-
-let test_key_ending_with_colon () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test:" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "Key ending with colon should be rejected"
-
-let test_key_with_wildcards () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test*key" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "Wildcard in key should be rejected"
-
-let test_key_with_quotes () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test\"key" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "Quote in key should be rejected"
-
-let test_key_with_shell_metachar () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test|key" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "Shell metachar should be rejected"
-
-(* ============================================================ *)
-(* Backend.ml - FileSystem CAS and list_keys                     *)
-(* ============================================================ *)
-
-(* NOTE: FileSystemBackend uses non-reentrant Mutex. Use MemoryBackend for these tests. *)
-let test_memory_compare_and_swap () =
-  match Backend.MemoryBackend.create Backend.default_config with
-  | Error _ -> fail "Failed to create MemoryBackend"
-  | Ok backend ->
-      let key = make_unique_key "cas" in
-      let _ = Backend.MemoryBackend.set backend ~key ~value:"initial" in
-
-      (* CAS with wrong expected should fail *)
-      (match Backend.MemoryBackend.compare_and_swap backend ~key ~expected:"wrong" ~value:"new" with
-      | Ok false -> ()
-      | _ -> fail "CAS should fail with wrong expected");
-
-      (* CAS with correct expected should succeed *)
-      (match Backend.MemoryBackend.compare_and_swap backend ~key ~expected:"initial" ~value:"updated" with
-      | Ok true -> ()
-      | _ -> fail "CAS should succeed");
-
-      (* Verify update *)
-      (match Backend.MemoryBackend.get backend ~key with
-      | Ok (Some v) -> check string "CAS updated" "updated" v
-      | _ -> fail "get after CAS failed")
-
-let test_memory_list_keys () =
-  match Backend.MemoryBackend.create Backend.default_config with
-  | Error _ -> fail "Failed to create MemoryBackend"
-  | Ok backend ->
-      let prefix = make_unique_key "list" in
-      let _ = Backend.MemoryBackend.set backend ~key:(prefix ^ ":a") ~value:"1" in
-      let _ = Backend.MemoryBackend.set backend ~key:(prefix ^ ":b") ~value:"2" in
-
-      match Backend.MemoryBackend.list_keys backend ~prefix with
-      | Ok keys -> check int "list_keys count" 2 (List.length keys)
-      | Error _ -> fail "list_keys failed"
-
-let test_memory_get_all () =
-  match Backend.MemoryBackend.create Backend.default_config with
-  | Error _ -> fail "Failed to create MemoryBackend"
-  | Ok backend ->
-      let prefix = make_unique_key "getall" in
-      let _ = Backend.MemoryBackend.set backend ~key:(prefix ^ ":a") ~value:"1" in
-      let _ = Backend.MemoryBackend.set backend ~key:(prefix ^ ":b") ~value:"2" in
-
-      match Backend.MemoryBackend.get_all backend ~prefix with
-      | Ok pairs -> check int "get_all count" 2 (List.length pairs)
-      | Error _ -> fail "get_all failed"
-
-let test_filesystem_health_check () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "masc_health_test" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      match Backend.FileSystemBackend.health_check backend with
-      | Ok true -> ()
-      | Ok false -> fail "health check returned false"
-      | Error _ -> fail "health check error"
-
-(* ============================================================ *)
-(* Backend.ml - Memory Pub/Sub (BackendNotSupported)             *)
-(* ============================================================ *)
-
-let test_memory_pubsub () =
-  let cfg = Backend.{ default_config with backend_type = Memory } in
-  match Backend.MemoryBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let received = ref "" in
-      (match Backend.MemoryBackend.subscribe backend
-          ~channel:"test" ~callback:(fun msg -> received := msg) with
-       | Ok () -> ()
-       | Error e -> fail (Backend.show_error e));
-      (match Backend.MemoryBackend.publish backend
-          ~channel:"test" ~message:"hello" with
-       | Ok count -> check int "1 subscriber" 1 count
-       | Error e -> fail (Backend.show_error e));
-      check string "received message" "hello" !received
-
-let test_filesystem_pubsub () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "masc_ps_test" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let received = ref "" in
-      (match Backend.FileSystemBackend.subscribe backend
-          ~channel:"test" ~callback:(fun msg -> received := msg) with
-       | Ok () -> ()
-       | Error e -> fail (Backend.show_error e));
-      (match Backend.FileSystemBackend.publish backend
-          ~channel:"test" ~message:"hello" with
-       | Ok count -> check int "1 subscriber" 1 count
-       | Error e -> fail (Backend.show_error e));
-      check string "received message" "hello" !received
-
-let test_pubsub_no_subscribers () =
-  let cfg = Backend.{ default_config with backend_type = Memory } in
-  match Backend.MemoryBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      (match Backend.MemoryBackend.publish backend ~channel:"empty" ~message:"msg" with
-       | Ok count -> check int "0 subscribers" 0 count
-       | Error e -> fail (Backend.show_error e))
-
-let test_pubsub_multi_subscribers () =
-  let cfg = Backend.{ default_config with backend_type = Memory } in
-  match Backend.MemoryBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let count_a = ref 0 in
-      let count_b = ref 0 in
-      ignore (Backend.MemoryBackend.subscribe backend
-          ~channel:"ch" ~callback:(fun _ -> incr count_a));
-      ignore (Backend.MemoryBackend.subscribe backend
-          ~channel:"ch" ~callback:(fun _ -> incr count_b));
-      (match Backend.MemoryBackend.publish backend ~channel:"ch" ~message:"x" with
-       | Ok count -> check int "2 subscribers" 2 count
-       | Error e -> fail (Backend.show_error e));
-      check int "a received" 1 !count_a;
-      check int "b received" 1 !count_b
-
-let test_pubsub_channel_isolation () =
-  let cfg = Backend.{ default_config with backend_type = Memory } in
-  match Backend.MemoryBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let received = ref false in
-      ignore (Backend.MemoryBackend.subscribe backend
-          ~channel:"alpha" ~callback:(fun _ -> received := true));
-      ignore (Backend.MemoryBackend.publish backend
-          ~channel:"beta" ~message:"msg");
-      check bool "alpha not triggered by beta" false !received
-
-(* ============================================================ *)
-(* Backend.ml - Lock Edge Cases                                  *)
-(* ============================================================ *)
-
-let test_lock_nonowner_release () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend1" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "lock" in
-      let _ = Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" in
-
-      (* Non-owner should not be able to release *)
-      match Backend.FileSystemBackend.release_lock backend ~key ~owner:"owner2" with
-      | Ok false -> ()
-      | _ -> fail "non-owner release should fail"
-
-let test_lock_nonowner_extend () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend2" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "lock" in
-      let _ = Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" in
-
-      (* Non-owner should not be able to extend *)
-      match Backend.FileSystemBackend.extend_lock backend ~key ~ttl_seconds:120 ~owner:"owner2" with
-      | Ok false -> ()
-      | _ -> fail "non-owner extend should fail"
-
-let test_lock_extend_success () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend3" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "lock" in
-      let _ = Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:10 ~owner:"owner1" in
-
-      (* Owner should be able to extend *)
-      match Backend.FileSystemBackend.extend_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" with
-      | Ok true -> ()
-      | _ -> fail "owner extend should succeed"
-
-let test_lock_release_nonexistent () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend4" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "nolock" in
-      (* Releasing non-existent lock should return false *)
-      match Backend.FileSystemBackend.release_lock backend ~key ~owner:"owner1" with
-      | Ok false -> ()
-      | _ -> fail "release nonexistent should return false"
-
-let test_lock_extend_nonexistent () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend5" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "nolock" in
-      (* Extending non-existent lock should return false *)
-      match Backend.FileSystemBackend.extend_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" with
-      | Ok false -> ()
-      | _ -> fail "extend nonexistent should return false"
-
-let test_lock_reacquire_same_owner () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend6" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "lock" in
-      let _ = Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" in
-
-      (* Same owner should be able to reacquire (refresh) *)
-      match Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" with
-      | Ok true -> ()
-      | _ -> fail "same owner reacquire should succeed"
-
-(* ============================================================ *)
-(* Backend.ml - Memory Lock Expiration                           *)
-(* ============================================================ *)
-
-let test_memory_lock_different_owners () =
-  let cfg = Backend.{ default_config with backend_type = Memory } in
-  match Backend.MemoryBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let _ = Backend.MemoryBackend.acquire_lock backend ~key:"res" ~ttl_seconds:60 ~owner:"a" in
-
-      (* Different owner blocked *)
-      (match Backend.MemoryBackend.acquire_lock backend ~key:"res" ~ttl_seconds:60 ~owner:"b" with
-      | Ok false -> ()
-      | _ -> fail "different owner should be blocked");
-
-      (* Release by owner *)
-      let _ = Backend.MemoryBackend.release_lock backend ~key:"res" ~owner:"a" in
-
-      (* Now b can acquire *)
-      match Backend.MemoryBackend.acquire_lock backend ~key:"res" ~ttl_seconds:60 ~owner:"b" with
-      | Ok true -> ()
-      | _ -> fail "b should acquire after a releases"
-
-(* ============================================================ *)
-(* Backend.ml - Error Type Coverage                              *)
-(* ============================================================ *)
-
-let test_error_types () =
-  (* Test all error constructors *)
-  let e1 = Backend.ConnectionFailed "conn error" in
-  let e2 = Backend.KeyNotFound "key" in
-  let e3 = Backend.OperationFailed "op error" in
-  let e4 = Backend.BackendNotSupported "backend" in
-  let e5 = Backend.InvalidKey "key error" in
-
-  check bool "ConnectionFailed shows" true (String.length (Backend.show_error e1) > 0);
-  check bool "KeyNotFound shows" true (String.length (Backend.show_error e2) > 0);
-  check bool "OperationFailed shows" true (String.length (Backend.show_error e3) > 0);
-  check bool "BackendNotSupported shows" true (String.length (Backend.show_error e4) > 0);
-  check bool "InvalidKey shows" true (String.length (Backend.show_error e5) > 0)
-
-(* ============================================================ *)
-(* Backend.ml - Backend Type Coverage                            *)
-(* ============================================================ *)
-
-let test_backend_type_show () =
-  let s1 = Backend.show_backend_type Backend.Memory in
-  let s2 = Backend.show_backend_type Backend.FileSystem in
-  let s3 = Backend.show_backend_type Backend.PostgresNative in
-
-  check bool "Memory shows" true (String.length s1 > 0);
-  check bool "FileSystem shows" true (String.length s2 > 0);
-  check bool "PostgresNative shows" true (String.length s3 > 0)
-
-let test_backend_type_equal () =
-  check bool "Memory = Memory" true (Backend.equal_backend_type Backend.Memory Backend.Memory);
-  check bool "Memory != FileSystem" false (Backend.equal_backend_type Backend.Memory Backend.FileSystem);
-  check bool "FileSystem = FileSystem" true (Backend.equal_backend_type Backend.FileSystem Backend.FileSystem)
-
-(* ============================================================ *)
-(* Backend.ml - Config and Status                                *)
+(* Backend_eio_types - Config and Status                         *)
 (* ============================================================ *)
 
 let test_get_status_all_backends () =
-  let cfg_mem = { Backend.default_config with backend_type = Backend.Memory } in
-  let cfg_fs = { Backend.default_config with backend_type = Backend.FileSystem } in
-  let cfg_pg = { Backend.default_config with
-    backend_type = Backend.PostgresNative;
+  let cfg_mem = { Backend_eio_types.default_config with backend_type = Backend_eio_types.Memory } in
+  let cfg_fs = { Backend_eio_types.default_config with backend_type = Backend_eio_types.FileSystem } in
+  let cfg_pg = { Backend_eio_types.default_config with
+    backend_type = Backend_eio_types.PostgresNative;
     postgres_url = Some "postgresql://localhost/test"
   } in
 
   let open Yojson.Safe.Util in
 
-  let s1 = Backend.get_status cfg_mem in
+  let s1 = Backend_eio_types.get_status cfg_mem in
   check string "memory status" "memory" (s1 |> member "backend_type" |> to_string);
 
-  let s2 = Backend.get_status cfg_fs in
+  let s2 = Backend_eio_types.get_status cfg_fs in
   check string "fs status" "filesystem" (s2 |> member "backend_type" |> to_string);
 
-  let s3 = Backend.get_status cfg_pg in
+  let s3 = Backend_eio_types.get_status cfg_pg in
   check string "pg status" "postgres_native" (s3 |> member "backend_type" |> to_string);
   check bool "pg url present" true (s3 |> member "postgres_url" |> to_string_option |> Option.is_some)
 
 let test_pubsub_max_messages_env () =
   (* Test the default value - cannot easily test env override in unit test *)
-  let result = Backend.pubsub_max_messages_from_env () in
+  let result = Backend_eio_types.pubsub_max_messages_from_env () in
   check bool "pubsub default >= 100" true (result >= 100)
 
 (* ============================================================ *)
@@ -496,7 +166,7 @@ let with_eio_backend f =
   (* Ensure clock is available for atomic lock-retry sleep on Linux *)
   Eio_context.set_clock clock;
   let tmp_dir = make_test_dir "masc_eio" in
-  let config = Backend_eio.{ base_path = tmp_dir; node_id = "test"; cluster_name = "test" } in
+  let config = { Backend_eio.default_config with base_path = tmp_dir; node_id = "test"; cluster_name = "test" } in
   let backend = Backend_eio.FileSystem.create ~fs config in
   Fun.protect
     ~finally:(fun () -> try rm_rf tmp_dir with _ -> ())
@@ -566,16 +236,16 @@ let test_eio_atomic_get () =
   (* Get non-existent should be 0 *)
   (match Backend_eio.FileSystem.atomic_get backend key with
   | Ok n -> check int "initial is 0" 0 n
-  | Error e -> fail (Printf.sprintf "atomic_get (initial): %s" ((match e with Backend_eio.IOError s | NotFound s | AlreadyExists s | InvalidKey s -> s))));
+  | Error e -> fail (Printf.sprintf "atomic_get (initial): %s" ((Backend_eio.show_error e))));
 
   (match Backend_eio.FileSystem.atomic_increment backend key with
   | Ok _ -> ()
-  | Error e -> fail (Printf.sprintf "atomic_increment: %s" ((match e with Backend_eio.IOError s | NotFound s | AlreadyExists s | InvalidKey s -> s))));
+  | Error e -> fail (Printf.sprintf "atomic_increment: %s" ((Backend_eio.show_error e))));
 
   (* Get after increment should be 1 *)
   match Backend_eio.FileSystem.atomic_get backend key with
   | Ok n -> check int "after increment is 1" 1 n
-  | Error e -> fail (Printf.sprintf "atomic_get (after incr): %s" ((match e with Backend_eio.IOError s | NotFound s | AlreadyExists s | InvalidKey s -> s)))
+  | Error e -> fail (Printf.sprintf "atomic_get (after incr): %s" ((Backend_eio.show_error e)))
 
 let test_eio_atomic_update () =
   with_eio_backend @@ fun backend ->
@@ -794,43 +464,6 @@ let () =
       test_case "normal TTL" `Quick test_validate_ttl_normal;
       test_case "large TTL" `Quick test_validate_ttl_large;
       test_case "boundary TTL" `Quick test_validate_ttl_boundary;
-    ];
-    "key_validation", [
-      test_case "NUL byte" `Quick test_key_with_nul_byte;
-      test_case "consecutive colons" `Quick test_key_consecutive_colons;
-      test_case "ending colon" `Quick test_key_ending_with_colon;
-      test_case "wildcards" `Quick test_key_with_wildcards;
-      test_case "quotes" `Quick test_key_with_quotes;
-      test_case "shell metachar" `Quick test_key_with_shell_metachar;
-    ];
-    "memory_ops", [
-      test_case "compare_and_swap" `Quick test_memory_compare_and_swap;
-      test_case "list_keys" `Quick test_memory_list_keys;
-      test_case "get_all" `Quick test_memory_get_all;
-      test_case "health_check" `Quick test_filesystem_health_check;
-    ];
-    "pubsub", [
-      test_case "memory publish and subscribe" `Quick test_memory_pubsub;
-      test_case "filesystem publish and subscribe" `Quick test_filesystem_pubsub;
-      test_case "no subscribers returns 0" `Quick test_pubsub_no_subscribers;
-      test_case "multi subscribers all receive" `Quick test_pubsub_multi_subscribers;
-      test_case "channel isolation" `Quick test_pubsub_channel_isolation;
-    ];
-    "lock_edge_cases", [
-      test_case "nonowner release" `Quick test_lock_nonowner_release;
-      test_case "nonowner extend" `Quick test_lock_nonowner_extend;
-      test_case "extend success" `Quick test_lock_extend_success;
-      test_case "release nonexistent" `Quick test_lock_release_nonexistent;
-      test_case "extend nonexistent" `Quick test_lock_extend_nonexistent;
-      test_case "reacquire same owner" `Quick test_lock_reacquire_same_owner;
-      test_case "memory different owners" `Quick test_memory_lock_different_owners;
-    ];
-    "error_types", [
-      test_case "error show" `Quick test_error_types;
-    ];
-    "backend_types", [
-      test_case "backend type show" `Quick test_backend_type_show;
-      test_case "backend type equal" `Quick test_backend_type_equal;
     ];
     "config_status", [
       test_case "get_status all backends" `Quick test_get_status_all_backends;

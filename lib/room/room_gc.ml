@@ -291,7 +291,7 @@ let gc config ?(days=7) () =
        results := Printf.sprintf "🗃️ Cleaned %d pubsub message(s) from backend" count :: !results
    | Ok _ -> ()  (* No messages to clean *)
    | Error e ->
-       results := Printf.sprintf "⚠️ Backend pubsub cleanup failed: %s" (Backend.show_error e) :: !results);
+       results := Printf.sprintf "⚠️ Backend pubsub cleanup failed: %s" (Backend_eio_types.show_error e) :: !results);
 
   (* 5. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json)
         and orphan date-split metrics directories (<name>/metrics/ without <name>.json) *)

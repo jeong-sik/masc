@@ -215,19 +215,15 @@ let with_memory_test_env f =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_mem_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
-  let backend_config : Backend.config = {
-    backend_type = Backend.Memory;
+  let backend_config : Backend_eio_types.config = {
+    backend_type = Backend_eio_types.Memory;
     base_path = Filename.concat tmp_dir ".masc";
     postgres_url = None;
     node_id = "test-node";
     cluster_name = "default";
     pubsub_max_messages = 1000;
   } in
-  let memory_backend =
-    match Backend.MemoryBackend.create backend_config with
-    | Ok backend -> backend
-    | Error e -> failwith (Backend.show_error e)
-  in
+  let memory_backend = Backend_eio.Memory.create () in
   let config : Room_utils.config = {
     base_path = tmp_dir;
     workspace_path = tmp_dir;

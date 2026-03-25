@@ -209,22 +209,18 @@ let test_calculate_adaptive_tempo_low_priority () =
    tempo_file Tests
    ============================================================ *)
 
-module Backend = Backend
 module Room_utils = Room_utils
 
 let make_test_config ~base_path : Room_utils.config =
-  let backend_config : Backend.config = {
-    backend_type = Backend.Memory;
+  let backend_config : Backend_eio_types.config = {
+    backend_type = Backend_eio_types.Memory;
     base_path;
     postgres_url = None;
     node_id = "test-node";
     cluster_name = "default";
     pubsub_max_messages = 1000;
   } in
-  let memory_backend = match Backend.MemoryBackend.create backend_config with
-    | Ok t -> t
-    | Error _ -> failwith "Failed to create memory backend"
-  in
+  let memory_backend = Backend_eio.Memory.create () in
   {
     Room_utils.base_path;
     workspace_path = base_path;

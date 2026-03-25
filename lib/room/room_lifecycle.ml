@@ -86,7 +86,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
          (match backend_set config ~key:agent_key
                    ~value:(Yojson.Safe.to_string (agent_to_yojson updated)) with
           | Ok () -> ()
-          | Error e -> Log.Room.warn "rejoin backend_set failed for %s: %s" agent_key (Backend.show_error e))
+          | Error e -> Log.Room.warn "rejoin backend_set failed for %s: %s" agent_key (Backend_eio_types.show_error e))
        end;
        if is_inactive then begin
          (* Restore to active_agents on rejoin *)
@@ -135,7 +135,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
     (match backend_set config ~key:agent_key ~value:(Yojson.Safe.to_string agent_json) with
      | Ok () -> ()
-     | Error e -> Log.Room.warn "join backend_set failed for %s: %s" agent_key (Backend.show_error e))
+     | Error e -> Log.Room.warn "join backend_set failed for %s: %s" agent_key (Backend_eio_types.show_error e))
   end;
 
   (* Update state *)
@@ -302,11 +302,11 @@ let leave config ~agent_name =
         (match backend_set config ~key:agent_key
                   ~value:(Yojson.Safe.to_string updated_json) with
          | Ok () -> ()
-         | Error e -> Log.Room.warn "leave backend_set failed for %s: %s" agent_key (Backend.show_error e))
+         | Error e -> Log.Room.warn "leave backend_set failed for %s: %s" agent_key (Backend_eio_types.show_error e))
       else
         (match backend_delete config ~key:agent_key with
          | Ok _ -> ()
-         | Error e -> Log.Room.warn "leave backend_delete failed for %s: %s" agent_key (Backend.show_error e)))
+         | Error e -> Log.Room.warn "leave backend_delete failed for %s: %s" agent_key (Backend_eio_types.show_error e)))
     end;
 
     (* Capture active agents before removal for relationship materialization *)

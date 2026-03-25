@@ -444,8 +444,8 @@ let write_status ~base_path ~cell ~config =
 let write_status_with_backend ~room_config ~cell ~config =
   let open Room_utils in
   let base_path = room_config.base_path in
-  let node_id = room_config.backend_config.Backend.node_id in
-  let cluster_name = room_config.backend_config.Backend.cluster_name in
+  let node_id = room_config.backend_config.Backend_eio_types.node_id in
+  let cluster_name = room_config.backend_config.Backend_eio_types.cluster_name in
   let tool_calls = cell.tool_call_count in
   let estimated_ratio = Float.min 1.0 (Float.of_int tool_calls /. Defaults.tool_calls_per_full_context) in
   let status =
@@ -478,7 +478,7 @@ let write_status_with_backend ~room_config ~cell ~config =
   let key = Printf.sprintf "mitosis:%s" node_id in
   (match backend_set room_config ~key ~value:json_str with
    | Ok () -> ()
-   | Error e -> Log.Misc.error "mitosis: backend_set failed for %s: %s" node_id (Backend.show_error e))
+   | Error e -> Log.Misc.error "mitosis: backend_set failed for %s: %s" node_id (Backend_eio_types.show_error e))
 
 (** Get all mitosis statuses from backend. *)
 let get_all_statuses ~room_config =

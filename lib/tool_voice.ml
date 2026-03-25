@@ -172,7 +172,7 @@ let handle_voice_speak (ctx : 'a context) args : result =
     | Error message -> (false, message)
     | Ok net ->
         json_string_of_result
-          (Voice_bridge.agent_speak ~sw:ctx.sw ~clock:ctx.clock ~net ~agent_id
+          (Voice_bridge_eio.agent_speak ~sw:ctx.sw ~clock:ctx.clock ~net ~agent_id
              ~message ?provider ~priority ())
 
 (* Category B: local session via Voice_session_manager *)
@@ -221,7 +221,7 @@ let handle_voice_agent _ctx args : result =
   if agent_id = "" then
     (false, "Error: agent_id is required")
   else
-    json_string_of_result (Voice_bridge.get_agent_voice ~agent_id)
+    json_string_of_result (Voice_bridge_eio.get_agent_voice ~agent_id)
 
 (* Category C: STT stub — returns not_available until service is integrated *)
 let handle_voice_transcript (_ctx : 'a context) _args : result =

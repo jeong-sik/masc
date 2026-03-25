@@ -29,7 +29,7 @@ let with_eio_env f =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let tmp_dir = make_test_dir () in
-  let config = Backend_eio.{
+  let config = { Backend_eio.default_config with
     base_path = tmp_dir;
     node_id = "test_node";
     cluster_name = "test";
@@ -48,20 +48,12 @@ let test_set_get () =
   (* Set value *)
   (match Backend_eio.FileSystem.set backend key value with
    | Ok () -> ()
-   | Error e -> Alcotest.failf "set failed: %s" (match e with
-       | Backend_eio.IOError msg -> msg
-       | Backend_eio.NotFound k -> "not found: " ^ k
-       | Backend_eio.AlreadyExists k -> "already exists: " ^ k
-       | Backend_eio.InvalidKey k -> "invalid key: " ^ k));
+   | Error e -> Alcotest.failf "set failed: %s" (Backend_eio.show_error e));
 
   (* Get value *)
   match Backend_eio.FileSystem.get backend key with
   | Ok v -> Alcotest.(check string) "value matches" value v
-  | Error e -> Alcotest.failf "get failed: %s" (match e with
-      | Backend_eio.IOError msg -> msg
-      | Backend_eio.NotFound k -> "not found: " ^ k
-      | Backend_eio.AlreadyExists k -> "already exists: " ^ k
-      | Backend_eio.InvalidKey k -> "invalid key: " ^ k)
+  | Error e -> Alcotest.failf "get failed: %s" (Backend_eio.show_error e)
 
 (** Test exists function *)
 let test_exists () =
@@ -213,7 +205,7 @@ let test_unified_backend () =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let tmp_dir = make_test_dir () in
-  let config = Backend_eio.{
+  let config = { Backend_eio.default_config with
     base_path = tmp_dir;
     node_id = "unified_test";
     cluster_name = "test";
@@ -240,7 +232,7 @@ let test_postgres_backend () =
   | Some url ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
-      let config = Backend_eio.{
+      let config = { Backend_eio.default_config with
         base_path = ".masc";
         node_id = "test_pg_node";
         cluster_name = "test_pg";
@@ -278,7 +270,7 @@ let test_postgres_expired_lock_reacquire () =
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
       let suffix = unique_suffix () in
-      let config = Backend_eio.{
+      let config = { Backend_eio.default_config with
         base_path = ".masc";
         node_id = "test_pg_lock_node";
         cluster_name = "test_pg_lock_" ^ suffix;
@@ -304,7 +296,7 @@ let test_postgres_lock_blocks_other_owner () =
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
       let suffix = unique_suffix () in
-      let config = Backend_eio.{
+      let config = { Backend_eio.default_config with
         base_path = ".masc";
         node_id = "test_pg_lock_node";
         cluster_name = "test_pg_lock_block_" ^ suffix;
@@ -329,7 +321,7 @@ let test_postgres_expired_lock_concurrent_reacquire () =
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
       let suffix = unique_suffix () in
-      let config = Backend_eio.{
+      let config = { Backend_eio.default_config with
         base_path = ".masc";
         node_id = "test_pg_lock_node";
         cluster_name = "test_pg_lock_race_" ^ suffix;
@@ -364,7 +356,7 @@ let test_postgres_old_owner_cannot_release_reclaimed_lock () =
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
       let suffix = unique_suffix () in
-      let config = Backend_eio.{
+      let config = { Backend_eio.default_config with
         base_path = ".masc";
         node_id = "test_pg_lock_node";
         cluster_name = "test_pg_lock_release_" ^ suffix;

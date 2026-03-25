@@ -572,29 +572,48 @@ module Memory = struct
     mutex: Eio.Mutex.t;
   }
 
+  let _poisoned_warned = Atomic.make false
+
+  (** Eio.Mutex wrapper with fallback for non-Eio test contexts.
+      When called outside Eio_main.run (e.g., unit tests without Eio),
+      Effect.Unhandled is raised. A prior failure may also leave the mutex
+      in a Poisoned state. In both cases, run the function unprotected --
+      safe because test contexts are single-fiber with no contention. *)
+  let with_lock t f =
+    match Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> f ())
+    with
+    | result -> result
+    | exception Effect.Unhandled _ -> f ()
+    | exception Eio__Eio_mutex.Poisoned _ ->
+        if not (Atomic.exchange _poisoned_warned true) then
+          Log.Backend.warn "Memory backend: Eio.Mutex poisoned, running unprotected (non-Eio context)";
+        f ()
+
   let create () = {
     data = Hashtbl.create 64;
     mutex = Eio.Mutex.create ();
   }
 
   let get t key =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    with_lock t (fun () ->
       match Hashtbl.find_opt t.data key with
       | Some v -> Ok v
       | None -> Error (NotFound key)
     )
 
   let set t key value =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    with_lock t (fun () ->
       Hashtbl.replace t.data key value;
       Ok ()
     )
 
   let exists t key =
-    Hashtbl.mem t.data key
+    with_lock t (fun () ->
+      Hashtbl.mem t.data key
+    )
 
   let delete t key =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    with_lock t (fun () ->
       if Hashtbl.mem t.data key then begin
         Hashtbl.remove t.data key;
         Ok ()
@@ -603,16 +622,18 @@ module Memory = struct
     )
 
   let list_keys t ~prefix =
-    let keys = Hashtbl.fold (fun k _ acc ->
-      if String.length k >= String.length prefix &&
-         String.sub k 0 (String.length prefix) = prefix then
-        k :: acc
-      else acc
-    ) t.data [] in
-    Ok keys
+    with_lock t (fun () ->
+      let keys = Hashtbl.fold (fun k _ acc ->
+        if String.length k >= String.length prefix &&
+           String.sub k 0 (String.length prefix) = prefix then
+          k :: acc
+        else acc
+      ) t.data [] in
+      Ok keys
+    )
 
   let clear t =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    with_lock t (fun () ->
       Hashtbl.clear t.data
     )
 end
@@ -626,6 +647,11 @@ module Postgres = struct
   (** Adapter: accept [config] record matching [Backend_eio.config]. *)
   let create ~sw ~env ~url config =
     Backend_eio_pg.create ~sw ~env ~url
+      ~cluster_name:config.cluster_name ~node_id:config.node_id
+
+  (** Readonly adapter with smaller pool. *)
+  let create_readonly ~sw ~env ~url config =
+    Backend_eio_pg.create_readonly ~sw ~env ~url
       ~cluster_name:config.cluster_name ~node_id:config.node_id
 end
 

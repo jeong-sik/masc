@@ -29,10 +29,3 @@ export function LoadingState({ class: cx, children }: LoadingStateProps) {
     </div>
   `
 }
-
-/** Error state — red tinted */
-export function ErrorState({ class: cx, children }: { class?: string; children: ComponentChildren }) {
-  return html`
-    <div class="text-center py-6 text-[13px] text-[var(--bad)] ${cx ?? ''}">${children}</div>
-  `
-}

@@ -407,9 +407,7 @@
    tool_input_validation
    tool_tag_init
    tool_permissions
-   sse_room_filter
    tool_metrics
-   tool_harness_health
    tool_inline_dispatch_types
    tool_inline_dispatch_room
    tool_inline_dispatch_comm
@@ -433,7 +431,6 @@
    mention_inbox
    agent_reputation
    activity_feed
-   social
    transport
    transport_metrics
    ;; gRPC coordination transport (grpc-direct)
@@ -452,7 +449,6 @@
   voice_bridge_eio_core
   voice_bridge
   voice_session_manager
-  voice_stream
    version
    ;; webrtc_bindings/common/datachannel removed — in ocaml-webrtc
    ;; Keeper Agent Harness (trajectory + eval gates + scenarios)

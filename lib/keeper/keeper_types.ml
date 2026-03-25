@@ -779,3 +779,13 @@ type fiber_health =
   | Fiber_zombie   (** Registry entry exists but fiber terminated *)
   | Fiber_dead     (** Restart budget exhausted, manual recovery needed *)
   | Fiber_unknown  (** Not in supervised registry *)
+
+(** Per-tool usage entry for keeper tool tracking.
+    Defined here so Keeper_registry can embed it without depending
+    on Keeper_tools_oas (avoids module init order issues). *)
+type tool_call_entry = {
+  mutable count : int;
+  mutable successes : int;
+  mutable failures : int;
+  mutable last_used_at : float;
+}

@@ -216,38 +216,25 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
       let trimmed = String.trim meta.continuity_summary in
       if trimmed = "" then "No continuity snapshot available." else trimmed
 
-(** Per-keeper cursor for board event collection.
-    Tracks the last check timestamp so no posts are missed between heartbeats.
-    In-memory only — first run after restart uses a 300s bootstrap window. *)
-let board_cursors_mu = Eio.Mutex.create ()
-let board_cursors : (string, float) Hashtbl.t = Hashtbl.create 8
+(** Board event cursor bootstrap window (seconds). *)
 let bootstrap_window_sec = 300.0
 
-let reset_board_cursor name =
-  Eio.Mutex.use_rw ~protect:true board_cursors_mu (fun () ->
-      Hashtbl.remove board_cursors name)
-[@@warning "-32"]
 (** Collect recent board activity using cursor-based tracking.
+    Cursor state lives in Keeper_registry (board_cursor_ts field).
     Returns (event summaries, new post count, mention count). *)
-let collect_board_events ~(continuity_summary : string) ~(meta : keeper_meta) :
-    string list * int * int =
+let collect_board_events ~(base_path : string) ~(continuity_summary : string)
+    ~(meta : keeper_meta) : string list * int * int =
   try
     let since_ts =
-      Eio.Mutex.use_ro board_cursors_mu (fun () ->
-          match Hashtbl.find_opt board_cursors meta.name with
-          | Some ts -> ts
-          | None -> Time_compat.now () -. bootstrap_window_sec)
+      let ts = Keeper_registry.get_board_cursor_ts ~base_path meta.name in
+      if ts > 0.0 then ts
+      else Time_compat.now () -. bootstrap_window_sec
     in
-    (* Capture the watermark before fetch so posts created during the read
-       window are included on the next pass instead of being skipped. *)
     let cursor_watermark = Time_compat.now () in
     let posts =
       Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:20 ()
     in
-    (* Update the cursor only after a successful read to avoid losing events
-       when the board fetch fails mid-turn. *)
-    Eio.Mutex.use_rw ~protect:true board_cursors_mu (fun () ->
-        Hashtbl.replace board_cursors meta.name cursor_watermark);
+    Keeper_registry.set_board_cursor_ts ~base_path meta.name cursor_watermark;
     let recent =
       List.filter (fun (p : Board.post) -> p.updated_at >= since_ts) posts
       |> List.filter (fun (p : Board.post) ->
@@ -338,7 +325,7 @@ let observe ~(pending_board_events : string list option) ~(config : Room.config)
     | Some events -> events
     | None ->
         let events, _board_new_count, _board_mention_count =
-          collect_board_events ~meta ~continuity_summary
+          collect_board_events ~base_path:config.base_path ~meta ~continuity_summary
         in
         events
   in

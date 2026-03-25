@@ -16,13 +16,11 @@ let file_contains_pattern file_rel pattern =
       ~finally:(fun () -> close_in_noerr ic)
       (fun () ->
         let content = In_channel.input_all ic in
-        let rec loop idx =
-          let remaining = String.length content - idx in
-          let plen = String.length pattern in
-          remaining >= plen
-          && (String.sub content idx plen = pattern || loop (idx + 1))
-        in
-        if String.length pattern = 0 then true else loop 0)
+        if String.length pattern = 0 then true
+        else
+          let re = Str.regexp_string pattern in
+          (try ignore (Str.search_forward re content 0); true
+           with Not_found -> false))
 
 let test_ci_sync_and_asset_contracts () =
   check bool "pr sync script added" true

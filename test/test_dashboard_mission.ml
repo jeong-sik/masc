@@ -4,6 +4,9 @@ module Lib = Masc_mcp
 
 open Alcotest
 
+(* Force filesystem backend so tests run without PG/Eio context. *)
+let () = Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
+
 let test_dir () =
   let tmp = Filename.temp_file "masc_dashboard_mission" "" in
   Sys.remove tmp;
@@ -313,8 +316,13 @@ let test_dashboard_mission_projection () =
         ~context:"fixture context"
         ~allowed_tools:[ "masc_board_comment" ]
         ();
-      Sys.remove
-        (Filename.concat (Room_utils.agents_dir config) "llama-local-delta.json");
+      (* Simulate delta departing: remove agent file if it exists (Memory
+         backend does not write files), then ensure agent dir exists so
+         Dashboard_mission sees delta as departed. *)
+      let delta_path =
+        Filename.concat (Room_utils.agents_dir config) "llama-local-delta.json"
+      in
+      if Sys.file_exists delta_path then Sys.remove delta_path;
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_mission.json

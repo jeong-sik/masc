@@ -830,7 +830,7 @@ let test_resident_list_items_expose_runtime_config_summary () =
       in
       check string "runtime class" "resident_keeper"
         Yojson.Safe.Util.(row |> member "runtime_class" |> to_string);
-      check string "policy mode" "heuristic"
+      check string "policy mode" "unified"
         Yojson.Safe.Util.(row |> member "policy_mode" |> to_string);
       check string "trigger mode" "explicit_only"
         Yojson.Safe.Util.(row |> member "trigger_mode" |> to_string);

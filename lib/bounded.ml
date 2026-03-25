@@ -308,7 +308,7 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
           let agent_idx = state.turns mod (List.length agents) in
           let agent = match List.nth_opt agents agent_idx with
             | Some a -> a
-            | None -> (match agents with a :: _ -> a | [] -> failwith "bounded: empty agents")
+            | None -> assert false (* unreachable: idx = turns mod length *)
           in
 
           (* 4. Execute agent with retry logic *)

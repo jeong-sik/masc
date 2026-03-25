@@ -3,14 +3,13 @@
 
 module KET = Masc_mcp.Keeper_exec_tools
 
-let make_meta ?(policy_mode = "learned_offline_v1") () =
+let make_meta () =
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
       [
         ("name", `String "keeper-bridge-test");
         ("agent_name", `String "keeper-bridge-test");
         ("trace_id", `String "keeper-bridge-trace");
-        ("policy_mode", `String policy_mode);
       ])
   with
   | Ok meta -> meta

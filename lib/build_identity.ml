@@ -40,16 +40,22 @@ let executable_dir () =
 (** Probe git commit via subprocess.
     Offloaded to system thread to avoid blocking Eio scheduler. *)
 let git_capture_output ~repo_root args =
-  let ic =
-    Unix.open_process_args_in "git"
+  let channels =
+    Unix.open_process_args_full "git"
       (Array.of_list ("git" :: "-C" :: repo_root :: args))
+      (Unix.environment ())
   in
   Fun.protect
     ~finally:(fun () ->
-      match Unix.close_process_in ic with
+      match Unix.close_process_full channels with
       | Unix.WEXITED 0 -> ()
       | _ -> ())
-    (fun () -> In_channel.input_all ic)
+    (fun () ->
+      let stdout, stdin, stderr = channels in
+      close_out_noerr stdin;
+      let output = In_channel.input_all stdout in
+      ignore (In_channel.input_all stderr);
+      output)
 
 let git_probe_from_root repo_root =
   let f () =

@@ -101,6 +101,32 @@ module FileSystem = struct
         let path_part = String.map (function ':' -> '/' | c -> c) safe_key in
         Ok Eio.Path.(t.fs / path_part)
 
+  let run_blocking_file_op f =
+    try Eio_unix.run_in_systhread f
+    with Stdlib.Effect.Unhandled _ -> f ()
+
+  let with_locked_rw_fd path_str f =
+    run_blocking_file_op (fun () ->
+        let fd = Unix.openfile path_str [ Unix.O_RDWR; Unix.O_CREAT ] 0o644 in
+        Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer"
+          ~finally:(fun () -> Unix.close fd)
+        @@ fun () ->
+        let rec try_lock retries =
+          if retries <= 0 then
+            raise (Failure "Failed to acquire lock after max retries")
+          else
+            try Unix.lockf fd Unix.F_TLOCK 0
+            with
+            | Unix.Unix_error (Unix.EAGAIN, _, _)
+            | Unix.Unix_error (Unix.EACCES, _, _) ->
+                Unix.sleepf 0.01;
+                try_lock (retries - 1)
+        in
+        let _ = try_lock 100 in
+        Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer"
+          ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0)
+        @@ fun () -> f fd)
+
   (** {2 Core Operations} *)
 
   (** Get value by key (auto-decompresses ZSTD if detected) *)
@@ -407,48 +433,22 @@ module FileSystem = struct
                             (Printexc.to_string e)))
            | None -> ());
 
-          (* Get the actual filesystem path string *)
           let path_str = Eio.Path.native_exn path in
-
-          (* Open file for read+write, create if needed *)
-          let fd = Unix.openfile path_str [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
-          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.close fd) @@ fun () ->
-
-          (* Acquire exclusive lock with non-blocking retry *)
-          let max_retries = 100 in
-          let rec try_lock retries =
-            if retries <= 0 then
-              raise (Failure "Failed to acquire lock after max retries")
-            else
-              try
-                Unix.lockf fd Unix.F_TLOCK 0;  (* Non-blocking try *)
-                true
-              with Unix.Unix_error (Unix.EAGAIN, _, _)
-                 | Unix.Unix_error (Unix.EACCES, _, _) ->
-                (* Lock held by another process, yield and retry *)
-                Eio.Fiber.yield ();
-                try_lock (retries - 1)
-          in
-          let _ = try_lock max_retries in
-          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
-
-          (* Read current value *)
+          with_locked_rw_fd path_str @@ fun fd ->
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
           let buf = Bytes.create 32 in
           let n = Unix.read fd buf 0 32 in
           let current =
             if n = 0 then 0
             else
-              Safe_ops.int_of_string_with_default ~default:0 (String.trim (Bytes.sub_string buf 0 n))
+              Safe_ops.int_of_string_with_default ~default:0
+                (String.trim (Bytes.sub_string buf 0 n))
           in
-
-          (* Increment and write back *)
           let new_value = current + 1 in
           let new_str = string_of_int new_value in
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
           let _ = Unix.ftruncate fd 0 in
           let _ = Unix.write_substring fd new_str 0 (String.length new_str) in
-
           Ok new_value
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Error (IOError (Printf.sprintf "atomic_increment failed: %s" (Printexc.to_string exn)))
@@ -465,14 +465,20 @@ module FileSystem = struct
     | Ok path ->
         try
           let path_str = Eio.Path.native_exn path in
-          if not (Sys.file_exists path_str) then Ok 0
-          else
-            let fd = Unix.openfile path_str [Unix.O_RDONLY] 0o644 in
-            Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.close fd) @@ fun () ->
-            let buf = Bytes.create 32 in
-            let n = Unix.read fd buf 0 32 in
-            if n = 0 then Ok 0
-            else Ok (Safe_ops.int_of_string_with_default ~default:0 (String.trim (Bytes.sub_string buf 0 n)))
+          run_blocking_file_op (fun () ->
+            try
+              let fd = Unix.openfile path_str [ Unix.O_RDONLY ] 0o644 in
+              Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer"
+                ~finally:(fun () -> Unix.close fd)
+              @@ fun () ->
+              let buf = Bytes.create 32 in
+              let n = Unix.read fd buf 0 32 in
+              if n = 0 then Ok 0
+              else
+                Ok
+                  (Safe_ops.int_of_string_with_default ~default:0
+                     (String.trim (Bytes.sub_string buf 0 n)))
+            with Unix.Unix_error (Unix.ENOENT, _, _) -> Ok 0)
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Error (IOError (Printf.sprintf "atomic_get failed: %s" (Printexc.to_string exn)))
 
@@ -500,29 +506,7 @@ module FileSystem = struct
            | None -> ());
 
           let path_str = Eio.Path.native_exn path in
-
-          (* Open file for read+write, create if needed *)
-          let fd = Unix.openfile path_str [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
-          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.close fd) @@ fun () ->
-
-          (* Acquire exclusive lock with non-blocking retry *)
-          let max_retries = 100 in
-          let rec try_lock retries =
-            if retries <= 0 then
-              raise (Failure "Failed to acquire lock after max retries")
-            else
-              try
-                Unix.lockf fd Unix.F_TLOCK 0;
-                true
-              with Unix.Unix_error (Unix.EAGAIN, _, _)
-                 | Unix.Unix_error (Unix.EACCES, _, _) ->
-                Eio.Fiber.yield ();
-                try_lock (retries - 1)
-          in
-          let _ = try_lock max_retries in
-          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
-
-          (* Read current content *)
+          with_locked_rw_fd path_str @@ fun fd ->
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
           let stat = Unix.fstat fd in
           let size = stat.Unix.st_size in
@@ -534,20 +518,14 @@ module FileSystem = struct
               if n = 0 then None
               else
                 let raw = Bytes.sub_string buf 0 n in
-                (* Auto-decompress if ZSTD *)
                 Some (Compression.decompress_auto raw)
             end
           in
-
-          (* Apply transform function *)
           let new_content = f current in
-
-          (* Compress and write back *)
           let compressed = Compression.compress_with_header new_content in
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
           let _ = Unix.ftruncate fd 0 in
           let _ = Unix.write_substring fd compressed 0 (String.length compressed) in
-
           Ok new_content
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Error (IOError (Printf.sprintf "atomic_update failed: %s" (Printexc.to_string exn)))

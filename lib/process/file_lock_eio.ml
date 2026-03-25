@@ -51,34 +51,51 @@ let get_lock path =
   try Eio.Mutex.use_rw ~protect:true table_mu f
   with Stdlib.Effect.Unhandled _ -> f ()
 
+let run_blocking_lock_op f =
+  try Eio_unix.run_in_systhread f
+  with Stdlib.Effect.Unhandled _ -> f ()
+
+let acquire_flock_fd lock_path =
+  run_blocking_lock_op (fun () ->
+      let fd = Unix.openfile lock_path [ Unix.O_CREAT; Unix.O_WRONLY ] 0o644 in
+      let rec acquire attempts =
+        if attempts <= 0 then
+          raise (Failure (Printf.sprintf "File_lock_eio: flock timeout on %s" lock_path))
+        else
+          try
+            Unix.lockf fd Unix.F_TLOCK 0;
+            fd
+          with
+          | Unix.Unix_error (Unix.EAGAIN, _, _)
+          | Unix.Unix_error (Unix.EACCES, _, _) ->
+              Unix.sleepf 0.01;
+              acquire (attempts - 1)
+      in
+      try
+        acquire 200
+      with exn ->
+        Unix.close fd;
+        raise exn)
+
+let release_flock_fd fd =
+  run_blocking_lock_op (fun () ->
+      (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
+      Unix.close fd)
+
 (** Run [f] while holding both the cooperative Eio.Mutex and an
     OS-level flock on [path].lock.  The flock is acquired with F_TLOCK
-    (non-blocking) and retried with Eio.Fiber.yield to avoid blocking
-    the scheduler.  Max 200 attempts (~2s with yields). *)
+    (non-blocking) from a system thread so the Eio scheduler stays free.
+    Max 200 attempts (~2s with sleeps). *)
 let with_lock path f =
   let run_with_flock () =
     let lock_path = path ^ ".lock" in
     let dir = Filename.dirname lock_path in
     if not (Sys.file_exists dir) then
       (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-    let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
-    let rec acquire attempts =
-      if attempts <= 0 then
-        failwith (Printf.sprintf "File_lock_eio: flock timeout on %s" lock_path)
-      else
-        try Unix.lockf fd Unix.F_TLOCK 0
-        with Unix.Unix_error (Unix.EAGAIN, _, _) | Unix.Unix_error (Unix.EACCES, _, _) ->
-          (try Eio.Fiber.yield () with Stdlib.Effect.Unhandled _ -> Unix.sleepf 0.01);
-          acquire (attempts - 1)
-    in
+    let fd = acquire_flock_fd lock_path in
     Common.protect ~module_name:"file_lock_eio" ~finally_label:"finalizer"
-      ~finally:(fun () ->
-        (try Unix.lockf fd Unix.F_ULOCK 0
-         with Unix.Unix_error _ -> ());
-        Unix.close fd)
-      (fun () ->
-        acquire 200;
-        f ())
+      ~finally:(fun () -> release_flock_fd fd)
+      f
   in
   try
     let mu = get_lock path in

@@ -2,6 +2,7 @@ open Alcotest
 
 type http_result = {
   status: int option;
+  body: string;
   curl_exit: int;
   stderr: string;
 }
@@ -123,10 +124,11 @@ let run_curl ?(headers=[]) ?max_time ~port ~path () =
     | Unix.WSTOPPED code -> 256 + code
   in
   let header_raw = read_file header_file in
+  let body = read_file body_file in
   (try Sys.remove header_file with _ -> ());
   (try Sys.remove body_file with _ -> ());
   let (status, _headers) = parse_headers header_raw in
-  { status; curl_exit; stderr }
+  { status; body; curl_exit; stderr }
 
 let find_main_eio_exe () =
   let env_override = Sys.getenv_opt "MASC_MAIN_EIO_EXE" in

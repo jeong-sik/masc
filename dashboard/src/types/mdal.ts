@@ -55,14 +55,3 @@ export interface MdalLoop {
   history: MdalIterationRecord[]
 }
 
-// --- Perpetual Agent ---
-
-export interface PerpetualStatus {
-  running: boolean
-  goal?: string
-  turn?: number
-  generation?: number
-  context_ratio?: number
-  model?: string
-  cost_usd?: number
-}

@@ -87,7 +87,7 @@ export function OpsSessionColumn() {
       await effect()
       await refreshSelectedSession()
     } catch (err) {
-      autoresearchError.value = err instanceof Error ? err.message : 'Autoresearch action failed'
+      autoresearchError.value = err instanceof Error ? err.message : '오토리서치 액션 실패'
     } finally {
       autoresearchBusy.value = false
     }

@@ -460,9 +460,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <span class="text-xs text-[var(--text-muted)]">State</span>
         <${FeatureBadge} status=${c.drift.status} value=${c.drift.enabled} />
       </div>
-      <${ConfigRow} label="Min turn gap" value=${formatMaybeNumber(c.drift.min_turn_gap)} />
-      <${ConfigRow} label="Count total" value=${formatMaybeNumber(c.drift.count_total)} />
-      ${c.drift.last_reason ? html`<${ConfigRow} label="Last reason" value=${c.drift.last_reason} />` : null}
+      <${ConfigRow} label="최소 턴 간격" value=${formatMaybeNumber(c.drift.min_turn_gap)} />
+      <${ConfigRow} label="총 횟수" value=${formatMaybeNumber(c.drift.count_total)} />
+      ${c.drift.last_reason ? html`<${ConfigRow} label="마지막 사유" value=${c.drift.last_reason} />` : null}
 
       ${'' /* --- Initiative (read-only) --- */}
       <${SectionHeader} title="이니셔티브" />
@@ -470,10 +470,10 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <span class="text-xs text-[var(--text-muted)]">State</span>
         <${FeatureBadge} status=${c.initiative.status} value=${c.initiative.enabled} />
       </div>
-      <${ConfigRow} label="Scope" value=${c.initiative.scope || '--'} />
-      <${ConfigRow} label="Idle trigger" value=${formatMaybeNumber(c.initiative.idle_sec, 's')} />
-      <${ConfigRow} label="Cooldown" value=${formatMaybeNumber(c.initiative.cooldown_sec, 's')} />
-      <${ConfigRow} label="Context mode" value=${c.initiative.context_mode || '--'} />
+      <${ConfigRow} label="범위" value=${c.initiative.scope || '--'} />
+      <${ConfigRow} label="유휴 트리거" value=${formatMaybeNumber(c.initiative.idle_sec, 's')} />
+      <${ConfigRow} label="쿨다운" value=${formatMaybeNumber(c.initiative.cooldown_sec, 's')} />
+      <${ConfigRow} label="컨텍스트 모드" value=${c.initiative.context_mode || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">기본값에 설정됨</span>
         <${BoolBadge} value=${c.initiative.configured_in_source} />
@@ -501,25 +501,25 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <span class="text-xs text-[var(--text-muted)]">Auto</span>
         <${BoolBadge} value=${c.handoff.auto} />
       </div>
-      <${ConfigRow} label="Threshold" value=${(c.handoff.threshold * 100).toFixed(0) + '%'} />
-      <${ConfigRow} label="Cooldown" value=${c.handoff.cooldown_sec + 's'} />
+      <${ConfigRow} label="임계값" value=${(c.handoff.threshold * 100).toFixed(0) + '%'} />
+      <${ConfigRow} label="쿨다운" value=${c.handoff.cooldown_sec + 's'} />
 
       ${'' /* --- Last Call Performance (read-only) --- */}
       ${'' /* Totals (generation, turns, tokens, cost, compactions) are in KpiGrid */}
       <${SectionHeader} title="마지막 호출 성능" />
-      <${ConfigRow} label="Total input tokens" value=${formatTokens(c.metrics.total_input_tokens)} />
-      <${ConfigRow} label="Total output tokens" value=${formatTokens(c.metrics.total_output_tokens)} />
-      <${ConfigRow} label="Last model" value=${c.metrics.last_model_used || '--'} />
-      <${ConfigRow} label="Last input tokens" value=${formatTokens(c.metrics.last_input_tokens)} />
-      <${ConfigRow} label="Last output tokens" value=${formatTokens(c.metrics.last_output_tokens)} />
-      <${ConfigRow} label="Last total tokens" value=${formatTokens(c.metrics.last_total_tokens)} />
-      <${ConfigRow} label="Last latency" value=${formatMaybeNumber(c.metrics.last_latency_ms, 'ms')} />
-      <${ConfigRow} label="Last throughput" value=${formatMaybeFloat(c.metrics.last_total_tokens_per_sec, 1, ' tok/s')} />
-      <${ConfigRow} label="Last output throughput" value=${formatMaybeFloat(c.metrics.last_output_tokens_per_sec, 1, ' tok/s')} />
+      <${ConfigRow} label="총 입력 토큰" value=${formatTokens(c.metrics.total_input_tokens)} />
+      <${ConfigRow} label="총 출력 토큰" value=${formatTokens(c.metrics.total_output_tokens)} />
+      <${ConfigRow} label="마지막 모델" value=${c.metrics.last_model_used || '--'} />
+      <${ConfigRow} label="마지막 입력 토큰" value=${formatTokens(c.metrics.last_input_tokens)} />
+      <${ConfigRow} label="마지막 출력 토큰" value=${formatTokens(c.metrics.last_output_tokens)} />
+      <${ConfigRow} label="마지막 총 토큰" value=${formatTokens(c.metrics.last_total_tokens)} />
+      <${ConfigRow} label="마지막 지연" value=${formatMaybeNumber(c.metrics.last_latency_ms, 'ms')} />
+      <${ConfigRow} label="마지막 처리량" value=${formatMaybeFloat(c.metrics.last_total_tokens_per_sec, 1, ' tok/s')} />
+      <${ConfigRow} label="마지막 출력 처리량" value=${formatMaybeFloat(c.metrics.last_output_tokens_per_sec, 1, ' tok/s')} />
 
       ${'' /* --- Sources (read-only) --- */}
       <${SectionHeader} title="소스" />
-      <${ConfigRow} label="Default source" value=${c.sources.default_source_kind || '--'} />
+      <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">라이브 오버라이드</span>
         <${BoolBadge} value=${c.sources.has_live_override} />

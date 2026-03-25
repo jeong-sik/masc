@@ -168,7 +168,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
       <div class="px-4 py-4">
         <${ChatTranscript}
           entries=${transcriptEntries}
-          emptyText="Send a direct prompt to start the keeper conversation."
+          emptyText="직접 프롬프트를 보내 키퍼 대화를 시작하세요."
           showMetadata=${false}
         />
       </div>

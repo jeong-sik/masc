@@ -1040,7 +1040,7 @@ let load_keepers (base_path : string) : keeper list =
              k_created_at = str "created_at" "";
              k_updated_at = str "updated_at" "";
            }
-         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Sys_error _ -> None
        )
     |> List.sort (fun a b -> String.compare a.k_name b.k_name)
   else []
@@ -1199,7 +1199,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
              let current_task = json |> member "current_task" |> to_string_option in
              let last_seen = json |> member "last_seen" |> to_string in
              Some { name; status; current_task; last_seen }
-           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Sys_error _ -> None
          )
     else []
   );
@@ -1222,7 +1222,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
              let priority = json |> member "priority" |> to_int_option |> Option.value ~default:3 in
              let claimed_by = json |> member "claimed_by" |> to_string_option in
              Some { id; title; status; priority; claimed_by }
-           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Sys_error _ -> None
          )
       |> List.sort (fun a b -> compare a.priority b.priority)
     else []

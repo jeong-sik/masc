@@ -84,7 +84,7 @@ let percentile_int (values : int list) ~(pct : float) : int option =
         |> max 0
         |> min (n - 1)
       in
-      Some (List.nth sorted idx)
+      List.nth_opt sorted idx
 
 let json_int_opt = function
   | Some v -> `Int v

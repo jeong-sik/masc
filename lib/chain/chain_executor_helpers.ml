@@ -334,8 +334,10 @@ let resolve_single_input ctx (ref_str : string) : string =
                   | None -> Error (Printf.sprintf "Key '%s' not found" key))
              | `List items ->
                  (match parse_index key with
-                  | Some idx when idx >= 0 && idx < List.length items ->
-                      walk (List.nth items idx) rest
+                  | Some idx when idx >= 0 ->
+                      (match List.nth_opt items idx with
+                       | Some item -> walk item rest
+                       | None -> Error "Invalid array index")
                   | _ -> Error "Invalid array index")
              | _ -> Error (Printf.sprintf "Cannot extract '%s' from non-object" key))
       in

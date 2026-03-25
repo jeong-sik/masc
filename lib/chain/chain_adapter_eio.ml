@@ -41,10 +41,12 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
                    let idx_str = String.sub key 1 (String.length key - 2) in
                    (try
                      let idx = int_of_string idx_str in
-                     if idx >= 0 && idx < List.length items then
-                       extract_path (List.nth items idx) rest
-                     else
+                     if idx < 0 then
                        Error (Printf.sprintf "Index %d out of bounds" idx)
+                     else
+                       (match List.nth_opt items idx with
+                       | Some item -> extract_path item rest
+                       | None -> Error (Printf.sprintf "Index %d out of bounds" idx))
                    with Invalid_argument _ | Failure _ -> Error (Printf.sprintf "Invalid index: %s" key))
                | _ -> Error (Printf.sprintf "Cannot extract '%s' from non-object" key))
         in

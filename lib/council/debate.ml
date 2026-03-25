@@ -370,12 +370,13 @@ let add_argument config ~debate_id ~agent ~position ~content
              (* Notify agent being replied to *)
              (match reply_to with
               | None -> ()
-              | Some idx when idx < List.length debate.arguments ->
-                let target_arg = List.nth debate.arguments idx in
-                let msg = Printf.sprintf "@%s replied to your argument (#%d) in debate [%s]" 
-                  agent idx debate_id in
-                fn ~agent:target_arg.agent ~message:msg
-              | Some _ -> ()));
+              | Some idx ->
+                (match List.nth_opt debate.arguments idx with
+                | Some target_arg ->
+                  let msg = Printf.sprintf "@%s replied to your argument (#%d) in debate [%s]"
+                    agent idx debate_id in
+                  fn ~agent:target_arg.agent ~message:msg
+                | None -> ())));
           (* Return with arg index for reference *)
           Log.Misc.info "Debate: argument #%d added by %s" arg_idx agent;
           Ok updated

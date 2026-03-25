@@ -170,7 +170,8 @@ let percentile p sorted_list =
   if n = 0 then 0.0
   else
     let k = int_of_float (float_of_int (n - 1) *. p) in
-    float_of_int (List.nth sorted_list k)
+    (* bounds-checked: k derived from (n-1)*p where 0<=p<=1 and n>0 *)
+    float_of_int (List.nth_opt sorted_list k |> Option.value ~default:0)
 
 (** Calculate multiple percentiles efficiently *)
 let percentiles ps list =

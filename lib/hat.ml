@@ -230,7 +230,8 @@ let next_in_rotation rotation current_idx =
       if len = 0 then (Builder, 0)
       else
         let idx = current_idx mod len in
-        (List.nth hats idx, current_idx + 1)
+        (* bounds-checked: idx = current_idx mod len, len > 0 *)
+        (List.nth_opt hats idx |> Option.value ~default:Builder, current_idx + 1)
   | TDD ->
       if current_idx mod 2 = 0 then (Tester, current_idx + 1)
       else (Builder, current_idx + 1)

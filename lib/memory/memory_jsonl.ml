@@ -176,9 +176,10 @@ let make_backend ~base_dir ~agent_name ~session_id
     match !errors with
     | [] -> Ok ()
     | errs ->
+      let first_err = match errs with e :: _ -> e | [] -> "unknown" in
       let msg = Printf.sprintf "memory_jsonl batch_persist: %d/%d failed: %s"
           (List.length errs) (List.length pairs)
-          (List.hd errs) in
+          first_err in
       Error msg
   in
 

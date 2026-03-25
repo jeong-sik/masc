@@ -3,7 +3,7 @@
 (** Storage backend type - unified interface *)
 type storage_backend =
   | Memory of Backend.MemoryBackend.t
-  | FileSystem of Backend.FileSystemBackend.t
+  | FileSystem of Backend_eio.FileSystem.t
   | PostgresNative of Backend.PostgresNative.t
 
 (** Room scope — determines which directory tree is active.
@@ -274,9 +274,19 @@ let create_backend cfg =
        | Ok backend -> Ok (Memory backend)
        | Error e -> Error e)
   | Backend.FileSystem ->
-      (match Backend.FileSystemBackend.create cfg with
-       | Ok backend -> Ok (FileSystem backend)
-       | Error e -> Error e)
+      (match Fs_compat.get_fs_opt () with
+       | Some fs ->
+           let eio_cfg = {
+             Backend_eio.base_path = cfg.Backend.base_path;
+             Backend_eio.node_id = cfg.Backend.node_id;
+             Backend_eio.cluster_name = cfg.Backend.cluster_name;
+           } in
+           Ok (FileSystem (Backend_eio.FileSystem.create ~fs eio_cfg))
+       | None ->
+           Log.Backend.warn "No Eio fs available for FileSystem backend; falling back to Memory";
+           (match Backend.MemoryBackend.create cfg with
+            | Ok backend -> Ok (Memory backend)
+            | Error e -> Error e))
   | Backend.PostgresNative ->
       (* PostgresNative requires Eio context - use create_backend_eio instead *)
       (match Backend.PostgresNative.create cfg with
@@ -316,10 +326,16 @@ let default_config base_path =
         let fallback_cfg =
           { backend_config with Backend.backend_type = Backend.FileSystem }
         in
-        (match Backend.FileSystemBackend.create fallback_cfg with
-         | Ok fs -> FileSystem fs
-         | Error _ ->
-             (* Final fallback: in-memory to keep server alive *)
+        (match Fs_compat.get_fs_opt () with
+         | Some fs ->
+             let eio_cfg = {
+               Backend_eio.base_path = fallback_cfg.Backend.base_path;
+               Backend_eio.node_id = fallback_cfg.Backend.node_id;
+               Backend_eio.cluster_name = fallback_cfg.Backend.cluster_name;
+             } in
+             FileSystem (Backend_eio.FileSystem.create ~fs eio_cfg)
+         | None ->
+             (* No Eio fs: final fallback to in-memory *)
              (match Backend.MemoryBackend.create fallback_cfg with
               | Ok mem -> Memory mem
               | Error e -> invalid_arg (Printf.sprintf "Failed to initialize any MASC backend: %s" (Backend.show_error e))))
@@ -358,9 +374,15 @@ let default_config_eio ~sw ~env ?(on_backend_ready = fun _backend -> ()) base_pa
         let fallback_cfg =
           { backend_config with Backend.backend_type = Backend.FileSystem }
         in
-        (match Backend.FileSystemBackend.create fallback_cfg with
-         | Ok fs -> FileSystem fs
-         | Error _ ->
+        (match Fs_compat.get_fs_opt () with
+         | Some fs ->
+             let eio_cfg = {
+               Backend_eio.base_path = fallback_cfg.Backend.base_path;
+               Backend_eio.node_id = fallback_cfg.Backend.node_id;
+               Backend_eio.cluster_name = fallback_cfg.Backend.cluster_name;
+             } in
+             FileSystem (Backend_eio.FileSystem.create ~fs eio_cfg)
+         | None ->
              (match Backend.MemoryBackend.create fallback_cfg with
               | Ok mem -> Memory mem
               | Error e -> invalid_arg (Printf.sprintf "Failed to initialize any MASC backend: %s" (Backend.show_error e))))

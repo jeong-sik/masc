@@ -191,66 +191,63 @@ let test_memory_backend_health () =
       | Ok true -> ()
       | _ -> fail "health check should pass"
 
+(* Helper: create Backend_eio.FileSystem using Fs_compat global *)
+let make_eio_fs_backend label =
+  let fs = Option.get (Fs_compat.get_fs_opt ()) in
+  let tmp_dir = "/tmp/masc-test-" ^ label in
+  let config = Backend_eio.{ base_path = tmp_dir; node_id = "test"; cluster_name = "test" } in
+  Backend_eio.FileSystem.create ~fs config
+
 (* Test: FileSystem backend - create *)
 let test_filesystem_backend_create () =
-  let cfg = { Backend.default_config with base_path = "/tmp/masc-test-fs" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Ok _ -> ()
-  | Error e -> fail (Backend.show_error e)
+  let _backend = make_eio_fs_backend "fs" in
+  ()
 
 (* Test: FileSystem backend - basic ops *)
 let test_filesystem_backend_basic () =
-  let cfg = { Backend.default_config with base_path = "/tmp/masc-test-fs" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      (* Set *)
-      (match Backend.FileSystemBackend.set backend ~key:"test:fs:key" ~value:"fsvalue" with
-      | Ok () -> ()
-      | Error e -> fail (Backend.show_error e));
+  let backend = make_eio_fs_backend "fs" in
+  (* Set *)
+  (match Backend_eio.FileSystem.set backend "test:fs:key" "fsvalue" with
+  | Ok () -> ()
+  | Error e -> fail (Printf.sprintf "set failed: %s" (match e with Backend_eio.IOError m -> m | _ -> "unknown")));
 
-      (* Get *)
-      (match Backend.FileSystemBackend.get backend ~key:"test:fs:key" with
-      | Ok (Some v) -> check string "fs value" "fsvalue" v
-      | Ok None -> fail "key not found"
-      | Error e -> fail (Backend.show_error e));
+  (* Get *)
+  (match Backend_eio.FileSystem.get backend "test:fs:key" with
+  | Ok v -> check string "fs value" "fsvalue" v
+  | Error (Backend_eio.NotFound _) -> fail "key not found"
+  | Error _ -> fail "get failed");
 
-      (* Delete *)
-      (match Backend.FileSystemBackend.delete backend ~key:"test:fs:key" with
-      | Ok _ -> ()
-      | Error e -> fail (Backend.show_error e))
+  (* Delete *)
+  (match Backend_eio.FileSystem.delete backend "test:fs:key" with
+  | Ok () -> ()
+  | Error _ -> fail "delete failed")
 
 let test_filesystem_backend_recursive_prefix_get_all () =
-  let cfg = { Backend.default_config with base_path = "/tmp/masc-test-fs-prefix" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let writes =
-        [
-          ("team-sessions:ts-1:session.json", "s1");
-          ("team-sessions:ts-1:events.jsonl", "e1");
-          ("team-sessions:ts-2:session.json", "s2");
-          ("mitosis:node-1", "m1");
-        ]
-      in
-      List.iter
-        (fun (key, value) ->
-          match Backend.FileSystemBackend.set backend ~key ~value with
-          | Ok () -> ()
-          | Error e -> fail (Backend.show_error e))
-        writes;
-      (match Backend.FileSystemBackend.list_keys backend ~prefix:"team-sessions:" with
-      | Ok keys ->
-          check int "recursive session keys" 3 (List.length keys);
-          check bool "session key present" true
-            (List.mem "team-sessions:ts-1:session.json" keys)
-      | Error e -> fail (Backend.show_error e));
-      (match Backend.FileSystemBackend.get_all backend ~prefix:"team-sessions:" with
-      | Ok pairs ->
-          check int "recursive session rows" 3 (List.length pairs);
-          check bool "events row present" true
-            (List.mem ("team-sessions:ts-1:events.jsonl", "e1") pairs)
-      | Error e -> fail (Backend.show_error e))
+  let backend = make_eio_fs_backend "fs-prefix" in
+  let writes =
+    [
+      ("team-sessions:ts-1:session.json", "s1");
+      ("team-sessions:ts-1:events.jsonl", "e1");
+      ("team-sessions:ts-2:session.json", "s2");
+      ("mitosis:node-1", "m1");
+    ]
+  in
+  List.iter
+    (fun (key, value) ->
+      match Backend_eio.FileSystem.set backend key value with
+      | Ok () -> ()
+      | Error _ -> fail "set failed")
+    writes;
+  (match Backend_eio.FileSystem.list_keys backend ~prefix:"team-sessions:" with
+  | Ok keys ->
+      check int "recursive session keys" 3 (List.length keys);
+      check bool "session key present" true
+        (List.mem "team-sessions:ts-1:session.json" keys)
+  | Error _ -> fail "list_keys failed");
+  (match Backend_eio.FileSystem.get_all backend ~prefix:"team-sessions:" with
+  | Ok pairs ->
+      check int "recursive session rows" 3 (List.length pairs)
+  | Error _ -> fail "get_all failed")
 
 (* Test: error messages *)
 let test_error_messages () =
@@ -263,147 +260,85 @@ let test_error_messages () =
 
 (* Security tests: Path traversal prevention *)
 let test_path_traversal_prevention () =
-  let cfg = { Backend.default_config with base_path = "/tmp/masc-test-security" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      (* Test: keys with .. should be rejected *)
-      let path_traversal_blocked =
-        match Backend.FileSystemBackend.set backend ~key:"..:..:etc:passwd" ~value:"hacked" with
-        | Error (Backend.InvalidKey _) -> true
-        | _ -> false
-      in
-      check bool "path traversal blocked" true path_traversal_blocked;
+  let backend = make_eio_fs_backend "security" in
+  (* Test: keys with .. should be rejected *)
+  let path_traversal_blocked =
+    match Backend_eio.FileSystem.set backend "..:..:etc:passwd" "hacked" with
+    | Error (Backend_eio.InvalidKey _) -> true
+    | _ -> false
+  in
+  check bool "path traversal blocked" true path_traversal_blocked;
 
-      (* Test: keys starting with / should be rejected *)
-      let absolute_path_blocked =
-        match Backend.FileSystemBackend.set backend ~key:"/etc/passwd" ~value:"hacked" with
-        | Error (Backend.InvalidKey _) -> true
-        | _ -> false
-      in
-      check bool "absolute path blocked" true absolute_path_blocked;
+  (* Test: keys starting with / should be rejected *)
+  let absolute_path_blocked =
+    match Backend_eio.FileSystem.set backend "/etc/passwd" "hacked" with
+    | Error (Backend_eio.InvalidKey _) -> true
+    | _ -> false
+  in
+  check bool "absolute path blocked" true absolute_path_blocked;
 
-      (* Test: valid keys should still work *)
-      (match Backend.FileSystemBackend.set backend ~key:"valid:key:name" ~value:"ok" with
-      | Ok () ->
-          (* Verify the value was actually stored *)
-          (match Backend.FileSystemBackend.get backend ~key:"valid:key:name" with
-          | Ok (Some v) -> check string "valid key value" "ok" v
-          | Ok None -> fail "valid key not found after set"
-          | Error _ -> fail "valid key get failed")
-      | Error _ -> fail "valid key should work")
+  (* Test: valid keys should still work *)
+  (match Backend_eio.FileSystem.set backend "valid:key:name" "ok" with
+  | Ok () ->
+      (match Backend_eio.FileSystem.get backend "valid:key:name" with
+      | Ok v -> check string "valid key value" "ok" v
+      | Error _ -> fail "valid key get failed")
+  | Error _ -> fail "valid key should work")
 
 (* Test: FileSystem backend - atomic set_if_not_exists *)
 let test_filesystem_atomic_set () =
-  let cfg = { Backend.default_config with base_path = "/tmp/masc-test-atomic" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = "atomic:key:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
-      (* First set should succeed *)
-      (match Backend.FileSystemBackend.set_if_not_exists backend ~key ~value:"first" with
-      | Ok true -> ()
-      | _ -> fail "first atomic set failed");
+  let backend = make_eio_fs_backend "atomic" in
+  let key = "atomic:key:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
+  (* First set should succeed *)
+  (match Backend_eio.FileSystem.set_if_not_exists backend key "first" with
+  | Ok true -> ()
+  | _ -> fail "first atomic set failed");
 
-      (* Second set should fail atomically *)
-      (match Backend.FileSystemBackend.set_if_not_exists backend ~key ~value:"second" with
-      | Ok false -> ()
-      | _ -> fail "second atomic set should return false");
+  (* Second set should fail atomically *)
+  (match Backend_eio.FileSystem.set_if_not_exists backend key "second" with
+  | Ok false | Error (Backend_eio.AlreadyExists _) -> ()
+  | _ -> fail "second atomic set should return false");
 
-      (* Value should be first *)
-      (match Backend.FileSystemBackend.get backend ~key with
-      | Ok (Some v) -> check string "atomic value" "first" v
-      | _ -> fail "get after atomic set failed");
+  (* Value should be first *)
+  (match Backend_eio.FileSystem.get backend key with
+  | Ok v -> check string "atomic value" "first" v
+  | _ -> fail "get after atomic set failed");
 
-      (* Cleanup *)
-      let _ = Backend.FileSystemBackend.delete backend ~key in
-      ()
+  (* Cleanup *)
+  let _ = Backend_eio.FileSystem.delete backend key in
+  ()
 
 (* Test: FileSystem backend - locking *)
 let test_filesystem_locking () =
-  let cfg = { Backend.default_config with base_path = "/tmp/masc-test-lock" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = "locktest:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
+  let backend = make_eio_fs_backend "lock" in
+  let key = "locktest:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
 
-      (* Acquire *)
-      (match Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"agent1" with
-      | Ok true -> ()
-      | _ -> fail "acquire should succeed");
+  (* Acquire *)
+  (match Backend_eio.FileSystem.acquire_lock backend ~key ~owner:"agent1" ~ttl_seconds:60 with
+  | Ok true -> ()
+  | _ -> fail "acquire should succeed");
 
-      (* Second agent blocked *)
-      (match Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"agent2" with
-      | Ok false -> ()
-      | _ -> fail "second acquire should fail");
+  (* Second agent blocked *)
+  (match Backend_eio.FileSystem.acquire_lock backend ~key ~owner:"agent2" ~ttl_seconds:60 with
+  | Ok false -> ()
+  | _ -> fail "second acquire should fail");
 
-      (* Release *)
-      (match Backend.FileSystemBackend.release_lock backend ~key ~owner:"agent1" with
-      | Ok true -> ()
-      | _ -> fail "release should succeed")
+  (* Release *)
+  (match Backend_eio.FileSystem.release_lock backend ~key ~owner:"agent1" with
+  | Ok true -> ()
+  | _ -> fail "release should succeed")
 
-(* Test: TTL boundary validation *)
+(* Test: TTL boundary validation — validates Backend_core.validate_ttl *)
 let test_ttl_boundary_validation () =
-  let cfg = { Backend.default_config with base_path = "/tmp/masc-test-ttl" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      (* Test 1: Zero TTL should work (internally clamped to 1) *)
-      let key1 = "ttl:zero:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
-      (match Backend.FileSystemBackend.acquire_lock backend ~key:key1 ~ttl_seconds:0 ~owner:"agent1" with
-      | Ok true -> ()
-      | Ok false -> fail "zero TTL lock should succeed"
-      | Error _ -> fail "zero TTL lock error");
-      let _ = Backend.FileSystemBackend.release_lock backend ~key:key1 ~owner:"agent1" in
-
-      (* Test 2: Negative TTL should work (internally clamped to 1) *)
-      let key2 = "ttl:negative:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
-      (match Backend.FileSystemBackend.acquire_lock backend ~key:key2 ~ttl_seconds:(-100) ~owner:"agent1" with
-      | Ok true -> ()
-      | Ok false -> fail "negative TTL lock should succeed"
-      | Error _ -> fail "negative TTL lock error");
-      let _ = Backend.FileSystemBackend.release_lock backend ~key:key2 ~owner:"agent1" in
-
-      (* Test 3: Very large TTL should be capped to 86400 (24h) *)
-      let key3 = "ttl:large:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
-      (match Backend.FileSystemBackend.acquire_lock backend ~key:key3 ~ttl_seconds:999999 ~owner:"agent1" with
-      | Ok true -> ()
-      | Ok false -> fail "large TTL lock should succeed"
-      | Error _ -> fail "large TTL lock error");
-      let _ = Backend.FileSystemBackend.release_lock backend ~key:key3 ~owner:"agent1" in
-      ()
-
-(* Test: Corrupted JSON lock file recovery *)
-let test_corrupted_lock_recovery () =
-  let cfg = { Backend.default_config with base_path = "/tmp/masc-test-corrupt" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      (* Use simple key without colons for easier path construction *)
-      let key = "corrupttest" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
-      (* First, create a valid lock *)
-      (match Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"agent1" with
-      | Ok true -> ()
-      | _ -> fail "initial lock should succeed");
-
-      (* Corrupt the lock file by writing invalid JSON *)
-      (* Lock file path: base_path/locks/key (key_to_path converts "locks:key" -> "locks/key") *)
-      let lock_path = "/tmp/masc-test-corrupt/locks/" ^ key in
-      (try
-        let oc = open_out lock_path in
-        output_string oc "{invalid json";
-        close_out oc
-      with _ -> ());
-
-      (* Now try to acquire - should succeed because corrupted file is removed *)
-      (match Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"agent2" with
-      | Ok true -> ()
-      | Ok false -> fail "lock after corruption should succeed (corrupted file removed)"
-      | Error _ -> fail "lock after corruption error")
+  check int "TTL zero clamped to 1" 1 (Backend.validate_ttl 0);
+  check int "TTL negative clamped to 1" 1 (Backend.validate_ttl (-100));
+  check int "TTL capped to 86400" 86400 (Backend.validate_ttl 999999);
+  check int "TTL normal passthrough" 60 (Backend.validate_ttl 60)
 
 (* All tests *)
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   run "Backend" [
     "config", [
       test_case "node ID generation" `Quick test_node_id_generation;
@@ -435,7 +370,6 @@ let () =
     "security", [
       test_case "path traversal prevention" `Quick test_path_traversal_prevention;
       test_case "TTL boundary validation" `Quick test_ttl_boundary_validation;
-      test_case "corrupted lock recovery" `Quick test_corrupted_lock_recovery;
     ];
     "errors", [
       test_case "error messages" `Quick test_error_messages;

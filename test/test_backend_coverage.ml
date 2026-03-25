@@ -58,66 +58,58 @@ let test_validate_ttl_boundary () =
   check int "TTL at min boundary" 1 (Backend.validate_ttl 1)
 
 (* ============================================================ *)
-(* Backend.ml - Key Validation Edge Cases                        *)
+(* Backend_eio.FileSystem - Key Validation Edge Cases            *)
 (* ============================================================ *)
 
-let test_fs_backend () =
-  { Backend.default_config with base_path = make_test_dir "masc_key_test" }
-  |> Backend.FileSystemBackend.create
+let with_key_test_backend f =
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  let tmp_dir = make_test_dir "masc_key_test" in
+  let config = Backend_eio.{ base_path = tmp_dir; node_id = "test"; cluster_name = "test" } in
+  let backend = Backend_eio.FileSystem.create ~fs config in
+  Fun.protect ~finally:(fun () -> try rm_rf tmp_dir with _ -> ()) (fun () -> f backend)
 
 let test_key_with_nul_byte () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test\x00key" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "NUL byte in key should be rejected"
+  with_key_test_backend @@ fun backend ->
+  match Backend_eio.FileSystem.set backend "test\x00key" "v" with
+  | Error (Backend_eio.InvalidKey _) -> ()
+  | _ -> fail "NUL byte in key should be rejected"
 
 let test_key_consecutive_colons () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test::key" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "Consecutive colons should be rejected"
+  with_key_test_backend @@ fun backend ->
+  match Backend_eio.FileSystem.set backend "test::key" "v" with
+  | Error (Backend_eio.InvalidKey _) -> ()
+  | _ -> fail "Consecutive colons should be rejected"
 
 let test_key_ending_with_colon () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test:" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "Key ending with colon should be rejected"
+  with_key_test_backend @@ fun backend ->
+  match Backend_eio.FileSystem.set backend "test:" "v" with
+  | Error (Backend_eio.InvalidKey _) -> ()
+  | _ -> fail "Key ending with colon should be rejected"
 
 let test_key_with_wildcards () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test*key" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "Wildcard in key should be rejected"
+  with_key_test_backend @@ fun backend ->
+  match Backend_eio.FileSystem.set backend "test*key" "v" with
+  | Error (Backend_eio.InvalidKey _) -> ()
+  | _ -> fail "Wildcard in key should be rejected"
 
 let test_key_with_quotes () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test\"key" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "Quote in key should be rejected"
+  with_key_test_backend @@ fun backend ->
+  match Backend_eio.FileSystem.set backend "test\"key" "v" with
+  | Error (Backend_eio.InvalidKey _) -> ()
+  | _ -> fail "Quote in key should be rejected"
 
 let test_key_with_shell_metachar () =
-  match test_fs_backend () with
-  | Error _ -> fail "Failed to create backend"
-  | Ok backend ->
-      match Backend.FileSystemBackend.set backend ~key:"test|key" ~value:"v" with
-      | Error (Backend.InvalidKey _) -> ()
-      | _ -> fail "Shell metachar should be rejected"
+  with_key_test_backend @@ fun backend ->
+  match Backend_eio.FileSystem.set backend "test|key" "v" with
+  | Error (Backend_eio.InvalidKey _) -> ()
+  | _ -> fail "Shell metachar should be rejected"
 
 (* ============================================================ *)
 (* Backend.ml - FileSystem CAS and list_keys                     *)
 (* ============================================================ *)
 
-(* NOTE: FileSystemBackend uses non-reentrant Mutex. Use MemoryBackend for these tests. *)
+(* NOTE: CAS is only tested on MemoryBackend (dispatch does not use FileSystem CAS). *)
 let test_memory_compare_and_swap () =
   match Backend.MemoryBackend.create Backend.default_config with
   | Error _ -> fail "Failed to create MemoryBackend"
@@ -165,14 +157,11 @@ let test_memory_get_all () =
       | Error _ -> fail "get_all failed"
 
 let test_filesystem_health_check () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "masc_health_test" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      match Backend.FileSystemBackend.health_check backend with
-      | Ok true -> ()
-      | Ok false -> fail "health check returned false"
-      | Error _ -> fail "health check error"
+  with_key_test_backend @@ fun backend ->
+  match Backend_eio.FileSystem.health_check backend with
+  | Ok { Backend_eio.is_healthy = true; _ } -> ()
+  | Ok { Backend_eio.is_healthy = false; _ } -> fail "health check returned false"
+  | Error _ -> fail "health check error"
 
 (* ============================================================ *)
 (* Backend.ml - Memory Pub/Sub (BackendNotSupported)             *)
@@ -195,20 +184,17 @@ let test_memory_pubsub () =
       check string "received message" "hello" !received
 
 let test_filesystem_pubsub () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "masc_ps_test" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let received = ref "" in
-      (match Backend.FileSystemBackend.subscribe backend
-          ~channel:"test" ~callback:(fun msg -> received := msg) with
-       | Ok () -> ()
-       | Error e -> fail (Backend.show_error e));
-      (match Backend.FileSystemBackend.publish backend
-          ~channel:"test" ~message:"hello" with
-       | Ok count -> check int "1 subscriber" 1 count
-       | Error e -> fail (Backend.show_error e));
-      check string "received message" "hello" !received
+  with_key_test_backend @@ fun backend ->
+  let received = ref "" in
+  (match Backend_eio.FileSystem.subscribe backend
+      ~channel:"test" ~callback:(fun msg -> received := msg) with
+   | Ok () -> ()
+   | Error e -> fail (Backend.show_error e));
+  (match Backend_eio.FileSystem.publish backend
+      ~channel:"test" ~message:"hello" with
+   | Ok count -> check int "1 subscriber" 1 count
+   | Error e -> fail (Backend.show_error e));
+  check string "received message" "hello" !received
 
 let test_pubsub_no_subscribers () =
   let cfg = Backend.{ default_config with backend_type = Memory } in
@@ -253,78 +239,50 @@ let test_pubsub_channel_isolation () =
 (* ============================================================ *)
 
 let test_lock_nonowner_release () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend1" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "lock" in
-      let _ = Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" in
-
-      (* Non-owner should not be able to release *)
-      match Backend.FileSystemBackend.release_lock backend ~key ~owner:"owner2" with
-      | Ok false -> ()
-      | _ -> fail "non-owner release should fail"
+  with_key_test_backend @@ fun backend ->
+  let key = make_unique_key "lock" in
+  let _ = Backend_eio.FileSystem.acquire_lock backend ~key ~owner:"owner1" ~ttl_seconds:60 in
+  match Backend_eio.FileSystem.release_lock backend ~key ~owner:"owner2" with
+  | Ok false -> ()
+  | _ -> fail "non-owner release should fail"
 
 let test_lock_nonowner_extend () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend2" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "lock" in
-      let _ = Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" in
-
-      (* Non-owner should not be able to extend *)
-      match Backend.FileSystemBackend.extend_lock backend ~key ~ttl_seconds:120 ~owner:"owner2" with
-      | Ok false -> ()
-      | _ -> fail "non-owner extend should fail"
+  with_key_test_backend @@ fun backend ->
+  let key = make_unique_key "lock" in
+  let _ = Backend_eio.FileSystem.acquire_lock backend ~key ~owner:"owner1" ~ttl_seconds:60 in
+  match Backend_eio.FileSystem.extend_lock backend ~key ~owner:"owner2" ~ttl_seconds:120 with
+  | Ok false -> ()
+  | _ -> fail "non-owner extend should fail"
 
 let test_lock_extend_success () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend3" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "lock" in
-      let _ = Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:10 ~owner:"owner1" in
-
-      (* Owner should be able to extend *)
-      match Backend.FileSystemBackend.extend_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" with
-      | Ok true -> ()
-      | _ -> fail "owner extend should succeed"
+  with_key_test_backend @@ fun backend ->
+  let key = make_unique_key "lock" in
+  let _ = Backend_eio.FileSystem.acquire_lock backend ~key ~owner:"owner1" ~ttl_seconds:10 in
+  match Backend_eio.FileSystem.extend_lock backend ~key ~owner:"owner1" ~ttl_seconds:60 with
+  | Ok true -> ()
+  | _ -> fail "owner extend should succeed"
 
 let test_lock_release_nonexistent () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend4" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "nolock" in
-      (* Releasing non-existent lock should return false *)
-      match Backend.FileSystemBackend.release_lock backend ~key ~owner:"owner1" with
-      | Ok false -> ()
-      | _ -> fail "release nonexistent should return false"
+  with_key_test_backend @@ fun backend ->
+  let key = make_unique_key "nolock" in
+  match Backend_eio.FileSystem.release_lock backend ~key ~owner:"owner1" with
+  | Ok true -> ()  (* Backend_eio: NotFound lock = already released = Ok true *)
+  | _ -> fail "release nonexistent should succeed"
 
 let test_lock_extend_nonexistent () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend5" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "nolock" in
-      (* Extending non-existent lock should return false *)
-      match Backend.FileSystemBackend.extend_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" with
-      | Ok false -> ()
-      | _ -> fail "extend nonexistent should return false"
+  with_key_test_backend @@ fun backend ->
+  let key = make_unique_key "nolock" in
+  match Backend_eio.FileSystem.extend_lock backend ~key ~owner:"owner1" ~ttl_seconds:60 with
+  | Ok false -> ()
+  | _ -> fail "extend nonexistent should return false"
 
 let test_lock_reacquire_same_owner () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend6" } in
-  match Backend.FileSystemBackend.create cfg with
-  | Error _ -> fail "Failed to create"
-  | Ok backend ->
-      let key = make_unique_key "lock" in
-      let _ = Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" in
-
-      (* Same owner should be able to reacquire (refresh) *)
-      match Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner1" with
-      | Ok true -> ()
-      | _ -> fail "same owner reacquire should succeed"
+  with_key_test_backend @@ fun backend ->
+  let key = make_unique_key "lock" in
+  let _ = Backend_eio.FileSystem.acquire_lock backend ~key ~owner:"owner1" ~ttl_seconds:60 in
+  match Backend_eio.FileSystem.acquire_lock backend ~key ~owner:"owner1" ~ttl_seconds:60 with
+  | Ok true -> ()
+  | _ -> fail "same owner reacquire should succeed"
 
 (* ============================================================ *)
 (* Backend.ml - Memory Lock Expiration                           *)

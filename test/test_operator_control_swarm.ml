@@ -14,6 +14,7 @@ let expect_unsupported_action ~action_type result =
 
 let test_confirm_rejects_expired_token () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -57,6 +58,7 @@ let test_confirm_rejects_expired_token () =
 
 let test_swarm_run_continue_removed_from_operator_actions () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -78,6 +80,7 @@ let test_swarm_run_continue_removed_from_operator_actions () =
 
 let test_swarm_run_abandon_removed_from_operator_actions () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -99,6 +102,7 @@ let test_swarm_run_abandon_removed_from_operator_actions () =
 
 let test_swarm_run_rerun_removed_from_operator_actions () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect

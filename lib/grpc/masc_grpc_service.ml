@@ -129,7 +129,7 @@ let handle_broadcast (room_config : Room_utils_backend_setup.config) (bytes : st
       in
       T.BroadcastResponse.{ success = true; seq = now_ms () }
     with exn ->
-      ignore (Printexc.to_string exn);
+      Log.Transport.error "gRPC broadcast failed: %s" (Printexc.to_string exn);
       T.BroadcastResponse.{ success = false; seq = 0L }
   in
   T.BroadcastResponse.to_bytes result
@@ -160,7 +160,10 @@ let handle_get_status (room_config : Room_utils_backend_setup.config) (_bytes : 
                 Option.value ~default:"" agent.current_task;
             } : T.agent_info)
           | _ -> None
-        with _ -> None)
+        with exn ->
+          Log.Transport.debug "gRPC status: agent parse skip: %s"
+            (Printexc.to_string exn);
+          None)
     else []
   in
   let tasks =
@@ -262,7 +265,9 @@ let handle_heartbeat
               let oc = open_out agent_file in
               output_string oc (Yojson.Safe.to_string (Types.agent_to_yojson updated));
               close_out oc
-            | Error _ -> ()
+            | Error e ->
+                Log.Transport.warn "gRPC heartbeat: invalid agent JSON for %s: %s"
+                  ping.agent_name e
           end
         with exn -> Log.Transport.error "gRPC heartbeat update failed: %s" (Printexc.to_string exn));
         (* Count active agents and pending tasks *)

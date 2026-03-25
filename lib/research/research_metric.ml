@@ -88,7 +88,9 @@ let measure_loc_delta ~cwd : int * int =
     let ins = get_int re_ins summary in
     let del = get_int re_del summary in
     (ins - del, files)
-  with _ -> (0, 0)
+  with exn ->
+    Log.Autoresearch.debug "measure_loc_delta failed: %s" (Printexc.to_string exn);
+    (0, 0)
 
 (** Check if compiled output actually changed by comparing .cma/.cmxa sizes.
     A semantic gate: if source changed but binary didn't, the change is cosmetic. *)
@@ -110,7 +112,9 @@ let check_binary_changed ~cwd : bool =
           "stat"; "-f"; "%z"; "{}"; "+" ]
     in
     String.length (String.trim size_out) > 0
-  with _ -> true  (* assume changed if we can't check *)
+  with exn ->
+    Log.Autoresearch.debug "check_binary_changed failed: %s" (Printexc.to_string exn);
+    true  (* assume changed if we can't check *)
 
 (** Full measurement pipeline: build → test → LOC delta → semantic gate. *)
 let collect ~(config : Research_config.repo_config) : t =

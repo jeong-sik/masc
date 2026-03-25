@@ -541,7 +541,9 @@ let get_agents config : Types.agent list =
       let json = Room_utils.read_json config path in
       match Types.agent_of_yojson json with
       | Ok agent -> Some agent
-      | Error _ -> None)
+      | Error e ->
+          Log.Room.debug "get_agents: skipping invalid agent file %s: %s" name e;
+          None)
   |> List.sort (fun (a : Types.agent) (b : Types.agent) -> String.compare a.name b.name)
 
 let get_messages config : Types.message list =
@@ -554,7 +556,9 @@ let get_messages config : Types.message list =
       let json = Room_utils.read_json config path in
       match Types.message_of_yojson json with
       | Ok msg -> Some msg
-      | Error _ -> None)
+      | Error e ->
+          Log.Room.debug "get_messages: skipping invalid message file %s: %s" name e;
+          None)
   |> List.sort (fun (a : Types.message) (b : Types.message) -> compare a.seq b.seq)
 
 let tasks_connection config first after =

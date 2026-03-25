@@ -100,7 +100,8 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
            "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
            nickname agent_type new_session_id (now_iso ()))
        end
-     | Error _ -> ());
+     | Error e ->
+         Log.Room.warn "agent rejoin: invalid agent JSON for %s: %s" nickname e);
     Printf.sprintf "✅ %s already in room (last_seen updated)" nickname
   end else begin
     (* Collect metadata *)
@@ -159,6 +160,109 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     nickname nickname agent_type session_id
   end
 
+(** @deprecated Use [join (with_scope config (Named room_id))] instead. *)
+let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
+    ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
+  let scoped = with_scope config (Named room_id) in
+  ensure_room_bootstrap scoped room_id;
+
+  let agent_type = match agent_type_override with
+    | Some t -> t
+    | None ->
+        if Nickname.is_generated_nickname agent_name then
+          Option.value (Nickname.extract_agent_type agent_name) ~default:agent_name
+        else
+          agent_name
+  in
+  let nickname =
+    if Nickname.is_generated_nickname agent_name then agent_name
+    else
+      let resolved = resolve_agent_name (with_scope config (Named room_id)) agent_name in
+      if resolved <> agent_name && Nickname.is_generated_nickname resolved then
+        resolved
+      else
+        Nickname.generate agent_type
+  in
+  let agent_file_dedup =
+    Filename.concat (agents_dir scoped) (safe_filename nickname ^ ".json")
+  in
+  if Sys.file_exists agent_file_dedup then begin
+    (* Lock the agent file to prevent race with heartbeat writes.
+       read-modify-write must be atomic; without this lock, a concurrent
+       heartbeat can update current_task/status between our read and write,
+       and the rejoin write would silently discard those changes. *)
+    let was_inactive = with_file_lock scoped agent_file_dedup (fun () ->
+      let existing_json = read_json scoped agent_file_dedup in
+      match agent_of_yojson existing_json with
+      | Ok existing_agent ->
+          let is_inactive = existing_agent.status = Inactive in
+          let updated = { existing_agent with
+            status = Active;
+            last_seen = now_iso ();
+            capabilities;
+          } in
+          write_json scoped agent_file_dedup (agent_to_yojson updated);
+          is_inactive
+      | Error e ->
+          Log.Room.warn "agent dedup: invalid agent JSON for %s: %s" nickname e;
+          false
+    ) in
+    if was_inactive then begin
+      let _ = update_state scoped (fun s ->
+        let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
+        { s with active_agents = agents }
+      ) in
+      let _ = broadcast scoped ~from_agent:nickname
+                ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname room_id) in
+      log_event scoped (Printf.sprintf
+        "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
+        room_id nickname (now_iso ()))
+    end;
+    Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname room_id
+  end else begin
+    let session_id = generate_session_id () in
+    let meta : agent_meta = {
+      session_id;
+      agent_type;
+      pid;
+      hostname = (match hostname with Some h -> Some h | None -> get_hostname ());
+      tty = (match tty with Some t -> Some t | None -> get_tty ());
+      worktree;
+      parent_task;
+    } in
+    let agent_file =
+      Filename.concat (agents_dir scoped) (safe_filename nickname ^ ".json")
+    in
+    let agent = {
+      name = nickname;
+      agent_type;
+      status = Active;
+      capabilities;
+      current_task = None;
+      joined_at = now_iso ();
+      last_seen = now_iso ();
+      meta = Some meta;
+    } in
+    write_json scoped agent_file (agent_to_yojson agent);
+    let _ = update_state scoped (fun s ->
+      let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
+      { s with active_agents = agents }
+    ) in
+    let _ =
+      broadcast scoped ~from_agent:nickname
+        ~content:(Printf.sprintf "👋 %s joined the room" nickname)
+    in
+    log_event scoped (Printf.sprintf
+      "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
+      room_id
+      nickname
+      agent_type
+      session_id
+      (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
+      (now_iso ()));
+    Printf.sprintf "✅ %s joined room %s" nickname room_id
+  end
+
 (** Leave room *)
 let leave config ~agent_name =
   ensure_initialized config;
@@ -188,7 +292,8 @@ let leave config ~agent_name =
       | Ok existing_agent ->
         let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
         write_json config agent_file (agent_to_yojson updated)
-      | Error _ -> ());
+      | Error e ->
+          Log.Room.warn "agent leave: invalid agent JSON for %s: %s" actual_name e);
     if is_pg_backend config then begin
       let agent_key = Printf.sprintf "agents:%s" (safe_filename actual_name) in
       (* Update backend entry to Inactive as well *)

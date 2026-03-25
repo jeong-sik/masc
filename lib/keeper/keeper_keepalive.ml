@@ -428,6 +428,10 @@ let stop_keepalive name =
   | Some entry ->
       entry.stop := true;
       (match entry.grpc_close with
-       | Some close_fn -> (try close_fn () with _ -> ())
+       | Some close_fn ->
+           (try close_fn ()
+            with exn ->
+              Log.Keeper.debug "keepalive grpc close failed for %s: %s"
+                name (Printexc.to_string exn))
        | None -> ());
       Hashtbl.remove keepalives name

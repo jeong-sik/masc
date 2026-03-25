@@ -347,7 +347,9 @@ let add_routes router =
                    Prompt_registry.clear_prompt_override key;
                    (try Prompt_registry.persist_overrides
                           state.Mcp_server.room_config.base_path
-                    with _ -> ());
+                    with exn ->
+                      Log.Pages.warn "prompt override persist (clear) failed: %s"
+                        (Printexc.to_string exn));
                    Ok "override cleared"
                  | "set" | _ ->
                    let value = Yojson.Safe.Util.(member "value" args |> to_string_option)
@@ -356,7 +358,9 @@ let add_routes router =
                    | Ok () ->
                      (try Prompt_registry.persist_overrides
                             state.Mcp_server.room_config.base_path
-                      with _ -> ());
+                      with exn ->
+                        Log.Pages.warn "prompt override persist (set) failed: %s"
+                          (Printexc.to_string exn));
                      Ok "override set"
                    | Error msg -> Error msg
                in

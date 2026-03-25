@@ -64,7 +64,9 @@ let load_state (config : Room_utils.config) : tempo_state =
     match Safe_ops.read_json_file_safe path with
     | Ok json ->
       (match state_of_json json with Some state -> state | None -> default_state)
-    | Error _ -> default_state
+    | Error e ->
+        Log.Room.debug "tempo: state load failed (%s): %s" path e;
+        default_state
   else
     { current_interval_s = default_config.default_interval_s;
       last_adjusted = 0.0;

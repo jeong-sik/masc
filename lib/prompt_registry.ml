@@ -749,5 +749,6 @@ let restore_overrides base_path =
           | _ -> ()
         ) pairs
       | _ -> ()
-    with _ -> ()
+    with exn ->
+      Log.Misc.warn "prompt override restore failed: %s" (Printexc.to_string exn)
   end

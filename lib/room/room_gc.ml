@@ -29,7 +29,9 @@ let heartbeat_in_room config ~room_id ~agent_name =
           let updated = { agent with last_seen = now_iso () } in
           write_json scoped agent_file (agent_to_yojson updated);
           Printf.sprintf "💓 %s heartbeat updated in %s" actual_name room_id
-      | Error _ ->
+      | Error e ->
+          Log.Room.debug "heartbeat_scoped: invalid agent JSON for %s in %s: %s"
+            actual_name room_id e;
           Printf.sprintf "⚠ Invalid agent file for %s in %s" actual_name room_id
     )
   end else
@@ -48,7 +50,8 @@ let heartbeat config ~agent_name =
           let updated = { agent with last_seen = now_iso () } in
           write_json config agent_file (agent_to_yojson updated);
           Printf.sprintf "💓 %s heartbeat updated" actual_name
-      | Error _ ->
+      | Error e ->
+          Log.Room.debug "heartbeat: invalid agent JSON for %s: %s" actual_name e;
           Printf.sprintf "⚠ Invalid agent file for %s" actual_name
     )
   end else

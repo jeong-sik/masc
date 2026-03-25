@@ -131,13 +131,17 @@ let get_or_create_identity ?mcp_session_id params =
 let get_by_name agent_name =
   match get_registry () with
   | Ok reg -> Agent_identity.Registry.find_by_name reg agent_name
-  | Error _ -> None
+  | Error e ->
+      Log.Identity.warn "get_by_name(%s): registry unavailable: %s" agent_name e;
+      None
 
 (** Get identity by session key *)
 let get_by_session session_key =
   match get_registry () with
   | Ok reg -> Agent_identity.Registry.find_by_session reg session_key
-  | Error _ -> None
+  | Error e ->
+      Log.Identity.warn "get_by_session: registry unavailable: %s" e;
+      None
 
 (** {1 Resolved Agent Name Cache}
 
@@ -161,26 +165,34 @@ let set_resolved_name sid name =
 let active_count ?(within_seconds = 300.0) () =
   match get_registry () with
   | Ok reg -> List.length (Agent_identity.Registry.list_active reg ~within_seconds)
-  | Error _ -> 0
+  | Error e ->
+      Log.Identity.debug "active_count: registry unavailable: %s" e;
+      0
 
 (** Get total registered count *)
 let total_count () =
   match get_registry () with
   | Ok reg -> Agent_identity.Registry.count reg
-  | Error _ -> 0
+  | Error e ->
+      Log.Identity.debug "total_count: registry unavailable: %s" e;
+      0
 
 (** List all active identities *)
 let list_active ?(within_seconds = 300.0) () =
   match get_registry () with
   | Ok reg -> Agent_identity.Registry.list_active reg ~within_seconds
-  | Error _ -> []
+  | Error e ->
+      Log.Identity.debug "list_active: registry unavailable: %s" e;
+      []
 
 (** {1 Cleanup} *)
 
 (** Clean up stale session mappings and resolved-name cache entries *)
 let cleanup_stale_sessions () =
   match get_registry () with
-  | Error _ -> 0
+  | Error e ->
+      Log.Identity.warn "cleanup_stale_sessions: registry unavailable: %s" e;
+      0
   | Ok reg ->
     with_session_lock (fun () ->
       let to_remove = ref [] in
@@ -201,7 +213,9 @@ let cleanup_stale_sessions () =
 (** Unregister an identity *)
 let unregister session_key =
   match get_registry () with
-  | Error _ -> ()
+  | Error e ->
+      Log.Identity.warn "unregister(%s): registry unavailable: %s"
+        (String.sub session_key 0 (min 8 (String.length session_key))) e
   | Ok reg ->
     Agent_identity.Registry.unregister reg session_key;
     (* Also clean up session map *)

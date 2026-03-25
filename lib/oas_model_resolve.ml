@@ -188,4 +188,8 @@ let models_of_cascade_name (cascade_name : string) : string list =
       ~name:cascade_name
       ~defaults
       ()
-  with _ -> defaults
+  with exn ->
+    Log.warn ~ctx:"OasModelResolve"
+      "cascade config resolve failed for %s, using defaults: %s"
+      cascade_name (Printexc.to_string exn);
+    defaults

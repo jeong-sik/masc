@@ -1,6 +1,7 @@
 // MASC Dashboard — MCP-over-HTTP client with session lifecycle
 
 import { fetchWithTimeout, DEFAULT_MCP_TIMEOUT_MS } from './core'
+import { MCP_INITIALIZE_TIMEOUT_MS } from '../config/constants'
 import { reportToolHostFailure } from './dashboard'
 
 // --- MCP Session Management ---
@@ -173,7 +174,7 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
         message,
         phase,
         requestId: phase === 'tools/call' ? requestId : undefined,
-        timeoutMs: phase === 'initialize' ? 10000 : DEFAULT_MCP_TIMEOUT_MS,
+        timeoutMs: phase === 'initialize' ? MCP_INITIALIZE_TIMEOUT_MS : DEFAULT_MCP_TIMEOUT_MS,
       })
     }
     throw err

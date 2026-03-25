@@ -188,8 +188,14 @@ let balance_cache : (string * string, float) Hashtbl.t = Hashtbl.create 32
 (* Track whether we have loaded from disk for a given base_path *)
 let loaded_paths : (string, bool) Hashtbl.t = Hashtbl.create 4
 
+(* Mutex protecting balance_cache and loaded_paths. *)
+let economy_mu = Eio.Mutex.create ()
+let with_economy_rw f =
+  try Eio.Mutex.use_rw ~protect:true economy_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
 let load_balances_from_ledger base_path =
-  if Hashtbl.mem loaded_paths base_path then ()
+  if with_economy_rw (fun () -> Hashtbl.mem loaded_paths base_path) then ()
   else begin
     let path = ledger_path base_path in
     if Sys.file_exists path then begin
@@ -204,19 +210,21 @@ let load_balances_from_ledger base_path =
               let json = Yojson.Safe.from_string trimmed in
               match transaction_of_json json with
               | Some txn ->
-                Hashtbl.replace balance_cache (base_path, txn.agent_name) txn.balance_after
+                with_economy_rw (fun () ->
+                  Hashtbl.replace balance_cache (base_path, txn.agent_name) txn.balance_after)
               | None -> ()
             with Yojson.Json_error msg ->
               Log.Misc.warn "agent_economy: skipping malformed ledger entry: %s" msg)
     end;
-    Hashtbl.replace loaded_paths base_path true
+    with_economy_rw (fun () -> Hashtbl.replace loaded_paths base_path true)
   end
 
 let get_balance ~base_path ~agent_name =
   load_balances_from_ledger base_path;
-  match Hashtbl.find_opt balance_cache (base_path, agent_name) with
-  | Some b -> b
-  | None -> initial_balance ()
+  with_economy_rw (fun () ->
+    match Hashtbl.find_opt balance_cache (base_path, agent_name) with
+    | Some b -> b
+    | None -> initial_balance ())
 
 (** {1 Reputation Integration} *)
 

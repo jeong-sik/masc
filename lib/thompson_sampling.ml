@@ -55,9 +55,18 @@ let pending_votes : (string, int * int) Hashtbl.t = Hashtbl.create 16
 (** Base path for stats storage (cluster root, e.g. ~/me) *)
 let base_path_ref : string option ref = ref None
 
+(** Mutex protecting stats_table, pending_votes, and base_path_ref. *)
+let ts_mu = Eio.Mutex.create ()
+let with_ts_rw f =
+  try Eio.Mutex.use_rw ~protect:true ts_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_ts_ro f =
+  try Eio.Mutex.use_ro ts_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
 (** Set base path for stats storage. Call during server init. *)
 let set_base_path path =
-  base_path_ref := Some path
+  with_ts_rw (fun () -> base_path_ref := Some path)
 
 (** Stats file path — uses cluster base_path, not execution directory *)
 let stats_path () =
@@ -188,21 +197,24 @@ let make_default_stats name =
   }
 
 let get_stats name =
-  match Hashtbl.find_opt stats_table name with
-  | Some s -> s
-  | None ->
-      let s = make_default_stats name in
-      Hashtbl.add stats_table name s;
-      s
+  with_ts_rw (fun () ->
+    match Hashtbl.find_opt stats_table name with
+    | Some s -> s
+    | None ->
+        let s = make_default_stats name in
+        Hashtbl.add stats_table name s;
+        s)
 
 let get_all_stats () =
-  Hashtbl.fold (fun _ v acc -> v :: acc) stats_table []
+  with_ts_ro (fun () ->
+    Hashtbl.fold (fun _ v acc -> v :: acc) stats_table [])
 
 let init_agent name =
-  if not (Hashtbl.mem stats_table name) then begin
-    let s = make_default_stats name in
-    Hashtbl.add stats_table name s
-  end
+  with_ts_rw (fun () ->
+    if not (Hashtbl.mem stats_table name) then begin
+      let s = make_default_stats name in
+      Hashtbl.add stats_table name s
+    end)
 
 (** {1 JSON Serialization} *)
 
@@ -293,13 +305,14 @@ let save_stats () =
 (** {1 Feedback Updates} *)
 
 let record_vote ~agent_name ~direction =
-  let (up, down) = Hashtbl.find_opt pending_votes agent_name
-    |> Option.value ~default:(0, 0) in
-  let (up', down') = match direction with
-    | `Up -> (up + 1, down)
-    | `Down -> (up, down + 1)
-  in
-  Hashtbl.replace pending_votes agent_name (up', down')
+  with_ts_rw (fun () ->
+    let (up, down) = Hashtbl.find_opt pending_votes agent_name
+      |> Option.value ~default:(0, 0) in
+    let (up', down') = match direction with
+      | `Up -> (up + 1, down)
+      | `Down -> (up, down + 1)
+    in
+    Hashtbl.replace pending_votes agent_name (up', down'))
 
 let flush_pending_votes () =
   let decay = Env_config.LodgeSelection.vote_decay_factor in

@@ -26,27 +26,34 @@ let keeper_name = "operator-judge"
 
 let states : (string, state) Hashtbl.t = Hashtbl.create 4
 
+(** Mutex for outer [states] Hashtbl. Inner per-state mutex for per-keeper ops. *)
+let outer_mu = Eio.Mutex.create ()
+let with_outer_rw f =
+  try Eio.Mutex.use_rw ~protect:true outer_mu (fun () -> f ())
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
 let with_lock st f =
   Eio.Mutex.use_rw ~protect:true st.mutex f
 
 let get_state base_path =
-  match Hashtbl.find_opt states base_path with
-  | Some st -> st
-  | None ->
-      let st =
-        {
-          mutex = Eio.Mutex.create ();
-          started = false;
-          refreshing = false;
-          judge_online = false;
-          generated_at = None;
-          expires_at = None;
-          model_used = None;
-          last_error = None;
-        }
-      in
-      Hashtbl.add states base_path st;
-      st
+  with_outer_rw (fun () ->
+    match Hashtbl.find_opt states base_path with
+    | Some st -> st
+    | None ->
+        let st =
+          {
+            mutex = Eio.Mutex.create ();
+            started = false;
+            refreshing = false;
+            judge_online = false;
+            generated_at = None;
+            expires_at = None;
+            model_used = None;
+            last_error = None;
+          }
+        in
+        Hashtbl.add states base_path st;
+        st)
 
 let enabled () =
   match Sys.getenv_opt "MASC_OPERATOR_JUDGE_ENABLED" with

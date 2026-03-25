@@ -82,10 +82,7 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let active_model =
     Safe_ops.json_string ~default:"" "active_model" json |> String.trim
   in
-  let _policy_mode =
-    Safe_ops.json_string ~default:"heuristic" "policy_mode" json
-    |> canonical_policy_mode
-  in
+  let _policy_mode = "heuristic" in
   let _policy_voice_enabled =
     Safe_ops.json_bool ~default:false "policy_voice_enabled" json
   in
@@ -206,11 +203,7 @@ let resolved_keeper_args_from_persona args :
                      | model :: _ -> model
                      | [] -> "")
             in
-            let policy_mode =
-              first_some (get_string_opt args "policy_mode") defaults.policy_mode
-              |> Option.value ~default:"heuristic"
-              |> canonical_policy_mode
-            in
+            let policy_mode = "heuristic" in
             let policy_voice_enabled =
               first_some
                 (get_bool_opt args "policy_voice_enabled")

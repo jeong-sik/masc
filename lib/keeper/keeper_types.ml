@@ -243,10 +243,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       dedupe_keep_order base
     in
     let active_model = Safe_ops.json_string ~default:"" "active_model" json in
-    let policy_mode =
-      Safe_ops.json_string ~default:"heuristic" "policy_mode" json
-      |> canonical_policy_mode
-    in
+    let policy_mode = "heuristic" in
     let policy_voice_enabled =
       Safe_ops.json_bool ~default:(default_voice_enabled_for name) "policy_voice_enabled" json
     in

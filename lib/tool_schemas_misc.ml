@@ -205,7 +205,7 @@ After masc_tool_admin_snapshot to review current state before making changes.";
       ("properties", `Assoc [
         ("section", `Assoc [
           ("type", `String "string");
-          ("description", `String "One of: auth, unit_policy, keeper_policy, persistent_agent_policy");
+          ("description", `String "One of: auth, unit_policy");
         ]);
         ("enabled", `Assoc [
           ("type", `String "boolean");

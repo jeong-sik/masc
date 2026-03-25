@@ -57,8 +57,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
             | model :: _ -> model
             | [] -> "")
   in
-  (* Mode categorization removed: always use fixed values. *)
-  let policy_mode = canonical_policy_mode "heuristic" in
+  let policy_mode = "heuristic" in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt

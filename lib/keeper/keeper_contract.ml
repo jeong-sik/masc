@@ -1,11 +1,5 @@
-(** Keeper_contract — typed keeper policy/runtime enums while preserving
+(** Keeper_contract — typed keeper runtime enums while preserving
     current JSON and MCP string representations at the boundary. *)
-
-type policy_mode =
-  | Heuristic
-  | Learned_offline_v1
-  | Explicit_event_v1
-  | Model_deliberation
 
 type policy_action_budget =
   | Conversation
@@ -21,33 +15,6 @@ type room_scope =
 
 type trigger_mode =
   | Explicit_only
-
-let policy_mode_of_string = function
-  | "learned_offline_v1" -> Learned_offline_v1
-  | "explicit_event_v1" -> Explicit_event_v1
-  | "model_deliberation" -> Model_deliberation
-  | _ -> Heuristic
-
-let parse_policy_mode = function
-  | "heuristic" -> Some Heuristic
-  | "learned_offline_v1" -> Some Learned_offline_v1
-  | "explicit_event_v1" -> Some Explicit_event_v1
-  | "model_deliberation" -> Some Model_deliberation
-  | _ -> None
-
-let policy_mode_to_string = function
-  | Heuristic -> "heuristic"
-  | Learned_offline_v1 -> "learned_offline_v1"
-  | Explicit_event_v1 -> "explicit_event_v1"
-  | Model_deliberation -> "model_deliberation"
-
-let policy_mode_is_learned = function
-  | Learned_offline_v1 -> true
-  | Heuristic | Explicit_event_v1 | Model_deliberation -> false
-
-let policy_mode_is_deliberation = function
-  | Model_deliberation -> true
-  | Heuristic | Learned_offline_v1 | Explicit_event_v1 -> false
 
 let policy_action_budget_of_string = function
   | "board" -> Board

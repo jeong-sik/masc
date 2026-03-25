@@ -147,16 +147,13 @@ let get_by_session session_key =
 let resolved_names : (string, string) Hashtbl.t = Hashtbl.create 64
 let resolved_names_lock = Eio.Mutex.create ()
 
-(* Used by Mcp_server_eio_execute — same library, cross-file reference *)
 let get_resolved_name sid =
   Eio.Mutex.use_rw ~protect:true resolved_names_lock (fun () ->
     Hashtbl.find_opt resolved_names sid)
-  [@@warning "-32"]
 
 let set_resolved_name sid name =
   Eio.Mutex.use_rw ~protect:true resolved_names_lock (fun () ->
     Hashtbl.replace resolved_names sid name)
-  [@@warning "-32"]
 
 (** {1 Statistics} *)
 

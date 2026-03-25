@@ -248,27 +248,7 @@ let test_deliberation_meta_defaults () =
   check (float 0.001) "default ts" 0.0 dm.last_deliberation_ts;
   check string "default triggers" "" dm.last_triage_triggers
 
-(* ---------- Policy mode tests ---------- *)
-
-let test_policy_mode_model_deliberation_parse () =
-  match Contract.parse_policy_mode "model_deliberation" with
-  | Some Contract.Model_deliberation -> ()
-  | _ -> fail "expected Model_deliberation"
-
-let test_policy_mode_model_deliberation_roundtrip () =
-  let s = Contract.policy_mode_to_string Contract.Model_deliberation in
-  check string "to_string" "model_deliberation" s;
-  match Contract.policy_mode_of_string s with
-  | Contract.Model_deliberation -> ()
-  | _ -> fail "expected roundtrip to Model_deliberation"
-
-let test_policy_mode_is_deliberation () =
-  check bool "model_deliberation is deliberation" true
-    (Contract.policy_mode_is_deliberation Contract.Model_deliberation);
-  check bool "heuristic is not deliberation" false
-    (Contract.policy_mode_is_deliberation Contract.Heuristic);
-  check bool "learned is not deliberation" false
-    (Contract.policy_mode_is_deliberation Contract.Learned_offline_v1)
+(* Policy mode tests removed: type system purged (always "heuristic") *)
 
 (* ---------- Keeper meta deliberation fields ---------- *)
 
@@ -351,21 +331,6 @@ let test_world_observation_json () =
   in
   check bool "direct_mention in json" true dm;
   check int "unclaimed_task_count in json" 3 utc
-
-(* ---------- Canonical policy mode ---------- *)
-
-let test_canonical_policy_mode_model_deliberation () =
-  (* Mode removal: canonical_policy_mode always returns "heuristic" *)
-  check string "canonical model_deliberation" "heuristic"
-    (Keeper_types.canonical_policy_mode "model_deliberation")
-
-let test_canonical_policy_mode_heuristic () =
-  check string "canonical heuristic" "heuristic"
-    (Keeper_types.canonical_policy_mode "heuristic")
-
-let test_canonical_policy_mode_unknown () =
-  check string "canonical unknown" "heuristic"
-    (Keeper_types.canonical_policy_mode "unknown_mode")
 
 (* ================================================================ *)
 (* Phase 2: MODEL-Driven Deliberation tests                          *)
@@ -880,15 +845,6 @@ let () =
           test_case "defaults from empty json" `Quick
             test_deliberation_meta_defaults;
         ] );
-      ( "policy_mode",
-        [
-          test_case "parse model_deliberation" `Quick
-            test_policy_mode_model_deliberation_parse;
-          test_case "model_deliberation roundtrip" `Quick
-            test_policy_mode_model_deliberation_roundtrip;
-          test_case "is_deliberation predicate" `Quick
-            test_policy_mode_is_deliberation;
-        ] );
       ( "keeper_meta",
         [
           test_case "deliberation fields roundtrip" `Quick
@@ -904,12 +860,6 @@ let () =
       ( "world_observation",
         [
           test_case "observation to json" `Quick test_world_observation_json;
-          test_case "canonical policy mode model_deliberation" `Quick
-            test_canonical_policy_mode_model_deliberation;
-          test_case "canonical policy mode heuristic" `Quick
-            test_canonical_policy_mode_heuristic;
-          test_case "canonical policy mode unknown" `Quick
-            test_canonical_policy_mode_unknown;
         ] );
       ( "build_deliberation_prompt",
         [

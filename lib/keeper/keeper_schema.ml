@@ -546,7 +546,7 @@ let housekeep_schemas : tool_schema list = [
       ("properties", `Assoc [
         ("category", `Assoc [
           ("type", `String "string");
-          ("description", `String "Filter by category: keeper_meta, keeper_metrics_single_file, keeper_memory, keeper_policy, keeper_feedback, jsonl_data, dated_split, events, other. Omit for all.");
+          ("description", `String "Filter by category: keeper_meta, keeper_metrics_single_file, keeper_memory, keeper_feedback, jsonl_data, dated_split, events, other. Omit for all.");
         ]);
         ("min_age_days", `Assoc [
           ("type", `String "number");

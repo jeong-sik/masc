@@ -285,7 +285,8 @@ let () = test "dispatch_tool_admin_snapshot" (fun () ->
       assert (Yojson.Safe.Util.member "tool_inventory" json <> `Null);
       assert (Yojson.Safe.Util.member "auth" json <> `Null);
       assert (Yojson.Safe.Util.member "mode" json = `Null);
-      assert (Yojson.Safe.Util.member "keeper_policies" json <> `Null);
+      (* keeper_policies removed with policy_mode purge *)
+      assert (Yojson.Safe.Util.member "keeper_policies" json = `Null);
       assert (Yojson.Safe.Util.member "command_plane" json <> `Null)
   | None -> failwith "dispatch returned None"
 )
@@ -413,23 +414,18 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           ])
   with
   | Some (true, _) -> (
+      (* keeper_policy section removed with policy_mode purge —
+         admin_update should reject the section *)
       let args =
         `Assoc
           [
             ("section", `String "keeper_policy");
             ("name", `String "admin-keeper");
-            ("policy_mode", `String "heuristic");
-            ("action_budget", `String "board");
           ]
       in
       match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
-      | Some (success, result) ->
-          assert success;
-          let json = parse_json result in
-          assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "keeper_policy");
-          (match Keeper_types.read_meta ctx.config "admin-keeper" with
-          | Ok (Some _meta) -> ()
-          | _ -> failwith "expected updated keeper meta")
+      | Some (false, _msg) -> () (* expected: section no longer supported *)
+      | Some (true, _) -> failwith "keeper_policy section should be rejected"
       | None -> failwith "dispatch returned None")
   | Some (false, err) -> failwith err
   | None -> failwith "keeper up dispatch returned None"

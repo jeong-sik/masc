@@ -40,13 +40,13 @@ let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Sa
   let agent_file =
     Filename.concat (Room.agents_dir config) (Room.safe_filename agent_name ^ ".json")
   in
-  if not (Sys.file_exists agent_file) then
+  if not (Room.path_exists config agent_file) then
     `Assoc [ ("exists", `Bool false) ]
-  else
-    match Safe_ops.read_json_file_safe agent_file with
-    | Error _ ->
+  else (
+    match Room.read_json_opt config agent_file with
+    | None ->
         `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_read") ]
-    | Ok json -> (
+    | Some json -> (
         match Types.agent_of_yojson json with
         | Error _ ->
             `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_parse") ]
@@ -79,7 +79,7 @@ let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Sa
                 ("age_s", `Float age_s);
                 ("last_seen_ago_s", `Float last_seen_ago_s);
                 ("is_zombie", `Bool (Room.is_zombie_agent ~agent_name:agent.name agent.last_seen));
-              ])
+              ]))
 
 let json_string_opt key json =
   match Yojson.Safe.Util.member key json with

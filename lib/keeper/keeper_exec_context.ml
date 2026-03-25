@@ -337,6 +337,7 @@ let compact_if_needed
             ~strategies:Context_compact_oas.[
               PruneToolOutputs; MergeContiguous;
               DropLowImportance; SummarizeOld]
+            ()
         in
         let compacted_ctx =
           sync_oas_context

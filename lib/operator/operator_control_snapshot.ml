@@ -413,12 +413,19 @@ let _snapshot_ttl_s =
 
 let invalidate_snapshot_cache () = _snapshot_cache := None
 
+let room_scope_cache_segment (config : Room_utils.config) =
+  match config.scope with
+  | Room_utils_backend_setup.Default -> "default"
+  | Room_utils_backend_setup.Named room_id -> "room:" ^ room_id
+
 let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
     ?(include_keepers = true) ?(include_summary_fields = true)
     ?(include_command_plane = true) ?(lightweight_summary = false) ?sessions
     (ctx : 'a context) : Yojson.Safe.t =
   let cache_key =
-    Printf.sprintf "%s|%s|%b|%b|%b|%b|%b|%b"
+    Printf.sprintf "%s|%s|%s|%s|%b|%b|%b|%b|%b|%b"
+      ctx.config.base_path
+      (room_scope_cache_segment ctx.config)
       (Option.value ~default:"" actor)
       (Option.value ~default:"" view)
       include_messages include_sessions include_keepers include_summary_fields

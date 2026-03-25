@@ -1,5 +1,4 @@
-(** Keeper_exec_tools — keeper tool execution and tool-loop helpers.
-    Memory recall helpers are in Keeper_exec_tools_recall. *)
+(** Keeper_exec_tools — keeper tool execution and tool-loop helpers. *)
 
 open Keeper_types
 open Keeper_memory

@@ -1473,6 +1473,55 @@ let test_session_dir_mkdir_p_creates_full_tree () =
       check bool "history file written" true
         (Sys.file_exists history_path))
 
+let test_parse_agent_status_reads_compressed_filesystem_backend () =
+  Eio_main.run @@ fun env ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      with_env "MASC_STORAGE_TYPE" "filesystem" (fun () ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Fun.protect
+          ~finally:(fun () -> Fs_compat.clear_fs ())
+          (fun () ->
+            let config = Masc_mcp.Room.default_config base_dir in
+            ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+            let agent_name = "keeper-sangsu-agent" in
+            let agent_file =
+              Filename.concat (Masc_mcp.Room.agents_dir config)
+                (Masc_mcp.Room.safe_filename agent_name ^ ".json")
+            in
+            let agent : Types.agent =
+              {
+                name = agent_name;
+                agent_type = "keeper";
+                status = Types.Active;
+                capabilities = [ "keeper"; "resident" ];
+                current_task = None;
+                joined_at = "2026-03-25T00:00:00Z";
+                last_seen = "2026-03-25T00:01:00Z";
+                meta = None;
+              }
+            in
+            Masc_mcp.Room.write_json config agent_file
+              (Types.agent_to_yojson agent);
+            let raw =
+              match Safe_ops.read_file_safe agent_file with
+              | Ok content -> content
+              | Error e -> fail e
+            in
+            check string "compressed header prefix" "ZSTD" (String.sub raw 0 4);
+            let status_json =
+              Masc_mcp.Keeper_exec_status.parse_agent_status config ~agent_name
+            in
+            check bool "exists" true (require_json_bool_field status_json "exists");
+            check string "agent name preserved" agent_name
+              Yojson.Safe.Util.(status_json |> member "name" |> to_string);
+            check string "status preserved" "active"
+              Yojson.Safe.Util.(status_json |> member "status" |> to_string);
+            check bool "no read error" true
+              Yojson.Safe.Util.(status_json |> member "error" = `Null))))
+
 let test_resident_bootstrap_marks_stale_explicit_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1605,6 +1654,8 @@ let () =
            test_write_meta_syncs_registered_resident_seed;
          test_case "keeper up persists allowed paths" `Quick
            test_keeper_up_persists_allowed_paths_to_status_policy;
+         test_case "parse_agent_status reads compressed filesystem backend" `Quick
+           test_parse_agent_status_reads_compressed_filesystem_backend;
          test_case "resident bootstrap marks stale explicit keeper" `Quick
            test_resident_bootstrap_marks_stale_explicit_keeper;
          test_case "session dir mkdir_p creates full tree from scratch (issue #3019)" `Quick

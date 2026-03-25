@@ -51,7 +51,7 @@ let write_state config state =
     let json_str = Yojson.Safe.to_string (room_state_to_yojson state) in
     (match backend_set config ~key:"room:state" ~value:json_str with
      | Ok () -> ()
-     | Error e -> Log.Misc.error "room_state write_state backend_set failed: %s" (Backend.show_error e))
+     | Error e -> Log.Misc.error "room_state write_state backend_set failed: %s" (Backend_types.show_error e))
   end
 
 (** Update state with function - uses file lock for atomic read-modify-write *)
@@ -377,7 +377,7 @@ let broadcast config ~from_agent ~content =
   (match backend_publish config ~channel:(Printf.sprintf "broadcast:%s" room_id)
       ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
    | Ok _ -> ()
-   | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id (Backend.show_error e));
+   | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id (Backend_types.show_error e));
   emit_message_activity config ~from_agent:safe_agent ~content:safe_content
     ~mention;
   Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content

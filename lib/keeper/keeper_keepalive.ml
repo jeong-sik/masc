@@ -220,6 +220,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                          ~message_count:(List.length c.messages)
                          ~token_count:c.token_count ~repetition_risk
                          ~goal_alignment ~response_alignment
+                         ()
                      in
                      let snapshot =
                        `Assoc
@@ -571,6 +572,11 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
         m
     in
     Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
+    (match get_bus () with
+     | Some bus ->
+         Oas_events.publish_keeper_resident_lifecycle bus ~event:"started"
+           ~keeper_name:live_meta.name ~detail:"keepalive"
+     | None -> ());
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
         run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup))
 
@@ -589,5 +595,10 @@ let stop_keepalive name =
        | None -> ());
       Keeper_registry.set_state ~base_path:entry.base_path name
         Keeper_registry.Stopped;
-      Keeper_registry.cleanup_tracking ~base_path:entry.base_path name
+      Keeper_registry.cleanup_tracking ~base_path:entry.base_path name;
+      (match get_bus () with
+       | Some bus ->
+           Oas_events.publish_keeper_resident_lifecycle bus ~event:"stopped"
+             ~keeper_name:name ~detail:"manual stop"
+       | None -> ())
   ) entries

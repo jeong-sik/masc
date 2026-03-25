@@ -51,6 +51,15 @@ let mark_cached_surface_error surface exn =
   surface.last_error_at <- Some iso;
   surface.last_error_unix <- Some ts
 
+let invalidate_cached_surface surface =
+  surface.last_success_at <- None;
+  surface.last_success_unix <- None;
+  surface.last_attempt_at <- None;
+  surface.last_attempt_unix <- None;
+  surface.last_error <- None;
+  surface.last_error_at <- None;
+  surface.last_error_unix <- None
+
 let upsert_assoc_field key value fields =
   (key, value) :: List.remove_assoc key fields
 
@@ -150,4 +159,3 @@ let initialized_json_opt ?(allow_initializing = false) = function
       | Some (`String "initializing") when not allow_initializing -> None
       | _ -> Some json)
   | _ -> None
-

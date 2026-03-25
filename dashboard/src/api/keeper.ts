@@ -93,10 +93,6 @@ export async function sendKeeperMessageDetailed(
   return callKeeperMessageViaOperator(name, message)
 }
 
-export function sendKeeperMessage(name: string, message: string, models?: string[]): Promise<string> {
-  return sendKeeperMessageDetailed(name, message, models).then(reply => reply.text)
-}
-
 // --- SSE streaming ---
 
 function jsonHeaders(): Record<string, string> {

@@ -16,15 +16,11 @@ open Printf
     Returns [None] on any file error. *)
 let read_file_truncated path ~max_chars =
   try
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let len = min (in_channel_length ic) max_chars in
-      let buf = Bytes.create len in
-      really_input ic buf 0 len;
-      let content = Bytes.to_string buf in
-      if in_channel_length ic > max_chars
-      then Some (content ^ "\n... (truncated)")
-      else Some content)
+    let content = Fs_compat.load_file path in
+    if String.length content > max_chars then
+      Some (String.sub content 0 max_chars ^ "\n... (truncated)")
+    else
+      Some content
   with Sys_error _ -> None
 
 (** Build the isolated review prompt. Only file contents and the question

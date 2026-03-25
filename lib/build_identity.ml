@@ -39,26 +39,39 @@ let executable_dir () =
 
 (** Probe git commit via subprocess.
     Offloaded to system thread to avoid blocking Eio scheduler. *)
+let git_capture_output ~repo_root args =
+  let channels =
+    Unix.open_process_args_full "git"
+      (Array.of_list ("git" :: "-C" :: repo_root :: args))
+      (Unix.environment ())
+  in
+  let stdout, stdin, stderr = channels in
+  try
+    close_out_noerr stdin;
+    let output = In_channel.input_all stdout in
+    ignore (In_channel.input_all stderr);
+    match Unix.close_process_full channels with
+    | Unix.WEXITED 0 -> Some output
+    | _ -> None
+  with exn ->
+    ignore (try Unix.close_process_full channels with _ -> Unix.WEXITED 1);
+    raise exn
 let git_probe_from_root repo_root =
   let f () =
-    let cmd =
-      Printf.sprintf "git -C %s rev-parse --short HEAD 2>/dev/null"
-        (Filename.quote repo_root)
-    in
-    let ic = Unix.open_process_in cmd in
     let output =
-      try In_channel.input_all ic with
+      try git_capture_output ~repo_root [ "rev-parse"; "--short"; "HEAD" ] with
       | Sys_error msg ->
           Log.Identity.warn "git_probe_from_root read failed: %s" msg;
-          ""
+          None
+      | Unix.Unix_error (code, fn, arg) ->
+          Log.Identity.warn "git_probe_from_root unix error: %s (%s %s)"
+            (Unix.error_message code) fn arg;
+          None
       | exn ->
           Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
-          ""
+          None
     in
-    (* Wrap close in try/with to prevent resource leak on close failure *)
-    match (try Unix.close_process_in ic with _ -> Unix.WEXITED 1) with
-    | Unix.WEXITED 0 -> trim_to_option output
-    | _ -> None
+    Option.bind output trim_to_option
   in
   try Eio_unix.run_in_systhread f
   with Stdlib.Effect.Unhandled _ -> f ()

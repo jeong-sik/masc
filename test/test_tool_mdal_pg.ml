@@ -127,7 +127,7 @@ let test_mdal_roundtrip_uses_postgres_backend =
   with_pg_room (fun ~source_name ~url:_ ~effective_url ~config ~ctx ->
       Alcotest.(check bool) "detected backend type" true
         (match config.Room.backend_config.backend_type with
-         | Backend.PostgresNative -> true
+         | Backend_types.PostgresNative -> true
          | _ -> false);
       Alcotest.(check (option string)) "resolved postgres url" (Some effective_url)
         config.Room.backend_config.postgres_url;

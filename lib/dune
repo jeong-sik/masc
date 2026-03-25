@@ -455,6 +455,7 @@
    eval_gate
    eval_harness
    eval_calibration
+   eval_ablation
    ;; Keeper contract
    keeper_schema
    keeper_config

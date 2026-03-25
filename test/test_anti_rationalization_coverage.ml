@@ -15,20 +15,21 @@ let test name f =
     Printf.printf "  FAIL %s: %s\n" name (Printexc.to_string e);
     exit 1
 
-let assert_reject verdict =
-  match verdict with
+(** Helpers accept review_result and extract .verdict for matching. *)
+let assert_reject (r : Anti_rationalization.review_result) =
+  match r.verdict with
   | Anti_rationalization.Reject _ -> ()
   | Anti_rationalization.Approve ->
     failwith "expected Reject but got Approve"
 
-let assert_approve verdict =
-  match verdict with
+let assert_approve (r : Anti_rationalization.review_result) =
+  match r.verdict with
   | Anti_rationalization.Approve -> ()
   | Anti_rationalization.Reject reason ->
     failwith (Printf.sprintf "expected Approve but got Reject: %s" reason)
 
-let assert_reject_contains verdict substring =
-  match verdict with
+let assert_reject_contains (r : Anti_rationalization.review_result) substring =
+  match r.verdict with
   | Anti_rationalization.Reject reason ->
     let lower_reason = String.lowercase_ascii reason in
     let lower_sub = String.lowercase_ascii substring in
@@ -125,7 +126,7 @@ let () = test "case_insensitive_pattern" (fun () ->
     "pre-existing")
 
 (* ================================================================ *)
-(* Gate 3: LLM review (unavailable in tests → Approve by default)  *)
+(* Gate 3: LLM review (unavailable in tests -> Approve by default)  *)
 (* ================================================================ *)
 
 let () = test "normal_notes_approve_when_llm_unavailable" (fun () ->
@@ -140,31 +141,65 @@ let () = test "substantive_notes_no_pattern_match" (fun () ->
        (make_request "Implemented the search feature with pagination support. 15 new tests added, all passing.")))
 
 (* ================================================================ *)
+(* review_result structured fields (#3067)                           *)
+(* ================================================================ *)
+
+let () = test "review_result_gate_field_length" (fun () ->
+  let r = Anti_rationalization.review (make_request "") in
+  assert (r.gate = "length"))
+
+let () = test "review_result_gate_field_excuse" (fun () ->
+  let r = Anti_rationalization.review (make_request "This is out of scope entirely") in
+  assert (r.gate = "excuse"))
+
+let () = test "review_result_evaluator_cascade_default" (fun () ->
+  let r = Anti_rationalization.review (make_request "") in
+  assert (r.evaluator_cascade = "verifier"))
+
+let () = test "review_result_custom_evaluator_cascade" (fun () ->
+  let r = Anti_rationalization.review ~evaluator_cascade:"cross_verifier" (make_request "") in
+  assert (r.evaluator_cascade = "cross_verifier"))
+
+(* ================================================================ *)
 (* parse_verdict (directly tested)                                  *)
 (* ================================================================ *)
 
 let () = test "parse_verdict_approve" (fun () ->
-  assert_approve (Anti_rationalization.parse_verdict "APPROVE"))
+  match Anti_rationalization.parse_verdict "APPROVE" with
+  | Anti_rationalization.Approve -> ()
+  | _ -> failwith "expected Approve")
 
 let () = test "parse_verdict_approve_with_trailing" (fun () ->
-  assert_approve (Anti_rationalization.parse_verdict "APPROVE - looks good"))
+  match Anti_rationalization.parse_verdict "APPROVE - looks good" with
+  | Anti_rationalization.Approve -> ()
+  | _ -> failwith "expected Approve")
 
 let () = test "parse_verdict_reject_with_reason" (fun () ->
-  assert_reject_contains
-    (Anti_rationalization.parse_verdict "REJECT: vague notes")
-    "vague notes")
+  match Anti_rationalization.parse_verdict "REJECT: vague notes" with
+  | Anti_rationalization.Reject reason ->
+    assert (String.lowercase_ascii reason |> fun s ->
+      let len = String.length s in len >= 5 && String.sub s 0 5 = "vague")
+  | _ -> failwith "expected Reject")
 
 let () = test "parse_verdict_reject_bare" (fun () ->
-  assert_reject (Anti_rationalization.parse_verdict "REJECT"))
+  match Anti_rationalization.parse_verdict "REJECT" with
+  | Anti_rationalization.Reject _ -> ()
+  | _ -> failwith "expected Reject")
 
 let () = test "parse_verdict_reject_colon_only" (fun () ->
-  assert_reject (Anti_rationalization.parse_verdict "REJECT:"))
+  match Anti_rationalization.parse_verdict "REJECT:" with
+  | Anti_rationalization.Reject _ -> ()
+  | _ -> failwith "expected Reject")
 
 let () = test "parse_verdict_unrecognized_defaults_approve" (fun () ->
-  assert_approve (Anti_rationalization.parse_verdict "I think it looks good"))
+  match Anti_rationalization.parse_verdict "I think it looks good" with
+  | Anti_rationalization.Approve -> ()
+  | _ -> failwith "expected Approve")
 
 let () = test "parse_verdict_empty_defaults_approve" (fun () ->
-  assert_approve (Anti_rationalization.parse_verdict ""))
+  match Anti_rationalization.parse_verdict "" with
+  | Anti_rationalization.Approve -> ()
+  | _ -> failwith "expected Approve")
 
 (* ================================================================ *)
 (* find_excuse_pattern                                               *)

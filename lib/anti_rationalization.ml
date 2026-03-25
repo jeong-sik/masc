@@ -28,6 +28,13 @@ type verdict =
   | Approve
   | Reject of string
 
+type review_result = {
+  verdict : verdict;
+  evaluator_cascade : string;
+  generator_cascade : string option;
+  gate : string;  (** Which gate produced this verdict: "length", "excuse", "llm", "fallback" *)
+}
+
 (* ================================================================ *)
 (* Excuse pattern detection (local, no LLM)                         *)
 (* ================================================================ *)
@@ -135,29 +142,59 @@ let parse_verdict (text : string) : verdict =
     Approve
 
 (* ================================================================ *)
+(* Cross-model cascade selection (#3067)                             *)
+(* ================================================================ *)
+
+(** Default evaluator cascade name. Override via [~evaluator_cascade]
+    to force cross-model evaluation (e.g. "cross_verifier" configured
+    to use a different provider than the generator's cascade).
+
+    Cross-model evaluation is more effective than same-model different-role
+    because different model architectures have different blindspots.
+    See: Anthropic "Harness Design" blog analysis. *)
+let default_evaluator_cascade = "verifier"
+
+(* ================================================================ *)
 (* Core: review                                                     *)
 (* ================================================================ *)
 
-let review (req : review_request) : verdict =
+(** Review completion notes for avoidance patterns and substance.
+
+    @param evaluator_cascade Override the cascade used for LLM verification.
+      Default: ["verifier"]. Set to a cascade that uses a different model
+      family than the generator for genuine cross-model evaluation.
+    @param generator_cascade Optional name of the cascade the generator used.
+      Logged for auditing model separation. Not used in verification logic. *)
+let review
+    ?(evaluator_cascade = default_evaluator_cascade)
+    ?generator_cascade
+    (req : review_request) : review_result =
   (* Gate 1: empty or trivially short notes *)
   let notes_trimmed = String.trim req.completion_notes in
   if String.length notes_trimmed < min_notes_length then
-    Reject (sprintf "completion notes too short (%d chars, minimum %d)"
-              (String.length notes_trimmed) min_notes_length)
+    { verdict = Reject (sprintf "completion notes too short (%d chars, minimum %d)"
+                          (String.length notes_trimmed) min_notes_length);
+      evaluator_cascade; generator_cascade; gate = "length" }
   else
   (* Gate 2: local excuse pattern detection *)
   match find_excuse_pattern notes_trimmed with
   | Some (pattern, reason) ->
     Log.Task.info "[anti-rationalization] agent=%s task=%s excuse_pattern=%s"
       req.agent_name req.task_title pattern;
-    Reject (sprintf "avoidance pattern detected: \"%s\" (%s). Revise your notes to describe actual completed work."
-              pattern reason)
+    { verdict = Reject (sprintf "avoidance pattern detected: \"%s\" (%s). Revise your notes to describe actual completed work."
+                          pattern reason);
+      evaluator_cascade; generator_cascade; gate = "excuse" }
   | None ->
-    (* Gate 3: LLM review via verifier cascade *)
+    (* Gate 3: LLM review via evaluator cascade *)
     let prompt = build_prompt req in
+    (match generator_cascade with
+     | Some gc when gc = evaluator_cascade ->
+       Log.Task.warn "[anti-rationalization] same cascade for generator (%s) and evaluator (%s) — cross-model separation not active"
+         gc evaluator_cascade
+     | _ -> ());
     (match
        Oas_worker.run_named
-         ~cascade_name:"verifier"
+         ~cascade_name:evaluator_cascade
          ~goal:prompt
          ~max_turns:1
          ~temperature:0.0
@@ -169,13 +206,26 @@ let review (req : review_request) : verdict =
        let v = parse_verdict text in
        (match v with
         | Reject reason ->
-          Log.Task.info "[anti-rationalization] LLM rejected: agent=%s task=%s reason=%s"
-            req.agent_name req.task_title reason
+          Log.Task.info "[anti-rationalization] LLM rejected: agent=%s task=%s cascade=%s reason=%s"
+            req.agent_name req.task_title evaluator_cascade reason
         | Approve ->
-          Log.Task.info "[anti-rationalization] LLM approved: agent=%s task=%s"
-            req.agent_name req.task_title);
-       v
+          Log.Task.info "[anti-rationalization] LLM approved: agent=%s task=%s cascade=%s"
+            req.agent_name req.task_title evaluator_cascade);
+       { verdict = v; evaluator_cascade; generator_cascade; gate = "llm" }
      | Error msg ->
        (* Liveness > correctness: if LLM is unavailable, approve *)
        Log.Task.warn "[anti-rationalization] LLM unavailable: %s (approving by default)" msg;
-       Approve)
+       { verdict = Approve; evaluator_cascade; generator_cascade; gate = "fallback" })
+
+(** Backward-compatible wrapper that returns only the verdict.
+    Use [review] directly for structured results with audit metadata. *)
+let review_verdict ?evaluator_cascade ?generator_cascade req =
+  (review ?evaluator_cascade ?generator_cascade req).verdict
+
+let review_result_to_json (r : review_result) : Yojson.Safe.t =
+  `Assoc [
+    ("verdict", `String (match r.verdict with Approve -> "approve" | Reject s -> "reject:" ^ s));
+    ("evaluator_cascade", `String r.evaluator_cascade);
+    ("generator_cascade", match r.generator_cascade with Some s -> `String s | None -> `Null);
+    ("gate", `String r.gate);
+  ]

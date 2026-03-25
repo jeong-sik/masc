@@ -98,6 +98,24 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
 
 (* ── Sweep and recover ───────────────────────────────────── *)
 
+let reconcile_desired_resident_keepers (ctx : _ context) =
+  let base_path = ctx.config.base_path in
+  Keeper_types.list_resident_keepers ctx.config
+  |> List.iter (fun (spec : Keeper_types.resident_keeper_spec) ->
+       if not spec.desired then ()
+       else
+         match read_meta ctx.config spec.persistent_name with
+         | Ok (Some meta)
+           when not meta.paused
+                && meta.presence_keepalive
+                && not (Keeper_registry.is_running ~base_path meta.name) ->
+             supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
+             if Keeper_registry.is_running ~base_path meta.name then begin
+               publish_lifecycle "reconciled" meta.name "late resident registration";
+               Log.Keeper.info "%s: reconciled late resident keeper" meta.name
+             end
+         | _ -> ())
+
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Env_config.KeeperResidentSupervisor.max_restarts in
@@ -151,4 +169,5 @@ let sweep_and_recover (ctx : _ context) =
         Log.Keeper.error "%s: cannot read meta for restart, removing"
           old_entry.name;
         Keeper_registry.unregister ~base_path old_entry.name
-  ) !to_restart
+  ) !to_restart;
+  reconcile_desired_resident_keepers ctx

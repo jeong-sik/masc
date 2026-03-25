@@ -138,6 +138,7 @@ let make_hooks
     after_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.AfterTurn { turn; response } ->
+        let meta = !meta_ref in
         let model = response.model in
         let input_tok, output_tok = match response.usage with
           | Some u -> (u.input_tokens, u.output_tokens)
@@ -145,14 +146,14 @@ let make_hooks
         in
         let total_tok = input_tok + output_tok in
         Log.Keeper.info "keeper:%s turn=%d model=%s tokens=%d"
-          (!meta_ref).name turn model total_tok;
+          meta.name turn model total_tok;
         (* Emit per-turn cost event for task attribution.
            cost_usd is 0.0 until OAS cascade provides actual cost
            (see oas#393). Token counts are the primary data for now. *)
         (match trajectory_acc with
          | Some acc ->
            emit_cost_event ~masc_root:acc.masc_root
-             ~agent_name:(!meta_ref).name ~task_id:acc.task_id
+             ~agent_name:meta.name ~task_id:acc.task_id
              ~model ~input_tokens:input_tok ~output_tokens:output_tok
              ~cost_usd:0.0
          | None -> ());

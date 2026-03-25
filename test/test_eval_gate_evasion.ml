@@ -84,35 +84,34 @@ let test_catches_newline_separated () =
   | None -> Alcotest.fail "Should catch newline-separated force push"
 
 (* ============================================================
-   Known gaps (documented — these bypass detection)
-   These test cases document the limitations, not failures.
+   Former known gaps — now detected after A-7 evasion hardening.
+   These patterns used to bypass detection but are now caught.
    ============================================================ *)
 
 let test_gap_variable_expansion () =
   (* ${IFS} expands to space in bash, so rm${IFS}-rf becomes rm -rf *)
   let result = Eval_gate.detect_destructive "rm${IFS}-rf /data" in
-  (* After normalization: "rm${IFS}-rf /data" — $ is kept, no space *)
-  Alcotest.(check bool) "variable expansion bypasses (known gap)"
-    true (result = None)
+  Alcotest.(check bool) "variable expansion now detected"
+    true (Option.is_some result)
 
 let test_gap_command_substitution () =
   (* $(echo rm) -rf expands to rm -rf in bash *)
   let result = Eval_gate.detect_destructive "$(echo rm) -rf /data" in
-  Alcotest.(check bool) "command substitution bypasses (known gap)"
-    true (result = None)
+  Alcotest.(check bool) "command substitution now detected"
+    true (Option.is_some result)
 
 let test_gap_hex_escape () =
   (* $'\x72\x6d' expands to rm in bash *)
   let result = Eval_gate.detect_destructive "$'\\x72\\x6d' -rf /data" in
-  Alcotest.(check bool) "hex escape bypasses (known gap)"
-    true (result = None)
+  Alcotest.(check bool) "hex escape now detected"
+    true (Option.is_some result)
 
 let test_gap_base64_decode () =
   (* echo cm0gLXJm | base64 -d | sh → executes rm -rf *)
   let result = Eval_gate.detect_destructive
     "echo cm0gLXJm | base64 -d | sh" in
-  Alcotest.(check bool) "base64 pipe bypasses (known gap)"
-    true (result = None)
+  Alcotest.(check bool) "base64 pipe now detected"
+    true (Option.is_some result)
 
 (* ============================================================
    Safe commands still pass

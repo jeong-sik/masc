@@ -15,6 +15,7 @@ type keeper_state =
   | Stopped
 
 type registry_entry = {
+  base_path : string;
   name : string;
   mutable meta : keeper_meta;
   mutable state : keeper_state;
@@ -28,37 +29,37 @@ type registry_entry = {
 val state_to_string : keeper_state -> string
 
 (** Register a keeper as running. Returns the new entry. *)
-val register : string -> keeper_meta -> registry_entry
+val register : base_path:string -> string -> keeper_meta -> registry_entry
 
 (** Unregister a keeper (removes from registry). *)
-val unregister : string -> unit
+val unregister : base_path:string -> string -> unit
 
 (** Look up a keeper by name. *)
-val get : string -> registry_entry option
+val get : base_path:string -> string -> registry_entry option
 
 (** Look up a keeper by name, raising [Not_found] if absent. *)
-val get_exn : string -> registry_entry
+val get_exn : base_path:string -> string -> registry_entry
 
 (** Return all registered keepers. *)
-val all : unit -> registry_entry list
+val all : ?base_path:string -> unit -> registry_entry list
 
 (** Update the meta for a registered keeper. No-op if not found. *)
-val update_meta : string -> keeper_meta -> unit
+val update_meta : base_path:string -> string -> keeper_meta -> unit
 
 (** Change keeper state. No-op if not found. *)
-val set_state : string -> keeper_state -> unit
+val set_state : base_path:string -> string -> keeper_state -> unit
 
 (** Record a restart for a keeper. Increments restart_count. *)
-val record_restart : string -> unit
+val record_restart : base_path:string -> string -> unit
 
 (** Record an error for a keeper. *)
-val record_error : string -> string -> unit
+val record_error : base_path:string -> string -> string -> unit
 
 (** Check if a keeper is in Running state. *)
-val is_running : string -> bool
+val is_running : base_path:string -> string -> bool
 
 (** Count keepers in Running state. *)
-val count_running : unit -> int
+val count_running : ?base_path:string -> unit -> int
 
 (** Clear the registry. For testing only. *)
 val clear : unit -> unit

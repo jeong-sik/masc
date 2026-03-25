@@ -30,6 +30,12 @@ val coordination_surface_json : keeper_meta -> Yojson.Safe.t
 val live_override_fields :
   keeper_meta -> keeper_profile_defaults -> string list
 
+val runtime_keepalive_running :
+  Room_utils.config -> keeper_meta -> bool
+
+val runtime_keepalive_started_at :
+  Room_utils.config -> keeper_meta -> float option
+
 val runtime_surface_json :
   Room_utils.config -> keeper_meta -> Yojson.Safe.t
 

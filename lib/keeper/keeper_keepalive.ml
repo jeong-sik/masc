@@ -76,6 +76,14 @@ let unregister_keepalive name =
       Hashtbl.remove last_agent_counts name;
       remove_board_reactive_wakeups_unlocked name)
 
+let sync_registry_running ~base_path (meta : keeper_meta) =
+  match Keeper_registry.get ~base_path meta.name with
+  | Some _ ->
+      Keeper_registry.update_meta ~base_path meta.name meta;
+      Keeper_registry.set_state ~base_path meta.name Keeper_registry.Running
+  | None ->
+      ignore (Keeper_registry.register ~base_path meta.name meta)
+
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~2 s instead of waiting for the full 30-300 s interval. *)
 let interruptible_sleep ~clock ~stop ~wakeup duration =
@@ -610,26 +618,25 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     with_keepalive_registry_rw (fun () ->
         Hashtbl.replace keepalives m.name
           { stop; wakeup; started_at = Time_compat.now (); grpc_close });
-    (try
-       if not (Room_utils.is_initialized ctx.config) then
-         let (_init_msg : string) = Room.init ctx.config ~agent_name:None in ()
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Keeper.error "room init failed: %s"
-         (Printexc.to_string exn));
-    (try
-       let synced = ensure_keeper_room_presence ctx.config m in
-       (match write_meta ctx.config synced with
-        | Ok () -> ()
-        | Error e -> Log.Keeper.warn "write_meta failed (bootstrap): %s" e)
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Keeper.error "room presence bootstrap failed: %s"
-         (Printexc.to_string exn));
+    let live_meta =
+      try
+        (if not (Room_utils.is_initialized ctx.config) then
+           let (_init_msg : string) = Room.init ctx.config ~agent_name:None in ());
+        let synced = ensure_keeper_room_presence ctx.config m in
+        (match write_meta ctx.config synced with
+         | Ok () -> ()
+         | Error e -> Log.Keeper.warn "write_meta failed (bootstrap): %s" e);
+        synced
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Keeper.error "room presence bootstrap failed: %s"
+          (Printexc.to_string exn);
+        m
+    in
+    sync_registry_running ~base_path:ctx.config.base_path live_meta;
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
-        run_heartbeat_loop ~proactive_warmup_sec ctx m stop ~wakeup))
+        run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup))
 
 let stop_keepalive name =
   match
@@ -644,6 +651,11 @@ let stop_keepalive name =
   with
   | None -> ()
   | Some entry ->
+      Keeper_registry.all ()
+      |> List.iter (fun (registry_entry : Keeper_registry.registry_entry) ->
+             if String.equal registry_entry.name name then
+               Keeper_registry.set_state ~base_path:registry_entry.base_path name
+                 Keeper_registry.Stopped);
       entry.stop := true;
       (match entry.grpc_close with
        (* cleanup: best-effort gRPC close, ignore transport errors *)

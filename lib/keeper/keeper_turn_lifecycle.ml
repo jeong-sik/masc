@@ -97,8 +97,9 @@ let handle_keeper_down ctx args : tool_result =
         (Operator_pending_confirm.remove_pending_confirms_by_target ctx.config
            ~target_type:"keeper" ~target_id:(Some name));
       (if remove_meta then
-         Safe_ops.remove_file_logged ~context:"keeper_down"
-           (keeper_meta_path ctx.config name)
+         ( Safe_ops.remove_file_logged ~context:"keeper_down"
+             (keeper_meta_path ctx.config name);
+           Keeper_registry.unregister ~base_path:ctx.config.base_path name )
        else
          let retained =
            {
@@ -109,7 +110,10 @@ let handle_keeper_down ctx args : tool_result =
              paused = true;
            }
          in
-         write_meta_logged ctx.config retained);
+         (write_meta_logged ctx.config retained;
+          Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
+          Keeper_registry.set_state ~base_path:ctx.config.base_path name
+            Keeper_registry.Paused));
       if remove_session then (
         let rec rm_rf path =
           if Sys.file_exists path then begin

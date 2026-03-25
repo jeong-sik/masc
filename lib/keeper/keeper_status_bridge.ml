@@ -134,6 +134,19 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
         | None -> false)
   |> List.rev
 
+let runtime_registry_entry (config : Room_utils.config) name =
+  Keeper_registry.get ~base_path:config.base_path name
+
+let runtime_keepalive_running config (meta : keeper_meta) =
+  match runtime_registry_entry config meta.name with
+  | Some entry -> entry.state = Keeper_registry.Running
+  | None -> Keeper_keepalive.keeper_keepalive_running meta.name
+
+let runtime_keepalive_started_at config (meta : keeper_meta) =
+  match runtime_registry_entry config meta.name with
+  | Some entry -> Some entry.started_at
+  | None -> Keeper_keepalive.keeper_keepalive_started_at meta.name
+
 let runtime_surface_json config (meta : keeper_meta) =
   let resident_spec =
     match read_resident_keeper config meta.name with
@@ -145,16 +158,29 @@ let runtime_surface_json config (meta : keeper_meta) =
     | Some spec -> spec.desired
     | None -> false
   in
+  let keepalive_running = runtime_keepalive_running config meta in
+  let fiber_health =
+    match Keeper_resident_supervisor.fiber_health_of meta.name with
+    | Fiber_unknown when keepalive_running -> Fiber_alive
+    | health -> health
+  in
+  let registry_state =
+    match runtime_registry_entry config meta.name with
+    | Some entry -> Some (Keeper_registry.state_to_string entry.state)
+    | None -> None
+  in
   `Assoc
     [
       ("paused", `Bool meta.paused);
       ("desired", `Bool desired);
       ("resident_registered", `Bool (Option.is_some resident_spec));
-      ("keepalive_running", `Bool (Keeper_keepalive.keeper_keepalive_running meta.name));
+      ("keepalive_running", `Bool keepalive_running);
+      ("registry_state",
+       match registry_state with
+       | Some state -> `String state
+       | None -> `Null);
       ( "fiber_health",
-        `String
-          (Keeper_exec_status.string_of_fiber_health
-             (Keeper_resident_supervisor.fiber_health_of meta.name)) );
+        `String (Keeper_exec_status.string_of_fiber_health fiber_health) );
       ("presence_keepalive", `Bool meta.presence_keepalive);
       ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
     ]

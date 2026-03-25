@@ -655,49 +655,6 @@ let bindings_to_json (bindings : binding list) : Yojson.Safe.t =
     ]
   ) bindings)
 
-(* ===== OCaml 5.x Parallel Processing ===== *)
-
-(** Atomic request counter for unique IDs *)
-let request_counter = Atomic.make 0
-
-(** Generate unique request ID (thread-safe) *)
-let generate_request_id () =
-  let count = Atomic.fetch_and_add request_counter 1 in
-  Printf.sprintf "req-%d-%d" (Unix.getpid ()) count
-
-(** Parallel request execution using Domains (OCaml 5.x)
-    Execute multiple requests in parallel and collect results *)
-let parallel_requests ~(requests : request list) ~(handler : request -> response) : response list =
-  match requests with
-  | [] -> []
-  | [single] -> [handler single]  (* Single request, no parallelism needed *)
-  | _ ->
-      (* Use Domain.spawn for true parallelism *)
-      let domains = List.map (fun req ->
-        Domain.spawn (fun () -> handler req)
-      ) requests in
-      List.map Domain.join domains
-
-(** Batch request processing with concurrency limit *)
-let batch_requests ~concurrency ~requests ~handler =
-  let rec process acc remaining =
-    match remaining with
-    | [] -> List.rev acc
-    | _ ->
-        let (batch, rest) =
-          let rec take n lst acc =
-            if n = 0 then (List.rev acc, lst)
-            else match lst with
-              | [] -> (List.rev acc, [])
-              | x :: xs -> take (n-1) xs (x :: acc)
-          in
-          take concurrency remaining []
-        in
-        let results = parallel_requests ~requests:batch ~handler in
-        process (List.rev_append results acc) rest
-  in
-  process [] requests
-
 (** Atomic statistics for monitoring *)
 module Stats = struct
   let total_requests = Atomic.make 0

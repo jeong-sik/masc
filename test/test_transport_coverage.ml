@@ -707,69 +707,7 @@ let test_bindings_to_json_has_url () =
     (try let _ = Str.search_forward (Str.regexp "url") json_str 0 in true
      with Not_found -> false)
 
-(* ============================================================
-   generate_request_id Tests
-   ============================================================ *)
-
-let test_generate_request_id_nonempty () =
-  let id = Transport.generate_request_id () in
-  check bool "has req- prefix" true
-    (String.length id > 4 && String.sub id 0 4 = "req-")
-
-let test_generate_request_id_has_prefix () =
-  let id = Transport.generate_request_id () in
-  check bool "has req- prefix" true
-    (String.length id > 4 && String.sub id 0 4 = "req-")
-
-let test_generate_request_id_unique () =
-  let id1 = Transport.generate_request_id () in
-  let id2 = Transport.generate_request_id () in
-  check bool "unique" true (id1 <> id2)
-
-(* ============================================================
-   parallel_requests Tests
-   ============================================================ *)
-
-let test_parallel_requests_empty () =
-  let handler _ = Transport.make_success ~result:`Null () in
-  let results = Transport.parallel_requests ~requests:[] ~handler in
-  check int "empty" 0 (List.length results)
-
-let test_parallel_requests_single () =
-  let req : Transport.request = { id = Some "1"; method_name = "test"; params = `Null; headers = [] } in
-  let handler _ = Transport.make_success ~result:(`String "done") () in
-  let results = Transport.parallel_requests ~requests:[req] ~handler in
-  check int "single" 1 (List.length results)
-
-let test_parallel_requests_multiple () =
-  let req1 : Transport.request = { id = Some "1"; method_name = "test1"; params = `Null; headers = [] } in
-  let req2 : Transport.request = { id = Some "2"; method_name = "test2"; params = `Null; headers = [] } in
-  let handler _ = Transport.make_success ~result:`Null () in
-  let results = Transport.parallel_requests ~requests:[req1; req2] ~handler in
-  check int "multiple" 2 (List.length results)
-
-(* ============================================================
-   batch_requests Tests
-   ============================================================ *)
-
-let test_batch_requests_empty () =
-  let handler _ = Transport.make_success ~result:`Null () in
-  let results = Transport.batch_requests ~concurrency:2 ~requests:[] ~handler in
-  check int "empty" 0 (List.length results)
-
-let test_batch_requests_less_than_concurrency () =
-  let req : Transport.request = { id = Some "1"; method_name = "test"; params = `Null; headers = [] } in
-  let handler _ = Transport.make_success ~result:`Null () in
-  let results = Transport.batch_requests ~concurrency:5 ~requests:[req] ~handler in
-  check int "single" 1 (List.length results)
-
-let test_batch_requests_more_than_concurrency () =
-  let reqs = List.init 5 (fun i ->
-    { Transport.id = Some (string_of_int i); method_name = "test"; params = `Null; headers = [] }
-  ) in
-  let handler _ = Transport.make_success ~result:`Null () in
-  let results = Transport.batch_requests ~concurrency:2 ~requests:reqs ~handler in
-  check int "five" 5 (List.length results)
+(* generate_request_id, parallel_requests, batch_requests removed: dead code (#2990) *)
 
 (* ============================================================
    Stats Module Tests
@@ -953,21 +891,6 @@ let () =
       test_case "nonempty" `Quick test_bindings_to_json_nonempty;
       test_case "has protocol" `Quick test_bindings_to_json_has_protocol;
       test_case "has url" `Quick test_bindings_to_json_has_url;
-    ];
-    "generate_request_id", [
-      test_case "nonempty" `Quick test_generate_request_id_nonempty;
-      test_case "has prefix" `Quick test_generate_request_id_has_prefix;
-      test_case "unique" `Quick test_generate_request_id_unique;
-    ];
-    "parallel_requests", [
-      test_case "empty" `Quick test_parallel_requests_empty;
-      test_case "single" `Quick test_parallel_requests_single;
-      test_case "multiple" `Quick test_parallel_requests_multiple;
-    ];
-    "batch_requests", [
-      test_case "empty" `Quick test_batch_requests_empty;
-      test_case "less than concurrency" `Quick test_batch_requests_less_than_concurrency;
-      test_case "more than concurrency" `Quick test_batch_requests_more_than_concurrency;
     ];
     "stats", [
       test_case "record success" `Quick test_stats_record_request_success;

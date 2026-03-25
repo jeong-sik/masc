@@ -725,6 +725,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_tool_admin_snapshot" -> Some (handle_tool_admin_snapshot ctx args)
   | "masc_tool_admin_update" -> Some (handle_tool_admin_update ctx args)
   | "masc_keeper_tool_catalog" -> Some (handle_keeper_tool_catalog ctx args)
+  | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas

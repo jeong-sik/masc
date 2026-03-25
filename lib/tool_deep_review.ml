@@ -1,0 +1,120 @@
+(** Tool_deep_review — Adversarial code review with isolated context.
+
+    PR#814 Gap 2: Spawns a review pass using a different model perspective.
+    Context is deliberately stripped — only target file contents and the
+    reviewer's question are provided. No JIRA, Slack, memory, or
+    institutional knowledge.
+
+    This forces the reviewer to evaluate code structurally rather than
+    relying on domain context that might mask bugs.
+
+    Uses the same [Oas_worker.run_named] pattern as {!Verifier_oas}. *)
+
+open Printf
+
+(** Read a file's content, returning at most [max_chars] characters.
+    Returns [None] on any file error. *)
+let read_file_truncated path ~max_chars =
+  try
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let len = min (in_channel_length ic) max_chars in
+      let buf = Bytes.create len in
+      really_input ic buf 0 len;
+      let content = Bytes.to_string buf in
+      if in_channel_length ic > max_chars
+      then Some (content ^ "\n... (truncated)")
+      else Some content)
+  with Sys_error _ -> None
+
+(** Build the isolated review prompt. Only file contents and the question
+    are included — no external context. *)
+let build_prompt ~target_files ~question ~base_path =
+  let file_sections =
+    List.filter_map (fun rel_path ->
+      let full_path = Filename.concat base_path rel_path in
+      match read_file_truncated full_path ~max_chars:3000 with
+      | Some content -> Some (sprintf "=== %s ===\n%s" rel_path content)
+      | None -> None
+    ) target_files
+  in
+  if file_sections = [] then
+    Error "No readable target files found"
+  else
+    let files_str = String.concat "\n\n" file_sections in
+    Ok (sprintf
+{|You are an adversarial code reviewer. Your job is to find bugs, edge cases,
+and potential issues that a domain-aware reviewer might miss.
+
+IMPORTANT: You have NO access to JIRA, GitHub issues, Slack, design docs,
+or any context outside the code below. Review ONLY the code structurally.
+
+QUESTION: %s
+
+FILES:
+%s
+
+If you find concerns, list each with file:line and a brief explanation.
+If the code looks correct, respond with exactly: NO_ISSUES_FOUND|} question files_str)
+
+(** Run the adversarial review via OAS. Returns (ok, result_json). *)
+let handle_deep_review (config : Room.config) args : bool * string =
+  let target_files =
+    match Yojson.Safe.Util.(member "target_files" args) with
+    | `List files ->
+        List.filter_map (function `String s -> Some s | _ -> None) files
+    | _ -> []
+  in
+  let question =
+    match Yojson.Safe.Util.(member "question" args) with
+    | `String s -> s
+    | _ -> ""
+  in
+  if target_files = [] || question = "" then
+    (false, Yojson.Safe.to_string (`Assoc [
+      ("error", `String "target_files (non-empty array) and question (string) are required")
+    ]))
+  else
+    match build_prompt ~target_files ~question ~base_path:config.base_path with
+    | Error msg ->
+        (false, Yojson.Safe.to_string (`Assoc [
+          ("error", `String msg)
+        ]))
+    | Ok prompt ->
+        match
+          Oas_worker.run_named
+            ~cascade_name:"adversarial_reviewer"
+            ~goal:prompt
+            ~max_turns:1
+            ~temperature:0.5
+            ~max_tokens:500
+            ()
+        with
+        | Ok result ->
+            let text = Oas_response.text_of_response result.response in
+            let verdict =
+              if String.trim (String.uppercase_ascii text) = "NO_ISSUES_FOUND"
+              then "no_issues"
+              else "concern"
+            in
+            (true, Yojson.Safe.to_string (`Assoc [
+              ("verdict", `String verdict);
+              ("review", `String text);
+              ("files_reviewed", `Int (List.length target_files));
+            ]))
+        | Error msg ->
+            Log.Misc.warn "adversarial review failed: %s" msg;
+            (true, Yojson.Safe.to_string (`Assoc [
+              ("verdict", `String "unavailable");
+              ("error", `String msg);
+            ]))
+
+(** Tool schema for MCP registration. *)
+let tool_definitions = [
+  ("masc_deep_review",
+   {|Request adversarial code review with isolated context. The reviewer sees ONLY the specified files and your question — no JIRA, Slack, memory, or design docs. Use this to catch structural bugs that domain context might mask.|},
+   [
+     ("target_files", "array", true, "List of file paths relative to room base (e.g., [\"lib/foo.ml\"])");
+     ("question", "string", true, "Specific question for the reviewer (e.g., 'Are there off-by-one errors?')");
+   ]);
+]

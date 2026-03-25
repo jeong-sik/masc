@@ -389,6 +389,7 @@
    tool_mdal_schemas
    tool_mdal_handlers
    tool_library
+   tool_deep_review
    tool_budget
    tool_catalog
    tool_result

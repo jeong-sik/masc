@@ -76,9 +76,10 @@ let set_if_not_exists_q =
   "INSERT INTO masc_kv (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING"
 
 let compare_and_swap_q =
-  (Caqti_type.(t2 string string) ->. Caqti_type.unit)
-  "INSERT INTO masc_kv (key, value, updated_at) VALUES ($1, $2, NOW()) \
-   ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()"
+  (Caqti_type.(t3 string string string) ->? Caqti_type.int)
+  "UPDATE masc_kv SET value = $3, updated_at = NOW() \
+   WHERE key = $1 AND value = $2 \
+   RETURNING 1"
 
 let acquire_lock_q =
   (Caqti_type.(t3 string string int) ->? Caqti_type.int)
@@ -189,6 +190,21 @@ let cleanup_pubsub_limit_q =
 
 let (let*) = Result.bind
 
+(** Read MASC_PG_POOL_SIZE from env, clamped to [1, 50]. Default: 10. *)
+let configured_pool_size () =
+  match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
+  | Some s -> (try max 1 (min (int_of_string s) 50) with Failure _ -> 10)
+  | None -> 10
+
+(** Add TCP keepalive query params to a URI if not already present. *)
+let uri_with_keepalive uri =
+  if Uri.get_query_param uri "keepalives" <> None then uri
+  else uri
+    |> (fun u -> Uri.add_query_param' u ("keepalives", "1"))
+    |> (fun u -> Uri.add_query_param' u ("keepalives_idle", "15"))
+    |> (fun u -> Uri.add_query_param' u ("keepalives_interval", "5"))
+    |> (fun u -> Uri.add_query_param' u ("keepalives_count", "3"))
+
 (* Rate-limited error logging to avoid flooding stderr
    when the PG pool is exhausted (e.g. Supabase MaxClientsInSessionMode). *)
 let _pg_last_error_log = Atomic.make 0.0
@@ -205,22 +221,12 @@ let caqti_error_to_masc err =
 
 let create ~sw ~env ~url ~cluster_name ~node_id =
   let uri = Uri.of_string url in
-  let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-    | Some s -> (try max 1 (min (int_of_string s) 50) with Failure _ -> 10)
-    | None -> 10
-  in
+  let max_pool = configured_pool_size () in
   let pool_config = Caqti_pool_config.create
       ~max_size:max_pool ~max_idle_size:(min max_pool 3)
       ~max_idle_age:(Some (Mtime.Span.of_uint64_ns 30_000_000_000L))
       ~max_use_count:(Some 50) () in
-  let uri =
-    if Uri.get_query_param uri "keepalives" <> None then uri
-    else uri
-      |> (fun u -> Uri.add_query_param' u ("keepalives", "1"))
-      |> (fun u -> Uri.add_query_param' u ("keepalives_idle", "15"))
-      |> (fun u -> Uri.add_query_param' u ("keepalives_interval", "5"))
-      |> (fun u -> Uri.add_query_param' u ("keepalives_count", "3"))
-  in
+  let uri = uri_with_keepalive uri in
   Log.Backend.info "[EioPG] connecting pool (max_size=%d, max_idle_size=%d, keepalives=on)..."
     max_pool (min max_pool 3);
   match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
@@ -257,20 +263,9 @@ let create_readonly ~sw ~env ~url ~cluster_name ~node_id =
   (* Readonly pools need >1 connection to avoid "Invalid concurrent
      usage" when multiple Eio fibers within the same executor domain
      call Pool.use concurrently. Use half the main pool size, minimum 3. *)
-  let main_pool_max = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-    | Some s -> (try max 1 (min (int_of_string s) 50) with _ -> 10)
-    | None -> 10
-  in
-  let max_pool = max 3 (main_pool_max / 2) in
+  let max_pool = max 3 (configured_pool_size () / 2) in
   let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
-  let uri =
-    if Uri.get_query_param uri "keepalives" <> None then uri
-    else uri
-      |> (fun u -> Uri.add_query_param' u ("keepalives", "1"))
-      |> (fun u -> Uri.add_query_param' u ("keepalives_idle", "15"))
-      |> (fun u -> Uri.add_query_param' u ("keepalives_interval", "5"))
-      |> (fun u -> Uri.add_query_param' u ("keepalives_count", "3"))
-  in
+  let uri = uri_with_keepalive uri in
   match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
   | Error err -> Error (caqti_error_to_masc err)
   | Ok pool ->
@@ -379,15 +374,12 @@ let set_if_not_exists t key value =
 
 let compare_and_swap t ~key ~expected ~value =
   let nkey = namespaced_key t.namespace key in
-  let compressed = Compression.compress_with_header value in
+  let compressed_new = Compression.compress_with_header value in
+  let compressed_expected = Compression.compress_with_header expected in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    let* current = C.find_opt get_q nkey in
-    match current with
-    | Some v when Compression.decompress_auto v = expected ->
-        let* () = C.exec compare_and_swap_q (nkey, compressed) in
-        Ok true
-    | _ -> Ok false
+    let* row = C.find_opt compare_and_swap_q (nkey, compressed_expected, compressed_new) in
+    Ok (Option.is_some row)
   ) t.pool with
   | Ok b -> Ok b
   | Error err -> Error (caqti_error_to_masc err)

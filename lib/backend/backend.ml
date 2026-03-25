@@ -634,6 +634,28 @@ module Memory = struct
       Ok keys
     )
 
+  let get_all t ~prefix =
+    with_lock t (fun () ->
+      let prefix_len = String.length prefix in
+      let pairs = Hashtbl.fold (fun k v acc ->
+        if String.length k >= prefix_len &&
+           String.sub k 0 prefix_len = prefix then
+          (k, v) :: acc
+        else acc
+      ) t.data [] in
+      Ok pairs
+    )
+
+  let set_if_not_exists t key value =
+    with_lock t (fun () ->
+      if Hashtbl.mem t.data key then
+        Ok false
+      else begin
+        Hashtbl.replace t.data key value;
+        Ok true
+      end
+    )
+
   let clear t =
     with_lock t (fun () ->
       Hashtbl.clear t.data
@@ -692,10 +714,7 @@ let list_keys = function
 let set_if_not_exists backend key value =
   match backend with
   | FS t -> FileSystem.set_if_not_exists t key value
-  | Mem t -> 
-      (match Memory.get t key with
-       | Error (NotFound _) -> Memory.set t key value |> Result.map (fun () -> true)
-       | _ -> Ok false)
+  | Mem t -> Memory.set_if_not_exists t key value
   | PG t -> Postgres.set_if_not_exists t key value
 
 let acquire_lock backend ~key ~owner ~ttl_seconds =

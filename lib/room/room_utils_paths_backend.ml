@@ -120,12 +120,13 @@ let backend_list_keys config ~prefix =
   | FileSystem t -> Backend.FileSystem.list_keys t ~prefix
   | PostgresNative t -> Backend.Postgres.list_keys t ~prefix
 
-(** get_all: FileSystem and Memory build from list_keys + get.
+(** get_all: Memory uses native Hashtbl fold, FileSystem uses list_keys + get.
     PostgreSQL has a native get_all. *)
 let backend_get_all config ~prefix =
   match config.backend with
   | PostgresNative t -> Backend.Postgres.get_all t ~prefix
-  | Memory _ | FileSystem _ ->
+  | Memory t -> Backend.Memory.get_all t ~prefix
+  | FileSystem _ ->
       (match backend_list_keys config ~prefix with
        | Error e -> Error e
        | Ok keys ->
@@ -138,13 +139,7 @@ let backend_get_all config ~prefix =
 
 let backend_set_if_not_exists config ~key ~value =
   match config.backend with
-  | Memory t ->
-      (* Memory backend: check-then-set *)
-      (match Backend.Memory.get t key with
-       | Error (Backend_types.NotFound _) ->
-           Backend.Memory.set t key value |> Result.map (fun () -> true)
-       | Ok _ -> Ok false
-       | Error e -> Error e)
+  | Memory t -> Backend.Memory.set_if_not_exists t key value
   | FileSystem t -> Backend.FileSystem.set_if_not_exists t key value
   | PostgresNative t -> Backend.Postgres.set_if_not_exists t key value
 

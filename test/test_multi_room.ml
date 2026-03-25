@@ -22,6 +22,7 @@ let cleanup_dir dir =
   rm dir
 
 let with_config f =
+  Eio_main.run @@ fun _env ->
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)

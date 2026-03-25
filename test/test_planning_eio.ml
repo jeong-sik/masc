@@ -80,6 +80,7 @@ let test_error_entry_serialization () =
 (* ===== File Operations Tests ===== *)
 
 let test_init () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   match Planning_eio.init config ~task_id:"init-test" with
   | Ok ctx ->
@@ -95,6 +96,7 @@ let test_init () =
       fail (Printf.sprintf "Init failed: %s" e)
 
 let test_load () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   (* Initialize first *)
   (match Planning_eio.init config ~task_id:"load-test" with
@@ -108,6 +110,7 @@ let test_load () =
       fail (Printf.sprintf "Load failed: %s" e)
 
 let test_load_nonexistent () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   match Planning_eio.load config ~task_id:"nonexistent-task" with
   | Ok _ ->
@@ -117,6 +120,7 @@ let test_load_nonexistent () =
       ()
 
 let test_update_plan () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   (* Initialize first *)
   (match Planning_eio.init config ~task_id:"update-plan-test" with
@@ -139,6 +143,7 @@ let test_update_plan () =
       fail (Printf.sprintf "Update plan failed: %s" e)
 
 let test_add_note () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   (* Initialize first *)
   (match Planning_eio.init config ~task_id:"add-note-test" with
@@ -159,6 +164,7 @@ let test_add_note () =
       fail (Printf.sprintf "Add note 2 failed: %s" e)
 
 let test_set_deliverable () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   (* Initialize first *)
   (match Planning_eio.init config ~task_id:"deliverable-test" with
@@ -173,6 +179,7 @@ let test_set_deliverable () =
       fail (Printf.sprintf "Set deliverable failed: %s" e)
 
 let test_set_deliverable_auto_init () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   (* Do NOT call init -- set_deliverable should auto-init *)
   let content = "# Auto-init Deliverable\n\nDelivered without prior plan_init." in
@@ -190,6 +197,7 @@ let test_set_deliverable_auto_init () =
 (* ===== Error Tracking Tests ===== *)
 
 let test_add_error () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   (* Initialize first *)
   (match Planning_eio.init config ~task_id:"error-test" with
@@ -209,6 +217,7 @@ let test_add_error () =
       fail (Printf.sprintf "Add error failed: %s" e)
 
 let test_resolve_error () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   (* Initialize and add error *)
   (match Planning_eio.init config ~task_id:"resolve-test" with
@@ -228,6 +237,7 @@ let test_resolve_error () =
       fail (Printf.sprintf "Resolve error failed: %s" e)
 
 let test_resolve_invalid_index () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   (* Initialize and add error *)
   (match Planning_eio.init config ~task_id:"invalid-resolve-test" with
@@ -244,6 +254,7 @@ let test_resolve_invalid_index () =
 (* ===== Session Context Tests ===== *)
 
 let test_session_context () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   (* Initially no current task *)
   check (option string) "no current task" None (Planning_eio.get_current_task config);
@@ -255,6 +266,7 @@ let test_session_context () =
   check (option string) "current task cleared" None (Planning_eio.get_current_task config)
 
 let test_resolve_task_id () =
+  Eio_main.run @@ fun _env ->
   let config = make_config () in
   (* With explicit task_id *)
   (match Planning_eio.resolve_task_id config ~task_id:"explicit-task" with

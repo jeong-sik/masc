@@ -356,12 +356,12 @@
 (test
  (name test_hebbian_eio)
  (modules test_hebbian_eio)
- (libraries masc_mcp alcotest str yojson))
+ (libraries masc_mcp alcotest str yojson eio eio_main))
 
 (test
  (name test_planning_eio)
  (modules test_planning_eio)
- (libraries masc_mcp alcotest str yojson))
+ (libraries masc_mcp alcotest str yojson eio eio_main))
 
 ; Thompson Sampling module tests (Thompson Sampling + Health Gate)
 (test
@@ -432,7 +432,7 @@
 (test
  (name test_tool_goals)
  (modules test_tool_goals)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 (test
  (name test_command_plane_v2)
@@ -535,7 +535,7 @@
 (test
  (name test_keeper_task_dispatch)
  (modules test_keeper_task_dispatch)
- (libraries masc_mcp agent_sdk alcotest re unix))
+ (libraries masc_mcp agent_sdk alcotest re unix eio eio_main))
 (test
  (name test_autoresearch_knowledge)
  (modules test_autoresearch_knowledge)
@@ -670,7 +670,7 @@
 (test
  (name test_task_dispatch)
  (modules test_task_dispatch)
- (libraries masc_mcp alcotest unix))
+ (libraries masc_mcp alcotest unix eio eio_main))
 
 ; Board PostgreSQL backend tests (skipped when MASC_POSTGRES_URL is absent)
 (test
@@ -682,7 +682,7 @@
 (test
  (name test_drift_guard_core)
  (modules test_drift_guard_core)
- (libraries masc_mcp alcotest unix yojson))
+ (libraries masc_mcp alcotest unix yojson eio eio_main))
 
 (test
  (name test_verify_handoff_tool)
@@ -905,7 +905,7 @@
 (test
  (name test_tool_goals_coverage)
  (modules test_tool_goals_coverage)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 ; Proof criteria pure-function unit tests (no server required)
 (test

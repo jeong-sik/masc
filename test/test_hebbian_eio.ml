@@ -17,6 +17,7 @@ let rec rm_rf path =
       Sys.remove path
 
 let with_temp_masc_dir f =
+  Eio_main.run @@ fun _env ->
   let base =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-hebbian-eio-%d-%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000000.)))

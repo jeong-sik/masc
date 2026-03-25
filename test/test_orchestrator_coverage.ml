@@ -185,6 +185,7 @@ let make_test_dir () =
   tmp_dir
 
 let with_initialized_room f =
+  Eio_main.run @@ fun _env ->
   let tmp_dir = make_test_dir () in
   let config = Room.default_config tmp_dir in
   let _ = Room.init config ~agent_name:None in

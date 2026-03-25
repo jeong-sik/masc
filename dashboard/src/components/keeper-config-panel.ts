@@ -354,12 +354,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Instructions</div>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
-    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-3 mb-0.5">System prompt blocks</div>
-    <${PromptBlock} title="Constitution" block=${c.prompt.system_prompt_blocks.constitution} />
-    <${PromptBlock} title="World" block=${c.prompt.system_prompt_blocks.world} />
-    <${PromptBlock} title="Capabilities" block=${c.prompt.system_prompt_blocks.capabilities} />
+    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-3 mb-0.5">시스템 프롬프트 블록</div>
+    <${PromptBlock} title="헌법" block=${c.prompt.system_prompt_blocks.constitution} />
+    <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
+    <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
     <details class="mt-3">
-      <summary class="cursor-pointer py-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors">View compiled system prompt</summary>
+      <summary class="cursor-pointer py-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
       <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
     </details>
   `
@@ -521,16 +521,16 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <span class="text-xs text-[var(--text-muted)]">레지던트 스펙 존재</span>
         <${BoolBadge} value=${c.sources.resident_spec_exists} />
       </div>
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Live meta path</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">라이브 메타 경로</div>
       <${LongText} text=${c.sources.live_meta_path} />
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Resident spec path</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">레지던트 스펙 경로</div>
       <${LongText} text=${c.sources.resident_spec_path} />
       ${c.sources.default_manifest_path ? html`
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Default manifest path</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">기본 매니페스트 경로</div>
         <${LongText} text=${c.sources.default_manifest_path} />
       ` : null}
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Precedence</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">우선순위</div>
         <${ModelList} models=${c.sources.precedence} />
       </div>
       <div class="mt-1.5">

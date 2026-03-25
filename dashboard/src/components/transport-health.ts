@@ -399,31 +399,31 @@ export function TransportHealthPanel() {
         <//>
 
         <${SectionCard} title="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>
-          <${MetricRow} label="Listener" value=${data.websocket.listening ? 'live' : 'down'} />
-          <${MetricRow} label="Sessions" value=${data.websocket.sessions} />
-          <${MetricRow} label="Mode" value=${data.websocket.mode} />
-          <${MetricRow} label="Relay Source" value=${data.websocket.relay_source} />
+          <${MetricRow} label="리스너" value=${data.websocket.listening ? 'live' : 'down'} />
+          <${MetricRow} label="세션" value=${data.websocket.sessions} />
+          <${MetricRow} label="모드" value=${data.websocket.mode} />
+          <${MetricRow} label="릴레이 소스" value=${data.websocket.relay_source} />
         <//>
 
         <${SectionCard} title="WebRTC" status=${webrtcStatus} eyebrow=${data.webrtc.enabled ? `${data.webrtc.ice_server_count} ICE` : 'disabled'}>
-          <${MetricRow} label="Connected Channels" value=${data.webrtc.connected_channels} />
-          <${MetricRow} label="Active Peers" value=${data.webrtc.active_peers} />
-          <${MetricRow} label="Pending Offers" value=${data.webrtc.pending_offers} />
-          <${MetricRow} label="Live Connections" value=${data.webrtc.live_connections} />
+          <${MetricRow} label="연결된 채널" value=${data.webrtc.connected_channels} />
+          <${MetricRow} label="활성 피어" value=${data.webrtc.active_peers} />
+          <${MetricRow} label="대기 오퍼" value=${data.webrtc.pending_offers} />
+          <${MetricRow} label="라이브 연결" value=${data.webrtc.live_connections} />
         <//>
 
         <${SectionCard} title="HTTP" status=${h2Status} eyebrow=${data.http2.listener_mode}>
           <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
-          <${MetricRow} label="Observer Stream" value=${data.streamable_http.observer_stream} />
-          <${MetricRow} label="Operator Surface" value=${data.streamable_http.operator_endpoint} />
-          <${MetricRow} label="Legacy" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
+          <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
+          <${MetricRow} label="오퍼레이터 표면" value=${data.streamable_http.operator_endpoint} />
+          <${MetricRow} label="레거시" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
         <//>
 
-        <${SectionCard} title="Agent Pool" status=${clusterStatus} eyebrow=${`${data.cluster.live_agents} live`}>
-          <${MetricRow} label="Managed Units" value=${data.cluster.managed_units} sub=${`${data.cluster.total_units} total`} />
-          <${MetricRow} label="Active Ops" value=${data.cluster.active_operations} />
-          <${MetricRow} label="Stale Units" value=${data.cluster.stale_units} />
-          <${MetricRow} label="Stale Agents" value=${data.agent_health.stale_total} />
+        <${SectionCard} title="에이전트 풀" status=${clusterStatus} eyebrow=${`${data.cluster.live_agents} live`}>
+          <${MetricRow} label="관리 유닛" value=${data.cluster.managed_units} sub=${`${data.cluster.total_units} 전체`} />
+          <${MetricRow} label="활성 작업" value=${data.cluster.active_operations} />
+          <${MetricRow} label="부실 유닛" value=${data.cluster.stale_units} />
+          <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
         <//>
       </div>
 

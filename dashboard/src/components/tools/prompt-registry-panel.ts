@@ -109,7 +109,7 @@ export function PromptRegistryPanel() {
   }
 
   return html`
-    <${Card} title="Prompt Registry" class="section mb-4">
+    <${Card} title="프롬프트 레지스트리" class="section mb-4">
       <div class="mb-4 text-[12px] text-[var(--text-muted)] leading-relaxed">
         <div>기준 원문은 <code>config/prompts/*.md</code>입니다.</div>
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>

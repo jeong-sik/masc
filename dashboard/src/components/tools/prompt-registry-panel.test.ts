@@ -75,7 +75,7 @@ describe('PromptRegistryPanel', () => {
     await flush()
 
     expect(mocks.fetchDashboardPrompts).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('Prompt Registry')
+    expect(container.textContent).toContain('프롬프트 레지스트리')
     expect(container.textContent).toContain('keeper.world')
     expect(container.textContent).toContain('/tmp/config/prompts/keeper.world.md')
     expect(container.textContent).toContain('file world')

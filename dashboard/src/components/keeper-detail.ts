@@ -210,18 +210,18 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Detail sections grid ── */}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-          <${SectionCard} title="Profile">
-            <${TraitsList} traits=${keeper.traits ?? []} label="Traits" />
-            <${TraitsList} traits=${keeper.interests ?? []} label="Interests" />
+          <${SectionCard} title="프로필">
+            <${TraitsList} traits=${keeper.traits ?? []} label="특성" />
+            <${TraitsList} traits=${keeper.interests ?? []} label="관심사" />
             ${keeper.primaryValue
               ? html`<div class="flex items-center gap-2 mt-3 text-xs text-[var(--text-muted)]">
-                  <span class="text-[var(--text-muted)]">Core value:</span>
+                  <span class="text-[var(--text-muted)]">핵심 가치:</span>
                   <span class="font-medium text-[var(--ok)]">${keeper.primaryValue}</span>
                 </div>`
               : null}
             ${keeper.skill_primary
               ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
-                  <span>Skill path:</span>
+                  <span>스킬 경로:</span>
                   <span class="font-medium text-[var(--cyan)]">${keeper.skill_primary}</span>
                 </div>`
               : null}
@@ -230,7 +230,7 @@ export function KeeperDetailOverlay() {
               : null}
             ${keeper.last_heartbeat
               ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
-                  <span>Last heartbeat:</span>
+                  <span>마지막 하트비트:</span>
                   <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                 </div>`
               : null}
@@ -253,7 +253,7 @@ export function KeeperDetailOverlay() {
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`
-              <${SectionCard} title="Equipment (${keeper.inventory.length})">
+              <${SectionCard} title="장비 (${keeper.inventory.length})">
                 <${EquipmentList} items=${keeper.inventory} />
               <//>
             `
@@ -261,21 +261,21 @@ export function KeeperDetailOverlay() {
 
           ${keeper.relationships && Object.keys(keeper.relationships).length > 0
             ? html`
-              <${SectionCard} title="Relationships (${Object.keys(keeper.relationships).length})">
+              <${SectionCard} title="관계 (${Object.keys(keeper.relationships).length})">
                 <${RelationshipList} rels=${keeper.relationships} />
               <//>
             `
             : null}
 
-          <${SectionCard} title="Quality Signals">
+          <${SectionCard} title="품질 시그널">
             <${RuntimeSignals} keeper=${keeper} />
           <//>
 
-          <${SectionCard} title="Neighborhood & Tool Audit">
+          <${SectionCard} title="인근 환경 & 도구 감사">
             <${KeeperNeighborhood} keeper=${keeper} />
           <//>
 
-          <${SectionCard} title="Config">
+          <${SectionCard} title="설정">
             <${KeeperConfigPanel} keeperName=${keeper.name} />
           <//>
         </div>

@@ -42,7 +42,7 @@ Requires: goal (what to optimize), metric_fn (shell command that outputs a float
         ]);
         ("model_model", `Assoc [
           ("type", `String "string");
-          ("description", `String "MODEL model for code change generation (default: 'glm')");
+          ("description", `String "Model label for code change generation (uses cascade default)");
         ]);
         ("target_file", `Assoc [
           ("type", `String "string");
@@ -96,7 +96,7 @@ and persists cross-links so team-session status/stop can surface the linked loop
         ]);
         ("model_model", `Assoc [
           ("type", `String "string");
-          ("description", `String "MODEL model for code change generation (default: 'glm')");
+          ("description", `String "Model label for code change generation (uses cascade default)");
         ]);
       ]);
       ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);

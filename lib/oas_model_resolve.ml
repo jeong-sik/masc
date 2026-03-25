@@ -74,9 +74,9 @@ let resolve_primary_model_id (labels : string list) : string =
 
 (** Resolve the default local model label and model_id.
     Uses Provider_adapter for configured label, then validates via OAS registry.
-    Returns (label, model_id) or falls back to "glm:auto". *)
+    Returns (label, model_id) or falls back to first available provider. *)
 let default_local_model_label_and_id () : string * string =
-  let fallback = ("glm:auto", "auto") in
+  let fallback = ("auto", "auto") in
   let try_label label =
     match provider_name_of_label label with
     | None -> None
@@ -174,9 +174,13 @@ let cascade_config_path () : string option =
 
 (** Resolve model label strings from a cascade name by reading cascade.json.
     Delegates to OAS Cascade_config for JSON loading and profile resolution.
-    Falls back to "default_models" then ["llama:auto"; "glm:auto"] if absent. *)
+    Falls back to "default_models" then preferred_execution_model_labels if absent. *)
 let models_of_cascade_name (cascade_name : string) : string list =
-  let defaults = ["llama:auto"; "glm:auto"] in
+  let defaults =
+    match Provider_adapter.preferred_execution_model_labels () with
+    | [] -> ["llama:auto"]
+    | labels -> labels
+  in
   let config_path = cascade_config_path () in
   (* Cascade_config uses Eio.Mutex internally.  When called outside
      Eio_main.run (e.g. unit tests) this raises Effect.Unhandled on

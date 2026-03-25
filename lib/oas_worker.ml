@@ -386,12 +386,11 @@ let default_model_strings ~cascade_name:_ =
   let models =
     if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else []
   in
-  let models =
-    match Sys.getenv_opt "ZAI_API_KEY" with
-    | Some k when k <> "" -> models @ [ "glm:auto" ]
-    | _ -> models
-  in
-  if models = [] then [ "llama:auto" ] else models
+  if models = [] then
+    match Provider_adapter.preferred_execution_model_labels () with
+    | [] -> [ "llama:auto" ]
+    | labels -> labels
+  else models
 
 (* ================================================================ *)
 (* Named model execution                                            *)

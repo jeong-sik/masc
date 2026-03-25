@@ -570,7 +570,10 @@ let recent_operator_trace_events config ?trace_id limit =
     []
   else
     (match trace_id with
-     | None -> read_jsonl_tail_lines (operator_action_log_path config) ~max_lines:limit
+     | None ->
+         (* Over-read to compensate for blank/malformed lines lost during filtering *)
+         read_jsonl_tail_lines (operator_action_log_path config)
+           ~max_lines:(max limit (limit * 2))
      | Some _ ->
          Fs_compat.load_file (operator_action_log_path config)
          |> String.split_on_char '\n')

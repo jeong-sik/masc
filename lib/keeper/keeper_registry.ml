@@ -138,10 +138,9 @@ let record_crash ~base_path name ts msg =
   with_lock_rw (fun () ->
     match Hashtbl.find_opt registry (registry_key ~base_path name) with
     | Some entry ->
-        let log = (ts, msg) :: entry.crash_log in
         entry.crash_log <-
-          (if List.length log <= max_crash_log_entries then log
-           else List.filteri (fun i _ -> i < max_crash_log_entries) log)
+          List.filteri (fun i _ -> i < max_crash_log_entries)
+            ((ts, msg) :: entry.crash_log)
     | None -> ())
 
 let set_grpc_close ~base_path name close_fn =
@@ -175,17 +174,18 @@ let wakeup_all ?base_path () =
     ) registry)
 
 let fiber_health_of ~base_path name =
-  match get ~base_path name with
-  | None -> Fiber_unknown
-  | Some entry ->
-      match Eio.Promise.peek entry.done_p with
-      | None -> Fiber_alive
-      | Some `Stopped -> Fiber_unknown
-      | Some (`Crashed _) ->
-          let max_restarts = Env_config.KeeperResidentSupervisor.max_restarts in
-          if entry.restart_count >= max_restarts
-          then Fiber_dead
-          else Fiber_zombie
+  with_lock_ro (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | None -> Fiber_unknown
+    | Some entry ->
+        match Eio.Promise.peek entry.done_p with
+        | None -> Fiber_alive
+        | Some `Stopped -> Fiber_unknown
+        | Some (`Crashed _) ->
+            let max_restarts = Env_config.KeeperResidentSupervisor.max_restarts in
+            if entry.restart_count >= max_restarts
+            then Fiber_dead
+            else Fiber_zombie)
 
 let crash_log_of ~base_path name =
   match get ~base_path name with

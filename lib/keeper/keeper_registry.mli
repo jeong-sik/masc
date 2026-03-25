@@ -25,6 +25,8 @@ type registry_entry = {
   grpc_close : (unit -> unit) option ref;
   done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
   done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
+      (** Exposed so the supervisor fiber can resolve on stop/crash.
+          Only the fiber owning this keeper should call [Eio.Promise.resolve]. *)
   mutable restart_count : int;
   mutable last_restart_ts : float;
   mutable crash_log : (float * string) list;

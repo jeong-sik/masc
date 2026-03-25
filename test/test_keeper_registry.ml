@@ -179,11 +179,14 @@ let test_wakeup_all () =
   let e1 = R.register ~base_path:bp "wa1" (make_meta "wa1") in
   let e2 = R.register ~base_path:bp "wa2" (make_meta "wa2") in
   let e3 = R.register ~base_path:bp "wa3" (make_meta "wa3") in
+  let e4 = R.register ~base_path:bp "wa4" (make_meta "wa4") in
   R.set_state ~base_path:bp "wa3" R.Stopped;
+  R.set_state ~base_path:bp "wa4" R.Paused;
   R.wakeup_all ();
   check bool "wa1 woken" true !(e1.fiber_wakeup);
   check bool "wa2 woken" true !(e2.fiber_wakeup);
-  check bool "wa3 not woken (stopped)" false !(e3.fiber_wakeup)
+  check bool "wa3 not woken (stopped)" false !(e3.fiber_wakeup);
+  check bool "wa4 not woken (paused)" false !(e4.fiber_wakeup)
 
 let test_fiber_health_alive () =
   R.clear ();

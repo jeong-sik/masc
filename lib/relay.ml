@@ -270,13 +270,8 @@ let checkpoints : checkpoint list ref = ref []
 let max_checkpoints = 500
 let checkpoint_mu = Eio.Mutex.create ()
 
-let with_checkpoint_rw f =
-  try Eio.Mutex.use_rw ~protect:true checkpoint_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-
-let with_checkpoint_ro f =
-  try Eio.Mutex.use_ro checkpoint_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_checkpoint_rw f = Eio_guard.with_mutex checkpoint_mu f
+let with_checkpoint_ro f = Eio_guard.with_mutex_ro checkpoint_mu f
 
 (** Save a checkpoint, capping at [max_checkpoints] to prevent unbounded growth. *)
 let save_checkpoint ~summary ~task ~todos ~pdca ~files ~metrics =

@@ -273,8 +273,7 @@ let read_tail_lines path ~max_bytes ~max_lines =
       with
       | Unix.Unix_error _ | Sys_error _ -> []
     in
-    try Eio_unix.run_in_systhread f
-    with Stdlib.Effect.Unhandled _ -> f ()
+    Eio_guard.run_in_systhread f
 
 let read_events ?max_events config session_id : Yojson.Safe.t list =
   let path = events_jsonl_path config session_id in

@@ -24,9 +24,7 @@ let jsonrpc_request_of_yojson = Mcp_server.jsonrpc_request_of_yojson
 
 let resource_subscription_mutex = Eio.Mutex.create ()
 
-let with_resource_subscription_lock f =
-  try Eio.Mutex.use_rw ~protect:true resource_subscription_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_resource_subscription_lock f = Eio_guard.with_mutex resource_subscription_mutex f
 
 let resource_subscriptions : (string, (string, unit) Hashtbl.t) Hashtbl.t =
   Hashtbl.create 64

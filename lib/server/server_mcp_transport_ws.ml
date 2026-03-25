@@ -28,9 +28,7 @@ type ws_session = {
 let sessions : (string, ws_session) Hashtbl.t = Hashtbl.create 16
 let sessions_mutex = Eio.Mutex.create ()
 
-let with_sessions_rw f =
-  try Eio.Mutex.use_rw ~protect:true sessions_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_sessions_rw f = Eio_guard.with_mutex sessions_mutex f
 
 (** Generate a unique session ID. *)
 let next_id =

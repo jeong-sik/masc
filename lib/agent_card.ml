@@ -442,9 +442,7 @@ let _cache : cached_card option ref = ref None
 let _cache_generation : int ref = ref 0
 let card_mu = Eio.Mutex.create ()
 
-let with_card_rw f =
-  try Eio.Mutex.use_rw ~protect:true card_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_card_rw f = Eio_guard.with_mutex card_mu f
 
 (** Get cached agent card, generating if needed.
     [schemas] is used only on first generation or after invalidation.

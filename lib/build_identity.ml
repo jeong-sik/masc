@@ -73,8 +73,7 @@ let git_probe_from_root repo_root =
     in
     Option.bind output trim_to_option
   in
-  try Eio_unix.run_in_systhread f
-  with Stdlib.Effect.Unhandled _ -> f ()
+  Eio_guard.run_in_systhread f
 
 let probe_git_commit () =
   [ Sys.getcwd (); executable_dir () ]

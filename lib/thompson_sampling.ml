@@ -57,12 +57,8 @@ let base_path_ref : string option ref = ref None
 
 (** Mutex protecting stats_table, pending_votes, and base_path_ref. *)
 let ts_mu = Eio.Mutex.create ()
-let with_ts_rw f =
-  try Eio.Mutex.use_rw ~protect:true ts_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-let with_ts_ro f =
-  try Eio.Mutex.use_ro ts_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_ts_rw f = Eio_guard.with_mutex ts_mu f
+let with_ts_ro f = Eio_guard.with_mutex_ro ts_mu f
 
 (** Set base path for stats storage. Call during server init. *)
 let set_base_path path =

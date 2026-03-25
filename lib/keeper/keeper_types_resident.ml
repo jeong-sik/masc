@@ -91,8 +91,7 @@ let keeper_metrics_store config name : Dated_jsonl.t =
       Hashtbl.replace metrics_store_cache dir store;
       store
   in
-  try Eio.Mutex.use_rw ~protect:true metrics_store_mu lookup
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> lookup ()
+  Eio_guard.with_mutex metrics_store_mu lookup
 
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")

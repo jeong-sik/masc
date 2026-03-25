@@ -85,9 +85,7 @@ let reset_lock_stats () =
   Atomic.set lock_max_wait_ms 0.0
 
 (** Run a blocking op in systhread when Eio context is available *)
-let run_blocking_op f =
-  try Eio_unix.run_in_systhread f
-  with Stdlib.Effect.Unhandled _ -> f ()
+let run_blocking_op f = Eio_guard.run_in_systhread f
 
 (** Transactional lock for graph operations.
     Uses F_TLOCK (non-blocking) from a systhread so the Eio scheduler stays

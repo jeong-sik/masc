@@ -28,9 +28,7 @@ let states : (string, state) Hashtbl.t = Hashtbl.create 4
 
 (** Mutex for outer [states] Hashtbl. Inner per-state mutex for per-keeper ops. *)
 let outer_mu = Eio.Mutex.create ()
-let with_outer_rw f =
-  try Eio.Mutex.use_rw ~protect:true outer_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_outer_rw f = Eio_guard.with_mutex outer_mu f
 
 let with_lock st f =
   Eio.Mutex.use_rw ~protect:true st.mutex f

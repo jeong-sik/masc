@@ -48,12 +48,9 @@ let get_lock path =
       Hashtbl.replace table path entry;
       entry.mu
   in
-  try Eio.Mutex.use_rw ~protect:true table_mu f
-  with Stdlib.Effect.Unhandled _ -> f ()
+  Eio_guard.with_mutex table_mu f
 
-let run_blocking_lock_op f =
-  try Eio_unix.run_in_systhread f
-  with Stdlib.Effect.Unhandled _ -> f ()
+let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 
 let acquire_flock_fd lock_path =
   run_blocking_lock_op (fun () ->
@@ -99,12 +96,8 @@ let with_lock path f =
       ~finally:(fun () -> release_flock_fd fd)
       f
   in
-  try
-    let mu = get_lock path in
-    Eio.Mutex.use_rw ~protect:true mu (fun () -> run_with_flock ())
-  with Stdlib.Effect.Unhandled _ ->
-    (* No Eio context (unit tests): skip cooperative mutex, use flock only *)
-    run_with_flock ()
+  let mu = get_lock path in
+  Eio_guard.with_mutex mu (fun () -> run_with_flock ())
 
 (** Number of tracked lock paths (for diagnostics). *)
 let lock_count () = Hashtbl.length table

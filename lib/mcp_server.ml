@@ -11,13 +11,8 @@ let current_cell = ref (Mitosis.create_stem_cell ~generation:0)
 let stem_pool = ref (Mitosis.init_pool ~config:Mitosis.default_config)
 let mitosis_mutex = Eio.Mutex.create ()
 
-let with_ro f =
-  try Eio.Mutex.use_ro mitosis_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-
-let with_rw f =
-  try Eio.Mutex.use_rw ~protect:true mitosis_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_ro f = Eio_guard.with_mutex_ro mitosis_mutex f
+let with_rw f = Eio_guard.with_mutex mitosis_mutex f
 
 let get_cell () = with_ro (fun () -> !current_cell)
 let get_pool () = with_ro (fun () -> !stem_pool)

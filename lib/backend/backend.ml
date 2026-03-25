@@ -548,22 +548,9 @@ module Memory = struct
     mutex: Eio.Mutex.t;
   }
 
-  let _poisoned_warned = Atomic.make false
-
-  (** Eio.Mutex wrapper with fallback for non-Eio test contexts.
-      When called outside Eio_main.run (e.g., unit tests without Eio),
-      Effect.Unhandled is raised. A prior failure may also leave the mutex
-      in a Poisoned state. In both cases, run the function unprotected --
-      safe because test contexts are single-fiber with no contention. *)
-  let with_lock t f =
-    match Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> f ())
-    with
-    | result -> result
-    | exception Effect.Unhandled _ -> f ()
-    | exception Eio__Eio_mutex.Poisoned _ ->
-        if not (Atomic.exchange _poisoned_warned true) then
-          Log.Backend.warn "Memory backend: Eio.Mutex poisoned, running unprotected (non-Eio context)";
-        f ()
+  (** Eio_guard-based dual-mode mutex for pre/post Eio runtime.
+      Skips locking when Eio runtime is not yet active (e.g. unit tests). *)
+  let with_lock t f = Eio_guard.with_mutex t.mutex f
 
   let create () = {
     data = Hashtbl.create 64;

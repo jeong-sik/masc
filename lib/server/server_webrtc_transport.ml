@@ -138,9 +138,7 @@ let peer_channel_map : (string, Webrtc.Webrtc_eio.datachannel) Hashtbl.t = Hasht
 
 let registry_mutex = Eio.Mutex.create ()
 
-let with_registry f =
-  try Eio.Mutex.use_rw ~protect:true registry_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_registry f = Eio_guard.with_mutex registry_mutex f
 
 (** Generate a unique offer/peer ID. *)
 let next_id =

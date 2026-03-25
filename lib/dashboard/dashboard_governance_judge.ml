@@ -39,9 +39,7 @@ let states : (string, state) Hashtbl.t = Hashtbl.create 4
 (** Mutex for outer [states] and [judgments_store_cache] Hashtbls.
     Inner per-state mutex protects per-keeper operations. *)
 let outer_mu = Eio.Mutex.create ()
-let with_outer_rw f =
-  try Eio.Mutex.use_rw ~protect:true outer_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_outer_rw f = Eio_guard.with_mutex outer_mu f
 
 let get_judgments_store base_path : Dated_jsonl.t =
   with_outer_rw (fun () ->

@@ -115,9 +115,7 @@ let meta_tbl : (string, prompt_meta) Hashtbl.t = Hashtbl.create 32
 
 let registry_mutex = Eio.Mutex.create ()
 
-let with_mutex f =
-  try Eio.Mutex.use_rw ~protect:true registry_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_mutex f = Eio_guard.with_mutex registry_mutex f
 
 (** {1 Persistence} *)
 

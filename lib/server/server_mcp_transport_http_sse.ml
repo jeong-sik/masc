@@ -153,6 +153,12 @@ let send_raw info data =
           Httpun.Body.Writer.flush info.writer (fun _ -> ()));
       Sse.touch info.session_id;
       true
-    with _exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      (try close_sse_conn info
+       with Eio.Cancel.Cancelled _ | Sys_error _ -> ());
+      raise e
+    | exn ->
+      Log.Misc.debug "SSE send_raw failed: %s" (Printexc.to_string exn);
       close_sse_conn info;
       false

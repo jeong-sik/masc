@@ -184,7 +184,7 @@ module Ring = struct
   let rotate_if_needed () =
     let today = date_string () in
     if today <> !file_current_date && !file_base_dir <> "" then begin
-      (match !file_channel with Some oc -> (try close_out oc with _ -> ()) | None -> ());
+      (match !file_channel with Some oc -> (try close_out oc with Sys_error _ -> ()) | None -> ());
       open_sink !file_base_dir
     end
 
@@ -195,7 +195,7 @@ module Ring = struct
         output_string oc (Yojson.Safe.to_string entry_json);
         output_char oc '\n';
         (* flush on warn/error for timely persistence *)
-        (try flush oc with _ -> ())
+        (try flush oc with Sys_error _ -> ())
     | None -> ()
 
   let entry_of_json json =
@@ -211,9 +211,9 @@ module Ring = struct
         legacy_classified = json |> member "legacy_classified" |> to_bool;
         module_name = json |> member "module" |> to_string;
         message = json |> member "message" |> to_string;
-        details = (try json |> member "details" with _ -> `Null);
+        details = (try json |> member "details" with Type_error _ -> `Null);
       }
-    with _ -> None
+    with Type_error _ -> None
 
   let load_from_file dir =
     ensure_dir dir;

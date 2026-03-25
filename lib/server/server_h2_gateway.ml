@@ -394,7 +394,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                              stop_sse_session session_id;
                              Sse.unregister session_id;
                              forget_mcp_session session_id;
-                             Printf.printf "🔚 Session terminated: %s\n%!" session_id;
+                             Log.info ~ctx:"h2_gateway" "Session terminated: %s" session_id;
                              let mcp_hdrs = mcp_headers session_id (get_protocol_version httpun_request) in
                              h2_respond_empty h2_reqd ~extra_headers:mcp_hdrs))
                 | None ->

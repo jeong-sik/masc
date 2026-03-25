@@ -16,12 +16,6 @@
 
     @since 0.4.0 *)
 
-(** {1 Eio Runtime Activation} *)
-
-(** [enable_eio ()] activates Eio.Mutex guards for concurrent access safety.
-    Must be called once inside [Eio_main.run] before any concurrent access. *)
-val enable_eio : unit -> unit
-
 (** {1 Types} *)
 
 (** A single task completion record within a generation.

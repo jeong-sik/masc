@@ -3,5 +3,5 @@
 (library
  (name event_bridge)
  (public_name masc_mcp.bridge)
- (libraries yojson)
+ (libraries yojson masc_log)
  (modules event_bus))

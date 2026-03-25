@@ -157,8 +157,9 @@ let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
     state.reason <- reason;
     Log.Server.info "[Shutdown] initiated: %s" reason;
 
-    (* Start force-exit watchdog (stdlib Thread — runs outside Eio domain).
-       Cancelled when shutdown completes normally via done_flag. *)
+    (* INTENTIONAL: force-exit watchdog uses stdlib Thread, NOT Eio.Fiber.
+       Runs outside the Eio domain so it can terminate the process even when
+       Eio is deadlocked or stuck.  Cancelled via done_flag on normal exit. *)
     let done_flag = Atomic.make false in
     ignore (Thread.create (fun () ->
       Unix.sleepf state.config.force_timeout_s;

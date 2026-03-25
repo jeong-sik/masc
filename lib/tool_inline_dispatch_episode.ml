@@ -46,7 +46,7 @@ let handle_episode_flush ~config ~arguments ~(state : Mcp_server.server_state) ~
         Fs_compat.mkdir_p processed_dir;
         let new_path = Filename.concat processed_dir file in
         Sys.rename file_path new_path;
-        Log.Misc.info "[EPISODE/FLUSH] Processed episode %s -> %s" ep_id new_path;
+        Log.debug ~ctx:"episode/flush" "Processed episode %s -> %s" ep_id new_path;
         incr flushed
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Log.Misc.error "Failed to flush %s: %s" file (Printexc.to_string exn);

@@ -583,7 +583,9 @@ let stop_keepalive name =
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
       entry.fiber_stop := true;
       (match !(entry.grpc_close) with
-       | Some close_fn -> (try close_fn () with _ -> ())
+       | Some close_fn ->
+         (try close_fn ()
+          with Eio.Cancel.Cancelled _ as e -> raise e | _exn -> ())
        | None -> ());
       Keeper_registry.set_state ~base_path:entry.base_path name
         Keeper_registry.Stopped;

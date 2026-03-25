@@ -108,7 +108,8 @@ let timestamp_iso () =
 
 (** In-memory ring buffer for dashboard log viewer.
     Fixed capacity, oldest entries evicted on overflow.
-    Lock-free: single-writer (log functions), multi-reader (API). *)
+    Lock-free: single-writer (log functions), multi-reader (API).
+    Optional file sink persists entries across restarts. *)
 module Ring = struct
   type entry = {
     seq : int;
@@ -139,6 +140,149 @@ module Ring = struct
     }
   let total = Atomic.make 0 (* total entries ever written *)
 
+  (* File sink state *)
+  let file_channel : out_channel option ref = ref None
+  let file_current_date : string ref = ref ""
+  let file_base_dir : string ref = ref ""
+
+  let date_string () =
+    let t = Time_compat.now () in
+    let tm = Unix.localtime t in
+    Printf.sprintf "%04d-%02d-%02d"
+      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+
+  let log_file_path dir date =
+    Filename.concat dir (Printf.sprintf "system_log_%s.jsonl" date)
+
+  let ensure_dir dir =
+    if not (Sys.file_exists dir) then
+      (try Sys.mkdir dir 0o755 with Sys_error _ -> ())
+
+  let open_sink dir =
+    ensure_dir dir;
+    let date = date_string () in
+    let path = log_file_path dir date in
+    let oc = open_out_gen [Open_append; Open_creat; Open_wronly] 0o644 path in
+    file_channel := Some oc;
+    file_current_date := date;
+    file_base_dir := dir
+
+  let entry_to_json e =
+    `Assoc [
+      ("seq", `Int e.seq);
+      ("ts", `String e.ts);
+      ("level", `String e.level);
+      ("raw_level", `String e.raw_level);
+      ("normalized_level", `String e.normalized_level);
+      ("source", `String e.source);
+      ("legacy_classified", `Bool e.legacy_classified);
+      ("module", `String e.module_name);
+      ("message", `String e.message);
+      ("details", e.details);
+    ]
+
+  let rotate_if_needed () =
+    let today = date_string () in
+    if today <> !file_current_date && !file_base_dir <> "" then begin
+      (match !file_channel with Some oc -> (try close_out oc with _ -> ()) | None -> ());
+      open_sink !file_base_dir
+    end
+
+  let write_to_sink entry_json =
+    rotate_if_needed ();
+    match !file_channel with
+    | Some oc ->
+        output_string oc (Yojson.Safe.to_string entry_json);
+        output_char oc '\n';
+        (* flush on warn/error for timely persistence *)
+        (try flush oc with _ -> ())
+    | None -> ()
+
+  let entry_of_json json =
+    let open Yojson.Safe.Util in
+    try
+      Some {
+        seq = json |> member "seq" |> to_int;
+        ts = json |> member "ts" |> to_string;
+        level = json |> member "level" |> to_string;
+        raw_level = json |> member "raw_level" |> to_string;
+        normalized_level = json |> member "normalized_level" |> to_string;
+        source = json |> member "source" |> to_string;
+        legacy_classified = json |> member "legacy_classified" |> to_bool;
+        module_name = json |> member "module" |> to_string;
+        message = json |> member "message" |> to_string;
+        details = (try json |> member "details" with _ -> `Null);
+      }
+    with _ -> None
+
+  let load_from_file dir =
+    ensure_dir dir;
+    let today = date_string () in
+    (* Load today's and yesterday's logs *)
+    let yesterday =
+      let t = Time_compat.now () -. 86400.0 in
+      let tm = Unix.localtime t in
+      Printf.sprintf "%04d-%02d-%02d"
+        (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    in
+    let load_file path =
+      if Sys.file_exists path then begin
+        let ic = open_in path in
+        let entries = ref [] in
+        (try while true do
+           let line = input_line ic in
+           if String.length line > 0 then
+             match entry_of_json (Yojson.Safe.from_string line) with
+             | Some e -> entries := e :: !entries
+             | None -> ()
+         done with End_of_file -> ());
+        close_in ic;
+        List.rev !entries
+      end else []
+    in
+    let yesterday_entries = load_file (log_file_path dir yesterday) in
+    let today_entries = load_file (log_file_path dir today) in
+    let all = yesterday_entries @ today_entries in
+    (* Take only last [capacity] entries *)
+    let len = List.length all in
+    let to_load = if len > capacity then
+      let skip = len - capacity in
+      let rec drop n = function [] -> [] | _ :: tl when n > 0 -> drop (n-1) tl | l -> l in
+      drop skip all
+    else all in
+    List.iter (fun e ->
+      let seq = Atomic.fetch_and_add total 1 in
+      let idx = seq mod capacity in
+      buf.(idx) <- { e with seq }
+    ) to_load
+
+  let init_file_sink dir =
+    load_from_file dir;
+    let loaded = Atomic.get total in
+    open_sink dir;
+    if loaded > 0 then
+      Printf.eprintf "[%s] [INFO] [Log] Restored %d log entries from disk\n%!" (timestamp ()) loaded
+
+  let cleanup_old_files ?(keep_days = 7) dir =
+    if Sys.file_exists dir then begin
+      let files = try Sys.readdir dir with Sys_error _ -> [||] in
+      let cutoff =
+        let t = Time_compat.now () -. (float_of_int keep_days *. 86400.0) in
+        let tm = Unix.localtime t in
+        Printf.sprintf "%04d-%02d-%02d"
+          (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+      in
+      Array.iter (fun fname ->
+        if has_prefix ~prefix:"system_log_" fname
+           && Filename.check_suffix fname ".jsonl" then begin
+          (* Extract date from system_log_YYYY-MM-DD.jsonl *)
+          let date_part = String.sub fname 11 10 in
+          if date_part < cutoff then
+            (try Sys.remove (Filename.concat dir fname) with Sys_error _ -> ())
+        end
+      ) files
+    end
+
   let push
       ?raw_level
       ?(source = Structured)
@@ -152,8 +296,7 @@ module Ring = struct
     let idx = seq mod capacity in
     let raw_level = Option.value ~default:normalized_level raw_level in
     let source = source_to_string source in
-    buf.(idx) <-
-      {
+    let entry = {
         seq;
         ts = timestamp_iso ();
         level = normalized_level;
@@ -164,7 +307,10 @@ module Ring = struct
         module_name;
         message;
         details;
-      }
+      } in
+    buf.(idx) <- entry;
+    if !file_channel <> None then
+      write_to_sink (entry_to_json entry)
 
   let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")
       ?since_seq
@@ -200,20 +346,6 @@ module Ring = struct
       | `Oldest_first -> !entries
       | `Newest_first -> List.rev !entries
     end
-
-  let entry_to_json e =
-    `Assoc [
-      ("seq", `Int e.seq);
-      ("ts", `String e.ts);
-      ("level", `String e.level);
-      ("raw_level", `String e.raw_level);
-      ("normalized_level", `String e.normalized_level);
-      ("source", `String e.source);
-      ("legacy_classified", `Bool e.legacy_classified);
-      ("module", `String e.module_name);
-      ("message", `String e.message);
-      ("details", e.details);
-    ]
 
   let to_json entries =
     `Assoc [

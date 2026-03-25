@@ -69,7 +69,16 @@ module Ring : sig
     unit ->
     entry list
 
+  val entry_to_json : entry -> Yojson.Safe.t
   val to_json : entry list -> Yojson.Safe.t
+
+  val init_file_sink : string -> unit
+  (** Initialize file-based log persistence. Loads previous entries from disk
+      into the ring buffer, then opens the file for appending new entries.
+      [dir] is the directory for dated JSONL log files. *)
+
+  val cleanup_old_files : ?keep_days:int -> string -> unit
+  (** Remove log files older than [keep_days] (default 7). *)
 end
 
 val client_tool_host_error :

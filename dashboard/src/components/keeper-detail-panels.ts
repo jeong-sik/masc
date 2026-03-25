@@ -95,12 +95,12 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         <${KpiCard}
           label="Generation"
           value=${keeper.generation ?? '-'}
-          hint="Succession count"
+          hint="승계 횟수"
         />
         <${KpiCard}
           label="Turns"
           value=${keeper.turn_count ?? '-'}
-          hint="Total loop turns"
+          hint="총 루프 회차"
         />
         <${KpiCard}
           label="Context"

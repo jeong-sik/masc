@@ -62,7 +62,7 @@ function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
       <div class="mb-3">
         <span class="text-[10px] font-medium py-1 px-2.5 border border-accent/20 bg-accent/10 text-accent whitespace-nowrap rounded-md shadow-sm group-hover:bg-accent/20 transition-colors">${row.taskId}</span>
       </div>
-      <pre class="m-0 whitespace-pre-wrap text-[12px] leading-relaxed text-text-body font-mono opacity-90">${row.text || 'No task history yet'}</pre>
+      <pre class="m-0 whitespace-pre-wrap text-[12px] leading-relaxed text-text-body font-mono opacity-90">${row.text || '작업 이력 없음'}</pre>
     </div>
   `
 }

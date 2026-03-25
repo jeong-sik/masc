@@ -74,7 +74,7 @@ export async function loadKeeperConfig(name: string): Promise<void> {
     const config = await fetchKeeperConfig(name)
     configState.value = { status: 'loaded', config }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to load config'
+    const message = err instanceof Error ? err.message : '설정 로드 실패'
     configState.value = { status: 'error', message }
   }
 }
@@ -450,12 +450,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ModelList} models=${c.coordination.mention_targets} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Joined rooms</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 룸</div>
         <${ModelList} models=${c.coordination.joined_room_ids} />
       </div>
 
       ${'' /* --- Drift (read-only) --- */}
-      <${SectionHeader} title="Drift" />
+      <${SectionHeader} title="드리프트" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">State</span>
         <${FeatureBadge} status=${c.drift.status} value=${c.drift.enabled} />
@@ -465,7 +465,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${c.drift.last_reason ? html`<${ConfigRow} label="Last reason" value=${c.drift.last_reason} />` : null}
 
       ${'' /* --- Initiative (read-only) --- */}
-      <${SectionHeader} title="Initiative" />
+      <${SectionHeader} title="이니셔티브" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">State</span>
         <${FeatureBadge} status=${c.initiative.status} value=${c.initiative.enabled} />
@@ -475,11 +475,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="Cooldown" value=${formatMaybeNumber(c.initiative.cooldown_sec, 's')} />
       <${ConfigRow} label="Context mode" value=${c.initiative.context_mode || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Configured in defaults</span>
+        <span class="text-xs text-[var(--text-muted)]">기본값에 설정됨</span>
         <${BoolBadge} value=${c.initiative.configured_in_source} />
       </div>
       ${c.initiative.source_defaults ? html`
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-1">Source defaults</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-1">소스 기본값</div>
         <${ConfigRow} label="Enabled" value=${c.initiative.source_defaults.enabled === null ? '--' : String(c.initiative.source_defaults.enabled)} />
         <${ConfigRow} label="Scope" value=${c.initiative.source_defaults.scope || '--'} />
         <${ConfigRow} label="Idle trigger" value=${formatMaybeNumber(c.initiative.source_defaults.idle_sec, 's')} />
@@ -489,14 +489,14 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ` : null}
 
       ${'' /* --- Team Session (read-only) --- */}
-      <${SectionHeader} title="Auto Team Session" />
+      <${SectionHeader} title="자동 팀 세션" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">State</span>
         <${FeatureBadge} status=${c.auto_team_session.status} value=${c.auto_team_session.enabled} />
       </div>
 
       ${'' /* --- Handoff (read-only) --- */}
-      <${SectionHeader} title="Handoff" />
+      <${SectionHeader} title="핸드오프" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">Auto</span>
         <${BoolBadge} value=${c.handoff.auto} />
@@ -506,7 +506,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* --- Last Call Performance (read-only) --- */}
       ${'' /* Totals (generation, turns, tokens, cost, compactions) are in KpiGrid */}
-      <${SectionHeader} title="Last Call Performance" />
+      <${SectionHeader} title="마지막 호출 성능" />
       <${ConfigRow} label="Total input tokens" value=${formatTokens(c.metrics.total_input_tokens)} />
       <${ConfigRow} label="Total output tokens" value=${formatTokens(c.metrics.total_output_tokens)} />
       <${ConfigRow} label="Last model" value=${c.metrics.last_model_used || '--'} />
@@ -518,14 +518,14 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="Last output throughput" value=${formatMaybeFloat(c.metrics.last_output_tokens_per_sec, 1, ' tok/s')} />
 
       ${'' /* --- Sources (read-only) --- */}
-      <${SectionHeader} title="Sources" />
+      <${SectionHeader} title="소스" />
       <${ConfigRow} label="Default source" value=${c.sources.default_source_kind || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Live override</span>
+        <span class="text-xs text-[var(--text-muted)]">라이브 오버라이드</span>
         <${BoolBadge} value=${c.sources.has_live_override} />
       </div>
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Resident spec exists</span>
+        <span class="text-xs text-[var(--text-muted)]">레지던트 스펙 존재</span>
         <${BoolBadge} value=${c.sources.resident_spec_exists} />
       </div>
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Live meta path</div>

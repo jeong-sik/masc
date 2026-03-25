@@ -151,7 +151,7 @@ export function KeeperDiagnosticSummary({
   }, [keeper?.name])
 
   if (!keeper) {
-    return html`<div class="text-xs text-[var(--text-muted)] leading-relaxed py-2">Select a keeper to inspect direct reply state.</div>`
+    return html`<div class="text-xs text-[var(--text-muted)] leading-relaxed py-2">키퍼를 선택하여 직접 응답 상태를 확인하세요.</div>`
   }
 
   const detail = keeperStatusDetails.value[keeper.name]
@@ -172,18 +172,18 @@ export function KeeperDiagnosticSummary({
       <div class="text-xs text-[var(--text-body)] leading-relaxed">
         ${diagnostic?.continuity_summary
           ?? diagnostic?.summary
-          ?? 'Keeper diagnostic summary is not available yet. Probe or open the detail overlay to inspect current runtime state.'}
+          ?? '키퍼 진단 요약을 아직 사용할 수 없습니다. 프로브하거나 상세 오버레이를 열어 런타임 상태를 확인하세요.'}
       </div>
       <div class="text-xs text-[var(--text-body)] leading-relaxed mt-1">
-        Reply: ${diagnostic?.last_reply_status ?? 'unknown'}
+        응답: ${diagnostic?.last_reply_status ?? 'unknown'}
         ${diagnostic?.last_reply_at ? html` -- ${formatTime(diagnostic.last_reply_at)}` : null}
-        ${diagnostic?.next_eligible_at_s ? html` -- next eligible ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
+        ${diagnostic?.next_eligible_at_s ? html` -- 다음 응답 가능 ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
       </div>
       ${diagnostic?.last_error
         ? html`<div class="text-xs text-[#ffb4b4] leading-relaxed mt-1">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus
-        ? html`<pre class="mt-3 py-3 px-4 rounded-lg border border-[var(--card-border)] bg-[rgba(2,10,24,0.82)] text-[#9ad8b6] text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono max-h-[240px] overflow-auto">${detail?.rawText ?? 'No keeper status loaded yet.'}</pre>`
+        ? html`<pre class="mt-3 py-3 px-4 rounded-lg border border-[var(--card-border)] bg-[rgba(2,10,24,0.82)] text-[#9ad8b6] text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono max-h-[240px] overflow-auto">${detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.'}</pre>`
         : null}
     </div>
   `
@@ -244,7 +244,7 @@ export function KeeperConversationPanel({
       <div class="overflow-hidden rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
         <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
           <div class="min-w-[220px] flex-1">
-            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Direct Chat</div>
+            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
               <div class="text-[15px] font-semibold text-[var(--text-strong)]">@${keeperName}</div>
               <span class=${`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
@@ -261,7 +261,7 @@ export function KeeperConversationPanel({
               class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
               onClick=${() => { setShowMetadata(!showMetadata) }}
             >
-              ${showMetadata ? 'Hide metadata' : 'Show metadata'}
+              ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
             </button>
             ${!historyExpanded && rawThread.length >= 10
               ? html`
@@ -271,7 +271,7 @@ export function KeeperConversationPanel({
                     disabled=${hydrating}
                     onClick=${() => { void expandHistory() }}
                   >
-                    ${hydrating ? 'Loading...' : `Load full history (${thread.length} direct shown)`}
+                    ${hydrating ? '불러오는 중...' : `전체 이력 불러오기 (직접 대화 ${thread.length}건 표시 중)`}
                   </button>
                 `
               : null}
@@ -281,7 +281,7 @@ export function KeeperConversationPanel({
         <div class="px-4 py-4">
           <${ChatTranscript}
             entries=${thread}
-            emptyText="No direct conversation yet. Internal keeper prompts and tool chatter are hidden."
+            emptyText="아직 직접 대화가 없습니다. 내부 키퍼 프롬프트와 도구 호출은 숨김 처리됩니다."
             showMetadata=${showMetadata}
             variant="messenger"
           />
@@ -290,7 +290,7 @@ export function KeeperConversationPanel({
         ${hiddenHistoryCount > 0
           ? html`
               <div class="mx-4 mb-4 rounded-[16px] border border-[rgba(245,158,11,0.16)] bg-[rgba(245,158,11,0.06)] px-3 py-2 text-[11px] leading-[1.55] text-[#f4d79e]">
-                ${hiddenHistoryCount} internal history entries are hidden from this transcript to keep the conversation readable.
+                이 대화에서 ${hiddenHistoryCount}개의 내부 이력이 가독성을 위해 숨겨져 있습니다.
               </div>
             `
           : null}

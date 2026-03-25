@@ -113,12 +113,12 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
   // Quality/rate metrics only — raw counts (handoffs, compactions, k2k, etc.)
   // are authoritative in KpiGrid to avoid duplication.
   const rows: Array<{ label: string; value: string | number }> = [
-    { label: 'Model fallback', value: formatPct(typeof mw?.model_fallback_rate === 'number' ? mw.model_fallback_rate : undefined) },
-    { label: 'Proactive fallback', value: formatPct(typeof mw?.proactive_fallback_rate === 'number' ? mw.proactive_fallback_rate : undefined) },
-    { label: 'Memory pass rate', value: formatPct(typeof mw?.memory_pass_rate === 'number' ? mw.memory_pass_rate : undefined) },
-    { label: 'Preview similarity', value: typeof mw?.proactive_preview_similarity_avg === 'number' ? `${(mw.proactive_preview_similarity_avg * 100).toFixed(1)}%` : '-' },
-    { label: 'Memory avg score', value: typeof mw?.memory_avg_score === 'number' ? mw.memory_avg_score.toFixed(3) : '-' },
-    { label: 'Fallback rate', value: typeof mw?.fallback_rate === 'number' ? `${(mw.fallback_rate * 100).toFixed(1)}%` : '-' },
+    { label: '모델 폴백', value: formatPct(typeof mw?.model_fallback_rate === 'number' ? mw.model_fallback_rate : undefined) },
+    { label: '프로액티브 폴백', value: formatPct(typeof mw?.proactive_fallback_rate === 'number' ? mw.proactive_fallback_rate : undefined) },
+    { label: '메모리 통과율', value: formatPct(typeof mw?.memory_pass_rate === 'number' ? mw.memory_pass_rate : undefined) },
+    { label: '프리뷰 유사도', value: typeof mw?.proactive_preview_similarity_avg === 'number' ? `${(mw.proactive_preview_similarity_avg * 100).toFixed(1)}%` : '-' },
+    { label: '메모리 평균 점수', value: typeof mw?.memory_avg_score === 'number' ? mw.memory_avg_score.toFixed(3) : '-' },
+    { label: '폴백 비율', value: typeof mw?.fallback_rate === 'number' ? `${(mw.fallback_rate * 100).toFixed(1)}%` : '-' },
   ]
 
   const visibleRows = rows.filter(row =>
@@ -178,63 +178,63 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex flex-col gap-1.5">
-      <${SignalRow} label="Room" value=${roomName} />
-      <${SignalRow} label="Project" value=${project} />
-      ${clusterVisible ? html`<${SignalRow} label="Cluster" value=${clusterRaw} />` : null}
-      <${SignalRow} label="Current task" value=${currentTaskLabel} />
-      <${SignalRow} label="Skill route" value=${skillRouteLabel} />
-      <${SignalRow} label="Context source" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
+      <${SignalRow} label="룸" value=${roomName} />
+      <${SignalRow} label="프로젝트" value=${project} />
+      ${clusterVisible ? html`<${SignalRow} label="클러스터" value=${clusterRaw} />` : null}
+      <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />
+      <${SignalRow} label="스킬 경로" value=${skillRouteLabel} />
+      <${SignalRow} label="컨텍스트 출처" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
 
       <div class="flex justify-end mt-1">
         <button type="button"
           class="py-1.5 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer"
           onClick=${() => { openToolsInventory(openToolsQuery) }}
         >
-          Open tools panel
+          도구 패널 열기
         </button>
       </div>
 
       <${ToolSection}
-        title="Allowed tools"
-        description="Currently permitted tools for this keeper runtime."
+        title="허용된 도구"
+        description="이 키퍼 런타임에 현재 허용된 도구."
         tools=${allowedTools}
         fallback=${allowlistFallback}
       />
 
       <${ToolSection}
-        title="Observed tools"
-        description="Recent execution evidence from heartbeat or runtime telemetry."
+        title="관측된 도구"
+        description="하트비트 또는 런타임 텔레메트리의 최근 실행 근거."
         tools=${observedTools}
         fallback=${observedFallback}
       />
 
-      <${SignalRow} label="Tool calls" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
-      <${SignalRow} label="Evidence source" value=${auditSource ?? metadataFallback} />
+      <${SignalRow} label="도구 호출" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
+      <${SignalRow} label="근거 출처" value=${auditSource ?? metadataFallback} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Observed at</span>
+        <span class="text-xs text-[var(--text-muted)]">관측 시점</span>
         <span class="text-xs font-medium text-[var(--text-strong)]">${auditAt ? html`<${TimeAgo} timestamp=${auditAt} />` : metadataFallback}</span>
       </div>
 
       <${ToolSection}
-        title="Keeper recent tools"
+        title="키퍼 최근 도구"
         tools=${recentTools}
         fallback=${linkedRecentFallback}
       />
 
       ${topTools.length > 0
-        ? html`<${ToolSection} title="Window top tools" tools=${topTools} fallback="" />`
+        ? html`<${ToolSection} title="윈도우 상위 도구" tools=${topTools} fallback="" />`
         : null}
 
       <${ToolSection}
-        title="Capabilities"
+        title="등록된 기능"
         tools=${capabilities}
-        fallback="No registered capabilities"
+        fallback="등록된 기능 없음"
       />
 
       <${ToolSection}
-        title="Available actions nearby"
+        title="사용 가능한 인근 액션"
         tools=${actions.map(action => actionDescriptorLabel(action.action_type))}
-        fallback="No operator action advertisements"
+        fallback="운영자 액션 광고 없음"
       />
     </div>
   `

@@ -149,13 +149,13 @@ export async function refreshAgentDetail(): Promise<void> {
           return { taskId: task.id, text: text.trim() }
         } catch (err) {
           const message = err instanceof Error ? err.message : 'history load failed'
-          return { taskId: task.id, text: `Failed to load history: ${message}` }
+          return { taskId: task.id, text: `이력 로드 실패: ${message}` }
         }
       }),
     )
     taskHistories.value = historyRows
   } catch (err) {
-    detailError.value = err instanceof Error ? err.message : 'Failed to load agent detail'
+    detailError.value = err instanceof Error ? err.message : '에이전트 상세 정보 로드 실패'
   } finally {
     loading.value = false
   }
@@ -172,10 +172,10 @@ export async function submitMention(): Promise<void> {
   try {
     await sendBroadcast(sender, `@${target} ${text}`)
     mentionText.value = ''
-    showToast(`Mention sent to ${target}`, 'success')
+    showToast(`${target}에게 멘션 전송 완료`, 'success')
     void refreshAgentDetail()
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Failed to send mention'
+    const msg = err instanceof Error ? err.message : '멘션 전송 실패'
     showToast(msg, 'error')
   } finally {
     sendingMention.value = false

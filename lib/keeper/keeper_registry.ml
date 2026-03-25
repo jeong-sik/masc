@@ -42,6 +42,7 @@ let state_to_string = function
 
 let registry : (string, registry_entry) Hashtbl.t = Hashtbl.create 16
 let mu = Eio.Mutex.create ()
+let running_count_atomic = Atomic.make 0
 
 let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
@@ -54,6 +55,11 @@ let max_crash_log_entries = 5
 let register ~base_path name meta =
   with_lock_rw (fun () ->
     let done_p, done_r = Eio.Promise.create () in
+    let key = registry_key ~base_path name in
+    (match Hashtbl.find_opt registry key with
+     | Some entry when entry.state = Running ->
+         Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
+     | _ -> ());
     let entry = {
       base_path;
       name;
@@ -74,11 +80,18 @@ let register ~base_path name meta =
       board_cursor_ts = 0.0;
       tool_usage = Hashtbl.create 16;
     } in
-    Hashtbl.replace registry (registry_key ~base_path name) entry;
+    Hashtbl.replace registry key entry;
+    Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1);
     entry)
 
 let unregister ~base_path name =
-  with_lock_rw (fun () -> Hashtbl.remove registry (registry_key ~base_path name))
+  with_lock_rw (fun () ->
+    let key = registry_key ~base_path name in
+    (match Hashtbl.find_opt registry key with
+     | Some entry when entry.state = Running ->
+         Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
+     | _ -> ());
+    Hashtbl.remove registry key)
 
 let get ~base_path name =
   with_lock_ro (fun () -> Hashtbl.find_opt registry (registry_key ~base_path name))
@@ -106,7 +119,17 @@ let update_meta ~base_path name meta =
 let set_state ~base_path name state =
   with_lock_rw (fun () ->
     match Hashtbl.find_opt registry (registry_key ~base_path name) with
-    | Some entry -> entry.state <- state
+    | Some entry ->
+        if entry.state <> state then begin
+          (match (entry.state, state) with
+           | Running, (Paused | Stopped) ->
+               Atomic.set running_count_atomic
+                 (max 0 (Atomic.get running_count_atomic - 1))
+           | (Paused | Stopped), Running ->
+               Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
+           | _ -> ());
+          entry.state <- state
+        end
     | None -> ())
 
 let record_restart ~base_path name =
@@ -129,13 +152,15 @@ let is_running ~base_path name =
   | _ -> false
 
 let count_running ?base_path () =
-  with_lock_ro (fun () ->
-    Hashtbl.fold
-      (fun _k v acc ->
-        match base_path with
-        | Some expected when not (String.equal expected v.base_path) -> acc
-        | _ -> if v.state = Running then acc + 1 else acc)
-      registry 0)
+  match base_path with
+  | None -> Atomic.get running_count_atomic
+  | Some expected ->
+      with_lock_ro (fun () ->
+        Hashtbl.fold
+          (fun _k v acc ->
+            if String.equal expected v.base_path && v.state = Running then acc + 1
+            else acc)
+          registry 0)
 
 let record_crash ~base_path name ts msg =
   with_lock_rw (fun () ->
@@ -246,7 +271,9 @@ let cleanup_tracking ~base_path name =
     | None -> ())
 
 let clear () =
-  with_lock_rw (fun () -> Hashtbl.clear registry)
+  with_lock_rw (fun () ->
+    Hashtbl.clear registry;
+    Atomic.set running_count_atomic 0)
 
 (* ── Board cursor ────────────────────────────────────────────── *)
 

@@ -64,18 +64,37 @@ release_build_lock() {
 
 build_dashboard_spa() {
     local dashboard_dir="$SCRIPT_DIR/dashboard"
+    local log_file=""
 
     if [ ! -f "$dashboard_dir/package.json" ]; then
         return 0
     fi
 
     echo "[dashboard] Building SPA before server start..." >&2
-    if command -v npm >/dev/null 2>&1; then
-        (cd "$dashboard_dir" && npm install --prefer-offline --no-audit 2>&1 | tail -1 >&2 && npm run build 2>&1 | tail -3 >&2) || \
-            echo "[dashboard] Build failed (non-fatal, server will show fallback page)." >&2
-    else
+    if ! command -v npm >/dev/null 2>&1; then
         echo "[dashboard] npm not found, skipping dashboard build." >&2
+        return 0
     fi
+
+    log_file="$(mktemp /tmp/masc-dashboard-build.XXXXXX.log)"
+    if [ -d "$dashboard_dir/node_modules" ]; then
+        if (cd "$dashboard_dir" && npm run build >"$log_file" 2>&1); then
+            tail -n 3 "$log_file" >&2 || true
+            rm -f "$log_file"
+            return 0
+        fi
+        echo "[dashboard] Existing deps build failed, retrying after npm install..." >&2
+    fi
+
+    if (cd "$dashboard_dir" && npm install --prefer-offline --no-audit >"$log_file" 2>&1 && npm run build >>"$log_file" 2>&1); then
+        tail -n 6 "$log_file" >&2 || true
+        rm -f "$log_file"
+        return 0
+    fi
+
+    tail -n 20 "$log_file" >&2 || true
+    rm -f "$log_file"
+    echo "[dashboard] Build failed (non-fatal, server will show fallback page)." >&2
 }
 
 resolve_repo_env_root() {

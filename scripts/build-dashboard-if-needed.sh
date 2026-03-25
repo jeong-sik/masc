@@ -50,10 +50,26 @@ needs_rebuild() {
 
 if needs_rebuild; then
   echo "[dashboard] Sources changed, rebuilding SPA..." >&2
-  (cd "$DASHBOARD_DIR" && npm install --prefer-offline --no-audit 2>&1 | tail -1 >&2 && npm run build 2>&1 | tail -3 >&2) || {
+  log_file="$(mktemp /tmp/masc-dashboard-build.XXXXXX.log)"
+  if [ -d "$DASHBOARD_DIR/node_modules" ]; then
+    if (cd "$DASHBOARD_DIR" && npm run build >"$log_file" 2>&1); then
+      tail -n 3 "$log_file" >&2 || true
+      rm -f "$log_file"
+      touch "$STAMP"
+      echo "[dashboard] Build complete." >&2
+      exit 0
+    fi
+    echo "[dashboard] Existing deps build failed, retrying after npm install..." >&2
+  fi
+
+  if ! (cd "$DASHBOARD_DIR" && npm install --prefer-offline --no-audit >"$log_file" 2>&1 && npm run build >>"$log_file" 2>&1); then
+    tail -n 20 "$log_file" >&2 || true
+    rm -f "$log_file"
     echo "[dashboard] Build failed (non-fatal)." >&2
     exit 0
-  }
+  fi
+  tail -n 6 "$log_file" >&2 || true
+  rm -f "$log_file"
   touch "$STAMP"
   echo "[dashboard] Build complete." >&2
 else

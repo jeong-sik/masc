@@ -25,6 +25,10 @@ let contains_substring haystack needle =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let write_executable path content =
+  write_file path content;
+  Unix.chmod path 0o755
+
 let rec mkdir_p path =
   if path = "" || path = "." || path = "/" then
     ()
@@ -75,8 +79,7 @@ let run_shell ?(env = []) ~cwd cmd =
   (code, stdout, stderr)
 
 let copy_script src dst =
-  write_file dst (read_file src);
-  Unix.chmod dst 0o755
+  write_executable dst (read_file src)
 
 let write_fake_eio_exe exe_path ~marker =
   mkdir_p (Filename.dirname exe_path);

@@ -134,6 +134,13 @@ let test_grpc_events_delivered () =
     "masc_grpc_events_delivered_total" () in
   check (float 0.01) "grpc events delta" 5.0 (after -. before)
 
+let test_grpc_runtime_listening_cache () =
+  TM.init ();
+  TM.set_grpc_runtime_listening true;
+  check bool "grpc listening uses runtime cache" true (TM.grpc_listening ());
+  TM.set_grpc_runtime_listening false;
+  check bool "grpc listening resets" false (TM.grpc_listening ())
+
 let test_ws_sessions () =
   TM.init ();
   TM.set_ws_sessions 4;
@@ -154,6 +161,13 @@ let test_ws_enabled_normalized_env_matches_runtime () =
       (TM.ws_enabled ());
     check bool "runtime server normalizes false env" false
       (Masc_mcp.Server_ws_standalone.is_enabled ()))
+
+let test_ws_runtime_listening_cache () =
+  TM.init ();
+  TM.set_ws_runtime_listening true;
+  check bool "ws listening uses runtime cache" true (TM.ws_listening ());
+  TM.set_ws_runtime_listening false;
+  check bool "ws listening resets" false (TM.ws_listening ())
 
 (* ============================================================
    Agent Health Metrics
@@ -250,6 +264,7 @@ let () =
       test_case "observe_grpc_heartbeat_latency" `Quick test_grpc_heartbeat_latency;
       test_case "set_grpc_subscribers" `Quick test_grpc_subscribers;
       test_case "inc_grpc_events_delivered" `Quick test_grpc_events_delivered;
+      test_case "runtime listening cache" `Quick test_grpc_runtime_listening_cache;
     ]);
     ("websocket", [
       test_case "set_ws_sessions" `Quick test_ws_sessions;
@@ -257,6 +272,8 @@ let () =
         test_ws_enabled_blank_env_matches_runtime;
       test_case "normalized env matches runtime" `Quick
         test_ws_enabled_normalized_env_matches_runtime;
+      test_case "runtime listening cache" `Quick
+        test_ws_runtime_listening_cache;
     ]);
     ("agent_health", [
       test_case "set_agent_heartbeat_age" `Quick test_agent_heartbeat_age;

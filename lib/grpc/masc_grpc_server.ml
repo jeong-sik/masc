@@ -461,6 +461,7 @@ let start
     ~(tool_dispatcher : string -> string -> (string, string) result)
   : unit =
   if not (is_enabled ()) then begin
+    Transport_metrics.set_grpc_runtime_listening false;
     Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=0 to disable)";
   end
   else begin
@@ -475,13 +476,18 @@ let start
         Log.Server.info "  health: %s/Check" health_service_name;
         Log.Server.info
           "  methods: Join, Leave, Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
-        Grpc_eio.Server.serve ~sw ~env server
+        Transport_metrics.set_grpc_runtime_listening true;
+        Fun.protect
+          ~finally:(fun () -> Transport_metrics.set_grpc_runtime_listening false)
+          (fun () -> Grpc_eio.Server.serve ~sw ~env server)
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
+        Transport_metrics.set_grpc_runtime_listening false;
         Log.Server.error
           "gRPC coordination transport unavailable on 127.0.0.1:%d: port already in use"
           port
       | exn ->
+        Transport_metrics.set_grpc_runtime_listening false;
         Log.Server.error "gRPC server failed: %s" (Printexc.to_string exn)))
   end

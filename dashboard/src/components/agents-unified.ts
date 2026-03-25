@@ -6,10 +6,13 @@ import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { FilterChips } from './common/filter-chips'
 import { navigate, route } from '../router'
-import { agents, keepers } from '../store'
+import { agents, keepers, executionLoaded, shellCounts } from '../store'
 import { missionKeeperBriefs } from '../mission-signals'
-import { AgentRoster, buildAgentRoster, scopeAgentsByKeeperFilter } from './agent-roster'
+import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
+import { roomTruth } from '../room-truth-store'
+import { resolveRuntimeCounts } from '../runtime-counts'
+
 type AgentsView = 'all' | 'agents' | 'keepers'
 
 const activeView = signal<AgentsView>('all')
@@ -41,20 +44,17 @@ export function AgentsUnified() {
   }, [routeView])
 
   // Compute counts for chip badges.
-  const rosterAgents = buildAgentRoster(agents.value, keepers.value, missionKeeperBriefs.value)
-  const totalCount = rosterAgents.length
-  const keeperCount = scopeAgentsByKeeperFilter(
-    rosterAgents,
-    keepers.value,
-    missionKeeperBriefs.value,
-    'keeper-only',
-  ).length
-  const agentOnlyCount = scopeAgentsByKeeperFilter(
-    rosterAgents,
-    keepers.value,
-    missionKeeperBriefs.value,
-    'agent-only',
-  ).length
+  const liveRuntimeCounts = countRuntimeKinds(agents.value, keepers.value, missionKeeperBriefs.value)
+  const runtimeCounts = resolveRuntimeCounts({
+    executionLoaded: executionLoaded.value,
+    agentsCount: liveRuntimeCounts.agents,
+    keepersCount: liveRuntimeCounts.keepers,
+    roomTruthCounts: roomTruth.value?.room.counts,
+    shellCounts: shellCounts.value,
+  })
+  const totalCount = runtimeCounts.totalRuntimes
+  const keeperCount = runtimeCounts.keepers
+  const agentOnlyCount = runtimeCounts.agents
   const currentViewMeta = CHIPS.find(chip => chip.id === currentView) ?? {
     id: 'all' as const,
     label: '전체 보기',

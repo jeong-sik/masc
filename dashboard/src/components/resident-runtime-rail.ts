@@ -5,12 +5,20 @@ import {
   agents,
   tasks,
   keepers,
+  shellCounts,
   serverStatus,
+  executionLoaded,
+  executionLoading,
+  executionError,
 } from '../store'
 import { refreshForRoute } from '../tab-refresh'
 import { navigate, route } from '../router'
 import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from '../operator-store'
 import { selectPendingConfirmState } from '../pending-confirm'
+import { missionKeeperBriefs } from '../mission-signals'
+import { roomTruth } from '../room-truth-store'
+import { resolveRuntimeCounts, runtimeCountSourceLabel } from '../runtime-counts'
+import { countRuntimeKinds } from './agent-roster'
 
 function shortCommit(commit: string | null | undefined): string {
   const value = commit?.trim()
@@ -21,6 +29,22 @@ function shortCommit(commit: string | null | undefined): string {
 export function SnapshotCard() {
   const liveConnected = connected.value
   const build = serverStatus.value?.build
+  const liveRuntimeCounts = countRuntimeKinds(agents.value, keepers.value, missionKeeperBriefs.value)
+  const runtimeCounts = resolveRuntimeCounts({
+    executionLoaded: executionLoaded.value,
+    agentsCount: liveRuntimeCounts.agents,
+    keepersCount: liveRuntimeCounts.keepers,
+    tasksCount: tasks.value.length,
+    roomTruthCounts: roomTruth.value?.room.counts,
+    shellCounts: shellCounts.value,
+  })
+  const countSourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
+  const countStateMessage =
+    executionError.value
+      ? `execution 상세 실패 · ${countSourceLabel} 카운트 표시 중`
+      : runtimeCounts.source !== 'execution'
+        ? `${executionLoading.value || !executionLoaded.value ? '상세 runtime 동기화 중' : '상세 runtime 불일치'} · ${countSourceLabel} 카운트 표시 중`
+        : null
 
   return html`
     <section class="grid gap-2 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.02))] p-2.5">
@@ -48,21 +72,29 @@ export function SnapshotCard() {
       <div class="grid grid-cols-2 gap-2 text-[11px]">
         <div class="rounded-md border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
           <div class="text-[10px] text-[var(--text-muted)]">에이전트</div>
-          <strong class="mt-1 block text-[18px] font-semibold tabular-nums text-[var(--accent)]">${agents.value.length}</strong>
+          <strong class="mt-1 block text-[18px] font-semibold tabular-nums text-[var(--accent)]">${runtimeCounts.agents}</strong>
         </div>
         <div class="rounded-md border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
           <div class="text-[10px] text-[var(--text-muted)]">키퍼</div>
-          <strong class="mt-1 block text-[18px] font-semibold tabular-nums text-[var(--ok)]">${keepers.value.length}</strong>
+          <strong class="mt-1 block text-[18px] font-semibold tabular-nums text-[var(--ok)]">${runtimeCounts.keepers}</strong>
         </div>
         <div class="rounded-md border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
           <div class="text-[10px] text-[var(--text-muted)]">태스크</div>
-          <strong class="mt-1 block text-[18px] font-semibold tabular-nums ${tasks.value.length > 0 ? 'text-[var(--warn)]' : 'text-[var(--text-muted)]'}">${tasks.value.length}</strong>
+          <strong class="mt-1 block text-[18px] font-semibold tabular-nums ${runtimeCounts.tasks > 0 ? 'text-[var(--warn)]' : 'text-[var(--text-muted)]'}">${runtimeCounts.tasks}</strong>
         </div>
         <div class="rounded-md border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3 py-2">
           <div class="text-[10px] text-[var(--text-muted)]">이벤트</div>
           <strong class="mt-1 block text-[18px] font-semibold tabular-nums text-[var(--text-strong)]">${eventCount.value}</strong>
         </div>
       </div>
+
+      ${countStateMessage
+        ? html`
+            <div class="rounded-md border border-[rgba(71,184,255,0.16)] bg-[rgba(71,184,255,0.08)] px-3 py-2 text-[10px] leading-[1.45] text-[rgba(191,231,255,0.78)]">
+              ${countStateMessage}
+            </div>
+          `
+        : null}
 
       <div class="grid grid-cols-2 gap-2">
         <button type="button"

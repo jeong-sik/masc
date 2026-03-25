@@ -39,6 +39,7 @@ import { OrchestraSurface } from './orchestra'
 import { SwarmSurface } from './swarm'
 import { ChainsSurface, OperationsSurface } from './operations'
 import { ControlSurface } from './control'
+import { WarroomGuideCallout } from './warroom-guide-callout'
 
 function SurfaceTabs() {
   return html`
@@ -223,14 +224,7 @@ export function Command() {
         ? html`<${EmptyState} message=${commandPlaneActionError.value} compact />`
         : null}
       <${RoomTruthStrip} />
-      <section class="${CARD_STANDARD}">
-        <div class="grid gap-1">
-          <strong class="text-[13px] text-[var(--text-strong)]">관제면은 실험 surface입니다.</strong>
-          <span class="text-[12px] text-[var(--text-muted)] leading-[1.5]">
-            메인 탐색에서는 숨겼고, readiness 근거와 direct entry는 Lab의 Surface Readiness에서 확인합니다.
-          </span>
-        </div>
-      </section>
+      <${WarroomGuideCallout} />
       <${SurfaceTabs} />
       <${SurfaceBody} />
     </section>

@@ -31,7 +31,7 @@ export function Tools() {
 
   return html`
     <div>
-      <${Card} title="Surface Readiness" class="section mb-4">
+      <${Card} title="운영 화면 안내" class="section mb-4">
         <${SurfaceReadinessPanel} />
       <//>
 

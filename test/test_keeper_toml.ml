@@ -148,7 +148,6 @@ let test_profile_minimal () =
   let input = {|
 [keeper]
 goal = "test goal"
-models = ["llama:test"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -157,8 +156,6 @@ models = ["llama:test"]
     | Error e -> fail e
     | Ok defaults ->
       check (option string) "goal" (Some "test goal") defaults.goal;
-      check int "models count" 1 (List.length defaults.models);
-      check string "model" "llama:test" (List.hd defaults.models);
       check (option string) "soul_profile" None defaults.soul_profile
 
 let test_profile_full () =
@@ -193,9 +190,6 @@ policy_voice_enabled = false
       check (option string) "goal" (Some "analyze logs") d.goal;
       check (option string) "soul_profile" (Some "research") d.soul_profile;
       check (option string) "will" (Some "detect issues") d.will;
-      check int "models" 1 (List.length d.models);
-      check int "allowed_models" 2 (List.length d.allowed_models);
-      check (option string) "active_model" (Some "llama:qwen3.5-35b-a3b-ud-q4-xl") d.active_model;
       check (option string) "room_scope" (Some "all") d.room_scope;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;

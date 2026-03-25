@@ -100,14 +100,6 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
        (match defaults.instructions with
         | Some value -> value <> meta.instructions
         | None -> false)
-  |> add_if "execution.models"
-       (defaults.models <> [] && defaults.models <> meta.models)
-  |> add_if "execution.allowed_models"
-       (defaults.allowed_models <> [] && defaults.allowed_models <> meta.allowed_models)
-  |> add_if "execution.active_model"
-       (match defaults.active_model with
-        | Some value -> value <> meta.active_model
-        | None -> false)
   |> add_if "coordination.room_scope"
        (match defaults.room_scope with
         | Some value ->

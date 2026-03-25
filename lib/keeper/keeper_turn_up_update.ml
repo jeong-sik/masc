@@ -136,8 +136,10 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       Option.value ~default:old.voice_agent_id p.voice_agent_id_opt;
     mention_targets;
     persona_profile_path =
-      if String.trim old.persona_profile_path <> "" then old.persona_profile_path
-      else Option.value ~default:"" p.profile_defaults.manifest_path;
+      (* Always resolve fresh to pick up path migrations (e.g. legacy ~/me/personas/ -> config/personas/) *)
+      (match Keeper_types_profile.persona_profile_path_opt p.name with
+       | Some path -> path
+       | None -> Option.value ~default:"" p.profile_defaults.manifest_path);
     presence_keepalive =
       Option.value
         ~default:

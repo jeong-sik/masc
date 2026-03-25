@@ -3,6 +3,51 @@
 
 ## [Unreleased]
 
+## [2.149.0] - 2026-03-26
+
+### Added
+- **Startup liveness and readiness probes** — add watchdog-backed startup health surfaces and bootstrap coverage so operators can distinguish booting from ready runtimes (#3121).
+- **Runtime roster counters** — add dashboard/runtime count derivation and tests to keep monitoring views aligned with live runtime state (#3124).
+
+### Changed
+- **System logging observability fan-out** — harden room/task/audit propagation so system logs surface consistently across runtime hooks and operator views (#3129).
+- **Readonly dashboard isolation** — route dashboard read paths through readonly pools and shared `Eio_guard` helpers to reduce contention under load (#3123, #3126).
+- **Front-door docs refresh** — update the README to match the current canonical entrypoints and remote-safe surfaces (#3102).
+
+### Fixed
+- **Eio and CI stability** — offload backend and file-lock Unix I/O, unblock mention inbox read paths, and land the post-`#3086` CI/test hang repairs (#3116, #3117, #3119, #3125).
+- **Backend correctness** — harden atomic CAS semantics and `Memory` get-all/set-if-not-exists behavior while removing stale backend code paths (#3110).
+- **Voice preview cleanup** — stop emitting dangling `preview_url` values for unregistered TTS routes (#3130).
+
+## [2.148.1] - 2026-03-26
+
+### Added
+- **OpenAI-compatible chat completions** — add an optional `/v1/chat/completions` surface for compatibility clients (#3026, #3030).
+- **Validation and cost accounting** — add pre-dispatch tool schema validation, per-task cost accounting, model-aware token pricing, p95 latency tracking, and per-keeper observed-tool metrics (#2892, #2919, #3003, #3013, #3035).
+- **Persistent diagnostics** — persist system logs across restarts, add gRPC descriptor drift checks, and expand harness evaluation coverage for repo synthesis and cross-model review flows (#2882, #2962, #3008, #3081).
+
+### Changed
+- **Keeper/runtime SSOT cleanup** — consolidate keeper and supervisor state into `KeeperRegistry`, remove legacy policy-mode residue, and make cascade metadata flow through the current registry model (#2904, #3002, #3012, #3020, #3028, #3033).
+- **Backend and I/O consolidation** — standardize on `Backend_eio`/`Fs_compat`, replace blocking file and process I/O with Eio-safe paths, and decompose large runtime modules into smaller ownership units (#2995, #3025, #3027, #3040, #3053, #3076).
+- **Dashboard and docs cleanup** — refresh front-door docs, remove dead dashboard/TRPG/runtime surfaces, centralize config constants, and trim mission/transport latency in the UI and runtime projections (#2898, #2936, #2952, #3043, #3047).
+- **Dependency and CI ratchets** — repeatedly ratchet OAS and `agent_sdk` pins, add stale-run retriggering, and tighten CI diagnostics around flaky tests and proto drift (#2975, #2980, #3038, #3039, #3087, #3088).
+
+### Fixed
+- **Concurrency and PostgreSQL stability** — guard mutable runtime state with `Eio.Mutex`/`Atomic`, reduce readonly contention, raise init timeouts, and fix lock cleanup races across backend paths (#2965, #3004, #3009, #3032, #3036, #3048).
+- **Dashboard and keeper correctness** — fix readiness/warmup handling, transport-health fallbacks, roster visibility, board cursor tracking, session directory creation, and cache/test isolation (#2932, #2951, #2963, #2998, #3019, #3080, #3083, #3085).
+- **Error visibility and test hygiene** — replace catch-all handlers with typed matches, convert silent `Printf` paths to structured logging, remove unsafe list access, and realign stale tests with the current server surface (#2987, #2989, #2999, #3057, #3058, #3094, #3105).
+
+## [2.148.0] - 2026-03-24
+
+### Changed
+- **Dashboard timeout pressure** — trim dashboard transport descriptions and reduce surface timeout pressure in the hot paths that were overloading slower rooms (#2870, #2872).
+- **Governance and harness bootstrap hardening** — ensure governance directories exist before judge startup and stabilize the bootstrap/render path used by the harness flow (#2862, #2867, #2869).
+- **Logging and dependency ratchet** — surface previously silent failures through the `Log` module and ratchet the OAS dependency pin to `v0.89.1` (#2865, #2868).
+
+### Fixed
+- **Autoresearch runtime** — restore MCP auth, autonomous loop behavior, and invalid-state coverage in the autoresearch path (#2858, #2871).
+- **Keeper test alignment** — update tests to match the removed policy/goals/action tool surfaces (#2866).
+
 ## [2.147.0] - 2026-03-24
 
 ### Added

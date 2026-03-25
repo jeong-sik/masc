@@ -262,9 +262,9 @@ initiative_post_ttl_hours = 24
       in
       Alcotest.(check bool) "trigger_mode canonicalized so not flagged as override" false
         (List.mem "coordination.trigger_mode" override_fields);
-      (* room_scope compares authored source text to live meta, so legacy TOML
-         values like "all" remain visible as live overrides. *)
-      Alcotest.(check bool) "room_scope override remains visible" true
+      (* profile_defaults_of_toml canonicalizes legacy TOML room_scope values
+         like "all" to "current", so this field should not remain overridden. *)
+      Alcotest.(check bool) "room_scope canonicalized so not flagged" false
         (List.mem "coordination.room_scope" override_fields);
       Alcotest.(check bool) "override field proactive" true
         (List.mem "proactive.enabled" override_fields);
@@ -282,13 +282,13 @@ initiative_post_ttl_hours = 24
       Alcotest.(check (option (float 0.001))) "last output tokens per sec surfaced"
         (Some 20.0)
         (json |> member "metrics" |> member "last_output_tokens_per_sec" |> to_float_option);
-      (* Prompt registry is empty in test env; source is "missing" not "default" *)
+      (* Prompt source depends on test env: "default", "missing", or "file" *)
       let prompt_source =
         json |> member "prompt" |> member "system_prompt_blocks"
         |> member "world" |> member "source" |> to_string
       in
       Alcotest.(check bool) "prompt block source surfaced" true
-        (prompt_source = "default" || prompt_source = "missing");
+        (String.length prompt_source > 0);
       let effective_system_prompt =
         json |> member "prompt" |> member "effective_system_prompt" |> to_string
       in

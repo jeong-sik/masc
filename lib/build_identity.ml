@@ -56,7 +56,6 @@ let git_capture_output ~repo_root args =
   with exn ->
     ignore (try Unix.close_process_full channels with _ -> Unix.WEXITED 1);
     raise exn
-
 let git_probe_from_root repo_root =
   let f () =
     let output =

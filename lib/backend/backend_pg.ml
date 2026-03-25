@@ -375,6 +375,9 @@ let set_if_not_exists t key value =
 let compare_and_swap t ~key ~expected ~value =
   let nkey = namespaced_key t.namespace key in
   let compressed_new = Compression.compress_with_header value in
+  (* CAS compares stored payload bytes directly. This preserves the public
+     raw-value contract because Backend_compression is deterministic for the
+     current simplified zstd path (fixed level, no external dictionary). *)
   let compressed_expected = Compression.compress_with_header expected in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in

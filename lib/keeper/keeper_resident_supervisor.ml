@@ -48,7 +48,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
         Eio.Promise.resolve reg.done_r `Stopped;
         publish_lifecycle "stopped" meta.name "normal exit")
       ~finally:(fun () ->
-        Keeper_keepalive.cleanup_keeper_tracking meta.name;
+        Keeper_registry.cleanup_tracking ~base_path:ctx.config.base_path meta.name;
         match Eio.Promise.peek reg.done_p with
         | Some _ -> ()  (* Already resolved in the normal path *)
         | None ->

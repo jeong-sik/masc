@@ -267,10 +267,6 @@ let handle_resident_keeper_status ctx args : tool_result =
            (annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true
               ~resident_registered:true json))
 
-(* Legacy model injection removed: cascade_name is the authority.
-   Kept as a no-op to avoid changing call-site signatures. *)
-let inject_models_from_meta _config _name args = args
-
 let inject_goal_from_message args =
   match Safe_ops.json_string_opt "goal" args with
   | Some _ -> args
@@ -291,7 +287,6 @@ let handle_resident_keeper_msg ctx args : tool_result =
     | _ ->
         let args_enriched =
           args |> inject_goal_from_message
-               |> inject_models_from_meta ctx.config name
         in
         let ok, body = handle_resident_keeper_up ctx args_enriched in
         if ok then Ok () else Error body
@@ -326,7 +321,6 @@ let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
     | _ ->
         let args_enriched =
           args |> inject_goal_from_message
-               |> inject_models_from_meta ctx.config name
         in
         let ok, body = handle_resident_keeper_up ctx args_enriched in
         if ok then Ok () else Error body

@@ -1382,12 +1382,10 @@ let test_write_meta_syncs_registered_resident_seed () =
         Yojson.Safe.Util.(resident_json |> member "voice_channel" |> to_string);
       check string "resident voice agent id sync" ""
         Yojson.Safe.Util.(resident_json |> member "voice_agent_id" |> to_string);
-      check bool "seed proactive sync" false
-        Yojson.Safe.Util.(
-          resident_json |> member "seed_meta" |> member "proactive_enabled" |> to_bool);
-      check bool "seed trigger mode removed" true
-        Yojson.Safe.Util.(
-          resident_json |> member "seed_meta" |> member "trigger_mode" = `Null))
+      check string "persona_name in resident spec" "buddy"
+        Yojson.Safe.Util.(resident_json |> member "persona_name" |> to_string);
+      check bool "seed_meta absent in thin format" true
+        (Yojson.Safe.Util.(resident_json |> member "seed_meta") = `Null))
 
 let test_keeper_up_persists_allowed_paths_to_status_policy () =
   Eio_main.run @@ fun env ->

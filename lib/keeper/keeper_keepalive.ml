@@ -9,25 +9,10 @@ open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
-(* ── Board / agent tracking (independent of keeper lifecycle) ── *)
+(* ── Board-reactive policy constants ── *)
 
-(** Per-keeper last known agent count for detecting roster changes. *)
-let last_agent_counts : (string, int) Hashtbl.t = Hashtbl.create 8
-let board_reactive_wakeups : (string, float) Hashtbl.t = Hashtbl.create 32
 let board_reactive_debounce_sec = 60.0
 let board_reactive_threshold = 4
-
-(** Dedicated mutex for [board_reactive_wakeups] and [last_agent_counts].
-    These are independent of keeper lifecycle tracked in [Keeper_registry]. *)
-let board_mu = Eio.Mutex.create ()
-
-let with_board_mu_ro f =
-  try Eio.Mutex.use_ro board_mu f
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-
-let with_board_mu_rw f =
-  try Eio.Mutex.use_rw ~protect:true board_mu f
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
 (* OAS Event_bus ref — set via bootstrap *)
 let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
@@ -39,22 +24,6 @@ let get_bus () = !bus_ref
     pings over the gRPC bidirectional stream. *)
 let grpc_client_ref : Masc_grpc_client.t option ref = ref None
 let set_grpc_client c = grpc_client_ref := Some c
-
-let remove_board_reactive_wakeups keeper_name =
-  let prefix = keeper_name ^ ":" in
-  let to_remove =
-    Hashtbl.fold
-      (fun key _ acc ->
-        if String.starts_with ~prefix key then key :: acc else acc)
-      board_reactive_wakeups []
-  in
-  List.iter (Hashtbl.remove board_reactive_wakeups) to_remove
-
-(** Clean up board/agent tracking state for a keeper. *)
-let cleanup_keeper_tracking name =
-  with_board_mu_rw (fun () ->
-      Hashtbl.remove last_agent_counts name;
-      remove_board_reactive_wakeups name)
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~2 s instead of waiting for the full 30-300 s interval. *)
@@ -85,15 +54,9 @@ let wakeup_keeper name =
 let wakeup_all_keepers () =
   Keeper_registry.wakeup_all ()
 
-let board_reactive_wakeup_allowed ~keeper_name ~post_id =
-  let key = keeper_name ^ ":" ^ post_id in
-  let now_ts = Time_compat.now () in
-  with_board_mu_rw (fun () ->
-      match Hashtbl.find_opt board_reactive_wakeups key with
-      | Some last_ts when now_ts -. last_ts < board_reactive_debounce_sec -> false
-      | _ ->
-          Hashtbl.replace board_reactive_wakeups key now_ts;
-          true)
+let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
+  Keeper_registry.board_wakeup_allowed ~base_path keeper_name
+    ~post_id ~debounce_sec:board_reactive_debounce_sec
 
 let wakeup_relevant_keeper_for_board_signal
     ~(config : Room.config)
@@ -124,6 +87,7 @@ let wakeup_relevant_keeper_for_board_signal
   in
   let wake_meta (meta : keeper_meta) reason =
     if board_reactive_wakeup_allowed
+         ~base_path:config.base_path
          ~keeper_name:meta.name
          ~post_id:signal.post_id
     then (
@@ -391,16 +355,15 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               in
               let agent_count_changed =
                 let last_count =
-                  with_board_mu_ro (fun () ->
-                      Hashtbl.find_opt last_agent_counts meta_current.name
-                      |> Option.value ~default:0)
+                  Keeper_registry.get_last_agent_count
+                    ~base_path:ctx.config.base_path meta_current.name
                 in
                 let changed =
                   last_count > 0 && current_agent_count <> last_count
                 in
-                with_board_mu_rw (fun () ->
-                    Hashtbl.replace last_agent_counts
-                      meta_current.name current_agent_count);
+                Keeper_registry.set_last_agent_count
+                  ~base_path:ctx.config.base_path
+                  meta_current.name current_agent_count;
                 changed
               in
               let pending_board_events, board_new_post_count, board_mention_count =
@@ -620,6 +583,6 @@ let stop_keepalive name =
        | Some close_fn -> (try close_fn () with _ -> ())
        | None -> ());
       Keeper_registry.set_state ~base_path:entry.base_path name
-        Keeper_registry.Stopped
-  ) entries;
-  cleanup_keeper_tracking name
+        Keeper_registry.Stopped;
+      Keeper_registry.cleanup_tracking ~base_path:entry.base_path name
+  ) entries

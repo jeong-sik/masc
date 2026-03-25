@@ -394,3 +394,60 @@ masc_set_param(key, value)
 | `hybrid` (기본값) | LLM 우선, 실패 시 keyword fallback. |
 
 점수 공식 (keyword mode): `total = trait_overlap * 0.4 + interest_overlap * 0.4 + capability_match * 0.2`.
+
+---
+
+## 12. Keeper 설정 소스와 우선순위
+
+### 12.1 설정 소스
+
+Keeper의 행동을 결정하는 설정은 3곳에서 공급된다.
+
+| 소스 | 경로 | 형식 | 역할 |
+|------|------|------|------|
+| Persona template | `config/personas/<name>/profile.json` | JSON | Blueprint. goal, instructions, soul_profile 등 정의 |
+| TOML declaration | `config/keepers/<name>.toml` | TOML | Persona 없이 선언적으로 keeper 정의 |
+| Persistent meta | `.masc/keeper_<name>.json` | JSON | 런타임 상태. turn 카운트, context ratio 등 포함 |
+
+**Resident-keeper** (`.masc/resident-keepers/<name>.json`)는 설정 소스가 아니라 등록/lifecycle 메타데이터다. `persona_name`, `desired`, voice 설정, 타임스탬프만 저장한다.
+
+### 12.2 설정 적용 우선순위
+
+**새 keeper 생성 시** (`keeper_up`, meta 없음):
+
+```
+inline args > TOML (config/keepers/) > persona template (config/personas/) > 하드코딩 기본값
+```
+
+**기존 keeper resume 시** (`keeper_up`, meta 존재):
+
+```
+inline args > stored keeper_meta > TOML/persona template (fallback) > 하드코딩 기본값
+```
+
+코드 경로: `keeper_turn_up_args.ml:parse()` → `load_keeper_profile_defaults()`가 TOML > persona 순서로 로드.
+
+### 12.3 Persona 디렉토리 탐색 순서
+
+`personas_root_opt()` (`keeper_types_profile.ml`):
+
+```
+$MASC_PERSONAS_DIR > $MASC_BASE_PATH/config/personas/ > $ME_ROOT/personas/ (legacy, 경고 로그)
+```
+
+### 12.4 Template 변경 반영
+
+Template 변경은 기존 keeper에 자동 전파되지 않는다. 반영 방법:
+
+1. `keeper_down <name>` — keeper 중지 + meta 파일 삭제
+2. `keeper_up <name>` — template에서 fresh로 재생성
+
+### 12.5 `--base-path`와 `.masc/` 의존성
+
+`--base-path` CLI 인자가 `.masc/` 디렉토리 위치를 결정한다. 기본값은 repo root.
+
+worktree에서 서버를 실행하면 `.masc/`가 worktree 내부를 가리키므로 main repo의 keeper 상태에 접근할 수 없다. keeper가 보이지 않는 가장 흔한 원인.
+
+### 12.6 모델 실행
+
+모델 선택은 `cascade.json`이 유일한 권위다. keeper_meta의 `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고, `Oas_model_resolve`가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.

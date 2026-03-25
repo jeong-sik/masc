@@ -8,6 +8,13 @@
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
+let resolve_join_state ~room_initialized ~join_required ~agent_name ~check_join =
+  if room_initialized && join_required && agent_name <> "unknown" then
+    try check_join ()
+    with Sys_error _ | Yojson.Json_error _ -> false
+  else
+    false
+
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
@@ -365,13 +372,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   (* Check if agent must join first — Fix 3: use cached value *)
   let room_initialized = !room_init_cached in
   let is_joined =
-    if room_initialized then
-      (* Some tools (e.g., masc_init) must run before initialization.
-         Guard the join check to avoid raising and crashing the server. *)
-      try Room.is_agent_joined config ~agent_name
-      with Sys_error _ | Yojson.Json_error _ -> false
-    else
-      false
+    resolve_join_state
+      ~room_initialized
+      ~join_required
+      ~agent_name
+      ~check_join:(fun () -> Room.is_agent_joined config ~agent_name)
   in
 
   (* Debug: log join check *)

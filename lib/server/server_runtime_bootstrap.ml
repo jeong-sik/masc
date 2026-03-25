@@ -382,13 +382,7 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
         Log.Keeper.info "autoboot: skipping %s (desired=false)" spec.name
       else
         try
-          (* Prefer persisted meta on disk; fall back to seed_meta from resident spec. *)
-          let meta =
-            match Keeper_types.read_meta config spec.name with
-            | Ok (Some m) -> Ok m
-            | Ok None -> Keeper_types.meta_of_json spec.seed_meta
-            | Error e -> Error e
-          in
+          let meta = Keeper_runtime.ensure_resident_meta config spec in
           match meta with
           | Error e ->
             Log.Keeper.error "autoboot: failed to load meta for %s: %s" spec.name e

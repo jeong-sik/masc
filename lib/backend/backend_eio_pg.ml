@@ -61,10 +61,15 @@ let set_if_not_exists_q =
   "INSERT INTO masc_kv (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING"
 
 let acquire_lock_q =
-  (Caqti_type.(t3 string string int) ->. Caqti_type.unit)
+  (Caqti_type.(t3 string string int) ->? Caqti_type.int)
   "INSERT INTO masc_kv (key, value, expires_at, updated_at) \
    VALUES ($1, $2, NOW() + $3 * INTERVAL '1 second', NOW()) \
-   ON CONFLICT DO NOTHING"
+   ON CONFLICT (key) DO UPDATE SET \
+     value = EXCLUDED.value, \
+     expires_at = EXCLUDED.expires_at, \
+     updated_at = NOW() \
+   WHERE masc_kv.expires_at IS NOT NULL AND masc_kv.expires_at <= NOW() \
+   RETURNING 1"
 
 let release_lock_q =
   (Caqti_type.(t2 string string) ->. Caqti_type.unit)
@@ -203,12 +208,8 @@ let acquire_lock t ~key ~owner ~ttl_seconds =
   let lock_key = namespaced_key t.namespace ("locks:" ^ key) in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    let* existing = C.find_opt get_q lock_key in
-    match existing with
-    | Some _ -> Ok false
-    | None ->
-        let* () = C.exec acquire_lock_q (lock_key, owner, ttl_seconds) in
-        Ok true
+    let* acquired = C.find_opt acquire_lock_q (lock_key, owner, ttl_seconds) in
+    Ok (Option.is_some acquired)
   ) t.pool with
   | Ok b -> Ok b
   | Error err -> Error (caqti_error_to_masc err)

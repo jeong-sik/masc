@@ -16,9 +16,13 @@
     - Automatically decompresses on load (ZSTD/ZSTDD header detection)
 *)
 
-(** {1 Compression} *)
+(** {1 Compression (internal)} *)
 
-module Compression = Backend_compression
+(** Encode value for storage (transparent zstd compression). *)
+let encode = Backend_compression.compress_with_header
+
+(** Decode stored value (auto-detects zstd header). *)
+let decode = Backend_compression.decompress_auto
 
 (** {1 Types} *)
 
@@ -153,7 +157,7 @@ module FileSystem = struct
           try
             let content = Eio.Path.load path in
             (* Compact Protocol v4: Auto-decompress if ZSTD header present *)
-            let decompressed = Compression.decompress_auto content in
+            let decompressed = decode content in
             Ok decompressed
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
@@ -172,7 +176,7 @@ module FileSystem = struct
           try
             _ensure_parent_dir ~log_errors:true path;
             (* Compact Protocol v4: Compress before saving (if beneficial) *)
-            let compressed = Compression.compress_with_header value in
+            let compressed = encode value in
             (* Write file *)
             Eio.Path.save ~create:(`Or_truncate 0o644) path compressed;
             Ok ()
@@ -271,7 +275,7 @@ module FileSystem = struct
   (** Set if not exists (atomic, auto-compresses) *)
   let set_if_not_exists t key value =
     (* Compact Protocol v4: Compress before saving *)
-    let compressed = Compression.compress_with_header value in
+    let compressed = encode value in
     Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
       match key_to_path t key with
       | Error e -> Error e
@@ -509,11 +513,11 @@ module FileSystem = struct
               if n = 0 then None
               else
                 let raw = Bytes.sub_string buf 0 n in
-                Some (Compression.decompress_auto raw)
+                Some (decode raw)
             end
           in
           let new_content = f current in
-          let compressed = Compression.compress_with_header new_content in
+          let compressed = encode new_content in
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
           let _ = Unix.ftruncate fd 0 in
           let _ = Unix.write_substring fd compressed 0 (String.length compressed) in

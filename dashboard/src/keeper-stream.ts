@@ -19,6 +19,7 @@ export function abortKeeperThreadMessage(name: string): void {
   if (!keeperName) return
   const controller = getStreamController(keeperName)
   const entryId = activeStreamEntryId(keeperName)
+  console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}`)
   if (controller) controller.abort()
   if (entryId) {
     finalizeAssistantEntry(keeperName, entryId, {

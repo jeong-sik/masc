@@ -350,8 +350,8 @@ export function relevantPitfalls(ids: string[]): CommandPlaneHelpPitfall[] {
 export async function fire(action: () => Promise<void>) {
   try {
     await action()
-  } catch {
-    // Error state is already captured in the store.
+  } catch (err) {
+    console.debug('[command] action error (state captured in store)', err instanceof Error ? err.message : err)
   }
 }
 

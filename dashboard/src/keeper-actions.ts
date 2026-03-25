@@ -75,6 +75,7 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
     return detail
   } catch (err) {
     const message = err instanceof Error ? err.message : `Failed to inspect ${keeperName}`
+    console.warn(`[keeper] hydration failed for ${keeperName}:`, message)
     setRecordValue(keeperActionErrors, keeperName, message)
     return null
   } finally {
@@ -102,8 +103,8 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
     try { parsed = JSON.parse(text) } catch { parsed = null }
     const detail = normalizeStatusDetail(keeperName, text, parsed)
     setStatusDetail(keeperName, detail)
-  } catch {
-    // ignore — best effort
+  } catch (err) {
+    console.warn(`[keeper] full history load failed for ${keeperName}`, err instanceof Error ? err.message : err)
   } finally {
     setRecordValue(keeperHydrating, keeperName, false)
   }
@@ -227,8 +228,8 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
         })
         await refreshDashboardState()
         return
-      } catch {
-        // Fall through to the shared error path below.
+      } catch (fallbackErr) {
+        console.warn(`[keeper] stream fallback also failed for ${keeperName}`, fallbackErr instanceof Error ? fallbackErr.message : fallbackErr)
       }
     }
 
@@ -289,6 +290,7 @@ export async function probeKeeperRuntime(name: string, actor: string): Promise<K
     return diagnostic
   } catch (err) {
     const message = err instanceof Error ? err.message : `Failed to probe ${keeperName}`
+    console.warn(`[keeper] probe failed for ${keeperName}:`, message)
     setRecordValue(keeperActionErrors, keeperName, message)
     throw err
   } finally {
@@ -326,6 +328,7 @@ export async function recoverKeeperRuntime(name: string, actor: string): Promise
     return after
   } catch (err) {
     const message = err instanceof Error ? err.message : `Failed to recover ${keeperName}`
+    console.warn(`[keeper] recovery failed for ${keeperName}:`, message)
     setRecordValue(keeperActionErrors, keeperName, message)
     throw err
   } finally {

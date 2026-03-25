@@ -90,7 +90,8 @@ export async function submitGovernancePetition(title: string): Promise<Governanc
       ruling: rulingRaw,
       execution_order: null,
     })
-  } catch {
+  } catch (err) {
+    console.warn('[governance] petition response parse failed', err instanceof Error ? err.message : err)
     return null
   }
 }
@@ -109,8 +110,8 @@ export async function submitGovernanceCaseBrief(
     const raw = JSON.parse(text) as Record<string, unknown>
     const existing = normalizeGovernanceCaseBundle(raw)
     if (existing) return existing
-  } catch {
-    // Fall through to a full status fetch.
+  } catch (err) {
+    console.debug('[governance] fast status update failed, falling back to full fetch', err instanceof Error ? err.message : err)
   }
   return fetchGovernanceCaseStatus(caseId)
 }
@@ -119,7 +120,8 @@ export async function fetchGovernanceCaseStatus(caseId: string): Promise<Governa
   const text = await callMcpTool('masc_case_status', { case_id: caseId })
   try {
     return normalizeGovernanceCaseBundle(JSON.parse(text) as Record<string, unknown>)
-  } catch {
+  } catch (err) {
+    console.warn('[governance] case status parse failed', err instanceof Error ? err.message : err)
     return null
   }
 }
@@ -134,7 +136,8 @@ export async function decideGovernanceExecutionOrder(
   })
   try {
     return normalizeGovernanceExecutionOrder(JSON.parse(text) as Record<string, unknown>)
-  } catch {
+  } catch (err) {
+    console.warn('[governance] execution order parse failed', err instanceof Error ? err.message : err)
     return null
   }
 }
@@ -273,7 +276,8 @@ export async function fetchGoals(): Promise<import('../types').Goal[]> {
     }
     if (Array.isArray(res)) return res
     return (res as Record<string, unknown>).goals as import('../types').Goal[] ?? []
-  } catch {
+  } catch (err) {
+    console.warn('[goals] fetch/parse error', err instanceof Error ? err.message : err)
     return []
   }
 }
@@ -286,7 +290,8 @@ export async function fetchActivityGraph(since?: string): Promise<import('../typ
     const resp = await fetchWithTimeout(`/api/v1/activity/graph${params}`, {}, 10000)
     if (!resp.ok) return null
     return (await resp.json()) as import('../types').ActivityGraphResponse
-  } catch {
+  } catch (err) {
+    console.debug('[activity] graph fetch failed', err instanceof Error ? err.message : err)
     return null
   }
 }
@@ -297,7 +302,8 @@ export async function fetchSwimlane(since?: string): Promise<import('../types').
     const resp = await fetchWithTimeout(`/api/v1/activity/swimlane${params}`, {}, 10000)
     if (!resp.ok) return null
     return (await resp.json()) as import('../types').SwimlaneResponse
-  } catch {
+  } catch (err) {
+    console.debug('[activity] swimlane fetch failed', err instanceof Error ? err.message : err)
     return null
   }
 }

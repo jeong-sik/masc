@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent, Keeper } from '../types'
 import type { DashboardMissionKeeperBrief } from '../types/dashboard-mission'
-import { countAgentsByStatus, scopeAgentsByKeeperFilter } from './agent-roster'
+import { buildAgentRoster, countAgentsByStatus, scopeAgentsByKeeperFilter } from './agent-roster'
 
 const AGENTS: Agent[] = [
   { name: 'plain-agent', status: 'active', current_task: null },
@@ -15,13 +15,26 @@ const KEEPERS: Keeper[] = [
 ]
 
 const KEEPER_BRIEFS: DashboardMissionKeeperBrief[] = [
-  { name: 'keeper-beta', agent_name: 'keeper-beta-agent' },
+  { name: 'keeper-beta', agent_name: 'keeper-beta-agent', current_work: 'watching room health' },
 ]
 
 describe('scopeAgentsByKeeperFilter', () => {
+  it('adds keeper-backed runtimes into the roster even when the agent feed is empty', () => {
+    const built = buildAgentRoster([], KEEPERS, KEEPER_BRIEFS)
+
+    expect(built.map(agent => agent.name)).toEqual([
+      'keeper-alpha-agent',
+      'keeper-beta-agent',
+    ])
+    expect(built.map(agent => agent.current_task)).toEqual([
+      null,
+      'watching room health',
+    ])
+  })
+
   it('keeps the all tab showing every agent entry', () => {
     const scoped = scopeAgentsByKeeperFilter(
-      AGENTS,
+      buildAgentRoster(AGENTS, KEEPERS, KEEPER_BRIEFS),
       KEEPERS,
       KEEPER_BRIEFS,
       'all',
@@ -37,7 +50,7 @@ describe('scopeAgentsByKeeperFilter', () => {
 
   it('keeps the general-agent tab scoped to non-keeper entries', () => {
     const scoped = scopeAgentsByKeeperFilter(
-      AGENTS,
+      buildAgentRoster(AGENTS, KEEPERS, KEEPER_BRIEFS),
       KEEPERS,
       KEEPER_BRIEFS,
       'agent-only',
@@ -51,7 +64,7 @@ describe('scopeAgentsByKeeperFilter', () => {
 
   it('keeps the keeper tab scoped to keeper-backed runtimes', () => {
     const scoped = scopeAgentsByKeeperFilter(
-      AGENTS,
+      buildAgentRoster(AGENTS, KEEPERS, KEEPER_BRIEFS),
       KEEPERS,
       KEEPER_BRIEFS,
       'keeper-only',
@@ -67,7 +80,7 @@ describe('scopeAgentsByKeeperFilter', () => {
 describe('countAgentsByStatus', () => {
   it('counts status chips from the already-scoped list', () => {
     const scoped = scopeAgentsByKeeperFilter(
-      AGENTS,
+      buildAgentRoster(AGENTS, KEEPERS, KEEPER_BRIEFS),
       KEEPERS,
       KEEPER_BRIEFS,
       'agent-only',

@@ -3,30 +3,58 @@
 
 import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
+import { CountBadge } from './badge'
 
 interface FilterChip<T extends string> {
   key: T
   label: string
+  count?: number | string | null
+  title?: string
 }
 
 interface FilterChipsProps<T extends string> {
   chips: FilterChip<T>[]
-  active: Signal<T>
+  active?: Signal<T>
+  value?: T
   onChange?: (key: T) => void
+  class?: string
+  size?: 'sm' | 'md'
 }
 
-export function FilterChips<T extends string>({ chips, active, onChange }: FilterChipsProps<T>) {
+export function FilterChips<T extends string>({
+  chips,
+  active,
+  value,
+  onChange,
+  class: cx,
+  size = 'sm',
+}: FilterChipsProps<T>) {
+  const activeKey = active?.value ?? value
+  const chipClass = size === 'md'
+    ? 'inline-flex min-h-9 items-center gap-1.5 rounded-2xl border px-3 py-2 text-[11px] font-medium'
+    : 'inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[length:var(--fs-xs)]'
+
   return html`
-    <div class="flex flex-wrap gap-1.5">
+    <div class="flex flex-wrap gap-1.5 ${cx ?? ''}">
       ${chips.map(chip => html`
         <button type="button"
           key=${chip.key}
-          class="rounded-lg border px-2 py-1 text-[length:var(--fs-xs)] cursor-pointer transition-all duration-150 ${active.value === chip.key
+          title=${chip.title}
+          aria-pressed=${activeKey === chip.key}
+          class="${chipClass} cursor-pointer transition-all duration-150 ${activeKey === chip.key
             ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
             : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'}"
-          onClick=${() => { active.value = chip.key; onChange?.(chip.key) }}
+          onClick=${() => {
+            if (active) active.value = chip.key
+            onChange?.(chip.key)
+          }}
         >
           ${chip.label}
+          ${chip.count != null ? html`
+            <${CountBadge} class=${activeKey === chip.key
+              ? 'bg-[rgba(255,255,255,0.12)] text-current'
+              : ''}>${chip.count}<//>
+          ` : null}
         </button>
       `)}
     </div>

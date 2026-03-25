@@ -257,6 +257,41 @@ let test_postgres_native_expired_lock_concurrent_reacquire () =
           check int "exactly one owner acquires expired lock" 1
             (bool_to_int acquired_a + bool_to_int acquired_b)
 
+let test_postgres_native_old_owner_cannot_release_reclaimed_lock () =
+  match Sys.getenv_opt "MASC_POSTGRES_URL" with
+  | None | Some "" -> ()
+  | Some url ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let suffix = unique_suffix () in
+      let cfg = {
+        Backend.default_config with
+        backend_type = Backend.PostgresNative;
+        cluster_name = "test-pg-native-release-" ^ suffix;
+        postgres_url = Some url;
+      } in
+      match Backend.PostgresNative.create_eio ~sw ~env:(env :> Caqti_eio.stdenv) cfg with
+      | Error e -> fail (Backend.show_error e)
+      | Ok backend ->
+          let key = "reclaimed-lock-" ^ suffix in
+          (match Backend.PostgresNative.acquire_lock backend ~key ~ttl_seconds:0 ~owner:"owner-a" with
+           | Ok true -> ()
+           | Ok false -> fail "seed expired lock acquire should succeed"
+           | Error e -> fail (Backend.show_error e));
+          Eio.Time.sleep env#clock 0.01;
+          (match Backend.PostgresNative.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner-b" with
+           | Ok true -> ()
+           | Ok false -> fail "reclaimed lock acquire should succeed"
+           | Error e -> fail (Backend.show_error e));
+          (match Backend.PostgresNative.release_lock backend ~key ~owner:"owner-a" with
+           | Ok true -> ()
+           | Ok false -> fail "release_lock should not fail"
+           | Error e -> fail (Backend.show_error e));
+          match Backend.PostgresNative.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner-c" with
+          | Ok false -> ()
+          | Ok true -> fail "old owner must not release reclaimed lock"
+          | Error e -> fail (Backend.show_error e)
+
 (* Test: Memory backend - list and get_all *)
 let test_memory_backend_list () =
   let cfg = test_config () in
@@ -543,5 +578,7 @@ let () =
         test_postgres_native_lock_blocks_other_owner;
       test_case "expired lock concurrent reacquire is single-winner" `Quick
         test_postgres_native_expired_lock_concurrent_reacquire;
+      test_case "old owner cannot release reclaimed lock" `Quick
+        test_postgres_native_old_owner_cannot_release_reclaimed_lock;
     ];
   ]

@@ -357,6 +357,40 @@ let test_postgres_expired_lock_concurrent_reacquire () =
           Alcotest.(check int) "exactly one owner acquires expired lock" 1
             (bool_to_int acquired_a + bool_to_int acquired_b)
 
+let test_postgres_old_owner_cannot_release_reclaimed_lock () =
+  match Sys.getenv_opt "MASC_POSTGRES_URL" with
+  | None | Some "" -> ()
+  | Some url ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let suffix = unique_suffix () in
+      let config = Backend_eio.{
+        base_path = ".masc";
+        node_id = "test_pg_lock_node";
+        cluster_name = "test_pg_lock_release_" ^ suffix;
+      } in
+      match Backend_eio.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
+      | Error _ -> Alcotest.fail "Postgres create failed"
+      | Ok backend ->
+          let key = "reclaimed-lock-" ^ suffix in
+          (match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-a" ~ttl_seconds:0 with
+           | Ok true -> ()
+           | Ok false -> Alcotest.fail "seed expired lock acquire should succeed"
+           | Error _ -> Alcotest.fail "seed expired lock acquire failed");
+          Eio.Time.sleep env#clock 0.01;
+          (match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-b" ~ttl_seconds:60 with
+           | Ok true -> ()
+           | Ok false -> Alcotest.fail "reclaimed lock acquire should succeed"
+           | Error _ -> Alcotest.fail "reclaimed lock acquire failed");
+          (match Backend_eio.Postgres.release_lock backend ~key ~owner:"owner-a" with
+           | Ok true -> ()
+           | Ok false -> Alcotest.fail "release_lock should not fail"
+           | Error _ -> Alcotest.fail "old owner release failed");
+          match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-c" ~ttl_seconds:60 with
+          | Ok false -> ()
+          | Ok true -> Alcotest.fail "old owner must not release reclaimed lock"
+          | Error _ -> Alcotest.fail "reclaimed lock validation failed"
+
 let () =
   Alcotest.run "Backend_eio" [
     "basic", [
@@ -390,5 +424,7 @@ let () =
         test_postgres_lock_blocks_other_owner;
       Alcotest.test_case "expired lock concurrent reacquire is single-winner" `Quick
         test_postgres_expired_lock_concurrent_reacquire;
+      Alcotest.test_case "old owner cannot release reclaimed lock" `Quick
+        test_postgres_old_owner_cannot_release_reclaimed_lock;
     ];
   ]

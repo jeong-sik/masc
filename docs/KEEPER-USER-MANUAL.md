@@ -616,6 +616,45 @@ Keeper가 응답하지 않을 때, `diagnostic.quiet_reason`을 확인:
 
 ---
 
+## 8. 설정과 동기화
+
+### 8.1 설정 소스
+
+Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는 `docs/spec/14-configuration.md` Section 12 참조.
+
+| 소스 | 경로 | 역할 |
+|------|------|------|
+| Persona template | `config/personas/<name>/profile.json` | Blueprint (goal, instructions, soul_profile 등) |
+| TOML declaration | `config/keepers/<name>.toml` | Persona 없이 선언적 정의 |
+| Persistent meta | `.masc/keeper_<name>.json` | 런타임 상태 (turn 카운트, context ratio 등) |
+
+Resident-keeper (`.masc/resident-keepers/<name>.json`)는 등록 메타데이터(persona_name, desired, timestamps)만 저장한다.
+
+### 8.2 Template 변경 반영
+
+Persona template을 수정해도 실행 중인 keeper에 자동 반영되지 않는다. 반영 방법:
+
+```text
+masc_keeper_down(name: "sangsu")
+masc_keeper_up(name: "sangsu")
+```
+
+`keeper_down`이 persistent meta를 제거하고, `keeper_up`이 template에서 fresh로 재생성한다.
+
+### 8.3 base-path 주의사항
+
+`--base-path` CLI 인자가 `.masc/` 디렉토리 위치를 결정한다 (기본: repo root).
+
+worktree에서 서버를 실행하면 `.masc/`가 worktree 내부를 가리키므로 **main repo의 keeper 상태에 접근할 수 없다**. keeper가 보이지 않을 때 가장 흔한 원인이다.
+
+해결: repo root에서 서버를 실행하거나, `--base-path`를 main repo root로 명시 지정.
+
+### 8.4 모델 실행
+
+모델 선택은 `config/cascade.json`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고 `Oas_model_resolve`가 실행 모델을 결정한다.
+
+---
+
 ## 부록: 관련 문서
 
 | 문서 | 용도 |

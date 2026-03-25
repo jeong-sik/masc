@@ -98,6 +98,21 @@ Failed tool calls include recovery hints automatically. Common patterns:
 | "no unclaimed tasks" | `masc_add_task(title="...")` |
 | "task not found" | `masc_status` to see available tasks |
 
+## 7. Keeper Bootstrap
+
+Keeper를 시작하려면:
+
+```text
+masc_keeper_up(name: "sangsu")
+```
+
+전제조건:
+- `config/personas/<name>/profile.json`이 존재해야 한다 (또는 `config/keepers/<name>.toml`)
+- 서버가 **repo root**에서 실행되어야 `.masc/` 디렉토리에 접근 가능. worktree에서 실행하면 keeper 상태를 찾지 못한다. 필요 시 `--base-path`를 repo root로 지정.
+- `MASC_PERSONAS_DIR` 환경변수로 커스텀 persona 경로 지정 가능.
+
+상세: `docs/KEEPER-USER-MANUAL.md`
+
 ## References
 
 - `docs/COMMAND-PLANE-RUNBOOK.md` — CPv2 benchmark/swarm path

@@ -16,9 +16,13 @@ import {
 } from './journal-entry'
 import type { OasKeeperSnapshot } from './types/oas'
 
+import {
+  RECONNECT_BASE_MS,
+  RECONNECT_MAX_MS,
+  MAX_JOURNAL_ENTRIES,
+} from './config/constants'
+
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
-const RECONNECT_BASE_MS = 1000
-const RECONNECT_MAX_MS = 15000
 
 // --- Signals ---
 
@@ -47,7 +51,7 @@ function getOrCreateSessionId(): string {
 
 // --- Journal ---
 
-const MAX_JOURNAL = 200
+const MAX_JOURNAL = MAX_JOURNAL_ENTRIES
 
 function addJournalEntry(
   agent: string,

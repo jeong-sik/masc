@@ -114,8 +114,13 @@ export const goalsLoading = signal(false)
 
 import type { OasAgentEvent, OasKeeperSnapshot } from './types/oas'
 
-const OAS_AGENT_EVENT_BUFFER = 50
-const OAS_KEEPER_SNAPSHOT_MAX = 20
+import {
+  OAS_AGENT_EVENT_BUFFER,
+  OAS_KEEPER_SNAPSHOT_MAX,
+  HEARTBEAT_STALE_MS,
+  SHELL_TTL_MS,
+  EXECUTION_TTL_MS,
+} from './config/constants'
 
 export const oasAgentEvents = signal<OasAgentEvent[]>([])
 export const oasKeeperSnapshots = signal<Map<string, OasKeeperSnapshot>>(new Map())
@@ -269,8 +274,7 @@ export const keeperLifecycles: ReadonlySignal<Map<string, KeeperLifecycleState>>
   return map
 })
 
-// Heartbeat staleness threshold (120 seconds)
-const HEARTBEAT_STALE_MS = 120_000
+// Heartbeat staleness threshold — value from config/constants.ts
 
 export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
   const now = Date.now()
@@ -291,8 +295,7 @@ interface RefreshOptions {
   force?: boolean
 }
 
-const SHELL_TTL_MS = 5_000
-const EXECUTION_TTL_MS = 30_000
+// TTL values from config/constants.ts
 
 let inflightDashboardRefresh: Promise<void> | null = null
 let inflightShellRefresh: Promise<void> | null = null

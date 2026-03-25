@@ -14,7 +14,7 @@ let handle_persona_list _ctx args : tool_result =
     if detailed then
       `List (List.map persona_summary_to_json personas)
     else
-      string_list_to_json (List.map (fun persona -> persona.persona_name) personas)
+      string_list_to_json (List.map (fun (persona : Keeper_types_profile.persona_summary) -> persona.persona_name) personas)
   in
   let json =
     `Assoc

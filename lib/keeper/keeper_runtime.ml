@@ -30,9 +30,14 @@ let maybe_promote_live_persistent_keeper config name =
 let ensure_resident_meta config (spec : resident_keeper_spec) =
   match read_meta config spec.persistent_name with
   | Ok (Some meta) -> Ok meta
-  | Ok None -> (
-      match meta_of_json spec.seed_meta with
-      | Ok meta ->
+  | Ok None ->
+    (* No persistent meta on disk. Try legacy seed_meta for backward compat,
+       otherwise require manual keeper_up (which loads fresh from template). *)
+    (match spec.seed_meta with
+     | `Assoc (_ :: _) ->
+       (* Legacy resident-keeper with full seed_meta snapshot *)
+       (match meta_of_json spec.seed_meta with
+        | Ok meta ->
           let meta =
             { meta with
               name = spec.persistent_name;
@@ -41,9 +46,17 @@ let ensure_resident_meta config (spec : resident_keeper_spec) =
             }
           in
           (match write_meta config meta with
-          | Ok () -> Ok meta
-          | Error msg -> Error msg)
-      | Error msg -> Error msg)
+           | Ok () -> Ok meta
+           | Error msg -> Error msg)
+        | Error msg -> Error msg)
+     | _ ->
+       (* Thin format: persona_name only. Cannot auto-create meta;
+          user must run keeper_up to initialize from template. *)
+       Log.Keeper.warn
+         "ensure_resident_meta: no persistent meta for %s (persona=%s) — run keeper_up to initialize"
+         spec.persistent_name spec.persona_name;
+       Error (Printf.sprintf "no persistent meta for %s — run keeper_up to initialize"
+                spec.persistent_name))
   | Error msg -> Error msg
 
 type keeper_bootstrap_stats = {

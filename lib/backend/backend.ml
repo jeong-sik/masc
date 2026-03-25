@@ -101,6 +101,20 @@ module FileSystem = struct
         let path_part = String.map (function ':' -> '/' | c -> c) safe_key in
         Ok Eio.Path.(t.fs / path_part)
 
+  (** Ensure the parent directory of [path] exists.
+      Logs a warning on failure instead of raising — the subsequent
+      file operation will surface the real error. *)
+  let ensure_parent_dir path =
+    match Eio.Path.split path with
+    | Some (parent, _) ->
+        (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
+         with Eio.Cancel.Cancelled _ as e -> raise e
+            | e ->
+                Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
+                  (Printf.sprintf "[WARN] mkdirs failed: %s"
+                     (Printexc.to_string e)))
+    | None -> ()
+
   let run_blocking_file_op f =
     try Eio_unix.run_in_systhread f
     with Stdlib.Effect.Unhandled _ -> f ()
@@ -155,16 +169,7 @@ module FileSystem = struct
       | Error e -> Error e
       | Ok path ->
           try
-            (* Ensure parent directory exists *)
-            (match Eio.Path.split path with
-             | Some (parent, _) ->
-                 (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                  with Eio.Cancel.Cancelled _ as e -> raise e
-                   | e ->
-                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                         (Printf.sprintf "[WARN] mkdirs failed: %s"
-                            (Printexc.to_string e)))
-             | None -> ());
+            ensure_parent_dir path;
             (* Compact Protocol v4: Compress before saving (if beneficial) *)
             let compressed = Compression.compress_with_header value in
             (* Write file *)
@@ -275,16 +280,7 @@ module FileSystem = struct
             match Eio.Path.kind ~follow:true path with
             | `Regular_file -> Error (AlreadyExists key)
             | _ ->
-                (* Ensure parent directory *)
-                (match Eio.Path.split path with
-                 | Some (parent, _) ->
-                     (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                      with Eio.Cancel.Cancelled _ as e -> raise e
-                   | e ->
-                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                         (Printf.sprintf "[WARN] mkdirs failed: %s"
-                            (Printexc.to_string e)))
-                 | None -> ());
+                ensure_parent_dir path;
                 (* Write with exclusive create *)
                 Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
                 Ok true
@@ -294,10 +290,7 @@ module FileSystem = struct
               (match key_to_path t key with
                | Error e -> Error e
                | Ok path ->
-                   (match Eio.Path.split path with
-                    | Some (parent, _) ->
-                        Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                    | None -> ());
+                   ensure_parent_dir path;
                    Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
                    Ok true)
           | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
@@ -422,17 +415,7 @@ module FileSystem = struct
     | Error e -> Error e
     | Ok path ->
         try
-          (* Ensure parent directory exists *)
-          (match Eio.Path.split path with
-           | Some (parent, _) ->
-               (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                with Eio.Cancel.Cancelled _ as e -> raise e
-                   | e ->
-                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                         (Printf.sprintf "[WARN] mkdirs failed: %s"
-                            (Printexc.to_string e)))
-           | None -> ());
-
+          ensure_parent_dir path;
           let path_str = Eio.Path.native_exn path in
           with_locked_rw_fd path_str @@ fun fd ->
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
@@ -494,17 +477,7 @@ module FileSystem = struct
     | Error e -> Error e
     | Ok path ->
         try
-          (* Ensure parent directory exists *)
-          (match Eio.Path.split path with
-           | Some (parent, _) ->
-               (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                with Eio.Cancel.Cancelled _ as e -> raise e
-                   | e ->
-                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                         (Printf.sprintf "[WARN] mkdirs failed: %s"
-                            (Printexc.to_string e)))
-           | None -> ());
-
+          ensure_parent_dir path;
           let path_str = Eio.Path.native_exn path in
           with_locked_rw_fd path_str @@ fun fd ->
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in

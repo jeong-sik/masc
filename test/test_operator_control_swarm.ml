@@ -1,6 +1,17 @@
 open Masc_mcp
 open Test_operator_control_support
 
+let expect_unsupported_action ~action_type result =
+  let expected = Printf.sprintf "unsupported action_type: %s" action_type in
+  match result with
+  | Ok body ->
+      Alcotest.failf "expected error %S, got success: %s" expected
+        (Yojson.Safe.to_string body)
+  | Error err ->
+      if String.equal err expected then ()
+      else
+        Alcotest.failf "expected error %S, got error %S" expected err
+
 let test_confirm_rejects_expired_token () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -54,21 +65,16 @@ let test_swarm_run_continue_removed_from_operator_actions () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "dashboard"));
       let ctx = operator_ctx env sw config "dashboard" in
-      match
-        Operator_control.action_json ctx
-          (`Assoc
-            [
-              ("actor", `String "dashboard");
-              ("action_type", `String "swarm_run_continue");
-              ("target_type", `String "swarm_run");
-              ("target_id", `String "operator-swarm-continue");
-              ("payload", `Assoc []);
-            ])
-      with
-      | Ok _ -> Alcotest.fail "swarm_run_continue should be removed from operator actions"
-      | Error err ->
-          Alcotest.(check string) "unsupported action"
-            "unsupported action_type: swarm_run_continue" err)
+      Operator_control.action_json ctx
+        (`Assoc
+          [
+            ("actor", `String "dashboard");
+            ("action_type", `String "swarm_run_continue");
+            ("target_type", `String "swarm_run");
+            ("target_id", `String "operator-swarm-continue");
+            ("payload", `Assoc []);
+          ])
+      |> expect_unsupported_action ~action_type:"swarm_run_continue")
 
 let test_swarm_run_abandon_removed_from_operator_actions () =
   Eio_main.run @@ fun env ->
@@ -80,21 +86,16 @@ let test_swarm_run_abandon_removed_from_operator_actions () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "dashboard"));
       let ctx = operator_ctx env sw config "dashboard" in
-      match
-        Operator_control.action_json ctx
-          (`Assoc
-            [
-              ("actor", `String "dashboard");
-              ("action_type", `String "swarm_run_abandon");
-              ("target_type", `String "swarm_run");
-              ("target_id", `String "operator-swarm-abandon");
-              ("payload", `Assoc [ ("reason", `String "operator chose to move on") ]);
-            ])
-      with
-      | Ok _ -> Alcotest.fail "swarm_run_abandon should be removed from operator actions"
-      | Error err ->
-          Alcotest.(check string) "unsupported action"
-            "unsupported action_type: swarm_run_abandon" err)
+      Operator_control.action_json ctx
+        (`Assoc
+          [
+            ("actor", `String "dashboard");
+            ("action_type", `String "swarm_run_abandon");
+            ("target_type", `String "swarm_run");
+            ("target_id", `String "operator-swarm-abandon");
+            ("payload", `Assoc [ ("reason", `String "operator chose to move on") ]);
+          ])
+      |> expect_unsupported_action ~action_type:"swarm_run_abandon")
 
 let test_swarm_run_rerun_removed_from_operator_actions () =
   Eio_main.run @@ fun env ->
@@ -106,18 +107,13 @@ let test_swarm_run_rerun_removed_from_operator_actions () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "dashboard"));
       let ctx = operator_ctx env sw config "dashboard" in
-      match
-        Operator_control.action_json ctx
-          (`Assoc
-            [
-              ("actor", `String "dashboard");
-              ("action_type", `String "swarm_run_rerun");
-              ("target_type", `String "swarm_run");
-              ("target_id", `String "operator-swarm-rerun");
-              ("payload", `Assoc []);
-            ])
-      with
-      | Ok _ -> Alcotest.fail "swarm_run_rerun should be removed from operator actions"
-      | Error err ->
-          Alcotest.(check string) "unsupported action"
-            "unsupported action_type: swarm_run_rerun" err)
+      Operator_control.action_json ctx
+        (`Assoc
+          [
+            ("actor", `String "dashboard");
+            ("action_type", `String "swarm_run_rerun");
+            ("target_type", `String "swarm_run");
+            ("target_id", `String "operator-swarm-rerun");
+            ("payload", `Assoc []);
+          ])
+      |> expect_unsupported_action ~action_type:"swarm_run_rerun")

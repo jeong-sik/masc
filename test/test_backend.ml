@@ -16,6 +16,10 @@ let test_config () = {
 let unique_suffix () =
   Printf.sprintf "%d-%.0f" (Unix.getpid ()) (Unix.gettimeofday () *. 1_000_000.)
 
+let bool_to_int = function
+  | true -> 1
+  | false -> 0
+
 (* Test: generate unique node IDs *)
 let test_node_id_generation () =
   let id1 = Backend.generate_node_id () in
@@ -190,6 +194,68 @@ let test_postgres_native_expired_lock_reacquire () =
           | Ok true -> ()
           | Ok false -> fail "expired postgres-native lock should be reacquired"
           | Error e -> fail (Backend.show_error e)
+
+let test_postgres_native_lock_blocks_other_owner () =
+  match Sys.getenv_opt "MASC_POSTGRES_URL" with
+  | None | Some "" -> ()
+  | Some url ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let suffix = unique_suffix () in
+      let cfg = {
+        Backend.default_config with
+        backend_type = Backend.PostgresNative;
+        cluster_name = "test-pg-native-block-" ^ suffix;
+        postgres_url = Some url;
+      } in
+      match Backend.PostgresNative.create_eio ~sw ~env:(env :> Caqti_eio.stdenv) cfg with
+      | Error e -> fail (Backend.show_error e)
+      | Ok backend ->
+          let key = "held-lock-" ^ suffix in
+          (match Backend.PostgresNative.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner-a" with
+           | Ok true -> ()
+           | Ok false -> fail "initial lock acquire should succeed"
+           | Error e -> fail (Backend.show_error e));
+          match Backend.PostgresNative.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"owner-b" with
+          | Ok false -> ()
+          | Ok true -> fail "non-expired postgres-native lock should block other owners"
+          | Error e -> fail (Backend.show_error e)
+
+let test_postgres_native_expired_lock_concurrent_reacquire () =
+  match Sys.getenv_opt "MASC_POSTGRES_URL" with
+  | None | Some "" -> ()
+  | Some url ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let suffix = unique_suffix () in
+      let cfg = {
+        Backend.default_config with
+        backend_type = Backend.PostgresNative;
+        cluster_name = "test-pg-native-race-" ^ suffix;
+        postgres_url = Some url;
+      } in
+      match Backend.PostgresNative.create_eio ~sw ~env:(env :> Caqti_eio.stdenv) cfg with
+      | Error e -> fail (Backend.show_error e)
+      | Ok backend ->
+          let key = "expired-race-" ^ suffix in
+          (match Backend.PostgresNative.acquire_lock backend ~key ~ttl_seconds:0 ~owner:"seed-owner" with
+           | Ok true -> ()
+           | Ok false -> fail "seed expired lock acquire should succeed"
+           | Error e -> fail (Backend.show_error e));
+          Eio.Time.sleep env#clock 0.01;
+          let attempt owner () =
+            match Backend.PostgresNative.acquire_lock backend ~key ~ttl_seconds:60 ~owner with
+            | Ok acquired -> acquired
+            | Error e -> fail (Backend.show_error e)
+          in
+          let promise_a, resolver_a = Eio.Promise.create () in
+          let promise_b, resolver_b = Eio.Promise.create () in
+          Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolver_a (attempt "owner-a" ()));
+          Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolver_b (attempt "owner-b" ()));
+          let acquired_a = Eio.Promise.await promise_a in
+          let acquired_b = Eio.Promise.await promise_b in
+          check int "exactly one owner acquires expired lock" 1
+            (bool_to_int acquired_a + bool_to_int acquired_b)
 
 (* Test: Memory backend - list and get_all *)
 let test_memory_backend_list () =
@@ -473,5 +539,9 @@ let () =
     "postgres", [
       test_case "expired lock can be reacquired" `Quick
         test_postgres_native_expired_lock_reacquire;
+      test_case "non-expired lock blocks other owner" `Quick
+        test_postgres_native_lock_blocks_other_owner;
+      test_case "expired lock concurrent reacquire is single-winner" `Quick
+        test_postgres_native_expired_lock_concurrent_reacquire;
     ];
   ]

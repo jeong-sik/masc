@@ -20,6 +20,10 @@ let make_test_dir () =
 let unique_suffix () =
   Printf.sprintf "%d-%.0f" (Unix.getpid ()) (Unix.gettimeofday () *. 1_000_000.)
 
+let bool_to_int = function
+  | true -> 1
+  | false -> 0
+
 (** Run test with Eio environment *)
 let with_eio_env f =
   Eio_main.run @@ fun env ->
@@ -293,6 +297,66 @@ let test_postgres_expired_lock_reacquire () =
           | Ok false -> Alcotest.fail "expired postgres lock should be reacquired"
           | Error _ -> Alcotest.fail "expired postgres lock reacquire failed"
 
+let test_postgres_lock_blocks_other_owner () =
+  match Sys.getenv_opt "MASC_POSTGRES_URL" with
+  | None | Some "" -> ()
+  | Some url ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let suffix = unique_suffix () in
+      let config = Backend_eio.{
+        base_path = ".masc";
+        node_id = "test_pg_lock_node";
+        cluster_name = "test_pg_lock_block_" ^ suffix;
+      } in
+      match Backend_eio.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
+      | Error _ -> Alcotest.fail "Postgres create failed"
+      | Ok backend ->
+          let key = "held-lock-" ^ suffix in
+          (match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-a" ~ttl_seconds:60 with
+           | Ok true -> ()
+           | Ok false -> Alcotest.fail "initial lock acquire should succeed"
+           | Error _ -> Alcotest.fail "initial lock acquire failed");
+          match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-b" ~ttl_seconds:60 with
+          | Ok false -> ()
+          | Ok true -> Alcotest.fail "non-expired postgres lock should block other owners"
+          | Error _ -> Alcotest.fail "non-expired postgres lock check failed"
+
+let test_postgres_expired_lock_concurrent_reacquire () =
+  match Sys.getenv_opt "MASC_POSTGRES_URL" with
+  | None | Some "" -> ()
+  | Some url ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let suffix = unique_suffix () in
+      let config = Backend_eio.{
+        base_path = ".masc";
+        node_id = "test_pg_lock_node";
+        cluster_name = "test_pg_lock_race_" ^ suffix;
+      } in
+      match Backend_eio.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
+      | Error _ -> Alcotest.fail "Postgres create failed"
+      | Ok backend ->
+          let key = "expired-race-" ^ suffix in
+          (match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"seed-owner" ~ttl_seconds:0 with
+           | Ok true -> ()
+           | Ok false -> Alcotest.fail "seed expired lock acquire should succeed"
+           | Error _ -> Alcotest.fail "seed expired lock acquire failed");
+          Eio.Time.sleep env#clock 0.01;
+          let attempt owner () =
+            match Backend_eio.Postgres.acquire_lock backend ~key ~owner ~ttl_seconds:60 with
+            | Ok acquired -> acquired
+            | Error _ -> Alcotest.fail "concurrent expired lock acquire failed"
+          in
+          let promise_a, resolver_a = Eio.Promise.create () in
+          let promise_b, resolver_b = Eio.Promise.create () in
+          Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolver_a (attempt "owner-a" ()));
+          Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolver_b (attempt "owner-b" ()));
+          let acquired_a = Eio.Promise.await promise_a in
+          let acquired_b = Eio.Promise.await promise_b in
+          Alcotest.(check int) "exactly one owner acquires expired lock" 1
+            (bool_to_int acquired_a + bool_to_int acquired_b)
+
 let () =
   Alcotest.run "Backend_eio" [
     "basic", [
@@ -322,5 +386,9 @@ let () =
       Alcotest.test_case "postgres backend" `Quick test_postgres_backend;
       Alcotest.test_case "expired lock can be reacquired" `Quick
         test_postgres_expired_lock_reacquire;
+      Alcotest.test_case "non-expired lock blocks other owner" `Quick
+        test_postgres_lock_blocks_other_owner;
+      Alcotest.test_case "expired lock concurrent reacquire is single-winner" `Quick
+        test_postgres_expired_lock_concurrent_reacquire;
     ];
   ]

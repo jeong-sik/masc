@@ -17,7 +17,7 @@
 type config = {
   base_path: string;
   lock_expiry_minutes: int;
-  backend: Backend_eio.FileSystem.t;
+  backend: Backend.FileSystem.t;
   fs: Eio.Fs.dir_ty Eio.Path.t;
 }
 
@@ -58,12 +58,15 @@ let now_iso () =
 
 (** Create Eio-native room configuration *)
 let create_config ~fs base_path =
-  let backend_config = Backend_eio.{
+  let backend_config = Backend.{
+    backend_type = FileSystem;
     base_path = Filename.concat base_path ".masc";
+    postgres_url = None;
     node_id = Printf.sprintf "node_%d" (Unix.getpid ());
     cluster_name = "default";
+    pubsub_max_messages = Backend.pubsub_max_messages_from_env ();
   } in
-  let backend = Backend_eio.FileSystem.create ~fs backend_config in
+  let backend = Backend.FileSystem.create ~fs backend_config in
   {
     base_path;
     lock_expiry_minutes = 30;
@@ -73,12 +76,15 @@ let create_config ~fs base_path =
 
 (** Create test configuration (isolated) *)
 let test_config ~fs base_path =
-  let backend_config = Backend_eio.{
+  let backend_config = Backend.{
+    backend_type = FileSystem;
     base_path = Filename.concat base_path ".masc";
+    postgres_url = None;
     node_id = Printf.sprintf "test_node_%04x" (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF);
     cluster_name = "test";
+    pubsub_max_messages = 1000;
   } in
-  let backend = Backend_eio.FileSystem.create ~fs backend_config in
+  let backend = Backend.FileSystem.create ~fs backend_config in
   {
     base_path;
     lock_expiry_minutes = 5;  (* Shorter for tests *)
@@ -148,7 +154,7 @@ let event_seq_key = "counters:event_seq"
     Uses file-based atomic_increment for cross-process safety. *)
 let log_event config ~event_type ~agent ~payload =
   (* Atomic increment via file lock - safe for multiple processes *)
-  let seq = match Backend_eio.FileSystem.atomic_increment config.backend event_seq_key with
+  let seq = match Backend.FileSystem.atomic_increment config.backend event_seq_key with
     | Ok n -> n - 1  (* atomic_increment returns NEW value, events are 0-indexed *)
     | Error _ -> int_of_float (Time_compat.now () *. 1000.) mod 100000
   in
@@ -160,30 +166,31 @@ let log_event config ~event_type ~agent ~payload =
     timestamp = Time_compat.now ();
   } in
   let json_str = Yojson.Safe.to_string (event_to_json event) in
-  (match Backend_eio.FileSystem.set config.backend (event_key seq) json_str with
+  (match Backend.FileSystem.set config.backend (event_key seq) json_str with
    | Ok () -> ()
    | Error e ->
        let msg = match e with
-         | Backend_eio.IOError m -> m | Backend_eio.NotFound k -> "not found: " ^ k
-         | Backend_eio.AlreadyExists k -> "already exists: " ^ k | Backend_eio.InvalidKey k -> "invalid key: " ^ k in
+         | Backend.IOError m -> m | Backend.NotFound k -> "not found: " ^ k
+         | Backend.AlreadyExists k -> "already exists: " ^ k | Backend.InvalidKey k -> "invalid key: " ^ k
+         | Backend.ConnectionFailed m -> "connection failed: " ^ m | Backend.BackendNotSupported m -> "not supported: " ^ m in
        Log.Room.warn "append_event set failed for seq %d: %s" seq msg);
   event
 
 (** Get event by sequence *)
 let get_event config ~seq =
-  match Backend_eio.FileSystem.get config.backend (event_key seq) with
+  match Backend.FileSystem.get config.backend (event_key seq) with
   | Ok json_str -> Some (Yojson.Safe.from_string json_str)
   | Error _ -> None
 
 (** Get recent events
     Uses atomic_get for cross-process safe counter read. *)
 let get_recent_events config ~limit =
-  let current_seq = match Backend_eio.FileSystem.atomic_get config.backend event_seq_key with
+  let current_seq = match Backend.FileSystem.atomic_get config.backend event_seq_key with
     | Ok n -> n
-    | Error (Backend_eio.NotFound _) -> 0
+    | Error (Backend.NotFound _) -> 0
     | Error e ->
         Log.Room.debug "get_recent_events: event seq read failed: %s"
-          (match e with Backend_eio.IOError m -> m
+          (match e with Backend.IOError m -> m
            | _ -> "unexpected backend error");
         0
   in
@@ -250,26 +257,28 @@ let room_state_of_json json =
 
 (** Read room state *)
 let read_state config =
-  match Backend_eio.FileSystem.get config.backend state_key with
+  match Backend.FileSystem.get config.backend state_key with
   | Ok json_str ->
       (try
         let json = Yojson.Safe.from_string json_str in
         room_state_of_json json
       with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
-  | Error (Backend_eio.NotFound _) ->
+  | Error (Backend.NotFound _) ->
       Ok (default_room_state ())
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
-        | Backend_eio.NotFound k -> "Not found: " ^ k
-        | Backend_eio.AlreadyExists k -> "Already exists: " ^ k
-        | Backend_eio.InvalidKey k -> "Invalid key: " ^ k)
+        | Backend.IOError msg -> msg
+        | Backend.NotFound k -> "Not found: " ^ k
+        | Backend.AlreadyExists k -> "Already exists: " ^ k
+        | Backend.InvalidKey k -> "Invalid key: " ^ k
+        | Backend.ConnectionFailed m -> "Connection failed: " ^ m
+        | Backend.BackendNotSupported m -> "Not supported: " ^ m)
 
 (** Write room state *)
 let write_state config state =
   let state = { state with last_updated = Time_compat.now () } in
   let json_str = Yojson.Safe.to_string (room_state_to_json state) in
-  Backend_eio.FileSystem.set config.backend state_key json_str
+  Backend.FileSystem.set config.backend state_key json_str
 
 (** Atomically update room state with a transform function.
     This is safe for multiple processes accessing the same state file.
@@ -295,7 +304,7 @@ let atomic_update_state config ~f =
     let new_state = { new_state with last_updated = Time_compat.now () } in
     Yojson.Safe.to_string (room_state_to_json new_state)
   in
-  match Backend_eio.FileSystem.atomic_update config.backend state_key ~f:transform with
+  match Backend.FileSystem.atomic_update config.backend state_key ~f:transform with
   | Ok json_str ->
       (try
         let json = Yojson.Safe.from_string json_str in
@@ -303,10 +312,12 @@ let atomic_update_state config ~f =
       with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
-        | Backend_eio.NotFound k -> "Not found: " ^ k
-        | Backend_eio.AlreadyExists k -> "Already exists: " ^ k
-        | Backend_eio.InvalidKey k -> "Invalid key: " ^ k)
+        | Backend.IOError msg -> msg
+        | Backend.NotFound k -> "Not found: " ^ k
+        | Backend.AlreadyExists k -> "Already exists: " ^ k
+        | Backend.InvalidKey k -> "Invalid key: " ^ k
+        | Backend.ConnectionFailed m -> "Connection failed: " ^ m
+        | Backend.BackendNotSupported m -> "Not supported: " ^ m)
 
 (** {1 Agent Operations} *)
 
@@ -339,7 +350,7 @@ let agent_state_of_json json =
 *)
 let register_agent config ~name ?(capabilities=[]) () =
   let already_active =
-    match Backend_eio.FileSystem.get config.backend (agent_key name) with
+    match Backend.FileSystem.get config.backend (agent_key name) with
     | Ok _ -> true
     | Error _ -> false
   in
@@ -350,7 +361,7 @@ let register_agent config ~name ?(capabilities=[]) () =
     status = "active";
   } in
   let json_str = Yojson.Safe.to_string (agent_state_to_json agent) in
-  match Backend_eio.FileSystem.set config.backend (agent_key name) json_str with
+  match Backend.FileSystem.set config.backend (agent_key name) json_str with
   | Ok () ->
       (* Atomically update room state to include this agent *)
       let _ = atomic_update_state config ~f:(fun state ->
@@ -378,27 +389,27 @@ let register_agent config ~name ?(capabilities=[]) () =
       Ok agent
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Failed to register agent")
 
 (** Get agent state *)
 let get_agent config ~name =
-  match Backend_eio.FileSystem.get config.backend (agent_key name) with
+  match Backend.FileSystem.get config.backend (agent_key name) with
   | Ok json_str ->
       (try
         let json = Yojson.Safe.from_string json_str in
         agent_state_of_json json
       with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
-  | Error (Backend_eio.NotFound _) ->
+  | Error (Backend.NotFound _) ->
       Error "Agent not found"
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Failed to get agent")
 
 (** Remove agent *)
 let remove_agent config ~name =
-  match Backend_eio.FileSystem.delete config.backend (agent_key name) with
+  match Backend.FileSystem.delete config.backend (agent_key name) with
   | Ok () ->
       (* Atomically update room state to remove this agent *)
       let _ = atomic_update_state config ~f:(fun state ->
@@ -413,11 +424,11 @@ let remove_agent config ~name =
         ~payload:`Null in
 
       Ok ()
-  | Error (Backend_eio.NotFound _) ->
+  | Error (Backend.NotFound _) ->
       Ok ()  (* Already removed *)
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Failed to remove agent")
 
 (** {1 Lock Operations} *)
@@ -467,7 +478,7 @@ let lock_info_of_json json =
 (** Acquire lock on a resource *)
 let acquire_lock config ~resource ~owner =
   let ttl_seconds = config.lock_expiry_minutes * 60 in
-  match Backend_eio.FileSystem.acquire_lock config.backend
+  match Backend.FileSystem.acquire_lock config.backend
           ~key:resource ~owner ~ttl_seconds with
   | Ok true ->
       let lock = {
@@ -481,29 +492,29 @@ let acquire_lock config ~resource ~owner =
       Ok None  (* Lock held by someone else *)
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Failed to acquire lock")
 
 (** Release lock *)
 let release_lock config ~resource ~owner =
-  match Backend_eio.FileSystem.release_lock config.backend ~key:resource ~owner with
+  match Backend.FileSystem.release_lock config.backend ~key:resource ~owner with
   | Ok true -> Ok ()
   | Ok false -> Error "Not lock owner"
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Failed to release lock")
 
 (** Extend lock TTL *)
 let extend_lock config ~resource ~owner =
   let ttl_seconds = config.lock_expiry_minutes * 60 in
-  match Backend_eio.FileSystem.extend_lock config.backend
+  match Backend.FileSystem.extend_lock config.backend
           ~key:resource ~owner ~ttl_seconds with
   | Ok true -> Ok ()
   | Ok false -> Error "Not lock owner or lock expired"
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Failed to extend lock")
 
 (** {1 Message Operations} *)
@@ -559,7 +570,7 @@ let on_broadcast_mention : (string option -> unit) ref =
 
 let broadcast config ~from_agent ~content =
   (* Atomic increment via file lock - safe for multiple processes *)
-  let seq = match Backend_eio.FileSystem.atomic_increment config.backend message_seq_key with
+  let seq = match Backend.FileSystem.atomic_increment config.backend message_seq_key with
     | Ok n -> n
     | Error _ ->
         (* Fallback: use timestamp-based unique seq (less reliable but won't fail) *)
@@ -573,7 +584,7 @@ let broadcast config ~from_agent ~content =
     timestamp = Time_compat.now ();
   } in
   let json_str = Yojson.Safe.to_string (message_to_json msg) in
-  match Backend_eio.FileSystem.set config.backend (message_key seq) json_str with
+  match Backend.FileSystem.set config.backend (message_key seq) json_str with
   | Ok () ->
       (* Atomically update state's message_seq for consistency *)
       let _ = atomic_update_state config ~f:(fun state ->
@@ -598,22 +609,22 @@ let broadcast config ~from_agent ~content =
       Ok msg
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Failed to broadcast message")
 
 (** Get message by sequence number *)
 let get_message config ~seq =
-  match Backend_eio.FileSystem.get config.backend (message_key seq) with
+  match Backend.FileSystem.get config.backend (message_key seq) with
   | Ok json_str ->
       (try
         let json = Yojson.Safe.from_string json_str in
         message_of_json json
       with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
-  | Error (Backend_eio.NotFound _) ->
+  | Error (Backend.NotFound _) ->
       Error "Message not found"
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Failed to get message")
 
 (** {1 Task Operations} *)
@@ -689,18 +700,18 @@ let create_task config ~description ?(priority=1) () =
     priority;
   } in
   let json_str = Yojson.Safe.to_string (task_to_json task) in
-  match Backend_eio.FileSystem.set config.backend (task_key id) json_str with
+  match Backend.FileSystem.set config.backend (task_key id) json_str with
   | Ok () -> Ok task
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Failed to create task")
 
 (** Claim a task (set to in_progress) *)
 let claim_task config ~task_id ~agent =
-  match Backend_eio.FileSystem.get config.backend (task_key task_id) with
-  | Error (Backend_eio.NotFound _) -> Error "Task not found"
-  | Error e -> Error (match e with Backend_eio.IOError msg -> msg | _ -> "Get failed")
+  match Backend.FileSystem.get config.backend (task_key task_id) with
+  | Error (Backend.NotFound _) -> Error "Task not found"
+  | Error e -> Error (match e with Backend.IOError msg -> msg | _ -> "Get failed")
   | Ok json_str ->
       (try
         let json = Yojson.Safe.from_string json_str in
@@ -714,7 +725,7 @@ let claim_task config ~task_id ~agent =
                   updated_at = Time_compat.now ();
                 } in
                 let new_json = Yojson.Safe.to_string (task_to_json updated) in
-                (match Backend_eio.FileSystem.set config.backend (task_key task_id) new_json with
+                (match Backend.FileSystem.set config.backend (task_key task_id) new_json with
                  | Ok () -> Ok updated
                  | Error _ -> Error "Failed to update task")
             | InProgress other when other = agent ->
@@ -729,9 +740,9 @@ let claim_task config ~task_id ~agent =
 
 (** Complete a task *)
 let complete_task config ~task_id ~agent =
-  match Backend_eio.FileSystem.get config.backend (task_key task_id) with
-  | Error (Backend_eio.NotFound _) -> Error "Task not found"
-  | Error e -> Error (match e with Backend_eio.IOError msg -> msg | _ -> "Get failed")
+  match Backend.FileSystem.get config.backend (task_key task_id) with
+  | Error (Backend.NotFound _) -> Error "Task not found"
+  | Error e -> Error (match e with Backend.IOError msg -> msg | _ -> "Get failed")
   | Ok json_str ->
       (try
         let json = Yojson.Safe.from_string json_str in
@@ -745,7 +756,7 @@ let complete_task config ~task_id ~agent =
                   updated_at = Time_compat.now ();
                 } in
                 let new_json = Yojson.Safe.to_string (task_to_json updated) in
-                (match Backend_eio.FileSystem.set config.backend (task_key task_id) new_json with
+                (match Backend.FileSystem.set config.backend (task_key task_id) new_json with
                  | Ok () -> Ok updated
                  | Error _ -> Error "Failed to update task")
             | InProgress _ ->
@@ -760,27 +771,27 @@ let complete_task config ~task_id ~agent =
 
 (** Get task by ID *)
 let get_task config ~task_id =
-  match Backend_eio.FileSystem.get config.backend (task_key task_id) with
+  match Backend.FileSystem.get config.backend (task_key task_id) with
   | Ok json_str ->
       (try
         let json = Yojson.Safe.from_string json_str in
         task_of_json json
       with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
-  | Error (Backend_eio.NotFound _) ->
+  | Error (Backend.NotFound _) ->
       Error "Task not found"
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Failed to get task")
 
 (** {1 Health Check} *)
 
 let health_check config =
-  match Backend_eio.FileSystem.health_check config.backend with
+  match Backend.FileSystem.health_check config.backend with
   | Ok result -> Ok result
   | Error e ->
       Error (match e with
-        | Backend_eio.IOError msg -> msg
+        | Backend.IOError msg -> msg
         | _ -> "Health check failed")
 
 (** {1 Room Status} *)

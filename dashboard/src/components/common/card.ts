@@ -61,14 +61,6 @@ export function SectionCard({
   `
 }
 
-// ── Clickable card (adds hover + cursor) ──
-interface ClickableCardProps {
-  variant?: CardVariant
-  class?: string
-  onClick?: () => void
-  children: ComponentChildren
-}
-
 // ── Legacy Card (backward compat — accepts title prop) ──
 interface CardProps {
   title?: ComponentChildren
@@ -87,18 +79,4 @@ export function Card({ title, class: cx, variant = 'standard', testId, children 
     `
   }
   return html`<${SurfaceCard} variant=${variant} class=${cx} testId=${testId}>${children}<//>`
-}
-
-export function ClickableCard({
-  variant = 'standard',
-  class: cx,
-  onClick,
-  children,
-}: ClickableCardProps) {
-  const cls = [
-    VARIANT_CLASSES[variant],
-    'cursor-pointer transition-all duration-200 hover:border-accent/40 hover:-translate-y-0.5 hover:shadow-md group',
-    cx,
-  ].filter(Boolean).join(' ')
-  return html`<div class=${cls} onClick=${onClick}>${children}</div>`
 }

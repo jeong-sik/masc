@@ -49,6 +49,141 @@ let _transport_health_cache =
           `String "Transport health data is warming up. Refresh in a few seconds." );
       ])
 
+let keepalive_running_of_lifecycle_event = function
+  | "started" | "restarted" | "reconciled" -> Some true
+  | "stopped" | "crashed" | "dead" -> Some false
+  | _ -> None
+
+let patch_keeper_diagnostic ~keepalive_running (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+      let fields =
+        upsert_assoc_field "keepalive_running" (`Bool keepalive_running) fields
+      in
+      let fields =
+        if keepalive_running then
+          let fields =
+            match List.assoc_opt "continuity_state" fields with
+            | Some (`String ("not_running" | "desired_offline" | "disabled")) ->
+                upsert_assoc_field "continuity_state" (`String "recovering") fields
+            | _ -> fields
+          in
+          match List.assoc_opt "quiet_reason" fields with
+          | Some (`String "not_running") ->
+              upsert_assoc_field "quiet_reason" `Null fields
+          | _ -> fields
+        else
+          fields
+          |> upsert_assoc_field "continuity_state" (`String "not_running")
+          |> upsert_assoc_field "quiet_reason" (`String "not_running")
+      in
+      `Assoc fields
+  | other -> other
+
+let patch_keeper_row ~keeper_name ~keepalive_running = function
+  | `Assoc fields as row -> (
+      match Yojson.Safe.Util.member "name" row with
+      | `String name when String.equal name keeper_name ->
+          let diagnostic =
+            match Yojson.Safe.Util.member "diagnostic" row with
+            | `Assoc _ as json ->
+                patch_keeper_diagnostic ~keepalive_running json
+            | `Null ->
+                `Assoc
+                  [
+                    ("keepalive_running", `Bool keepalive_running);
+                    ( "continuity_state",
+                      `String (if keepalive_running then "recovering" else "not_running") );
+                  ]
+            | other -> other
+          in
+          let row_fields : (string * Yojson.Safe.t) list = fields in
+          `Assoc
+            (row_fields
+            |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running)
+            |> upsert_assoc_field "diagnostic" diagnostic)
+      | _ -> row)
+  | other -> other
+
+let patch_keeper_rows ~keeper_name ~keepalive_running rows =
+  List.map (patch_keeper_row ~keeper_name ~keepalive_running) rows
+
+let running_keeper_names (config : Room.config) =
+  Keeper_types.resident_keeper_names config
+  |> List.filter_map (fun name ->
+         match Keeper_types.read_meta config name with
+         | Ok (Some meta)
+           when Keeper_status_bridge.runtime_keepalive_running config meta ->
+             Some name
+         | _ -> None)
+
+let patch_surface_json_for_running_keepers (config : Room.config) = function
+  | `Assoc fields as json ->
+      let running = running_keeper_names config in
+      if running = [] then json
+      else
+        let patch_rows rows =
+          List.fold_left
+            (fun acc keeper_name ->
+              patch_keeper_rows ~keeper_name ~keepalive_running:true acc)
+            rows running
+        in
+        (match List.assoc_opt "keepers" fields with
+         | Some (`List rows) ->
+             `Assoc
+               (upsert_assoc_field "keepers" (`List (patch_rows rows)) fields)
+         | Some (`Assoc keeper_fields) -> (
+             match List.assoc_opt "items" keeper_fields with
+             | Some (`List rows) ->
+                 let keeper_fields =
+                   upsert_assoc_field "items" (`List (patch_rows rows))
+                     keeper_fields
+                 in
+                 `Assoc
+                   (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
+             | _ -> json)
+         | _ -> json)
+  | other -> other
+
+let patch_execution_cache_for_keeper ~keeper_name ~keepalive_running =
+  match _execution_cache.json with
+  | `Assoc fields -> (
+      match List.assoc_opt "keepers" fields with
+      | Some (`List rows) ->
+          _execution_cache.json <-
+            `Assoc
+              (upsert_assoc_field "keepers"
+                 (`List (patch_keeper_rows ~keeper_name ~keepalive_running rows))
+                 fields)
+      | _ -> ())
+  | _ -> ()
+
+let patch_operator_snapshot_cache_for_keeper ~keeper_name ~keepalive_running =
+  match _operator_snapshot_cache.json with
+  | `Assoc fields -> (
+      match List.assoc_opt "keepers" fields with
+      | Some (`Assoc keeper_fields) -> (
+          match List.assoc_opt "items" keeper_fields with
+          | Some (`List rows) ->
+              let keeper_fields =
+                upsert_assoc_field "items"
+                  (`List (patch_keeper_rows ~keeper_name ~keepalive_running rows))
+                  keeper_fields
+              in
+              _operator_snapshot_cache.json <-
+                `Assoc
+                  (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
+          | _ -> ())
+      | _ -> ())
+  | _ -> ()
+
+let patch_keeper_dependent_caches ~keeper_name ~event =
+  match keepalive_running_of_lifecycle_event event with
+  | None -> ()
+  | Some keepalive_running ->
+      patch_execution_cache_for_keeper ~keeper_name ~keepalive_running;
+      patch_operator_snapshot_cache_for_keeper ~keeper_name ~keepalive_running
+
 (** Start the proactive execution refresh loop.  When an Executor_pool
     is available, each refresh runs in a pool domain with a domain-local
     Caqti pool (the main domain's Caqti pool is domain-bound due to
@@ -69,6 +204,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
         (fun ~config ~sw ->
           Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
+          |> patch_surface_json_for_running_keepers config
           |> with_projection_diagnostics ~surface:"execution" ~started_at
                ~extra:
                  [
@@ -124,6 +260,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
         Dashboard_execution.json ?actor ?fixture ~light
           ~config ~sw ~clock
           ~proc_mgr:state.Mcp_server.proc_mgr ()
+        |> patch_surface_json_for_running_keepers config
         |> with_projection_diagnostics ~surface:"execution" ~started_at
              ~extra:
                [

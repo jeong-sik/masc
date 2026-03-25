@@ -597,7 +597,7 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
         end else
           match backend with
           | PostgresNative pg ->
-              let pool = Backend.PostgresNative.get_pool pg in
+              let pool = Backend.Postgres.get_pool pg in
               (match Board_dispatch.init_pg pool with
                | Ok () -> ()
                | Error _ -> Board_dispatch.init_jsonl ())

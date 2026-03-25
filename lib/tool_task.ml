@@ -294,12 +294,12 @@ let handle_transition ctx args =
     if action_lc = "done" && not force then
       match task_opt with
       | Some task ->
-        (match Anti_rationalization.review {
+        (match (Anti_rationalization.review {
            task_title = task.title;
            task_description = task.description;
            completion_notes = notes;
            agent_name = ctx.agent_name;
-         } with
+         }).verdict with
          | Anti_rationalization.Reject reason -> Some reason
          | Anti_rationalization.Approve -> None)
       | None -> None

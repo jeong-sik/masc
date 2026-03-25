@@ -1,4 +1,4 @@
-(** Voice_bridge_eio core — config, helpers, audio path utils, local playback. *)
+(** Voice_bridge core — config, helpers, audio path utils, local playback. *)
 
 (** MASC Voice Bridge - Eio-native Implementation
 

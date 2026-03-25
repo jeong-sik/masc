@@ -6,13 +6,10 @@
  (modules
   pg_infix
   compression_dict
-  backend_core
-  backend
-  backend_eio_types
-  backend_eio_compression
-  backend_eio_pg
-  backend_eio
+  backend_types
+  backend_compression
   backend_pg
+  backend
   task_pg)
  (libraries
   masc_types

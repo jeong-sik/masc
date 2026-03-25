@@ -55,17 +55,3 @@ export function ActionButton({
     <button type="button" class=${cls} onClick=${onClick} disabled=${disabled}>${children}</button>
   `
 }
-
-// ── Button group (grid layout) ──
-interface ButtonGroupProps {
-  cols?: 2 | 3
-  class?: string
-  children: ComponentChildren
-}
-
-export function ButtonGroup({ cols = 2, class: cx, children }: ButtonGroupProps) {
-  const colClass = cols === 2 ? 'grid-cols-2' : 'grid-cols-3'
-  return html`
-    <div class="grid ${colClass} gap-1.5 ${cx ?? ''}">${children}</div>
-  `
-}

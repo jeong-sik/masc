@@ -81,7 +81,7 @@ function findKeeper(agentName: string, keeperList: Keeper[], keeperBriefs: Dashb
   return null
 }
 
-export type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
+type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
 
 const FILTER_META: Record<StatusFilter, { label: string; description: string }> = {
   all: {

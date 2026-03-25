@@ -28,10 +28,6 @@ export function toggleLiveFilter(kind: LiveFilterKind): void {
 
 export const selectedAgent = signal<string | null>(null)
 
-export function selectAgent(name: string | null): void {
-  selectedAgent.value = name
-}
-
 // --- Map journal kind to filter kind ---
 
 function journalKindToFilter(entry: JournalEntry): LiveFilterKind {
@@ -97,7 +93,7 @@ export const agentPulses: ReadonlySignal<AgentPulse[]> = computed(() => {
 
 // --- Focus sidebar data ---
 
-export interface FocusAgent {
+interface FocusAgent {
   name: string
   emoji: string
   koreanName: string | null

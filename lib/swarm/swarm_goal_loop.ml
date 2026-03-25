@@ -88,10 +88,15 @@ let make_cancel_token () = { cancelled = false }
 (* ================================================================ *)
 
 let measure_metric metric_fn =
+  match Autoresearch_metric.validate_metric_fn metric_fn with
+  | Error e -> Error e
+  | Ok metric_fn ->
   try
-    let ic = Unix.open_process_in metric_fn in
-    let output = In_channel.input_all ic |> String.trim in
-    let status = Unix.close_process_in ic in
+    let status, raw_output =
+      Process_eio.run_argv_with_status ~timeout_sec:60.0
+        ["sh"; "-c"; metric_fn]
+    in
+    let output = String.trim raw_output in
     match status with
     | Unix.WEXITED 0 ->
         (match Float.of_string_opt output with

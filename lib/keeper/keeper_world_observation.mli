@@ -60,4 +60,6 @@ val collect_board_events :
 
     @param config Room configuration for I/O operations
     @param meta Current keeper metadata *)
-val observe : config:Room.config -> meta:Keeper_types.keeper_meta -> world_observation
+val observe : config:Room.config -> meta:Keeper_types.keeper_meta ->
+  ?pre_collected_board_events:(string list * int * int) ->
+  unit -> world_observation

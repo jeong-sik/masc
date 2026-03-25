@@ -227,7 +227,9 @@ let collect_board_events ~(meta : keeper_meta) : string list * int * int =
       (Printexc.to_string exn);
     ([], 0, 0)
 
-let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
+let observe ~(config : Room.config) ~(meta : keeper_meta)
+    ?(pre_collected_board_events : (string list * int * int) option)
+    () : world_observation =
   let pending_mentions = collect_pending_mentions ~config ~meta in
   let unclaimed_task_count, failed_task_count =
     read_backlog_counts ~config
@@ -245,7 +247,9 @@ let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
       ~agent_name:meta.name
   in
   let pending_board_events, _board_new_count, _board_mention_count =
-    collect_board_events ~meta
+    match pre_collected_board_events with
+    | Some result -> result
+    | None -> collect_board_events ~meta
   in
   {
     pending_mentions;

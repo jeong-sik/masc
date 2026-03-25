@@ -270,6 +270,19 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  Log.Keeper.error "heartbeat snapshot write failed: %s"
                    (Printexc.to_string exn));
               last_snapshot_ts := now_ts);
+            (* Collect board events once per heartbeat, shared by triage and observe
+               to avoid double cursor advancement. *)
+            let board_events_result =
+              (try
+                 Some (Keeper_world_observation.collect_board_events
+                         ~meta:meta_current)
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 Log.Keeper.warn "keepalive: board count query failed: %s"
+                   (Printexc.to_string exn);
+                 None)
+            in
             (* Deliberation triage: run when initiative is enabled (default: all keepers).
                Initiative cooldown: skip triage if last proactive action was within cooldown_sec. *)
             let meta_after_triage =
@@ -333,20 +346,12 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                     meta_current.name current_agent_count;
                   changed
                 in
-                (* Board activity enrichment *)
+                (* Board activity from pre-collected result *)
                 let board_new_post_count, board_mention_count =
-                  (try
-                     let _events, new_count, mention_count =
-                       Keeper_world_observation.collect_board_events
-                         ~meta:meta_current
-                     in
-                     (new_count, mention_count)
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | exn ->
-                     Log.Keeper.warn "keepalive: board count query failed: %s"
-                       (Printexc.to_string exn);
-                     (0, 0))
+                  match board_events_result with
+                  | Some (_events, new_count, mention_count) ->
+                      (new_count, mention_count)
+                  | None -> (0, 0)
                 in
                 let obs =
                   { obs with
@@ -397,6 +402,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    let obs =
                      Keeper_world_observation.observe
                        ~config:ctx.config ~meta:meta_after_triage
+                       ?pre_collected_board_events:board_events_result ()
                    in
                    match
                      Keeper_unified_turn.run_unified_turn

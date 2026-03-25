@@ -72,6 +72,7 @@ type config = {
   system_prompt : string;
   tools : Oas.Tool.t list;
   max_turns : int;
+  max_idle_turns : int;
   max_tokens : int;
   temperature : float;
   hooks : Oas.Hooks.hooks option;
@@ -93,6 +94,7 @@ type config = {
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
   { name; provider; model_id; system_prompt; tools;
     max_turns = 20;
+    max_idle_turns = 3;
     max_tokens = 4096;
     temperature = 0.7;
     hooks = None;
@@ -205,6 +207,7 @@ let build
     |> Oas.Builder.with_system_prompt config.system_prompt
     |> Oas.Builder.with_max_tokens config.max_tokens
     |> Oas.Builder.with_max_turns config.max_turns
+    |> Oas.Builder.with_max_idle_turns config.max_idle_turns
     |> Oas.Builder.with_temperature config.temperature
     |> Oas.Builder.with_provider config.provider
     |> Oas.Builder.with_tools config.tools
@@ -421,6 +424,7 @@ let config_for_label
     ~(max_turns : int)
     ~(max_tokens : int)
     ~(temperature : float)
+    ?(max_idle_turns = 3)
     ?guardrails
     ?hooks
     ?context_reducer
@@ -443,6 +447,7 @@ let config_for_label
     max_turns;
     max_tokens;
     temperature;
+    max_idle_turns;
     guardrails;
     hooks;
     context_reducer;
@@ -469,6 +474,7 @@ let run_named
     ?(tools = [])
     ?(initial_messages = [])
     ?(max_turns = 20)
+    ?(max_idle_turns = 3)
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
     ?(accept = fun (_ : Oas_response.api_response) -> true)
@@ -516,7 +522,7 @@ let run_named
     { (default_config ~name ~provider ~model_id:primary_provider.model_id
          ~system_prompt ~tools)
       with
-      max_turns; max_tokens; temperature;
+      max_turns; max_tokens; temperature; max_idle_turns;
       guardrails; hooks; context_reducer; memory;
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
       transport = transport_resolved;
@@ -544,6 +550,7 @@ let run_model_by_label
     ?(system_prompt = "")
     ?(tools = [])
     ?(max_turns = 20)
+    ?(max_idle_turns = 3)
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
     ?(accept = fun (_ : Oas_response.api_response) -> true)
@@ -569,7 +576,7 @@ let run_model_by_label
         in
         let config =
           config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
-            ~tools ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
+            ~tools ~max_turns ~max_tokens ~temperature ~max_idle_turns ?guardrails ?hooks
             ?context_reducer ?memory
             ~description:(Some (Printf.sprintf "model_label:%s" model_label))
             ()

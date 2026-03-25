@@ -43,6 +43,7 @@ val run_named :
   ?tools:Oas.Tool.t list ->
   ?initial_messages:Oas.Types.message list ->
   ?max_turns:int ->
+  ?max_idle_turns:int ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?accept:(Oas_response.api_response -> bool) ->
@@ -67,6 +68,7 @@ val run_model_by_label :
   ?system_prompt:string ->
   ?tools:Oas.Tool.t list ->
   ?max_turns:int ->
+  ?max_idle_turns:int ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?accept:(Oas_response.api_response -> bool) ->

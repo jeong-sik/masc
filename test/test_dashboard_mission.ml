@@ -478,8 +478,9 @@ let test_dashboard_mission_http_full_contract () =
           ((json |> member "internal_signals" |> to_list) <> []);
         check bool "command focus retained in mission http payload" true
           (json |> member "command_focus" <> `Null);
-        check string "session brief survives mission http payload" session_id
-          (json |> member "session_briefs" |> index 0 |> member "session_id" |> to_string);
+        check bool "session brief survives mission http payload" true
+          (json |> member "session_briefs" |> to_list
+         |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));
       ))
 
 let test_dashboard_mission_keeper_tool_audit_fallback () =

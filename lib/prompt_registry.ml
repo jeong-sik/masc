@@ -490,7 +490,7 @@ let of_json (json : Yojson.Safe.t) : (int, string) result =
       | Ok entry ->
           register entry;
           incr count
-      | Error _ -> ()  (* Skip invalid entries *)
+      | Error e -> Log.Misc.debug "prompt entry parse skipped: %s" e
     ) entries;
     Ok !count
   with e ->

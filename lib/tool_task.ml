@@ -93,7 +93,7 @@ let handle_claim ctx args =
        Audit_log.log_claim_task ctx.config ~agent_id:ctx.agent_name
          ~room_id:(Filename.basename ctx.config.base_path)
          ~task_id ()
-   | Error _ -> ());
+   | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
   result_to_response result
 
 let handle_claim_next ctx _args =

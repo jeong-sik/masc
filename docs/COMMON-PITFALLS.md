@@ -62,7 +62,32 @@ Tests break when:
 dune build --root .  # catches compilation errors in tests
 ```
 
-## 5. Version String Drift (2 occurrences)
+## 5. Silent Error Patterns — When to Log
+
+`| Error _ ->` 사용 시 side-effect 실패 삼킴에 주의.
+
+**로그 필수 (`warn`) — state를 바꾸려다 실패:**
+```ocaml
+| Error e -> Log.BoardLog.warn "notification failed: %s" e
+```
+SSE/notification 발행, 파일 쓰기, 외부 API 호출, audit/economy 기록.
+
+**로그 선택 (`debug`) — 읽다가 실패:**
+```ocaml
+| Error e -> Log.Reputation.debug "task file unreadable: %s" e
+```
+디렉토리 스캔 중 개별 파일, config 파싱, runtime context 미가용.
+
+**로그 불필요 (idiomatic OCaml):**
+```ocaml
+List.filter_map (function Ok t -> Some t | Error _ -> None)
+(try int_of_string s with _ -> default)
+(try Sys.remove tmp with _ -> ())
+```
+
+**PR 체크:** `rg '\| Error _ -> \(\)' lib/` 로 새 `| Error _ -> ()` 확인.
+
+## 6. Version String Drift (2 occurrences)
 
 `dune-project` version and `sdk_version.ml` (or equivalent) must match.
 CI checks this — but fix it before pushing.
@@ -73,7 +98,7 @@ grep '(version' dune-project | head -1
 grep 'let version' lib/sdk_version.ml
 ```
 
-## 6. Prompt Changes Need Checkpoint Reset
+## 7. Prompt Changes Need Checkpoint Reset
 
 Keeper system prompts are cached in checkpoints. After changing prompts:
 - Existing keepers continue using the old prompt from checkpoint

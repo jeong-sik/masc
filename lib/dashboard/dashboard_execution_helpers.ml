@@ -340,7 +340,7 @@ let load_neo4j_identity_cache () =
       {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName model traits interests activityLevel primaryValue } } } }"}|}
     in
     match Graphql_client.request ~timeout_sec:10.0 body with
-    | Error _ -> ()
+    | Error e -> Log.Dashboard.warn "neo4j identity cache load failed: %s" e
     | Ok output -> (
         try
           let json = Yojson.Safe.from_string output in

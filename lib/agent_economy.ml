@@ -194,7 +194,7 @@ let load_balances_from_ledger base_path =
     let path = ledger_path base_path in
     if Sys.file_exists path then begin
       match Safe_ops.read_file_safe path with
-      | Error _ -> ()
+      | Error e -> Log.Misc.warn "economy ledger read failed for %s: %s" path e
       | Ok content ->
         String.split_on_char '\n' content
         |> List.iter (fun line ->

@@ -113,7 +113,7 @@ let count_tasks_from_room (config : Room.config) ~(agent_name : string)
         if Filename.check_suffix fname ".json" then begin
           let path = Filename.concat tasks_dir fname in
           match Safe_ops.read_json_file_safe path with
-          | Error _ -> ()
+          | Error e -> Log.Reputation.debug "task file read failed %s: %s" fname e
           | Ok json ->
             let status = Safe_ops.json_string ~default:"" "status" json in
             let assignee = Safe_ops.json_string ~default:"" "assignee" json in

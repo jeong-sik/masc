@@ -239,7 +239,7 @@ let add_comment ~post_id ~author ~content ?parent_id
                     content;
                     hearth = post.hearth;
                   }
-            | Error _ -> ());
+            | Error e -> Log.BoardLog.warn "board signal skipped: get_post failed for %s: %s" post_id (Board_types.show_board_error e));
            ok
        | Error _ as err -> err)
   | Postgres t ->
@@ -256,7 +256,7 @@ let add_comment ~post_id ~author ~content ?parent_id
                     content;
                     hearth = post.hearth;
                   }
-            | Error _ -> ());
+            | Error e -> Log.BoardLog.warn "board signal skipped: pg get_post failed for %s: %s" post_id (Board_types.show_board_error e));
            ok
        | Error _ as err -> err)
 

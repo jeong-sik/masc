@@ -161,12 +161,13 @@ let spawn_slots_available () =
   || with_lock_ro (fun () -> Hashtbl.length registry < max_keepers)
 
 let wakeup ~base_path name =
-  match get ~base_path name with
-  | Some entry -> entry.fiber_wakeup := true
-  | None -> ()
+  with_lock_rw (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | Some entry -> entry.fiber_wakeup := true
+    | None -> ())
 
 let wakeup_all ?base_path () =
-  with_lock_ro (fun () ->
+  with_lock_rw (fun () ->
     Hashtbl.iter (fun _k entry ->
       (match base_path with
        | Some expected when not (String.equal expected entry.base_path) -> ()

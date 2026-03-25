@@ -105,6 +105,10 @@ val register_name_tag : tool_name:string -> tag:module_tag -> unit
 val lookup_tag : string -> module_tag option
 (** Look up the module tag for a tool name. *)
 
+val lookup_schema : string -> Yojson.Safe.t option
+(** Look up the input_schema JSON for a tool name.
+    Used by Tool_input_validation pre-hook for argument validation. *)
+
 val tag_registry_count : unit -> int
 (** Number of entries in the tag registry. *)
 

@@ -166,7 +166,11 @@ let () =
   (* Inject masc_* schemas into keeper bridge for profile-based filtering.
      Must happen after all schemas are assembled. *)
   Keeper_exec_tools.inject_masc_schemas Tools.all_schemas_extended;
-  Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ())
+  Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ());
+  (* C-4: Register input schema validation pre-hook.
+     Validates tool arguments against their declared input_schema
+     before dispatch — catches missing required fields and type mismatches. *)
+  Tool_input_validation.register_pre_hook ()
 
 (** {1 execute_tool_eio -- included from Mcp_server_eio_execute} *)
 

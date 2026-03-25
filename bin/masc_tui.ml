@@ -1009,11 +1009,11 @@ let load_keepers (base_path : string) : keeper list =
            let path = Filename.concat keepers_dir f in
            let json = Yojson.Safe.from_file path in
            let open Yojson.Safe.Util in
-           let str key default = try json |> member key |> to_string with _ -> default in
-           let int_ key default = try json |> member key |> to_int with _ -> default in
-           let float_ key default = try json |> member key |> to_number with _ -> default in
-           let bool_ key default = try json |> member key |> to_bool with _ -> default in
-           let str_list key = try json |> member key |> to_list |> List.map to_string with _ -> [] in
+           let str key default = try json |> member key |> to_string with Type_error _ -> default in
+           let int_ key default = try json |> member key |> to_int with Type_error _ -> default in
+           let float_ key default = try json |> member key |> to_number with Type_error _ -> default in
+           let bool_ key default = try json |> member key |> to_bool with Type_error _ -> default in
+           let str_list key = try json |> member key |> to_list |> List.map to_string with Type_error _ -> [] in
            Some {
              k_name = str "name" (Filename.chop_suffix f ".json");
              k_goal = str "goal" "";
@@ -1040,7 +1040,7 @@ let load_keepers (base_path : string) : keeper list =
              k_created_at = str "created_at" "";
              k_updated_at = str "updated_at" "";
            }
-         with _ -> None
+         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
        )
     |> List.sort (fun a b -> String.compare a.k_name b.k_name)
   else []
@@ -1062,18 +1062,18 @@ let read_last_lines path n =
         if len <= n then all
         else
           List.filteri (fun i _ -> i >= len - n) all)
-  with _ -> []
+  with Sys_error _ -> []
 
 (** Parse a single metrics JSONL line into a log_entry *)
 let parse_log_entry (line : string) : log_entry option =
   try
     let json = Yojson.Safe.from_string line in
     let open Yojson.Safe.Util in
-    let str key default = try json |> member key |> to_string with _ -> default in
-    let int_ key default = try json |> member key |> to_int with _ -> default in
-    let float_ key default = try json |> member key |> to_number with _ -> default in
-    let bool_ key default = try json |> member key |> to_bool with _ -> default in
-    let str_list key = try json |> member key |> to_list |> List.map to_string with _ -> [] in
+    let str key default = try json |> member key |> to_string with Type_error _ -> default in
+    let int_ key default = try json |> member key |> to_int with Type_error _ -> default in
+    let float_ key default = try json |> member key |> to_number with Type_error _ -> default in
+    let bool_ key default = try json |> member key |> to_bool with Type_error _ -> default in
+    let str_list key = try json |> member key |> to_list |> List.map to_string with Type_error _ -> [] in
     Some {
       le_ts = str "ts" "";
       le_channel = str "channel" "unknown";
@@ -1082,8 +1082,8 @@ let parse_log_entry (line : string) : log_entry option =
       le_context_max = int_ "context_max" 0;
       le_message_count = int_ "message_count" 0;
       le_model_used = str "model_used" "";
-      le_input_tokens = (try json |> member "usage" |> member "input_tokens" |> to_int with _ -> 0);
-      le_output_tokens = (try json |> member "usage" |> member "output_tokens" |> to_int with _ -> 0);
+      le_input_tokens = (try json |> member "usage" |> member "input_tokens" |> to_int with Type_error _ -> 0);
+      le_output_tokens = (try json |> member "usage" |> member "output_tokens" |> to_int with Type_error _ -> 0);
       le_latency_ms = int_ "latency_ms" 0;
       le_cost_usd = float_ "cost_usd" 0.0;
       le_work_kind = str "work_kind" "";
@@ -1093,7 +1093,7 @@ let parse_log_entry (line : string) : log_entry option =
       le_repetition_risk = float_ "repetition_risk" 0.0;
       le_guardrail_stop = bool_ "guardrail_stop" false;
     }
-  with _ -> None
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 (** Find the most recent metrics file for a keeper *)
 let find_metrics_files (base_path : string) (keeper_name : string) : string list =
@@ -1199,7 +1199,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
              let current_task = json |> member "current_task" |> to_string_option in
              let last_seen = json |> member "last_seen" |> to_string in
              Some { name; status; current_task; last_seen }
-           with _ -> None
+           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
          )
     else []
   );
@@ -1222,7 +1222,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
              let priority = json |> member "priority" |> to_int_option |> Option.value ~default:3 in
              let claimed_by = json |> member "claimed_by" |> to_string_option in
              Some { id; title; status; priority; claimed_by }
-           with _ -> None
+           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
          )
       |> List.sort (fun a b -> compare a.priority b.priority)
     else []
@@ -1304,17 +1304,16 @@ let send_keeper_message (state : state) (keeper_name : string) (message : string
             (try
               let json = Yojson.Safe.from_string data in
               let open Yojson.Safe.Util in
-              let typ = try json |> member "type" |> to_string with _ -> "" in
+              let typ = try json |> member "type" |> to_string with Type_error _ -> "" in
               if typ = "content_delta" || typ = "delta" then begin
-                let delta = try json |> member "delta" |> to_string with _ -> "" in
+                let delta = try json |> member "delta" |> to_string with Type_error _ -> "" in
                 Buffer.add_string result delta
               end else if typ = "content_complete" || typ = "complete" then begin
-                (* Check for full text in content field *)
-                let text = try json |> member "text" |> to_string with _ -> "" in
+                let text = try json |> member "text" |> to_string with Type_error _ -> "" in
                 if text <> "" && Buffer.length result = 0 then
                   Buffer.add_string result text
               end
-            with _ -> ())
+            with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
           end
         ) lines;
 
@@ -1333,20 +1332,20 @@ let send_keeper_message (state : state) (keeper_name : string) (message : string
                 incr idx
             done;
             if !found then !idx else 0
-          with _ -> 0 in
+          with Invalid_argument _ -> 0 in
           if body_start > 0 then begin
             let body_str = String.sub response body_start (String.length response - body_start) in
             (* Try parsing as JSON *)
             (try
               let json = Yojson.Safe.from_string (String.trim body_str) in
               let open Yojson.Safe.Util in
-              let text = try json |> member "result" |> member "text" |> to_string with _ -> "" in
+              let text = try json |> member "result" |> member "text" |> to_string with Type_error _ -> "" in
               if text <> "" then text
               else
-                let msg = try json |> member "error" |> member "message" |> to_string with _ -> "" in
+                let msg = try json |> member "error" |> member "message" |> to_string with Type_error _ -> "" in
                 if msg <> "" then "(error: " ^ msg ^ ")"
                 else "(no response parsed)"
-            with _ -> "(response parsing failed)")
+            with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> "(response parsing failed)")
           end else "(empty response)"
         end)
   with

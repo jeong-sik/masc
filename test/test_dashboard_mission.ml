@@ -278,9 +278,11 @@ let test_dashboard_mission_projection () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Room_utils.default_config dir in
       let session_id = "ts-mission-fixture-001" in
       Eio_main.run @@ fun env ->
+      Eio_guard.enable ();
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room_utils.default_config dir in
       seed_room config session_id;
       Lib.A2a_tools.emit_heartbeat_task
         ~agent:"llama-local-alpha"
@@ -316,9 +318,8 @@ let test_dashboard_mission_projection () =
         ~context:"fixture context"
         ~allowed_tools:[ "masc_board_comment" ]
         ();
-      (* Simulate delta departing: remove agent file if it exists (Memory
-         backend does not write files), then ensure agent dir exists so
-         Dashboard_mission sees delta as departed. *)
+      (* Simulate delta departing: remove agent file so Dashboard_mission
+         sees delta as departed. *)
       let delta_path =
         Filename.concat (Room_utils.agents_dir config) "llama-local-delta.json"
       in
@@ -459,11 +460,12 @@ let test_dashboard_mission_http_full_contract () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Room_utils.default_config dir in
       let session_id = "ts-mission-http-fixture-001" in
-      seed_room config session_id;
       Eio_main.run @@ fun env ->
       Eio_guard.enable ();
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room_utils.default_config dir in
+      seed_room config session_id;
       (* Clear stale cache entries from prior tests to avoid cross-test pollution.
          Both dashboard-level and operator snapshot caches must be invalidated. *)
       Lib.Dashboard_cache.invalidate_all ();
@@ -496,11 +498,12 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Room_utils.default_config dir in
       let session_id = "ts-mission-http-default-001" in
-      seed_room config session_id;
       Eio_main.run @@ fun env ->
       Eio_guard.enable ();
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room_utils.default_config dir in
+      seed_room config session_id;
       Lib.Dashboard_cache.invalidate_all ();
       Lib.Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
@@ -536,10 +539,13 @@ let test_dashboard_mission_http_cache_isolation () =
       cleanup_dir dir_b)
     (fun () ->
       let actor = "test-dashboard-cache-isolation" in
-      let config_a = Room_utils.default_config dir_a in
-      let config_b = Room_utils.default_config dir_b in
       let session_a = "ts-mission-cache-fixture-a" in
       let session_b = "ts-mission-cache-fixture-b" in
+      Eio_main.run @@ fun env ->
+      Eio_guard.enable ();
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config_a = Room_utils.default_config dir_a in
+      let config_b = Room_utils.default_config dir_b in
       seed_room config_a session_a;
       seed_room config_b session_b;
       let state_a =
@@ -548,7 +554,6 @@ let test_dashboard_mission_http_cache_isolation () =
       let state_b =
         Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir_b ()
       in
-      Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let request =
           request ("/api/v1/dashboard/mission?agent_name=" ^ actor)

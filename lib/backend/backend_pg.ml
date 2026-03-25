@@ -1,36 +1,28 @@
-(** Backend_pg - PostgreSQL backend (Eio-native, non-blocking) via caqti-eio.
+(** Backend_pg - Eio-native PostgreSQL backend implementation.
 
-    Extracted from Backend.PostgresNative for separation of concerns.
-    Uses caqti-eio for connection pooling and non-blocking I/O.
+    Extracted from Backend.Postgres for separation of concerns.
+    Uses Caqti-eio for non-blocking PostgreSQL access with zstd compression.
 
-    Usage:
-      export MASC_POSTGRES_URL="postgresql://user:pass@host:port/db"
-
-    Schema (auto-created if not exists):
-      CREATE TABLE masc_kv (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        expires_at TIMESTAMP,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
+    Types come from Backend_types (shared with Backend).
+    Backend.Postgres delegates to this module.
 *)
 
-open Backend_core
+module Compression = Backend_compression
+
+(** {1 Types} *)
+
+include Backend_types
+
+(** {1 PostgreSQL Backend} *)
 
 type t = {
   pool: (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t;
   namespace: string;
-  clock: float Eio.Time.clock_ty Eio.Resource.t;
-  _sw: Eio.Switch.t;  (* Keep switch alive for pool lifetime *)
+  node_id: string;
 }
 
-(* Result monad binding operator for Caqti operations *)
-let (let*) = Result.bind
-
-
 let namespaced_key namespace key =
-  if namespace = "" then key
+  if namespace = "" || namespace = "default" then key
   else namespace ^ ":" ^ key
 
 let strip_namespace namespace key =
@@ -40,8 +32,7 @@ let strip_namespace namespace key =
     String.sub key prefix_len (String.length key - prefix_len)
   else key
 
-(* Caqti 2.x query definitions using Infix operators
-   Syntax: (param_type ->? row_type) "SQL" for static queries *)
+(* Caqti 2.x query definitions *)
 open Pg_infix
 
 let get_q =
@@ -52,13 +43,6 @@ let set_q =
   (Caqti_type.(t2 string string) ->. Caqti_type.unit)
   "INSERT INTO masc_kv (key, value, updated_at) VALUES ($1, $2, NOW()) \
    ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()"
-
-let _set_with_ttl_q =
-  (Caqti_type.(t3 string string int) ->. Caqti_type.unit)
-  "INSERT INTO masc_kv (key, value, expires_at, updated_at) \
-   VALUES ($1, $2, NOW() + $3 * INTERVAL '1 second', NOW()) \
-   ON CONFLICT (key) DO UPDATE SET value = $2, \
-     expires_at = NOW() + $3 * INTERVAL '1 second', updated_at = NOW()"
 
 let delete_q =
   (Caqti_type.string ->. Caqti_type.unit)
@@ -90,6 +74,11 @@ let get_all_matching_recent_q =
 let set_if_not_exists_q =
   (Caqti_type.(t2 string string) ->. Caqti_type.unit)
   "INSERT INTO masc_kv (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING"
+
+let compare_and_swap_q =
+  (Caqti_type.(t2 string string) ->. Caqti_type.unit)
+  "INSERT INTO masc_kv (key, value, updated_at) VALUES ($1, $2, NOW()) \
+   ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()"
 
 let acquire_lock_q =
   (Caqti_type.(t3 string string int) ->? Caqti_type.int)
@@ -198,8 +187,9 @@ let cleanup_pubsub_limit_q =
      DELETE FROM masc_pubsub WHERE id IN (SELECT id FROM ranked WHERE rn > $1) RETURNING 1\
    ) SELECT COUNT(*)::int FROM deleted"
 
-(* Helper to convert Caqti_error to our error type.
-   Rate-limits connection failure logs to avoid flooding stderr
+let (let*) = Result.bind
+
+(* Rate-limited error logging to avoid flooding stderr
    when the PG pool is exhausted (e.g. Supabase MaxClientsInSessionMode). *)
 let _pg_last_error_log = Atomic.make 0.0
 
@@ -209,131 +199,108 @@ let caqti_error_to_masc err =
   let last = Atomic.get _pg_last_error_log in
   if now -. last > 60.0 then begin
     Atomic.set _pg_last_error_log now;
-    Log.Backend.error "[PG] %s" msg
+    Log.Backend.error "[EioPG] %s" msg
   end;
-  OperationFailed msg
+  IOError msg
 
-(* WARNING: create requires an Eio.Switch context.
-   This is a blocking workaround - in production, create should be called
-   within an Eio.Switch.run context. *)
-let create (cfg : config) : (t, error) result =
-  match cfg.postgres_url with
-  | None -> Error (ConnectionFailed "PostgreSQL URL not configured (set MASC_POSTGRES_URL)")
-  | Some url ->
-      Error (ConnectionFailed
-        (Printf.sprintf "PostgresNative.create must be called from Eio context. URL: %s" url))
+let create ~sw ~env ~url ~cluster_name ~node_id =
+  let uri = Uri.of_string url in
+  let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
+    | Some s -> (try max 1 (min (int_of_string s) 50) with Failure _ -> 10)
+    | None -> 10
+  in
+  let pool_config = Caqti_pool_config.create
+      ~max_size:max_pool ~max_idle_size:(min max_pool 3)
+      ~max_idle_age:(Some (Mtime.Span.of_uint64_ns 30_000_000_000L))
+      ~max_use_count:(Some 50) () in
+  let uri =
+    if Uri.get_query_param uri "keepalives" <> None then uri
+    else uri
+      |> (fun u -> Uri.add_query_param' u ("keepalives", "1"))
+      |> (fun u -> Uri.add_query_param' u ("keepalives_idle", "15"))
+      |> (fun u -> Uri.add_query_param' u ("keepalives_interval", "5"))
+      |> (fun u -> Uri.add_query_param' u ("keepalives_count", "3"))
+  in
+  Log.Backend.info "[EioPG] connecting pool (max_size=%d, max_idle_size=%d, keepalives=on)..."
+    max_pool (min max_pool 3);
+  match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
+  | Error err ->
+      Log.Backend.error "[EioPG] pool creation failed: %s" (Caqti_error.show err);
+      Error (caqti_error_to_masc err)
+  | Ok pool ->
+      Log.Backend.info "[EioPG] pool created, initializing schema...";
+      (* Initialize schema including pubsub tables and indexes *)
+      let init_result = Caqti_eio.Pool.use (fun conn ->
+        let module C = (val conn : Caqti_eio.CONNECTION) in
+        let* () = C.exec create_schema_q () in
+        let* () = C.exec create_pubsub_table_q () in
+        let* () = C.exec create_index_q () in
+        let* () = C.exec create_pubsub_index_q () in
+        let* () = C.exec create_pubsub_created_at_index_q () in
+        Ok ()
+      ) pool in
+      (match init_result with
+       | Error err ->
+           Log.Backend.error "[EioPG] schema init failed: %s" (Caqti_error.show err);
+           Error (caqti_error_to_masc err)
+       | Ok () ->
+           Log.Backend.info "[EioPG] connected and schema ready";
+           at_exit (fun () ->
+             try Caqti_eio.Pool.drain pool
+             with exn ->
+               Log.Backend.warn "[EioPG] pool drain failed: %s"
+                 (Printexc.to_string exn));
+           Ok { pool; namespace = cluster_name; node_id })
 
-(* Eio-aware create function - call this from Eio.Switch.run *)
-let create_eio ~sw ~env (cfg : config) : (t, error) result =
-  match cfg.postgres_url with
-  | None -> Error (ConnectionFailed "PostgreSQL URL not configured (set MASC_POSTGRES_URL)")
-  | Some url ->
-      let uri = Uri.of_string url in
-      (* Pool sizing: default 5, tunable via MASC_PG_POOL_SIZE (1-50).
-         12+ concurrent keepers need ~12 connections.
-         Supabase Pro supports 500+ max_connections. *)
-      let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-        | Some s -> (try max 1 (min (int_of_string s) 50) with Failure _ -> 5)
-        | None -> 5
-      in
-      let pool_config = Caqti_pool_config.create
-          ~max_size:max_pool
-          ~max_idle_size:(min max_pool 2)
-          ~max_idle_age:(Some (Mtime.Span.of_uint64_ns 15_000_000_000L))
-          ~max_use_count:(Some 100)
-          () in
-      let uri =
-        if Uri.get_query_param uri "keepalives" <> None then uri
-        else
-          uri
-          |> (fun u -> Uri.add_query_param' u ("keepalives", "1"))
-          |> (fun u -> Uri.add_query_param' u ("keepalives_idle", "15"))
-          |> (fun u -> Uri.add_query_param' u ("keepalives_interval", "5"))
-          |> (fun u -> Uri.add_query_param' u ("keepalives_count", "3"))
-      in
-      Log.Backend.info "[PG] connecting pool (max_size=%d, max_idle_size=%d, max_idle_age=30s, keepalives=on)..."
-        max_pool (min max_pool 3);
-      match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
-      | Error err ->
-          Log.Backend.error "[PG] pool creation failed: %s" (Caqti_error.show err);
-          Error (caqti_error_to_masc err)
-      | Ok pool ->
-          Log.Backend.info "[PG] pool created, initializing schema...";
-          (* Initialize schema if needed *)
-          let init_result = Caqti_eio.Pool.use (fun conn ->
-            let module C = (val conn : Caqti_eio.CONNECTION) in
-            let* () = C.exec create_schema_q () in
-            let* () = C.exec create_pubsub_table_q () in
-            let* () = C.exec create_index_q () in
-            let* () = C.exec create_pubsub_index_q () in
-            let* () = C.exec create_pubsub_created_at_index_q () in
-            Ok ()
-          ) pool in
-          (match init_result with
-           | Error err ->
-               Log.Backend.error "[PG] schema init failed: %s" (Caqti_error.show err);
-               Error (caqti_error_to_masc err)
-           | Ok () ->
-               Log.Backend.info "[PG] connected and schema ready";
-               at_exit (fun () ->
-                 try Caqti_eio.Pool.drain pool
-                 with exn ->
-                   Log.Backend.warn "[PG] pool drain failed: %s"
-                     (Printexc.to_string exn));
-               Ok { pool; namespace = cfg.cluster_name; clock = env#clock; _sw = sw })
-
-let create_eio_readonly ~sw ~env (cfg : config) : (t, error) result =
-  match cfg.postgres_url with
-  | None -> Error (ConnectionFailed "PostgreSQL URL not configured")
-  | Some url ->
-      let uri = Uri.of_string url in
-      (* Domain-local pools need >1 connection to avoid "Invalid concurrent
-         usage" when multiple Eio fibers within the same executor domain
-         call Pool.use concurrently (e.g. dashboard room-truth parallel
-         fetch).  Use half the main pool size, minimum 3. *)
-      let main_pool_max = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-        | Some s -> (match int_of_string_opt s with Some n -> max 1 (min n 50) | None -> 5)
-        | None -> 5
-      in
-      let max_pool = max 3 (main_pool_max / 2) in
-      let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
-      match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
-      | Error err -> Error (caqti_error_to_masc err)
-      | Ok pool ->
-          Ok { pool; namespace = cfg.cluster_name; clock = env#clock; _sw = sw }
+let create_readonly ~sw ~env ~url ~cluster_name ~node_id =
+  let uri = Uri.of_string url in
+  (* Readonly pools need >1 connection to avoid "Invalid concurrent
+     usage" when multiple Eio fibers within the same executor domain
+     call Pool.use concurrently. Use half the main pool size, minimum 3. *)
+  let main_pool_max = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
+    | Some s -> (try max 1 (min (int_of_string s) 50) with _ -> 10)
+    | None -> 10
+  in
+  let max_pool = max 3 (main_pool_max / 2) in
+  let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
+  let uri =
+    if Uri.get_query_param uri "keepalives" <> None then uri
+    else uri
+      |> (fun u -> Uri.add_query_param' u ("keepalives", "1"))
+      |> (fun u -> Uri.add_query_param' u ("keepalives_idle", "15"))
+      |> (fun u -> Uri.add_query_param' u ("keepalives_interval", "5"))
+      |> (fun u -> Uri.add_query_param' u ("keepalives_count", "3"))
+  in
+  match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
+  | Error err -> Error (caqti_error_to_masc err)
+  | Ok pool ->
+      Ok { pool; namespace = cluster_name; node_id }
 
 let close _t = ()
 
 let get_pool t = t.pool
 
-let get t ~key =
+let get t key =
   let nkey = namespaced_key t.namespace key in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     C.find_opt get_q nkey
   ) t.pool with
-  | Ok v -> Ok v
+  | Ok (Some v) -> Ok (Compression.decompress_auto v)
+  | Ok None -> Error (NotFound key)
   | Error err -> Error (caqti_error_to_masc err)
 
-let set t ~key ~value =
+let set t key value =
   let nkey = namespaced_key t.namespace key in
+  let compressed = Compression.compress_with_header value in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    C.exec set_q (nkey, value)
+    C.exec set_q (nkey, compressed)
   ) t.pool with
   | Ok () -> Ok ()
   | Error err -> Error (caqti_error_to_masc err)
 
-let delete t ~key =
-  let nkey = namespaced_key t.namespace key in
-  match Caqti_eio.Pool.use (fun conn ->
-    let module C = (val conn : Caqti_eio.CONNECTION) in
-    C.exec delete_q nkey
-  ) t.pool with
-  | Ok () -> Ok true
-  | Error err -> Error (caqti_error_to_masc err)
-
-let exists t ~key =
+let exists t key =
   let nkey = namespaced_key t.namespace key in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
@@ -345,9 +312,18 @@ let exists t ~key =
     let now = Unix.gettimeofday () in
     if now -. Atomic.get _pg_last_error_log > 60.0 then begin
       Atomic.set _pg_last_error_log now;
-      Log.Backend.error "[PG:exists] %s" (Caqti_error.show err)
+      Log.Backend.error "[EioPG:exists] %s" (Caqti_error.show err)
     end;
     false
+
+let delete t key =
+  let nkey = namespaced_key t.namespace key in
+  match Caqti_eio.Pool.use (fun conn ->
+    let module C = (val conn : Caqti_eio.CONNECTION) in
+    C.exec delete_q nkey
+  ) t.pool with
+  | Ok () -> Ok ()
+  | Error err -> Error (caqti_error_to_masc err)
 
 let list_keys t ~prefix =
   let nprefix = namespaced_key t.namespace prefix in
@@ -365,7 +341,9 @@ let get_all t ~prefix =
     C.collect_list get_all_q (nprefix ^ "%")
   ) t.pool with
   | Ok pairs ->
-      Ok (List.map (fun (k, v) -> (strip_namespace t.namespace k, v)) pairs)
+      Ok (List.map (fun (k, v) ->
+        (strip_namespace t.namespace k, Compression.decompress_auto v)
+      ) pairs)
   | Error err -> Error (caqti_error_to_masc err)
 
 let get_all_matching_recent t ~prefix ~suffix ~updated_since ~limit =
@@ -379,18 +357,21 @@ let get_all_matching_recent t ~prefix ~suffix ~updated_since ~limit =
         (nprefix ^ "%", "%" ^ suffix, updated_since, limit)
     ) t.pool with
     | Ok pairs ->
-        Ok (List.map (fun (k, v) -> (strip_namespace t.namespace k, v)) pairs)
+        Ok (List.map (fun (k, v) ->
+          (strip_namespace t.namespace k, Compression.decompress_auto v)
+        ) pairs)
     | Error err -> Error (caqti_error_to_masc err)
 
-let set_if_not_exists t ~key ~value =
+let set_if_not_exists t key value =
   let nkey = namespaced_key t.namespace key in
+  let compressed = Compression.compress_with_header value in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     let* existing = C.find_opt exists_q nkey in
     match existing with
-    | Some _ -> Ok false  (* Key already exists *)
+    | Some _ -> Ok false
     | None ->
-        let* () = C.exec set_if_not_exists_q (nkey, value) in
+        let* () = C.exec set_if_not_exists_q (nkey, compressed) in
         Ok true
   ) t.pool with
   | Ok b -> Ok b
@@ -398,53 +379,54 @@ let set_if_not_exists t ~key ~value =
 
 let compare_and_swap t ~key ~expected ~value =
   let nkey = namespaced_key t.namespace key in
+  let compressed = Compression.compress_with_header value in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     let* current = C.find_opt get_q nkey in
     match current with
-    | Some v when v = expected ->
-        let* () = C.exec set_q (nkey, value) in
+    | Some v when Compression.decompress_auto v = expected ->
+        let* () = C.exec compare_and_swap_q (nkey, compressed) in
         Ok true
     | _ -> Ok false
   ) t.pool with
   | Ok b -> Ok b
   | Error err -> Error (caqti_error_to_masc err)
 
-let acquire_lock t ~key ~ttl_seconds ~owner =
-  let nkey = namespaced_key t.namespace ("lock:" ^ key) in
+let acquire_lock t ~key ~owner ~ttl_seconds =
+  let lock_key = namespaced_key t.namespace ("locks:" ^ key) in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    let* acquired = C.find_opt acquire_lock_q (nkey, owner, ttl_seconds) in
+    let* acquired = C.find_opt acquire_lock_q (lock_key, owner, ttl_seconds) in
     Ok (Option.is_some acquired)
   ) t.pool with
-  | Ok true -> Ok true
-  | Ok false -> Ok false
+  | Ok b -> Ok b
   | Error err -> Error (caqti_error_to_masc err)
 
 let release_lock t ~key ~owner =
-  let nkey = namespaced_key t.namespace ("lock:" ^ key) in
+  let lock_key = namespaced_key t.namespace ("locks:" ^ key) in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    C.exec release_lock_q (nkey, owner)
+    C.exec release_lock_q (lock_key, owner)
   ) t.pool with
   | Ok () -> Ok true
   | Error err -> Error (caqti_error_to_masc err)
 
-let extend_lock t ~key ~ttl_seconds ~owner =
-  let nkey = namespaced_key t.namespace ("lock:" ^ key) in
+let extend_lock t ~key ~owner ~ttl_seconds =
+  let lock_key = namespaced_key t.namespace ("locks:" ^ key) in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    C.exec extend_lock_q (nkey, ttl_seconds, owner)
+    C.exec extend_lock_q (lock_key, ttl_seconds, owner)
   ) t.pool with
   | Ok () -> Ok true
   | Error err -> Error (caqti_error_to_masc err)
 
 (* Pub/Sub using table as queue + NOTIFY for real-time *)
 let publish t ~channel ~message =
+  let compressed = Compression.compress_with_header message in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     (* Insert into table for reliability (persistent queue) *)
-    let* () = C.exec publish_q (channel, message) in
+    let* () = C.exec publish_q (channel, compressed) in
     (* Send NOTIFY for real-time push to LISTEN clients
        Skip NOTIFY for large payloads - subscribers poll anyway *)
     let total_payload = String.length channel + String.length message + 1 in
@@ -453,7 +435,7 @@ let publish t ~channel ~message =
     else begin
       Log.debug ~ctx:"Pubsub" "NOTIFY skipped: payload too large (%d bytes, limit %d)"
         total_payload pg_notify_max_payload;
-      Ok ()  (* Graceful degradation: table insert succeeded *)
+      Ok ()
     end
   ) t.pool with
   | Ok () -> Ok 1
@@ -464,7 +446,10 @@ let subscribe t ~channel ~callback =
     let module C = (val conn : Caqti_eio.CONNECTION) in
     C.find_opt subscribe_q channel
   ) t.pool with
-  | Ok (Some msg) -> callback msg; Ok ()
+  | Ok (Some msg) ->
+      let decompressed = Compression.decompress_auto msg in
+      callback decompressed;
+      Ok ()
   | Ok None -> Ok ()
   | Error err -> Error (caqti_error_to_masc err)
 
@@ -473,9 +458,8 @@ let health_check t =
     let module C = (val conn : Caqti_eio.CONNECTION) in
     C.find health_check_q ()
   ) t.pool with
-  | Ok 1 -> Ok true
-  | Ok _ -> Ok false
-  | Error err -> Error (caqti_error_to_masc err)
+  | Ok 1 -> Ok { latency_ms = 0.0; is_healthy = true }
+  | _ -> Ok { latency_ms = 0.0; is_healthy = false }
 
 (* Cleanup old pubsub messages by age (days) *)
 let cleanup_pubsub_by_age t ~days =

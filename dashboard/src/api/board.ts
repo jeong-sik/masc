@@ -2,7 +2,7 @@ import { get, post, withRetries, defaultBoardVoter } from './core'
 import { isRecord } from '../components/common/normalize'
 import { asString, asNumber, asInt, asStringList } from './parse-utils'
 import type {
-  BoardPost, BoardComment, BoardHearth, BoardFlair, BoardSortMode,
+  BoardPost, BoardComment, BoardSortMode,
   GovernanceCaseBrief, GovernanceCaseBundle, GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute, GovernanceExecutionOrder,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
@@ -441,29 +441,12 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
   })
 }
 
-export function fetchBoardHearths(): Promise<{ hearths: BoardHearth[] }> {
-  return get('/api/v1/board/hearths')
-}
-
-export function fetchBoardFlairs(): Promise<{ flairs: BoardFlair[] }> {
-  return get('/api/v1/board/flairs')
-}
-
 export function votePost(postId: string, direction: 'up' | 'down'): Promise<unknown> {
   return post('/api/v1/tools/masc_board_vote', {
     post_id: postId,
     direction,
     vote: direction,
     voter: defaultBoardVoter(),
-  })
-}
-
-export function voteBoardTool(postId: string, vote: 'up' | 'down', voter: string): Promise<unknown> {
-  return post('/api/v1/tools/masc_board_vote', {
-    post_id: postId,
-    direction: vote,
-    vote,
-    voter,
   })
 }
 

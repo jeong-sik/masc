@@ -1,4 +1,4 @@
-(** Backend_eio compression — zstd compression with dictionary support.
+(** Backend compression — zstd compression with dictionary support.
 
     Compact Protocol v4: Transparent zstd compression with Dictionary
     - Uses trained multi-format dictionary for 32-2048 byte messages

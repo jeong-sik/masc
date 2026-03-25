@@ -185,3 +185,139 @@ let merge_dna_with_delta ~prepared_dna ~delta =
       prepared_dna
     else
       Printf.sprintf "%s\n\n## Recent Updates (Delta)\n\n%s" prepared_dna deduped_delta
+
+(* ================================================================ *)
+(* DNA Quality Validation (#3072)                                    *)
+(* ================================================================ *)
+
+(** Quality dimensions for mitosis DNA validation.
+    Each dimension scores [0.0, 1.0] and contributes to the overall score
+    with its assigned weight.
+
+    Goal anchor (0.30): Without a goal, the child agent has no purpose.
+    Task anchor (0.20): Current task provides immediate focus.
+    Content coherence (0.25): Truncation artifacts indicate damaged context.
+    Minimum length (0.15): Below ~200 chars, DNA carries too little signal.
+    Recent context (0.10): Recent turns help the child continue work. *)
+type dna_quality = {
+  has_goal_anchor : bool;
+  has_task_anchor : bool;
+  has_recent_context : bool;
+  truncation_artifacts : int;
+  content_length : int;
+  score : float;
+}
+
+(** Detect truncation artifacts: mid-sentence cuts, orphan brackets, etc.
+    Returns count of detected artifacts. *)
+let count_truncation_artifacts (dna : string) : int =
+  let lines = String.split_on_char '\n' dna in
+  let last_non_empty =
+    lines
+    |> List.rev
+    |> List.find_opt (fun l -> String.trim l <> "")
+  in
+  let artifacts = ref 0 in
+  (* Check for mid-word truncation at boundaries *)
+  (match last_non_empty with
+   | Some line ->
+     let trimmed = String.trim line in
+     let len = String.length trimmed in
+     if len > 0 then begin
+       let last_char = trimmed.[len - 1] in
+       (* Sentence-ending punctuation or structural markers are OK *)
+       let is_sentence_end =
+        last_char = '.' || last_char = '!' || last_char = '?'
+        || last_char = ']' || last_char = '}'
+        || last_char = '"' || last_char = '\''
+        || last_char = '=' (* structural separator *)
+       in
+       if not is_sentence_end && len > 20 then incr artifacts
+     end
+   | None -> incr artifacts (* empty DNA *)
+  );
+  (* Check for orphan opening brackets/quotes without closing *)
+  let open_parens = ref 0 in
+  let open_brackets = ref 0 in
+  String.iter (fun c ->
+    match c with
+    | '(' -> incr open_parens
+    | ')' -> decr open_parens
+    | '[' -> incr open_brackets
+    | ']' -> decr open_brackets
+    | _ -> ()
+  ) dna;
+  if !open_parens > 2 then incr artifacts;
+  if !open_brackets > 2 then incr artifacts;
+  !artifacts
+
+(** Validate DNA quality before spawning a child agent.
+    Returns a quality assessment with a composite score [0.0, 1.0].
+
+    Usage: call after [compress_to_dna] + [build_continuity_anchors].
+    If [score < 0.3], consider falling back to a full context reset
+    rather than spawning with degraded DNA. *)
+let validate_dna ~(dna : string) ~(anchors : string) : dna_quality =
+  let goal_prefixes = ["goal:"; "goal -"; "objective:"; "north star:"] in
+  let task_prefixes = ["current task:"; "current_task:"; "task:"; "now:"] in
+  (* Case-insensitive substring search without Str dependency *)
+  let contains_ci ~needle haystack =
+    let n = String.lowercase_ascii needle in
+    let h = String.lowercase_ascii haystack in
+    let nlen = String.length n in
+    let hlen = String.length h in
+    if nlen > hlen then false
+    else
+      let rec scan i =
+        if i > hlen - nlen then false
+        else if String.sub h i nlen = n then true
+        else scan (i + 1)
+      in
+      scan 0
+  in
+  let has_goal_anchor =
+    List.exists (fun p -> contains_ci ~needle:p anchors) goal_prefixes
+  in
+  let has_task_anchor =
+    List.exists (fun p -> contains_ci ~needle:p anchors) task_prefixes
+  in
+  let has_recent_context =
+    contains_ci ~needle:"Recent turns:" anchors
+  in
+  let truncation_artifacts = count_truncation_artifacts dna in
+  let content_length = String.length (String.trim dna) in
+  (* Weighted scoring *)
+  let goal_score = if has_goal_anchor then 1.0 else 0.0 in
+  let task_score = if has_task_anchor then 1.0 else 0.0 in
+  let recent_score = if has_recent_context then 1.0 else 0.0 in
+  let coherence_score =
+    match truncation_artifacts with
+    | 0 -> 1.0
+    | 1 -> 0.5
+    | _ -> 0.1
+  in
+  let length_score =
+    if content_length < 100 then 0.0
+    else if content_length < 200 then 0.3
+    else if content_length < 500 then 0.7
+    else 1.0
+  in
+  let score =
+    (goal_score *. 0.30)
+    +. (task_score *. 0.20)
+    +. (coherence_score *. 0.25)
+    +. (length_score *. 0.15)
+    +. (recent_score *. 0.10)
+  in
+  { has_goal_anchor; has_task_anchor; has_recent_context;
+    truncation_artifacts; content_length; score }
+
+let dna_quality_to_json (q : dna_quality) : Yojson.Safe.t =
+  `Assoc [
+    ("has_goal_anchor", `Bool q.has_goal_anchor);
+    ("has_task_anchor", `Bool q.has_task_anchor);
+    ("has_recent_context", `Bool q.has_recent_context);
+    ("truncation_artifacts", `Int q.truncation_artifacts);
+    ("content_length", `Int q.content_length);
+    ("score", `Float q.score);
+  ]

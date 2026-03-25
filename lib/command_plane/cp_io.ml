@@ -246,11 +246,18 @@ let read_recent_events config ~limit =
   if not (Room_utils.path_exists config (events_path config)) then
     []
   else
-    read_jsonl_tail_lines (events_path config) ~max_lines:limit
-    |> List.filter_map (fun line ->
-           match Safe_ops.parse_json_safe ~context:"command_plane_v2.events" line with
-           | Ok json -> event_of_json json
-           | Error _ -> None)
+    (* Over-read to compensate for blank/malformed lines lost during filtering *)
+    let over_read = max limit (limit * 2) in
+    let all =
+      read_jsonl_tail_lines (events_path config) ~max_lines:over_read
+      |> List.filter_map (fun line ->
+             match Safe_ops.parse_json_safe ~context:"command_plane_v2.events" line with
+             | Ok json -> event_of_json json
+             | Error _ -> None)
+    in
+    let n = List.length all in
+    if n <= limit then all
+    else List.filteri (fun i _ -> i >= n - limit) all
 
 let append_event config (event : event_record) =
   ensure_dirs config;

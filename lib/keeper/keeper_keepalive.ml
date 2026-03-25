@@ -199,7 +199,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               try
                 let synced = ensure_keeper_room_presence ctx.config meta_current in
                 (match write_meta ctx.config synced with
-                 | Ok () -> synced  (* use written value directly, no second read_meta *)
+                 | Ok () ->
+                   Keeper_registry.update_meta synced.name synced;
+                   synced
                  | Error e ->
                    Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
                    synced)
@@ -610,6 +612,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     with_keepalive_registry_rw (fun () ->
         Hashtbl.replace keepalives m.name
           { stop; wakeup; started_at = Time_compat.now (); grpc_close });
+    ignore (Keeper_registry.register m.name m : Keeper_registry.registry_entry);
     (try
        if not (Room_utils.is_initialized ctx.config) then
          let (_init_msg : string) = Room.init ctx.config ~agent_name:None in ()
@@ -644,6 +647,8 @@ let stop_keepalive name =
   with
   | None -> ()
   | Some entry ->
+      Keeper_registry.set_state name Keeper_registry.Stopped;
+      Keeper_registry.unregister name;
       entry.stop := true;
       (match entry.grpc_close with
        (* cleanup: best-effort gRPC close, ignore transport errors *)

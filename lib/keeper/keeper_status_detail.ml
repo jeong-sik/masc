@@ -71,7 +71,7 @@ let handle_keeper_status ctx args : tool_result =
                  ("message_count", `Int (List.length c.messages));
                ]
          in
-         let keepalive_running = keeper_keepalive_running m.name in
+         let keepalive_running = Keeper_registry.is_running m.name in
          let agent_status = parse_agent_status ctx.config ~agent_name:m.agent_name in
          let now_ts = Time_compat.now () in
          let created_ts =

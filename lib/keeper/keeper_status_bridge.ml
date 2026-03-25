@@ -150,7 +150,7 @@ let runtime_surface_json config (meta : keeper_meta) =
       ("paused", `Bool meta.paused);
       ("desired", `Bool desired);
       ("resident_registered", `Bool (Option.is_some resident_spec));
-      ("keepalive_running", `Bool (Keeper_keepalive.keeper_keepalive_running meta.name));
+      ("keepalive_running", `Bool (Keeper_registry.is_running meta.name));
       ( "fiber_health",
         `String
           (Keeper_exec_status.string_of_fiber_health

@@ -54,6 +54,9 @@ val record_restart : string -> unit
 (** Record an error for a keeper. *)
 val record_error : string -> string -> unit
 
+(** Return the started_at timestamp for a keeper, or None if not registered. *)
+val started_at : string -> float option
+
 (** Check if a keeper is in Running state. *)
 val is_running : string -> bool
 

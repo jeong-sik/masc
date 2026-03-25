@@ -127,7 +127,7 @@ let keeper_list_row_json ~runtime_class ~desired ~resident_registered config
   | Error _ | Ok None -> None
   | Ok (Some (meta : keeper_meta)) ->
       let now_ts = Time_compat.now () in
-      let keepalive_running = Keeper_keepalive.keeper_keepalive_running meta.name in
+      let keepalive_running = Keeper_registry.is_running meta.name in
       let agent_status =
         Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
       in

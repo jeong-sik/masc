@@ -256,7 +256,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | _ -> 0
           in
           let keepalive_running =
-            Keeper_keepalive.keeper_keepalive_running m.name
+            Keeper_registry.is_running m.name
           in
 
           let context =
@@ -640,7 +640,7 @@ let keeper_config_json (config : Room.config) (name : string)
         let diagnostic_for_stage =
           Keeper_exec_status.keeper_diagnostic_json
             ~meta:m ~agent_status
-            ~keepalive_running:(Keeper_keepalive.keeper_keepalive_running m.name)
+            ~keepalive_running:(Keeper_registry.is_running m.name)
             ~history_items:[] ~now_ts
         in
         let surface =

@@ -102,5 +102,10 @@ let count_running () =
       (fun _k v acc -> if v.state = Running then acc + 1 else acc)
       registry 0)
 
+let started_at name =
+  match get name with
+  | Some e -> Some e.started_at
+  | None -> None
+
 let clear () =
   with_lock (fun () -> Hashtbl.clear registry)

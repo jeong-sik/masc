@@ -115,6 +115,16 @@ let test_register_replaces () =
   | Some e ->
     check int "restart count reset" 0 e.restart_count
 
+let test_started_at () =
+  R.clear ();
+  check (option (float 0.01)) "none before register" None (R.started_at "s1");
+  let _entry = R.register "s1" (make_meta "s1") in
+  (match R.started_at "s1" with
+   | None -> fail "expected started_at after register"
+   | Some ts -> check bool "positive timestamp" true (ts > 0.0));
+  R.unregister "s1";
+  check (option (float 0.01)) "none after unregister" None (R.started_at "s1")
+
 let () =
   run "Keeper_registry"
     [
@@ -131,5 +141,6 @@ let () =
           test_case "get_exn not found" `Quick test_get_exn_not_found;
           test_case "noop on missing keys" `Quick test_noop_on_missing;
           test_case "register replaces existing" `Quick test_register_replaces;
+          test_case "started_at" `Quick test_started_at;
         ] );
     ]

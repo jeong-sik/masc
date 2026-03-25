@@ -2,7 +2,6 @@
     Runtime-only mutable state stays behind keeper runtime/execution modules. *)
 
 open Keeper_types
-open Keeper_keepalive
 open Keeper_exec_status
 
 let maybe_promote_live_persistent_keeper config name =
@@ -81,7 +80,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     let remaining_slots =
       ref
         (if max_keepers > 0 then
-           max 0 (max_keepers - running_keepers ())
+           max 0 (max_keepers - Keeper_registry.count_running ())
          else
            max_int)
     in
@@ -103,7 +102,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 && (m.usage.last_turn_ts <= 0.0
                     || now_ts -. m.usage.last_turn_ts >= stale_turn_sec)
               in
-              let already_running = keeper_keepalive_running m.name in
+              let already_running = Keeper_registry.is_running m.name in
               let started_here =
                 if already_running then false
                 else if max_keepers > 0 && !remaining_slots <= 0 then false

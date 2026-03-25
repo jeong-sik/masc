@@ -116,6 +116,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta) entry
             let msg = "fiber terminated without resolution" in
             entry.crash_log :=
               keep_last_n 5 (Time_compat.now (), msg) !(entry.crash_log);
+            Keeper_registry.record_error meta.name msg;
             Eio.Promise.resolve entry.done_r (`Crashed msg);
             publish_lifecycle "crashed" meta.name msg))
 
@@ -138,6 +139,7 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
       crash_log = ref [];
     } in
     Hashtbl.replace supervised_registry meta.name entry;
+    ignore (Keeper_registry.register meta.name meta : Keeper_registry.registry_entry);
     (* Register in the shared keepalive registry *)
     let wakeup = ref false in
     Keeper_keepalive.register_keepalive meta.name
@@ -187,7 +189,9 @@ let sweep_and_recover (ctx : _ context) =
         end
   ) supervised_registry;
   (* Clean up stopped/dead entries *)
-  List.iter (fun name -> Hashtbl.remove supervised_registry name) !to_remove;
+  List.iter (fun name ->
+      Hashtbl.remove supervised_registry name;
+      Keeper_registry.unregister name) !to_remove;
   (* Restart zombies *)
   List.iter (fun (name, (old_entry : supervised_entry), crash_msg) ->
     match read_meta ctx.config name with
@@ -206,6 +210,8 @@ let sweep_and_recover (ctx : _ context) =
           crash_log = ref (keep_last_n 5 (now, crash_msg) !(old_entry.crash_log));
         } in
         Hashtbl.replace supervised_registry name new_entry;
+        ignore (Keeper_registry.register name meta : Keeper_registry.registry_entry);
+        Keeper_registry.record_restart name;
         Keeper_keepalive.register_keepalive name
           { Keeper_keepalive.stop = new_entry.stop; wakeup = new_wakeup;
             started_at = now; grpc_close = None };

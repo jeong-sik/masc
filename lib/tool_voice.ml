@@ -223,13 +223,12 @@ let handle_voice_agent _ctx args : result =
   else
     json_string_of_result (Voice_bridge.get_agent_voice ~agent_id)
 
-(* Category C: STT stub — returns not_available until service is integrated *)
+(* STT: not implemented — returns explicit error so callers do not mistake for success *)
 let handle_voice_transcript (_ctx : 'a context) _args : result =
-  (* Transcript requires an external STT service — not yet integrated locally *)
   (false, Yojson.Safe.to_string
     (`Assoc
-      [ ("status", `String "not_available");
-        ("message", `String "transcript requires STT service integration") ]))
+      [ ("error", `String "not_implemented");
+        ("message", `String "masc_voice_transcript requires an external STT service that is not integrated. This tool is not functional.") ]))
 
 (* Category B: conference = batch start of local sessions for multiple agents.
    Each agent_id gets its own Voice_session_manager session; the "conference"

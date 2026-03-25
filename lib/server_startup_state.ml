@@ -11,6 +11,7 @@ type t = {
   pending_lazy_tasks : string list;
   last_error : string option;
   fallback_reason : string option;
+  started_at : float;
 }
 
 let state =
@@ -22,6 +23,7 @@ let state =
       pending_lazy_tasks = [];
       last_error = None;
       fallback_reason = None;
+      started_at = Unix.gettimeofday ();
     }
 
 let phase_to_string = function
@@ -41,6 +43,7 @@ let reset ?(backend_mode = "unknown") () =
       pending_lazy_tasks = [];
       last_error = None;
       fallback_reason = None;
+      started_at = Unix.gettimeofday ();
     }
 
 let mark_blocking ~backend_mode =
@@ -53,6 +56,25 @@ let mark_blocking ~backend_mode =
         pending_lazy_tasks = [];
         last_error = None;
       })
+
+(** True when the HTTP accept loop can serve requests (always true after socket bind). *)
+let is_live () = true
+
+(** Seconds elapsed since startup began. *)
+let elapsed_since_start () =
+  Unix.gettimeofday () -. !state.started_at
+
+(** Default startup watchdog timeout in seconds. Override with MASC_STARTUP_WATCHDOG_SEC. *)
+let default_watchdog_timeout_sec = 120.0
+
+(** Read watchdog timeout from env, clamped to [30, 600]. *)
+let watchdog_timeout_sec () =
+  match Sys.getenv_opt "MASC_STARTUP_WATCHDOG_SEC" with
+  | Some s ->
+    (match float_of_string_opt s with
+     | Some v -> Float.max 30.0 (Float.min 600.0 v)
+     | None -> default_watchdog_timeout_sec)
+  | None -> default_watchdog_timeout_sec
 
 let mark_state_ready ~backend_mode =
   update (fun current ->
@@ -120,4 +142,6 @@ let to_yojson () =
         match current.fallback_reason with
         | Some reason -> `String reason
         | None -> `Null );
+      ("elapsed_sec", `Float (elapsed_since_start ()));
+      ("watchdog_timeout_sec", `Float (watchdog_timeout_sec ()));
     ]

@@ -43,20 +43,13 @@ let handle_relay_checkpoint _ctx args =
   let todos = get_string_list args "todos" in
   let pdca_state = get_string_opt args "pdca_state" in
   let relevant_files = get_string_list args "relevant_files" in
-  (* Goal fields are parsed for validation but not yet persisted in checkpoint.
-     They will be wired into checkpoint storage when Goal Store integration
-     is added to the relay module (tracked in Phase 2 roadmap). *)
-  let _active_goal_ids = get_string_list args "active_goal_ids" in
-  let _goal_blockers = get_string_list args "goal_blockers" in
-  let _goal_progress = match Yojson.Safe.Util.member "goal_progress" args with
-    | `List items -> List.filter_map (fun item ->
-        match item with
-        | `List [`String gid; `Float pct] -> Some (gid, pct)
-        | `List [`String gid; `Int n] -> Some (gid, float_of_int n)
-        | _ -> None
-      ) items
-    | _ -> []
-  in
+  (* Goal fields (active_goal_ids, goal_blockers, goal_progress) are accepted
+     by the schema but not persisted — silently discarding them would hide
+     caller intent.  Log when they are present so operators can detect drift. *)
+  (let goal_ids = get_string_list args "active_goal_ids" in
+   if goal_ids <> [] then
+     Log.Misc.info "[RELAY] active_goal_ids provided but not persisted (goal store not integrated): %s"
+       (String.concat "," goal_ids));
   let cell = Mcp_server.get_cell () in
   let messages = get_int args "messages" cell.Mitosis.task_count in
   let tool_calls = get_int args "tool_calls" cell.Mitosis.tool_call_count in

@@ -71,13 +71,7 @@ let inbox_path (config : Room.config) : string =
 let append_mention (config : Room.config) (record : mention_record) : unit =
   let path = inbox_path config in
   let json = mention_record_to_json record in
-  let line = Yojson.Safe.to_string json ^ "\n" in
-  let fd =
-    Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644
-  in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-      let _ = Unix.write_substring fd line 0 (String.length line) in
-      ())
+  Fs_compat.append_jsonl path json
 
 let load_all_mentions (config : Room.config) : mention_record list =
   let path = inbox_path config in
@@ -130,9 +124,4 @@ let mark_read (config : Room.config) ~(mention_id : string) : unit =
     |> String.concat "\n"
   in
   let content = if content = "" then "" else content ^ "\n" in
-  let fd =
-    Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644
-  in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-      let _ = Unix.write_substring fd content 0 (String.length content) in
-      ())
+  Fs_compat.save_file path content

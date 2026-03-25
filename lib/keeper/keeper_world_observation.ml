@@ -22,6 +22,14 @@ type world_observation = {
   failed_task_count : int;
   active_agent_count : int;
   triage_triggers : string;
+  autonomy_trigger : string option;
+  allow_noop : bool;
+}
+
+type board_signal_match = {
+  explicit_mention : bool;
+  matched_targets : string list;
+  score : int;
 }
 
 (** Collect pending direct mentions from joined rooms since last cursor. *)
@@ -95,6 +103,69 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
   if activity_ts <= 0.0 then 0
   else int_of_float (max 0.0 (now_ts -. activity_ts))
 
+let board_relevance_threshold = 4
+
+let nontrivial_token_overlap (left : string list) (right : string list) : int =
+  let left = dedupe_keep_order left in
+  let right = dedupe_keep_order right in
+  List.fold_left (fun acc token -> if List.mem token right then acc + 1 else acc) 0 left
+
+let board_signal_text (signal : Board_dispatch.keeper_board_signal) =
+  String.concat "\n"
+    (List.filter (fun part -> String.trim part <> "")
+       [
+         signal.title;
+         signal.content;
+         (match signal.hearth with Some hearth -> hearth | None -> "");
+       ])
+
+let board_signal_match
+    ~(continuity_summary : string)
+    ~(meta : keeper_meta)
+    ~(signal : Board_dispatch.keeper_board_signal) : board_signal_match =
+  let author = String.lowercase_ascii (String.trim signal.author) in
+  let self_tokens =
+    [ meta.name; meta.agent_name ]
+    |> List.map (fun value -> String.lowercase_ascii (String.trim value))
+  in
+  if List.mem author self_tokens then
+    { explicit_mention = false; matched_targets = []; score = 0 }
+  else
+    let targets =
+      if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
+    in
+    let haystack = String.lowercase_ascii (board_signal_text signal) in
+    let matched_targets =
+      targets
+      |> List.filter (fun target ->
+             let needle = "@" ^ String.lowercase_ascii (String.trim target) in
+             needle <> "@"
+             &&
+             try
+               let _ = Str.search_forward (Str.regexp_string needle) haystack 0 in
+               true
+             with Not_found -> false)
+    in
+    if matched_targets <> [] then
+      { explicit_mention = true; matched_targets; score = 100 }
+    else
+      let signal_tokens = similarity_tokens haystack in
+      let active_goal_tokens =
+        meta.active_goal_ids |> List.concat_map similarity_tokens
+      in
+      let goal_tokens =
+        [ meta.goal; meta.short_goal; meta.mid_goal; meta.long_goal; meta.instructions ]
+        |> List.concat_map similarity_tokens
+      in
+      let continuity_tokens =
+        continuity_summary |> similarity_tokens
+      in
+      let active_goal_score = nontrivial_token_overlap signal_tokens active_goal_tokens * 6 in
+      let goal_score = nontrivial_token_overlap signal_tokens goal_tokens * 4 in
+      let continuity_score = nontrivial_token_overlap signal_tokens continuity_tokens * 2 in
+      let score = active_goal_score + goal_score + continuity_score in
+      { explicit_mention = false; matched_targets = []; score }
+
 (** Read context ratio from checkpoint if available. *)
 let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
   try
@@ -158,7 +229,8 @@ let reset_board_cursor name =
 [@@warning "-32"]
 (** Collect recent board activity using cursor-based tracking.
     Returns (event summaries, new post count, mention count). *)
-let collect_board_events ~(meta : keeper_meta) : string list * int * int =
+let collect_board_events ~(continuity_summary : string) ~(meta : keeper_meta) :
+    string list * int * int =
   try
     let since_ts =
       Eio.Mutex.use_ro board_cursors_mu (fun () ->
@@ -170,14 +242,29 @@ let collect_board_events ~(meta : keeper_meta) : string list * int * int =
        window are included on the next pass instead of being skipped. *)
     let cursor_watermark = Time_compat.now () in
     let posts =
-      Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:20 ()
+      Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:20 ()
     in
     (* Update the cursor only after a successful read to avoid losing events
        when the board fetch fails mid-turn. *)
     Eio.Mutex.use_rw ~protect:true board_cursors_mu (fun () ->
         Hashtbl.replace board_cursors meta.name cursor_watermark);
     let recent =
-      List.filter (fun (p : Board.post) -> p.created_at >= since_ts) posts
+      List.filter (fun (p : Board.post) -> p.updated_at >= since_ts) posts
+      |> List.filter (fun (p : Board.post) ->
+             let signal : Board_dispatch.keeper_board_signal =
+               {
+                 kind = Board_dispatch.Board_post_created;
+                 post_id = Board.Post_id.to_string p.id;
+                 author = Board.Agent_id.to_string p.author;
+                 title = p.title;
+                 content = p.content;
+                 hearth = p.hearth;
+               }
+             in
+             let matched =
+               board_signal_match ~continuity_summary ~meta ~signal
+             in
+             matched.explicit_mention || matched.score >= board_relevance_threshold)
     in
     let new_count = List.length recent in
     let targets =
@@ -227,7 +314,9 @@ let collect_board_events ~(meta : keeper_meta) : string list * int * int =
       (Printexc.to_string exn);
     ([], 0, 0)
 
-let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
+let observe ~(pending_board_events : string list option) ~(config : Room.config)
+    ~(meta : keeper_meta) :
+    world_observation =
   let pending_mentions = collect_pending_mentions ~config ~meta in
   let unclaimed_task_count, failed_task_count =
     read_backlog_counts ~config
@@ -244,8 +333,30 @@ let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
     Agent_economy.economic_pressure ~base_path:config.base_path
       ~agent_name:meta.name
   in
-  let pending_board_events, _board_new_count, _board_mention_count =
-    collect_board_events ~meta
+  let pending_board_events =
+    match pending_board_events with
+    | Some events -> events
+    | None ->
+        let events, _board_new_count, _board_mention_count =
+          collect_board_events ~meta ~continuity_summary
+        in
+        events
+  in
+  let since_last_proactive =
+    if meta.proactive.last_ts <= 0.0 then max_int
+    else int_of_float (max 0.0 (Time_compat.now () -. meta.proactive.last_ts))
+  in
+  let proactive_due =
+    meta.proactive.enabled
+    && idle_seconds >= meta.proactive.idle_sec
+    && since_last_proactive >= meta.proactive.cooldown_sec
+  in
+  let autonomy_trigger =
+    if pending_mentions <> [] then Some "mention_reactive"
+    else if pending_board_events <> [] then Some "board_reactive"
+    else if failed_task_count > 0 || unclaimed_task_count > 0 then Some "task_reactive"
+    else if proactive_due then Some "proactive_idle"
+    else None
   in
   {
     pending_mentions;
@@ -260,4 +371,13 @@ let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
     failed_task_count;
     active_agent_count;
     triage_triggers = meta.last_triage_triggers;
+    autonomy_trigger;
+    allow_noop = Option.is_none autonomy_trigger;
   }
+
+let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observation) =
+  match observation.autonomy_trigger with
+  | Some _ -> true
+  | None ->
+      meta.proactive.enabled
+      && observation.idle_seconds >= meta.proactive.idle_sec

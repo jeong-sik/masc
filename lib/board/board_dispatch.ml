@@ -23,8 +23,31 @@ type backend_state =
   | Uninitialized
   | Active of board_backend
 
+type keeper_board_signal_kind =
+  | Board_post_created
+  | Board_comment_added
+
+type keeper_board_signal = {
+  kind : keeper_board_signal_kind;
+  post_id : string;
+  author : string;
+  title : string;
+  content : string;
+  hearth : string option;
+}
+
 (** Current backend state. Single ref avoids contradictory initialized/backend pairs. *)
 let backend_state : backend_state ref = ref Uninitialized
+
+let keeper_board_signal_hook : (keeper_board_signal -> unit) option ref = ref None
+
+let set_keeper_board_signal_hook hook =
+  keeper_board_signal_hook := Some hook
+
+let emit_keeper_board_signal signal =
+  match !keeper_board_signal_hook with
+  | Some hook -> hook signal
+  | None -> ()
 
 let is_initialized () =
   match !backend_state with
@@ -118,11 +141,39 @@ let create_post ~author ~content ?title ?body ?post_kind ?meta_json
     ?(ttl_hours=Board.Limits.default_ttl_hours) ?hearth ?thread_id () =
   match backend () with
   | Jsonl store ->
-      Board.create_post store ~author ~content ?title ?body ?post_kind ?meta_json
-        ~visibility ~ttl_hours ?hearth ?thread_id ()
+      (match
+         Board.create_post store ~author ~content ?title ?body ?post_kind ?meta_json
+           ~visibility ~ttl_hours ?hearth ?thread_id ()
+       with
+       | Ok post as ok ->
+           emit_keeper_board_signal
+             {
+               kind = Board_post_created;
+               post_id = Board.Post_id.to_string post.id;
+               author = Board.Agent_id.to_string post.author;
+               title = post.title;
+               content = post.content;
+               hearth = post.hearth;
+             };
+           ok
+       | Error _ as err -> err)
   | Postgres t ->
-      Board_pg.create_post t ~author ~content ?title ?body ?post_kind ?meta_json
-        ~visibility ~ttl_hours ?hearth ?thread_id ()
+      (match
+         Board_pg.create_post t ~author ~content ?title ?body ?post_kind ?meta_json
+           ~visibility ~ttl_hours ?hearth ?thread_id ()
+       with
+       | Ok post as ok ->
+           emit_keeper_board_signal
+             {
+               kind = Board_post_created;
+               post_id = Board.Post_id.to_string post.id;
+               author = Board.Agent_id.to_string post.author;
+               title = post.title;
+               content = post.content;
+               hearth = post.hearth;
+             };
+           ok
+       | Error _ as err -> err)
 
 let get_post ~post_id =
   match backend () with
@@ -175,9 +226,39 @@ let add_comment ~post_id ~author ~content ?parent_id
     ?(ttl_hours=Board.Limits.default_ttl_hours) () =
   match backend () with
   | Jsonl store ->
-      Board.add_comment store ~post_id ~author ~content ?parent_id ~ttl_hours ()
+      (match Board.add_comment store ~post_id ~author ~content ?parent_id ~ttl_hours () with
+       | Ok comment as ok ->
+           (match Board.get_post store ~post_id with
+            | Ok post ->
+                emit_keeper_board_signal
+                  {
+                    kind = Board_comment_added;
+                    post_id;
+                    author = Board.Agent_id.to_string comment.author;
+                    title = post.title;
+                    content;
+                    hearth = post.hearth;
+                  }
+            | Error _ -> ());
+           ok
+       | Error _ as err -> err)
   | Postgres t ->
-      Board_pg.add_comment t ~post_id ~author ~content ?parent_id ~ttl_hours ()
+      (match Board_pg.add_comment t ~post_id ~author ~content ?parent_id ~ttl_hours () with
+       | Ok comment as ok ->
+           (match Board_pg.get_post t ~post_id with
+            | Ok post ->
+                emit_keeper_board_signal
+                  {
+                    kind = Board_comment_added;
+                    post_id;
+                    author = Board.Agent_id.to_string comment.author;
+                    title = post.title;
+                    content;
+                    hearth = post.hearth;
+                  }
+            | Error _ -> ());
+           ok
+       | Error _ as err -> err)
 
 let vote ~voter ~post_id ~direction =
   match backend () with

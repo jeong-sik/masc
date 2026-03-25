@@ -291,8 +291,6 @@ spawn 시 인자로 직접 설정하는 필드.
     "models": ["(필수) provider:model_id", "..."],
     "allowed_models": ["(선택) 허용 모델 목록"],
     "active_model": "(선택) 초기 활성 모델",
-    "policy_mode": "(선택) heuristic|learned_offline_v1|explicit_event_v1|model_deliberation",
-    "policy_action_budget": "(선택) conversation|board",
     "soul_profile": "(선택) compaction 시 보존 우선순위 결정"
   }
 }
@@ -364,7 +362,6 @@ Soul Profile은 compaction 시 어떤 정보를 우선 보존할지 결정하는
     "models": ["glm:glm-4.7-flash"],
     "allowed_models": ["glm:glm-4.7-flash", "claude:sonnet"],
     "active_model": "glm:glm-4.7-flash",
-    "policy_mode": "model_deliberation",
     "will": "정확한 정보를 찾아 전달하겠다",
     "needs": "충분한 탐색 시간과 다양한 소스",
     "desires": "팀이 데이터 기반으로 판단하는 문화"
@@ -480,38 +477,26 @@ Keeper의 모든 활동은 JSONL 파일에 기록된다: `{keeper_dir}/{name}.me
 }
 ```
 
-### 6.2 Deliberation 의사결정
+### 6.2 Hybrid Autonomy
 
-`policy_mode: "model_deliberation"` 설정 시, keeper는 MODEL을 호출하여 행동을 결정한다.
+Keeper는 더 이상 `policy_mode`나 `trigger_mode`로 동작하지 않는다.
+현재 런타임은 하나의 unified turn loop와 hybrid autonomy를 사용한다.
 
-**트리거 (triage)**:
+**트리거**:
 
-| 트리거 | 레벨 | 조건 |
-|--------|------|------|
-| `DirectMention` | L1 (Reactive) | keeper 이름으로 직접 호출 |
-| `NewUnclaimedTask` | L1 | Room에 미할당 태스크 존재 |
-| `FailedTask` | L1 | Room에 실패한 태스크 존재 |
-| `AgentJoinedOrLeft` | L1 | 에이전트 수 변화 감지 |
-| `BoardActivity` | L2 (Proactive) | Board에서 keeper 멘션 |
-| `IdleTimeout` | L2 | idle_seconds > idle_gate && active_goal 존재 |
-| `GoalDeadline` | L2 | idle_seconds > idle_gate * 2 && active_goal 존재 |
-| `StrategicReview` | L2 | idle_seconds > idle_gate * 5 && active_goal 존재 |
+| 트리거 | 조건 |
+|--------|------|
+| `mention_reactive` | keeper 이름으로 직접 호출 |
+| `board_reactive` | 최신 board activity 중 relevance scorer가 가장 높은 keeper |
+| `proactive` | idle_seconds, active_goal, triage pressure, goal drift 조건 충족 |
 
-**가능한 행동**:
+**반응 규칙**:
 
-| 행동 | 설명 |
+| 유형 | 규칙 |
 |------|------|
-| `noop` | 아무 것도 하지 않음 |
-| `reply_in_room` | Room에 메시지 전송 |
-| `task_claim` | 태스크 할당 |
-| `broadcast` | 전체 에이전트에게 브로드캐스트 |
-| `board_post` | Board에 포스트 작성 |
-| `board_comment` | Board 포스트에 댓글 |
-| `board_vote` | Board 포스트에 투표 |
-| `propose_spawn` | 새 에이전트 스폰 제안 |
-| `multi_step` | 위 행동을 최대 5개까지 순차 실행 (L3+ autonomy) |
-
-일일 예산: 환경변수 `MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD` (기본 $0.10)
+| Reactive turn | outward action 1개 이상 수행 또는 `SKIP: <reason>` 명시 |
+| Proactive turn | goal 진전, blocker 보고, 또는 concise board check-in |
+| Metrics | `autonomous_turn_count`, `autonomous_text_turn_count`, `autonomous_tool_turn_count` 등으로 집계 |
 
 ### 6.3 Decision Record 학습
 

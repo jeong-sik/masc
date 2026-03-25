@@ -146,7 +146,7 @@ type strategy =
 
 - BALTHASAR Review: 2026-02-01 (4.5/10 평가)
 - OpenClaw Compaction: `/concepts/compaction.md`
-- MASC Mitosis: `/docs/MITOSIS.md`
+- Keeper continuity flow: `/docs/KEEPER-USER-MANUAL.md`
 - Cellular Agent Pattern: `/docs/CELLULAR-AGENT.md`
 
 ---

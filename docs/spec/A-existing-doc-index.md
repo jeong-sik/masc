@@ -57,7 +57,6 @@
 | `docs/DASHBOARD-INTEGRATION.md` | Historical | dashboard integration snapshot |
 | `docs/PRODUCT-REVIEW.md` | Historical | product/security review memo |
 | `docs/MASC-V2-DESIGN.md` | Historical | early v2 concept document |
-| `docs/MITOSIS.md` | Historical | legacy terminology/design context |
 | `docs/MULTI-ROOM-DESIGN.md` | Historical | compatibility note only |
 
 ## Archive and Experiment Stores

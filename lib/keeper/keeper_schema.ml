@@ -61,10 +61,6 @@ let resident_schemas : tool_schema list = [
           ("type", `String "string");
           ("enum", `List [`String "local"; `String "global"]);
         ]);
-        ("trigger_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "explicit_only"]);
-        ]);
         ("mention_targets", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -149,11 +145,6 @@ let resident_schemas : tool_schema list = [
           ("type", `String "string");
           ("enum", `List [`String "current"; `String "all"]);
           ("description", `String "Which rooms the keeper should maintain presence in.");
-        ]);
-        ("trigger_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "explicit_only"]);
-          ("description", `String "Keeper trigger mode. Only 'explicit_only' is supported and it reacts to exact direct mentions.");
         ]);
         ("mention_targets", `Assoc [
           ("type", `String "array");

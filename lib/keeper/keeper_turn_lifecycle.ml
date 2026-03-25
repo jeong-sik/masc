@@ -66,8 +66,7 @@ let handle_keeper_model_set ctx args : tool_result =
                           ("allowed_models",
                             `List
                               (List.map (fun item -> `String item) updated.allowed_models));
-                  ("room_scope", `String updated.room_scope);
-                  ("trigger_mode", `String updated.trigger_mode);
+                          ("room_scope", `String updated.room_scope);
                     ]) )
 
 

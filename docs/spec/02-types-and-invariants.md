@@ -472,7 +472,7 @@ type post_hook = Tool_result.t -> Tool_result.t
 type module_tag =
   | Mod_plan | Mod_run | Mod_operator | Mod_command_plane
   | Mod_local_runtime | Mod_team_session | Mod_voice | Mod_cache
-  | Mod_tempo | Mod_mitosis | Mod_portal | Mod_worktree
+  | Mod_tempo | Mod_portal | Mod_worktree
   | Mod_code_swarm | Mod_code | Mod_code_write | Mod_vote | Mod_social
   | Mod_council | Mod_a2a | Mod_handover
   | Mod_relay | Mod_goals | Mod_heartbeat | Mod_encryption

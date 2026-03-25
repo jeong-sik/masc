@@ -36,9 +36,8 @@ let find_jsonl_row_by_action_id rows action_id =
 let resolved_keeper_args_to_json
     ~name ~persona_name ~persona_profile_path ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~soul_profile ~will ~needs ~desires ~models ~allowed_models
-    ~active_model ~policy_mode
-    ~policy_voice_enabled ~policy_shell_mode
-    ~room_scope ~scope_kind ~trigger_mode ~mention_targets
+    ~active_model ~policy_voice_enabled
+    ~room_scope ~scope_kind ~mention_targets
     ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
   `Assoc
@@ -58,12 +57,9 @@ let resolved_keeper_args_to_json
       ("models", string_list_to_json models);
       ("allowed_models", string_list_to_json allowed_models);
       ("active_model", `String active_model);
-      ("policy_mode", `String policy_mode);
       ("policy_voice_enabled", `Bool policy_voice_enabled);
-      ("policy_shell_mode", `String policy_shell_mode);
       ("room_scope", `String room_scope);
       ("scope_kind", `String scope_kind);
-      ("trigger_mode", `String trigger_mode);
       ("mention_targets", string_list_to_json mention_targets);
       ("presence_keepalive", `Bool presence_keepalive);
       ("presence_keepalive_sec", `Int presence_keepalive_sec);
@@ -82,13 +78,8 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let active_model =
     Safe_ops.json_string ~default:"" "active_model" json |> String.trim
   in
-  let _policy_mode = "unified" in
   let _policy_voice_enabled =
     Safe_ops.json_bool ~default:false "policy_voice_enabled" json
-  in
-  let _policy_shell_mode = "coding" in
-  let _initiative_enabled =
-    Safe_ops.json_bool ~default:false "initiative_enabled" json
   in
   let mention_targets = Safe_ops.json_string_list "mention_targets" json in
   if not (validate_name name) then errors := "invalid keeper name" :: !errors;
@@ -96,12 +87,8 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   if models = [] then errors := "models is required" :: !errors;
   if active_model <> "" && not (List.mem active_model (allowed_models @ models)) then
     errors := "active_model must be included in models or allowed_models" :: !errors;
-  if
-    (Safe_ops.json_string ~default:"explicit_only" "trigger_mode" json
-     |> Keeper_contract.trigger_mode_of_string
-     |> Keeper_contract.trigger_mode_is_explicit_only)
-    && mention_targets = []
-  then errors := "mention_targets is required for explicit_only trigger_mode" :: !errors;
+  if mention_targets = [] then
+    errors := "mention_targets is required" :: !errors;
   List.rev !errors
 
 let resolved_keeper_args_from_persona args :
@@ -200,21 +187,11 @@ let resolved_keeper_args_from_persona args :
                      | model :: _ -> model
                      | [] -> "")
             in
-            let policy_mode =
-              ignore (first_some (get_string_opt args "policy_mode") defaults.policy_mode);
-              "unified"
-            in
             let policy_voice_enabled =
               first_some
                 (get_bool_opt args "policy_voice_enabled")
-                defaults.policy_voice_enabled
+              defaults.policy_voice_enabled
               |> Option.value ~default:false
-            in
-            let policy_shell_mode =
-              ignore (first_some
-                (get_string_opt args "policy_shell_mode")
-                defaults.policy_shell_mode);
-              "coding"
             in
             let room_scope =
               get_string_opt args "room_scope"
@@ -228,12 +205,6 @@ let resolved_keeper_args_from_persona args :
               |> Option.value
                    ~default:(if room_scope = "all" then "global" else "local")
               |> canonical_scope_kind
-            in
-            let trigger_mode =
-              get_string_opt args "trigger_mode"
-              |> first_some defaults.trigger_mode
-              |> Option.value ~default:"explicit_only"
-              |> canonical_trigger_mode
             in
             let mention_targets =
               let explicit = get_string_list args "mention_targets" in
@@ -259,10 +230,7 @@ let resolved_keeper_args_from_persona args :
             let proactive_enabled =
               get_bool_opt args "proactive_enabled"
               |> first_some defaults.proactive_enabled
-              |> Option.value
-                   ~default:
-                     (if trigger_mode = "explicit_only" then false
-                      else default_proactive_enabled)
+              |> Option.value ~default:false
             in
             let auto_handoff = get_bool args "auto_handoff" true in
             let handoff_threshold =
@@ -281,9 +249,8 @@ let resolved_keeper_args_from_persona args :
                 ~goal ~short_goal ~mid_goal ~long_goal
                 ~instructions ~soul_profile ~will ~needs ~desires
                 ~models:base_models ~allowed_models ~active_model
-                ~policy_mode
-                ~policy_voice_enabled ~policy_shell_mode
-                ~room_scope ~scope_kind ~trigger_mode ~mention_targets
+                ~policy_voice_enabled
+                ~room_scope ~scope_kind ~mention_targets
                 ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
                 ~auto_handoff ~handoff_threshold
                 ~handoff_cooldown_sec

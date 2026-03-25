@@ -99,15 +99,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       let effective_models =
         effective_model_labels_for_turn meta ~inline_models
       in
-      let effective_models =
-        if
-          meta.trigger_mode
-           |> Keeper_contract.trigger_mode_of_string
-           |> Keeper_contract.trigger_mode_is_explicit_only
-        then
-          effective_models
-        else maybe_append_keeper_fallback_models effective_models
-      in
       (match ensure_api_keys_for_labels effective_models with
        | Error e -> (false, "❌ " ^ e)
        | Ok () ->

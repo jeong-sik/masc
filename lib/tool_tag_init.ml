@@ -58,14 +58,6 @@ let register_all () =
     "masc_tempo";
   ];
 
-  (* ── Mod_mitosis: non-schema tools ──────────────────────────── *)
-  reg Mod_mitosis [
-    "masc_mitosis_all"; "masc_mitosis_pool";
-    "masc_mitosis_divide"; "masc_mitosis_check"; "masc_mitosis_record";
-    "masc_mitosis_prepare"; "masc_mitosis_handoff";
-    "masc_metrics_compare"; "masc_metrics_record";
-  ];
-
   (* ── Mod_code: Tool_code ──────────────────────────────────────── *)
   reg Mod_code [
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";

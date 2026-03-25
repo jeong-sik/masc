@@ -89,7 +89,9 @@ export function OpsKeeperColumn() {
                 : null}
               <div class="flex gap-2 text-[10px] text-[var(--text-muted)] mt-1">
                 ${typeof keeper.turn_count === 'number' ? html`<span>turns: ${keeper.turn_count}</span>` : null}
-                ${typeof keeper.autonomous_action_count === 'number' ? html`<span>actions: ${keeper.autonomous_action_count}</span>` : null}
+                ${typeof keeper.autonomous_turn_count === 'number' ? html`<span>auto: ${keeper.autonomous_turn_count}</span>` : null}
+                ${typeof keeper.autonomous_tool_turn_count === 'number' ? html`<span>tool: ${keeper.autonomous_tool_turn_count}</span>` : null}
+                ${typeof keeper.autonomous_text_turn_count === 'number' ? html`<span>text: ${keeper.autonomous_text_turn_count}</span>` : null}
                 ${keeper.keepalive_running ? html`<span class="text-[var(--ok)]">keepalive</span>` : null}
               </div>
             </button>

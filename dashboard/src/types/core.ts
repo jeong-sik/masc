@@ -328,6 +328,12 @@ export interface Keeper {
   active_goal_ids?: string[]
   last_autonomous_action_at?: string | null
   autonomous_action_count?: number
+  autonomous_turn_count?: number
+  autonomous_text_turn_count?: number
+  autonomous_tool_turn_count?: number
+  board_reactive_turn_count?: number
+  mention_reactive_turn_count?: number
+  noop_turn_count?: number
   created_at?: string
   updated_at?: string
   last_heartbeat?: string
@@ -478,26 +484,6 @@ export interface KeeperConfigDrift {
   last_reason: string | null
 }
 
-export interface KeeperConfigInitiativeSourceDefaults {
-  enabled: boolean | null
-  scope: string | null
-  idle_sec: number | null
-  cooldown_sec: number | null
-  context_mode: string | null
-  post_ttl_hours: number | null
-}
-
-export interface KeeperConfigInitiative {
-  status: KeeperFeatureStatus
-  enabled: boolean | null
-  scope: string | null
-  idle_sec: number | null
-  cooldown_sec: number | null
-  context_mode: string | null
-  configured_in_source: boolean
-  source_defaults: KeeperConfigInitiativeSourceDefaults | null
-}
-
 export interface KeeperConfigHandoff {
   auto: boolean
   threshold: number
@@ -522,7 +508,6 @@ export interface KeeperConfigRuntime {
 export interface KeeperConfigCoordination {
   room_scope: string
   scope_kind: string
-  trigger_mode: string
   mention_targets: string[]
   joined_room_ids: string[]
 }
@@ -562,7 +547,6 @@ export interface KeeperConfig {
   compaction: KeeperConfigCompaction
   proactive: KeeperConfigProactive
   drift: KeeperConfigDrift
-  initiative: KeeperConfigInitiative
   auto_team_session: KeeperConfigAutoTeamSession
   handoff: KeeperConfigHandoff
   runtime: KeeperConfigRuntime

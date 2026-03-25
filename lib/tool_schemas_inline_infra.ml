@@ -198,10 +198,10 @@ For llama, provide model explicitly. Pair with masc_add_task to create the task 
   (* masc_memento_mori *)
   {
     name = "masc_memento_mori";
-    description = "All-in-one context health check combining mitosis check + prepare + divide in a single call. \
-Use when you want a simple periodic lifecycle check without managing individual mitosis steps. \
-<50%: continue, 50-80%: auto-prepare DNA, >80%: auto-divide and spawn successor. \
-Pair with masc_mitosis_status to see cell state, or masc_mitosis_handoff for async saga variant.";
+    description = "All-in-one OAS lifecycle check for context pressure and successor rollover. \
+Use when you want a simple periodic lifecycle check without manual handoff bookkeeping. \
+Below threshold: continue, mid pressure: prepare context capsule, high pressure: roll work forward to a successor path. \
+Pair with masc_self_introspect for local lifecycle state, or masc_handover_* when you need an explicit successor record.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

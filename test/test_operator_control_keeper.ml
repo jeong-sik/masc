@@ -179,14 +179,7 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
 goal = "Defaults goal"
 models = ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
 room_scope = "all"
-trigger_mode = "legacy"
 proactive_enabled = true
-initiative_enabled = true
-initiative_scope = "board_only"
-initiative_idle_sec = 3600
-initiative_cooldown_sec = 3600
-initiative_context_mode = "board_snapshot"
-initiative_post_ttl_hours = 24
 |};
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
@@ -215,7 +208,6 @@ initiative_post_ttl_hours = 24
         {
           meta with
           room_scope = "current";
-          trigger_mode = "explicit_only";
           proactive = { meta.proactive with enabled = false };
           usage =
             {
@@ -242,8 +234,8 @@ initiative_post_ttl_hours = 24
       in
       Alcotest.(check bool) "config found" true (status = `OK);
       let open Yojson.Safe.Util in
-      Alcotest.(check string) "trigger_mode from live meta" "explicit_only"
-        (json |> member "coordination" |> member "trigger_mode" |> to_string);
+      Alcotest.(check bool) "trigger_mode removed from config surface" true
+        (json |> member "coordination" |> member "trigger_mode" = `Null);
       Alcotest.(check string) "room_scope from live meta" "current"
         (json |> member "coordination" |> member "room_scope" |> to_string);
       Alcotest.(check bool) "runtime paused from live meta" true
@@ -260,18 +252,14 @@ initiative_post_ttl_hours = 24
         json |> member "sources" |> member "override_fields" |> to_list
         |> List.map to_string
       in
-      Alcotest.(check bool) "trigger_mode canonicalized so not flagged as override" false
-        (List.mem "coordination.trigger_mode" override_fields);
-      (* room_scope "all" is canonicalized to "current" (#2901), matching
-         live meta — no longer flagged as override. *)
-      Alcotest.(check bool) "room_scope canonicalized so not flagged" false
+      (* Source defaults keep room_scope = "all", while live meta is mutated to
+         "current", so the override must stay visible. *)
+      Alcotest.(check bool) "room_scope override flagged" true
         (List.mem "coordination.room_scope" override_fields);
       Alcotest.(check bool) "override field proactive" true
         (List.mem "proactive.enabled" override_fields);
-      Alcotest.(check string) "initiative wired" "wired"
-        (json |> member "initiative" |> member "status" |> to_string);
-      Alcotest.(check bool) "initiative configured in source" true
-        (json |> member "initiative" |> member "configured_in_source" |> to_bool);
+      Alcotest.(check bool) "initiative surface removed" true
+        (json |> member "initiative" = `Null);
       Alcotest.(check int) "total input tokens surfaced" 1200
         (json |> member "metrics" |> member "total_input_tokens" |> to_int);
       Alcotest.(check int) "last latency surfaced" 4000

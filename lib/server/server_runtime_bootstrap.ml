@@ -270,6 +270,10 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
   (* Inject Event_bus into keeper resident runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
+  Board_dispatch.set_keeper_board_signal_hook (fun signal ->
+    Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
+      ~config:state.room_config
+      signal);
   (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
      can react to new tasks, mentions, or room activity immediately. *)
   Room_eio.on_broadcast_mention := (fun mention ->

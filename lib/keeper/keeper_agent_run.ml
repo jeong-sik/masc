@@ -18,6 +18,7 @@ type run_result = {
   tool_calls_made : int;
   usage : Agent_sdk.Types.api_usage;
   tools_used : string list;
+  checkpoint : Agent_sdk.Checkpoint.t option;
 }
 
 let normalize_response_text ~(text : string) ~(tool_names : string list) :
@@ -241,4 +242,5 @@ let run_turn
            tool_calls_made = List.length tool_names;
            usage;
            tools_used = tool_names;
+           checkpoint = result.checkpoint;
          })

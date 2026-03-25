@@ -40,84 +40,6 @@ let team_session_bridge_json config (meta : keeper_meta) =
       ("start_count_total", `Int meta.team_session_start_count_total);
     ]
 
-let unsupported_feature_status configured_in_source =
-  if configured_in_source then "source_only" else "unwired"
-
-let initiative_source_defaults_json (defaults : keeper_profile_defaults) :
-    Yojson.Safe.t =
-  let configured =
-    Option.is_some defaults.initiative_enabled
-    || Option.is_some defaults.initiative_scope
-    || Option.is_some defaults.initiative_idle_sec
-    || Option.is_some defaults.initiative_cooldown_sec
-    || Option.is_some defaults.initiative_context_mode
-    || Option.is_some defaults.initiative_post_ttl_hours
-  in
-  if not configured then `Null
-  else
-    `Assoc
-      [
-        ( "enabled",
-          match defaults.initiative_enabled with
-          | Some value -> `Bool value
-          | None -> `Null );
-        ( "scope",
-          match defaults.initiative_scope with
-          | Some value -> `String value
-          | None -> `Null );
-        ( "idle_sec",
-          match defaults.initiative_idle_sec with
-          | Some value -> `Int value
-          | None -> `Null );
-        ( "cooldown_sec",
-          match defaults.initiative_cooldown_sec with
-          | Some value -> `Int value
-          | None -> `Null );
-        ( "context_mode",
-          match defaults.initiative_context_mode with
-          | Some value -> `String value
-          | None -> `Null );
-        ( "post_ttl_hours",
-          match defaults.initiative_post_ttl_hours with
-          | Some value -> `Int value
-          | None -> `Null );
-      ]
-
-let initiative_configured_in_source (defaults : keeper_profile_defaults) =
-  initiative_source_defaults_json defaults <> `Null
-
-let initiative_surface_json ?(meta : keeper_meta option) (defaults : keeper_profile_defaults) =
-  let configured_in_source = initiative_configured_in_source defaults in
-  let runtime_enabled = match meta with
-    | Some m -> `Bool m.initiative_enabled
-    | None -> (match defaults.initiative_enabled with
-               | Some v -> `Bool v
-               | None -> `Bool true)
-  in
-  `Assoc
-    [
-      ("status", `String "wired");
-      ("enabled", runtime_enabled);
-      ("scope",
-        match defaults.initiative_scope with
-        | Some v -> `String v | None -> `Null);
-      ("idle_sec",
-        match meta with
-        | Some m when m.initiative_idle_sec > 0 -> `Int m.initiative_idle_sec
-        | _ -> (match defaults.initiative_idle_sec with
-                | Some v -> `Int v | None -> `Null));
-      ("cooldown_sec",
-        match meta with
-        | Some m when m.initiative_cooldown_sec > 0 -> `Int m.initiative_cooldown_sec
-        | _ -> (match defaults.initiative_cooldown_sec with
-                | Some v -> `Int v | None -> `Null));
-      ("context_mode",
-        match defaults.initiative_context_mode with
-        | Some v -> `String v | None -> `Null);
-      ("configured_in_source", `Bool configured_in_source);
-      ("source_defaults", initiative_source_defaults_json defaults);
-    ]
-
 let drift_surface_json () =
   `Assoc
     [
@@ -140,7 +62,6 @@ let coordination_surface_json (meta : keeper_meta) =
     [
       ("room_scope", `String meta.room_scope);
       ("scope_kind", `String meta.scope_kind);
-      ("trigger_mode", `String meta.trigger_mode);
       ("mention_targets", string_list_to_json meta.mention_targets);
       ("joined_room_ids", string_list_to_json meta.joined_room_ids);
     ]
@@ -196,10 +117,6 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
   |> add_if "coordination.scope_kind"
        (match defaults.scope_kind with
         | Some value -> canonical_scope_kind value <> meta.scope_kind
-        | None -> false)
-  |> add_if "coordination.trigger_mode"
-       (match defaults.trigger_mode with
-        | Some value -> canonical_trigger_mode value <> meta.trigger_mode
         | None -> false)
   |> add_if "coordination.mention_targets"
        (defaults.mention_targets <> [] && defaults.mention_targets <> meta.mention_targets)

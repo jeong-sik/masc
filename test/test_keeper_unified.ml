@@ -28,6 +28,23 @@ let () =
   Masc_mcp.Prompt_registry.set_markdown_dir prompts_dir;
   Masc_mcp.Prompt_defaults.init ()
 
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_unified_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
 (* ---------- World Observation type tests ---------- *)
 
 let base_observation : WO.world_observation =
@@ -44,6 +61,8 @@ let base_observation : WO.world_observation =
     failed_task_count = 0;
     active_agent_count = 0;
     triage_triggers = "";
+    autonomy_trigger = None;
+    allow_noop = true;
   }
 
 let test_observation_defaults () =
@@ -91,6 +110,37 @@ let minimal_meta : Masc_mcp.Keeper_types.keeper_meta =
   match Masc_mcp.Keeper_types.meta_of_json json with
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
+
+let test_observe_uses_precollected_board_events () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      (match
+         Masc_mcp.Board_dispatch.create_post ~author:"alice"
+           ~title:"Need sangsu" ~content:"@test-keeper please check this" ()
+       with
+      | Ok _ -> ()
+      | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e));
+      let events, _, _ =
+        WO.collect_board_events ~continuity_summary:"goal test-keeper"
+          ~meta:minimal_meta
+      in
+      let obs =
+        WO.observe ~pending_board_events:(Some events)
+          ~config ~meta:minimal_meta
+      in
+      check int "precollected board events preserved" (List.length events)
+        (List.length obs.pending_board_events);
+      check (option string) "board reactive trigger" (Some "board_reactive")
+        obs.autonomy_trigger)
 
 let test_prompt_contains_identity () =
   let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
@@ -308,6 +358,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     tool_calls_made = List.length tools;
     usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0 };
     tools_used = tools;
+    checkpoint = None;
   }
 
 let test_metrics_text_response () =
@@ -316,7 +367,8 @@ let test_metrics_text_response () =
       ~model:"test-model" ~input_tok:100 ~output_tok:50
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:200 result
+    UT.update_metrics_from_result minimal_meta ~latency_ms:200
+      ~observation:base_observation result
   in
   check int "total_turns +1" (minimal_meta.usage.total_turns + 1) updated.usage.total_turns;
   check int "proactive_count +1"
@@ -332,7 +384,8 @@ let test_metrics_tool_response () =
       ~model:"test-model" ~input_tok:200 ~output_tok:80
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:500 result
+    UT.update_metrics_from_result minimal_meta ~latency_ms:500
+      ~observation:base_observation result
   in
   check int "proactive_count +1" (minimal_meta.proactive.count_total + 1)
     updated.proactive.count_total;
@@ -346,7 +399,8 @@ let test_metrics_noop_response () =
       ~model:"test-model" ~input_tok:50 ~output_tok:10
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:100 result
+    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+      ~observation:base_observation result
   in
   check int "proactive_count unchanged" minimal_meta.proactive.count_total
     updated.proactive.count_total;
@@ -393,7 +447,8 @@ let test_metrics_mixed_response () =
       ~model:"test-model" ~input_tok:150 ~output_tok:60
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:300 result
+    UT.update_metrics_from_result minimal_meta ~latency_ms:300
+      ~observation:base_observation result
   in
   check int "proactive +1" (minimal_meta.proactive.count_total + 1)
     updated.proactive.count_total;
@@ -457,6 +512,8 @@ let () =
         [
           test_case "defaults" `Quick test_observation_defaults;
           test_case "with mentions" `Quick test_observation_with_mentions;
+          test_case "uses precollected board events" `Quick
+            test_observe_uses_precollected_board_events;
           test_case "with goals" `Quick test_observation_with_goals;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );

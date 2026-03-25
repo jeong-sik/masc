@@ -1109,9 +1109,8 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
          Test checks whichever mode is active. *)
       let voice_enabled =
         Yojson.Safe.Util.(json |> member "voice_enabled" |> to_bool) in
-      (* policy_mode system removed — always "unified" *)
-      check string "policy mode" "unified"
-        Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
+      check bool "policy mode removed from response" true
+        Yojson.Safe.Util.(json |> member "policy_mode" = `Null);
       if voice_enabled then begin
         check string "voice channel" "voice_text"
           Yojson.Safe.Util.(json |> member "voice_channel" |> to_string);
@@ -1171,7 +1170,6 @@ let test_keeper_up_update_preserves_proactive_when_omitted () =
         | Ok None -> fail "missing keeper meta after initial create"
         | Error e -> fail e
       in
-      check string "initial trigger mode" "explicit_only" old_meta.trigger_mode;
       check bool "initial proactive" true old_meta.proactive.enabled;
       let parsed0 =
         match
@@ -1205,7 +1203,6 @@ let test_keeper_up_update_preserves_proactive_when_omitted () =
         | Ok None -> fail "missing keeper meta after update"
         | Error e -> fail e
       in
-      check string "trigger mode preserved" "explicit_only" updated_meta.trigger_mode;
       check bool "proactive preserved when omitted" true updated_meta.proactive.enabled)
 
 let test_write_meta_syncs_registered_resident_seed () =
@@ -1272,9 +1269,9 @@ let test_write_meta_syncs_registered_resident_seed () =
       check bool "seed proactive sync" false
         Yojson.Safe.Util.(
           resident_json |> member "seed_meta" |> member "proactive_enabled" |> to_bool);
-      check string "seed trigger mode sync" "explicit_only"
+      check bool "seed trigger mode removed" true
         Yojson.Safe.Util.(
-          resident_json |> member "seed_meta" |> member "trigger_mode" |> to_string))
+          resident_json |> member "seed_meta" |> member "trigger_mode" = `Null))
 
 let test_keeper_up_persists_allowed_paths_to_status_policy () =
   Eio_main.run @@ fun env ->
@@ -1369,7 +1366,6 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       let stale_meta =
         {
           meta with
-          policy_mode = "unified";
           presence_keepalive = true;
           proactive = { meta.proactive with enabled = false };
           usage = { meta.usage with last_turn_ts = 0.0 };

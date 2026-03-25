@@ -150,15 +150,12 @@ let resolve_allowed_models ~explicit_allowed_models ~seed_allowed_models ~models
     dedupe_keep_order models
 
 let canonical_room_scope = function
+  | "all" -> "all"
   | _ -> "current"
 
 let canonical_scope_kind = function
   | "global" -> "global"
   | _ -> "local"
-
-let canonical_trigger_mode = function
-  | "explicit_only" -> "explicit_only"
-  | _ -> "explicit_only"
 
 let canonical_voice_channel = function
   | "voice_only" -> "voice_only"
@@ -214,22 +211,13 @@ type keeper_profile_defaults = {
   models : string list;
   allowed_models : string list;
   active_model : string option;
-  policy_mode : string option;
   policy_voice_enabled : bool option;
-  policy_shell_mode : string option;
   room_scope : string option;
   scope_kind : string option;
-  trigger_mode : string option;
   mention_targets : string list;
   presence_keepalive : bool option;
   presence_keepalive_sec : int option;
   proactive_enabled : bool option;
-  initiative_enabled : bool option;
-  initiative_scope : string option;
-  initiative_idle_sec : int option;
-  initiative_cooldown_sec : int option;
-  initiative_context_mode : string option;
-  initiative_post_ttl_hours : int option;
 }
 
 type persona_summary = {
@@ -255,22 +243,13 @@ let empty_keeper_profile_defaults = {
   models = [];
   allowed_models = [];
   active_model = None;
-  policy_mode = None;
   policy_voice_enabled = None;
-  policy_shell_mode = None;
   room_scope = None;
   scope_kind = None;
-  trigger_mode = None;
   mention_targets = [];
   presence_keepalive = None;
   presence_keepalive_sec = None;
   proactive_enabled = None;
-  initiative_enabled = None;
-  initiative_scope = None;
-  initiative_idle_sec = None;
-  initiative_cooldown_sec = None;
-  initiative_context_mode = None;
-  initiative_post_ttl_hours = None;
 }
 
 let personas_root_opt () =
@@ -357,30 +336,15 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
          models = strs "models";
          allowed_models = strs "allowed_models";
          active_model = str "active_model";
-         policy_mode =
-           str "policy_mode"
-           |> Option.map (fun _ -> "unified");
          policy_voice_enabled = bool_ "policy_voice_enabled";
-         policy_shell_mode =
-           str "policy_shell_mode"
-           |> Option.map (fun _ -> "coding");
          room_scope =
            str "room_scope"
            |> Option.map canonical_room_scope;
          scope_kind = str "scope_kind";
-         trigger_mode =
-           str "trigger_mode"
-           |> Option.map canonical_trigger_mode;
          mention_targets = strs "mention_targets";
          presence_keepalive = bool_ "presence_keepalive";
          presence_keepalive_sec = int_ "presence_keepalive_sec";
          proactive_enabled = bool_ "proactive_enabled";
-         initiative_enabled = bool_ "initiative_enabled";
-         initiative_scope = str "initiative_scope";
-         initiative_idle_sec = int_ "initiative_idle_sec";
-         initiative_cooldown_sec = int_ "initiative_cooldown_sec";
-         initiative_context_mode = str "initiative_context_mode";
-         initiative_post_ttl_hours = int_ "initiative_post_ttl_hours";
        })
 
 let load_keeper_toml (path : string)
@@ -468,34 +432,16 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 models = Safe_ops.json_string_list "models" keeper_json;
                 allowed_models = Safe_ops.json_string_list "allowed_models" keeper_json;
                 active_model = Safe_ops.json_string_opt "active_model" keeper_json;
-                policy_mode =
-                  Safe_ops.json_string_opt "policy_mode" keeper_json
-                  |> Option.map (fun _ -> "unified");
                 policy_voice_enabled =
                   (match Yojson.Safe.Util.member "policy_voice_enabled" keeper_json with
                   | `Bool flag -> Some flag
                   | _ -> None);
-                policy_shell_mode =
-                  Safe_ops.json_string_opt "policy_shell_mode" keeper_json
-                  |> Option.map (fun _ -> "coding");
                 room_scope = Safe_ops.json_string_opt "room_scope" keeper_json;
                 scope_kind = Safe_ops.json_string_opt "scope_kind" keeper_json;
-                trigger_mode =
-                  Safe_ops.json_string_opt "trigger_mode" keeper_json
-                  |> Option.map canonical_trigger_mode;
                 mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
                 presence_keepalive = Safe_ops.json_bool_opt "presence_keepalive" keeper_json;
                 presence_keepalive_sec = Safe_ops.json_int_opt "presence_keepalive_sec" keeper_json;
                 proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
-                initiative_enabled = Safe_ops.json_bool_opt "initiative_enabled" keeper_json;
-                initiative_scope = Safe_ops.json_string_opt "initiative_scope" keeper_json;
-                initiative_idle_sec = Safe_ops.json_int_opt "initiative_idle_sec" keeper_json;
-                initiative_cooldown_sec =
-                  Safe_ops.json_int_opt "initiative_cooldown_sec" keeper_json;
-                initiative_context_mode =
-                  Safe_ops.json_string_opt "initiative_context_mode" keeper_json;
-                initiative_post_ttl_hours =
-                  Safe_ops.json_int_opt "initiative_post_ttl_hours" keeper_json;
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 

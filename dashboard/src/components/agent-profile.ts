@@ -289,7 +289,7 @@ function CharacterPlate({ name }: { name: string }) {
             { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : 'N/A', variant: 'gold' },
             { label: '세대', value: generation ?? 0, variant: 'gold' },
             { label: '턴', value: keeper.turn_count ?? 0, variant: 'gold' },
-            { label: '행동', value: keeper.autonomous_action_count ?? 0, variant: 'gold' },
+            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, variant: 'gold' },
           ]} />
         ` : html`
           <${StatGrid} cols=${4} items=${[

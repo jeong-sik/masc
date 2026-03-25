@@ -178,13 +178,10 @@ allowed_models = ["llama:qwen3.5-35b-a3b-ud-q4-xl", "llama:qwen3.5-35b-a3b-ud-q8
 active_model = "llama:qwen3.5-35b-a3b-ud-q4-xl"
 room_scope = "all"
 scope_kind = "global"
-trigger_mode = "explicit_only"
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 presence_keepalive = true
 presence_keepalive_sec = 30
-policy_mode = "heuristic"
-policy_shell_mode = "readonly"
 policy_voice_enabled = false
 |} in
   match TL.parse_toml input with
@@ -199,16 +196,11 @@ policy_voice_enabled = false
       check int "models" 1 (List.length d.models);
       check int "allowed_models" 2 (List.length d.allowed_models);
       check (option string) "active_model" (Some "llama:qwen3.5-35b-a3b-ud-q4-xl") d.active_model;
-      check (option string) "room_scope" (Some "current") d.room_scope;
-      check (option string) "trigger_mode" (Some "explicit_only") d.trigger_mode;
+      check (option string) "room_scope" (Some "all") d.room_scope;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "keepalive" (Some true) d.presence_keepalive;
       check (option int) "keepalive_sec" (Some 30) d.presence_keepalive_sec;
-      (* policy_mode always canonicalized to "unified" *)
-      check (option string) "policy_mode" (Some "unified") d.policy_mode;
-      (* Mode removal: canonical_policy_shell_mode always returns "coding" *)
-      check (option string) "policy_shell_mode" (Some "coding") d.policy_shell_mode;
       check (option bool) "policy_voice" (Some false) d.policy_voice_enabled
 
 let test_profile_invalid_soul_profile () =

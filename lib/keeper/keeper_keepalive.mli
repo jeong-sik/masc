@@ -35,6 +35,9 @@ val wakeup_keeper : string -> unit
     or system-wide events. *)
 val wakeup_all_keepers : unit -> unit
 
+val wakeup_relevant_keeper_for_board_signal :
+  config:Room.config -> Board_dispatch.keeper_board_signal -> unit
+
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :

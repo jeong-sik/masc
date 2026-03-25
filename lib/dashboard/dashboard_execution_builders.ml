@@ -178,6 +178,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else infinity
   in
   let autonomous_action_count = int_field "autonomous_action_count" keeper in
+  let autonomous_turn_count = int_field "autonomous_turn_count" keeper in
   let turn_count = int_field "turn_count" keeper in
   let generation = int_field "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
@@ -197,9 +198,9 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
       ("critical", "bad", "핸드오프 임박")
     else if lifecycle = "preparing" || lifecycle = "compacting" then
       ("warning", "warn", "연속성 압력이 높습니다")
-    else if autonomous_action_count = 0 && turn_count > 0 then
+    else if autonomous_turn_count = 0 && turn_count > 0 then
       ("warning", "warn",
-       Printf.sprintf "자율 행동 없음 (턴 %d회 수행)" turn_count)
+       Printf.sprintf "자율 턴 없음 (턴 %d회 수행)" turn_count)
     else if last_action_age_s >= 3600.0 then
       ("warning", "warn",
        Printf.sprintf "마지막 행동 %.0f시간 전" (last_action_age_s /. 3600.0))
@@ -207,8 +208,8 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
       ("healthy", "ok", "정상 동작 중")
   in
   let continuity =
-    Printf.sprintf "Gen %d · Turns %d · Actions %d · Goals %d"
-      generation turn_count autonomous_action_count goal_count
+    Printf.sprintf "Gen %d · Turns %d · Auto turns %d · Tool actions %d · Goals %d"
+      generation turn_count autonomous_turn_count autonomous_action_count goal_count
   in
   let focus =
     match trim_to_option (string_field "short_goal" keeper) with
@@ -274,19 +275,20 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
             ("tool_audit_source", json_string_option audit.tool_audit_source);
             ("tool_audit_at", json_string_option audit.tool_audit_at);
             ("autonomous_action_count", `Int autonomous_action_count);
+            ("autonomous_turn_count", `Int autonomous_turn_count);
             ("last_heartbeat_at", json_string_option last_heartbeat_at);
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
             ("continuity_summary", `String (
               match trim_to_option (string_field "continuity_summary" keeper) with
               | Some s -> s
               | None ->
-                if autonomous_action_count = 0 && turn_count = 0 then
+                if autonomous_turn_count = 0 && turn_count = 0 then
                   "아직 활동 기록이 없습니다"
-                else if autonomous_action_count = 0 then
-                  Printf.sprintf "대기 중 (턴 %d회, 자율 행동 0회)" turn_count
+                else if autonomous_turn_count = 0 then
+                  Printf.sprintf "대기 중 (턴 %d회, 자율 턴 0회)" turn_count
                 else
-                  Printf.sprintf "행동 %d회, 턴 %d회, 세대 %d"
-                    autonomous_action_count turn_count generation));
+                  Printf.sprintf "자율 턴 %d회, 도구 행동 %d회, 턴 %d회, 세대 %d"
+                    autonomous_turn_count autonomous_action_count turn_count generation));
             ("skill_route_summary", json_string_option skill_route_summary);
             ( "model",
               match trim_to_option (string_field "active_model" keeper) with

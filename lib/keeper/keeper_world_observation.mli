@@ -12,7 +12,7 @@ type world_observation = {
   (** [(from_agent, content)] pairs of unprocessed direct mentions. *)
 
   pending_board_events : string list;
-  (** Post IDs of board events needing triage. *)
+  (** Summaries of board events needing triage. *)
 
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or proactive). *)
@@ -43,6 +43,18 @@ type world_observation = {
 
   triage_triggers : string;
   (** Comma-separated triage trigger strings from last deliberation triage. *)
+
+  autonomy_trigger : string option;
+  (** Current autonomous turn trigger kind. *)
+
+  allow_noop : bool;
+  (** Whether the keeper may safely choose a no-op on this turn. *)
+}
+
+type board_signal_match = {
+  explicit_mention : bool;
+  matched_targets : string list;
+  score : int;
 }
 
 (** Collect recent board activity within the keeper's heartbeat window.
@@ -50,7 +62,15 @@ type world_observation = {
     Used by both the world observation builder and the deliberation triage
     in keepalive to populate board-related triggers. *)
 val collect_board_events :
-  meta:Keeper_types.keeper_meta -> string list * int * int
+  continuity_summary:string ->
+  meta:Keeper_types.keeper_meta ->
+  string list * int * int
+
+val board_signal_match :
+  continuity_summary:string ->
+  meta:Keeper_types.keeper_meta ->
+  signal:Board_dispatch.keeper_board_signal ->
+  board_signal_match
 
 (** Build a world observation from room state and keeper metadata.
 
@@ -58,6 +78,15 @@ val collect_board_events :
     and recent board activity.
     All I/O errors are caught and produce safe defaults (0, empty, Normal).
 
+    @param pending_board_events Pre-collected board event summaries for this
+      heartbeat, if already fetched during triage
     @param config Room configuration for I/O operations
     @param meta Current keeper metadata *)
-val observe : config:Room.config -> meta:Keeper_types.keeper_meta -> world_observation
+val observe :
+  pending_board_events:string list option ->
+  config:Room.config ->
+  meta:Keeper_types.keeper_meta ->
+  world_observation
+
+val should_run_unified_turn :
+  meta:Keeper_types.keeper_meta -> world_observation -> bool

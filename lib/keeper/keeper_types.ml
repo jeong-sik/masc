@@ -63,14 +63,11 @@ type keeper_meta = {
   models: string list;
   allowed_models: string list;
   active_model: string;
-  policy_mode: string;
   policy_voice_enabled: bool;
-  policy_shell_mode: string;
   execution_scope: string;
   allowed_paths: string list;
   scope_kind: string;
   room_scope: string;
-  trigger_mode: string;
   mention_targets: string list;
   joined_room_ids: string list;
   last_seen_seq_by_room: (string * int) list;
@@ -98,6 +95,12 @@ type keeper_meta = {
   team_session_start_count_total: int;
   last_autonomous_action_at: string;
   autonomous_action_count: int;
+  autonomous_turn_count: int;
+  autonomous_text_turn_count: int;
+  autonomous_tool_turn_count: int;
+  board_reactive_turn_count: int;
+  mention_reactive_turn_count: int;
+  noop_turn_count: int;
   last_triage_triggers: string;
   initiative_enabled: bool;
   initiative_idle_sec: int;
@@ -128,14 +131,11 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("models", `List (List.map (fun s -> `String s) m.models));
       ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
       ("active_model", `String m.active_model);
-      ("policy_mode", `String "unified");
       ("policy_voice_enabled", `Bool m.policy_voice_enabled);
-      ("policy_shell_mode", `String "coding");
       ("execution_scope", `String m.execution_scope);
       ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
       ("scope_kind", `String m.scope_kind);
       ("room_scope", `String m.room_scope);
-      ("trigger_mode", `String m.trigger_mode);
       ("mention_targets", `List (List.map (fun s -> `String s) m.mention_targets));
       ("joined_room_ids", `List (List.map (fun s -> `String s) m.joined_room_ids));
       ("last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room);
@@ -191,6 +191,12 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("team_session_start_count_total", `Int m.team_session_start_count_total);
       ("last_autonomous_action_at", `String m.last_autonomous_action_at);
       ("autonomous_action_count", `Int m.autonomous_action_count);
+      ("autonomous_turn_count", `Int m.autonomous_turn_count);
+      ("autonomous_text_turn_count", `Int m.autonomous_text_turn_count);
+      ("autonomous_tool_turn_count", `Int m.autonomous_tool_turn_count);
+      ("board_reactive_turn_count", `Int m.board_reactive_turn_count);
+      ("mention_reactive_turn_count", `Int m.mention_reactive_turn_count);
+      ("noop_turn_count", `Int m.noop_turn_count);
       ("last_triage_triggers", `String m.last_triage_triggers);
       ("initiative_enabled", `Bool m.initiative_enabled);
       ("initiative_idle_sec", `Int m.initiative_idle_sec);
@@ -249,16 +255,8 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       dedupe_keep_order base
     in
     let active_model = Safe_ops.json_string ~default:"" "active_model" json in
-    let policy_mode =
-      ignore (Safe_ops.json_string ~default:"heuristic" "policy_mode" json);
-      "unified"
-    in
     let policy_voice_enabled =
       Safe_ops.json_bool ~default:(default_voice_enabled_for name) "policy_voice_enabled" json
-    in
-    let policy_shell_mode =
-      ignore (Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json);
-      "coding"
     in
     let execution_scope =
       Safe_ops.json_string ~default:default_execution_scope "execution_scope" json
@@ -279,10 +277,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     in
     let room_scope =
       Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
-    in
-    let trigger_mode =
-      Safe_ops.json_string ~default:"explicit_only" "trigger_mode" json
-      |> canonical_trigger_mode
     in
     let mention_targets =
       Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
@@ -399,6 +393,24 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let autonomous_action_count =
       Safe_ops.json_int ~default:0 "autonomous_action_count" json
     in
+    let autonomous_turn_count =
+      Safe_ops.json_int ~default:0 "autonomous_turn_count" json
+    in
+    let autonomous_text_turn_count =
+      Safe_ops.json_int ~default:0 "autonomous_text_turn_count" json
+    in
+    let autonomous_tool_turn_count =
+      Safe_ops.json_int ~default:0 "autonomous_tool_turn_count" json
+    in
+    let board_reactive_turn_count =
+      Safe_ops.json_int ~default:0 "board_reactive_turn_count" json
+    in
+    let mention_reactive_turn_count =
+      Safe_ops.json_int ~default:0 "mention_reactive_turn_count" json
+    in
+    let noop_turn_count =
+      Safe_ops.json_int ~default:0 "noop_turn_count" json
+    in
     let last_triage_triggers =
       Safe_ops.json_string ~default:"" "last_triage_triggers" json
     in
@@ -439,14 +451,11 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           models;
           allowed_models;
           active_model;
-          policy_mode;
           policy_voice_enabled;
-          policy_shell_mode;
           execution_scope;
           allowed_paths;
           scope_kind;
           room_scope;
-          trigger_mode;
           mention_targets;
           joined_room_ids;
           last_seen_seq_by_room;
@@ -505,6 +514,12 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           team_session_start_count_total;
           last_autonomous_action_at;
           autonomous_action_count;
+          autonomous_turn_count;
+          autonomous_text_turn_count;
+          autonomous_tool_turn_count;
+          board_reactive_turn_count;
+          mention_reactive_turn_count;
+          noop_turn_count;
           last_triage_triggers;
           initiative_enabled;
           initiative_idle_sec;

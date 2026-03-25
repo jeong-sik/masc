@@ -431,17 +431,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments
     | Mod_tempo ->
         Tool_tempo.dispatch { Tool_tempo.config; agent_name } ~name ~args:arguments
-    | Mod_mitosis ->
-        let rec ctx : Tool_mitosis_oas.context = {
-          config;
-          agent_name;
-          masc_tools = [];
-          dispatch = (fun ~name:n ~args:a ->
-            match Tool_mitosis_oas.dispatch ctx ~name:n ~args:a with
-            | Some r -> r
-            | None -> (false, Printf.sprintf "unknown tool: %s" n));
-        } in
-        Tool_mitosis_oas.dispatch ctx ~name ~args:arguments
     | Mod_portal ->
         Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:arguments
     | Mod_worktree ->

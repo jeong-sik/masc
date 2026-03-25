@@ -592,20 +592,6 @@ let test_masc_heartbeat_result_schema () =
             (List.mem_assoc "decision_confidence" props)
       | None -> Alcotest.fail "masc_heartbeat_result missing properties"
 
-(* ============================================================ *)
-(* 12. Mitosis Tool Tests                                        *)
-(* ============================================================ *)
-
-let test_masc_mitosis_status_schema () =
-  match find_tool "masc_mitosis_status" with
-  | None -> Alcotest.fail "masc_mitosis_status not found"
-  | Some _ -> ()
-
-let test_masc_mitosis_divide_schema () =
-  match find_tool "masc_mitosis_divide" with
-  | None -> Alcotest.fail "masc_mitosis_divide not found"
-  | Some _ -> ()
-
 let test_masc_spawn_schema () =
   match find_tool "masc_spawn" with
   | None -> Alcotest.fail "masc_spawn not found"
@@ -807,6 +793,28 @@ let test_legacy_swarm_tools_removed () =
       | None -> ()
       | Some _ ->
           Alcotest.fail (Printf.sprintf "%s should be removed from public schemas" name))
+    removed_tools
+
+let test_legacy_mitosis_tools_removed () =
+  let removed_tools =
+    [
+      "masc_mitosis_status";
+      "masc_mitosis_pool";
+      "masc_mitosis_divide";
+      "masc_mitosis_check";
+      "masc_mitosis_record";
+      "masc_mitosis_prepare";
+      "masc_mitosis_handoff";
+      "masc_mitosis_all";
+    ]
+  in
+  List.iter
+    (fun name ->
+      match find_tool name with
+      | None -> ()
+      | Some _ ->
+          Alcotest.fail
+            (Printf.sprintf "%s should be removed from public schemas" name))
     removed_tools
 
 (* ============================================================ *)
@@ -1111,21 +1119,27 @@ let () =
       Alcotest.test_case "poll_events" `Quick test_masc_poll_events_schema;
       Alcotest.test_case "heartbeat_result" `Quick test_masc_heartbeat_result_schema;
     ];
-    "mitosis_tools", [
-      Alcotest.test_case "mitosis_status" `Quick test_masc_mitosis_status_schema;
-      Alcotest.test_case "mitosis_divide" `Quick test_masc_mitosis_divide_schema;
+    "spawn_runtime_tools", [
       Alcotest.test_case "spawn" `Quick test_masc_spawn_schema;
+    ];
+    "keeper_runtime_tools", [
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
+    ];
+    "runtime_admin_tools", [
       Alcotest.test_case "tool-admin-snapshot" `Quick
         test_masc_tool_admin_snapshot_schema;
       Alcotest.test_case "tool-admin-update" `Quick
         test_masc_tool_admin_update_schema;
+    ];
+    "runtime_verify_tools", [
       Alcotest.test_case "llama-models" `Quick test_masc_llama_models_schema;
       Alcotest.test_case "runtime-verify" `Quick
         test_masc_runtime_verify_schema;
       Alcotest.test_case "llama-runtime-verify" `Quick
         test_masc_runtime_verify_schema;
+    ];
+    "team_session_runtime_tools", [
       Alcotest.test_case "team-session-step-spawn-selection-note" `Quick
         test_masc_team_session_step_spawn_selection_note_schema;
       Alcotest.test_case "team-session-step-spawn-batch" `Quick
@@ -1146,6 +1160,10 @@ let () =
     "legacy_swarm_removed", [
       Alcotest.test_case "removed_from_public_schemas" `Quick
         test_legacy_swarm_tools_removed;
+    ];
+    "legacy_lifecycle_removed", [
+      Alcotest.test_case "mitosis_removed_from_public_schemas" `Quick
+        test_legacy_mitosis_tools_removed;
     ];
     "command_plane_tools", [
       Alcotest.test_case "operation_start" `Quick test_masc_operation_start_schema;

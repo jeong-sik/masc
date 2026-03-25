@@ -170,6 +170,24 @@ let () =
                   check bool (name ^ " should be visible with flag") true
                     (Tool_catalog.is_visible ~include_hidden:true name))
                 hidden_names);
+          test_case "legacy mitosis tools are removed from the public registry" `Quick
+            (fun () ->
+              let removed_names =
+                [
+                  "masc_mitosis_status";
+                  "masc_mitosis_divide";
+                  "masc_mitosis_check";
+                  "masc_mitosis_prepare";
+                  "masc_mitosis_handoff";
+                ]
+              in
+              let all_names = Config.all_tool_names () in
+              List.iter
+                (fun name ->
+                  check bool (name ^ " removed from registry")
+                    false
+                    (List.mem name all_names))
+                removed_names);
           test_case "removed named-room tools are absent from the schema registry" `Quick
             (fun () ->
               let all_names = Config.all_tool_names () in

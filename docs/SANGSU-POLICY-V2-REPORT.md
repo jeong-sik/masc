@@ -1,5 +1,8 @@
 # Sangsu Policy V2 Report
 
+Historical note: this document describes an older `policy_mode`-based keeper design.
+The live runtime now uses a fixed keeper tool surface and hybrid autonomy instead.
+
 ## Goal
 
 `sangsu v2` moves keeper behavior selection away from product heuristics and toward an explicit offline reward-model path.

@@ -13,6 +13,7 @@ open Keeper_exec_context [@@warning "-33"]
 (** Observe tool call history from run_result to update keeper metrics.
     No action_taken type — we observe what the agent did, not classify it. *)
 let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
+    ~(observation : Keeper_world_observation.world_observation)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let used_model_id =
@@ -38,6 +39,13 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let has_tool_calls = result.tools_used <> [] in
   let has_text =
     String.trim result.response_text <> ""
+  in
+  let is_autonomous_turn = Option.is_some observation.autonomy_trigger in
+  let is_board_reactive =
+    observation.autonomy_trigger = Some "board_reactive"
+  in
+  let is_mention_reactive =
+    observation.autonomy_trigger = Some "mention_reactive"
   in
   {
     meta with
@@ -77,9 +85,90 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     (* Autonomous action tracking from tool calls *)
     autonomous_action_count =
       meta.autonomous_action_count + List.length result.tools_used;
+    autonomous_turn_count =
+      meta.autonomous_turn_count + (if is_autonomous_turn then 1 else 0);
+    autonomous_text_turn_count =
+      meta.autonomous_text_turn_count
+      + (if is_autonomous_turn && has_text && not has_tool_calls then 1 else 0);
+    autonomous_tool_turn_count =
+      meta.autonomous_tool_turn_count
+      + (if is_autonomous_turn && has_tool_calls then 1 else 0);
+    board_reactive_turn_count =
+      meta.board_reactive_turn_count + (if is_board_reactive then 1 else 0);
+    mention_reactive_turn_count =
+      meta.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
+    noop_turn_count =
+      meta.noop_turn_count
+      + (if is_autonomous_turn && not has_text && not has_tool_calls then 1 else 0);
     last_autonomous_action_at =
       (if has_tool_calls then now_iso () else meta.last_autonomous_action_at);
   }
+
+let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
+    ~(observation : Keeper_world_observation.world_observation)
+    ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
+    ~(turn_cost : float)
+    ~(context_ratio : float)
+    ~(context_tokens : int)
+    ~(context_max : int)
+    ~(message_count : int)
+    ~(handoff_json : Yojson.Safe.t option) : unit =
+  let now_ts = Time_compat.now () in
+  let channel =
+    match observation.autonomy_trigger with
+    | Some "board_reactive" -> "turn"
+    | Some "mention_reactive" -> "turn"
+    | Some _ -> "proactive"
+    | None -> "turn"
+  in
+  let work_kind =
+    if result.tools_used <> [] then "tool_use"
+    else if String.trim result.response_text <> "" then "text_turn"
+    else "noop"
+  in
+  let metrics_store = keeper_metrics_store config meta.name in
+  let snapshot =
+    `Assoc
+      [
+        ("ts", `String (now_iso ()));
+        ("ts_unix", `Float now_ts);
+        ("channel", `String channel);
+        ("name", `String meta.name);
+        ("agent_name", `String meta.agent_name);
+        ("trace_id", `String meta.trace_id);
+        ("generation", `Int meta.generation);
+        ("model_used", `String result.model_used);
+        ( "usage",
+          `Assoc
+            [
+              ("input_tokens", `Int result.usage.input_tokens);
+              ("output_tokens", `Int result.usage.output_tokens);
+              ("total_tokens",
+               `Int (Keeper_exec_context.total_tokens result.usage));
+            ] );
+        ("latency_ms", `Int latency_ms);
+        ("cost_usd", `Float turn_cost);
+        ("context_ratio", `Float context_ratio);
+        ("context_tokens", `Int context_tokens);
+        ("context_max", `Int context_max);
+        ("message_count", `Int message_count);
+        ("continuity_state", `Null);
+        ("continuity_summary", `String meta.continuity_summary);
+        ("compacted", `Bool false);
+        ("compaction_before_tokens", `Int context_tokens);
+        ("compaction_after_tokens", `Int context_tokens);
+        ("work_kind", `String work_kind);
+        ("tool_call_count", `Int result.tool_calls_made);
+        ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
+        ("snapshot_source", `String "keeper_unified_turn");
+        ("memory_check", memory_check_default_json ());
+        ("handoff",
+         match handoff_json with
+         | Some value -> value
+         | None -> `Assoc [ ("performed", `Bool false) ]);
+      ]
+  in
+  Dated_jsonl.append metrics_store snapshot
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(reason : string) : keeper_meta =
@@ -163,10 +252,67 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                  "write_meta failed after unified turn failure: %s" msg);
           Error e
       | Ok result ->
+          let used_model_id =
+            let strip_latest s =
+              if
+                String.length s > 7
+                && String.sub s (String.length s - 7) 7 = ":latest"
+              then String.sub s 0 (String.length s - 7)
+              else s
+            in
+            let used = strip_latest result.model_used in
+            let cascade_models =
+              Oas_model_resolve.models_of_cascade_name meta.cascade_name
+            in
+            let cfgs =
+              Llm_provider.Cascade_config.parse_model_strings cascade_models
+            in
+            match
+              List.find_opt
+                (fun (c : Llm_provider.Provider_config.t) ->
+                  c.model_id = result.model_used || c.model_id = used)
+                cfgs
+            with
+            | Some c -> c.model_id
+            | None ->
+                (match cfgs with
+                | c :: _ -> c.model_id
+                | [] -> result.model_used)
+          in
+          let turn_cost =
+            let pricing =
+              Llm_provider.Pricing.pricing_for_model used_model_id
+            in
+            Llm_provider.Pricing.estimate_cost ~pricing
+              ~input_tokens:result.usage.input_tokens
+              ~output_tokens:result.usage.output_tokens ()
+          in
+          let rollover =
+            maybe_rollover_oas_handoff ~base_dir
+              ~meta
+              ~model:result.model_used
+              ~primary_model_max_tokens:primary_max_context
+              ~checkpoint:result.checkpoint
+          in
           (* 6. Observe result and update metrics *)
           let updated_meta =
-            update_metrics_from_result meta ~latency_ms result
+            update_metrics_from_result rollover.updated_meta ~latency_ms
+              ~observation result
           in
+          (try
+             append_metrics_snapshot ~config ~meta:updated_meta ~observation
+               ~result ~latency_ms ~turn_cost
+               ~context_ratio:rollover.context_ratio
+               ~context_tokens:rollover.context_tokens
+               ~context_max:rollover.context_max
+               ~message_count:rollover.message_count
+               ~handoff_json:rollover.handoff_json
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               Log.Keeper.error
+                 "write metrics snapshot failed after unified turn: %s"
+                 (Printexc.to_string exn));
           (* 7. Persist updated meta *)
           (match write_meta config updated_meta with
            | Ok () -> ()

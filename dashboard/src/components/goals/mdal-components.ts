@@ -28,12 +28,12 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
         </div>
 
         <div class="flex gap-3 flex-wrap text-[#b9c9ea] text-[13px]">
-          <span>Baseline ${formatMetric(loop.baseline_metric)}</span>
+          <span>기준값 ${formatMetric(loop.baseline_metric)}</span>
           <span>현재 ${formatMetric(loop.current_metric)}</span>
           <span class=${formatMetricDelta(loop).startsWith('+') ? 'text-[#9af3ba]' : 'text-[#fda4af]'}>
             Delta ${formatMetricDelta(loop)}
           </span>
-          <span>Elapsed ${formatElapsedCompact(loop.elapsed_seconds)}</span>
+          <span>경과 ${formatElapsedCompact(loop.elapsed_seconds)}</span>
         </div>
 
         <div class="text-[var(--text-body)] text-base leading-[1.5]">${loop.target || '명시된 목표가 없습니다'}</div>

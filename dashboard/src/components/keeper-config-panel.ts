@@ -245,7 +245,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   }
 
   if (state.status === 'loading') {
-    return html`<div class="py-3 text-xs text-[var(--text-muted)]">Loading config...</div>`
+    return html`<div class="py-3 text-xs text-[var(--text-muted)]">설정 로딩 중...</div>`
   }
 
   if (state.status === 'error') {
@@ -302,17 +302,17 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           class="${btnBase} bg-[#4ade80] text-[#000]"
           onClick=${saveConfig}
           disabled=${isSaving}
-        >${isSaving ? 'Saving...' : 'Save'}</button>
+        >${isSaving ? '저장 중...' : '저장'}</button>
         <button type="button"
           class="${btnBase} bg-[var(--white-10)] text-[var(--text-body)]"
           onClick=${cancelEdit}
           disabled=${isSaving}
-        >Cancel</button>
+        >취소</button>
       ` : html`
         <button type="button"
           class="${btnBase} bg-[var(--purple)] text-[#000]"
           onClick=${enterEditMode}
-        >Edit</button>
+        >편집</button>
       `}
       ${saveError.value ? html`<span class="text-xs text-[#ef4444]">${saveError.value}</span>` : null}
     </div>
@@ -339,19 +339,19 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${LongText} text=${c.prompt.short_goal} />
     ` : null}
     ${c.prompt.mid_goal ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Mid-term goal</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">중기 목표</div>
       <${LongText} text=${c.prompt.mid_goal} />
     ` : null}
     ${c.prompt.long_goal ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Long-term goal</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">장기 목표</div>
       <${LongText} text=${c.prompt.long_goal} />
     ` : null}
     ${c.prompt.soul_profile ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Soul profile</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">소울 프로필</div>
       <${LongText} text=${c.prompt.soul_profile} />
     ` : null}
     ${c.prompt.instructions ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Instructions</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">지시사항</div>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
     <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-3 mb-0.5">시스템 프롬프트 블록</div>
@@ -374,11 +374,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${SectionHeader} title="실행" />
       <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Verify</span>
+        <span class="text-xs text-[var(--text-muted)]">검증</span>
         <${BoolBadge} value=${c.execution.verify} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Models</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">모델</div>
         <${ModelList} models=${c.execution.models} />
       </div>
       ${'' /* Show allowed_models only when it differs from models */}
@@ -386,7 +386,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         && JSON.stringify(c.execution.allowed_models.slice().sort()) !== JSON.stringify(c.execution.models.slice().sort())
         ? html`
         <div class="mt-1.5">
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Allowed models</div>
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">허용 모델</div>
           <${ModelList} models=${c.execution.allowed_models} />
         </div>
       ` : null}
@@ -439,7 +439,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="범위 유형" value=${c.coordination.scope_kind || '--'} />
       <${ConfigRow} label="트리거 모드" value=${c.coordination.trigger_mode || '--'} />
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Mention targets</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>
         <${ModelList} models=${c.coordination.mention_targets} />
       </div>
       <div class="mt-1.5">
@@ -450,7 +450,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${'' /* --- Drift (read-only) --- */}
       <${SectionHeader} title="드리프트" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">State</span>
+        <span class="text-xs text-[var(--text-muted)]">상태</span>
         <${FeatureBadge} status=${c.drift.status} value=${c.drift.enabled} />
       </div>
       <${ConfigRow} label="최소 턴 간격" value=${formatMaybeNumber(c.drift.min_turn_gap)} />
@@ -460,7 +460,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${'' /* --- Initiative (read-only) --- */}
       <${SectionHeader} title="이니셔티브" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">State</span>
+        <span class="text-xs text-[var(--text-muted)]">상태</span>
         <${FeatureBadge} status=${c.initiative.status} value=${c.initiative.enabled} />
       </div>
       <${ConfigRow} label="범위" value=${c.initiative.scope || '--'} />
@@ -473,25 +473,25 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
       ${c.initiative.source_defaults ? html`
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-1">소스 기본값</div>
-        <${ConfigRow} label="Enabled" value=${c.initiative.source_defaults.enabled === null ? '--' : String(c.initiative.source_defaults.enabled)} />
-        <${ConfigRow} label="Scope" value=${c.initiative.source_defaults.scope || '--'} />
-        <${ConfigRow} label="Idle trigger" value=${formatMaybeNumber(c.initiative.source_defaults.idle_sec, 's')} />
-        <${ConfigRow} label="Cooldown" value=${formatMaybeNumber(c.initiative.source_defaults.cooldown_sec, 's')} />
-        <${ConfigRow} label="Context mode" value=${c.initiative.source_defaults.context_mode || '--'} />
-        <${ConfigRow} label="Post TTL" value=${formatMaybeNumber(c.initiative.source_defaults.post_ttl_hours, 'h')} />
+        <${ConfigRow} label="활성" value=${c.initiative.source_defaults.enabled === null ? '--' : String(c.initiative.source_defaults.enabled)} />
+        <${ConfigRow} label="범위" value=${c.initiative.source_defaults.scope || '--'} />
+        <${ConfigRow} label="유휴 트리거" value=${formatMaybeNumber(c.initiative.source_defaults.idle_sec, 's')} />
+        <${ConfigRow} label="쿨다운" value=${formatMaybeNumber(c.initiative.source_defaults.cooldown_sec, 's')} />
+        <${ConfigRow} label="컨텍스트 모드" value=${c.initiative.source_defaults.context_mode || '--'} />
+        <${ConfigRow} label="포스트 TTL" value=${formatMaybeNumber(c.initiative.source_defaults.post_ttl_hours, 'h')} />
       ` : null}
 
       ${'' /* --- Team Session (read-only) --- */}
       <${SectionHeader} title="자동 팀 세션" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">State</span>
+        <span class="text-xs text-[var(--text-muted)]">상태</span>
         <${FeatureBadge} status=${c.auto_team_session.status} value=${c.auto_team_session.enabled} />
       </div>
 
       ${'' /* --- Handoff (read-only) --- */}
       <${SectionHeader} title="핸드오프" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Auto</span>
+        <span class="text-xs text-[var(--text-muted)]">자동</span>
         <${BoolBadge} value=${c.handoff.auto} />
       </div>
       <${ConfigRow} label="임계값" value=${(c.handoff.threshold * 100).toFixed(0) + '%'} />
@@ -534,7 +534,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ModelList} models=${c.sources.precedence} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Override fields</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">오버라이드 필드</div>
         <${ModelList} models=${c.sources.override_fields} />
       </div>
 

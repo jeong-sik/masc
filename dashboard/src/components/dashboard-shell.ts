@@ -130,7 +130,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
       <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-2.5 pt-2.5 pb-1">
         ${!collapsed ? html`
           <div class="px-1">
-            <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-[rgba(154,217,255,0.5)]">Navigation</div>
+            <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-[rgba(154,217,255,0.5)]">내비게이션</div>
             <div class="mt-0.5 text-[13px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
           </div>
         ` : null}

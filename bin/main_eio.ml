@@ -265,7 +265,8 @@ let base_path =
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
 (** Graceful shutdown exception *)
-exception Shutdown
+(* Shutdown exception removed: graceful shutdown returns normally from
+   await_shutdown_signal, letting Eio.Fiber.first cancel run_server. *)
 
 let pid_lock_path port = Printf.sprintf "/tmp/masc-%d.pid" port
 
@@ -367,19 +368,26 @@ let run_cmd host port base_path =
             Eio.Time.sleep clock 0.2;
             Masc_mcp.Shutdown_hooks.run_all ();
             (try Board_dispatch.flush ()
-             with _ ->
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | _ ->
                Log.Server.warn
                  "[Shutdown] Board flush skipped (not initialized)");
-            close_all_sse_connections ();
-            Eio.Time.sleep clock 0.2;
-            raise Shutdown
+            (* Return normally — Eio.Fiber.first will cancel run_server
+               cleanly via Eio.Cancel.Cancelled, avoiding "Multiple
+               exceptions" from raising Shutdown + Cancelled together. *)
+            ()
       in
       Eio.Fiber.first
         (fun () -> run_server ~sw ~env ~host ~port ~base_path)
-        await_shutdown_signal
+        await_shutdown_signal;
+      (* Server stopped; close SSE connections after server is down. *)
+      (try close_all_sse_connections ()
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | _ -> ());
+      Log.Server.info "MASC MCP: Shutdown complete."
     with
-    | Shutdown ->
-        Log.Server.info "MASC MCP: Shutdown complete."
     | Eio.Cancel.Cancelled _ ->
         Log.Server.info "MASC MCP: Shutdown complete."
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) when attempt < max_bind_retries ->

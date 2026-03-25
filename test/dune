@@ -200,7 +200,7 @@
 (test
  (name test_ci_hardening_source)
  (modules test_ci_hardening_source)
- (libraries alcotest unix))
+ (libraries alcotest unix str))
 
 (test
  (name test_local_review_script)

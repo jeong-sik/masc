@@ -104,46 +104,51 @@ let start
     ~(env : Eio_unix.Stdenv.base)
     ~(on_message : string -> string -> unit)
   : unit =
-  if not (is_enabled ()) then
+  if not (is_enabled ()) then begin
+    Transport_metrics.set_ws_runtime_listening false;
     Log.Server.info "WebSocket transport disabled (MASC_WS_ENABLED=0)"
-  else begin
+  end else begin
     let port = configured_port () in
     let net = Eio.Stdenv.net env in
     let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
     let socket =
       Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:128 addr
     in
+    Transport_metrics.set_ws_runtime_listening true;
     let connection_handler =
       Ws_eio.Server.create_connection_handler ~sw
         (make_websocket_handler ~on_message)
     in
     Eio.Fiber.fork ~sw (fun () ->
-      Log.Server.info "WebSocket server starting on port %d" port;
-      let rec accept_loop backoff_s =
-        try
-          let flow, client_addr = Eio.Net.accept ~sw socket in
-          Eio.Fiber.fork ~sw (fun () ->
-            try connection_handler client_addr flow
+      Fun.protect
+        ~finally:(fun () -> Transport_metrics.set_ws_runtime_listening false)
+        (fun () ->
+          Log.Server.info "WebSocket server starting on port %d" port;
+          let rec accept_loop backoff_s =
+            try
+              let flow, client_addr = Eio.Net.accept ~sw socket in
+              Eio.Fiber.fork ~sw (fun () ->
+                try connection_handler client_addr flow
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  Log.Server.warn "WS standalone handler error: %s"
+                    (Printexc.to_string exn));
+              accept_loop 0.05
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
-              Log.Server.warn "WS standalone handler error: %s"
-                (Printexc.to_string exn));
-          accept_loop 0.05
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Server.error "WS standalone accept error: %s"
-            (Printexc.to_string exn);
-          (* Backoff to avoid tight error loops *)
-          (try Eio.Time.sleep (Eio.Stdenv.clock env) backoff_s
-           with Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                  Log.Server.warn
-                    "WS standalone backoff sleep failed on port %d (backoff=%.2fs): %s"
-                    port backoff_s (Printexc.to_string exn));
-          let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
-          accept_loop next_backoff
-      in
-      accept_loop 0.05)
+              Log.Server.error "WS standalone accept error: %s"
+                (Printexc.to_string exn);
+              (* Backoff to avoid tight error loops *)
+              (try Eio.Time.sleep (Eio.Stdenv.clock env) backoff_s
+               with Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn ->
+                      Log.Server.warn
+                        "WS standalone backoff sleep failed on port %d (backoff=%.2fs): %s"
+                        port backoff_s (Printexc.to_string exn));
+              let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
+              accept_loop next_backoff
+          in
+          accept_loop 0.05))
   end

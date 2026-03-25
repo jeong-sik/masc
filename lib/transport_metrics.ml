@@ -92,6 +92,15 @@ let set_ws_sessions count =
 
 (** {1 Environment-derived Transport Config} *)
 
+let grpc_runtime_listening : bool Atomic.t = Atomic.make false
+let ws_runtime_listening : bool Atomic.t = Atomic.make false
+
+let set_grpc_runtime_listening listening =
+  Atomic.set grpc_runtime_listening listening
+
+let set_ws_runtime_listening listening =
+  Atomic.set ws_runtime_listening listening
+
 let grpc_enabled () =
   match Sys.getenv_opt "MASC_GRPC_ENABLED" with
   | Some raw -> (
@@ -109,7 +118,7 @@ let grpc_port () =
   | None -> 8936
 
 let grpc_listening () =
-  grpc_enabled () && Mitosis_spawn.port_listening (grpc_port ())
+  grpc_enabled () && Atomic.get grpc_runtime_listening
 
 (** {1 Agent Health Metrics} *)
 
@@ -132,7 +141,9 @@ let init () =
   register_sse_metrics ();
   register_grpc_metrics ();
   register_ws_metrics ();
-  register_agent_metrics ()
+  register_agent_metrics ();
+  set_grpc_runtime_listening false;
+  set_ws_runtime_listening false
 
 (** {1 Transport Health JSON Snapshot} *)
 
@@ -193,7 +204,7 @@ let ws_port () =
   | None -> 8937
 
 let ws_listening () =
-  ws_enabled () && Mitosis_spawn.port_listening (ws_port ())
+  ws_enabled () && Atomic.get ws_runtime_listening
 
 let hot_session_json (session : hot_queue_session) =
   `Assoc

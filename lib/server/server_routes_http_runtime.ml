@@ -77,7 +77,7 @@ let websocket_discovery_json request =
   let (host, _) = advertised_host_port request in
   let configured = Server_ws_standalone.is_enabled () in
   let port = Server_ws_standalone.configured_port () in
-  let listening = configured && Mitosis_spawn.port_listening port in
+  let listening = Transport_metrics.ws_listening () in
   let base_fields =
     [
       ("enabled", `Bool configured);
@@ -105,9 +105,7 @@ let transport_json request =
   let base_url = Printf.sprintf "http://%s:%d" host port in
   let grpc_enabled = Masc_grpc_server.is_enabled () in
   let grpc_port = Masc_grpc_server.configured_port () in
-  let grpc_listening =
-    grpc_enabled && Mitosis_spawn.port_listening grpc_port
-  in
+  let grpc_listening = Transport_metrics.grpc_listening () in
   let webrtc_enabled = Server_webrtc_transport.is_enabled () in
   `Assoc
     [

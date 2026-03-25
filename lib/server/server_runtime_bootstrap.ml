@@ -931,11 +931,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
-      (* Pre-warm shell cache so the first /dashboard load is instant.
-         shell is the only room-truth component without a proactive refresh loop. *)
-      Server_dashboard_http.warm_shell_cache state;
-      start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
-      start_lazy_startup state;
+      (* Start auxiliary transports before optional warmups and resident loops.
+         Otherwise HTTP can report ready while gRPC/WS startup is still stuck
+         behind heavier startup work. *)
       (* gRPC coordination transport (opt-in via MASC_GRPC_ENABLED=1) *)
       let tool_dispatcher tool_name args_json =
         let arguments =
@@ -987,7 +985,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                   peer_id (Printexc.to_string exn)));
         Server_webrtc_transport.set_connection_starter
           (fun peer_id ->
-            Server_webrtc_transport.start_webrtc_connection ~sw ~env peer_id))
+            Server_webrtc_transport.start_webrtc_connection ~sw ~env peer_id));
+      (* Pre-warm shell cache so the first /dashboard load is instant.
+         shell is the only room-truth component without a proactive refresh loop. *)
+      Server_dashboard_http.warm_shell_cache state;
+      start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
+      start_lazy_startup state
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

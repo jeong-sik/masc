@@ -20,6 +20,7 @@ type keepalive_entry = {
 
 (** Per-keeper last known agent count for detecting changes. *)
 let last_agent_counts : (string, int) Hashtbl.t = Hashtbl.create 8
+let keepalive_registry_mu = Eio.Mutex.create ()
 
 (* OAS Event_bus ref — set via bootstrap *)
 let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
@@ -36,23 +37,44 @@ let board_reactive_wakeups : (string, float) Hashtbl.t = Hashtbl.create 32
 let board_reactive_debounce_sec = 60.0
 let board_reactive_threshold = 4
 
-let running_keepers () = Hashtbl.length keepalives
+let with_keepalive_registry_ro f = Eio.Mutex.use_ro keepalive_registry_mu f
 
-let keeper_keepalive_running name = Hashtbl.mem keepalives name
+let with_keepalive_registry_rw f =
+  Eio.Mutex.use_rw ~protect:true keepalive_registry_mu f
+
+let remove_board_reactive_wakeups_unlocked keeper_name =
+  let prefix = keeper_name ^ ":" in
+  let to_remove =
+    Hashtbl.fold
+      (fun key _ acc ->
+        if String.starts_with ~prefix key then key :: acc else acc)
+      board_reactive_wakeups []
+  in
+  List.iter (Hashtbl.remove board_reactive_wakeups) to_remove
+
+let running_keepers () =
+  with_keepalive_registry_ro (fun () -> Hashtbl.length keepalives)
+
+let keeper_keepalive_running name =
+  with_keepalive_registry_ro (fun () -> Hashtbl.mem keepalives name)
 
 let keeper_keepalive_started_at name =
-  Hashtbl.find_opt keepalives name |> Option.map (fun entry -> entry.started_at)
+  with_keepalive_registry_ro (fun () ->
+      Hashtbl.find_opt keepalives name |> Option.map (fun entry -> entry.started_at))
 
 let keeper_spawn_slots_available () =
   let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
-  max_keepers <= 0 || running_keepers () < max_keepers
+  max_keepers <= 0
+  || with_keepalive_registry_ro (fun () -> Hashtbl.length keepalives < max_keepers)
 
 let register_keepalive name entry =
-  Hashtbl.replace keepalives name entry
+  with_keepalive_registry_rw (fun () -> Hashtbl.replace keepalives name entry)
 
 let unregister_keepalive name =
-  Hashtbl.remove keepalives name;
-  Hashtbl.remove last_agent_counts name
+  with_keepalive_registry_rw (fun () ->
+      Hashtbl.remove keepalives name;
+      Hashtbl.remove last_agent_counts name;
+      remove_board_reactive_wakeups_unlocked name)
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~2 s instead of waiting for the full 30-300 s interval. *)
@@ -73,29 +95,33 @@ let interruptible_sleep ~clock ~stop ~wakeup duration =
     its sleep and run the next heartbeat cycle. Used by broadcast notification
     when a @mention targets a running keeper. *)
 let wakeup_keeper name =
-  match Hashtbl.find_opt keepalives name with
-  | Some entry -> entry.wakeup := true
-  | None -> ()
+  with_keepalive_registry_ro (fun () ->
+      match Hashtbl.find_opt keepalives name with
+      | Some entry -> entry.wakeup := true
+      | None -> ())
 
 (** Wake up all running keepers — used when a broadcast mentions @@all
     or when a system-wide event requires immediate attention. *)
 let wakeup_all_keepers () =
-  Hashtbl.iter (fun _name entry -> entry.wakeup := true) keepalives
+  with_keepalive_registry_ro (fun () ->
+      Hashtbl.iter (fun _name entry -> entry.wakeup := true) keepalives)
 
 let board_reactive_wakeup_allowed ~keeper_name ~post_id =
   let key = keeper_name ^ ":" ^ post_id in
   let now_ts = Time_compat.now () in
-  match Hashtbl.find_opt board_reactive_wakeups key with
-  | Some last_ts when now_ts -. last_ts < board_reactive_debounce_sec -> false
-  | _ ->
-      Hashtbl.replace board_reactive_wakeups key now_ts;
-      true
+  with_keepalive_registry_rw (fun () ->
+      match Hashtbl.find_opt board_reactive_wakeups key with
+      | Some last_ts when now_ts -. last_ts < board_reactive_debounce_sec -> false
+      | _ ->
+          Hashtbl.replace board_reactive_wakeups key now_ts;
+          true)
 
 let wakeup_relevant_keeper_for_board_signal
     ~(config : Room.config)
     (signal : Board_dispatch.keeper_board_signal) =
   let running_names =
-    Hashtbl.fold (fun name _ acc -> name :: acc) keepalives []
+    with_keepalive_registry_ro (fun () ->
+        Hashtbl.fold (fun name _ acc -> name :: acc) keepalives [])
   in
   let candidates =
     running_names
@@ -385,30 +411,32 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               in
               let agent_count_changed =
                 let last_count =
-                  Hashtbl.find_opt last_agent_counts meta_current.name
-                  |> Option.value ~default:0
+                  with_keepalive_registry_ro (fun () ->
+                      Hashtbl.find_opt last_agent_counts meta_current.name
+                      |> Option.value ~default:0)
                 in
                 let changed =
                   last_count > 0 && current_agent_count <> last_count
                 in
-                Hashtbl.replace last_agent_counts
-                  meta_current.name current_agent_count;
+                with_keepalive_registry_rw (fun () ->
+                    Hashtbl.replace last_agent_counts
+                      meta_current.name current_agent_count);
                 changed
               in
-              let board_new_post_count, board_mention_count =
+              let pending_board_events, board_new_post_count, board_mention_count =
                 (try
-                   let _events, new_count, mention_count =
+                   let events, new_count, mention_count =
                      Keeper_world_observation.collect_board_events
                        ~meta:meta_current
                        ~continuity_summary:meta_current.continuity_summary
                    in
-                   (new_count, mention_count)
+                   (events, new_count, mention_count)
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
                      Log.Keeper.warn "keepalive: board count query failed: %s"
                        (Printexc.to_string exn);
-                     (0, 0))
+                     ([], 0, 0))
               in
               let obs =
                 { obs with
@@ -455,6 +483,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    let obs =
                      Keeper_world_observation.observe
                        ~config:ctx.config ~meta:meta_after_triage
+                       ~pending_board_events
                    in
                    if
                      Keeper_world_observation.should_run_unified_turn
@@ -546,8 +575,14 @@ let run_grpc_heartbeat_fiber ~sw ~stop
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     (m : keeper_meta) : unit =
   if not m.presence_keepalive then ()
-  else if Hashtbl.mem keepalives m.name then ()
-  else if not (keeper_spawn_slots_available ()) then ()
+  else
+    let can_start =
+      let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
+      with_keepalive_registry_ro (fun () ->
+          (not (Hashtbl.mem keepalives m.name))
+          && (max_keepers <= 0 || Hashtbl.length keepalives < max_keepers))
+    in
+    if not can_start then ()
   else (
     let stop = ref false in
     let wakeup = ref false in
@@ -571,8 +606,9 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
         None
       | _ -> None
     in
-    Hashtbl.replace keepalives m.name
-      { stop; wakeup; started_at = Time_compat.now (); grpc_close };
+    with_keepalive_registry_rw (fun () ->
+        Hashtbl.replace keepalives m.name
+          { stop; wakeup; started_at = Time_compat.now (); grpc_close });
     (try
        if not (Room_utils.is_initialized ctx.config) then
          let (_init_msg : string) = Room.init ctx.config ~agent_name:None in ()
@@ -595,11 +631,19 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
         run_heartbeat_loop ~proactive_warmup_sec ctx m stop ~wakeup))
 
 let stop_keepalive name =
-  match Hashtbl.find_opt keepalives name with
+  match
+    with_keepalive_registry_rw (fun () ->
+        match Hashtbl.find_opt keepalives name with
+        | None -> None
+        | Some entry ->
+            Hashtbl.remove keepalives name;
+            Hashtbl.remove last_agent_counts name;
+            remove_board_reactive_wakeups_unlocked name;
+            Some entry)
+  with
   | None -> ()
   | Some entry ->
       entry.stop := true;
       (match entry.grpc_close with
        | Some close_fn -> (try close_fn () with _ -> ())
-       | None -> ());
-      Hashtbl.remove keepalives name
+       | None -> ())

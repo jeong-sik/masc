@@ -12,7 +12,7 @@ type world_observation = {
   (** [(from_agent, content)] pairs of unprocessed direct mentions. *)
 
   pending_board_events : string list;
-  (** Post IDs of board events needing triage. *)
+  (** Summaries of board events needing triage. *)
 
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or proactive). *)
@@ -78,9 +78,15 @@ val board_signal_match :
     and recent board activity.
     All I/O errors are caught and produce safe defaults (0, empty, Normal).
 
+    @param pending_board_events Pre-collected board event summaries for this
+      heartbeat, if already fetched during triage
     @param config Room configuration for I/O operations
     @param meta Current keeper metadata *)
-val observe : config:Room.config -> meta:Keeper_types.keeper_meta -> world_observation
+val observe :
+  ?pending_board_events:string list ->
+  config:Room.config ->
+  meta:Keeper_types.keeper_meta ->
+  world_observation
 
 val should_run_unified_turn :
   meta:Keeper_types.keeper_meta -> world_observation -> bool

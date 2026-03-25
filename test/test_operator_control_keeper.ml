@@ -252,9 +252,9 @@ proactive_enabled = true
         json |> member "sources" |> member "override_fields" |> to_list
         |> List.map to_string
       in
-      (* room_scope "all" is canonicalized to "current" (#2901), matching
-         live meta — no longer flagged as override. *)
-      Alcotest.(check bool) "room_scope canonicalized so not flagged" false
+      (* Source defaults keep room_scope = "all", while live meta is mutated to
+         "current", so the override must stay visible. *)
+      Alcotest.(check bool) "room_scope override flagged" true
         (List.mem "coordination.room_scope" override_fields);
       Alcotest.(check bool) "override field proactive" true
         (List.mem "proactive.enabled" override_fields);

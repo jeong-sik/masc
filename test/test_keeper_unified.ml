@@ -28,6 +28,23 @@ let () =
   Masc_mcp.Prompt_registry.set_markdown_dir prompts_dir;
   Masc_mcp.Prompt_defaults.init ()
 
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_unified_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
 (* ---------- World Observation type tests ---------- *)
 
 let base_observation : WO.world_observation =
@@ -93,6 +110,36 @@ let minimal_meta : Masc_mcp.Keeper_types.keeper_meta =
   match Masc_mcp.Keeper_types.meta_of_json json with
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
+
+let test_observe_uses_precollected_board_events () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      (match
+         Masc_mcp.Board_dispatch.create_post ~author:"alice"
+           ~title:"Need sangsu" ~content:"@test-keeper please check this" ()
+       with
+      | Ok _ -> ()
+      | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e));
+      let events, _, _ =
+        WO.collect_board_events ~continuity_summary:"goal test-keeper"
+          ~meta:minimal_meta
+      in
+      let obs =
+        WO.observe ~config ~meta:minimal_meta ~pending_board_events:events
+      in
+      check int "precollected board events preserved" (List.length events)
+        (List.length obs.pending_board_events);
+      check (option string) "board reactive trigger" (Some "board_reactive")
+        obs.autonomy_trigger)
 
 let test_prompt_contains_identity () =
   let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
@@ -464,6 +511,8 @@ let () =
         [
           test_case "defaults" `Quick test_observation_defaults;
           test_case "with mentions" `Quick test_observation_with_mentions;
+          test_case "uses precollected board events" `Quick
+            test_observe_uses_precollected_board_events;
           test_case "with goals" `Quick test_observation_with_goals;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );

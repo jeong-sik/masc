@@ -314,7 +314,8 @@ let collect_board_events ~(continuity_summary : string) ~(meta : keeper_meta) :
       (Printexc.to_string exn);
     ([], 0, 0)
 
-let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
+let observe ?pending_board_events ~(config : Room.config) ~(meta : keeper_meta) :
+    world_observation =
   let pending_mentions = collect_pending_mentions ~config ~meta in
   let unclaimed_task_count, failed_task_count =
     read_backlog_counts ~config
@@ -331,8 +332,14 @@ let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
     Agent_economy.economic_pressure ~base_path:config.base_path
       ~agent_name:meta.name
   in
-  let pending_board_events, _board_new_count, _board_mention_count =
-    collect_board_events ~meta ~continuity_summary
+  let pending_board_events =
+    match pending_board_events with
+    | Some events -> events
+    | None ->
+        let events, _board_new_count, _board_mention_count =
+          collect_board_events ~meta ~continuity_summary
+        in
+        events
   in
   let since_last_proactive =
     if meta.proactive.last_ts <= 0.0 then max_int

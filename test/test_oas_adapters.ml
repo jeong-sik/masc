@@ -74,7 +74,7 @@ let test_roundtrip_tool_msg () =
 let compact_ctx (ctx : Keeper_exec_context.working_context) strategies =
   let messages, token_count =
     Context_compact_oas.compact
-      ~system_prompt:ctx.system_prompt ~messages:ctx.messages ~strategies in
+      ~system_prompt:ctx.system_prompt ~messages:ctx.messages ~strategies () in
   { ctx with Keeper_exec_context.messages; token_count; importance_scores = [] }
 (* ================================================================ *)
 

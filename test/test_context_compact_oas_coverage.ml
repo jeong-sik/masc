@@ -31,7 +31,7 @@ let test_merge_contiguous_still_merges_plain_user () =
   ] in
   let result, _tokens = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
-    ~strategies:[Compact.MergeContiguous] in
+    ~strategies:[Compact.MergeContiguous] () in
   let user_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
     m.role = Agent_sdk.Types.User) result in
   check int "plain user messages merged" 1 (List.length user_msgs)
@@ -49,7 +49,7 @@ let test_compact_prune_tool_outputs () =
   ] in
   let result, _tokens = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
-    ~strategies:[Compact.PruneToolOutputs] in
+    ~strategies:[Compact.PruneToolOutputs] () in
   let tool_text = Agent_sdk.Types.text_of_message (List.nth result 1) in
   check bool "tool output was pruned" true
     (String.length tool_text < String.length long_output)
@@ -57,7 +57,7 @@ let test_compact_prune_tool_outputs () =
 let test_compact_empty_messages () =
   let result, tokens = Compact.compact
     ~system_prompt:"sys" ~messages:[]
-    ~strategies:[Compact.PruneToolOutputs; Compact.MergeContiguous] in
+    ~strategies:[Compact.PruneToolOutputs; Compact.MergeContiguous] () in
   check int "empty input = empty output" 0 (List.length result);
   check bool "tokens > 0 (system prompt)" true (tokens > 0)
 
@@ -65,7 +65,7 @@ let test_compact_single_message () =
   let msgs = [msg Agent_sdk.Types.User "hello"] in
   let result, _tokens = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
-    ~strategies:[Compact.MergeContiguous; Compact.DropLowImportance] in
+    ~strategies:[Compact.MergeContiguous; Compact.DropLowImportance] () in
   check bool "single message survives" true (List.length result >= 1)
 
 let test_compact_drop_low_importance () =

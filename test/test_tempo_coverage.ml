@@ -212,15 +212,15 @@ let test_calculate_adaptive_tempo_low_priority () =
 module Room_utils = Room_utils
 
 let make_test_config ~base_path : Room_utils.config =
-  let backend_config : Backend_eio_types.config = {
-    backend_type = Backend_eio_types.Memory;
+  let backend_config : Backend_types.config = {
+    backend_type = Backend_types.Memory;
     base_path;
     postgres_url = None;
     node_id = "test-node";
     cluster_name = "default";
     pubsub_max_messages = 1000;
   } in
-  let memory_backend = Backend_eio.Memory.create () in
+  let memory_backend = Backend.Memory.create () in
   {
     Room_utils.base_path;
     workspace_path = base_path;

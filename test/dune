@@ -579,8 +579,8 @@
 
 ; Backend_eio test (Eio-native storage backend)
 (test
- (name test_backend_eio)
- (modules test_backend_eio)
+ (name test_backend)
+ (modules test_backend)
  (libraries masc_mcp alcotest eio eio_main fmt yojson))
 
 ; Room_eio test (Eio-native room operations)

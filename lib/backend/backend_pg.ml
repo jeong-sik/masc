@@ -1,17 +1,17 @@
-(** Backend_eio_pg - Eio-native PostgreSQL backend implementation.
+(** Backend_pg - Eio-native PostgreSQL backend implementation.
 
-    Extracted from Backend_eio.Postgres for separation of concerns.
+    Extracted from Backend.Postgres for separation of concerns.
     Uses Caqti-eio for non-blocking PostgreSQL access with zstd compression.
 
-    Types come from Backend_eio_types (shared with Backend_eio).
-    Backend_eio.Postgres delegates to this module.
+    Types come from Backend_types (shared with Backend).
+    Backend.Postgres delegates to this module.
 *)
 
-module Compression = Backend_eio_compression
+module Compression = Backend_compression
 
 (** {1 Types} *)
 
-include Backend_eio_types
+include Backend_types
 
 (** {1 PostgreSQL Backend} *)
 

@@ -1,4 +1,4 @@
-(** Backend_eio: OCaml 5.x Eio-native storage backend
+(** Backend: OCaml 5.x Eio-native storage backend
 
     Direct-style async I/O using Eio.
 
@@ -7,7 +7,7 @@
     - Eio.Mutex for concurrency control
     - Direct style (no let*/>>= needed)
 
-    Migration path: Backend.FileSystemBackend -> Backend_eio.FileSystem
+    Migration path: Backend.FileSystemBackend -> Backend.FileSystem
 
     Compact Protocol v4: Transparent zstd compression with Dictionary
     - Uses trained multi-format dictionary for 32-2048 byte messages
@@ -18,13 +18,13 @@
 
 (** {1 Compression} *)
 
-module Compression = Backend_eio_compression
+module Compression = Backend_compression
 
 (** {1 Types} *)
 
-(* Types are shared with Backend_eio_pg via Backend_eio_types
+(* Types are shared with Backend_pg via Backend_types
    to avoid circular dependency. Re-exported here for API compatibility. *)
-include Backend_eio_types
+include Backend_types
 
 (** {1 FileSystem Backend (Eio)} *)
 
@@ -639,19 +639,19 @@ module Memory = struct
 end
 
 (** {1 PostgreSQL Backend (Eio)}
-    Implementation delegated to Backend_eio_pg for separation of concerns. *)
+    Implementation delegated to Backend_pg for separation of concerns. *)
 
 module Postgres = struct
-  include Backend_eio_pg
+  include Backend_pg
 
-  (** Adapter: accept [config] record matching [Backend_eio.config]. *)
+  (** Adapter: accept [config] record matching [Backend.config]. *)
   let create ~sw ~env ~url config =
-    Backend_eio_pg.create ~sw ~env ~url
+    Backend_pg.create ~sw ~env ~url
       ~cluster_name:config.cluster_name ~node_id:config.node_id
 
   (** Readonly adapter with smaller pool. *)
   let create_readonly ~sw ~env ~url config =
-    Backend_eio_pg.create_readonly ~sw ~env ~url
+    Backend_pg.create_readonly ~sw ~env ~url
       ~cluster_name:config.cluster_name ~node_id:config.node_id
 end
 

@@ -1,10 +1,10 @@
 (** Room Utilities - Shared helpers for Room module *)
 
-(** Storage backend type - unified interface (Backend_eio only) *)
+(** Storage backend type - unified interface (Backend only) *)
 type storage_backend =
-  | Memory of Backend_eio.Memory.t
-  | FileSystem of Backend_eio.FileSystem.t
-  | PostgresNative of Backend_eio.Postgres.t
+  | Memory of Backend.Memory.t
+  | FileSystem of Backend.FileSystem.t
+  | PostgresNative of Backend.Postgres.t
 
 (** Room scope — determines which directory tree is active.
     Resolved once at config creation time, never re-read from filesystem. *)
@@ -17,7 +17,7 @@ type config = {
   base_path: string;
   workspace_path: string;
   lock_expiry_minutes: int;
-  backend_config: Backend_eio_types.config;
+  backend_config: Backend_types.config;
   backend: storage_backend;
   scope: scope;
 }
@@ -57,19 +57,19 @@ let with_domain_local_pg_backend ~sw ~net ~clock ~mono_clock config =
         method mono_clock = mono_clock
       end
     in
-    let url = match config.backend_config.Backend_eio_types.postgres_url with
+    let url = match config.backend_config.Backend_types.postgres_url with
       | Some u -> u
       | None -> ""
     in
-    (match Backend_eio.Postgres.create_readonly ~sw ~env ~url config.backend_config with
+    (match Backend.Postgres.create_readonly ~sw ~env ~url config.backend_config with
     | Ok t ->
       Atomic.fetch_and_add _domain_local_pg_backend_created 1 |> ignore;
       Some { config with backend = PostgresNative t }
     | Error err ->
       Atomic.fetch_and_add _domain_local_pg_backend_failed 1 |> ignore;
-      Atomic.set _domain_local_pg_backend_last_error (Backend_eio_types.show_error err);
+      Atomic.set _domain_local_pg_backend_last_error (Backend_types.show_error err);
       Log.Room.warn "Domain-local PG backend failed: %s"
-        (Backend_eio_types.show_error err);
+        (Backend_types.show_error err);
       None)
   | Memory _ | FileSystem _ ->
     Some config
@@ -247,9 +247,9 @@ let backend_config_for base_path =
   in
   let backend_type =
     match storage_type with
-    | "postgres" | "postgresql" -> Backend_eio_types.PostgresNative
-    | "memory" -> Backend_eio_types.Memory
-    | _ -> Backend_eio_types.FileSystem
+    | "postgres" | "postgresql" -> Backend_types.PostgresNative
+    | "memory" -> Backend_types.Memory
+    | _ -> Backend_types.FileSystem
   in
   let masc_root = Filename.concat base_path ".masc" in
   let cluster_segment =
@@ -263,41 +263,41 @@ let backend_config_for base_path =
     | Some seg -> Filename.concat (Filename.concat masc_root "clusters") seg
   in
   {
-    Backend_eio_types.backend_type;
-    Backend_eio_types.postgres_url;
-    Backend_eio_types.base_path = backend_base_path;
-    Backend_eio_types.cluster_name;
-    Backend_eio_types.node_id = Backend_eio_types.generate_node_id ();
-    Backend_eio_types.pubsub_max_messages = Backend_eio_types.pubsub_max_messages_from_env ();
+    Backend_types.backend_type;
+    Backend_types.postgres_url;
+    Backend_types.base_path = backend_base_path;
+    Backend_types.cluster_name;
+    Backend_types.node_id = Backend_types.generate_node_id ();
+    Backend_types.pubsub_max_messages = Backend_types.pubsub_max_messages_from_env ();
   }
 
 let create_backend cfg =
-  match cfg.Backend_eio_types.backend_type with
-  | Backend_eio_types.Memory ->
-      (* Backend_eio.Memory now has Effect.Unhandled/Poisoned fallback
+  match cfg.Backend_types.backend_type with
+  | Backend_types.Memory ->
+      (* Backend.Memory now has Effect.Unhandled/Poisoned fallback
          built in, so it works in both Eio and non-Eio contexts. *)
-      Ok (Memory (Backend_eio.Memory.create ()))
-  | Backend_eio_types.FileSystem ->
+      Ok (Memory (Backend.Memory.create ()))
+  | Backend_types.FileSystem ->
       (match Fs_compat.get_fs_opt () with
-       | Some fs -> Ok (FileSystem (Backend_eio.FileSystem.create ~fs cfg))
+       | Some fs -> Ok (FileSystem (Backend.FileSystem.create ~fs cfg))
        | None ->
            (* No Eio fs context available (e.g., test without Fs_compat.set_fs).
               Fall back to Memory backend which works without Eio context. *)
            Log.Backend.warn "No Eio fs context for FileSystem backend, falling back to Memory";
-           Ok (Memory (Backend_eio.Memory.create ())))
-  | Backend_eio_types.PostgresNative ->
+           Ok (Memory (Backend.Memory.create ())))
+  | Backend_types.PostgresNative ->
       (* PostgresNative requires Eio context - use create_backend_eio instead *)
-      Error (Backend_eio_types.BackendNotSupported "PostgresNative requires Eio context (use create_backend_eio)")
+      Error (Backend_types.BackendNotSupported "PostgresNative requires Eio context (use create_backend_eio)")
 
 (** Create backend with Eio context - required for PostgresNative *)
 let create_backend_eio ~sw ~env cfg =
-  match cfg.Backend_eio_types.backend_type with
-  | Backend_eio_types.PostgresNative ->
-      let url = match cfg.Backend_eio_types.postgres_url with
+  match cfg.Backend_types.backend_type with
+  | Backend_types.PostgresNative ->
+      let url = match cfg.Backend_types.postgres_url with
         | Some u -> u
         | None -> ""
       in
-      (match Backend_eio.Postgres.create ~sw ~env ~url cfg with
+      (match Backend.Postgres.create ~sw ~env ~url cfg with
        | Ok backend -> Ok (PostgresNative backend)
        | Error e -> Error e)
   | _ ->
@@ -309,7 +309,7 @@ let default_config base_path =
   let resolved_path = resolve_masc_base_path base_path in
   let backend_config = backend_config_for resolved_path in
   Log.Backend.info "MASC Backend: type=%s, postgres_url=%s"
-    (Backend_eio_types.show_backend_type backend_config.backend_type)
+    (Backend_types.show_backend_type backend_config.backend_type)
     (match backend_config.postgres_url with Some _ -> "<configured>" | None -> "none");
   let backend =
     match create_backend backend_config with
@@ -322,15 +322,15 @@ let default_config base_path =
         backend
     | Error e ->
         Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
-          (Backend_eio_types.show_error e);
+          (Backend_types.show_error e);
         let fallback_cfg =
-          { backend_config with Backend_eio_types.backend_type = Backend_eio_types.FileSystem }
+          { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
         in
         (match create_backend fallback_cfg with
          | Ok fb -> fb
          | Error _ ->
              (* Final fallback: in-memory to keep server alive *)
-             Memory (Backend_eio.Memory.create ()))
+             Memory (Backend.Memory.create ()))
   in
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
@@ -348,7 +348,7 @@ let default_config_eio ~sw ~env ?(on_backend_ready = fun _backend -> ()) base_pa
   let resolved_path = resolve_masc_base_path base_path in
   let backend_config = backend_config_for resolved_path in
   Log.Backend.info "MASC Backend: type=%s, postgres_url=%s"
-    (Backend_eio_types.show_backend_type backend_config.backend_type)
+    (Backend_types.show_backend_type backend_config.backend_type)
     (match backend_config.postgres_url with Some _ -> "<configured>" | None -> "none");
   let backend =
     match create_backend_eio ~sw ~env backend_config with
@@ -362,15 +362,15 @@ let default_config_eio ~sw ~env ?(on_backend_ready = fun _backend -> ()) base_pa
         backend
     | Error e ->
         Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
-          (Backend_eio_types.show_error e);
+          (Backend_types.show_error e);
         let fallback_cfg =
-          { backend_config with Backend_eio_types.backend_type = Backend_eio_types.FileSystem }
+          { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
         in
         (match create_backend fallback_cfg with
          | Ok fb -> fb
          | Error _ ->
              (* Final fallback: in-memory to keep server alive *)
-             Memory (Backend_eio.Memory.create ()))
+             Memory (Backend.Memory.create ()))
   in
   {
     base_path = resolved_path;

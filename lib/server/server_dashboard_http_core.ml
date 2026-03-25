@@ -141,8 +141,8 @@ let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
     ~(config : Room.config) compute =
   let fallback () = compute ~config ~sw in
   let run_in_pool pool_sw =
-    match config.backend_config.Backend_eio_types.backend_type with
-    | Backend_eio_types.PostgresNative ->
+    match config.backend_config.Backend_types.backend_type with
+    | Backend_types.PostgresNative ->
         let net = Eio_context.get_net () in
         let mono_clock = Eio_context.get_mono_clock () in
         (match
@@ -151,7 +151,7 @@ let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
          with
          | Some domain_config -> `Done (compute ~config:domain_config ~sw:pool_sw)
          | None -> `Fallback)
-    | Backend_eio_types.Memory | Backend_eio_types.FileSystem ->
+    | Backend_types.Memory | Backend_types.FileSystem ->
         `Done (compute ~config ~sw:pool_sw)
   in
   let offloaded () =

@@ -290,7 +290,7 @@ let test_backend_config_for_uses_fallback_pg_url () =
       let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
       check bool "backend type is postgres native" true
         (match cfg.backend_type with
-         | Backend_eio_types.PostgresNative -> true
+         | Backend_types.PostgresNative -> true
          | _ -> false);
       check (option string) "postgres url" (Some url) cfg.postgres_url)
 
@@ -389,15 +389,15 @@ let test_validate_file_path_angle_bracket_gt () =
    ============================================================ *)
 
 let make_test_config ~base_path ~cluster_name : Room_utils.config =
-  let backend_config : Backend_eio_types.config = {
-    backend_type = Backend_eio_types.Memory;
+  let backend_config : Backend_types.config = {
+    backend_type = Backend_types.Memory;
     base_path;
     postgres_url = None;
     node_id = "test-node";
     cluster_name;
     pubsub_max_messages = 1000;
   } in
-  let memory_backend = Backend_eio.Memory.create () in
+  let memory_backend = Backend.Memory.create () in
   {
     Room_utils.base_path;
     workspace_path = base_path;

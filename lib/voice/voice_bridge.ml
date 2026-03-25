@@ -1,6 +1,6 @@
-(** Voice_bridge_eio — TTS synthesis, MCP voice sessions, conferences. *)
+(** Voice_bridge — TTS synthesis, MCP voice sessions, conferences. *)
 
-include Voice_bridge_eio_core
+include Voice_bridge_core
 
 let safe_agent_id value =
   String.map

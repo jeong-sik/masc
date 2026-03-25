@@ -142,7 +142,7 @@ let save config =
     let json_str = Yojson.Safe.to_string json in
     (match Room_utils.backend_set config ~key:"swarm:checkpoint" ~value:json_str with
      | Ok () -> ()
-     | Error e -> Log.Misc.warn "swarm checkpoint backend_set failed: %s" (Backend_eio_types.show_error e))
+     | Error e -> Log.Misc.warn "swarm checkpoint backend_set failed: %s" (Backend_types.show_error e))
   end;
   Ok snapshot
 

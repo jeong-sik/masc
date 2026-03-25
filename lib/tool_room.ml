@@ -99,7 +99,7 @@ let status_summary_string (ctx : context) =
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
   let cluster_name =
-    match ctx.config.backend_config.Backend_eio_types.cluster_name with
+    match ctx.config.backend_config.Backend_types.cluster_name with
     | "" -> state.project
     | name -> name
   in

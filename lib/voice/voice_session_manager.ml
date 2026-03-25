@@ -131,7 +131,7 @@ let start_session t ~agent_id ?voice () =
     (* Get default voice from Voice_bridge *)
     let voice = match voice with
       | Some v -> v
-      | None -> Voice_bridge_eio.get_voice_for_agent agent_id
+      | None -> Voice_bridge.get_voice_for_agent agent_id
     in
     let now = Time_compat.now () in
     let session = {

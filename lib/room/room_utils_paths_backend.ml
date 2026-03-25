@@ -2,7 +2,7 @@ open Room_utils_backend_setup
 
 let masc_root_dir config =
   let masc_root = Filename.concat config.base_path ".masc" in
-  let cluster_name = config.backend_config.Backend_eio_types.cluster_name in
+  let cluster_name = config.backend_config.Backend_types.cluster_name in
   match cluster_name with
   | "" | "default" -> masc_root
   | other ->
@@ -74,57 +74,57 @@ let is_pg_backend config =
 
 (** Shared in-memory pubsub for FileSystem and Memory backends.
     PostgreSQL backend has its own pg_notify-based pubsub. *)
-let _shared_pubsub = lazy (Backend_eio_types.Pubsub_mem.create ())
+let _shared_pubsub = lazy (Backend_types.Pubsub_mem.create ())
 
-(** Adapt Backend_eio get (returns Ok string | Error NotFound) to
+(** Adapt Backend get (returns Ok string | Error NotFound) to
     the (string option, error) result shape used by all callers. *)
 let backend_get config ~key =
   let result = match config.backend with
-    | Memory t -> Backend_eio.Memory.get t key
-    | FileSystem t -> Backend_eio.FileSystem.get t key
-    | PostgresNative t -> Backend_eio.Postgres.get t key
+    | Memory t -> Backend.Memory.get t key
+    | FileSystem t -> Backend.FileSystem.get t key
+    | PostgresNative t -> Backend.Postgres.get t key
   in
   (match result with
    | Ok v -> Ok (Some v)
-   | Error (Backend_eio_types.NotFound _) -> Ok None
+   | Error (Backend_types.NotFound _) -> Ok None
    | Error e -> Error e)
 
 let backend_set config ~key ~value =
   match config.backend with
-  | Memory t -> Backend_eio.Memory.set t key value
-  | FileSystem t -> Backend_eio.FileSystem.set t key value
-  | PostgresNative t -> Backend_eio.Postgres.set t key value
+  | Memory t -> Backend.Memory.set t key value
+  | FileSystem t -> Backend.FileSystem.set t key value
+  | PostgresNative t -> Backend.Postgres.set t key value
 
-(** Adapt Backend_eio delete (returns Ok unit | Error NotFound) to
+(** Adapt Backend delete (returns Ok unit | Error NotFound) to
     the (bool, error) result shape. *)
 let backend_delete config ~key =
   let result = match config.backend with
-    | Memory t -> Backend_eio.Memory.delete t key
-    | FileSystem t -> Backend_eio.FileSystem.delete t key
-    | PostgresNative t -> Backend_eio.Postgres.delete t key
+    | Memory t -> Backend.Memory.delete t key
+    | FileSystem t -> Backend.FileSystem.delete t key
+    | PostgresNative t -> Backend.Postgres.delete t key
   in
   (match result with
    | Ok () -> Ok true
-   | Error (Backend_eio_types.NotFound _) -> Ok false
+   | Error (Backend_types.NotFound _) -> Ok false
    | Error e -> Error e)
 
 let backend_exists config ~key =
   match config.backend with
-  | Memory t -> Backend_eio.Memory.exists t key
-  | FileSystem t -> Backend_eio.FileSystem.exists t key
-  | PostgresNative t -> Backend_eio.Postgres.exists t key
+  | Memory t -> Backend.Memory.exists t key
+  | FileSystem t -> Backend.FileSystem.exists t key
+  | PostgresNative t -> Backend.Postgres.exists t key
 
 let backend_list_keys config ~prefix =
   match config.backend with
-  | Memory t -> Backend_eio.Memory.list_keys t ~prefix
-  | FileSystem t -> Backend_eio.FileSystem.list_keys t ~prefix
-  | PostgresNative t -> Backend_eio.Postgres.list_keys t ~prefix
+  | Memory t -> Backend.Memory.list_keys t ~prefix
+  | FileSystem t -> Backend.FileSystem.list_keys t ~prefix
+  | PostgresNative t -> Backend.Postgres.list_keys t ~prefix
 
 (** get_all: FileSystem and Memory build from list_keys + get.
     PostgreSQL has a native get_all. *)
 let backend_get_all config ~prefix =
   match config.backend with
-  | PostgresNative t -> Backend_eio.Postgres.get_all t ~prefix
+  | PostgresNative t -> Backend.Postgres.get_all t ~prefix
   | Memory _ | FileSystem _ ->
       (match backend_list_keys config ~prefix with
        | Error e -> Error e
@@ -140,51 +140,51 @@ let backend_set_if_not_exists config ~key ~value =
   match config.backend with
   | Memory t ->
       (* Memory backend: check-then-set *)
-      (match Backend_eio.Memory.get t key with
-       | Error (Backend_eio_types.NotFound _) ->
-           Backend_eio.Memory.set t key value |> Result.map (fun () -> true)
+      (match Backend.Memory.get t key with
+       | Error (Backend_types.NotFound _) ->
+           Backend.Memory.set t key value |> Result.map (fun () -> true)
        | Ok _ -> Ok false
        | Error e -> Error e)
-  | FileSystem t -> Backend_eio.FileSystem.set_if_not_exists t key value
-  | PostgresNative t -> Backend_eio.Postgres.set_if_not_exists t key value
+  | FileSystem t -> Backend.FileSystem.set_if_not_exists t key value
+  | PostgresNative t -> Backend.Postgres.set_if_not_exists t key value
 
 let backend_acquire_lock config ~key ~ttl_seconds ~owner =
   match config.backend with
   | Memory _ -> Ok true  (* In-memory is single-process *)
-  | FileSystem t -> Backend_eio.FileSystem.acquire_lock t ~key ~owner ~ttl_seconds
-  | PostgresNative t -> Backend_eio.Postgres.acquire_lock t ~key ~owner ~ttl_seconds
+  | FileSystem t -> Backend.FileSystem.acquire_lock t ~key ~owner ~ttl_seconds
+  | PostgresNative t -> Backend.Postgres.acquire_lock t ~key ~owner ~ttl_seconds
 
 let backend_release_lock config ~key ~owner =
   match config.backend with
   | Memory _ -> Ok true
-  | FileSystem t -> Backend_eio.FileSystem.release_lock t ~key ~owner
-  | PostgresNative t -> Backend_eio.Postgres.release_lock t ~key ~owner
+  | FileSystem t -> Backend.FileSystem.release_lock t ~key ~owner
+  | PostgresNative t -> Backend.Postgres.release_lock t ~key ~owner
 
 let backend_extend_lock config ~key ~ttl_seconds ~owner =
   match config.backend with
   | Memory _ -> Ok true
-  | FileSystem t -> Backend_eio.FileSystem.extend_lock t ~key ~owner ~ttl_seconds
-  | PostgresNative t -> Backend_eio.Postgres.extend_lock t ~key ~owner ~ttl_seconds
+  | FileSystem t -> Backend.FileSystem.extend_lock t ~key ~owner ~ttl_seconds
+  | PostgresNative t -> Backend.Postgres.extend_lock t ~key ~owner ~ttl_seconds
 
 let backend_health_check config =
   match config.backend with
-  | Memory _ -> Ok { Backend_eio_types.latency_ms = 0.0; is_healthy = true }
-  | FileSystem t -> Backend_eio.FileSystem.health_check t
-  | PostgresNative t -> Backend_eio.Postgres.health_check t
+  | Memory _ -> Ok { Backend_types.latency_ms = 0.0; is_healthy = true }
+  | FileSystem t -> Backend.FileSystem.health_check t
+  | PostgresNative t -> Backend.Postgres.health_check t
 
 (** Publish: PostgreSQL uses pg_notify, FileSystem/Memory use shared in-mem pubsub. *)
 let backend_publish config ~channel ~message =
   match config.backend with
-  | PostgresNative t -> Backend_eio.Postgres.publish t ~channel ~message
+  | PostgresNative t -> Backend.Postgres.publish t ~channel ~message
   | Memory _ | FileSystem _ ->
-      Backend_eio_types.Pubsub_mem.publish (Lazy.force _shared_pubsub) ~channel ~message
+      Backend_types.Pubsub_mem.publish (Lazy.force _shared_pubsub) ~channel ~message
 
 (** Subscribe: PostgreSQL uses table polling, FileSystem/Memory use shared in-mem pubsub. *)
 let backend_subscribe config ~channel ~callback =
   match config.backend with
-  | PostgresNative t -> Backend_eio.Postgres.subscribe t ~channel ~callback
+  | PostgresNative t -> Backend.Postgres.subscribe t ~channel ~callback
   | Memory _ | FileSystem _ ->
-      Backend_eio_types.Pubsub_mem.subscribe (Lazy.force _shared_pubsub) ~channel ~callback
+      Backend_types.Pubsub_mem.subscribe (Lazy.force _shared_pubsub) ~channel ~callback
 
 let backend_name config =
   match config.backend with
@@ -197,7 +197,7 @@ let backend_name config =
     Returns the number of deleted messages. *)
 let backend_cleanup_pubsub config ~days ~max_messages =
   match config.backend with
-  | PostgresNative t -> Backend_eio.Postgres.cleanup_pubsub t ~days ~max_messages
+  | PostgresNative t -> Backend.Postgres.cleanup_pubsub t ~days ~max_messages
   | Memory _ | FileSystem _ ->
       Ok 0
 

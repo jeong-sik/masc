@@ -1,4 +1,4 @@
-(** Tests for Backend_eio: OCaml 5.x Eio-native storage backend *)
+(** Tests for Backend: OCaml 5.x Eio-native storage backend *)
 
 (** Recursive directory cleanup *)
 let rec rm_rf path =
@@ -29,12 +29,12 @@ let with_eio_env f =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let tmp_dir = make_test_dir () in
-  let config = { Backend_eio.default_config with
+  let config = { Backend.default_config with
     base_path = tmp_dir;
     node_id = "test_node";
     cluster_name = "test";
   } in
-  let backend = Backend_eio.FileSystem.create ~fs config in
+  let backend = Backend.FileSystem.create ~fs config in
   Fun.protect
     ~finally:(fun () -> try rm_rf tmp_dir with _ -> ())
     (fun () -> f backend)
@@ -46,14 +46,14 @@ let test_set_get () =
   let value = "hello world" in
 
   (* Set value *)
-  (match Backend_eio.FileSystem.set backend key value with
+  (match Backend.FileSystem.set backend key value with
    | Ok () -> ()
-   | Error e -> Alcotest.failf "set failed: %s" (Backend_eio.show_error e));
+   | Error e -> Alcotest.failf "set failed: %s" (Backend.show_error e));
 
   (* Get value *)
-  match Backend_eio.FileSystem.get backend key with
+  match Backend.FileSystem.get backend key with
   | Ok v -> Alcotest.(check string) "value matches" value v
-  | Error e -> Alcotest.failf "get failed: %s" (Backend_eio.show_error e)
+  | Error e -> Alcotest.failf "get failed: %s" (Backend.show_error e)
 
 (** Test exists function *)
 let test_exists () =
@@ -62,14 +62,14 @@ let test_exists () =
 
   (* Should not exist initially *)
   Alcotest.(check bool) "not exists initially" false
-    (Backend_eio.FileSystem.exists backend key);
+    (Backend.FileSystem.exists backend key);
 
   (* Set value *)
-  let _ = Backend_eio.FileSystem.set backend key "value" in
+  let _ = Backend.FileSystem.set backend key "value" in
 
   (* Should exist now *)
   Alcotest.(check bool) "exists after set" true
-    (Backend_eio.FileSystem.exists backend key)
+    (Backend.FileSystem.exists backend key)
 
 (** Test delete operation *)
 let test_delete () =
@@ -77,39 +77,39 @@ let test_delete () =
   let key = "delete:test" in
 
   (* Set then delete *)
-  let _ = Backend_eio.FileSystem.set backend key "to be deleted" in
+  let _ = Backend.FileSystem.set backend key "to be deleted" in
   Alcotest.(check bool) "exists before delete" true
-    (Backend_eio.FileSystem.exists backend key);
+    (Backend.FileSystem.exists backend key);
 
-  (match Backend_eio.FileSystem.delete backend key with
+  (match Backend.FileSystem.delete backend key with
    | Ok () -> ()
    | Error _ -> Alcotest.fail "delete failed");
 
   Alcotest.(check bool) "not exists after delete" false
-    (Backend_eio.FileSystem.exists backend key)
+    (Backend.FileSystem.exists backend key)
 
 (** Test key validation *)
 let test_key_validation () =
   with_eio_env @@ fun backend ->
 
   (* Empty key should fail *)
-  (match Backend_eio.FileSystem.set backend "" "value" with
-   | Error (Backend_eio.InvalidKey _) -> ()
+  (match Backend.FileSystem.set backend "" "value" with
+   | Error (Backend.InvalidKey _) -> ()
    | _ -> Alcotest.fail "empty key should fail");
 
   (* Key with slash should fail *)
-  (match Backend_eio.FileSystem.set backend "test/key" "value" with
-   | Error (Backend_eio.InvalidKey _) -> ()
+  (match Backend.FileSystem.set backend "test/key" "value" with
+   | Error (Backend.InvalidKey _) -> ()
    | _ -> Alcotest.fail "key with slash should fail");
 
   (* Key starting with colon should fail *)
-  (match Backend_eio.FileSystem.set backend ":test" "value" with
-   | Error (Backend_eio.InvalidKey _) -> ()
+  (match Backend.FileSystem.set backend ":test" "value" with
+   | Error (Backend.InvalidKey _) -> ()
    | _ -> Alcotest.fail "key starting with colon should fail");
 
   (* Path traversal should fail *)
-  (match Backend_eio.FileSystem.set backend "..:..:etc:passwd" "value" with
-   | Error (Backend_eio.InvalidKey _) -> ()
+  (match Backend.FileSystem.set backend "..:..:etc:passwd" "value" with
+   | Error (Backend.InvalidKey _) -> ()
    | _ -> Alcotest.fail "path traversal should fail")
 
 (** Test nested keys *)
@@ -119,12 +119,12 @@ let test_nested_keys () =
   let value = "nested value" in
 
   (* Set nested key *)
-  (match Backend_eio.FileSystem.set backend key value with
+  (match Backend.FileSystem.set backend key value with
    | Ok () -> ()
    | Error _ -> Alcotest.fail "set nested key failed");
 
   (* Get nested key *)
-  match Backend_eio.FileSystem.get backend key with
+  match Backend.FileSystem.get backend key with
   | Ok v -> Alcotest.(check string) "nested value matches" value v
   | Error _ -> Alcotest.fail "get nested key failed"
 
@@ -140,11 +140,11 @@ let test_recursive_prefix_get_all () =
   in
   List.iter
     (fun (key, value) ->
-      match Backend_eio.FileSystem.set backend key value with
+      match Backend.FileSystem.set backend key value with
       | Ok () -> ()
       | Error _ -> Alcotest.fail "set for recursive prefix test failed")
     writes;
-  match Backend_eio.FileSystem.list_keys backend ~prefix:"team-sessions:" with
+  match Backend.FileSystem.list_keys backend ~prefix:"team-sessions:" with
   | Ok keys ->
       Alcotest.(check int) "recursive keys" 3 (List.length keys);
       Alcotest.(check bool) "session key present" true
@@ -157,46 +157,46 @@ let test_set_if_not_exists () =
   let key = "exclusive:key" in
 
   (* First set should succeed *)
-  (match Backend_eio.FileSystem.set_if_not_exists backend key "first" with
+  (match Backend.FileSystem.set_if_not_exists backend key "first" with
    | Ok true -> ()
    | _ -> Alcotest.fail "first set_if_not_exists should succeed");
 
   (* Second set should fail with AlreadyExists *)
-  match Backend_eio.FileSystem.set_if_not_exists backend key "second" with
-  | Error (Backend_eio.AlreadyExists _) -> ()
+  match Backend.FileSystem.set_if_not_exists backend key "second" with
+  | Error (Backend.AlreadyExists _) -> ()
   | _ -> Alcotest.fail "second set_if_not_exists should fail"
 
 (** Test Memory backend basic operations *)
 let test_memory_backend () =
   Eio_main.run @@ fun _env ->
-  let backend = Backend_eio.Memory.create () in
+  let backend = Backend.Memory.create () in
 
   (* Set value *)
-  (match Backend_eio.Memory.set backend "key1" "value1" with
+  (match Backend.Memory.set backend "key1" "value1" with
    | Ok () -> ()
    | Error _ -> Alcotest.fail "memory set failed");
 
   (* Get value *)
-  (match Backend_eio.Memory.get backend "key1" with
+  (match Backend.Memory.get backend "key1" with
    | Ok v -> Alcotest.(check string) "memory get" "value1" v
    | Error _ -> Alcotest.fail "memory get failed");
 
   (* Exists check *)
   Alcotest.(check bool) "memory exists" true
-    (Backend_eio.Memory.exists backend "key1");
+    (Backend.Memory.exists backend "key1");
 
   (* Delete *)
-  (match Backend_eio.Memory.delete backend "key1" with
+  (match Backend.Memory.delete backend "key1" with
    | Ok () -> ()
    | Error _ -> Alcotest.fail "memory delete failed");
 
   Alcotest.(check bool) "memory not exists after delete" false
-    (Backend_eio.Memory.exists backend "key1")
+    (Backend.Memory.exists backend "key1")
 
 (** Test health check *)
 let test_health_check () =
   with_eio_env @@ fun backend ->
-  match Backend_eio.FileSystem.health_check backend with
+  match Backend.FileSystem.health_check backend with
   | Ok result -> Alcotest.(check bool) "is healthy" true result.is_healthy
   | Error _ -> Alcotest.fail "health check failed"
 
@@ -205,23 +205,23 @@ let test_unified_backend () =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let tmp_dir = make_test_dir () in
-  let config = { Backend_eio.default_config with
+  let config = { Backend.default_config with
     base_path = tmp_dir;
     node_id = "unified_test";
     cluster_name = "test";
   } in
-  let fs_backend = Backend_eio.FileSystem.create ~fs config in
-  let backend = Backend_eio.FS fs_backend in
+  let fs_backend = Backend.FileSystem.create ~fs config in
+  let backend = Backend.FS fs_backend in
 
   Fun.protect
     ~finally:(fun () -> try rm_rf tmp_dir with _ -> ())
     (fun () ->
       (* Test through unified interface *)
-      (match Backend_eio.set backend "unified:key" "unified value" with
+      (match Backend.set backend "unified:key" "unified value" with
        | Ok () -> ()
        | Error _ -> Alcotest.fail "unified set failed");
 
-      match Backend_eio.get backend "unified:key" with
+      match Backend.get backend "unified:key" with
       | Ok v -> Alcotest.(check string) "unified get" "unified value" v
       | Error _ -> Alcotest.fail "unified get failed")
 
@@ -232,36 +232,36 @@ let test_postgres_backend () =
   | Some url ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
-      let config = { Backend_eio.default_config with
+      let config = { Backend.default_config with
         base_path = ".masc";
         node_id = "test_pg_node";
         cluster_name = "test_pg";
       } in
-      match Backend_eio.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
+      match Backend.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
       | Error _ -> Alcotest.fail "Postgres create failed"
       | Ok backend ->
           let key = "pg:test:key" in
           let value = "pg value" in
           
           (* Set *)
-          (match Backend_eio.Postgres.set backend key value with
+          (match Backend.Postgres.set backend key value with
            | Ok () -> ()
            | Error _ -> Alcotest.fail "pg set failed");
            
           (* Get *)
-          (match Backend_eio.Postgres.get backend key with
+          (match Backend.Postgres.get backend key with
            | Ok v -> Alcotest.(check string) "pg value matches" value v
            | Error _ -> Alcotest.fail "pg get failed");
            
           (* Exists *)
-          Alcotest.(check bool) "pg exists" true (Backend_eio.Postgres.exists backend key);
+          Alcotest.(check bool) "pg exists" true (Backend.Postgres.exists backend key);
           
           (* Delete *)
-          (match Backend_eio.Postgres.delete backend key with
+          (match Backend.Postgres.delete backend key with
            | Ok () -> ()
            | Error _ -> Alcotest.fail "pg delete failed");
            
-          Alcotest.(check bool) "pg not exists" false (Backend_eio.Postgres.exists backend key)
+          Alcotest.(check bool) "pg not exists" false (Backend.Postgres.exists backend key)
 
 let test_postgres_expired_lock_reacquire () =
   match Sys.getenv_opt "MASC_POSTGRES_URL" with
@@ -270,21 +270,21 @@ let test_postgres_expired_lock_reacquire () =
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
       let suffix = unique_suffix () in
-      let config = { Backend_eio.default_config with
+      let config = { Backend.default_config with
         base_path = ".masc";
         node_id = "test_pg_lock_node";
         cluster_name = "test_pg_lock_" ^ suffix;
       } in
-      match Backend_eio.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
+      match Backend.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
       | Error _ -> Alcotest.fail "Postgres create failed"
       | Ok backend ->
           let key = "expired-lock-" ^ suffix in
-          (match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-a" ~ttl_seconds:0 with
+          (match Backend.Postgres.acquire_lock backend ~key ~owner:"owner-a" ~ttl_seconds:0 with
            | Ok true -> ()
            | Ok false -> Alcotest.fail "initial lock acquire should succeed"
            | Error _ -> Alcotest.fail "initial lock acquire failed");
           Eio.Time.sleep env#clock 0.01;
-          match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-b" ~ttl_seconds:60 with
+          match Backend.Postgres.acquire_lock backend ~key ~owner:"owner-b" ~ttl_seconds:60 with
           | Ok true -> ()
           | Ok false -> Alcotest.fail "expired postgres lock should be reacquired"
           | Error _ -> Alcotest.fail "expired postgres lock reacquire failed"
@@ -296,20 +296,20 @@ let test_postgres_lock_blocks_other_owner () =
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
       let suffix = unique_suffix () in
-      let config = { Backend_eio.default_config with
+      let config = { Backend.default_config with
         base_path = ".masc";
         node_id = "test_pg_lock_node";
         cluster_name = "test_pg_lock_block_" ^ suffix;
       } in
-      match Backend_eio.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
+      match Backend.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
       | Error _ -> Alcotest.fail "Postgres create failed"
       | Ok backend ->
           let key = "held-lock-" ^ suffix in
-          (match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-a" ~ttl_seconds:60 with
+          (match Backend.Postgres.acquire_lock backend ~key ~owner:"owner-a" ~ttl_seconds:60 with
            | Ok true -> ()
            | Ok false -> Alcotest.fail "initial lock acquire should succeed"
            | Error _ -> Alcotest.fail "initial lock acquire failed");
-          match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-b" ~ttl_seconds:60 with
+          match Backend.Postgres.acquire_lock backend ~key ~owner:"owner-b" ~ttl_seconds:60 with
           | Ok false -> ()
           | Ok true -> Alcotest.fail "non-expired postgres lock should block other owners"
           | Error _ -> Alcotest.fail "non-expired postgres lock check failed"
@@ -321,22 +321,22 @@ let test_postgres_expired_lock_concurrent_reacquire () =
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
       let suffix = unique_suffix () in
-      let config = { Backend_eio.default_config with
+      let config = { Backend.default_config with
         base_path = ".masc";
         node_id = "test_pg_lock_node";
         cluster_name = "test_pg_lock_race_" ^ suffix;
       } in
-      match Backend_eio.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
+      match Backend.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
       | Error _ -> Alcotest.fail "Postgres create failed"
       | Ok backend ->
           let key = "expired-race-" ^ suffix in
-          (match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"seed-owner" ~ttl_seconds:0 with
+          (match Backend.Postgres.acquire_lock backend ~key ~owner:"seed-owner" ~ttl_seconds:0 with
            | Ok true -> ()
            | Ok false -> Alcotest.fail "seed expired lock acquire should succeed"
            | Error _ -> Alcotest.fail "seed expired lock acquire failed");
           Eio.Time.sleep env#clock 0.01;
           let attempt owner () =
-            match Backend_eio.Postgres.acquire_lock backend ~key ~owner ~ttl_seconds:60 with
+            match Backend.Postgres.acquire_lock backend ~key ~owner ~ttl_seconds:60 with
             | Ok acquired -> acquired
             | Error _ -> Alcotest.fail "concurrent expired lock acquire failed"
           in
@@ -356,35 +356,35 @@ let test_postgres_old_owner_cannot_release_reclaimed_lock () =
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
       let suffix = unique_suffix () in
-      let config = { Backend_eio.default_config with
+      let config = { Backend.default_config with
         base_path = ".masc";
         node_id = "test_pg_lock_node";
         cluster_name = "test_pg_lock_release_" ^ suffix;
       } in
-      match Backend_eio.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
+      match Backend.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
       | Error _ -> Alcotest.fail "Postgres create failed"
       | Ok backend ->
           let key = "reclaimed-lock-" ^ suffix in
-          (match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-a" ~ttl_seconds:0 with
+          (match Backend.Postgres.acquire_lock backend ~key ~owner:"owner-a" ~ttl_seconds:0 with
            | Ok true -> ()
            | Ok false -> Alcotest.fail "seed expired lock acquire should succeed"
            | Error _ -> Alcotest.fail "seed expired lock acquire failed");
           Eio.Time.sleep env#clock 0.01;
-          (match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-b" ~ttl_seconds:60 with
+          (match Backend.Postgres.acquire_lock backend ~key ~owner:"owner-b" ~ttl_seconds:60 with
            | Ok true -> ()
            | Ok false -> Alcotest.fail "reclaimed lock acquire should succeed"
            | Error _ -> Alcotest.fail "reclaimed lock acquire failed");
-          (match Backend_eio.Postgres.release_lock backend ~key ~owner:"owner-a" with
+          (match Backend.Postgres.release_lock backend ~key ~owner:"owner-a" with
            | Ok true -> ()
            | Ok false -> Alcotest.fail "release_lock should not fail"
            | Error _ -> Alcotest.fail "old owner release failed");
-          match Backend_eio.Postgres.acquire_lock backend ~key ~owner:"owner-c" ~ttl_seconds:60 with
+          match Backend.Postgres.acquire_lock backend ~key ~owner:"owner-c" ~ttl_seconds:60 with
           | Ok false -> ()
           | Ok true -> Alcotest.fail "old owner must not release reclaimed lock"
           | Error _ -> Alcotest.fail "reclaimed lock validation failed"
 
 let () =
-  Alcotest.run "Backend_eio" [
+  Alcotest.run "Backend" [
     "basic", [
       Alcotest.test_case "set and get" `Quick test_set_get;
       Alcotest.test_case "exists" `Quick test_exists;

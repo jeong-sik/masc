@@ -3,7 +3,7 @@
 open Alcotest
 
 module Tool_voice = Masc_mcp.Tool_voice
-module Voice_bridge_eio = Masc_mcp.Voice_bridge_eio
+module Voice_bridge = Masc_mcp.Voice_bridge
 module Config = Masc_mcp.Config
 
 let contains haystack needle =
@@ -194,12 +194,12 @@ let test_voice_agent_reads_nested_tuning_config () =
       check (option string) "voice"
         (Some "Roger")
         (match json_field "voice" body with Some (`String s) -> Some s | _ -> None);
-      let tuning = Masc_mcp.Voice_bridge_eio.tuning_for_agent "sangsu" in
+      let tuning = Masc_mcp.Voice_bridge.tuning_for_agent "sangsu" in
       check (float 0.001) "stability" 0.28 tuning.stability;
       check (float 0.001) "similarity_boost" 0.82 tuning.similarity_boost;
       check (float 0.001) "style" 0.45 tuning.style;
       check bool "local playback enabled" true
-        (Masc_mcp.Voice_bridge_eio.local_playback_enabled_for_agent "sangsu")
+        (Masc_mcp.Voice_bridge.local_playback_enabled_for_agent "sangsu")
 
 let test_voice_provider_alias_selects_adapter_endpoint () =
   let config_json =
@@ -252,7 +252,7 @@ let test_voice_provider_alias_selects_adapter_endpoint () =
 |}
   in
   with_temp_voice_config config_json @@ fun () ->
-      let endpoints = Masc_mcp.Voice_bridge_eio.available_tts_endpoints ~provider:"elevenlabs" () in
+      let endpoints = Masc_mcp.Voice_bridge.available_tts_endpoints ~provider:"elevenlabs" () in
       check int "one endpoint" 1 (List.length endpoints);
       let endpoint = List.hd endpoints in
       check string "selected direct endpoint" "elevenlabs-direct" endpoint.id
@@ -304,8 +304,8 @@ let test_voice_request_builder_follows_adapter_contract () =
 |}
   in
   with_temp_voice_config config_json @@ fun () ->
-      let endpoint = List.hd (Masc_mcp.Voice_bridge_eio.available_tts_endpoints ~provider:"elevenlabs" ()) in
-      let tuning = Masc_mcp.Voice_bridge_eio.tuning_for_agent "sangsu" in
+      let endpoint = List.hd (Masc_mcp.Voice_bridge.available_tts_endpoints ~provider:"elevenlabs" ()) in
+      let tuning = Masc_mcp.Voice_bridge.tuning_for_agent "sangsu" in
       match
         Masc_mcp.Provider_adapter.voice_http_request_for_tts endpoint ~api_key:"secret"
           ~message:"hello" ~voice:"Roger" ~model:"eleven_multilingual_v2" ~tuning
@@ -359,9 +359,9 @@ let test_voice_session_urls_follow_adapter_contract () =
   in
   with_temp_voice_config config_json @@ fun () ->
       check string "mcp uri" "https://voice.example/base/mcp"
-        (Uri.to_string (Masc_mcp.Voice_bridge_eio.voice_mcp_uri ()));
+        (Uri.to_string (Masc_mcp.Voice_bridge.voice_mcp_uri ()));
       check string "health uri" "https://voice.example/base/health"
-        (Uri.to_string (Masc_mcp.Voice_bridge_eio.voice_health_uri ()))
+        (Uri.to_string (Masc_mcp.Voice_bridge.voice_health_uri ()))
 
 let test_voice_speak_without_net_errors () =
   with_ctx_no_net (fun ctx ->
@@ -517,7 +517,7 @@ let test_voice_public_config_json () =
 |}
   in
   with_temp_voice_config config_json @@ fun () ->
-  match Masc_mcp.Voice_bridge_eio.public_config_json () with
+  match Masc_mcp.Voice_bridge.public_config_json () with
   | Error json ->
       failf "expected Ok, got Error: %s" (Yojson.Safe.to_string json)
   | Ok json ->
@@ -554,7 +554,7 @@ let test_local_playback_argv_prefers_ffplay () =
       let ffplay = touch_executable dir "ffplay" in
       ignore (touch_executable dir "mpg123");
       let argv =
-        Voice_bridge_eio.local_playback_argv ~path_value:dir
+        Voice_bridge.local_playback_argv ~path_value:dir
           ~audio_file:"/tmp/sample.mp3" ()
       in
       check (option (list string)) "ffplay selected first"
@@ -568,7 +568,7 @@ let test_local_playback_argv_falls_back_to_open () =
     (fun () ->
       let open_cmd = touch_executable dir "open" in
       let argv =
-        Voice_bridge_eio.local_playback_argv ~path_value:dir
+        Voice_bridge.local_playback_argv ~path_value:dir
           ~audio_file:"/tmp/sample.mp3" ()
       in
       check (option (list string)) "open fallback selected"

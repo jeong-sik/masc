@@ -4,7 +4,7 @@
 let trpg_tts_proxy ~body_str : (string, [> `Bad_request | `Internal_server_error] * string) result =
   try
     let json = Yojson.Safe.from_string body_str in
-    (match Voice_bridge_eio.tts_preview_bytes_from_request_json json with
+    (match Voice_bridge.tts_preview_bytes_from_request_json json with
     | Ok bytes -> Ok bytes
     | Error message -> Error (`Internal_server_error, message))
   with
@@ -15,7 +15,7 @@ let trpg_tts_proxy ~body_str : (string, [> `Bad_request | `Internal_server_error
         Printf.sprintf "TTS proxy error: %s" (Printexc.to_string exn))
 
 let voice_config_payload () =
-  match Voice_bridge_eio.public_config_json () with
+  match Voice_bridge.public_config_json () with
   | Ok json -> (`OK, json)
   | Error json -> (`Error, json)
 

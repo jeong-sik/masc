@@ -157,7 +157,7 @@ let write_json_root config path json =
       let content = Yojson.Safe.pretty_to_string json in
       (match backend_set config ~key ~value:content with
        | Ok () -> ()
-       | Error e -> Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_eio_types.show_error e))
+       | Error e -> Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e))
   | None -> write_json_local path json
 
 let delete_path_root config path =
@@ -165,7 +165,7 @@ let delete_path_root config path =
   | Some key ->
     (match backend_delete config ~key with
      | Ok _ -> ()
-     | Error e -> Log.Misc.error "delete_path_root: backend_delete failed for %s: %s" key (Backend_eio_types.show_error e))
+     | Error e -> Log.Misc.error "delete_path_root: backend_delete failed for %s: %s" key (Backend_types.show_error e))
   | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists_root config path =
@@ -194,7 +194,7 @@ let write_json config path json =
       let content = Yojson.Safe.pretty_to_string json in
       (match backend_set config ~key ~value:content with
        | Ok () -> ()
-       | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_eio_types.show_error e))
+       | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e))
   | None -> write_json_local path json
 
 let delete_path config path =
@@ -202,7 +202,7 @@ let delete_path config path =
   | Some key ->
     (match backend_delete config ~key with
      | Ok _ -> ()
-     | Error e -> Log.Misc.error "delete_path: backend_delete failed for %s: %s" key (Backend_eio_types.show_error e))
+     | Error e -> Log.Misc.error "delete_path: backend_delete failed for %s: %s" key (Backend_types.show_error e))
   | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists config path =
@@ -256,7 +256,7 @@ let with_file_lock config path f =
             | Ok _ -> ()
             | Error e ->
               let msg = match e with
-                | Backend_eio_types.ConnectionFailed s | NotFound s
+                | Backend_types.ConnectionFailed s | NotFound s
                 | IOError s | BackendNotSupported s | InvalidKey s
                 | AlreadyExists s -> s in
               Log.Room.warn "lock release failed for %s: %s" key msg)
@@ -286,7 +286,7 @@ let with_file_lock_r config path f : ('a, masc_error) result =
             | Ok _ -> ()
             | Error e ->
               let msg = match e with
-                | Backend_eio_types.ConnectionFailed s | NotFound s
+                | Backend_types.ConnectionFailed s | NotFound s
                 | IOError s | BackendNotSupported s | InvalidKey s
                 | AlreadyExists s -> s in
               Log.Room.warn "lock release failed for %s: %s" key msg)

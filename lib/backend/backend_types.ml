@@ -1,7 +1,7 @@
-(** Backend_eio_types - Shared types for Backend_eio modules.
+(** Backend_types - Shared types for Backend modules.
 
     Extracted to avoid circular dependency between
-    Backend_eio and Backend_eio_pg.
+    Backend and Backend_pg.
 
     This module is the single source of truth for error types, config,
     and shared utilities used by all _eio backend implementations.

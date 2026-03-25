@@ -306,8 +306,10 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
       | None ->
           (* 3. Select next agent (round-robin) *)
           let agent_idx = state.turns mod (List.length agents) in
-          (* bounds-checked: agent_idx = turns mod length, length > 0 *)
-          let agent = List.nth_opt agents agent_idx |> Option.get in
+          let agent = match List.nth_opt agents agent_idx with
+            | Some a -> a
+            | None -> (match agents with a :: _ -> a | [] -> failwith "bounded: empty agents")
+          in
 
           (* 4. Execute agent with retry logic *)
           let rec try_spawn attempt =

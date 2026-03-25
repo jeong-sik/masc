@@ -193,26 +193,36 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
        (Printexc.to_string exn))
 
 let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
+  let timeout_s =
+    Safe_ops.get_env_float_logged "MASC_KEEPER_BOOTSTRAP_TIMEOUT_S" ~default:15.0
+  in
   try
-    let keeper_ctx : _ Tool_keeper.context =
-      {
-        config = state.room_config;
-        agent_name = "keeper-bootstrap";
-        sw;
-        clock;
-        proc_mgr = state.Mcp_server.proc_mgr;
-      }
-    in
-    let stats = Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
-    Keeper_runtime.maybe_start_supervisor_sweep keeper_ctx stats;
-    if stats.enabled then
-      Log.Keeper.info "scanned=%d started=%d stale=%d recovering=%d"
-        stats.scanned stats.started stats.stale stats.recovering
+    match
+      Eio.Time.with_timeout clock timeout_s (fun () ->
+        let keeper_ctx : _ Tool_keeper.context =
+          {
+            config = state.room_config;
+            agent_name = "keeper-bootstrap";
+            sw;
+            clock;
+            proc_mgr = state.Mcp_server.proc_mgr;
+          }
+        in
+        let stats = Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
+        Keeper_runtime.maybe_start_supervisor_sweep keeper_ctx stats;
+        if stats.enabled then
+          Log.Keeper.info "scanned=%d started=%d stale=%d recovering=%d"
+            stats.scanned stats.started stats.stale stats.recovering;
+        Ok ())
+    with
+    | Ok () -> ()
+    | Error `Timeout ->
+        Log.Server.warn "keeper bootstrap timed out after %.0fs" timeout_s
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Server.error "keeper bootstrap failed: %s"
-      (Printexc.to_string exn)
+      Log.Server.error "keeper bootstrap failed: %s"
+        (Printexc.to_string exn)
 
 let init_task_backend () =
   match Board_dispatch.get_pg_pool () with
@@ -863,6 +873,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
       Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
+      Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;

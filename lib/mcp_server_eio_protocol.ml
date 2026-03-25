@@ -361,6 +361,21 @@ let handle_resources_unsubscribe_eio id ?mcp_session_id params =
 
 let contains_casefold = Mcp_server_eio_call_tool.contains_casefold
 
+let tool_call_outcome (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "error" fields with
+      | Some _ -> "error"
+      | None -> (
+          match List.assoc_opt "result" fields with
+          | Some (`Assoc result_fields) -> (
+              match List.assoc_opt "isError" result_fields with
+              | Some (`Bool true) -> "error"
+              | Some (`Bool false) -> "ok"
+              | _ -> "unknown")
+          | _ -> "unknown"))
+  | _ -> "unknown"
+
 (** Handle incoming JSON-RPC request - Pure Eio Native *)
 let handle_request
     ~handle_call_tool_eio
@@ -465,7 +480,8 @@ let handle_request
                                let result =
                                  handle_call_tool_eio ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params
                                in
-                               Log.Mcp.info "tools/call done: %s" name;
+                               Log.Mcp.info "tools/call completed: %s (outcome=%s)"
+                                 name (tool_call_outcome result);
                                result)
                            with Yojson.Safe.Util.Type_error (_, _) ->
                              make_error ~id (-32602) "Invalid params: name must be a string")

@@ -25,6 +25,43 @@ type tool_result = Keeper_types.tool_result
 
 let schemas = Keeper_types.schemas
 
+type text_cache = {
+  mutable key : string option;
+  mutable value : string option;
+  mutable expires_at : float;
+}
+
+let _resident_keeper_list_cache = { key = None; value = None; expires_at = 0.0 }
+
+let cache_ttl_seconds env_var ~default =
+  match Sys.getenv_opt env_var with
+  | Some raw -> (
+      match Float.of_string_opt (String.trim raw) with
+      | Some value when value >= 0.0 -> value
+      | _ -> default)
+  | None -> default
+
+let resident_keeper_list_cache_ttl_s () =
+  cache_ttl_seconds "MASC_KEEPER_LIST_CACHE_TTL_S" ~default:2.0
+
+let invalidate_resident_keeper_list_cache () =
+  _resident_keeper_list_cache.key <- None;
+  _resident_keeper_list_cache.value <- None;
+  _resident_keeper_list_cache.expires_at <- 0.0
+
+let cached_text_by_key cache ~key ~ttl_s compute =
+  let now = Time_compat.now () in
+  match cache.key, cache.value with
+  | Some cached_key, Some value
+    when String.equal cached_key key && now < cache.expires_at ->
+      value
+  | _ ->
+      let value = compute () in
+      cache.key <- Some key;
+      cache.value <- Some value;
+      cache.expires_at <- now +. ttl_s;
+      value
+
 let annotate_keeper_json ~runtime_class ~desired ~resident_registered json =
   match json with
   | `Assoc fields ->
@@ -34,6 +71,64 @@ let annotate_keeper_json ~runtime_class ~desired ~resident_registered json =
         :: ("resident_registered", `Bool resident_registered)
         :: fields)
   | other -> other
+
+let keeper_brief_meta_json (meta : keeper_meta) =
+  `Assoc
+    [
+      ("name", `String meta.name);
+      ("goal", `String meta.goal);
+      ("trace_id", `String meta.trace_id);
+      ("created_at", `String meta.created_at);
+      ("updated_at", `String meta.updated_at);
+    ]
+
+let keeper_list_row_json ~runtime_class ~desired ~resident_registered config
+    name =
+  match read_meta config name with
+  | Error _ | Ok None -> None
+  | Ok (Some (meta : keeper_meta)) ->
+      let now_ts = Time_compat.now () in
+      let keepalive_running = Keeper_keepalive.keeper_keepalive_running meta.name in
+      let agent_status =
+        Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
+      in
+      let diagnostic =
+        Keeper_exec_status.keeper_diagnostic_json
+          ~meta
+          ~agent_status
+          ~keepalive_running ~history_items:[] ~now_ts
+        |> Keeper_exec_status.augment_keeper_diagnostic_json
+             ~desired ~meta ~keepalive_running
+             ~keepalive_started_at:
+               (Keeper_keepalive.keeper_keepalive_started_at meta.name)
+             ~now_ts
+      in
+      let status =
+        Keeper_exec_status.keeper_surface_status ~agent_status ~diagnostic
+      in
+      Some
+        (`Assoc
+          [
+            ("runtime_class", `String runtime_class);
+            ("desired", `Bool desired);
+            ("resident_registered", `Bool resident_registered);
+            ("name", `String meta.name);
+            ("meta", keeper_brief_meta_json meta);
+            ("agent_name", `String meta.agent_name);
+            ("status", `String status);
+            ("diagnostic", diagnostic);
+            ("keepalive_running", `Bool keepalive_running);
+            ("presence_keepalive", `Bool meta.presence_keepalive);
+            ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
+            ("proactive_enabled", `Bool meta.proactive.enabled);
+            ("proactive_idle_sec", `Int meta.proactive.idle_sec);
+            ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
+            ("policy_mode", `String meta.policy_mode);
+            ("trigger_mode", `String meta.trigger_mode);
+            ("models", `List (List.map (fun model -> `String model) meta.models));
+            ("created_at", `String meta.created_at);
+            ("updated_at", `String meta.updated_at);
+          ])
 
 let handle_resident_keeper_create_from_persona ctx args : tool_result =
   match Keeper_exec_persona.resolved_keeper_args_from_persona args with
@@ -73,6 +168,7 @@ let handle_resident_keeper_create_from_persona ctx args : tool_result =
           (match register_result with
           | Error e -> (false, "❌ " ^ e)
           | Ok () ->
+              invalidate_resident_keeper_list_cache ();
               let created_json =
                 try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
               in
@@ -101,6 +197,7 @@ let handle_resident_keeper_up ctx args : tool_result =
         (match register_resident_keeper_from_meta ctx.config meta with
         | Error e -> (false, "❌ " ^ e)
         | Ok () ->
+            invalidate_resident_keeper_list_cache ();
             let json =
               try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
             in
@@ -170,6 +267,7 @@ let handle_resident_keeper_msg ctx args : tool_result =
       let ok, body = Turn.handle_keeper_msg ctx args in
       if not ok then (ok, body)
       else begin
+        invalidate_resident_keeper_list_cache ();
         (match read_meta ctx.config name with
         | Ok (Some meta) ->
             (match register_resident_keeper_from_meta ctx.config meta with
@@ -204,6 +302,7 @@ let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
       let ok, body = Turn.handle_keeper_msg ~on_text_delta ctx args in
       if not ok then (ok, body)
       else begin
+        invalidate_resident_keeper_list_cache ();
         (match read_meta ctx.config name with
         | Ok (Some meta) ->
             (match register_resident_keeper_from_meta ctx.config meta with
@@ -221,6 +320,7 @@ let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
 let handle_resident_keeper_down ctx args : tool_result =
   let name = get_string args "name" "" in
   if validate_name name then remove_resident_keeper ctx.config name;
+  invalidate_resident_keeper_list_cache ();
   Turn.handle_keeper_down ctx args
 
 let handle_resident_keeper_model_set ctx args : tool_result =
@@ -232,6 +332,7 @@ let handle_resident_keeper_model_set ctx args : tool_result =
       let ok, body = Turn.handle_keeper_model_set ctx args in
       if not ok then (ok, body)
       else begin
+        invalidate_resident_keeper_list_cache ();
         (match read_meta ctx.config name with
         | Ok (Some meta) -> ignore (register_resident_keeper_from_meta ctx.config meta)
         | _ -> ());
@@ -247,47 +348,38 @@ let handle_resident_keeper_model_set ctx args : tool_result =
 let handle_resident_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
-  let resident =
-    resident_keeper_names ctx.config
-    |> take limit
+  let cache_key = Printf.sprintf "%d:%b" limit detailed in
+  let body =
+    cached_text_by_key _resident_keeper_list_cache ~key:cache_key
+      ~ttl_s:(resident_keeper_list_cache_ttl_s ()) (fun () ->
+        let resident =
+          resident_keeper_names ctx.config
+          |> take limit
+        in
+        let rows =
+          resident
+          |> List.filter_map
+               (keeper_list_row_json ~runtime_class:"resident_keeper" ~desired:true
+                  ~resident_registered:true ctx.config)
+        in
+        let json =
+          if not detailed then
+            `Assoc
+              [
+                ("count", `Int (List.length resident));
+                ("keepers", `List (List.map (fun name -> `String name) resident));
+                ("items", `List rows);
+              ]
+          else
+            `Assoc
+              [
+                ("count", `Int (List.length rows));
+                ("keepers", `List rows);
+              ]
+        in
+        Yojson.Safe.pretty_to_string json)
   in
-  if not detailed then
-    let json =
-      `Assoc
-        [
-          ("count", `Int (List.length resident));
-          ("keepers", `List (List.map (fun name -> `String name) resident));
-        ]
-    in
-    (true, Yojson.Safe.pretty_to_string json)
-  else
-    let rows =
-      resident
-      |> List.filter_map (fun name ->
-             let status_args =
-               `Assoc
-                 [
-                   ("name", `String name);
-                   ("tail_turns", `Int 3);
-                   ("tail_messages", `Int 5);
-                   ("tail_compactions", `Int 10);
-                   ("tail_bytes", `Int 60000);
-                 ]
-             in
-             let ok, body = handle_resident_keeper_status ctx status_args in
-             if not ok then None
-             else
-               try Some (Yojson.Safe.from_string body)
-               with Yojson.Json_error _ -> None)
-    in
-    let json =
-      `Assoc
-        [
-          ("count", `Int (List.length rows));
-          ("keepers", `List rows);
-        ]
-    in
-    (true, Yojson.Safe.pretty_to_string json)
+  (true, body)
 
 let handle_persistent_agent_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in

@@ -780,6 +780,124 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
       check bool "persistent registered" false
         Yojson.Safe.Util.(persistent_row |> member "resident_registered" |> to_bool))
 
+let test_resident_list_items_expose_runtime_config_summary () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        {
+          config;
+          agent_name = "tester";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+        }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, up_body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "resident-demo");
+              ("goal", `String "Stay resident");
+              ("models", `List [ `String "custom:test-model" ]);
+              ("presence_keepalive", `Bool true);
+              ("proactive_enabled", `Bool true);
+              ("trigger_mode", `String "explicit_only");
+            ])
+      in
+      if not ok then fail up_body;
+      let ok, body =
+        dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool false) ])
+      in
+      check bool "resident list ok" true ok;
+      let json = parse_json_exn body in
+      let row =
+        Yojson.Safe.Util.(
+          json |> member "items" |> to_list
+          |> List.find (fun item -> member "name" item = `String "resident-demo"))
+      in
+      check string "runtime class" "resident_keeper"
+        Yojson.Safe.Util.(row |> member "runtime_class" |> to_string);
+      check string "policy mode" "heuristic"
+        Yojson.Safe.Util.(row |> member "policy_mode" |> to_string);
+      check string "trigger mode" "explicit_only"
+        Yojson.Safe.Util.(row |> member "trigger_mode" |> to_string);
+      check bool "presence keepalive true" true
+        Yojson.Safe.Util.(row |> member "presence_keepalive" |> to_bool);
+      check bool "proactive enabled true" true
+        Yojson.Safe.Util.(row |> member "proactive_enabled" |> to_bool))
+
+let test_keepalive_gap_reports_not_running_instead_of_disabled () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        {
+          config;
+          agent_name = "tester";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+        }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, up_body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "resident-demo");
+              ("goal", `String "Stay resident");
+              ("models", `List [ `String "custom:test-model" ]);
+              ("presence_keepalive", `Bool true);
+              ("proactive_enabled", `Bool true);
+            ])
+      in
+      if not ok then fail up_body;
+      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
+      let ok, body =
+        dispatch "masc_keeper_status"
+          (`Assoc
+            [
+              ("name", `String "resident-demo");
+              ("include_history_tail", `Bool false);
+              ("include_compaction_history", `Bool false);
+              ("include_context", `Bool false);
+              ("include_metrics_overview", `Bool false);
+              ("include_memory_bank", `Bool false);
+            ])
+      in
+      check bool "status ok" true ok;
+      let json = parse_json_exn body in
+      check string "quiet reason not_running" "not_running"
+        Yojson.Safe.Util.(
+          json |> member "diagnostic" |> member "quiet_reason" |> to_string);
+      check string "continuity state not_running" "not_running"
+        Yojson.Safe.Util.(
+          json |> member "diagnostic" |> member "continuity_state" |> to_string))
+
 let test_resident_keeper_msg_bootstraps_then_requires_message () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1423,6 +1541,10 @@ let () =
            test_resident_keeper_and_persistent_agent_lists_split;
          test_case "resident and persistent detailed lists annotate runtime class" `Quick
            test_resident_and_persistent_detailed_lists_annotate_runtime_class;
+         test_case "resident list items expose runtime config summary" `Quick
+           test_resident_list_items_expose_runtime_config_summary;
+         test_case "keepalive gap reports not_running instead of disabled" `Quick
+           test_keepalive_gap_reports_not_running_instead_of_disabled;
          test_case "resident keeper msg bootstraps then requires message" `Quick
            test_resident_keeper_msg_bootstraps_then_requires_message;
          test_case "persistent agent msg rejects missing message" `Quick

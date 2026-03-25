@@ -16,6 +16,53 @@ type context = {
 
 open Tool_args
 
+let take_items limit items =
+  let rec loop remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | x :: xs -> loop (remaining - 1) (x :: acc) xs
+  in
+  loop limit [] items
+
+type text_cache = {
+  mutable key : string option;
+  mutable value : string option;
+  mutable expires_at : float;
+}
+
+let make_text_cache () = { key = None; value = None; expires_at = 0.0 }
+
+let _status_cache = make_text_cache ()
+
+let cache_ttl_seconds env_var ~default =
+  match Sys.getenv_opt env_var with
+  | Some raw -> (
+      match Float.of_string_opt (String.trim raw) with
+      | Some value when value >= 0.0 -> value
+      | _ -> default)
+  | None -> default
+
+let status_cache_ttl_s () =
+  cache_ttl_seconds "MASC_STATUS_CACHE_TTL_S" ~default:2.0
+
+let invalidate_status_cache () =
+  _status_cache.key <- None;
+  _status_cache.value <- None;
+  _status_cache.expires_at <- 0.0
+
+let cached_text_by_key cache ~key ~ttl_s compute =
+  let now = Time_compat.now () in
+  match cache.key, cache.value with
+  | Some cached_key, Some value
+    when String.equal cached_key key && now < cache.expires_at ->
+      value
+  | _ ->
+      let value = compute () in
+      cache.key <- Some key;
+      cache.value <- Some value;
+      cache.expires_at <- now +. ttl_s;
+      value
+
 let normalize_search_strategy value =
   match String.trim value with
   | "" -> Ok None
@@ -42,22 +89,120 @@ let room_strategy_json config =
 
 (* Handlers *)
 
+let status_summary_string (ctx : context) =
+  Room.ensure_initialized ctx.config;
+  let state = Room.read_state ctx.config in
+  let current_room =
+    Room.read_current_room ctx.config |> Option.value ~default:"default"
+  in
+  let backlog = Room.read_backlog_in_room ctx.config current_room in
+  let max_agents_display = 40 in
+  let max_active_tasks_display = 30 in
+  let cluster_name =
+    match ctx.config.backend_config.Backend.cluster_name with
+    | "" -> state.project
+    | name -> name
+  in
+  let active_agents =
+    state.active_agents |> List.sort String.compare
+  in
+  let active_tasks, done_count, cancelled_count =
+    List.fold_left
+      (fun (active, done_cnt, cancelled_cnt) (task : Types.task) ->
+        match task.task_status with
+        | Types.Done _ -> (active, done_cnt + 1, cancelled_cnt)
+        | Types.Cancelled _ -> (active, done_cnt, cancelled_cnt + 1)
+        | _ -> (task :: active, done_cnt, cancelled_cnt))
+      ([], 0, 0)
+      backlog.tasks
+  in
+  let active_tasks = List.rev active_tasks in
+  let shown_agents = take_items max_agents_display active_agents in
+  let shown_active_tasks = take_items max_active_tasks_display active_tasks in
+  let buf = Buffer.create 256 in
+  Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" cluster_name);
+  if cluster_name <> state.project then
+    Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
+  Buffer.add_string buf (Printf.sprintf "📍 Room: %s\n" current_room);
+  Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" ctx.config.base_path);
+  Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
+  Buffer.add_string buf "📌 Players:\n";
+  (match shown_agents with
+  | [] ->
+      Buffer.add_string buf "  (no active agents)\n"
+  | _ ->
+      List.iter
+        (fun agent_name ->
+          Buffer.add_string buf (Printf.sprintf "  🟢 %s\n" agent_name))
+        shown_agents;
+      if List.length active_agents > max_agents_display then
+        Buffer.add_string buf
+          (Printf.sprintf
+             "  … and %d more agents (use masc_who for full list)\n"
+             (List.length active_agents - max_agents_display)));
+  Buffer.add_string buf "\n📋 Quest Board:\n";
+  List.iter
+    (fun (task : Types.task) ->
+      let status_icon =
+        match task.task_status with
+        | Types.Done _ -> "✅"
+        | Types.Claimed _ | Types.InProgress _ -> "🔄"
+        | Types.Todo -> "📋"
+        | Types.Cancelled _ -> "🚫"
+      in
+      let assignee =
+        match task.task_status with
+        | Types.Claimed { assignee; _ }
+        | Types.InProgress { assignee; _ }
+        | Types.Done { assignee; _ } -> assignee
+        | Types.Cancelled { cancelled_by; _ } -> cancelled_by
+        | Types.Todo -> "unclaimed"
+      in
+      Buffer.add_string buf
+        (Printf.sprintf "  %s %s: %s (%s)\n" status_icon task.id task.title
+           assignee))
+    shown_active_tasks;
+  if active_tasks = [] then
+    Buffer.add_string buf "  (no active tasks)\n";
+  if List.length active_tasks > max_active_tasks_display then
+    Buffer.add_string buf
+      (Printf.sprintf
+         "  … and %d more active tasks (use masc_tasks for full list)\n"
+         (List.length active_tasks - max_active_tasks_display));
+  Buffer.add_string buf
+    (Printf.sprintf "  Summary: active=%d, done=%d, cancelled=%d, total=%d\n"
+       (List.length active_tasks) done_count cancelled_count
+       (List.length backlog.tasks));
+  let total_messages = max 0 state.message_seq in
+  if total_messages > 0 then begin
+    Buffer.add_string buf
+      (Printf.sprintf "\n💬 Messages: %d (cumulative)\n" total_messages);
+    Buffer.add_string buf "   Use masc_messages for recent details\n"
+  end else
+    Buffer.add_string buf "\n💬 Messages: 0\n";
+  Buffer.contents buf
+
 let handle_status ctx _args =
-  (true, Room.status ctx.config)
+  (true, cached_text_by_key _status_cache ~key:ctx.config.base_path
+       ~ttl_s:(status_cache_ttl_s ()) (fun () ->
+       status_summary_string ctx))
 
 let handle_init ctx args =
   let agent = match get_string args "agent_name" "" with
     | "" -> None
     | s -> Some s
   in
+  invalidate_status_cache ();
   (true, Room.init ctx.config ~agent_name:agent)
 
 let handle_reset ctx args =
   let confirm = get_bool args "confirm" false in
   if not confirm then
     (false, "⚠️ This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed.")
-  else
+  else begin
+    invalidate_status_cache ();
     (true, Room.reset ctx.config)
+  end
 
 let handle_room_strategy_get ctx _args =
   (true, Yojson.Safe.pretty_to_string (room_strategy_json ctx.config))
@@ -95,6 +240,7 @@ let handle_room_strategy_set ctx args =
                 | _ -> state.speculation_budget);
             })
       in
+      invalidate_status_cache ();
       ( true,
         Yojson.Safe.pretty_to_string
           (`Assoc

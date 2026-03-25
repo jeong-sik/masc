@@ -205,12 +205,15 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     |> String.lowercase_ascii
   in
   let error_hint = keeper_error_hint ~agent_status ~meta in
-  if
-    not keepalive_running
-    || not agent_exists
+  if not meta.presence_keepalive || not meta.proactive.enabled then
+    Some "disabled"
+  else if not keepalive_running then
+    Some "not_running"
+  else if
+    not agent_exists
     || agent_status_text = "offline"
     || agent_status_text = "inactive"
-  then Some "disabled"
+  then Some "agent_missing"
   else if meta.usage.total_turns = 0 && meta.proactive.count_total = 0 then
     let keeper_age_s =
       match Resilience.Time.parse_iso8601_opt meta.created_at with
@@ -298,6 +301,7 @@ let keeper_next_action_path ~health_state ~quiet_reason =
   | _ -> (
       match quiet_reason with
       | Some "quiet_hours" -> "manual_lodge_poke"
+      | Some "not_running" | Some "agent_missing" -> "recover"
       | Some "graphql_error" | Some "model_error" | Some "startup" | Some "unknown" ->
           "probe"
       | Some "disabled" -> "recover"
@@ -322,6 +326,12 @@ let keeper_diagnostic_summary ~health_state ~quiet_reason =
       "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
   | _ -> (
       match quiet_reason with
+      | Some "disabled" ->
+          "Keeper autonomy is disabled by configuration. Direct messages still work, but resident automation will stay quiet."
+      | Some "not_running" ->
+          "Keeper should be resident, but its keepalive loop is not running."
+      | Some "agent_missing" ->
+          "Keeper keepalive is running, but the live agent record is missing or offline."
       | Some "quiet_hours" ->
           "Quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep."
       | Some "min_gap" ->
@@ -350,21 +360,24 @@ let keeper_continuity_state
     | None -> false
   in
   if desired && meta.presence_keepalive then
-    if not keepalive_running then "desired_offline"
+    if not keepalive_running then "not_running"
     else if recently_started || not healthy_like then "recovering"
     else "healthy"
+  else if desired then "disabled"
   else if keepalive_running && healthy_like then "healthy"
   else if keepalive_running then "recovering"
   else "offline"
 
 let keeper_continuity_summary continuity_state =
   match continuity_state with
-  | "desired_offline" ->
-      "Desired always-on keeper is offline. The runtime should reconcile it back into live presence."
+  | "not_running" ->
+      "Desired always-on keeper is not running. The runtime should reconcile it back into live presence."
   | "recovering" ->
       "Keeper runtime is reconciling back into live presence."
   | "healthy" ->
       "Keeper runtime is aligned with the desired live presence."
+  | "disabled" ->
+      "Resident live presence is disabled by configuration."
   | _ -> "Keeper runtime is offline."
 
 let augment_keeper_diagnostic_json

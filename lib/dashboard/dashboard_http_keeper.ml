@@ -400,6 +400,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("primary_model", `String primary_model);
               ("active_model", `String active_model);
               ("next_model_hint", match next_model_hint with Some s -> `String s | None -> `Null);
+              ("policy_mode", `String m.policy_mode);
+              ("policy_shell_mode", `String m.policy_shell_mode);
+              ("trigger_mode", `String m.trigger_mode);
               ("presence_keepalive", `Bool m.presence_keepalive);
               ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
               ("keepalive_running", `Bool keepalive_running);

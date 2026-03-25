@@ -408,10 +408,9 @@ let list_sessions ?(since_unix = 0.0) ?(limit = 0) config : Team_session_types.s
   in
   let pg_recent_attempted, pg_recent_result =
     match config.backend with
-    | PostgresNative backend when since_unix > 0.0 || limit > 0 ->
-        (* Safety cap: PG backend returns Ok [] when limit<=0, so we need a
-           positive value. 10_000 is high enough to avoid silent truncation
-           in practice while preventing unbounded queries. See #2778. *)
+    | PostgresNative backend ->
+        (* Always prefer PG when available. Safety cap prevents unbounded
+           queries when caller omits limit. See #2778, #2770. *)
         let row_limit =
           if limit > 0 then limit
           else 10_000

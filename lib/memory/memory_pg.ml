@@ -8,7 +8,7 @@
 
     @since 2.130.0 *)
 
-let (let*) = Result.bind
+open Result_syntax
 
 type pool = (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t
 

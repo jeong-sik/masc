@@ -22,8 +22,10 @@ type action =
   | Join
   | Leave
   | ClaimTask
+  | StartTask
   | DoneTask
   | CancelTask
+  | ReleaseTask
   | Broadcast
   | Suspend
   | ToolCall of string
@@ -53,8 +55,10 @@ let action_to_string = function
   | Join -> "join"
   | Leave -> "leave"
   | ClaimTask -> "claim_task"
+  | StartTask -> "start_task"
   | DoneTask -> "done_task"
   | CancelTask -> "cancel_task"
+  | ReleaseTask -> "release_task"
   | Broadcast -> "broadcast"
   | Suspend -> "suspend"
   | ToolCall name -> "tool_call:" ^ name
@@ -70,8 +74,10 @@ let string_to_action = function
   | "join" -> Join
   | "leave" -> Leave
   | "claim_task" -> ClaimTask
+  | "start_task" -> StartTask
   | "done_task" -> DoneTask
   | "cancel_task" -> CancelTask
+  | "release_task" -> ReleaseTask
   | "broadcast" -> Broadcast
   | "suspend" -> Suspend
   | "auth_success" -> AuthSuccess
@@ -163,8 +169,10 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
 
 (** {1 File Operations} *)
 
+type config = Room_utils.config
+
 (** Legacy single-file path (for fallback reads). *)
-let legacy_audit_path (config : Room.config) =
+let legacy_audit_path (config : config) =
   let masc_dir = Room_utils.masc_dir config in
   Filename.concat masc_dir "audit.jsonl"
 
@@ -172,7 +180,7 @@ let legacy_audit_path (config : Room.config) =
     Cached per base_dir so all callers share the same Eio.Mutex. *)
 let audit_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 
-let get_audit_store (config : Room.config) : Dated_jsonl.t =
+let get_audit_store (config : config) : Dated_jsonl.t =
   let base = Filename.concat (Room_utils.masc_dir config) "audit" in
   match Hashtbl.find_opt audit_store_cache base with
   | Some store -> store
@@ -183,7 +191,7 @@ let get_audit_store (config : Room.config) : Dated_jsonl.t =
 
 (** Read recent audit entries.
     Tries date-split store first; falls back to legacy single file. *)
-let read_entries ?(n = 10_000) (config : Room.config) : audit_entry list =
+let read_entries ?(n = 10_000) (config : config) : audit_entry list =
   let store = get_audit_store config in
   let entries = Dated_jsonl.read_recent store n in
   if entries <> [] then
@@ -201,14 +209,14 @@ let read_entries ?(n = 10_000) (config : Room.config) : audit_entry list =
           with Yojson.Json_error _ -> None)
 
 (** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)
-let append_entry (config : Room.config) (entry : audit_entry) =
+let append_entry (config : config) (entry : audit_entry) =
   let store = get_audit_store config in
   Dated_jsonl.append store (entry_to_json entry)
 
 (** {1 Logging API} *)
 
 let log_action
-    (config : Room.config)
+    (config : config)
     ~agent_id
     ~action
     ?(room_id : string option)
@@ -327,7 +335,7 @@ let log_governance_decision config ~agent_id ~trace_id ~decision ~action_type ~c
 
 (** Prune audit entries older than [days] days.
     Date-split storage makes rotation unnecessary. *)
-let prune_old (config : Room.config) ~days =
+let prune_old (config : config) ~days =
   let store = get_audit_store config in
   let deleted = Dated_jsonl.prune store ~days in
   if deleted > 0 then
@@ -342,7 +350,7 @@ type stats = {
   newest_timestamp: float option;
 }
 
-let get_stats (config : Room.config) =
+let get_stats (config : config) =
   let store = get_audit_store config in
   (* Read a large window to compute stats *)
   let entries = Dated_jsonl.read_recent store 100_000 in

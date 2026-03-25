@@ -370,6 +370,20 @@ let log level ?(ctx : string option) fmt =
     end
   ) fmt
 
+let emit level ?(module_name = "") ?(details = `Null) message =
+  if should_log level then begin
+    let level_str = level_to_string level in
+    let prefix =
+      if module_name = "" then
+        Printf.sprintf "[%s] [%s]" (timestamp ()) level_str
+      else
+        Printf.sprintf "[%s] [%s] [%s]" (timestamp ()) level_str module_name
+    in
+    Printf.eprintf "%s %s\n%!" prefix message;
+    Ring.push ~raw_level:level_str ~normalized_level:level_str ~module_name
+      ~message ~details ()
+  end
+
 (** Convenience functions *)
 let debug ?ctx fmt = log Debug ?ctx fmt
 let info ?ctx fmt = log Info ?ctx fmt

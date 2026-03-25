@@ -64,6 +64,49 @@ let with_test_env f =
     Unix.rmdir tmp_dir;
     raise e
 
+let latest_ring_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.seq
+  | [] -> 0
+
+let detail_string details key =
+  match details with
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+      | Some (`String value) -> Some value
+      | _ -> None)
+  | _ -> None
+
+let detail_matches details expected =
+  List.for_all
+    (fun (key, value) ->
+      match detail_string details key with
+      | Some actual -> String.equal actual value
+      | None -> false)
+    expected
+
+let find_agent_name_by_prefix config prefix =
+  match
+    List.find_opt
+      (fun (agent : Types.agent) -> String.starts_with ~prefix agent.name)
+      (Room.get_agents_raw config)
+  with
+  | Some agent -> agent.name
+  | None -> Alcotest.failf "agent with prefix %s not found" prefix
+
+let audit_has_entry entries ~agent_id ~action_pred ~details =
+  List.exists
+    (fun (entry : Audit_log.audit_entry) ->
+      String.equal entry.agent_id agent_id
+      && action_pred entry.action
+      && detail_matches entry.details details)
+    entries
+
+let ring_has_entry entries ~details =
+  List.exists
+    (fun (entry : Log.Ring.entry) -> detail_matches entry.details details)
+    entries
+
 (* ============================================================ *)
 (* Batch Operations Tests                                        *)
 (* ============================================================ *)
@@ -373,6 +416,279 @@ let test_transition_version_mismatch () =
     | Error Types.TaskInvalidState _ -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState for version mismatch"
   )
+
+(* ============================================================ *)
+(* Observability Tests                                           *)
+(* ============================================================ *)
+
+let test_join_leave_emit_observability () =
+  with_test_env (fun config ->
+    let before_seq = latest_ring_seq () in
+    let join_result =
+      Room.join config ~agent_name:"gemini" ~capabilities:[ "review" ] ()
+    in
+    Alcotest.(check bool) "join succeeds" true (contains_check join_result);
+    let gemini = find_agent_name_by_prefix config "gemini" in
+    let leave_result = Room.leave config ~agent_name:gemini in
+    Alcotest.(check bool) "leave succeeds" true (contains_check leave_result);
+
+    let audit_entries = Audit_log.read_entries ~n:50 config in
+    Alcotest.(check bool) "audit join recorded" true
+      (audit_has_entry audit_entries ~agent_id:gemini
+         ~action_pred:(function Audit_log.Join -> true | _ -> false)
+         ~details:
+           [
+             ("event_family", "agent_lifecycle");
+             ("event_kind", "join");
+             ("room_id", "default");
+           ]);
+    Alcotest.(check bool) "audit leave recorded" true
+      (audit_has_entry audit_entries ~agent_id:gemini
+         ~action_pred:(function Audit_log.Leave -> true | _ -> false)
+         ~details:
+           [
+             ("event_family", "agent_lifecycle");
+             ("event_kind", "leave");
+             ("room_id", "default");
+           ]);
+
+    let telemetry_events = Telemetry_eio.read_all_events config in
+    let has_joined =
+      List.exists
+        (fun (entry : Telemetry_eio.event_record) ->
+          match entry.event with
+          | Telemetry_eio.Agent_joined { agent_id; _ } ->
+              String.equal agent_id gemini
+          | _ -> false)
+        telemetry_events
+    in
+    let has_left =
+      List.exists
+        (fun (entry : Telemetry_eio.event_record) ->
+          match entry.event with
+          | Telemetry_eio.Agent_left { agent_id; reason } ->
+              String.equal agent_id gemini && String.equal reason "leave"
+          | _ -> false)
+        telemetry_events
+    in
+    Alcotest.(check bool) "telemetry join recorded" true has_joined;
+    Alcotest.(check bool) "telemetry leave recorded" true has_left;
+
+    let ring_entries =
+      Log.Ring.recent ~limit:50 ~module_filter:"Room" ~since_seq:before_seq ()
+    in
+    Alcotest.(check bool) "ring join recorded" true
+      (ring_has_entry ring_entries
+         ~details:
+           [
+             ("event_family", "agent_lifecycle");
+             ("event_kind", "join");
+             ("agent_id", gemini);
+           ]);
+    Alcotest.(check bool) "ring leave recorded" true
+      (ring_has_entry ring_entries
+         ~details:
+           [
+             ("event_family", "agent_lifecycle");
+             ("event_kind", "leave");
+             ("agent_id", gemini);
+           ]))
+
+let test_task_transitions_emit_observability () =
+  with_test_env (fun config ->
+    let before_seq = latest_ring_seq () in
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ = Room.add_task config ~title:"Observed Task" ~priority:1 ~description:"" in
+
+    (match Room.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+    | Ok _ -> ()
+    | Error err ->
+        Alcotest.failf "claim_task_r failed: %s"
+          (Types.show_masc_error err));
+    (match
+       Room.transition_task_r config ~agent_name:claude ~task_id:"task-001"
+         ~action:"start" ()
+     with
+    | Ok _ -> ()
+    | Error err ->
+        Alcotest.failf "transition_task_r start failed: %s"
+          (Types.show_masc_error err));
+    (match
+       Room.complete_task_r config ~agent_name:claude ~task_id:"task-001"
+         ~notes:"done" with
+    | Ok _ -> ()
+    | Error err ->
+        Alcotest.failf "complete_task_r failed: %s"
+          (Types.show_masc_error err));
+
+    let audit_entries = Audit_log.read_entries ~n:50 config in
+    Alcotest.(check bool) "audit claim recorded" true
+      (audit_has_entry audit_entries ~agent_id:claude
+         ~action_pred:(function Audit_log.ClaimTask -> true | _ -> false)
+         ~details:
+           [
+             ("event_family", "task_transition");
+             ("transition", "claim");
+             ("task_id", "task-001");
+           ]);
+    Alcotest.(check bool) "audit start recorded" true
+      (audit_has_entry audit_entries ~agent_id:claude
+         ~action_pred:(function Audit_log.StartTask -> true | _ -> false)
+         ~details:
+           [
+             ("event_family", "task_transition");
+             ("transition", "start");
+             ("task_id", "task-001");
+           ]);
+    Alcotest.(check bool) "audit done recorded" true
+      (audit_has_entry audit_entries ~agent_id:claude
+         ~action_pred:(function Audit_log.DoneTask -> true | _ -> false)
+         ~details:
+           [
+             ("event_family", "task_transition");
+             ("transition", "done");
+             ("task_id", "task-001");
+           ]);
+
+    let telemetry_events = Telemetry_eio.read_all_events config in
+    let has_started =
+      List.exists
+        (fun (entry : Telemetry_eio.event_record) ->
+          match entry.event with
+          | Telemetry_eio.Task_started { task_id; agent_id } ->
+              String.equal task_id "task-001" && String.equal agent_id claude
+          | _ -> false)
+        telemetry_events
+    in
+    let has_completed =
+      List.exists
+        (fun (entry : Telemetry_eio.event_record) ->
+          match entry.event with
+          | Telemetry_eio.Task_completed { task_id; success; _ } ->
+              String.equal task_id "task-001" && success
+          | _ -> false)
+        telemetry_events
+    in
+    Alcotest.(check bool) "telemetry start recorded" true has_started;
+    Alcotest.(check bool) "telemetry completion recorded" true has_completed;
+
+    let ring_entries =
+      Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
+    in
+    Alcotest.(check bool) "ring claim recorded" true
+      (ring_has_entry ring_entries
+         ~details:
+           [
+             ("event_family", "task_transition");
+             ("transition", "claim");
+             ("task_id", "task-001");
+           ]);
+    Alcotest.(check bool) "ring start recorded" true
+      (ring_has_entry ring_entries
+         ~details:
+           [
+             ("event_family", "task_transition");
+             ("transition", "start");
+             ("task_id", "task-001");
+           ]);
+    Alcotest.(check bool) "ring done recorded" true
+      (ring_has_entry ring_entries
+         ~details:
+           [
+             ("event_family", "task_transition");
+             ("transition", "done");
+             ("task_id", "task-001");
+           ]))
+
+let test_complete_task_legacy_emits_observability () =
+  with_test_env (fun config ->
+    let before_seq = latest_ring_seq () in
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ = Room.add_task config ~title:"Legacy Task" ~priority:1 ~description:"" in
+    let claim_result = Room.claim_task config ~agent_name:claude ~task_id:"task-001" in
+    Alcotest.(check bool) "legacy claim succeeds" true
+      (contains_check claim_result);
+    let done_result =
+      Room.complete_task config ~agent_name:claude ~task_id:"task-001"
+        ~notes:"legacy path"
+    in
+    Alcotest.(check bool) "legacy complete succeeds" true
+      (contains_check done_result);
+
+    let audit_entries = Audit_log.read_entries ~n:50 config in
+    Alcotest.(check bool) "legacy audit done recorded" true
+      (audit_has_entry audit_entries ~agent_id:claude
+         ~action_pred:(function Audit_log.DoneTask -> true | _ -> false)
+         ~details:
+           [
+             ("event_family", "task_transition");
+             ("transition", "done");
+             ("task_id", "task-001");
+           ]);
+
+    let telemetry_events = Telemetry_eio.read_all_events config in
+    let has_completed =
+      List.exists
+        (fun (entry : Telemetry_eio.event_record) ->
+          match entry.event with
+          | Telemetry_eio.Task_completed { task_id; success; _ } ->
+              String.equal task_id "task-001" && success
+          | _ -> false)
+        telemetry_events
+    in
+    Alcotest.(check bool) "legacy telemetry completion recorded" true
+      has_completed;
+
+    let ring_entries =
+      Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
+    in
+    Alcotest.(check bool) "legacy ring done recorded" true
+      (ring_has_entry ring_entries
+         ~details:
+           [
+             ("event_family", "task_transition");
+             ("transition", "done");
+             ("task_id", "task-001");
+           ]))
+
+let test_claim_next_auto_release_emits_release_observability () =
+  with_test_env (fun config ->
+    let before_seq = latest_ring_seq () in
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ = Room.add_task config ~title:"First" ~priority:1 ~description:"" in
+    let _ = Room.add_task config ~title:"Second" ~priority:2 ~description:"" in
+
+    (match Room.claim_next_r config ~agent_name:claude () with
+    | Room.Claim_next_claimed _ -> ()
+    | _ -> Alcotest.fail "expected first claim_next_r to succeed");
+    (match Room.claim_next_r config ~agent_name:claude () with
+    | Room.Claim_next_claimed { released_task_id = Some released; task_id; _ } ->
+        Alcotest.(check string) "released task id" "task-001" released;
+        Alcotest.(check string) "new task id" "task-002" task_id
+    | _ -> Alcotest.fail "expected auto-release on second claim_next_r");
+
+    let audit_entries = Audit_log.read_entries ~n:50 config in
+    Alcotest.(check bool) "audit release recorded" true
+      (audit_has_entry audit_entries ~agent_id:claude
+         ~action_pred:(function Audit_log.ReleaseTask -> true | _ -> false)
+         ~details:
+           [
+             ("event_family", "task_transition");
+             ("transition", "release");
+             ("task_id", "task-001");
+           ]);
+
+    let ring_entries =
+      Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
+    in
+    Alcotest.(check bool) "ring release recorded" true
+      (ring_has_entry ring_entries
+         ~details:
+           [
+             ("event_family", "task_transition");
+             ("transition", "release");
+             ("task_id", "task-001");
+           ]))
 
 (* ============================================================ *)
 (* Pause/Resume Tests                                            *)
@@ -694,6 +1010,18 @@ let () =
       Alcotest.test_case "release" `Quick test_transition_release;
       Alcotest.test_case "invalid" `Quick test_transition_invalid;
       Alcotest.test_case "version mismatch" `Quick test_transition_version_mismatch;
+    ];
+
+    (* === Observability === *)
+    "observability", [
+      Alcotest.test_case "join leave fan-out" `Quick
+        test_join_leave_emit_observability;
+      Alcotest.test_case "task transitions fan-out" `Quick
+        test_task_transitions_emit_observability;
+      Alcotest.test_case "legacy complete fan-out" `Quick
+        test_complete_task_legacy_emits_observability;
+      Alcotest.test_case "claim_next auto-release fan-out" `Quick
+        test_claim_next_auto_release_emits_release_observability;
     ];
 
     (* === Pause/Resume === *)

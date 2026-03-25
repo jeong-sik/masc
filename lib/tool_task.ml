@@ -88,11 +88,7 @@ let handle_claim ctx args =
          ("task_id", `String task_id);
          ("agent_name", `String ctx.agent_name);
          ("timestamp", `Float (Time_compat.now ()));
-       ]);
-       (* Audit: log claim event *)
-       Audit_log.log_claim_task ctx.config ~agent_id:ctx.agent_name
-         ~room_id:(Filename.basename ctx.config.base_path)
-         ~task_id ()
+       ])
    | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
   result_to_response result
 
@@ -240,11 +236,7 @@ let handle_cancel_task ctx args =
          ("agent_name", `String ctx.agent_name);
          ("reason", `String reason);
          ("timestamp", `Float (Time_compat.now ()));
-       ]);
-       (* Audit: log cancel event *)
-       Audit_log.log_cancel_task ctx.config ~agent_id:ctx.agent_name
-         ~room_id:(Filename.basename ctx.config.base_path)
-         ~task_id ~reason ()
+       ])
    | Error err ->
        Log.Task.error "metrics record failed: %s" (Types.masc_error_to_string err));
   result_to_response result
@@ -365,18 +357,7 @@ let handle_transition ctx args =
          ("action", `String action);
          ("agent_name", `String ctx.agent_name);
          ("timestamp", `Float (Time_compat.now ()));
-       ]);
-       (* Audit: log transition event by action type *)
-       let room_id = Filename.basename ctx.config.base_path in
-       (match action_lc with
-        | "claim" ->
-            Audit_log.log_claim_task ctx.config ~agent_id:ctx.agent_name ~room_id ~task_id ()
-        | "done" ->
-            Audit_log.log_done_task ctx.config ~agent_id:ctx.agent_name ~room_id ~task_id ()
-        | "cancel" ->
-            Audit_log.log_cancel_task ctx.config ~agent_id:ctx.agent_name ~room_id ~task_id
-              ~reason:(if reason = "" then "cancelled" else reason) ()
-        | _ -> ())
+       ])
    | Error err ->
        Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err));
   (* Record metrics *)

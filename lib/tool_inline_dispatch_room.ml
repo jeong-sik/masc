@@ -284,17 +284,6 @@ let handle_join (ctx : context) : result option =
   ] in
   let _pushed = Session.push_notification_to_active_agents registry ~event:join_event in
   Mcp_server.sse_broadcast state join_event;
-  Audit_log.log_join config ~agent_id:nickname
-    ~room_id:(Filename.basename config.base_path) ();
-  Prometheus.inc_gauge "masc_active_agents" ();
-  (match state.Mcp_server.fs with
-   | Some fs ->
-       (try Telemetry_eio.track_agent_joined ~fs config ~agent_id:nickname ()
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Log.Telemetry.debug "track_agent_joined (join): %s" (Printexc.to_string exn))
-   | None -> ());
   Some (true, final_result)
 
 (** masc_leave — leave a MASC room *)
@@ -318,15 +307,4 @@ let handle_leave (ctx : context) : result option =
     let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
     Safe_ops.remove_file_logged ~context:"masc_leave" agent_file
   end;
-  Audit_log.log_leave config ~agent_id:agent_name
-    ~room_id:(Filename.basename config.base_path) ();
-  Prometheus.dec_gauge "masc_active_agents" ();
-  (match state.Mcp_server.fs with
-   | Some fs ->
-       (try Telemetry_eio.track_agent_left ~fs config ~agent_id:agent_name ~reason:"leave"
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Log.Telemetry.debug "track_agent_left: %s" (Printexc.to_string exn))
-   | None -> ());
   Some (true, result)

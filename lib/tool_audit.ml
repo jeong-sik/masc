@@ -12,11 +12,27 @@ type audit_event = {
   event_type: string;
   success: bool;
   detail: string option;
+  details: Yojson.Safe.t option;
 }
 
-(* Audit log path *)
-let audit_log_path (config : Room.config) =
-  Filename.concat (Room_utils.masc_dir config) "audit.jsonl"
+let has_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.sub value 0 prefix_len = prefix
+
+let normalize_event_type value =
+  if has_prefix ~prefix:"tool_call:" value then
+    "tool_call"
+  else
+    value
+
+let details_option = function
+  | `Null -> None
+  | json -> Some json
+
+let detail_string_of_details = function
+  | `String value when String.trim value <> "" -> Some value
+  | _ -> None
 
 (* Convert audit event to JSON *)
 let audit_event_to_json (e : audit_event) : Yojson.Safe.t =
@@ -26,60 +42,35 @@ let audit_event_to_json (e : audit_event) : Yojson.Safe.t =
     ("event_type", `String e.event_type);
     ("success", `Bool e.success);
     ("detail", match e.detail with Some d -> `String d | None -> `Null);
+    ("details", match e.details with Some json -> json | None -> `Null);
   ]
 
-(* Read audit events since given timestamp.
-   Supports both legacy simple format ("agent"/"event_type"/"success")
-   and canonical Audit_log rich format ("agent_id"/"action"/"outcome"). *)
+(* Read audit events since given timestamp from the canonical date-split audit store. *)
 let read_audit_events (config : Room.config) ~since : audit_event list =
-  let path = audit_log_path config in
-  if not (Sys.file_exists path) then []
-  else
-    let content = In_channel.with_open_text path In_channel.input_all in
-    let lines = String.split_on_char '\n' content |> List.filter (fun s -> String.trim s <> "") in
-    List.filter_map (fun line ->
-      try
-        let json = Yojson.Safe.from_string line in
-        let module U = Yojson.Safe.Util in
-        let timestamp =
-          match U.member "timestamp" json with
-          | `Float f -> f
-          | `Int i -> float_of_int i
-          | `String s -> (try float_of_string s with Failure _ -> 0.0)
-          | _ -> 0.0
-        in
-        if timestamp < since then None
-        else
-          (* Try rich format first (agent_id/action/outcome), fall back to legacy *)
-          let agent =
-            match U.to_string_option (U.member "agent_id" json) with
-            | Some a -> a
-            | None -> json |> U.member "agent" |> U.to_string
-          in
-          let event_type =
-            match U.to_string_option (U.member "action" json) with
-            | Some a -> a
-            | None -> json |> U.member "event_type" |> U.to_string
-          in
-          let success =
-            match U.member "outcome" json with
-            | `Assoc _ as outcome ->
-                let status = U.to_string_option (U.member "status" outcome) in
-                (match status with Some "success" -> true | _ -> false)
-            | `String "success" -> true
-            | _ ->
-                (match U.to_bool_option (U.member "success" json) with
-                 | Some b -> b
-                 | None -> false)
-          in
-          let detail =
-            match U.to_string_option (U.member "detail" json) with
-            | Some _ as d -> d
-            | None -> U.to_string_option (U.member "details" json)
-          in
-          Some { timestamp; agent; event_type; success; detail }
-      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Not_found -> None
-    ) lines
+  Audit_log.read_entries config
+  |> List.filter (fun (entry : Audit_log.audit_entry) -> entry.timestamp >= since)
+  |> List.map (fun (entry : Audit_log.audit_entry) ->
+         let details = details_option entry.details in
+         let detail =
+           match detail_string_of_details entry.details with
+           | Some value -> Some value
+           | None ->
+               (match entry.outcome with
+                | Audit_log.Failure reason -> Some reason
+                | Audit_log.Success -> None)
+         in
+         {
+           timestamp = entry.timestamp;
+           agent = entry.agent_id;
+           event_type =
+             normalize_event_type (Audit_log.action_to_string entry.action);
+           success =
+             (match entry.outcome with
+              | Audit_log.Success -> true
+              | Audit_log.Failure _ -> false);
+           detail;
+           details;
+         })
 
 (* Handle masc_audit_query *)
 let handle_audit_query ctx args =
@@ -97,7 +88,7 @@ let handle_audit_query ctx args =
         | None -> true)
     |> List.filter (fun e ->
         if event_type = "all" then true
-        else e.event_type = event_type)
+        else e.event_type = normalize_event_type event_type)
     (* Sort newest-first so limit returns the most recent events *)
     |> List.sort (fun a b -> Float.compare b.timestamp a.timestamp)
   in
@@ -146,7 +137,10 @@ let handle_audit_stats ctx args =
   let stats_for agent_id =
     let agent_events = List.filter (fun e -> e.agent = agent_id) events in
     let count_type t =
-      List.fold_left (fun acc e -> if e.event_type = t then acc + 1 else acc) 0 agent_events
+      let normalized = normalize_event_type t in
+      List.fold_left
+        (fun acc e -> if e.event_type = normalized then acc + 1 else acc)
+        0 agent_events
     in
     let auth_success = count_type "auth_success" in
     let auth_failure = count_type "auth_failure" in
@@ -380,6 +374,13 @@ Pair with masc_audit_stats for aggregate trust metrics, masc_auth_list for crede
             `String "auth_failure";
             `String "anomaly_detected";
             `String "security_violation";
+            `String "join";
+            `String "leave";
+            `String "claim_task";
+            `String "start_task";
+            `String "done_task";
+            `String "cancel_task";
+            `String "release_task";
             `String "tool_call";
             `String "all"
           ]);

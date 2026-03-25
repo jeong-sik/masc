@@ -111,7 +111,8 @@ let add_routes ~sw ~clock router =
            in
            match report_result with
            | Ok report ->
-               Dashboard_tool_host_events.record state.Mcp_server.room_config
+               Dashboard_tool_host_events.record ?fs:state.Mcp_server.fs
+                 state.Mcp_server.room_config
                  report;
                Http.Response.json ~compress:true ~request:req {|{"ok":true}|}
                  reqd

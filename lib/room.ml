@@ -51,6 +51,109 @@ include Room_gc
 (* Wire Room_hooks callbacks                    *)
 (* ============================================ *)
 
+let telemetry_enabled () =
+  match Sys.getenv_opt "MASC_TELEMETRY_ENABLED" with
+  | Some "false" | Some "0" -> false
+  | _ -> true
+
+let merge_detail_fields fields details =
+  match details with
+  | `Assoc extra -> `Assoc (fields @ extra)
+  | `Null -> `Assoc fields
+  | other -> `Assoc (fields @ [ ("payload", other) ])
+
+let task_action_of_transition = function
+  | "claim" -> Audit_log.ClaimTask
+  | "start" -> Audit_log.StartTask
+  | "done" -> Audit_log.DoneTask
+  | "cancel" -> Audit_log.CancelTask
+  | "release" -> Audit_log.ReleaseTask
+  | other -> Audit_log.Custom ("task_" ^ other)
+
+let observe_agent_lifecycle config ~agent_id ~room_id ~event_kind ~details =
+  let details =
+    merge_detail_fields
+      [
+        ("event_family", `String "agent_lifecycle");
+        ("event_kind", `String event_kind);
+        ("agent_id", `String agent_id);
+        ("room_id", `String room_id);
+      ]
+      details
+  in
+  let level =
+    match event_kind with
+    | "leave" -> Log.Info
+    | _ -> Log.Info
+  in
+  let message =
+    match event_kind with
+    | "rejoin" -> Printf.sprintf "agent rejoined: %s (%s)" agent_id room_id
+    | "leave" -> Printf.sprintf "agent left: %s (%s)" agent_id room_id
+    | _ -> Printf.sprintf "agent joined: %s (%s)" agent_id room_id
+  in
+  Log.emit level ~module_name:"Room" ~details message;
+  (match event_kind with
+   | "leave" -> Prometheus.dec_gauge "masc_active_agents" ()
+   | "join" | "rejoin" -> Prometheus.inc_gauge "masc_active_agents" ()
+   | _ -> ());
+  let audit_details =
+    match event_kind with
+    | "rejoin" -> merge_detail_fields [ ("rejoin", `Bool true) ] details
+    | _ -> details
+  in
+  let action =
+    match event_kind with
+    | "leave" -> Audit_log.Leave
+    | _ -> Audit_log.Join
+  in
+  Audit_log.log_action config ~agent_id ~action ~room_id
+    ~details:audit_details ~outcome:Audit_log.Success ();
+  if telemetry_enabled () then
+    match event_kind with
+    | "leave" -> Telemetry_eio.track_agent_left config ~agent_id ~reason:"leave"
+    | "rejoin" ->
+        Telemetry_eio.track_agent_joined config ~agent_id ()
+    | _ -> Telemetry_eio.track_agent_joined config ~agent_id ()
+
+let observe_task_transition_event config ~agent_name ~room_id ~task_id
+    ~transition ~details =
+  let details =
+    merge_detail_fields
+      [
+        ("event_family", `String "task_transition");
+        ("transition", `String transition);
+        ("task_id", `String task_id);
+        ("agent_id", `String agent_name);
+        ("room_id", `String room_id);
+      ]
+      details
+  in
+  let level =
+    match transition with
+    | "cancel" -> Log.Warn
+    | _ -> Log.Info
+  in
+  let message =
+    Printf.sprintf "task %s %s by %s (%s)" task_id transition agent_name
+      room_id
+  in
+  Log.emit level ~module_name:"Task" ~details message;
+  Audit_log.log_action config ~agent_id:agent_name
+    ~action:(task_action_of_transition transition) ~room_id
+    ~details ~outcome:Audit_log.Success ();
+  if telemetry_enabled () then
+    match transition with
+    | "start" ->
+        Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
+    | "done" | "cancel" ->
+        let duration_ms =
+          Safe_ops.json_int ~default:0 "duration_ms" details
+        in
+        Telemetry_eio.track_task_completed config ~task_id ~duration_ms
+          ~success:(String.equal transition "done")
+    | _ -> ()
+
 (* force_release_task — zombie cleanup needs task management logic *)
 let () = Room_hooks.force_release_task_fn :=
   (fun config ~agent_name ~task_id () ->
@@ -82,6 +185,15 @@ let () = Room_hooks.relation_on_leave_fn := Relation_materializer.on_agent_leave
 
 (* Relation materializer — task done *)
 let () = Room_hooks.relation_on_task_done_fn := Relation_materializer.on_task_done
+
+let () = Room_hooks.observe_agent_lifecycle_fn :=
+  (fun config ~agent_id ~room_id ~event_kind ~details ->
+    observe_agent_lifecycle config ~agent_id ~room_id ~event_kind ~details)
+
+let () = Room_hooks.observe_task_transition_fn :=
+  (fun config ~agent_name ~room_id ~task_id ~transition ~details ->
+    observe_task_transition_event config ~agent_name ~room_id ~task_id
+      ~transition ~details)
 
 (* Board artifact cleanup — wraps Board_dispatch for GC *)
 let () = Room_hooks.cleanup_board_artifacts_fn := (fun () ->

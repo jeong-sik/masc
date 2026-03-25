@@ -36,6 +36,17 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
             String.equal assignee agent_name
         | Todo | Done _ | Cancelled _ -> false
       ) backlog.tasks in
+      let observe_auto_release () =
+        match previous_claim with
+        | Some prev ->
+            Room_task.observe_task_transition config ~agent_name ~task_id:prev.id
+              ~transition:"release"
+              ~details:
+                (Room_task.task_transition_details ~from_status:prev.task_status
+                   ~to_status:Types.Todo
+                   ~reason:"auto_release_before_claim_next" ())
+        | None -> ()
+      in
       let released_task_id, working_tasks = match previous_claim with
         | None -> None, backlog.tasks
         | Some prev ->
@@ -146,7 +157,8 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
                  last_updated = now_iso ();
                  version = backlog.version + 1;
                } in
-               write_backlog config new_backlog
+               write_backlog config new_backlog;
+               observe_auto_release ()
            | None -> ());
           clear_agent_state_after_release ();
           Claim_next_no_unclaimed
@@ -158,7 +170,8 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
                  last_updated = now_iso ();
                  version = backlog.version + 1;
                } in
-               write_backlog config new_backlog
+               write_backlog config new_backlog;
+               observe_auto_release ()
            | None -> ());
           clear_agent_state_after_release ();
           Claim_next_no_eligible { excluded_count = List.length exclude_task_ids }
@@ -204,7 +217,8 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
            | Some rid ->
                Room_task.emit_task_activity config ~agent_name ~task_id:rid
                  ~kind:"task.released"
-                 ~payload:(`Assoc [ ("task_id", `String rid) ])
+                 ~payload:(`Assoc [ ("task_id", `String rid) ]);
+               observe_auto_release ()
            | None -> ());
           Room_task.emit_task_activity config ~agent_name ~task_id:task.id
             ~kind:"task.claimed"
@@ -219,6 +233,14 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
           log_event config (Printf.sprintf
             "{\"type\":\"task_claim_next\",\"agent\":\"%s\",\"task\":\"%s\",\"priority\":%d,\"ts\":\"%s\"}"
             agent_name task.id task.priority (now_iso ()));
+          Room_task.observe_task_transition config ~agent_name ~task_id:task.id
+            ~transition:"claim"
+            ~details:
+              (Room_task.task_transition_details ~from_status:Types.Todo
+                 ~to_status:
+                   (Types.Claimed
+                      { assignee = agent_name; claimed_at = now_iso () })
+                 ());
 
           let message = match released_task_id with
             | Some rid ->

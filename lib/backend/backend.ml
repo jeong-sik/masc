@@ -129,15 +129,18 @@ module FileSystem = struct
 
   (** {2 Core Operations} *)
 
-  let _ensure_parent_dir path =
+  let _ensure_parent_dir ?(log_errors = false) path =
     match Eio.Path.split path with
     | Some (parent, _) ->
         (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
          with Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
-              Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                (Printf.sprintf "[WARN] mkdirs failed: %s"
-                   (Printexc.to_string exn)))
+              if log_errors then
+                Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
+                  (Printf.sprintf "[WARN] mkdirs failed: %s"
+                     (Printexc.to_string exn))
+              else
+                raise exn)
     | None -> ()
 
   (** Get value by key (auto-decompresses ZSTD if detected) *)
@@ -166,7 +169,7 @@ module FileSystem = struct
       | Error e -> Error e
       | Ok path ->
           try
-            _ensure_parent_dir path;
+            _ensure_parent_dir ~log_errors:true path;
             (* Compact Protocol v4: Compress before saving (if beneficial) *)
             let compressed = Compression.compress_with_header value in
             (* Write file *)
@@ -277,7 +280,7 @@ module FileSystem = struct
             match Eio.Path.kind ~follow:true path with
             | `Regular_file -> Error (AlreadyExists key)
             | _ ->
-                _ensure_parent_dir path;
+                _ensure_parent_dir ~log_errors:true path;
                 (* Write with exclusive create *)
                 Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
                 Ok true

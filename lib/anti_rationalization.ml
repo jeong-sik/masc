@@ -165,9 +165,36 @@ let default_evaluator_cascade = "verifier"
       family than the generator for genuine cross-model evaluation.
     @param generator_cascade Optional name of the cascade the generator used.
       Logged for auditing model separation. Not used in verification logic. *)
+(* ================================================================ *)
+(* Contract verification (#3071)                                     *)
+(* ================================================================ *)
+
+(** Check completion notes against a pre-declared contract.
+    Returns unmet contract items. A contract item is "met" if the
+    notes contain a case-insensitive substring match.
+
+    This is deliberately simple — the contract is a lightweight
+    pre-declaration, not a formal specification language. *)
+let check_contract ~(notes : string) ~(contract : string list) : string list =
+  let lower_notes = String.lowercase_ascii notes in
+  List.filter (fun item ->
+    let lower_item = String.lowercase_ascii item in
+    let ilen = String.length lower_item in
+    let nlen = String.length lower_notes in
+    if ilen > nlen then true  (* unmet: item longer than notes *)
+    else
+      let rec scan i =
+        if i > nlen - ilen then true  (* not found = unmet *)
+        else if String.sub lower_notes i ilen = lower_item then false  (* found = met *)
+        else scan (i + 1)
+      in
+      scan 0
+  ) contract
+
 let review
     ?(evaluator_cascade = default_evaluator_cascade)
     ?generator_cascade
+    ?(completion_contract : string list option)
     (req : review_request) : review_result =
   (* Gate 1: empty or trivially short notes *)
   let notes_trimmed = String.trim req.completion_notes in
@@ -184,6 +211,25 @@ let review
     { verdict = Reject (sprintf "avoidance pattern detected: \"%s\" (%s). Revise your notes to describe actual completed work."
                           pattern reason);
       evaluator_cascade; generator_cascade; gate = "excuse" }
+  | None ->
+  (* Gate 2.5: contract verification (local, no LLM) *)
+  let contract_rejection =
+    match completion_contract with
+    | None | Some [] -> None
+    | Some contract ->
+      let unmet = check_contract ~notes:notes_trimmed ~contract in
+      if unmet = [] then None
+      else begin
+        Log.Task.info "[anti-rationalization] contract unmet: agent=%s task=%s unmet=[%s]"
+          req.agent_name req.task_title (String.concat "; " unmet);
+        Some (sprintf "completion contract not satisfied. Unmet items: %s"
+                (String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") unmet)))
+      end
+  in
+  match contract_rejection with
+  | Some reason ->
+    { verdict = Reject reason;
+      evaluator_cascade; generator_cascade; gate = "contract" }
   | None ->
     (* Gate 3: LLM review via evaluator cascade *)
     let prompt = build_prompt req in
@@ -219,8 +265,8 @@ let review
 
 (** Backward-compatible wrapper that returns only the verdict.
     Use [review] directly for structured results with audit metadata. *)
-let review_verdict ?evaluator_cascade ?generator_cascade req =
-  (review ?evaluator_cascade ?generator_cascade req).verdict
+let review_verdict ?evaluator_cascade ?generator_cascade ?completion_contract req =
+  (review ?evaluator_cascade ?generator_cascade ?completion_contract req).verdict
 
 let review_result_to_json (r : review_result) : Yojson.Safe.t =
   `Assoc [

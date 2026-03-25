@@ -128,7 +128,7 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (meta : keeper_meta) =
   if not meta.presence_keepalive then ()
   else if Hashtbl.mem supervised_registry meta.name then ()
-  else if not (Keeper_keepalive.keeper_spawn_slots_available ()) then ()
+  else if not (Keeper_registry.spawn_slots_available ()) then ()
   else begin
     let stop = ref false in
     let now = Time_compat.now () in

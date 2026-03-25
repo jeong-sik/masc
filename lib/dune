@@ -546,10 +546,7 @@
    tool_autoresearch_repo_synthesis
    tool_autoresearch_cycle
    tool_autoresearch
-   ;; Code Research Loop — automated self-improvement via LLM
-   research_config
-   research_metric
-   research_loop
+   ;; Code Research Loop — tool_research adapter (core logic in masc_research library)
    tool_research
    ;; godsplit-phase1: type/schema sub-modules
    team_session_types_enums
@@ -807,6 +804,8 @@
    masc_backend
    ;; Process execution + file locking (extracted sub-library)
    masc_process
+   ;; Research loop — experimental, non-core (extracted sub-library)
+   masc_research
    ;; Room coordination (extracted sub-library)
    masc_room
    )

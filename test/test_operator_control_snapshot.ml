@@ -3,6 +3,7 @@ open Test_operator_control_support
 
 let test_snapshot_has_expected_sections () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -60,6 +61,7 @@ let test_snapshot_has_expected_sections () =
 
 let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -119,6 +121,7 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
 
 let test_snapshot_caps_session_recent_events () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -160,6 +163,7 @@ let test_snapshot_caps_session_recent_events () =
 
 let test_snapshot_summary_view_can_omit_command_plane () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -184,6 +188,7 @@ let test_snapshot_summary_view_can_omit_command_plane () =
 
 let test_snapshot_lightweight_summary_omits_heavy_activity () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -213,6 +218,7 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
 
 let test_orchestra_room_core_shape () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -236,6 +242,7 @@ let test_orchestra_room_core_shape () =
 
 let test_orchestra_includes_session_edge_and_pending_signal () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -281,6 +288,7 @@ let test_orchestra_includes_session_edge_and_pending_signal () =
 
 let test_digest_room_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -345,6 +353,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
 
 let test_digest_team_session_shape () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -384,6 +393,7 @@ let test_digest_team_session_shape () =
 
 let test_digest_team_session_can_skip_workers () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -408,6 +418,7 @@ let test_digest_team_session_can_skip_workers () =
 
 let test_snapshot_and_digest_expose_role_runtime_census () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect

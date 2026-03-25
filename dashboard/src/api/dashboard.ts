@@ -1,7 +1,7 @@
 // MASC Dashboard — Dashboard projections, resource fetchers, tool metrics
 
 import { isRecord } from '../components/common/normalize'
-import { asInt } from './trpg'
+import { asInt } from '../components/common/normalize'
 import {
   asNullableIsoTimestamp,
   normalizeGovernanceDecisionItem,

@@ -33,6 +33,7 @@ module FileSystem = struct
     config: config;
     fs: Eio.Fs.dir_ty Eio.Path.t;
     mutex: Eio.Mutex.t;
+    pubsub: Backend_core.Pubsub_mem.t;
   }
 
   (** Create a new FileSystem backend *)
@@ -49,6 +50,7 @@ module FileSystem = struct
       config;
       fs = path;
       mutex = Eio.Mutex.create ();
+      pubsub = Backend_core.Pubsub_mem.create ();
     }
 
   (** {2 Key Validation} *)
@@ -561,6 +563,27 @@ module FileSystem = struct
          | Ok () -> Ok { latency_ms = 0.0; is_healthy = true }
          | Error _ -> Ok { latency_ms = 0.0; is_healthy = false })
     | Error e -> Error e
+
+  (** {2 Bulk Operations} *)
+
+  let get_all t ~prefix =
+    match list_keys t ~prefix with
+    | Error e -> Error e
+    | Ok keys ->
+        let pairs = List.filter_map (fun k ->
+          match get t k with
+          | Ok v -> Some (k, v)
+          | Error _ -> None
+        ) keys in
+        Ok pairs
+
+  (** {2 Pub/Sub (in-memory, delegates to Backend_core.Pubsub_mem)} *)
+
+  let publish t ~channel ~message =
+    Backend_core.Pubsub_mem.publish t.pubsub ~channel ~message
+
+  let subscribe t ~channel ~callback =
+    Backend_core.Pubsub_mem.subscribe t.pubsub ~channel ~callback
 
 end
 

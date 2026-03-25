@@ -1,0 +1,227 @@
+import { confirmOperatorAction, fetchOperatorDigest, fetchOperatorSnapshot, runOperatorAction } from './api'
+import type {
+  OperatorActionLogEntry,
+  OperatorActionRequest,
+  OperatorActionResult,
+} from './types'
+import { registerOperatorRefresh } from './sse-store'
+import {
+  operatorSnapshot,
+  operatorRoomDigest,
+  operatorSessionDigest,
+  operatorLoading,
+  operatorError,
+  operatorDigestLoading,
+  operatorDigestError,
+  operatorActionBusy,
+  operatorActionLog,
+} from './operator-signals'
+import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
+
+let nextLogId = 1
+
+interface RefreshOptions {
+  force?: boolean
+}
+
+const OPERATOR_REFRESH_TTL_MS = 1_000
+
+let snapshotRefreshInflight: Promise<void> | null = null
+let roomDigestRefreshInflight: Promise<void> | null = null
+let sessionDigestRefreshInflight: Promise<void> | null = null
+let lastSnapshotRefreshAt = 0
+let lastRoomDigestRefreshAt = 0
+let lastSessionDigestRefreshAt = 0
+let lastSessionDigestId: string | null = null
+
+function stringifyUnknown(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === null || value === undefined) return ''
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function targetLabelOf(request: Pick<OperatorActionRequest, 'target_type' | 'target_id'>): string {
+  return request.target_id ? `${request.target_type}:${request.target_id}` : request.target_type
+}
+
+function appendLog(entry: Omit<OperatorActionLogEntry, 'id' | 'at'>): void {
+  operatorActionLog.value = [
+    {
+      ...entry,
+      id: nextLogId++,
+      at: new Date().toISOString(),
+    },
+    ...operatorActionLog.value,
+  ].slice(0, 20)
+}
+
+function logMessageFromResult(result: OperatorActionResult): string {
+  if (result.confirm_required) {
+    return stringifyUnknown(result.preview) || 'Confirmation required'
+  }
+  return stringifyUnknown(result.result)
+    || stringifyUnknown(result.executed_action)
+    || stringifyUnknown(result.delegated_tool_result)
+    || result.status
+}
+
+function isFresh(lastAt: number, opts?: RefreshOptions): boolean {
+  return !opts?.force && Date.now() - lastAt < OPERATOR_REFRESH_TTL_MS
+}
+
+export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<void> {
+  if (snapshotRefreshInflight) return snapshotRefreshInflight
+  if (isFresh(lastSnapshotRefreshAt, opts)) return
+  operatorLoading.value = true
+  operatorError.value = null
+  snapshotRefreshInflight = (async () => {
+    try {
+      const raw = await fetchOperatorSnapshot()
+      operatorSnapshot.value = normalizeOperatorSnapshot(raw)
+      lastSnapshotRefreshAt = Date.now()
+    } catch (err) {
+      operatorError.value = err instanceof Error ? err.message : 'Failed to load operator snapshot'
+    } finally {
+      operatorLoading.value = false
+      snapshotRefreshInflight = null
+    }
+  })()
+  return snapshotRefreshInflight
+}
+
+export async function refreshOperatorRoomDigest(opts?: RefreshOptions): Promise<void> {
+  if (roomDigestRefreshInflight) return roomDigestRefreshInflight
+  if (isFresh(lastRoomDigestRefreshAt, opts)) return
+  operatorDigestLoading.value = true
+  operatorDigestError.value = null
+  roomDigestRefreshInflight = (async () => {
+    try {
+      const raw = await fetchOperatorDigest({ targetType: 'room' })
+      operatorRoomDigest.value = normalizeOperatorDigest(raw)
+      lastRoomDigestRefreshAt = Date.now()
+    } catch (err) {
+      operatorDigestError.value = err instanceof Error ? err.message : 'Failed to load operator digest'
+    } finally {
+      operatorDigestLoading.value = false
+      roomDigestRefreshInflight = null
+    }
+  })()
+  return roomDigestRefreshInflight
+}
+
+export async function refreshOperatorSessionDigest(sessionId: string | null, opts?: RefreshOptions): Promise<void> {
+  if (!sessionId) {
+    operatorSessionDigest.value = null
+    lastSessionDigestId = null
+    return
+  }
+  if (sessionDigestRefreshInflight && lastSessionDigestId === sessionId) return sessionDigestRefreshInflight
+  if (lastSessionDigestId === sessionId && isFresh(lastSessionDigestRefreshAt, opts)) return
+
+  operatorDigestLoading.value = true
+  operatorDigestError.value = null
+  lastSessionDigestId = sessionId
+  sessionDigestRefreshInflight = (async () => {
+    try {
+      const raw = await fetchOperatorDigest({
+        targetType: 'team_session',
+        targetId: sessionId,
+        includeWorkers: true,
+      })
+      operatorSessionDigest.value = normalizeOperatorDigest(raw)
+      lastSessionDigestRefreshAt = Date.now()
+    } catch (err) {
+      operatorDigestError.value = err instanceof Error ? err.message : 'Failed to load session digest'
+    } finally {
+      operatorDigestLoading.value = false
+      sessionDigestRefreshInflight = null
+    }
+  })()
+  return sessionDigestRefreshInflight
+}
+
+export async function dispatchOperatorAction(request: OperatorActionRequest): Promise<OperatorActionResult> {
+  operatorActionBusy.value = true
+  operatorError.value = null
+  try {
+    const result = await runOperatorAction(request)
+    appendLog({
+      actor: request.actor,
+      action_type: request.action_type,
+      target_label: targetLabelOf(request),
+      outcome: result.confirm_required ? 'preview' : 'executed',
+      message: logMessageFromResult(result),
+      delegated_tool: result.delegated_tool,
+    })
+    await refreshOperatorSnapshot({ force: true })
+    await refreshOperatorRoomDigest({ force: true })
+    if (operatorSessionDigest.value?.target_id) {
+      await refreshOperatorSessionDigest(operatorSessionDigest.value.target_id, { force: true })
+    }
+    return result
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Operator action failed'
+    operatorError.value = message
+    appendLog({
+      actor: request.actor,
+      action_type: request.action_type,
+      target_label: targetLabelOf(request),
+      outcome: 'error',
+      message,
+    })
+    throw err
+  } finally {
+    operatorActionBusy.value = false
+  }
+}
+
+export async function confirmOperatorPendingAction(
+  actor: string,
+  confirmToken: string,
+  decision: 'confirm' | 'deny' = 'confirm',
+): Promise<OperatorActionResult> {
+  operatorActionBusy.value = true
+  operatorError.value = null
+  try {
+    const result = await confirmOperatorAction(actor, confirmToken, decision)
+    appendLog({
+      actor,
+      action_type: decision,
+      target_label: confirmToken,
+      outcome: 'confirmed',
+      message: logMessageFromResult(result),
+      delegated_tool: result.delegated_tool,
+    })
+    await refreshOperatorSnapshot({ force: true })
+    await refreshOperatorRoomDigest({ force: true })
+    if (operatorSessionDigest.value?.target_id) {
+      await refreshOperatorSessionDigest(operatorSessionDigest.value.target_id, { force: true })
+    }
+    return result
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Operator confirmation failed'
+    operatorError.value = message
+    appendLog({
+      actor,
+      action_type: 'confirm',
+      target_label: confirmToken,
+      outcome: 'error',
+      message,
+    })
+    throw err
+  } finally {
+    operatorActionBusy.value = false
+  }
+}
+
+registerOperatorRefresh(() => {
+  void refreshOperatorSnapshot({ force: true })
+  void refreshOperatorRoomDigest({ force: true })
+  if (operatorSessionDigest.value?.target_id) {
+    void refreshOperatorSessionDigest(operatorSessionDigest.value.target_id, { force: true })
+  }
+})

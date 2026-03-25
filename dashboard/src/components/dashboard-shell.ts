@@ -22,7 +22,7 @@ const buildIdentityOpen = signal(false)
 const LazyStatus = lazy(async () => ({ default: (await import('./status')).Status }))
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
 const LazyOperations = lazy(async () => ({ default: (await import('./control')).Operations }))
-const LazyLabSurface = lazy(async () => ({ default: (await import('./lab-unified')).LabSurface }))
+const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
 function lazyTabFallback(label: string) {

@@ -407,7 +407,6 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
     ("agents", `Assoc [ ("agents", `List agents_json); ("total", `Int (List.length agents_json)) ]);
     ("messages", `Assoc [ ("messages", `List msgs_json); ("total", `Int (List.length msgs_json)) ]);
     ("keepers", keepers_dashboard_json ~compact config);
-    ("perpetual", perpetual_dashboard_json ());
   ]
 
 (** Strip non-ASCII characters from actor string.

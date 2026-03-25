@@ -22,7 +22,6 @@ import {
   RawDataDebug,
   RelationshipList,
   TraitsList,
-  TrpgStats,
 } from './keeper-detail-panels'
 import {
   KeeperNeighborhood,
@@ -242,14 +241,6 @@ export function KeeperDetailOverlay() {
               `
               : null}
           <//>
-
-          ${keeper.trpg_stats
-            ? html`
-              <${SectionCard} title="TRPG Stats">
-                <${TrpgStats} stats=${keeper.trpg_stats} />
-              <//>
-            `
-            : null}
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`

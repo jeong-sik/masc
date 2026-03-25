@@ -39,8 +39,6 @@ Date: 2026-03-11
 
 - `keeper` skill selection 기본값은 `agent` 경로다.
 - `capability_match` 기본값은 `hybrid`다.
-- `trpg_dm_intent` 기본값은 `hybrid`다.
-
 즉 primary path는 MODEL judgment를 먼저 시도하고, 실패 시에만 fallback을 쓴다.
 
 ## Validation
@@ -52,15 +50,13 @@ dune build ./_build/default/test/test_tool_contract_truth.exe \
   ./_build/default/test/test_operator_control.exe \
   ./_build/default/test/test_swarm_status.exe \
   ./_build/default/test/test_dashboard_mission_briefing.exe \
-  ./_build/default/test/test_capability_match_coverage.exe \
-  ./_build/default/test/test_trpg_dm_intent.exe
+  ./_build/default/test/test_capability_match_coverage.exe
 
 ./_build/default/test/test_tool_contract_truth.exe
 ./_build/default/test/test_operator_control.exe
 ./_build/default/test/test_swarm_status.exe
 ./_build/default/test/test_dashboard_mission_briefing.exe
 ./_build/default/test/test_capability_match_coverage.exe
-./_build/default/test/test_trpg_dm_intent.exe
 ```
 
 이 검증의 목적은 품질 점수보다 truthfulness다.

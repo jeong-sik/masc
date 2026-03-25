@@ -774,10 +774,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd json ~extra_headers:cors
 
-      | `GET, p when String.starts_with ~prefix:"/api/v1/trpg/" p ->
-          let json = `Assoc [("error", `String "TRPG module archived"); ("status", `Int 410)] in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~status:`Gone ~extra_headers:cors
-
       | `GET, "/api/v1/room/current" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in

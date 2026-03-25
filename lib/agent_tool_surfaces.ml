@@ -63,8 +63,6 @@ let spawned_agent_public_tool_names : string list =
     "masc_board_vote";
     "masc_board_get";
     "masc_tool_help";
-    (* masc_tool_list, masc_tool_grant, masc_tool_revoke removed:
-       no matching schema found (dead entries) *)
     "masc_portal_open";
     "masc_portal_send";
     "masc_portal_status";

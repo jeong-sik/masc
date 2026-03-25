@@ -13,6 +13,7 @@ let contains_substring s needle =
 
 let test_snapshot_exposes_keeper_and_social_actions () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -85,6 +86,7 @@ let test_snapshot_exposes_keeper_and_social_actions () =
 
 let test_keeper_status_exposes_summary_and_recoverable () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -161,6 +163,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
 
 let test_keeper_config_exposes_live_runtime_and_sources () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let cwd = Sys.getcwd () in
@@ -293,6 +296,7 @@ proactive_enabled = true
 
 let test_snapshot_keeper_tool_audit_fallback () =
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -365,6 +369,7 @@ let test_keeper_msg_auto_team_session_bridge () =
     Alcotest.skip ()
   else
   Eio_main.run @@ fun env ->
+  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect

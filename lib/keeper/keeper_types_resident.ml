@@ -16,7 +16,9 @@ let keeper_dir_ (config : Room.config) =
   d
 
 let session_base_dir_ (config : Room.config) =
-  Filename.concat (Room.masc_root_dir config) "perpetual"
+  let d = Filename.concat (Room.masc_root_dir config) "perpetual" in
+  mkdir_p_ d;
+  d
 
 let env_present name =
   match Sys.getenv_opt name with

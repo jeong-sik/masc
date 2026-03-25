@@ -18,7 +18,6 @@
    auto_responder
    auth
    board
-   board_types
    board_core
    board_votes
    board_pg
@@ -807,6 +806,8 @@
    masc_process
    ;; Research loop — experimental, non-core (extracted sub-library)
    masc_research
+   ;; Board types (extracted sub-library — first step toward board isolation)
+   masc_board
    ;; Room coordination (extracted sub-library)
    masc_room
    )

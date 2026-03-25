@@ -51,15 +51,27 @@ type security_scheme = {
 (** Structured capabilities — A2A v0.3 spec *)
 type agent_capabilities = {
   streaming: bool;
-  push_notifications: bool;
-  extended_agent_card: bool;
+  push_notifications: bool [@key "pushNotifications"];
+  extended_agent_card: bool [@key "extendedAgentCard"];
 } [@@deriving yojson, show, eq]
+
+(** String-keyed object serialized as JSON {"k":"v",...} instead of [["k","v"],...] *)
+type string_assoc = (string * string) list [@@deriving show, eq]
+let string_assoc_to_yojson (xs : string_assoc) : Yojson.Safe.t =
+  `Assoc (List.map (fun (k, v) -> (k, `String v)) xs)
+let string_assoc_of_yojson (json : Yojson.Safe.t) : (string_assoc, string) result =
+  match json with
+  | `Assoc pairs ->
+    Ok (List.filter_map (fun (k, v) ->
+      match v with `String s -> Some (k, s) | _ -> None) pairs)
+  | `Null -> Ok []
+  | _ -> Error "expected object for string_assoc"
 
 (** JWS signature for Agent Card signing — A2A v0.3 spec (RFC 7515) *)
 type agent_card_signature = {
-  protected_header: string;  (** Base64url-encoded JSON (alg, kid) *)
+  protected_header: string [@key "protected"];  (** Base64url-encoded JSON (alg, kid) *)
   signature: string;         (** Base64url-encoded computed signature *)
-  header: (string * string) list;  (** Optional unprotected JWS header *)
+  header: string_assoc [@default []];  (** Optional unprotected JWS header *)
 } [@@deriving yojson, show, eq]
 
 (** Agent Card - A2A v0.3.0 compliant agent metadata *)
@@ -85,25 +97,20 @@ type agent_card = {
 
 (* ---------- JSON Serialization ---------- *)
 
-let capabilities_to_json (c : agent_capabilities) : Yojson.Safe.t =
-  `Assoc [
-    ("streaming", `Bool c.streaming);
-    ("pushNotifications", `Bool c.push_notifications);
-    ("extendedAgentCard", `Bool c.extended_agent_card);
-  ]
+(* Derived [agent_capabilities_to_yojson] produces correct camelCase via [@key]. *)
+let capabilities_to_json = agent_capabilities_to_yojson
 
 let capabilities_of_json (json : Yojson.Safe.t) : agent_capabilities =
-  let open Yojson.Safe.Util in
   match json with
   | `Assoc _ ->
-    {
-      streaming = (try json |> member "streaming" |> to_bool with Yojson.Safe.Util.Type_error _ -> false);
-      push_notifications = (try json |> member "pushNotifications" |> to_bool with Yojson.Safe.Util.Type_error _ -> false);
-      extended_agent_card = (try json |> member "extendedAgentCard" |> to_bool with Yojson.Safe.Util.Type_error _ -> false);
-    }
+    (match agent_capabilities_of_yojson json with
+     | Ok c -> c
+     | Error _ ->
+       { streaming = false; push_notifications = false; extended_agent_card = false })
   | `List strs ->
     (* Backward compat: parse old string list format *)
-    let has s = List.exists (fun v -> try to_string v = s with Yojson.Safe.Util.Type_error _ -> false) strs in
+    let has s = List.exists (fun v ->
+      match v with `String x -> String.equal x s | _ -> false) strs in
     {
       streaming = has "streaming";
       push_notifications = has "push-notifications";
@@ -112,27 +119,13 @@ let capabilities_of_json (json : Yojson.Safe.t) : agent_capabilities =
   | _ ->
     { streaming = false; push_notifications = false; extended_agent_card = false }
 
-let signature_to_json (s : agent_card_signature) : Yojson.Safe.t =
-  `Assoc ([
-    ("protected", `String s.protected_header);
-    ("signature", `String s.signature);
-  ] @ (if s.header = [] then [] else [
-    ("header", `Assoc (List.map (fun (k, v) -> (k, `String v)) s.header))
-  ]))
+(* Derived [agent_card_signature_to_yojson] produces correct keys via [@key]. *)
+let signature_to_json = agent_card_signature_to_yojson
 
 let signature_of_json (json : Yojson.Safe.t) : agent_card_signature option =
-  let open Yojson.Safe.Util in
-  try
-    let protected_header = json |> member "protected" |> to_string in
-    let signature = json |> member "signature" |> to_string in
-    let header =
-      match json |> member "header" with
-      | `Assoc pairs -> List.filter_map (fun (k, v) ->
-          try Some (k, to_string v) with Yojson.Safe.Util.Type_error _ -> None) pairs
-      | _ -> []
-    in
-    Some { protected_header; signature; header }
-  with Yojson.Safe.Util.Type_error _ -> None
+  match agent_card_signature_of_yojson json with
+  | Ok s -> Some s
+  | Error _ -> None
 
 (** Convert agent_card to JSON (A2A v0.3 spec format) *)
 let to_json (card : agent_card) : Yojson.Safe.t =

@@ -370,13 +370,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   return html`
     <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
-      <section class="monitor-surface-card monitor-surface-card-strong bg-[linear-gradient(180deg,rgba(17,26,46,0.94),rgba(11,18,32,0.92))] p-5">
+      <section class="monitor-surface-card monitor-surface-card-strong p-5">
         <div class="flex flex-col gap-5">
           <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div class="flex min-w-0 flex-col gap-3">
               <div class="flex flex-wrap items-center gap-3">
                 <h2 class="m-0 text-[20px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">${pageTitle}</h2>
-                <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.2)] bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[#cfeaff]">${resultCountLabel}</span>
+                <span class="inline-flex items-center rounded-full border border-[var(--border-slate-22)] bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)]">${resultCountLabel}</span>
               </div>
               <p class="m-0 max-w-[720px] text-[13px] leading-[1.6] text-[var(--text-body)]">${pageDescription}</p>
             </div>
@@ -384,7 +384,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <label class="flex w-full max-w-[320px] flex-col gap-2 text-[11px] font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">
               <span>에이전트 이름으로 찾기</span>
               <${TextInput}
-                class="rounded-2xl bg-[rgba(8,16,32,0.6)] px-4 py-3 text-[14px] text-[var(--text-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+                class="rounded-2xl bg-[var(--white-3)] px-4 py-3 text-[14px] text-[var(--text-body)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-soft)]"
                 name="agent_search"
                 ariaLabel="에이전트 이름 검색"
                 autoComplete="off"
@@ -453,7 +453,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <button type="button"
-              class="monitor-surface-card monitor-surface-card-medium group flex min-h-[308px] w-full flex-col gap-4 rounded-[22px] bg-[linear-gradient(180deg,rgba(17,26,46,0.92),rgba(11,18,32,0.92))] p-5 text-left transition-all duration-200 cursor-pointer hover:border-[rgba(71,184,255,0.3)] hover:bg-[linear-gradient(180deg,rgba(20,30,52,0.96),rgba(12,19,35,0.94))] hover:-translate-y-0.5"
+              class="monitor-surface-card monitor-surface-card-medium group flex min-h-[308px] w-full flex-col gap-4 rounded-[22px] p-5 text-left transition-all duration-200 cursor-pointer hover:border-[var(--border-slate-22)] hover:bg-[var(--bg-1)] hover:-translate-y-0.5"
               key=${agent.name}
               aria-label=${`${agent.name} 상세 보기`}
               onClick=${() => openAgentDetail(agent.name)}

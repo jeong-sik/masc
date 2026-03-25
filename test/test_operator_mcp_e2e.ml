@@ -254,7 +254,7 @@ let wait_for_health ~port ~timeout_s =
     else
       let res = run_curl_get ~port ~path:"/health" () in
       match res.status with
-      | Some 200 -> true
+      | Some 200 when contains_substr "\"state_ready\":true" res.body -> true
       | _ ->
           Unix.sleepf 0.1;
           loop ()
@@ -822,10 +822,20 @@ let test_mcp_requires_auth_when_bound_non_loopback () =
   @@ fun ~port ~supervisor_token:_ ~planner_token:_ ~implementer_a_token:_
             ~implementer_b_token:_ ~supervisor_nickname:_ ~planner_nickname:_
             ~implementer_a_nickname:_ ~implementer_b_nickname:_ ->
-  let result =
-    run_curl_json ~port ~path:"/mcp" ~session_id:"strict-remote"
-      ~payload:(tools_list_payload ~id:1) ()
+  let rec call_until_ready retries_left =
+    let result =
+      run_curl_json ~port ~path:"/mcp" ~session_id:"strict-remote"
+        ~payload:(tools_list_payload ~id:1) ()
+    in
+    match (result.status, retries_left) with
+    | Some 503, retries
+      when retries > 0
+           && contains_substr "Server is starting up, not ready yet" result.body ->
+        Unix.sleepf 0.5;
+        call_until_ready (retries - 1)
+    | _ -> result
   in
+  let result = call_until_ready 40 in
   Alcotest.(check (option int)) "returns unauthorized" (Some 401) result.status;
   check bool "strict auth message" true
     (contains_substr "requires room auth enabled with require_token=true"

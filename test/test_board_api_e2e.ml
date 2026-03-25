@@ -137,7 +137,7 @@ let wait_for_health ~port ~timeout_s =
     else
       let res = run_curl ~port ~path:"/health" () in
       match res.status with
-      | Some 200 -> true
+      | Some 200 when contains_substr "\"state_ready\":true" res.body -> true
       | _ ->
           Unix.sleepf 0.1;
           loop ()
@@ -231,7 +231,20 @@ let with_server f =
 
 let test_board_missing_post_returns_404 () =
   with_server @@ fun ~port ->
-  let res = run_curl ~port ~path:"/api/v1/board/post-not-exists-12345" () in
+  let rec get_until_ready retries_left =
+    let res = run_curl ~port ~path:"/api/v1/board/post-not-exists-12345" () in
+    match (res.status, retries_left) with
+    | Some 503, retries
+      when retries > 0
+           && contains_substr "Server is starting up, not ready yet" res.body ->
+        Unix.sleepf 0.5;
+        get_until_ready (retries - 1)
+    | None, retries when retries > 0 && res.curl_exit = 28 ->
+        Unix.sleepf 0.5;
+        get_until_ready (retries - 1)
+    | _ -> res
+  in
+  let res = get_until_ready 40 in
   (match res.status with
    | Some code -> check int "missing post returns 404" 404 code
    | None ->

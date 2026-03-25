@@ -295,42 +295,36 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
              Worker_tool_input.extract_float "timeout_s" input
              |> Option.value ~default:30.0
              |> Float.min 120.0
-           in
+          in
            try
              let started = Time_compat.now () in
+             let wrapped_command =
+               match workdir with
+               | Some dir when String.trim dir <> "" ->
+                   Printf.sprintf "cd %s && %s" (Filename.quote dir) command
+               | _ -> command
+             in
+             let status, output =
+               Process_eio.run_argv_with_status ~timeout_sec:timeout
+                 [ "sh"; "-c"; wrapped_command ^ " 2>&1" ]
+             in
              let result =
-               Eio.Fiber.first
-               (fun () ->
-                  Eio.Switch.run @@ fun sw ->
-                  let buf = Buffer.create 1024 in
-                  let wrapped_command =
-                    match workdir with
-                    | Some dir when String.trim dir <> "" ->
-                        Printf.sprintf "cd %s && %s" (Filename.quote dir) command
-                    | _ -> command
-                  in
-                  let proc = Eio.Process.spawn ~sw proc_mgr
-                    ~stdout:(Eio.Flow.buffer_sink buf)
-                    ~stderr:(Eio.Flow.buffer_sink buf)
-                    ["sh"; "-c"; wrapped_command] in
-                  let status = Eio.Process.await proc in
-                  let output = Buffer.contents buf in
-                  (match status with
-                   | `Exited 0 ->
-                     Ok { Agent_sdk.Types.content = output }
-                   | `Exited code ->
-                     Error { Agent_sdk.Types.message =
-                       Printf.sprintf "Exit code %d:\n%s" code output;
-                       recoverable = false }
-                   | `Signaled sig_num ->
-                     Error { Agent_sdk.Types.message =
-                       Printf.sprintf "Killed by signal %d:\n%s" sig_num output;
-                       recoverable = false }))
-               (fun () ->
-                  Eio.Time.sleep clock timeout;
-                  Error { Agent_sdk.Types.message =
-                    Printf.sprintf "Timeout after %.0fs: %s" timeout command;
-                    recoverable = true })
+               match status with
+               | Unix.WEXITED 0 ->
+                   Ok { Agent_sdk.Types.content = output }
+               | Unix.WEXITED code ->
+                   Error { Agent_sdk.Types.message =
+                     Printf.sprintf "Exit code %d:\n%s" code output;
+                     recoverable = false }
+               | Unix.WSIGNALED sig_num ->
+                   Error { Agent_sdk.Types.message =
+                     Printf.sprintf "Timeout after %.0fs: %s\n%s" timeout command
+                       output;
+                     recoverable = sig_num = Sys.sigterm }
+               | Unix.WSTOPPED sig_num ->
+                   Error { Agent_sdk.Types.message =
+                     Printf.sprintf "Stopped by signal %d:\n%s" sig_num output;
+                     recoverable = false }
              in
              let duration_ms =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)

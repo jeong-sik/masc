@@ -93,5 +93,11 @@ val fiber_health_of : base_path:string -> string -> fiber_health
 (** Recent crash entries (up to 5) for a keeper. *)
 val crash_log_of : base_path:string -> string -> (float * string) list
 
+(** Restore supervisor state on a freshly registered entry (used by restart). *)
+val restore_supervisor_state :
+  base_path:string -> string ->
+  restart_count:int -> last_restart_ts:float ->
+  crash_log:(float * string) list -> unit
+
 (** Clear the registry. For testing only. *)
 val clear : unit -> unit

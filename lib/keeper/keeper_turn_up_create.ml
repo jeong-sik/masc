@@ -75,7 +75,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         p.presence_keepalive_sec_opt
     in
     let max_active_keepers = Env_config.KeeperBootstrap.max_active_keepers in
-    let active_keepers = running_keepers () in
+    let active_keepers = Keeper_registry.count_running () in
     if presence_keepalive && max_active_keepers > 0 && active_keepers >= max_active_keepers then
       (false,
         Printf.sprintf

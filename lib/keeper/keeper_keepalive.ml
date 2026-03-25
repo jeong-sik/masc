@@ -1,30 +1,38 @@
-(** Keeper_keepalive — keepalive registry and resident heartbeat fiber.
+(** Keeper_keepalive — resident heartbeat fiber and board-reactive wakeup.
 
-    When [MASC_AGENT_TRANSPORT=grpc], a secondary fiber sends heartbeat
-    pings over a gRPC bidirectional stream in parallel with the
-    existing file-based heartbeat loop. *)
+    Per-keeper lifecycle (start, stop, wakeup) is managed through
+    [Keeper_registry] (SSOT).  This module provides the heartbeat loop
+    body, board-reactive wakeup filtering, and optional gRPC heartbeat
+    fiber. *)
 
 open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
-type keepalive_entry = {
-  stop : bool ref;
-  wakeup : bool ref;
-    (** When set, [interruptible_sleep] exits early so the keeper
-        processes a pending mention or board event immediately. *)
-  started_at : float;
-  grpc_close : (unit -> unit) option;
-    (** Close the gRPC heartbeat stream when stopping. *)
-}
+(* ── Board / agent tracking (independent of keeper lifecycle) ── *)
 
-(** Per-keeper last known agent count for detecting changes. *)
+(** Per-keeper last known agent count for detecting roster changes. *)
 let last_agent_counts : (string, int) Hashtbl.t = Hashtbl.create 8
-let keepalive_registry_mu = Eio.Mutex.create ()
+let board_reactive_wakeups : (string, float) Hashtbl.t = Hashtbl.create 32
+let board_reactive_debounce_sec = 60.0
+let board_reactive_threshold = 4
+
+(** Dedicated mutex for [board_reactive_wakeups] and [last_agent_counts].
+    These are independent of keeper lifecycle tracked in [Keeper_registry]. *)
+let board_mu = Eio.Mutex.create ()
+
+let with_board_mu_ro f =
+  try Eio.Mutex.use_ro board_mu f
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
+let with_board_mu_rw f =
+  try Eio.Mutex.use_rw ~protect:true board_mu f
+  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
 
 (* OAS Event_bus ref — set via bootstrap *)
 let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
 let set_bus bus = bus_ref := Some bus
+let get_bus () = !bus_ref
 
 (** Optional gRPC client — set at server bootstrap when
     [MASC_AGENT_TRANSPORT=grpc]. When set, heartbeat also sends
@@ -32,17 +40,7 @@ let set_bus bus = bus_ref := Some bus
 let grpc_client_ref : Masc_grpc_client.t option ref = ref None
 let set_grpc_client c = grpc_client_ref := Some c
 
-let keepalives : (string, keepalive_entry) Hashtbl.t = Hashtbl.create 8
-let board_reactive_wakeups : (string, float) Hashtbl.t = Hashtbl.create 32
-let board_reactive_debounce_sec = 60.0
-let board_reactive_threshold = 4
-
-let with_keepalive_registry_ro f = Eio.Mutex.use_ro keepalive_registry_mu f
-
-let with_keepalive_registry_rw f =
-  Eio.Mutex.use_rw ~protect:true keepalive_registry_mu f
-
-let remove_board_reactive_wakeups_unlocked keeper_name =
+let remove_board_reactive_wakeups keeper_name =
   let prefix = keeper_name ^ ":" in
   let to_remove =
     Hashtbl.fold
@@ -52,37 +50,11 @@ let remove_board_reactive_wakeups_unlocked keeper_name =
   in
   List.iter (Hashtbl.remove board_reactive_wakeups) to_remove
 
-let running_keepers () =
-  with_keepalive_registry_ro (fun () -> Hashtbl.length keepalives)
-
-let keeper_keepalive_running name =
-  with_keepalive_registry_ro (fun () -> Hashtbl.mem keepalives name)
-
-let keeper_keepalive_started_at name =
-  with_keepalive_registry_ro (fun () ->
-      Hashtbl.find_opt keepalives name |> Option.map (fun entry -> entry.started_at))
-
-let keeper_spawn_slots_available () =
-  let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
-  max_keepers <= 0
-  || with_keepalive_registry_ro (fun () -> Hashtbl.length keepalives < max_keepers)
-
-let register_keepalive name entry =
-  with_keepalive_registry_rw (fun () -> Hashtbl.replace keepalives name entry)
-
-let unregister_keepalive name =
-  with_keepalive_registry_rw (fun () ->
-      Hashtbl.remove keepalives name;
+(** Clean up board/agent tracking state for a keeper. *)
+let cleanup_keeper_tracking name =
+  with_board_mu_rw (fun () ->
       Hashtbl.remove last_agent_counts name;
-      remove_board_reactive_wakeups_unlocked name)
-
-let sync_registry_running ~base_path (meta : keeper_meta) =
-  match Keeper_registry.get ~base_path meta.name with
-  | Some _ ->
-      Keeper_registry.update_meta ~base_path meta.name meta;
-      Keeper_registry.set_state ~base_path meta.name Keeper_registry.Running
-  | None ->
-      ignore (Keeper_registry.register ~base_path meta.name meta)
+      remove_board_reactive_wakeups name)
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~2 s instead of waiting for the full 30-300 s interval. *)
@@ -103,21 +75,20 @@ let interruptible_sleep ~clock ~stop ~wakeup duration =
     its sleep and run the next heartbeat cycle. Used by broadcast notification
     when a @mention targets a running keeper. *)
 let wakeup_keeper name =
-  with_keepalive_registry_ro (fun () ->
-      match Hashtbl.find_opt keepalives name with
-      | Some entry -> entry.wakeup := true
-      | None -> ())
+  Keeper_registry.all ()
+  |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+         if String.equal entry.name name && entry.state = Keeper_registry.Running
+         then Keeper_registry.wakeup ~base_path:entry.base_path name)
 
 (** Wake up all running keepers — used when a broadcast mentions @@all
     or when a system-wide event requires immediate attention. *)
 let wakeup_all_keepers () =
-  with_keepalive_registry_ro (fun () ->
-      Hashtbl.iter (fun _name entry -> entry.wakeup := true) keepalives)
+  Keeper_registry.wakeup_all ()
 
 let board_reactive_wakeup_allowed ~keeper_name ~post_id =
   let key = keeper_name ^ ":" ^ post_id in
   let now_ts = Time_compat.now () in
-  with_keepalive_registry_rw (fun () ->
+  with_board_mu_rw (fun () ->
       match Hashtbl.find_opt board_reactive_wakeups key with
       | Some last_ts when now_ts -. last_ts < board_reactive_debounce_sec -> false
       | _ ->
@@ -128,8 +99,9 @@ let wakeup_relevant_keeper_for_board_signal
     ~(config : Room.config)
     (signal : Board_dispatch.keeper_board_signal) =
   let running_names =
-    with_keepalive_registry_ro (fun () ->
-        Hashtbl.fold (fun name _ acc -> name :: acc) keepalives [])
+    Keeper_registry.all ()
+    |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
+           if e.state = Keeper_registry.Running then Some e.name else None)
   in
   let candidates =
     running_names
@@ -419,14 +391,14 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               in
               let agent_count_changed =
                 let last_count =
-                  with_keepalive_registry_ro (fun () ->
+                  with_board_mu_ro (fun () ->
                       Hashtbl.find_opt last_agent_counts meta_current.name
                       |> Option.value ~default:0)
                 in
                 let changed =
                   last_count > 0 && current_agent_count <> last_count
                 in
-                with_keepalive_registry_rw (fun () ->
+                with_board_mu_rw (fun () ->
                     Hashtbl.replace last_agent_counts
                       meta_current.name current_agent_count);
                 changed
@@ -584,17 +556,13 @@ let run_grpc_heartbeat_fiber ~sw ~stop
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     (m : keeper_meta) : unit =
   if not m.presence_keepalive then ()
-  else
-    let can_start =
-      let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
-      with_keepalive_registry_ro (fun () ->
-          (not (Hashtbl.mem keepalives m.name))
-          && (max_keepers <= 0 || Hashtbl.length keepalives < max_keepers))
-    in
-    if not can_start then ()
+  else if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name then ()
+  else if not (Keeper_registry.spawn_slots_available ()) then ()
   else (
-    let stop = ref false in
-    let wakeup = ref false in
+    (* Register in Keeper_registry first — single source of truth. *)
+    let reg = Keeper_registry.register ~base_path:ctx.config.base_path m.name m in
+    let stop = reg.fiber_stop in
+    let wakeup = reg.fiber_wakeup in
     (* Start optional gRPC heartbeat fiber *)
     let grpc_close =
       match Masc_grpc_transport.from_env (), !grpc_client_ref with
@@ -615,9 +583,11 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
         None
       | _ -> None
     in
-    with_keepalive_registry_rw (fun () ->
-        Hashtbl.replace keepalives m.name
-          { stop; wakeup; started_at = Time_compat.now (); grpc_close });
+    (match grpc_close with
+     | Some _ ->
+         Keeper_registry.set_grpc_close ~base_path:ctx.config.base_path m.name
+           grpc_close
+     | None -> ());
     let live_meta =
       try
         (if not (Room_utils.is_initialized ctx.config) then
@@ -634,30 +604,22 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
           (Printexc.to_string exn);
         m
     in
-    sync_registry_running ~base_path:ctx.config.base_path live_meta;
+    Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
         run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup))
 
 let stop_keepalive name =
-  match
-    with_keepalive_registry_rw (fun () ->
-        match Hashtbl.find_opt keepalives name with
-        | None -> None
-        | Some entry ->
-            Hashtbl.remove keepalives name;
-            Hashtbl.remove last_agent_counts name;
-            remove_board_reactive_wakeups_unlocked name;
-            Some entry)
-  with
-  | None -> ()
-  | Some entry ->
-      Keeper_registry.all ()
-      |> List.iter (fun (registry_entry : Keeper_registry.registry_entry) ->
-             if String.equal registry_entry.name name then
-               Keeper_registry.set_state ~base_path:registry_entry.base_path name
-                 Keeper_registry.Stopped);
-      entry.stop := true;
-      (match entry.grpc_close with
-       (* cleanup: best-effort gRPC close, ignore transport errors *)
-       | Some close_fn -> (try close_fn () with exn -> ignore exn)
-       | None -> ())
+  let entries =
+    Keeper_registry.all ()
+    |> List.filter (fun (e : Keeper_registry.registry_entry) ->
+           String.equal e.name name)
+  in
+  List.iter (fun (entry : Keeper_registry.registry_entry) ->
+      entry.fiber_stop := true;
+      (match !(entry.grpc_close) with
+       | Some close_fn -> (try close_fn () with _ -> ())
+       | None -> ());
+      Keeper_registry.set_state ~base_path:entry.base_path name
+        Keeper_registry.Stopped
+  ) entries;
+  cleanup_keeper_tracking name

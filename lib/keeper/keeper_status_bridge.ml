@@ -137,15 +137,12 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
 let runtime_registry_entry (config : Room_utils.config) name =
   Keeper_registry.get ~base_path:config.base_path name
 
-let runtime_keepalive_running config (meta : keeper_meta) =
-  match runtime_registry_entry config meta.name with
-  | Some entry -> entry.state = Keeper_registry.Running
-  | None -> Keeper_keepalive.keeper_keepalive_running meta.name
+let runtime_keepalive_running (config : Room_utils.config) (meta : keeper_meta) =
+  Keeper_registry.is_running ~base_path:config.base_path meta.name
 
-let runtime_keepalive_started_at config (meta : keeper_meta) =
-  match runtime_registry_entry config meta.name with
-  | Some entry -> Some entry.started_at
-  | None -> Keeper_keepalive.keeper_keepalive_started_at meta.name
+let runtime_keepalive_started_at (config : Room_utils.config)
+    (meta : keeper_meta) =
+  Keeper_registry.started_at ~base_path:config.base_path meta.name
 
 let runtime_surface_json config (meta : keeper_meta) =
   let resident_spec =
@@ -160,7 +157,9 @@ let runtime_surface_json config (meta : keeper_meta) =
   in
   let keepalive_running = runtime_keepalive_running config meta in
   let fiber_health =
-    match Keeper_resident_supervisor.fiber_health_of meta.name with
+    match
+      Keeper_registry.fiber_health_of ~base_path:config.base_path meta.name
+    with
     | Fiber_unknown when keepalive_running -> Fiber_alive
     | health -> health
   in

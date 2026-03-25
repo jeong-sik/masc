@@ -192,5 +192,15 @@ let crash_log_of ~base_path name =
   | Some entry -> entry.crash_log
   | None -> []
 
+let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts
+    ~crash_log =
+  with_lock_rw (fun () ->
+    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    | Some entry ->
+        entry.restart_count <- restart_count;
+        entry.last_restart_ts <- last_restart_ts;
+        entry.crash_log <- crash_log
+    | None -> ())
+
 let clear () =
   with_lock_rw (fun () -> Hashtbl.clear registry)

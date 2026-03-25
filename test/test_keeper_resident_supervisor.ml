@@ -1,8 +1,10 @@
 (** Test suite for Keeper_resident_supervisor — fiber liveness tracking and recovery.
-    Pure tests for backoff/helpers + Eio tests for Promise-based tracking. *)
+    Pure tests for backoff/helpers. Fiber health queries now delegate to
+    Keeper_registry (tested in test_keeper_registry.ml). *)
 
 open Alcotest
 module Sup = Masc_mcp.Keeper_resident_supervisor
+module Reg = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
 
 (* ── Pure tests: backoff_delay ──────────────────────────── *)
@@ -46,24 +48,22 @@ let test_keep_last_n_over_limit () =
   (* oldest item "d" should be dropped *)
   check bool "old item dropped" false (List.mem "d" result)
 
-(* ── Eio tests: fiber_health_of ─────────────────────────── *)
+(* ── Registry-based tests (replacing removed supervisor Hashtbl queries) *)
 
 let test_fiber_health_unknown () =
-  (* Querying a name not in registry *)
-  let health = Sup.fiber_health_of "nonexistent-keeper" in
+  Reg.clear ();
+  let health = Reg.fiber_health_of ~base_path:"/tmp" "nonexistent-keeper" in
   check bool "unknown for unregistered"
     true (health = KT.Fiber_unknown)
 
-let test_supervised_count_initially_zero () =
-  check int "no supervised keepers initially" 0 (Sup.supervised_count ())
-
-let test_supervised_state_of_none () =
-  check bool "no state for unregistered"
-    true (Sup.supervised_state_of "nonexistent" = None)
+let test_registry_count_initially_zero () =
+  Reg.clear ();
+  check int "no keepers initially" 0 (Reg.count_running ())
 
 let test_crash_log_empty_for_unknown () =
+  Reg.clear ();
   check int "empty crash log" 0
-    (List.length (Sup.crash_log_of "nonexistent"))
+    (List.length (Reg.crash_log_of ~base_path:"/tmp" "nonexistent"))
 
 (* ── Test runner ────────────────────────────────────────── *)
 
@@ -81,8 +81,7 @@ let () =
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;
-      test_case "supervised count zero" `Quick test_supervised_count_initially_zero;
-      test_case "state_of returns None" `Quick test_supervised_state_of_none;
+      test_case "registry count zero" `Quick test_registry_count_initially_zero;
       test_case "crash_log empty" `Quick test_crash_log_empty_for_unknown;
     ];
   ]

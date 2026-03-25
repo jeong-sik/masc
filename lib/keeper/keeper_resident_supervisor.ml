@@ -1,48 +1,17 @@
 (** Keeper_resident_supervisor — resident keepalive fiber supervision.
 
     Supervises the MASC-owned background keepalive fibers that maintain
-    keeper presence and heartbeat snapshots. This is not the OAS [Agent.run]
-    lifecycle; it sits outside the turn loop and only manages resident
-    liveness/restart policy for keepalive work.
+    keeper presence and heartbeat snapshots. Uses [Keeper_registry] as
+    the single source of truth for keeper state. The Promise-based
+    liveness tracking ([done_p]/[done_r]) lives in registry entries.
+
+    This is not the OAS [Agent.run] lifecycle; it sits outside the turn
+    loop and only manages resident liveness/restart policy.
 
     @since 2.102.0 *)
 
 open Keeper_types
 open Keeper_execution
-
-(* ── Internal Types ──────────────────────────────────────── *)
-
-type supervised_entry = {
-  name : string;
-  stop : bool ref;
-  wakeup : bool ref;
-  started_at : float; [@warning "-69"]
-  done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
-  done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
-  restart_count : int ref;
-  last_restart_ts : float ref;
-  crash_log : (float * string) list ref;
-}
-
-(* ── Public query type ───────────────────────────────────── *)
-
-type supervised_state = {
-  name : string;
-  fiber_health : fiber_health;
-  restart_count : int;
-  last_restart_ts : float;
-  crash_log : (float * string) list;
-}
-
-(* ── Registries ──────────────────────────────────────────── *)
-
-let supervised_registry : (string, supervised_entry) Hashtbl.t =
-  Hashtbl.create 8
-
-let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
-
-let init ~bus =
-  bus_ref := Some bus
 
 (* ── Pure helpers ────────────────────────────────────────── *)
 
@@ -59,94 +28,51 @@ let keep_last_n n item lst =
 (* ── Event publishing ────────────────────────────────────── *)
 
 let publish_lifecycle event_name keeper_name detail =
-  match !bus_ref with
+  match Keeper_keepalive.get_bus () with
   | Some bus ->
       Oas_events.publish_keeper_resident_lifecycle bus ~event:event_name
         ~keeper_name ~detail
   | None -> ()
 
-(* ── Fiber health queries ────────────────────────────────── *)
-
-let fiber_health_of name =
-  match Hashtbl.find_opt supervised_registry name with
-  | None -> Fiber_unknown
-  | Some entry ->
-      match Eio.Promise.peek entry.done_p with
-      | None -> Fiber_alive
-      | Some `Stopped -> Fiber_unknown  (* cleaned up by sweep *)
-      | Some (`Crashed _) ->
-          if !(entry.restart_count) >= Env_config.KeeperResidentSupervisor.max_restarts
-          then Fiber_dead
-          else Fiber_zombie
-
-let supervised_state_of name =
-  match Hashtbl.find_opt supervised_registry name with
-  | None -> None
-  | Some entry ->
-      Some {
-        name = entry.name;
-        fiber_health = fiber_health_of name;
-        restart_count = !(entry.restart_count);
-        last_restart_ts = !(entry.last_restart_ts);
-        crash_log = !(entry.crash_log);
-      }
-
-let crash_log_of name =
-  match Hashtbl.find_opt supervised_registry name with
-  | None -> []
-  | Some entry -> !(entry.crash_log)
-
-let supervised_count () = Hashtbl.length supervised_registry
-
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
-let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta) entry =
+let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
+    (reg : Keeper_registry.registry_entry) =
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     Fun.protect
       (fun () ->
         Keeper_keepalive.run_heartbeat_loop ~proactive_warmup_sec
-          ctx meta entry.stop ~wakeup:entry.wakeup;
+          ctx meta reg.fiber_stop ~wakeup:reg.fiber_wakeup;
         Keeper_registry.set_state ~base_path:ctx.config.base_path meta.name
           Keeper_registry.Stopped;
-        Eio.Promise.resolve entry.done_r `Stopped;
+        Eio.Promise.resolve reg.done_r `Stopped;
         publish_lifecycle "stopped" meta.name "normal exit")
       ~finally:(fun () ->
-        Keeper_keepalive.unregister_keepalive meta.name;
-        match Eio.Promise.peek entry.done_p with
+        Keeper_keepalive.cleanup_keeper_tracking meta.name;
+        match Eio.Promise.peek reg.done_p with
         | Some _ -> ()  (* Already resolved in the normal path *)
         | None ->
             let msg = "fiber terminated without resolution" in
-            entry.crash_log :=
-              keep_last_n 5 (Time_compat.now (), msg) !(entry.crash_log);
-            Keeper_registry.record_error ~base_path:ctx.config.base_path meta.name msg;
+            Keeper_registry.record_crash ~base_path:ctx.config.base_path
+              meta.name (Time_compat.now ()) msg;
+            Keeper_registry.record_error ~base_path:ctx.config.base_path
+              meta.name msg;
             Keeper_registry.set_state ~base_path:ctx.config.base_path meta.name
               Keeper_registry.Stopped;
-            Eio.Promise.resolve entry.done_r (`Crashed msg);
+            Eio.Promise.resolve reg.done_r (`Crashed msg);
             publish_lifecycle "crashed" meta.name msg))
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (meta : keeper_meta) =
   if not meta.presence_keepalive then ()
-  else if Hashtbl.mem supervised_registry meta.name then ()
+  else if Keeper_registry.is_running ~base_path:ctx.config.base_path meta.name
+  then ()
   else if not (Keeper_registry.spawn_slots_available ()) then ()
   else begin
-    let stop = ref false in
-    let now = Time_compat.now () in
-    let done_p, done_r = Eio.Promise.create () in
-    let wakeup_ref = ref false in
-    let entry = {
-      name = meta.name;
-      stop; wakeup = wakeup_ref; started_at = now;
-      done_p; done_r;
-      restart_count = ref 0;
-      last_restart_ts = ref 0.0;
-      crash_log = ref [];
-    } in
-    Hashtbl.replace supervised_registry meta.name entry;
-    (* Register in the shared keepalive registry *)
-    let wakeup = ref false in
-    Keeper_keepalive.register_keepalive meta.name
-      { Keeper_keepalive.stop; wakeup; started_at = now; grpc_close = None };
+    (* Register in Keeper_registry — single source of truth. *)
+    let reg =
+      Keeper_registry.register ~base_path:ctx.config.base_path meta.name meta
+    in
     (* Room initialization *)
     (try
        if not (Room_utils.is_initialized ctx.config) then
@@ -164,18 +90,10 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
           (Printexc.to_string exn);
         meta
     in
-    (match Keeper_registry.get ~base_path:ctx.config.base_path live_meta.name with
-     | Some _ ->
-         Keeper_registry.update_meta ~base_path:ctx.config.base_path live_meta.name
-           live_meta;
-         Keeper_registry.set_state ~base_path:ctx.config.base_path live_meta.name
-           Keeper_registry.Running
-     | None ->
-         ignore
-           (Keeper_registry.register ~base_path:ctx.config.base_path live_meta.name
-              live_meta));
+    Keeper_registry.update_meta ~base_path:ctx.config.base_path meta.name
+      live_meta;
     publish_lifecycle "started" meta.name "supervised";
-    launch_supervised_fiber ~proactive_warmup_sec ctx live_meta entry
+    launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg
   end
 
 (* ── Sweep and recover ───────────────────────────────────── *)
@@ -183,56 +101,54 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Env_config.KeeperResidentSupervisor.max_restarts in
+  let base_path = ctx.config.base_path in
+  let entries = Keeper_registry.all ~base_path () in
   let to_restart = ref [] in
-  let to_remove = ref [] in
-  Hashtbl.iter (fun name entry ->
+  let to_unregister = ref [] in
+  List.iter (fun (entry : Keeper_registry.registry_entry) ->
     match Eio.Promise.peek entry.done_p with
     | None -> ()  (* Alive — skip *)
     | Some `Stopped ->
-        to_remove := name :: !to_remove
+        to_unregister := entry :: !to_unregister
     | Some (`Crashed msg) ->
-        if !(entry.restart_count) >= max_restarts then begin
-          to_remove := name :: !to_remove;
-          publish_lifecycle "dead" name
+        if entry.restart_count >= max_restarts then begin
+          to_unregister := entry :: !to_unregister;
+          publish_lifecycle "dead" entry.name
             (Printf.sprintf "restart budget exhausted (%d), last: %s"
                max_restarts msg);
           Log.Keeper.error "%s: restart budget exhausted (%d). Dead."
-            name max_restarts
+            entry.name max_restarts
         end else begin
-          let delay = backoff_delay !(entry.restart_count) in
-          if now -. !(entry.last_restart_ts) >= delay then
-            to_restart := (name, entry, msg) :: !to_restart
+          let delay = backoff_delay entry.restart_count in
+          if now -. entry.last_restart_ts >= delay then
+            to_restart := (entry, msg) :: !to_restart
         end
-  ) supervised_registry;
+  ) entries;
   (* Clean up stopped/dead entries *)
-  List.iter (fun name -> Hashtbl.remove supervised_registry name) !to_remove;
+  List.iter (fun (entry : Keeper_registry.registry_entry) ->
+    Keeper_registry.unregister ~base_path entry.name
+  ) !to_unregister;
   (* Restart zombies *)
-  List.iter (fun (name, (old_entry : supervised_entry), crash_msg) ->
-    match read_meta ctx.config name with
+  List.iter (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->
+    match read_meta ctx.config old_entry.name with
     | Ok (Some meta) ->
-        let attempt = !(old_entry.restart_count) + 1 in
-        let done_p, done_r = Eio.Promise.create () in
-        let new_wakeup = ref false in
-        let new_entry = {
-          name;
-          stop = ref false;
-          wakeup = new_wakeup;
-          started_at = now;
-          done_p; done_r;
-          restart_count = ref attempt;
-          last_restart_ts = ref now;
-          crash_log = ref (keep_last_n 5 (now, crash_msg) !(old_entry.crash_log));
-        } in
-        Hashtbl.replace supervised_registry name new_entry;
-        Keeper_keepalive.register_keepalive name
-          { Keeper_keepalive.stop = new_entry.stop; wakeup = new_wakeup;
-            started_at = now; grpc_close = None };
-        launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta new_entry;
-        publish_lifecycle "restarted" name
+        let attempt = old_entry.restart_count + 1 in
+        let old_crash_log = old_entry.crash_log in
+        (* Re-register — fresh refs for the new fiber *)
+        let reg =
+          Keeper_registry.register ~base_path old_entry.name meta
+        in
+        (* Carry over supervisor history from previous entry *)
+        Keeper_registry.restore_supervisor_state ~base_path old_entry.name
+          ~restart_count:attempt ~last_restart_ts:now
+          ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
+        launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg;
+        publish_lifecycle "restarted" old_entry.name
           (Printf.sprintf "attempt %d" attempt);
         Log.Keeper.info "%s: restarted (attempt %d, backoff %.0fs)"
-          name attempt (backoff_delay (attempt - 1))
+          old_entry.name attempt (backoff_delay (attempt - 1))
     | _ ->
-        Log.Keeper.error "%s: cannot read meta for restart, removing" name;
-        Hashtbl.remove supervised_registry name
+        Log.Keeper.error "%s: cannot read meta for restart, removing"
+          old_entry.name;
+        Keeper_registry.unregister ~base_path old_entry.name
   ) !to_restart

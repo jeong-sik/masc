@@ -44,6 +44,21 @@ export function asStringArray(value: unknown): string[] {
     .filter(Boolean)
 }
 
+export function asStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => {
+      if (typeof item === 'string') return item.trim()
+      if (isRecord(item)) {
+        return asString(item.name, '').trim()
+          || asString(item.id, '').trim()
+          || asString(item.skill, '').trim()
+      }
+      return ''
+    })
+    .filter((item): item is string => item.length > 0)
+}
+
 export function extractArray(value: unknown, keys: string[] = []): unknown[] {
   if (Array.isArray(value)) return value
   if (!isRecord(value)) return []

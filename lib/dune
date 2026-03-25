@@ -83,7 +83,7 @@
    drift_guard
    server_utils
    server_auth
-   server_tts_proxy
+   server_voice_config
    dashboard_http_helpers
    dashboard_http_monitoring
    dashboard_http_keeper_metrics

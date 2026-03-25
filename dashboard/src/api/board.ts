@@ -1,6 +1,5 @@
 import { get, post, withRetries, defaultBoardVoter } from './core'
-import { isRecord } from '../components/common/normalize'
-import { asString, asNumber, asInt, asStringList } from './parse-utils'
+import { isRecord, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import type {
   BoardPost, BoardComment, BoardSortMode,
   GovernanceCaseBrief, GovernanceCaseBundle, GovernanceContextRef,

@@ -401,7 +401,6 @@ let public_json config =
             ("default_voice", `String config.tts.default_voice);
             ("available_voices", `List (List.map (fun voice -> `String voice) (available_voices config)));
             ("available_models", `List [ `String config.tts.default_model ]);
-            ("preview_url", `String "/api/v1/voice/tts");
             ("agent_voices", agent_voices_json config);
             ("active_endpoint", active_endpoint_json config.tts.endpoints);
           ] );

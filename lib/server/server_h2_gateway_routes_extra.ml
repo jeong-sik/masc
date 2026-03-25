@@ -1,6 +1,6 @@
 
 open Server_utils
-open Server_tts_proxy
+open Server_voice_config
 open Server_routes_http
 open Server_h2_gateway_helpers
 

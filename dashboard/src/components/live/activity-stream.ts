@@ -23,13 +23,13 @@ function FilterBar() {
   const active = liveFilters.value
 
   return html`
-    <div class="flex gap-1.5">
+    <div class="flex flex-wrap gap-1.5">
       ${FILTER_OPTIONS.map(opt => html`
         <button type="button"
           key=${opt.kind}
-          class="px-2 py-0.5 text-[11px] rounded-md border cursor-pointer transition-all duration-150 ${active.has(opt.kind)
-            ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
-            : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'}"
+          class="px-3 py-1.5 text-[11px] rounded-full border cursor-pointer transition-all duration-150 ${active.has(opt.kind)
+            ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'
+            : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[var(--border-slate-22)] hover:text-[var(--text-body)]'}"
           onClick=${() => toggleLiveFilter(opt.kind)}
         >
           ${opt.label}
@@ -44,32 +44,32 @@ export function ActivityStream() {
 
   return html`
     <div class="grid gap-3 grid-rows-[auto_auto_1fr] min-h-0">
-      <div class="activity-stream-head">
-        <h3 class="m-0 text-[0.95rem] font-semibold">활동 스트림</h3>
-        <span class="text-xs text-[rgba(255,255,255,0.4)]">${entries.length} events</span>
+      <div class="activity-stream-head flex items-center justify-between gap-3 border-b border-[var(--border-slate-12)] pb-3">
+        <h3 class="m-0 text-[0.95rem] font-semibold text-[var(--text-strong)]">활동 스트림</h3>
+        <span class="text-xs text-[var(--text-muted)]">${entries.length} events</span>
       </div>
       <${FilterBar} />
-      <div class="activity-stream-list">
+      <div class="activity-stream-list grid gap-2 content-start">
         ${entries.length === 0
           ? html`<div class="py-6 text-center text-[13px]">
               ${!connected.value
                 ? html`<div class="text-[#e05050]">SSE 연결이 끊겨있습니다. 서버 상태를 확인하세요.</div>`
                 : liveFilters.value.size > 0
-                  ? html`<div class="text-[var(--white-25)]">선택한 필터에 맞는 이벤트가 없습니다. 필터를 해제해 보세요.</div>`
-                  : html`<div class="text-[var(--white-25)]">아직 수신된 이벤트가 없습니다. 에이전트가 활동하면 여기에 표시됩니다.</div>`
+                  ? html`<div class="text-[var(--text-muted)]">선택한 필터에 맞는 이벤트가 없습니다. 필터를 해제해 보세요.</div>`
+                  : html`<div class="text-[var(--text-muted)]">아직 수신된 이벤트가 없습니다. 에이전트가 활동하면 여기에 표시됩니다.</div>`
               }
             </div>`
           : entries.map((entry, i) => html`
             <div
               key=${`${entry.timestamp}-${i}`}
-              class="activity-item rounded-lg ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
+              class="activity-item rounded-2xl border border-[var(--border-slate-12)] border-l-2 bg-[var(--white-2)] px-3.5 py-3 ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
             >
-              <div class="activity-item-head">
-                <span class="activity-kind-chip rounded ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
-                <span class="text-[0.75rem] text-[var(--white-60)] font-medium">${entry.agent}</span>
-                <span class="text-[0.7rem] text-[var(--white-30)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
+              <div class="activity-item-head flex items-center gap-2">
+                <span class="activity-kind-chip rounded-md px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
+                <span class="text-[0.75rem] text-[var(--text-body)] font-medium">${entry.agent}</span>
+                <span class="text-[0.7rem] text-[var(--text-muted)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
               </div>
-              <div class="text-[13px] text-[var(--white-70)] leading-[1.4] break-words">${entry.text}</div>
+              <div class="text-[13px] text-[var(--text-body)] leading-[1.5] break-words">${entry.text}</div>
             </div>
           `)}
       </div>

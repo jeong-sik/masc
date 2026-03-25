@@ -20,7 +20,7 @@ let status config =
 
   let buf = Buffer.create 256 in
   let cluster_name =
-    match config.backend_config.Backend.cluster_name with
+    match config.backend_config.Backend_types.cluster_name with
     | "" -> state.project
     | name -> name
   in

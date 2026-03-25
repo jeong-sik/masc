@@ -145,7 +145,7 @@ let handle_lock (ctx : context) : result option =
          | Ok false ->
              Some (false, Printf.sprintf "Lock busy: %s" expanded)
          | Error e ->
-             Some (false, Printf.sprintf "Lock error: %s" (Backend.show_error e)))
+             Some (false, Printf.sprintf "Lock error: %s" (Backend_types.show_error e)))
   end
 
 (** masc_unlock — release a file lock *)
@@ -182,7 +182,7 @@ let handle_unlock (ctx : context) : result option =
          | Ok false ->
              Some (false, Printf.sprintf "Lock not held by %s: %s" agent_name expanded)
          | Error e ->
-             Some (false, Printf.sprintf "Lock release error: %s" (Backend.show_error e)))
+             Some (false, Printf.sprintf "Lock release error: %s" (Backend_types.show_error e)))
   end
 
 (** masc_set_room — set the active MASC room *)

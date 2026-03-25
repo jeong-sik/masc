@@ -1,7 +1,7 @@
 (** Test suite for Compact Protocol v4 Compression
 
     Tests compression functionality across MASC-MCP modules:
-    - Backend_eio.Compression (storage layer)
+    - Backend.Compression (storage layer)
     - Http_server_eio.Compression (HTTP layer - tested separately)
 
     Expected Results:
@@ -10,9 +10,9 @@
     - Transparent decompression via ZSTD header detection
 *)
 
-(* ===== Backend_eio Compression Tests ===== *)
+(* ===== Backend Compression Tests ===== *)
 
-module BackendCompression = Backend_eio.Compression
+module BackendCompression = Backend.Compression
 
 let test_backend_compress_skip_small () =
   let small = "tiny" in  (* <32 bytes, below min_dict_size *)
@@ -144,7 +144,7 @@ let ratio_tests = [
 
 let () =
   Alcotest.run "Compression" [
-    "Backend_eio", backend_tests;
+    "Backend", backend_tests;
     "Thresholds", threshold_tests;
     "Compression Ratios", ratio_tests;
   ]

@@ -445,9 +445,8 @@
    audit_log
    build_identity
   voice_config
-  voice_bridge_eio
-  voice_bridge_eio_core
   voice_bridge
+  voice_bridge_core
   voice_session_manager
    version
    ;; webrtc_bindings/common/datachannel removed — in ocaml-webrtc

@@ -1,156 +1,184 @@
-(** Backend Module - Storage abstraction for MASC (facade)
+(** Backend: OCaml 5.x Eio-native storage backend
 
-    FileSystemBackend was removed in favour of Backend_eio.FileSystem.
-    Dispatch is handled by room_utils_paths_backend.ml. *)
+    Direct-style async I/O using Eio.
 
-include Backend_core
+    This module provides the same interface as Backend, but uses:
+    - Eio.Path for file operations
+    - Eio.Mutex for concurrency control
+    - Direct style (no let*/>>= needed)
 
-module FileSystemBackend : BACKEND = struct
+    Migration path: Backend.FileSystemBackend -> Backend.FileSystem
+
+    Compact Protocol v4: Transparent zstd compression with Dictionary
+    - Uses trained multi-format dictionary for 32-2048 byte messages
+    - Dictionary achieves ~70% compression vs ~6% standard zstd on small data
+    - Automatically compresses data >32 bytes on save
+    - Automatically decompresses on load (ZSTD/ZSTDD header detection)
+*)
+
+(** {1 Compression} *)
+
+module Compression = Backend_compression
+
+(** {1 Types} *)
+
+(* Types are shared with Backend_pg via Backend_types
+   to avoid circular dependency. Re-exported here for API compatibility. *)
+include Backend_types
+
+(** {1 FileSystem Backend (Eio)} *)
+
+module FileSystem = struct
   type t = {
-    base_path: string;
-    pubsub: Backend_core.Pubsub_mem.t;
+    config: config;
+    fs: Eio.Fs.dir_ty Eio.Path.t;
     mutex: Eio.Mutex.t;
   }
 
-  (* Once-only flag to avoid log spam in test contexts where every call
-     after the first Effect.Unhandled triggers Poisoned. *)
-  let poisoned_warned = Atomic.make false
+  (** Create a new FileSystem backend *)
+  let create ~fs config =
+    let path = Eio.Path.(fs / config.base_path) in
+    (* Ensure base directory exists *)
+    (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 path
+     with Eio.Cancel.Cancelled _ as e -> raise e
+        | e ->
+            Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
+              (Printf.sprintf "[WARN] mkdirs base failed: %s"
+                 (Printexc.to_string e)));
+    {
+      config;
+      fs = path;
+      mutex = Eio.Mutex.create ();
+    }
 
-  let with_lock t f =
-    (* Eio.Mutex requires an Eio runtime (Cancel context).
-       When called outside Eio_main.run (e.g. unit tests without Eio),
-       Effect.Unhandled is raised. A prior failure may also leave the mutex
-       in a Poisoned state (Eio__Eio_mutex.Poisoned).
-       In both cases, run the function unprotected. *)
-    match Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> f ()) with
-    | result -> result
-    | exception Effect.Unhandled _ -> f ()
-    | exception Eio__Eio_mutex.Poisoned _ ->
-        if not (Atomic.exchange poisoned_warned true) then
-          Log.Backend.warn
-            "Eio.Mutex poisoned, running unprotected (non-Eio context)";
-        f ()
+  (** {2 Key Validation} *)
 
   let validate_key key =
     if String.length key = 0 then
-      raise (Invalid_argument "Empty key not allowed");
-    if String.contains key '\x00' then
-      raise (Invalid_argument "NUL byte not allowed in key");
-    if String.contains key '/' then
-      raise (Invalid_argument "Slash not allowed in key (use ':' as separator)");
-    if key.[0] = ':' then
-      raise (Invalid_argument "Key cannot start with ':'");
-    if key.[String.length key - 1] = ':' then
-      raise (Invalid_argument "Key cannot end with ':'");
-    if String.length key >= 2 then
-      for i = 0 to String.length key - 2 do
-        if key.[i] = ':' && key.[i + 1] = ':' then
-          raise (Invalid_argument "Consecutive colons not allowed")
-      done;
-    let segments = String.split_on_char ':' key in
-    List.iter
-      (fun seg ->
-        if seg = "." || seg = ".." then
-          raise (Invalid_argument "Path traversal detected (. or ..)");
-        if String.length seg >= 2 && String.sub seg 0 2 = ".." then
-          raise (Invalid_argument "Path traversal detected");
-        String.iter
-          (fun c ->
-            let code = Char.code c in
-            let dangerous =
-              code = 0 || code < 32 || c = '/' || c = '\\' || c = ':'
-              || c = '*' || c = '?' || c = '"' || c = '\''
-              || c = '<' || c = '>' || c = '|'
-            in
-            if dangerous then
-              raise
-                (Invalid_argument
-                   (Printf.sprintf "Invalid character (code=%d) in key" code)))
-          seg)
-      segments;
-    key
+      Error (InvalidKey "Empty key not allowed")
+    else if String.contains key '\x00' then
+      Error (InvalidKey "NUL byte not allowed")
+    else if String.contains key '/' then
+      Error (InvalidKey "Slash not allowed (use ':' as separator)")
+    else if key.[0] = ':' then
+      Error (InvalidKey "Key cannot start with ':'")
+    else if key.[String.length key - 1] = ':' then
+      Error (InvalidKey "Key cannot end with ':'")
+    else
+      (* Check segments *)
+      let segments = String.split_on_char ':' key in
+      let rec check_segments = function
+        | [] -> Ok key
+        | seg :: rest ->
+            if seg = "" then
+              Error (InvalidKey "Consecutive colons not allowed")
+            else if seg = "." || seg = ".." then
+              Error (InvalidKey "Path traversal detected")
+            else if String.length seg >= 2 && String.sub seg 0 2 = ".." then
+              Error (InvalidKey "Path traversal detected")
+            else
+              (* Blocklist: reject only dangerous characters, allow UTF-8 *)
+              let has_dangerous = String.exists (fun c ->
+                let code = Char.code c in
+                code = 0 || code < 32 ||       (* null/control chars *)
+                c = '/' || c = '\\' ||         (* path separators *)
+                c = ':' ||                     (* key separator *)
+                c = '*' || c = '?' ||          (* wildcards *)
+                c = '"' || c = '\'' ||         (* quotes *)
+                c = '<' || c = '>' || c = '|'  (* shell metacharacters *)
+              ) seg in
+              if has_dangerous then
+                Error (InvalidKey (Printf.sprintf "Invalid character in key segment '%s'" seg))
+              else
+                check_segments rest
+      in
+      check_segments segments
 
   let key_to_path t key =
-    let safe_key = validate_key key in
-    let path_part = String.map (function ':' -> '/' | c -> c) safe_key in
-    if String.length path_part > 0 && path_part.[0] = '/' then
-      raise (Invalid_argument "Internal error: path starts with /");
-    Filename.concat t.base_path path_part
-
-  let safe_key_to_path t key =
-    try Ok (key_to_path t key) with Invalid_argument msg -> Error (InvalidKey msg)
-
-  let ensure_dir path =
-    let dir = Filename.dirname path in
-    Fs_compat.mkdir_p dir
-
-  let create (cfg : config) : (t, error) result =
-    let path = cfg.base_path in
-    (try Fs_compat.mkdir_p path
-     with Unix.Unix_error (err, _, _) ->
-       Log.Misc.error "Failed to mkdir %s: %s" path (Unix.error_message err));
-    Ok
-      {
-        base_path = path;
-        pubsub = Backend_core.Pubsub_mem.create ();
-        mutex = Eio.Mutex.create ();
-      }
-
-  let close _t = ()
-
-  let get t ~key =
-    match safe_key_to_path t key with
+    match validate_key key with
     | Error e -> Error e
-    | Ok path ->
-        if Sys.file_exists path then
-          (match Safe_ops.read_file_safe path with
-           | Ok content -> Ok (Some content)
-           | Error _ -> Ok None)
-        else
-          Ok None
+    | Ok safe_key ->
+        let path_part = String.map (function ':' -> '/' | c -> c) safe_key in
+        Ok Eio.Path.(t.fs / path_part)
 
-  let set t ~key ~value =
-    with_lock t (fun () ->
-        match safe_key_to_path t key with
-        | Error e -> Error e
-        | Ok path ->
-            ensure_dir path;
-            let write_file () =
-              let tmp_path = Printf.sprintf "%s.%d.tmp" path (Unix.getpid ()) in
-              Out_channel.with_open_text tmp_path (fun oc ->
-                  Out_channel.output_string oc value);
-              Sys.rename tmp_path path
-            in
-            (try
-               (try Eio_unix.run_in_systhread write_file
-                with Stdlib.Effect.Unhandled _ -> write_file ());
-               Ok ()
-             with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | e -> Error (OperationFailed (Printexc.to_string e))))
+  (** {2 Core Operations} *)
 
-  let delete t ~key =
-    with_lock t (fun () ->
-        match safe_key_to_path t key with
-        | Error e -> Error e
-        | Ok path ->
-            if Sys.file_exists path then
-              begin
-                try
-                  Sys.remove path;
-                  Ok true
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | e -> Error (OperationFailed (Printexc.to_string e))
-              end
-            else
-              Ok false)
+  (** Get value by key (auto-decompresses ZSTD if detected) *)
+  let get t key =
+    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+      match key_to_path t key with
+      | Error e -> Error e
+      | Ok path ->
+          try
+            let content = Eio.Path.load path in
+            (* Compact Protocol v4: Auto-decompress if ZSTD header present *)
+            let decompressed = Compression.decompress_auto content in
+            Ok decompressed
+          with
+          | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+              Error (NotFound key)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+              Error (IOError (Printexc.to_string exn))
+    )
 
-  let exists t ~key =
-    match safe_key_to_path t key with
+  (** Set value (auto-compresses with ZSTD if beneficial) *)
+  let set t key value =
+    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+      match key_to_path t key with
+      | Error e -> Error e
+      | Ok path ->
+          try
+            (* Ensure parent directory exists *)
+            (match Eio.Path.split path with
+             | Some (parent, _) ->
+                 (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
+                  with Eio.Cancel.Cancelled _ as e -> raise e
+                   | e ->
+                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
+                         (Printf.sprintf "[WARN] mkdirs failed: %s"
+                            (Printexc.to_string e)))
+             | None -> ());
+            (* Compact Protocol v4: Compress before saving (if beneficial) *)
+            let compressed = Compression.compress_with_header value in
+            (* Write file *)
+            Eio.Path.save ~create:(`Or_truncate 0o644) path compressed;
+            Ok ()
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Error (IOError (Printexc.to_string exn))
+    )
+
+  (** Check if key exists *)
+  let exists t key =
+    match key_to_path t key with
     | Error _ -> false
-    | Ok path -> Sys.file_exists path
+    | Ok path ->
+        try
+          match Eio.Path.kind ~follow:true path with
+          | `Regular_file -> true
+          | _ -> false
+        with Eio.Io _ -> false
 
+  (** Delete key *)
+  let delete t key =
+    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+      match key_to_path t key with
+      | Error e -> Error e
+      | Ok path ->
+          try
+            Eio.Path.unlink path;
+            Ok ()
+          with
+          | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+              Error (NotFound key)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+              Error (IOError (Printexc.to_string exn))
+    )
+
+  (** List keys with prefix *)
   let starts_with ~prefix value =
     let prefix_len = String.length prefix in
     String.length value >= prefix_len
@@ -163,291 +191,527 @@ module FileSystemBackend : BACKEND = struct
     else
       prefix
 
-  let strip_trailing_sep s =
-    let len = String.length s in
-    if len > 0 && s.[len - 1] = Filename.dir_sep.[0] then
-      String.sub s 0 (len - 1)
-    else
-      s
-
-  let key_of_path t path =
-    let normalized = strip_trailing_sep t.base_path in
-    let base = normalized ^ Filename.dir_sep in
-    if path = normalized || path = t.base_path then
-      Some ""
-    else if starts_with ~prefix:base path then
-      let rel =
-        String.sub path (String.length base) (String.length path - String.length base)
-      in
-      Some (String.map (function '/' -> ':' | c -> c) rel)
-    else
-      None
-
-  let rec collect_keys_under t ~requested_prefix path acc =
-    if Sys.is_directory path then
-      Sys.readdir path
-      |> Array.fold_left
-           (fun acc name ->
-             collect_keys_under t ~requested_prefix (Filename.concat path name) acc)
-           acc
-    else
-      match key_of_path t path with
-      | Some key
-        when requested_prefix = "" || starts_with ~prefix:requested_prefix key ->
-          key :: acc
-      | _ -> acc
+  let rec collect_keys_under ~requested_prefix ~logical_prefix path acc =
+    match Eio.Path.kind ~follow:true path with
+    | `Directory ->
+        Eio.Path.read_dir path
+        |> List.fold_left
+             (fun acc name ->
+               let child_prefix =
+                 if logical_prefix = "" then name else logical_prefix ^ ":" ^ name
+               in
+               collect_keys_under ~requested_prefix ~logical_prefix:child_prefix
+                 Eio.Path.(path / name) acc)
+             acc
+    | `Regular_file ->
+        if requested_prefix = ""
+           || starts_with ~prefix:requested_prefix logical_prefix
+        then
+          logical_prefix :: acc
+        else
+          acc
+    | _ -> acc
 
   let list_keys t ~prefix =
     let scan_prefix = normalize_prefix_for_scan prefix in
-    let scan_root_result =
+    let scan_root =
       if scan_prefix = "" then
-        Ok t.base_path
+        Ok (scan_prefix, t.fs)
       else
-        safe_key_to_path t scan_prefix
-    in
-    match scan_root_result with
-    | Error e -> Error e
-    | Ok scan_root ->
-        if not (Sys.file_exists scan_root) then
-          Ok []
-        else
-          Ok
-            (collect_keys_under t ~requested_prefix:prefix scan_root []
-             |> List.sort_uniq String.compare)
-
-  let get_all t ~prefix =
-    match list_keys t ~prefix with
-    | Error e -> Error e
-    | Ok keys ->
-        let pairs =
-          List.filter_map
-            (fun k ->
-              match get t ~key:k with
-              | Ok (Some v) -> Some (k, v)
-              | _ -> None)
-            keys
-        in
-        Ok pairs
-
-  let set_if_not_exists t ~key ~value =
-    with_lock t (fun () ->
-        match safe_key_to_path t key with
+        match key_to_path t scan_prefix with
+        | Ok path -> Ok (scan_prefix, path)
         | Error e -> Error e
-        | Ok path ->
-            ensure_dir path;
-            try
-              let fd =
-                Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o644
-              in
-              let _ = Unix.write_substring fd value 0 (String.length value) in
-              Unix.close fd;
-              Ok true
-            with
-            | Unix.Unix_error (Unix.EEXIST, _, _) -> Ok false
-            | e -> Error (OperationFailed (Printexc.to_string e)))
+    in
+    match scan_root with
+    | Error e -> Error e
+    | Ok (logical_prefix, dir_path) ->
+        try
+          Ok
+            (collect_keys_under ~requested_prefix:prefix ~logical_prefix dir_path []
+             |> List.sort_uniq String.compare)
+        with
+        | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+            Ok []  (* Directory doesn't exist = no keys *)
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+            Error (IOError (Printexc.to_string exn))
 
-  let compare_and_swap t ~key ~expected ~value =
-    with_lock t (fun () ->
-        match get t ~key with
-        | Ok (Some current) when current = expected ->
-            (match set t ~key ~value with
-             | Ok () -> Ok true
-             | Error e -> Error e)
-        | _ -> Ok false)
+  (** Set if not exists (atomic, auto-compresses) *)
+  let set_if_not_exists t key value =
+    (* Compact Protocol v4: Compress before saving *)
+    let compressed = Compression.compress_with_header value in
+    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+      match key_to_path t key with
+      | Error e -> Error e
+      | Ok path ->
+          try
+            (* Check if exists first *)
+            match Eio.Path.kind ~follow:true path with
+            | `Regular_file -> Error (AlreadyExists key)
+            | _ ->
+                (* Ensure parent directory *)
+                (match Eio.Path.split path with
+                 | Some (parent, _) ->
+                     (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
+                      with Eio.Cancel.Cancelled _ as e -> raise e
+                   | e ->
+                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
+                         (Printf.sprintf "[WARN] mkdirs failed: %s"
+                            (Printexc.to_string e)))
+                 | None -> ());
+                (* Write with exclusive create *)
+                Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
+                Ok true
+          with
+          | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+              (* Parent doesn't exist, create it *)
+              (match key_to_path t key with
+               | Error e -> Error e
+               | Ok path ->
+                   (match Eio.Path.split path with
+                    | Some (parent, _) ->
+                        Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
+                    | None -> ());
+                   Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
+                   Ok true)
+          | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
+              Error (AlreadyExists key)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+              Error (IOError (Printexc.to_string exn))
+    )
 
-  let acquire_lock t ~key ~ttl_seconds ~owner =
+  (** {2 Lock Operations} *)
+
+  type lock_info = {
+    owner: string;
+    acquired_at: float;
+    expires_at: float;
+  }
+
+  let lock_info_to_json info =
+    Yojson.Safe.to_string (`Assoc [
+      ("owner", `String info.owner);
+      ("acquired_at", `Float info.acquired_at);
+      ("expires_at", `Float info.expires_at);
+    ])
+
+  let lock_info_of_json json =
     try
-      let safe_ttl = validate_ttl ttl_seconds in
-      with_lock t (fun () ->
-          let lock_key = "locks:" ^ key in
-          let path = key_to_path t lock_key in
-          ensure_dir path;
-          let now = Time_compat.now () in
-          let expires_at = now +. float_of_int safe_ttl in
-          let lock_file = path ^ ".flock" in
-          let fd = Unix.openfile lock_file [ Unix.O_CREAT; Unix.O_RDWR ] 0o644 in
-          if not (acquire_flock fd) then begin
-            Unix.close fd;
-            Ok false
-          end else begin
-            let result =
-              try
-                let existing_valid =
-                  match safe_parse_lock_json path with
-                  | Some (own, exp) when exp > now && own <> owner -> Some own
-                  | _ -> None
-                in
-                match existing_valid with
-                | Some _ -> Ok false
-                | None ->
-                    let json =
-                      `Assoc
-                        [
-                          ("owner", `String owner);
-                          ("expires_at", `Float expires_at);
-                          ("acquired_at", `Float now);
-                        ]
-                    in
-                    Out_channel.with_open_text path (fun oc ->
-                        Out_channel.output_string oc (Yojson.Safe.to_string json));
-                    Ok true
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn -> Error (OperationFailed (Printexc.to_string exn))
-            in
-            release_flock fd;
-            Unix.close fd;
-            result
-          end)
-    with
-    | Invalid_argument msg -> Error (InvalidKey msg)
-    | exn -> Error (OperationFailed (Printexc.to_string exn))
-
-  let release_lock t ~key ~owner =
-    try
-      with_lock t (fun () ->
-          let lock_key = "locks:" ^ key in
-          let file_path = key_to_path t lock_key in
-          if not (Sys.file_exists file_path) then
-            Ok false
-          else begin
-            let lock_file = file_path ^ ".flock" in
-            let fd = Unix.openfile lock_file [ Unix.O_CREAT; Unix.O_RDWR ] 0o644 in
-            if not (acquire_flock fd) then begin
-              Unix.close fd;
-              Ok false
-            end else begin
-              let result =
-                try
-                  match safe_parse_lock_json file_path with
-                  | Some (own, _) when own = owner ->
-                      Safe_ops.remove_file_logged ~context:"backend_lock" file_path;
-                      Ok true
-                  | Some _ -> Ok false
-                  | None -> Ok false
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | e ->
-                    Log.Misc.error "Lock operation failed: %s"
-                      (Printexc.to_string e);
-                    Ok false
-              in
-              release_flock fd;
-              Unix.close fd;
-              result
-            end
-          end)
-    with
-    | Invalid_argument msg -> Error (InvalidKey msg)
-    | exn -> Error (OperationFailed (Printexc.to_string exn))
-
-  let extend_lock t ~key ~ttl_seconds ~owner =
-    try
-      let safe_ttl = validate_ttl ttl_seconds in
-      with_lock t (fun () ->
-          let lock_key = "locks:" ^ key in
-          let file_path = key_to_path t lock_key in
-          let lock_file = file_path ^ ".flock" in
-          if not (Sys.file_exists file_path) then
-            Ok false
-          else begin
-            let fd = Unix.openfile lock_file [ Unix.O_CREAT; Unix.O_RDWR ] 0o644 in
-            if not (acquire_flock fd) then begin
-              Unix.close fd;
-              Ok false
-            end else begin
-              let result =
-                try
-                  let do_io () =
-                    let content =
-                      In_channel.with_open_text file_path In_channel.input_all
-                    in
-                    let json = Yojson.Safe.from_string content in
-                    let open Yojson.Safe.Util in
-                    let own = json |> member "owner" |> to_string in
-                    if own = owner then begin
-                      let now = Time_compat.now () in
-                      let expires_at = now +. float_of_int safe_ttl in
-                      let new_json =
-                        `Assoc
-                          [
-                            ("owner", `String owner);
-                            ("expires_at", `Float expires_at);
-                            ("acquired_at", json |> member "acquired_at");
-                          ]
-                      in
-                      Out_channel.with_open_text file_path (fun oc ->
-                          Out_channel.output_string oc
-                            (Yojson.Safe.to_string new_json));
-                      Ok true
-                    end else
-                      Ok false
-                  in
-                  (try Eio_unix.run_in_systhread do_io
-                   with Stdlib.Effect.Unhandled _ -> do_io ())
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | e ->
-                    Log.Misc.error "Lock operation failed: %s"
-                      (Printexc.to_string e);
-                    Ok false
-              in
-              release_flock fd;
-              Unix.close fd;
-              result
-            end
-          end)
-    with
-    | Invalid_argument msg -> Error (InvalidKey msg)
-    | exn -> Error (OperationFailed (Printexc.to_string exn))
-
-  let publish t ~channel ~message =
-    with_lock t (fun () ->
-        Backend_core.Pubsub_mem.publish t.pubsub ~channel ~message)
-
-  let subscribe t ~channel ~callback =
-    with_lock t (fun () ->
-        Backend_core.Pubsub_mem.subscribe t.pubsub ~channel ~callback)
-
-  let health_check t =
-    try
-      let test_path = Filename.concat t.base_path ".health_check" in
-      let do_io () =
-        Out_channel.with_open_text test_path (fun oc ->
-            Out_channel.output_string oc "ok");
-        Sys.remove test_path
+      let module U = Yojson.Safe.Util in
+      let j = Yojson.Safe.from_string json in
+      let parse_float = function
+        | `Float f -> Some f
+        | `Int i -> Some (float_of_int i)
+        | `Intlit s -> float_of_string_opt s
+        | `String s -> float_of_string_opt s
+        | _ -> None
       in
-      (try Eio_unix.run_in_systhread do_io
-       with Stdlib.Effect.Unhandled _ -> do_io ());
-      Ok true
+      let parse_string = function
+        | `String s -> Some s
+        | _ -> None
+      in
+      match
+        (parse_string (U.member "owner" j),
+         parse_float (U.member "acquired_at" j),
+         parse_float (U.member "expires_at" j))
+      with
+      | Some owner, Some acquired_at, Some expires_at ->
+          Some { owner; acquired_at; expires_at }
+      | _ -> None
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
-        Log.Misc.error "Health check failed: %s" (Printexc.to_string e);
-        Ok false
+      Log.Misc.error "parse_lock_info failed: %s" (Printexc.to_string e);
+      None
+
+  let acquire_lock t ~key ~owner ~ttl_seconds =
+    let lock_key = "locks:" ^ key in
+    let now = Time_compat.now () in
+    let info = {
+      owner;
+      acquired_at = now;
+      expires_at = now +. float_of_int ttl_seconds;
+    } in
+    match set_if_not_exists t lock_key (lock_info_to_json info) with
+    | Ok true -> Ok true
+    | Ok false -> Ok false
+    | Error (AlreadyExists _) ->
+        (* Check if expired *)
+        (match get t lock_key with
+         | Ok json ->
+             (match lock_info_of_json json with
+              | Some existing when existing.expires_at < now ->
+                  (* Expired, try to take over *)
+                  (match set t lock_key (lock_info_to_json info) with
+                   | Ok () -> Ok true
+                   | Error e -> Error e)
+              | Some _ -> Ok false
+              | None ->
+                  (* Invalid lock metadata, overwrite to recover *)
+                  (match set t lock_key (lock_info_to_json info) with
+                   | Ok () -> Ok true
+                   | Error e -> Error e))
+         | Error _ -> Ok false)
+    | Error e -> Error e
+
+  let release_lock t ~key ~owner =
+    let lock_key = "locks:" ^ key in
+    match get t lock_key with
+    | Ok json ->
+        (match lock_info_of_json json with
+         | Some info when info.owner = owner ->
+             (match delete t lock_key with
+              | Ok () -> Ok true
+              | Error _ -> Ok false)
+         | _ -> Ok false)  (* Not owner or invalid *)
+    | Error (NotFound _) -> Ok true  (* Already released *)
+    | Error e -> Error e
+
+  let extend_lock t ~key ~owner ~ttl_seconds =
+    let lock_key = "locks:" ^ key in
+    match get t lock_key with
+    | Ok json ->
+        (match lock_info_of_json json with
+         | Some info when info.owner = owner ->
+             let now = Time_compat.now () in
+             let new_info = { info with expires_at = now +. float_of_int ttl_seconds } in
+             (match set t lock_key (lock_info_to_json new_info) with
+              | Ok () -> Ok true
+              | Error e -> Error e)
+         | _ -> Ok false)
+    | Error e -> Error e
+
+  (** {2 Atomic Operations (Cross-Process Safe)} *)
+
+  (** Atomically increment a counter stored in a file.
+      Uses Unix.lockf with non-blocking retry for cross-process synchronization.
+      Returns the NEW value after increment.
+
+      This is safe for multiple processes accessing the same file.
+      Uses F_TLOCK (try lock) to avoid blocking Eio's event loop.
+  *)
+  let atomic_increment t key =
+    match key_to_path t key with
+    | Error e -> Error e
+    | Ok path ->
+        try
+          (* Ensure parent directory exists *)
+          (match Eio.Path.split path with
+           | Some (parent, _) ->
+               (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
+                with Eio.Cancel.Cancelled _ as e -> raise e
+                   | e ->
+                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
+                         (Printf.sprintf "[WARN] mkdirs failed: %s"
+                            (Printexc.to_string e)))
+           | None -> ());
+
+          (* Get the actual filesystem path string *)
+          let path_str = Eio.Path.native_exn path in
+
+          (* Open file for read+write, create if needed *)
+          let fd = Unix.openfile path_str [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
+          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.close fd) @@ fun () ->
+
+          (* Acquire exclusive lock with non-blocking retry *)
+          let max_retries = 100 in
+          let rec try_lock retries =
+            if retries <= 0 then
+              raise (Failure "Failed to acquire lock after max retries")
+            else
+              try
+                Unix.lockf fd Unix.F_TLOCK 0;  (* Non-blocking try *)
+                true
+              with Unix.Unix_error (Unix.EAGAIN, _, _)
+                 | Unix.Unix_error (Unix.EACCES, _, _) ->
+                (* Lock held by another process, yield and retry *)
+                Eio.Fiber.yield ();
+                try_lock (retries - 1)
+          in
+          let _ = try_lock max_retries in
+          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
+
+          (* Read current value *)
+          let _ = Unix.lseek fd 0 Unix.SEEK_SET in
+          let buf = Bytes.create 32 in
+          let n = Unix.read fd buf 0 32 in
+          let current =
+            if n = 0 then 0
+            else
+              Safe_ops.int_of_string_with_default ~default:0 (String.trim (Bytes.sub_string buf 0 n))
+          in
+
+          (* Increment and write back *)
+          let new_value = current + 1 in
+          let new_str = string_of_int new_value in
+          let _ = Unix.lseek fd 0 Unix.SEEK_SET in
+          let _ = Unix.ftruncate fd 0 in
+          let _ = Unix.write_substring fd new_str 0 (String.length new_str) in
+
+          Ok new_value
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+          Error (IOError (Printf.sprintf "atomic_increment failed: %s" (Printexc.to_string exn)))
+
+  (** Atomically get the current counter value without incrementing *)
+  (** Atomically get the current counter value without incrementing.
+      Reads the file without locking — the counter is a small integer
+      written atomically by [atomic_increment] (which holds an exclusive
+      lock).  A lockless read avoids EBADF on Linux where [F_TLOCK] on
+      an [O_RDONLY] fd is rejected per POSIX. *)
+  let atomic_get t key =
+    match key_to_path t key with
+    | Error e -> Error e
+    | Ok path ->
+        try
+          let path_str = Eio.Path.native_exn path in
+          if not (Sys.file_exists path_str) then Ok 0
+          else
+            let fd = Unix.openfile path_str [Unix.O_RDONLY] 0o644 in
+            Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.close fd) @@ fun () ->
+            let buf = Bytes.create 32 in
+            let n = Unix.read fd buf 0 32 in
+            if n = 0 then Ok 0
+            else Ok (Safe_ops.int_of_string_with_default ~default:0 (String.trim (Bytes.sub_string buf 0 n)))
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+          Error (IOError (Printf.sprintf "atomic_get failed: %s" (Printexc.to_string exn)))
+
+  (** Atomically update a file with a transform function.
+      The transform receives [Some content] if file exists, [None] if not.
+      Returns [Ok new_content] on success.
+
+      This is safe for multiple processes accessing the same file.
+      Uses F_TLOCK (try lock) to avoid blocking Eio's event loop.
+  *)
+  let atomic_update t key ~f =
+    match key_to_path t key with
+    | Error e -> Error e
+    | Ok path ->
+        try
+          (* Ensure parent directory exists *)
+          (match Eio.Path.split path with
+           | Some (parent, _) ->
+               (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
+                with Eio.Cancel.Cancelled _ as e -> raise e
+                   | e ->
+                       Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
+                         (Printf.sprintf "[WARN] mkdirs failed: %s"
+                            (Printexc.to_string e)))
+           | None -> ());
+
+          let path_str = Eio.Path.native_exn path in
+
+          (* Open file for read+write, create if needed *)
+          let fd = Unix.openfile path_str [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
+          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.close fd) @@ fun () ->
+
+          (* Acquire exclusive lock with non-blocking retry *)
+          let max_retries = 100 in
+          let rec try_lock retries =
+            if retries <= 0 then
+              raise (Failure "Failed to acquire lock after max retries")
+            else
+              try
+                Unix.lockf fd Unix.F_TLOCK 0;
+                true
+              with Unix.Unix_error (Unix.EAGAIN, _, _)
+                 | Unix.Unix_error (Unix.EACCES, _, _) ->
+                Eio.Fiber.yield ();
+                try_lock (retries - 1)
+          in
+          let _ = try_lock max_retries in
+          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
+
+          (* Read current content *)
+          let _ = Unix.lseek fd 0 Unix.SEEK_SET in
+          let stat = Unix.fstat fd in
+          let size = stat.Unix.st_size in
+          let current =
+            if size = 0 then None
+            else begin
+              let buf = Bytes.create size in
+              let n = Unix.read fd buf 0 size in
+              if n = 0 then None
+              else
+                let raw = Bytes.sub_string buf 0 n in
+                (* Auto-decompress if ZSTD *)
+                Some (Compression.decompress_auto raw)
+            end
+          in
+
+          (* Apply transform function *)
+          let new_content = f current in
+
+          (* Compress and write back *)
+          let compressed = Compression.compress_with_header new_content in
+          let _ = Unix.lseek fd 0 Unix.SEEK_SET in
+          let _ = Unix.ftruncate fd 0 in
+          let _ = Unix.write_substring fd compressed 0 (String.length compressed) in
+
+          Ok new_content
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+          Error (IOError (Printf.sprintf "atomic_update failed: %s" (Printexc.to_string exn)))
+
+  (** {2 Health Check} *)
+
+  let health_check t =
+    let test_key = "_health_check_" ^ t.config.node_id in
+    let test_value = string_of_float (Time_compat.now ()) in
+    match set t test_key test_value with
+    | Ok () ->
+        (match delete t test_key with
+         | Ok () -> Ok { latency_ms = 0.0; is_healthy = true }
+         | Error _ -> Ok { latency_ms = 0.0; is_healthy = false })
+    | Error e -> Error e
+
 end
 
-(* ============================================ *)
-(* PostgreSQL Backend (Eio-native, non-blocking) *)
-(* ============================================ *)
+(** {1 Memory Backend (for testing)} *)
 
-(** PostgresNative - Eio-based PostgreSQL backend using caqti-eio.
+module Memory = struct
+  type t = {
+    mutable data: (string, string) Hashtbl.t;
+    mutex: Eio.Mutex.t;
+  }
+
+  let _poisoned_warned = Atomic.make false
+
+  (** Eio.Mutex wrapper with fallback for non-Eio test contexts.
+      When called outside Eio_main.run (e.g., unit tests without Eio),
+      Effect.Unhandled is raised. A prior failure may also leave the mutex
+      in a Poisoned state. In both cases, run the function unprotected --
+      safe because test contexts are single-fiber with no contention. *)
+  let with_lock t f =
+    match Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> f ())
+    with
+    | result -> result
+    | exception Effect.Unhandled _ -> f ()
+    | exception Eio__Eio_mutex.Poisoned _ ->
+        if not (Atomic.exchange _poisoned_warned true) then
+          Log.Backend.warn "Memory backend: Eio.Mutex poisoned, running unprotected (non-Eio context)";
+        f ()
+
+  let create () = {
+    data = Hashtbl.create 64;
+    mutex = Eio.Mutex.create ();
+  }
+
+  let get t key =
+    with_lock t (fun () ->
+      match Hashtbl.find_opt t.data key with
+      | Some v -> Ok v
+      | None -> Error (NotFound key)
+    )
+
+  let set t key value =
+    with_lock t (fun () ->
+      Hashtbl.replace t.data key value;
+      Ok ()
+    )
+
+  let exists t key =
+    with_lock t (fun () ->
+      Hashtbl.mem t.data key
+    )
+
+  let delete t key =
+    with_lock t (fun () ->
+      if Hashtbl.mem t.data key then begin
+        Hashtbl.remove t.data key;
+        Ok ()
+      end else
+        Error (NotFound key)
+    )
+
+  let list_keys t ~prefix =
+    with_lock t (fun () ->
+      let keys = Hashtbl.fold (fun k _ acc ->
+        if String.length k >= String.length prefix &&
+           String.sub k 0 (String.length prefix) = prefix then
+          k :: acc
+        else acc
+      ) t.data [] in
+      Ok keys
+    )
+
+  let clear t =
+    with_lock t (fun () ->
+      Hashtbl.clear t.data
+    )
+end
+
+(** {1 PostgreSQL Backend (Eio)}
     Implementation delegated to Backend_pg for separation of concerns. *)
-module PostgresNative : sig
-  include BACKEND
-  val create_eio : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> config -> (t, error) result
-  val create_eio_readonly : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> config -> (t, error) result
-  val get_pool : t -> (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t
-  val get_all_matching_recent :
-    t ->
-    prefix:string ->
-    suffix:string ->
-    updated_since:float ->
-    limit:int ->
-    ((string * string) list, error) result
-  val cleanup_pubsub_by_age : t -> days:int -> (int, error) result
-  val cleanup_pubsub_by_limit : t -> max_messages:int -> (int, error) result
-  val cleanup_pubsub : t -> days:int -> max_messages:int -> (int, error) result
-end = struct
+
+module Postgres = struct
   include Backend_pg
+
+  (** Adapter: accept [config] record matching [Backend.config]. *)
+  let create ~sw ~env ~url config =
+    Backend_pg.create ~sw ~env ~url
+      ~cluster_name:config.cluster_name ~node_id:config.node_id
+
+  (** Readonly adapter with smaller pool. *)
+  let create_readonly ~sw ~env ~url config =
+    Backend_pg.create_readonly ~sw ~env ~url
+      ~cluster_name:config.cluster_name ~node_id:config.node_id
 end
+
+(** {1 Unified Backend} *)
+
+type backend =
+  | FS of FileSystem.t
+  | Mem of Memory.t
+  | PG of Postgres.t
+
+let get = function
+  | FS t -> FileSystem.get t
+  | Mem t -> Memory.get t
+  | PG t -> Postgres.get t
+
+let set = function
+  | FS t -> FileSystem.set t
+  | Mem t -> Memory.set t
+  | PG t -> Postgres.set t
+
+let exists = function
+  | FS t -> FileSystem.exists t
+  | Mem t -> Memory.exists t
+  | PG t -> Postgres.exists t
+
+let delete = function
+  | FS t -> FileSystem.delete t
+  | Mem t -> Memory.delete t
+  | PG t -> Postgres.delete t
+
+let list_keys = function
+  | FS t -> FileSystem.list_keys t ~prefix:""
+  | Mem t -> Memory.list_keys t ~prefix:""
+  | PG t -> Postgres.list_keys t ~prefix:""
+
+let set_if_not_exists backend key value =
+  match backend with
+  | FS t -> FileSystem.set_if_not_exists t key value
+  | Mem t -> 
+      (match Memory.get t key with
+       | Error (NotFound _) -> Memory.set t key value |> Result.map (fun () -> true)
+       | _ -> Ok false)
+  | PG t -> Postgres.set_if_not_exists t key value
+
+let acquire_lock backend ~key ~owner ~ttl_seconds =
+  match backend with
+  | FS t -> FileSystem.acquire_lock t ~key ~owner ~ttl_seconds
+  | Mem _ -> Ok true  (* In-memory is single-process *)
+  | PG t -> Postgres.acquire_lock t ~key ~owner ~ttl_seconds
+
+let release_lock backend ~key ~owner =
+  match backend with
+  | FS t -> FileSystem.release_lock t ~key ~owner
+  | Mem _ -> Ok true
+  | PG t -> Postgres.release_lock t ~key ~owner
+
+let extend_lock backend ~key ~owner ~ttl_seconds =
+  match backend with
+  | FS t -> FileSystem.extend_lock t ~key ~owner ~ttl_seconds
+  | Mem _ -> Ok true
+  | PG t -> Postgres.extend_lock t ~key ~owner ~ttl_seconds

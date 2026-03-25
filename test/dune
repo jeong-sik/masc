@@ -21,7 +21,7 @@
 ; ============================================================
 (tests
  (names test_room test_types test_auth test_http_negotiation
-        test_sse test_encryption test_backend test_cancellation test_graphql_api
+        test_sse test_encryption test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_mitosis test_spawn
         test_validation test_response
@@ -48,7 +48,7 @@
         test_tool_input_validation
 )
  (modules test_room test_types test_auth test_http_negotiation
-          test_sse test_encryption test_backend test_cancellation test_graphql_api
+          test_sse test_encryption test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_mitosis test_spawn
           test_validation test_response
@@ -579,8 +579,8 @@
 
 ; Backend_eio test (Eio-native storage backend)
 (test
- (name test_backend_eio)
- (modules test_backend_eio)
+ (name test_backend)
+ (modules test_backend)
  (libraries masc_mcp alcotest eio eio_main fmt yojson))
 
 ; Room_eio test (Eio-native room operations)

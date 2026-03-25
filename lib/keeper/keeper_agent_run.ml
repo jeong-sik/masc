@@ -78,6 +78,7 @@ let run_turn
     ?max_tokens
     ?max_cost_usd
     ?on_event
+    ?(trajectory_acc : Trajectory.accumulator option)
     ()
   : (run_result, string) result =
   (* 0. Resolve inference parameters via Cascade_inference *)
@@ -160,6 +161,7 @@ let run_turn
   let tools = extend_turns_tool :: keeper_tools in
   let hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
+    ?trajectory_acc
     () in
   let base_dir = Filename.concat config.base_path ".masc" in
   let memory =

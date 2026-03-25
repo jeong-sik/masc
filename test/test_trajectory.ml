@@ -204,6 +204,74 @@ let test_calls_in_current_turn () =
     Alcotest.(check int) "calls in turn 1" 2 count)
 
 (* ================================================================ *)
+(* Test: task_id binding and propagation                             *)
+(* ================================================================ *)
+
+let test_task_id_default_none () =
+  with_tmpdir (fun dir ->
+    let acc = Trajectory.create_accumulator
+      ~masc_root:dir ~keeper_name:"test-keeper"
+      ~trace_id:"trace-tid-001" ~generation:0 in
+    Alcotest.(check (option string)) "task_id default" None acc.Trajectory.task_id)
+
+let test_set_task_id () =
+  with_tmpdir (fun dir ->
+    let acc = Trajectory.create_accumulator
+      ~masc_root:dir ~keeper_name:"test-keeper"
+      ~trace_id:"trace-tid-002" ~generation:0 in
+    Trajectory.set_task_id acc "task-042";
+    Alcotest.(check (option string)) "task_id set"
+      (Some "task-042") acc.Trajectory.task_id)
+
+let test_clear_task_id () =
+  with_tmpdir (fun dir ->
+    let acc = Trajectory.create_accumulator
+      ~masc_root:dir ~keeper_name:"test-keeper"
+      ~trace_id:"trace-tid-003" ~generation:0 in
+    Trajectory.set_task_id acc "task-042";
+    Trajectory.clear_task_id acc;
+    Alcotest.(check (option string)) "task_id cleared" None acc.Trajectory.task_id)
+
+let test_finalize_propagates_task_id () =
+  with_tmpdir (fun dir ->
+    let acc = Trajectory.create_accumulator
+      ~masc_root:dir ~keeper_name:"test-keeper"
+      ~trace_id:"trace-tid-004" ~generation:0 in
+    Trajectory.set_task_id acc "task-099";
+    Trajectory.increment_turn acc;
+    let traj = Trajectory.finalize acc Trajectory.Completed in
+    Alcotest.(check (option string)) "task_id propagated"
+      (Some "task-099") traj.Trajectory.task_id)
+
+let test_task_id_in_trajectory_json () =
+  with_tmpdir (fun dir ->
+    let acc = Trajectory.create_accumulator
+      ~masc_root:dir ~keeper_name:"test-keeper"
+      ~trace_id:"trace-tid-005" ~generation:0 in
+    Trajectory.set_task_id acc "task-json-test";
+    let traj = Trajectory.finalize acc Trajectory.Completed in
+    let json = Trajectory.trajectory_to_json traj in
+    let open Yojson.Safe.Util in
+    let task_id_val = json |> member "task_id" in
+    match task_id_val with
+    | `String s ->
+      Alcotest.(check string) "task_id in json" "task-json-test" s
+    | _ -> Alcotest.fail "Expected task_id to be a string in trajectory JSON")
+
+let test_task_id_null_when_none () =
+  with_tmpdir (fun dir ->
+    let acc = Trajectory.create_accumulator
+      ~masc_root:dir ~keeper_name:"test-keeper"
+      ~trace_id:"trace-tid-006" ~generation:0 in
+    let traj = Trajectory.finalize acc Trajectory.Completed in
+    let json = Trajectory.trajectory_to_json traj in
+    let open Yojson.Safe.Util in
+    let task_id_val = json |> member "task_id" in
+    match task_id_val with
+    | `Null -> ()
+    | _ -> Alcotest.fail "Expected task_id to be null when not set")
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -233,5 +301,13 @@ let () =
     ]);
     ("outcome", [
       Alcotest.test_case "outcome_to_string" `Quick test_outcome_to_string;
+    ]);
+    ("task_id", [
+      Alcotest.test_case "default none" `Quick test_task_id_default_none;
+      Alcotest.test_case "set_task_id" `Quick test_set_task_id;
+      Alcotest.test_case "clear_task_id" `Quick test_clear_task_id;
+      Alcotest.test_case "finalize propagates" `Quick test_finalize_propagates_task_id;
+      Alcotest.test_case "json with task_id" `Quick test_task_id_in_trajectory_json;
+      Alcotest.test_case "json null when none" `Quick test_task_id_null_when_none;
     ]);
   ]

@@ -184,7 +184,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 ~user_message:message
                 ~cascade_name:"keeper_turn"
                 ~generation:meta.generation
-                ?on_event ()
+                ?on_event
+                ~trajectory_acc
+                ()
             with
             | Error e ->
               (try ignore (Trajectory.finalize trajectory_acc

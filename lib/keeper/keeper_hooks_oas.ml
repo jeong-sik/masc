@@ -63,12 +63,46 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
           | _ -> ""))
   with Yojson.Safe.Util.Type_error _ -> ""
 
+(** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
+    Schema matches bin/masc_cost.ml with an additional "source" field to
+    distinguish automatic entries from manual CLI entries.
+
+    Called from [after_turn] hook when a trajectory accumulator is present. *)
+let emit_cost_event
+    ~(masc_root : string)
+    ~(agent_name : string)
+    ~(task_id : string option)
+    ~(model : string)
+    ~(input_tokens : int)
+    ~(output_tokens : int)
+    ~(cost_usd : float)
+    : unit =
+  let path = Filename.concat masc_root "costs.jsonl" in
+  let entry = `Assoc [
+    ("agent", `String agent_name);
+    ("task_id",
+      (match task_id with Some t -> `String t | None -> `Null));
+    ("model", `String model);
+    ("input_tokens", `Int input_tokens);
+    ("output_tokens", `Int output_tokens);
+    ("cost_usd", `Float cost_usd);
+    ("timestamp", `String (Types.now_iso ()));
+    ("source", `String "auto_trajectory");
+  ] in
+  let line = Yojson.Safe.to_string entry ^ "\n" in
+  (try Fs_compat.append_file path line
+   with Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Keeper.error "emit_cost_event: failed to write %s: %s"
+          path (Printexc.to_string exn))
+
 (** Build OAS hooks for a keeper agent.
 
     All keepers receive the full tool set unconditionally.
     Safety is enforced through eval_gate deny lists and these hooks:
     1. Cost budget — reject when accumulated cost exceeds limit
     2. Destructive pattern detection — reject dangerous bash/edit commands
+    3. Cost event emission — auto-emit per-turn cost to .masc/costs.jsonl
 
     @param config Room configuration
     @param meta_ref Mutable ref to keeper metadata
@@ -77,7 +111,8 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
     @param generation Current generation counter
     @param max_cost_usd Optional cost budget (rejects tool calls above limit)
     @param destructive_check Enable destructive pattern detection (default true)
-    @param on_tool_executed Optional callback after each tool execution *)
+    @param on_tool_executed Optional callback after each tool execution
+    @param trajectory_acc Optional trajectory accumulator for cost attribution *)
 let make_hooks
     ~(config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
@@ -88,6 +123,7 @@ let make_hooks
     ?(destructive_check : bool = true)
     ?(on_tool_executed : string -> Yojson.Safe.t -> string -> unit =
         fun _ _ _ -> ())
+    ?(trajectory_acc : Trajectory.accumulator option)
     ()
   : Agent_sdk.Hooks.hooks =
   ignore config;
@@ -103,12 +139,29 @@ let make_hooks
       match event with
       | Agent_sdk.Hooks.AfterTurn { turn; response } ->
         let model = response.model in
-        let usage = match response.usage with
-          | Some u -> u.input_tokens + u.output_tokens
-          | None -> 0
+        let input_tok, output_tok = match response.usage with
+          | Some u -> (u.input_tokens, u.output_tokens)
+          | None -> (0, 0)
         in
+        let total_tok = input_tok + output_tok in
         Log.Keeper.info "keeper:%s turn=%d model=%s tokens=%d"
-          (!meta_ref).name turn model usage;
+          (!meta_ref).name turn model total_tok;
+        (* Emit per-turn cost event for task attribution *)
+        (match trajectory_acc with
+         | Some acc ->
+           (* Rough per-turn cost estimate based on token count.
+              Local llama models are effectively free; cloud models
+              average ~$0.003/1K input + $0.015/1K output tokens.
+              This estimate errs conservative (uses cloud pricing). *)
+           let cost_usd =
+             (Float.of_int input_tok *. 0.000003)
+             +. (Float.of_int output_tok *. 0.000015)
+           in
+           emit_cost_event ~masc_root:acc.masc_root
+             ~agent_name:(!meta_ref).name ~task_id:acc.task_id
+             ~model ~input_tokens:input_tok ~output_tokens:output_tok
+             ~cost_usd
+         | None -> ());
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
 

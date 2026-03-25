@@ -52,6 +52,10 @@ type trajectory = {
   total_turns : int;
   total_tool_calls : int;
   outcome : trajectory_outcome;
+  task_id : string option;
+  (** Claimed task ID for cost attribution.
+      Set when keeper claims a task via masc_claim; None if no task claimed.
+      Enables per-task cost aggregation from trajectory summaries. *)
 }
 
 (* ================================================================ *)
@@ -126,6 +130,8 @@ let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
     ("total_turns", `Int t.total_turns);
     ("total_tool_calls", `Int t.total_tool_calls);
     ("outcome", outcome_to_json t.outcome);
+    ("task_id",
+      (match t.task_id with None -> `Null | Some s -> `String s));
     ("entries", `List (List.map entry_to_json t.entries));
   ]
 
@@ -167,6 +173,8 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     ("total_turns", `Int traj.total_turns);
     ("total_tool_calls", `Int traj.total_tool_calls);
     ("outcome", outcome_to_json traj.outcome);
+    ("task_id",
+      (match traj.task_id with None -> `Null | Some s -> `String s));
     ("started_at", `Float traj.started_at);
     ("ended_at", `Float traj.ended_at);
   ] in
@@ -187,6 +195,10 @@ type accumulator = {
   generation : int;
   started_at : float;
   masc_root : string;
+  mutable task_id : string option;
+  (** Claimed task ID for cost attribution.
+      Starts as None; set via [set_task_id] when keeper claims a task.
+      Propagated to trajectory record on [finalize]. *)
 }
 
 let create_accumulator ~masc_root ~keeper_name ~trace_id ~generation : accumulator =
@@ -199,7 +211,16 @@ let create_accumulator ~masc_root ~keeper_name ~trace_id ~generation : accumulat
     generation;
     started_at = Time_compat.now ();
     masc_root;
+    task_id = None;
   }
+
+(** Bind a claimed task to this trajectory for cost attribution. *)
+let set_task_id (acc : accumulator) (id : string) : unit =
+  acc.task_id <- Some id
+
+(** Clear task binding (e.g., after masc_done). *)
+let clear_task_id (acc : accumulator) : unit =
+  acc.task_id <- None
 
 let increment_turn (acc : accumulator) : unit =
   acc.turn <- acc.turn + 1
@@ -226,6 +247,7 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
     total_turns = acc.turn;
     total_tool_calls = acc.total_calls;
     outcome;
+    task_id = acc.task_id;
   } in
   (try append_summary ~masc_root:acc.masc_root ~keeper_name:acc.keeper_name
        ~trace_id:acc.trace_id traj

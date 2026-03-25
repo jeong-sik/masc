@@ -221,7 +221,7 @@ let collect_recent_messages_from_pg config ~msgs_path ~since_seq ~limit =
       | None -> None
       | Some key_prefix -> (
           match
-            Backend.PostgresNative.get_all_matching_recent backend
+            Backend.Postgres.get_all_matching_recent backend
               ~prefix:(key_prefix ^ ":")
               ~suffix:".json"
               ~updated_since:0.0

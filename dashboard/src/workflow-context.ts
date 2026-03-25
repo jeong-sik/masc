@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals'
-import type { OperatorAttentionItem, OperatorRecommendedAction, RouteState, TabId } from './types'
+import type { OperatorAttentionItem, OperatorRecommendedAction, RouteState } from './types'
 import { isRecord } from './components/common/normalize'
 
 const STORAGE_KEY = 'masc_dashboard_workflow_context'
@@ -389,28 +389,5 @@ export function workflowActionLabel(actionType?: string | null): string {
       return 'keeper recover'
     default:
       return actionType?.trim() || '추천 액션'
-  }
-}
-
-export function workflowCommandSurfaceLabel(surface?: string | null): string {
-  switch (surface) {
-    case 'orchestra':
-      return '오케스트라'
-    case 'swarm':
-      return '스웜'
-    case 'chains':
-      return '체인'
-    case 'control':
-      return '제어'
-    case 'operations':
-      return '작전'
-    default:
-      return surface?.trim() || '관제'
-  }
-}
-
-export function clearWorkflowContextForTab(tab: TabId): void {
-  if (tab === 'monitoring') {
-    persistWorkflowContext(null)
   }
 }

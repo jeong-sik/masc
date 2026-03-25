@@ -345,6 +345,60 @@ let keeper_reflection_payload_of_auto_rules (e : keeper_auto_rule_eval) : Yojson
     ("reasons", `List (List.map (fun reason -> `String reason) e.reasons));
   ]
 
+(* ================================================================ *)
+(* Model-aware threshold adjustment (#3069)                          *)
+(* ================================================================ *)
+
+(** Categorize model_id into a family for threshold selection.
+    Small local models (llama, qwen) are more susceptible to context
+    anxiety and benefit from earlier mitosis. Large cloud models
+    (claude opus, gemini) handle long context well and prefer compaction.
+
+    See: Anthropic "Harness Design" blog — Opus 4.6 removed context
+    anxiety, but smaller models still exhibit it. *)
+type model_family =
+  | Small_local   (** Local LLMs via llama.cpp — limited context handling *)
+  | Medium_cloud  (** Mid-tier cloud models — moderate context handling *)
+  | Large_cloud   (** Top-tier models (Opus, Gemini Ultra) — strong context *)
+  | Unknown       (** Unrecognized model — use configured defaults *)
+
+let classify_model_family (model_id : string) : model_family =
+  let id = String.lowercase_ascii model_id in
+  let contains needle =
+    let nlen = String.length needle in
+    let hlen = String.length id in
+    if nlen > hlen then false
+    else
+      let rec scan i =
+        if i > hlen - nlen then false
+        else if String.sub id i nlen = needle then true
+        else scan (i + 1)
+      in scan 0
+  in
+  if contains "qwen" || contains "llama" || contains "mistral"
+     || contains "phi-" || contains "deepseek" then
+    Small_local
+  else if contains "opus" || contains "gemini-2" || contains "gpt-4o" then
+    Large_cloud
+  else if contains "sonnet" || contains "haiku" || contains "gemini"
+          || contains "glm" || contains "gpt-4" then
+    Medium_cloud
+  else
+    Unknown
+
+(** Adjust compaction/handoff thresholds based on model family.
+    Returns [(ratio_gate_multiplier, handoff_threshold_multiplier)].
+
+    Small local models: lower thresholds (0.75x) → earlier mitosis.
+    Large cloud models: higher thresholds (1.15x, clamped to 0.95) → prefer compaction.
+    Medium/Unknown: no adjustment (1.0x). *)
+let model_threshold_multipliers (family : model_family) : float * float =
+  match family with
+  | Small_local  -> (0.75, 0.75)   (* 0.70 * 0.75 = 0.525, 0.85 * 0.75 = 0.6375 *)
+  | Large_cloud  -> (1.15, 1.10)   (* 0.70 * 1.15 = 0.805, 0.85 * 1.10 = 0.935 *)
+  | Medium_cloud -> (1.0, 1.0)
+  | Unknown      -> (1.0, 1.0)
+
 let evaluate_keeper_auto_rules
     ~(meta : keeper_meta)
     ~(context_ratio : float)
@@ -352,8 +406,15 @@ let evaluate_keeper_auto_rules
     ~(token_count : int)
     ~(repetition_risk : float)
     ~(goal_alignment : float)
-    ~(response_alignment : float) : keeper_auto_rule_eval =
-  let ratio_gate = meta.compaction.ratio_gate in
+    ~(response_alignment : float)
+    ?(model_id : string option) () : keeper_auto_rule_eval =
+  (* Apply model-aware threshold adjustment when model_id is provided *)
+  let (ratio_mult, handoff_mult) =
+    match model_id with
+    | Some id -> model_threshold_multipliers (classify_model_family id)
+    | None -> (1.0, 1.0)
+  in
+  let ratio_gate = Float.min 0.95 (meta.compaction.ratio_gate *. ratio_mult) in
   let message_gate = meta.compaction.message_gate in
   let token_gate = meta.compaction.token_gate in
   let reflect_threshold = keeper_rule_reflect_repetition_threshold () in
@@ -380,7 +441,8 @@ let evaluate_keeper_auto_rules
     || (message_gate > 0 && message_count >= message_gate)
     || (token_gate > 0 && token_count >= token_gate)
   in
-  let handoff = meta.auto_handoff && context_ratio >= meta.handoff_threshold in
+  let adjusted_handoff_threshold = Float.min 0.95 (meta.handoff_threshold *. handoff_mult) in
+  let handoff = meta.auto_handoff && context_ratio >= adjusted_handoff_threshold in
   let guardrail_stop =
     repetition_risk >= guardrail_repetition_threshold
     && goal_alignment <= guardrail_goal_alignment_threshold
@@ -437,9 +499,10 @@ let evaluate_keeper_auto_rules
   let reasons =
     if handoff then
       (Printf.sprintf
-         "handoff(ctx=%.3f>=%.3f)"
+         "handoff(ctx=%.3f>=%.3f%s)"
          context_ratio
-         meta.handoff_threshold)
+         adjusted_handoff_threshold
+         (match model_id with Some id -> ",model=" ^ id | None -> ""))
       :: reasons
     else reasons
   in
@@ -508,8 +571,14 @@ let learned_policy_auto_rules
     ~(token_count : int)
     ~(repetition_risk : float)
     ~(goal_alignment : float)
-    ~(response_alignment : float) : keeper_auto_rule_eval =
-  let ratio_gate = meta.compaction.ratio_gate in
+    ~(response_alignment : float)
+    ?(model_id : string option) () : keeper_auto_rule_eval =
+  let (ratio_mult, handoff_mult) =
+    match model_id with
+    | Some id -> model_threshold_multipliers (classify_model_family id)
+    | None -> (1.0, 1.0)
+  in
+  let ratio_gate = Float.min 0.95 (meta.compaction.ratio_gate *. ratio_mult) in
   let message_gate = meta.compaction.message_gate in
   let token_gate = meta.compaction.token_gate in
   let goal_drift =
@@ -522,7 +591,8 @@ let learned_policy_auto_rules
     || (message_gate > 0 && message_count >= message_gate)
     || (token_gate > 0 && token_count >= token_gate)
   in
-  let handoff = meta.auto_handoff && context_ratio >= meta.handoff_threshold in
+  let adjusted_handoff_threshold = Float.min 0.95 (meta.handoff_threshold *. handoff_mult) in
+  let handoff = meta.auto_handoff && context_ratio >= adjusted_handoff_threshold in
   {
     repetition_risk;
     goal_alignment;

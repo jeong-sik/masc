@@ -48,6 +48,15 @@ let active_or_recent_sessions config =
   Team_session_store.list_sessions ~since_unix:cutoff_unix config
   |> List.filter is_active_or_recent
 
+let room_scope_cache_segment (config : Room_utils.config) =
+  match config.scope with
+  | Room_utils_backend_setup.Default -> "default"
+  | Room_utils_backend_setup.Named room_id -> "room:" ^ room_id
+
+let room_scoped_cache_key (config : Room_utils.config) prefix actor_name =
+  Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
+    (room_scope_cache_segment config) actor_name
+
 
 let dedup_strings items =
   List.sort_uniq String.compare
@@ -574,7 +583,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
   in
   let snapshot_json =
     Dashboard_cache.get_or_compute
-      (Printf.sprintf "snapshot:%s" actor_name)
+      (room_scoped_cache_key config "snapshot" actor_name)
       ~ttl:3.0
       (fun () ->
         Operator_control.snapshot_json
@@ -591,14 +600,14 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
   in
   let command_json =
     Dashboard_cache.get_or_compute
-      (Printf.sprintf "command_projection:%s" actor_name)
+      (room_scoped_cache_key config "command_projection" actor_name)
       ~ttl:3.0
       (fun () ->
         Command_plane_v2.dashboard_projection_json ~sessions:tracked_sessions config)
   in
   let digest_json =
     Dashboard_cache.get_or_compute
-      (Printf.sprintf "digest:%s" actor_name)
+      (room_scoped_cache_key config "digest" actor_name)
       ~ttl:5.0
       (fun () ->
         match

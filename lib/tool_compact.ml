@@ -157,6 +157,7 @@ let handle_compact args : result =
         ~system_prompt:ctx.system_prompt
         ~messages:ctx.messages
         ~strategies
+        ()
     in
     let compacted = { ctx with messages; token_count; importance_scores = [] } in
     let tokens_after = compacted.token_count in

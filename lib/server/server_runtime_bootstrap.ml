@@ -325,6 +325,36 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   in
   (* Event_bus → SSE bridge: relay masc:* events to dashboard *)
   Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
+  let keeper_lifecycle_sub =
+    Agent_sdk.Event_bus.subscribe event_bus
+      ~filter:(function
+        | Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", _) -> true
+        | _ -> false)
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      let events = Agent_sdk.Event_bus.drain keeper_lifecycle_sub in
+      List.iter
+        (function
+          | Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", payload) ->
+              (match
+                 ( Safe_ops.json_string_opt "event" payload,
+                   Safe_ops.json_string_opt "keeper_name" payload )
+               with
+              | Some event, Some keeper_name ->
+                  Server_dashboard_http.patch_keeper_dependent_caches
+                    ~keeper_name ~event
+              | _ -> ())
+          | _ -> ())
+        events;
+      if events <> [] then
+        Log.Dashboard.info
+          "patched keeper-dependent dashboard caches (%d lifecycle event(s))"
+          (List.length events);
+      Eio.Time.sleep clock 0.25;
+      loop ()
+    in
+    loop ());
   (* Inject Event_bus into keeper resident runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
   Board_dispatch.set_keeper_board_signal_hook (fun signal ->

@@ -21,8 +21,8 @@ let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
     ~(config : Room.config) compute =
   let fallback () = compute ~config ~sw in
   let run_in_pool pool_sw =
-    match config.backend_config.Backend.backend_type with
-    | Backend.PostgresNative ->
+    match config.backend_config.Backend_types.backend_type with
+    | Backend_types.PostgresNative ->
         let net = Eio_context.get_net () in
         let mono_clock = Eio_context.get_mono_clock () in
         (match
@@ -31,7 +31,7 @@ let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
          with
          | Some domain_config -> `Done (compute ~config:domain_config ~sw:pool_sw)
          | None -> `Fallback)
-    | Backend.Memory | Backend.FileSystem ->
+    | Backend_types.Memory | Backend_types.FileSystem ->
         `Done (compute ~config ~sw:pool_sw)
   in
   let offloaded () =
@@ -80,6 +80,15 @@ let with_dashboard_timeout ~clock compute =
         ("message", `String "Dashboard computation timed out after 30s. First request may be slow due to filesystem scan.");
         ("generated_at", `String (Types.now_iso ()));
       ]
+
+let room_scope_cache_segment (config : Room.config) =
+  match config.scope with
+  | Room_utils_backend_setup.Default -> "default"
+  | Room_utils_backend_setup.Named room_id -> "room:" ^ room_id
+
+let room_scoped_cache_key (config : Room.config) prefix suffix =
+  Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
+    (room_scope_cache_segment config) suffix
 
 let dashboard_session_list_timeout_s = 5.0
 
@@ -700,7 +709,8 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
-        Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
+        room_scoped_cache_key state.Mcp_server.room_config "mission"
+          (Option.value ~default:"" actor)
       in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
         ~clock ~timeout_sec:120.0 (compute ?actor)
@@ -742,7 +752,8 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
   if force then with_dashboard_timeout ~clock compute
   else
     let cache_key =
-      Printf.sprintf "mission_briefing:%s" (Option.value ~default:"" actor)
+      room_scoped_cache_key state.Mcp_server.room_config "mission_briefing"
+        (Option.value ~default:"" actor)
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:5.0
       ~clock ~timeout_sec:60.0 compute

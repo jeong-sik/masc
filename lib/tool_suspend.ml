@@ -27,15 +27,20 @@ let add_to_blacklist ~agent_id ~until ~reason =
 
 let check_blacklist ~agent_id =
   Eio.Mutex.use_rw ~protect:true blacklist_lock (fun () ->
+    let now = Time_compat.now () in
+    (* Bulk prune expired entries when table accumulates beyond 32 *)
+    if Hashtbl.length blacklist > 32 then
+      Hashtbl.filter_map_inplace (fun _id (until, reason) ->
+        if now >= until then None else Some (until, reason)
+      ) blacklist;
     match Hashtbl.find_opt blacklist agent_id with
     | None -> None
     | Some (until, reason) ->
-        let now = Time_compat.now () in
-        if now >= until then begin
-          Hashtbl.remove blacklist agent_id;
-          None
-        end else
-          Some (until, reason))
+      if now >= until then begin
+        Hashtbl.remove blacklist agent_id;
+        None
+      end else
+        Some (until, reason))
 
 let remove_from_blacklist ~agent_id =
   Eio.Mutex.use_rw ~protect:true blacklist_lock (fun () ->

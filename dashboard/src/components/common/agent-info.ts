@@ -27,7 +27,3 @@ export function extractAgentInfo(name: string): AgentInfo {
   const isKeeper = model === 'keeper'
   return { model, nickname, isKeeper }
 }
-
-export function isKeeperAgent(name: string): boolean {
-  return name === 'keeper' || name.startsWith('keeper-')
-}

@@ -85,9 +85,7 @@ let dispatch (ctx : context) ~name ~args : (bool * string) option =
   | "masc_research_status" ->
     let results_file = Printf.sprintf "%s/research_results.tsv" ctx.base_path in
     if Sys.file_exists results_file then begin
-      let ic = open_in results_file in
-      let content = In_channel.input_all ic in
-      close_in ic;
+      let content = Fs_compat.load_file results_file in
       Some (true, content)
     end else
       Some (true, "No research results found. Run masc_research_start first.")

@@ -74,19 +74,60 @@ let generate_id () =
   let sequence = Atomic.get metric_counter in
   Printf.sprintf "metric-%d-%06d" timestamp_ms sequence
 
-(* Mutex protecting concurrent metric writes within this process.
-   Replaces Unix.lockf which blocks the Eio scheduler. *)
-let record_mutex = Eio.Mutex.create ()
+(* Async write queue: callers push (file, line) entries into a bounded stream.
+   A background fiber drains the stream and batches file appends, eliminating
+   the previous global mutex + synchronous I/O pattern that blocked all writers. *)
 
-(** Record a new task metric - Eio-compatible, non-blocking *)
+type write_entry = { file: string; line: string }
+
+let write_queue : write_entry Eio.Stream.t = Eio.Stream.create 256
+
+let queue_active = Atomic.make false
+
+(** Record a new task metric.
+    Lock-free: serializes the metric to JSON and pushes to the write queue.
+    Actual file I/O happens in the background flush fiber. *)
 let record config (metric : task_metric) : unit =
   ensure_metrics_dir config metric.agent_id;
   let file = current_month_file config metric.agent_id in
   let json = task_metric_to_yojson metric in
   let line = Yojson.Safe.to_string json ^ "\n" in
-  Eio.Mutex.use_rw ~protect:true record_mutex (fun () ->
+  if Atomic.get queue_active then
+    Eio.Stream.add write_queue { file; line }
+  else
+    (* Fallback: no flush fiber running (tests, pre-init). Direct write. *)
     Fs_compat.append_file file line
-  )
+
+(** Drain all pending entries from the write queue, batching by file. *)
+let flush_pending () =
+  let batch = Hashtbl.create 8 in
+  let rec drain () =
+    match Eio.Stream.take_nonblocking write_queue with
+    | None -> ()
+    | Some entry ->
+        let prev = try Hashtbl.find batch entry.file with Not_found -> Buffer.create 256 in
+        Buffer.add_string prev entry.line;
+        Hashtbl.replace batch entry.file prev;
+        drain ()
+  in
+  drain ();
+  Hashtbl.iter (fun file buf ->
+    (try Fs_compat.append_file file (Buffer.contents buf)
+     with exn ->
+       Log.Metrics.error "flush_pending: append failed for %s: %s"
+         file (Printexc.to_string exn))
+  ) batch
+
+(** Start the background flush fiber. Call once inside Eio_main.run.
+    Drains the write queue every 500ms or when the stream has entries. *)
+let start_flush_fiber ~clock =
+  Atomic.set queue_active true;
+  let rec loop () =
+    Eio.Time.sleep clock 0.5;
+    flush_pending ();
+    loop ()
+  in
+  loop ()
 
 (** Create a new task metric (helper) - pure *)
 let create_metric ~agent_id ~task_id ?(collaborators=[]) ?handoff_from () =

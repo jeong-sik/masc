@@ -91,7 +91,7 @@ let test_pubsub_max_messages_env () =
 
 let test_compression_small_data () =
   let data = "hello" in
-  let (compressed, used_dict, did_compress) = Backend.Compression.compress data in
+  let (compressed, used_dict, did_compress) = Backend_compression.compress data in
   (* Small data should not be compressed *)
   check bool "small data not compressed" false did_compress;
   check string "small data unchanged" data compressed;
@@ -100,19 +100,19 @@ let test_compression_small_data () =
 let test_compression_large_data () =
   (* Create data larger than min_size (32 bytes) *)
   let data = String.make 100 'a' in
-  let (compressed, _used_dict, did_compress) = Backend.Compression.compress data in
+  let (compressed, _used_dict, did_compress) = Backend_compression.compress data in
   check bool "large data compressed" true did_compress;
   check bool "compressed smaller" true (String.length compressed < String.length data)
 
 let test_compression_roundtrip () =
   let data = String.make 200 'x' ^ String.make 200 'y' in
-  let encoded = Backend.Compression.compress_with_header data in
-  let decoded = Backend.Compression.decompress_auto encoded in
+  let encoded = Backend_compression.compress_with_header data in
+  let decoded = Backend_compression.decompress_auto encoded in
   check string "roundtrip matches" data decoded
 
 let test_compression_uncompressed_passthrough () =
   let data = "short" in
-  let result = Backend.Compression.decompress_auto data in
+  let result = Backend_compression.decompress_auto data in
   check string "uncompressed passthrough" data result
 
 let test_compression_encode_header () =
@@ -120,10 +120,10 @@ let test_compression_encode_header () =
   let orig_size = 1000 in
   let compressed = "compressed_data" in
 
-  let with_dict = Backend.Compression.encode_with_header ~used_dict:true orig_size compressed in
+  let with_dict = Backend_compression.encode_with_header ~used_dict:true orig_size compressed in
   check bool "dict header starts with ZSTDD" true (String.sub with_dict 0 5 = "ZSTDD");
 
-  let without_dict = Backend.Compression.encode_with_header ~used_dict:false orig_size compressed in
+  let without_dict = Backend_compression.encode_with_header ~used_dict:false orig_size compressed in
   check bool "std header starts with ZSTD" true (String.sub without_dict 0 4 = "ZSTD")
 
 let test_compression_decode_header () =
@@ -132,16 +132,16 @@ let test_compression_decode_header () =
   let data = "test_compressed" in
 
   (* With dictionary *)
-  let encoded_dict = Backend.Compression.encode_with_header ~used_dict:true orig data in
-  (match Backend.Compression.decode_header encoded_dict with
+  let encoded_dict = Backend_compression.encode_with_header ~used_dict:true orig data in
+  (match Backend_compression.decode_header encoded_dict with
   | Some (size, _, used_dict) ->
       check int "decoded size" orig size;
       check bool "decoded used_dict" true used_dict
   | None -> fail "decode_header failed for dict");
 
   (* Without dictionary *)
-  let encoded_std = Backend.Compression.encode_with_header ~used_dict:false orig data in
-  match Backend.Compression.decode_header encoded_std with
+  let encoded_std = Backend_compression.encode_with_header ~used_dict:false orig data in
+  match Backend_compression.decode_header encoded_std with
   | Some (size, _, used_dict) ->
       check int "decoded size std" orig size;
       check bool "decoded used_dict std" false used_dict
@@ -149,10 +149,10 @@ let test_compression_decode_header () =
 
 let test_compression_invalid_header () =
   (* Test with data that doesn't have a valid header *)
-  let result = Backend.Compression.decode_header "short" in
+  let result = Backend_compression.decode_header "short" in
   check bool "short data returns None" true (Option.is_none result);
 
-  let result2 = Backend.Compression.decode_header "INVALID_HEADER_DATA" in
+  let result2 = Backend_compression.decode_header "INVALID_HEADER_DATA" in
   check bool "invalid header returns None" true (Option.is_none result2)
 
 (* ============================================================ *)

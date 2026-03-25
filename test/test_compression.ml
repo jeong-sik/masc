@@ -12,7 +12,7 @@
 
 (* ===== Backend Compression Tests ===== *)
 
-module BackendCompression = Backend.Compression
+module BackendCompression = Backend_compression
 
 let test_backend_compress_skip_small () =
   let small = "tiny" in  (* <32 bytes, below min_dict_size *)

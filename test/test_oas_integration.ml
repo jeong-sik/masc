@@ -108,7 +108,7 @@ let test_compact_syncs_oas_context () =
   let messages, token_count =
     Context_compact_oas.compact
       ~system_prompt:ctx.system_prompt ~messages:ctx.messages
-      ~strategies:[Context_compact_oas.MergeContiguous] in
+      ~strategies:[Context_compact_oas.MergeContiguous] () in
   let ctx = Keeper_exec_context.sync_oas_context
     { ctx with messages; token_count; importance_scores = [] } in
   let ratio =

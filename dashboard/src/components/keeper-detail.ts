@@ -65,9 +65,9 @@ async function runSocialSweep(): Promise<void> {
     })
     invalidateDashboardCache()
     await refreshDashboard({ force: true })
-    showToast('Social sweep finished', 'success')
+    showToast('소셜 스위프 완료', 'success')
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to run social sweep'
+    const message = err instanceof Error ? err.message : '소셜 스위프 실행 실패'
     showToast(message, 'error')
   }
 }
@@ -110,18 +110,18 @@ function KeeperStatusPill({ status }: { status: string }) {
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="border-t border-[var(--border-slate-12)] pt-5">
-      <h3 class="m-0 mb-3 text-[13px] font-semibold text-[var(--text-strong)] uppercase tracking-[0.06em]">Direct Comms</h3>
+      <h3 class="m-0 mb-3 text-[13px] font-semibold text-[var(--text-strong)] uppercase tracking-[0.06em]">직접 통신</h3>
 
       <div class="flex flex-col gap-4">
         <div class="w-full">
           <${KeeperConversationPanel}
             keeperName=${keeper.name}
-            placeholder="Send a direct prompt to this keeper"
+            placeholder="이 키퍼에게 직접 프롬프트 전송"
           />
         </div>
 
         <details class="group">
-          <summary class="cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors">Runtime diagnostics</summary>
+          <summary class="cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors">런타임 진단</summary>
           <div class="flex flex-col gap-3 px-4 pb-4 pt-2">
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}

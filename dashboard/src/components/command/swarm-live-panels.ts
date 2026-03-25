@@ -43,7 +43,7 @@ export function SwarmLivePanels() {
           <div class="card rounded-xl-title">스웜 라이브 런</div>
         </div>
         ${commandPlaneSwarmLoading.value
-          ? html`<${EmptyState} message="Loading swarm live state…" compact />`
+          ? html`<${EmptyState} message="스웜 라이브 상태 불러오는 중..." compact />`
           : commandPlaneSwarmError.value
             ? html`<${EmptyState} message=${commandPlaneSwarmError.value} compact />`
             : swarm

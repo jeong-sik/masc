@@ -140,7 +140,7 @@ async function loadProfile(name: string): Promise<void> {
       taskHistories.value = rows
     }
   } catch (err) {
-    profileError.value = err instanceof Error ? err.message : 'Failed to load profile'
+    profileError.value = err instanceof Error ? err.message : '프로필 로드 실패'
   } finally {
     loading.value = false
   }
@@ -416,7 +416,7 @@ export function AgentProfile({ name }: { name: string }) {
             <div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
                 <div class="mb-2"><span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${row.taskId}</span></div>
-                <pre class="m-0 whitespace-pre-wrap text-[13px] leading-[1.5] text-[#cfe0ff] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || 'No history yet'}</pre>
+                <pre class="m-0 whitespace-pre-wrap text-[13px] leading-[1.5] text-[#cfe0ff] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
               </div>
             `)}</div>
           <//>

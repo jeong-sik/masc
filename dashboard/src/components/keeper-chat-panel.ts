@@ -60,7 +60,7 @@ export function normalizeKeeperChatErrorValue(value: unknown): string {
       ?? asString(nestedError?.error)
     if (message) return message
   }
-  return 'Stream error'
+  return '스트림 오류'
 }
 
 function cancelStream(): void {
@@ -107,7 +107,7 @@ async function sendChat(keeperName: string): Promise<void> {
     })
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') return
-    const msg = err instanceof Error ? err.message : 'Chat failed'
+    const msg = err instanceof Error ? err.message : '채팅 실패'
     chatError.value = msg
     showToast(msg, 'error')
   } finally {
@@ -168,7 +168,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
       <div class="px-4 py-4">
         <${ChatTranscript}
           entries=${transcriptEntries}
-          emptyText="Send a direct prompt to start the keeper conversation."
+          emptyText="직접 프롬프트를 보내 키퍼 대화를 시작하세요."
           showMetadata=${false}
         />
       </div>

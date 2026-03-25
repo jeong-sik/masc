@@ -403,8 +403,8 @@ export function ChatComposer({
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="text-[11px] leading-[1.55] text-[var(--text-muted)]">
           ${streaming
-            ? 'Keeper reply stream is active. You can stop it if the run looks stuck.'
-            : 'Direct messages are kept in this lane. Internal keeper prompts stay hidden.'}
+            ? '키퍼 응답 스트림이 활성 상태입니다. 멈춘 것 같으면 중지할 수 있습니다.'
+            : '직접 메시지만 이 레인에 표시됩니다. 내부 키퍼 프롬프트는 숨겨집니다.'}
         </div>
         <div class="flex gap-2 items-center">
         <${ActionButton}

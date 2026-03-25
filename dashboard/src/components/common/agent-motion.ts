@@ -147,6 +147,6 @@ export function buildAgentMotion(
   return {
     activeAssignedCount,
     lastActivityAt: options.lastSeen ?? null,
-    lastActivityText: fallbackText ?? 'Presence heartbeat',
+    lastActivityText: fallbackText ?? '프레즌스 하트비트',
   }
 }

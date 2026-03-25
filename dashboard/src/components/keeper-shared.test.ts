@@ -105,10 +105,10 @@ describe('KeeperConversationPanel', () => {
     )
     await Promise.resolve()
 
-    expect(container.textContent).toContain('Direct Chat')
+    expect(container.textContent).toContain('직접 대화')
     expect(container.textContent).toContain('@sangsu')
-    expect(container.textContent).toContain('Show metadata')
-    expect(container.textContent).toContain('1 internal history entries are hidden')
+    expect(container.textContent).toContain('메타데이터 표시')
+    expect(container.textContent).toContain('1개의 내부 이력이 가독성을 위해 숨겨져 있습니다')
     expect(container.textContent).not.toContain('Conversation Lane')
     expect(container.textContent).not.toContain('Visible thread')
     expect(container.textContent).not.toContain('Hidden internal')

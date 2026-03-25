@@ -106,7 +106,7 @@ export function RuntimeParamsPanel() {
   if (params.length === 0 && !runtimeLoading.value) return null
 
   return html`
-    <${Card} title="Runtime Parameters" class="section mb-4">
+    <${Card} title="런타임 파라미터" class="section mb-4">
       ${runtimeLoading.value
         ? html`<${LoadingState}>파라미터 로딩 중...<//>`
         : html`

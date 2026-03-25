@@ -368,7 +368,7 @@ export function TransportHealthPanel() {
         <div>
           <div class="flex items-center gap-2">
             <span class="text-base text-text-strong">Transport</span>
-            <span class="text-[10px] uppercase tracking-wider text-text-muted">${data.cluster.cluster} / ${data.cluster.room_id}</span>
+            <span class="text-[10px] uppercase tracking-wider text-text-muted">${data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default' ? `${data.cluster.cluster} / ` : ''}${data.cluster.room_id}</span>
           </div>
           <div class="mt-1 text-sm text-text-body">
             primary path: <span class="font-mono text-text-strong">${data.summary.primary_path}</span>
@@ -419,7 +419,7 @@ export function TransportHealthPanel() {
           <${MetricRow} label="Legacy" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
         <//>
 
-        <${SectionCard} title="Cluster" status=${clusterStatus} eyebrow=${`${data.cluster.live_agents} live`}>
+        <${SectionCard} title="Agent Pool" status=${clusterStatus} eyebrow=${`${data.cluster.live_agents} live`}>
           <${MetricRow} label="Managed Units" value=${data.cluster.managed_units} sub=${`${data.cluster.total_units} total`} />
           <${MetricRow} label="Active Ops" value=${data.cluster.active_operations} />
           <${MetricRow} label="Stale Units" value=${data.cluster.stale_units} />

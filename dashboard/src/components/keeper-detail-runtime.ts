@@ -161,7 +161,8 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const capabilities = keeper.agent?.capabilities ?? []
   const roomName = room.current_room ?? room.room_id ?? serverStatus.value?.room ?? 'default'
   const project = room.project ?? serverStatus.value?.project ?? 'N/A'
-  const cluster = room.cluster ?? serverStatus.value?.cluster ?? 'N/A'
+  const clusterRaw = room.cluster ?? serverStatus.value?.cluster ?? null
+  const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'
   const allowlistFallback = toolAuditStateLabel(allowlistEmptyState(keeper))
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
@@ -179,7 +180,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
     <div class="flex flex-col gap-1.5">
       <${SignalRow} label="Room" value=${roomName} />
       <${SignalRow} label="Project" value=${project} />
-      <${SignalRow} label="Cluster" value=${cluster} />
+      ${clusterVisible ? html`<${SignalRow} label="Cluster" value=${clusterRaw} />` : null}
       <${SignalRow} label="Current task" value=${currentTaskLabel} />
       <${SignalRow} label="Skill route" value=${skillRouteLabel} />
       <${SignalRow} label="Context source" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />

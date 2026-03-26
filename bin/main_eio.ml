@@ -250,11 +250,7 @@ let port =
   Arg.(value & opt int 8935 & info ["p"; "port"] ~docv:"PORT" ~doc)
 
 let host =
-  let default =
-    match trim_opt (Sys.getenv_opt "MASC_HOST") with
-    | Some value -> value
-    | None -> "127.0.0.1"
-  in
+  let default = Masc_mcp.Env_config.masc_host () in
   let doc =
     "Host/IP to bind. Defaults to loopback (`127.0.0.1`). Use `0.0.0.0` or `::` only when you also enable room auth with `require_token=true`."
   in

@@ -22,7 +22,7 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
     [
       ("room", `String current_room);
       ("room_base_path", `String config.base_path);
-      ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+      ("cluster", `String (Env_config_core.cluster_name ()));
       ("project", `String project);
       ("current_room", `String current_room);
       ("tempo_interval_s", `Float tempo.current_interval_s);

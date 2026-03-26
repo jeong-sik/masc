@@ -41,9 +41,9 @@ let project_root () =
             | None -> Sys.getcwd ()))
 
 let () =
-  if Sys.getenv_opt "MASC_ASSETS_ROOT" = None then
+  if Sys.getenv_opt "MASC_ASSETS_DIR" = None && Sys.getenv_opt "MASC_ASSETS_ROOT" = None then
     let assets = Filename.concat (project_root ()) "assets" in
-    if Sys.file_exists assets then Unix.putenv "MASC_ASSETS_ROOT" assets
+    if Sys.file_exists assets then Unix.putenv "MASC_ASSETS_DIR" assets
 
 let contains_substr sub s =
   try
@@ -206,22 +206,23 @@ let test_etag_stable () =
    ============================================================ *)
 
 let test_fallback_on_missing_asset () =
-  (* Override MASC_ASSETS_ROOT to an existing directory without dashboard assets *)
-  let original = Sys.getenv_opt "MASC_ASSETS_ROOT" in
   let missing_assets_root = make_temp_dir "missing-assets" in
   Fun.protect
     (fun () ->
-      Unix.putenv "MASC_ASSETS_ROOT" missing_assets_root;
-      let html = Web_dashboard.html () in
-      let etag = Web_dashboard.etag () in
-      check bool "fallback html contains error message" true
-        (contains_substr "Dashboard build not found" html);
-      check string "fallback etag is none" "none" etag)
-    ~finally:(fun () ->
-      (match original with
-       | Some v -> Unix.putenv "MASC_ASSETS_ROOT" v
-       | None -> Unix.putenv "MASC_ASSETS_ROOT" "");
-      cleanup_temp_dashboard_root missing_assets_root)
+      with_env
+        [
+          ("MASC_ASSETS_DIR", missing_assets_root);
+          ("MASC_ASSETS_ROOT", "");
+          ("MASC_BASE_PATH_INPUT", "");
+          ("MASC_BASE_PATH", "");
+        ]
+        (fun () ->
+          let html = Web_dashboard.html () in
+          let etag = Web_dashboard.etag () in
+          check bool "fallback html contains error message" true
+            (contains_substr "Dashboard build not found" html);
+          check string "fallback etag is none" "none" etag))
+    ~finally:(fun () -> Unix.rmdir missing_assets_root)
 
 let test_html_uses_base_path_input_assets () =
   let input_root = make_temp_dashboard_root "input" "dashboard-from-base-path-input" in

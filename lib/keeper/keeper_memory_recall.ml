@@ -73,7 +73,7 @@ let is_memory_recall_query (s : string) : bool =
   let needles = en_keywords @ ko_keywords in
   List.exists (fun n ->
     try
-      let _ = Str.search_forward (Str.regexp_string n) q 0 in
+      let _ = Re.Str.search_forward (Re.Str.regexp_string n) q 0 in
       true
     with Not_found -> false
   ) needles
@@ -81,13 +81,13 @@ let is_memory_recall_query (s : string) : bool =
 let expected_topic_hint (s : string) : string option =
   let q = String.lowercase_ascii s in
   let has_ko needle =
-    try let _ = Str.search_forward (Str.regexp_string needle) s 0 in true with Not_found -> false
+    try let _ = Re.Str.search_forward (Re.Str.regexp_string needle) s 0 in true with Not_found -> false
   in
   let has_en needle =
-    try let _ = Str.search_forward (Str.regexp_string needle) q 0 in true with Not_found -> false
+    try let _ = Re.Str.search_forward (Re.Str.regexp_string needle) q 0 in true with Not_found -> false
   in
-  if (try let _ = Str.search_forward (Str.regexp_string "날씨") s 0 in true with Not_found -> false)
-     || (try let _ = Str.search_forward (Str.regexp_string "weather") q 0 in true with Not_found -> false)
+  if (try let _ = Re.Str.search_forward (Re.Str.regexp_string "날씨") s 0 in true with Not_found -> false)
+     || (try let _ = Re.Str.search_forward (Re.Str.regexp_string "weather") q 0 in true with Not_found -> false)
   then
     Some "weather"
   else if has_ko "첫 질문"
@@ -599,8 +599,8 @@ let evaluate_memory_recall
   let expected_topic = expected_topic_hint user_message in
   let has_weather_word (s : string) =
     let q = String.lowercase_ascii s in
-    (try let _ = Str.search_forward (Str.regexp_string "날씨") s 0 in true with Not_found -> false)
-    || (try let _ = Str.search_forward (Str.regexp_string "weather") q 0 in true with Not_found -> false)
+    (try let _ = Re.Str.search_forward (Re.Str.regexp_string "날씨") s 0 in true with Not_found -> false)
+    || (try let _ = Re.Str.search_forward (Re.Str.regexp_string "weather") q 0 in true with Not_found -> false)
   in
   (* Similarity threshold for recall match acceptance.
      0.18 (default): Jaccard + character n-gram combined score.
@@ -670,8 +670,8 @@ let evaluate_memory_recall
           if has_weather_reply then 0.08 else -.0.08
       | Some "first_question" ->
           let has_first =
-            (try let _ = Str.search_forward (Str.regexp_string "첫") assistant_reply 0 in true with Not_found -> false)
-            || (try let _ = Str.search_forward (Str.regexp_string "first") (String.lowercase_ascii assistant_reply) 0 in true with Not_found -> false)
+            (try let _ = Re.Str.search_forward (Re.Str.regexp_string "첫") assistant_reply 0 in true with Not_found -> false)
+            || (try let _ = Re.Str.search_forward (Re.Str.regexp_string "first") (String.lowercase_ascii assistant_reply) 0 in true with Not_found -> false)
           in
           if has_first then 0.05 else -.0.05
       | _ -> 0.0

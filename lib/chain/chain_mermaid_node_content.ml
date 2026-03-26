@@ -7,8 +7,8 @@ include Chain_mermaid_parse
     Normalize those escapes before parsing the semantic node payload. *)
 let normalize_label_content (content : string) : string =
   content
-  |> Str.global_replace (Str.regexp {|\\\"|}) "\""
-  |> Str.global_replace (Str.regexp {|\\'|}) "'"
+  |> Re.Str.global_replace (Re.Str.regexp {|\\\"|}) "\""
+  |> Re.Str.global_replace (Re.Str.regexp {|\\'|}) "'"
 
 (** Parse node content into Chain node_type *)
 let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stadium | `Circle ]) (content : string)
@@ -260,12 +260,12 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         (* {GoalDriven:metric:op:value:max_iter} - e.g., {GoalDriven:coverage:gte:0.90:10} *)
         let rest = String.sub content 11 (String.length content - 11) in
         (* Format: metric:op:value:max_iter *)
-        let goaldriven_re = Str.regexp {|^\([a-z_]+\):\([a-z]+\):\([0-9.]+\):\([0-9]+\)$|} in
-        if Str.string_match goaldriven_re rest 0 then
-          let metric = Str.matched_group 1 rest in
-          let op_str = Str.matched_group 2 rest in
-          let value = float_of_string (Str.matched_group 3 rest) in
-          let max_iter = int_of_string (Str.matched_group 4 rest) in
+        let goaldriven_re = Re.Str.regexp {|^\([a-z_]+\):\([a-z]+\):\([0-9.]+\):\([0-9]+\)$|} in
+        if Re.Str.string_match goaldriven_re rest 0 then
+          let metric = Re.Str.matched_group 1 rest in
+          let op_str = Re.Str.matched_group 2 rest in
+          let value = float_of_string (Re.Str.matched_group 3 rest) in
+          let max_iter = int_of_string (Re.Str.matched_group 4 rest) in
           let operator = match op_str with
             | "gt" -> Gt | "gte" -> Gte | "lt" -> Lt | "lte" -> Lte | "eq" -> Eq | "neq" -> Neq
             | _ -> Gte  (* default *)
@@ -403,26 +403,26 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
       if String.length content_clean > 6 && String.sub content_clean 0 6 = "MODEL:" then
         let rest = String.sub content_clean 6 (String.length content_clean - 6) in
         (* Parse: model "prompt" or model 'prompt' or just model *)
-        if Str.string_match quote_re rest 0 then
-          let model = Str.matched_group 1 rest in
-          let prompt = Str.matched_group 2 rest in
+        if Re.Str.string_match quote_re rest 0 then
+          let model = Re.Str.matched_group 1 rest in
+          let prompt = Re.Str.matched_group 2 rest in
           Ok (Model { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
-        else if Str.string_match single_quote_re rest 0 then
-          let model = Str.matched_group 1 rest in
-          let prompt = Str.matched_group 2 rest in
+        else if Re.Str.string_match single_quote_re rest 0 then
+          let model = Re.Str.matched_group 1 rest in
+          let prompt = Re.Str.matched_group 2 rest in
           Ok (Model { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
-        else if Str.string_match simple_model_re rest 0 then
-          let model = Str.matched_group 1 rest in
+        else if Re.Str.string_match simple_model_re rest 0 then
+          let model = Re.Str.matched_group 1 rest in
           Ok (Model { model = trim model; system = None; prompt = "{{input}}"; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
         else
           Error (Printf.sprintf "Invalid MODEL format: %s" content)
       else if String.length content_clean > 5 && String.sub content_clean 0 5 = "Tool:" then
         let rest = String.sub content_clean 5 (String.length content_clean - 5) in
         (* Try Base64 encoded args first: "name %{base64}" *)
-        let base64_re = Str.regexp {|^\([^ ]+\) *%{\([^}]+\)}$|} in
-        if Str.string_match base64_re rest 0 then
-          let name = trim (Str.matched_group 1 rest) in
-          let encoded = Str.matched_group 2 rest in
+        let base64_re = Re.Str.regexp {|^\([^ ]+\) *%{\([^}]+\)}$|} in
+        if Re.Str.string_match base64_re rest 0 then
+          let name = trim (Re.Str.matched_group 1 rest) in
+          let encoded = Re.Str.matched_group 2 rest in
           (try
              let decoded = Base64.decode_exn encoded in
              let args = Yojson.Safe.from_string decoded in
@@ -431,14 +431,14 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
              (* Fallback: if Base64 decode or JSON parse fails, store as-is *)
              Ok (Tool { name; args = `Assoc [("input", `String encoded)] }))
         (* Parse: name "args" or name 'args' or name {...json...} or just name *)
-        else if Str.string_match quote_re rest 0 then
-          let name = trim (Str.matched_group 1 rest) in
-          let args_str = trim (Str.matched_group 2 rest) in
+        else if Re.Str.string_match quote_re rest 0 then
+          let name = trim (Re.Str.matched_group 1 rest) in
+          let args_str = trim (Re.Str.matched_group 2 rest) in
           (* Create args with "input" key holding the args string *)
           Ok (Tool { name; args = `Assoc [("input", `String args_str)] })
-        else if Str.string_match single_quote_re rest 0 then
-          let name = trim (Str.matched_group 1 rest) in
-          let args_str = trim (Str.matched_group 2 rest) in
+        else if Re.Str.string_match single_quote_re rest 0 then
+          let name = trim (Re.Str.matched_group 1 rest) in
+          let args_str = trim (Re.Str.matched_group 2 rest) in
           Ok (Tool { name; args = `Assoc [("input", `String args_str)] })
         else
           (* Try to find name followed by JSON: "name {...}" *)
@@ -448,7 +448,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
                let name = trim (String.sub rest 0 idx) in
                let json_str = String.sub rest idx (String.length rest - idx) in
                (* Un-escape Mermaid quotes: \" -> " *)
-               let json_unescaped = Str.global_replace (Str.regexp {|\\"|}) {|"|} json_str in
+               let json_unescaped = Re.Str.global_replace (Re.Str.regexp {|\\"|}) {|"|} json_str in
                (try
                   let args = Yojson.Safe.from_string json_unescaped in
                   Ok (Tool { name; args })
@@ -457,8 +457,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
                   Ok (Tool { name; args = `Assoc [("input", `String json_unescaped)] }))
            | _ ->
                (* No JSON, try simple name *)
-               if Str.string_match simple_model_re rest 0 then
-                 let name = trim (Str.matched_group 1 rest) in
+               if Re.Str.string_match simple_model_re rest 0 then
+                 let name = trim (Re.Str.matched_group 1 rest) in
                  Ok (Tool { name; args = `Assoc [] })
                else
                  Error (Printf.sprintf "Invalid Tool format: %s" content))
@@ -509,7 +509,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
       let stripped =
         if String.length content > 2 then
           try
-            let masc_idx = Str.search_forward (Str.regexp_string "MASC:") content 0 in
+            let masc_idx = Re.Str.search_forward (Re.Str.regexp_string "MASC:") content 0 in
             String.sub content masc_idx (String.length content - masc_idx)
           with Not_found -> content
         else content

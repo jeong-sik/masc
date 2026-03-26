@@ -281,7 +281,7 @@ let builtin_profile name =
 let parse_goal s =
   let s = String.trim s in
   (* Try to match: metric_name op value *)
-  let parts = Str.split (Str.regexp "[ \t]+") s in
+  let parts = Re.Str.split (Re.Str.regexp "[ \t]+") s in
   match parts with
   | [path; op; value_str] ->
     let value = float_of_string value_str in
@@ -343,9 +343,9 @@ let measure_metric (cmd : string) : (float, string) result =
       | Some v -> Ok v
       | None ->
         (* Try to extract first float-like substring *)
-        let re = Str.regexp "[0-9]+\\(\\.[0-9]+\\)?" in
-        if Str.string_match re trimmed 0 then
-          match float_of_string_opt (Str.matched_string trimmed) with
+        let re = Re.Str.regexp "[0-9]+\\(\\.[0-9]+\\)?" in
+        if Re.Str.string_match re trimmed 0 then
+          match float_of_string_opt (Re.Str.matched_string trimmed) with
           | Some v -> Ok v
           | None -> Error (Printf.sprintf "Cannot parse float from: %s" trimmed)
         else
@@ -553,7 +553,7 @@ let parse_worker_result (raw : string) : (iteration_record, string) result =
   try
     (* Try to extract JSON from possibly noisy output *)
     let json_str =
-      let open Str in
+      let open Re.Str in
       (* Find first { ... } block — use search_forward to handle multiline *)
       let re = regexp "{[^}]*}" in
       (try

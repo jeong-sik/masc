@@ -14,4 +14,4 @@
    unix
    yojson
    re
-   str))
+   re.str))

@@ -139,23 +139,23 @@ let default_config hat =
 (** Parse "@agent:hat" format from message
     @return Some (agent, hat) or None *)
 let parse_hatted_mention msg =
-  let re = Str.regexp "@\\([a-zA-Z0-9_-]+\\):\\([a-zA-Z0-9_-]+\\)" in
+  let re = Re.Str.regexp "@\\([a-zA-Z0-9_-]+\\):\\([a-zA-Z0-9_-]+\\)" in
   try
-    let _ = Str.search_forward re msg 0 in
-    let agent = Str.matched_group 1 msg in
-    let hat_str = Str.matched_group 2 msg in
+    let _ = Re.Str.search_forward re msg 0 in
+    let agent = Re.Str.matched_group 1 msg in
+    let hat_str = Re.Str.matched_group 2 msg in
     Some (agent, of_string hat_str)
   with Not_found -> None
 
 (** Extract all hatted mentions from a message *)
 let extract_hatted_mentions msg =
-  let re = Str.regexp "@\\([a-zA-Z0-9_-]+\\):\\([a-zA-Z0-9_-]+\\)" in
+  let re = Re.Str.regexp "@\\([a-zA-Z0-9_-]+\\):\\([a-zA-Z0-9_-]+\\)" in
   let rec find_all start acc =
     try
-      let _ = Str.search_forward re msg start in
-      let agent = Str.matched_group 1 msg in
-      let hat_str = Str.matched_group 2 msg in
-      let end_pos = Str.match_end () in
+      let _ = Re.Str.search_forward re msg start in
+      let agent = Re.Str.matched_group 1 msg in
+      let hat_str = Re.Str.matched_group 2 msg in
+      let end_pos = Re.Str.match_end () in
       find_all end_pos ((agent, of_string hat_str) :: acc)
     with Not_found -> List.rev acc
   in

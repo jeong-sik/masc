@@ -6,7 +6,7 @@ val graphql_url : unit -> string
 
 (** {1 HTTP Transport} *)
 
-val request : ?timeout_sec:float -> string -> (string, string) result
+val request : ?timeout_sec:float -> ?fallback:bool -> string -> (string, string) result
 
 (** {1 GraphQL Response Parsing} *)
 

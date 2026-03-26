@@ -9,7 +9,7 @@
     - Keeper_turn_up: start/reconfigure
     - Keeper_turn_session: team-session helpers
     - Keeper_turn_setup: ensure_keeper_exists, apply_settings_update
-    - Keeper_turn_lifecycle: model-set, shutdown *)
+    - Keeper_turn_lifecycle: shutdown *)
 
 open Tool_args
 open Keeper_types
@@ -23,7 +23,6 @@ open Keeper_turn_setup
 type tool_result = Keeper_types.tool_result
 
 let handle_keeper_up = Keeper_turn_up.handle_keeper_up
-let handle_keeper_model_set = Keeper_turn_lifecycle.handle_keeper_model_set
 let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
@@ -64,16 +63,18 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     let new_will = parse_self_model_opt args "new_will" in
     let new_needs = parse_self_model_opt args "new_needs" in
     let new_desires = parse_self_model_opt args "new_desires" in
-    let inline_models = get_string_list args "models" in
     let require_existing = get_bool args "require_existing" false in
     match inline_soul_profile_res, new_soul_profile_res with
     | Error e, _ | _, Error e -> (false, "❌ " ^ e)
     | Ok inline_soul_profile, Ok new_soul_profile ->
+    (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
+    | Error e -> (false, "❌ " ^ e)
+    | Ok () ->
     match ensure_keeper_exists
       ~ctx ~name ~require_existing ~profile_defaults
       ~inline_goal ~inline_short_goal ~inline_mid_goal ~inline_long_goal
       ~inline_instructions ~inline_will ~inline_needs ~inline_desires
-      ~inline_soul_profile ~inline_models
+      ~inline_soul_profile
     with
     | Error e -> (false, "❌ " ^ e)
     | Ok meta0 ->
@@ -96,9 +97,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           ~trace_id:meta.trace_id
           ~generation:meta.generation
       in
-      let effective_models =
-        effective_model_labels_for_turn meta ~inline_models
-      in
+      let effective_models = effective_model_labels_for_turn meta in
       (match ensure_api_keys_for_labels effective_models with
        | Error e -> (false, "❌ " ^ e)
        | Ok () ->
@@ -209,4 +208,4 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               ] in
               (true, Yojson.Safe.to_string reply_json)
 
-)
+))

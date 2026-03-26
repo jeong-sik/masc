@@ -134,10 +134,10 @@ let execute_goal_driven ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : exe
     | "exec_test" ->
         (* For test execution: extract coverage/pass rate from output *)
         (* Expected format: "coverage: 0.85" or JSON with metric field *)
-        let regex = Str.regexp (goal_metric ^ "[: ]+\\([0-9.]+\\)") in
+        let regex = Re.Str.regexp (goal_metric ^ "[: ]+\\([0-9.]+\\)") in
         (try
-          let _ = Str.search_forward regex output 0 in
-          Some (float_of_string (Str.matched_group 1 output))
+          let _ = Re.Str.search_forward regex output 0 in
+          Some (float_of_string (Re.Str.matched_group 1 output))
         with Not_found ->
           try Some (float_of_string (String.trim output))
           with Failure _ -> None)
@@ -283,10 +283,10 @@ let execute_feedback_loop ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : e
              let cleaned = String.trim score_str in
              (try min 1.0 (max 0.0 (float_of_string cleaned))
               with Failure _ ->
-                let regex = Str.regexp "[0-9]+\\.[0-9]+" in
+                let regex = Re.Str.regexp "[0-9]+\\.[0-9]+" in
                 try
-                  let _ = Str.search_forward regex cleaned 0 in
-                  min 1.0 (max 0.0 (float_of_string (Str.matched_string cleaned)))
+                  let _ = Re.Str.search_forward regex cleaned 0 in
+                  min 1.0 (max 0.0 (float_of_string (Re.Str.matched_string cleaned)))
                 with Not_found | Failure _ -> 0.5)
          | Error _ -> 0.5)
     | "regex_match" ->
@@ -325,9 +325,9 @@ let execute_feedback_loop ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : e
   (* Helper: Substitute variables in improver_prompt *)
   let substitute_prompt template ~score ~feedback ~previous_output =
     template
-    |> Str.global_replace (Str.regexp "{{score}}") (Printf.sprintf "%.2f" score)
-    |> Str.global_replace (Str.regexp "{{feedback}}") feedback
-    |> Str.global_replace (Str.regexp "{{previous_output}}") previous_output
+    |> Re.Str.global_replace (Re.Str.regexp "{{score}}") (Printf.sprintf "%.2f" score)
+    |> Re.Str.global_replace (Re.Str.regexp "{{feedback}}") feedback
+    |> Re.Str.global_replace (Re.Str.regexp "{{previous_output}}") previous_output
   in
 
   (* Create a mutable copy of the generator for prompt updates *)

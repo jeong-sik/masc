@@ -43,22 +43,22 @@ let is_nickname mention =
 *)
 let parse content =
   (* Pattern 1: @@agent (broadcast) *)
-  let broadcast_re = Str.regexp "@@\\([a-zA-Z0-9_]+\\)" in
+  let broadcast_re = Re.Str.regexp "@@\\([a-zA-Z0-9_]+\\)" in
   try
-    let _ = Str.search_forward broadcast_re content 0 in
-    Broadcast (Str.matched_group 1 content)
+    let _ = Re.Str.search_forward broadcast_re content 0 in
+    Broadcast (Re.Str.matched_group 1 content)
   with Not_found ->
     (* Pattern 2: @agent-xxx-yyy (stateful - 3+ parts, alphanumeric allowed) *)
-    let stateful_re = Str.regexp "@\\([a-zA-Z0-9_]+-[a-zA-Z0-9]+-[a-zA-Z0-9]+\\)" in
+    let stateful_re = Re.Str.regexp "@\\([a-zA-Z0-9_]+-[a-zA-Z0-9]+-[a-zA-Z0-9]+\\)" in
     try
-      let _ = Str.search_forward stateful_re content 0 in
-      Stateful (Str.matched_group 1 content)
+      let _ = Re.Str.search_forward stateful_re content 0 in
+      Stateful (Re.Str.matched_group 1 content)
     with Not_found ->
       (* Pattern 3: @agent (stateless) or @agent-something (stateful) *)
-      let mention_re = Str.regexp "@\\([a-zA-Z0-9_-]+\\)" in
+      let mention_re = Re.Str.regexp "@\\([a-zA-Z0-9_-]+\\)" in
       try
-        let _ = Str.search_forward mention_re content 0 in
-        let matched = Str.matched_group 1 content in
+        let _ = Re.Str.search_forward mention_re content 0 in
+        let matched = Re.Str.matched_group 1 content in
         (* Heuristic: if contains hyphen but not 3-part nickname, still stateful *)
         if String.contains matched '-' then
           Stateful matched
@@ -104,10 +104,10 @@ let is_mentioned target content =
   else
     let pattern =
       Printf.sprintf "\\(^\\|[^@A-Za-z0-9_-]\\)@%s\\([^A-Za-z0-9_-]\\|$\\)"
-        (Str.quote target)
+        (Re.Str.quote target)
     in
     try
-      ignore (Str.search_forward (Str.regexp_case_fold pattern) content 0);
+      ignore (Re.Str.search_forward (Re.Str.regexp_case_fold pattern) content 0);
       true
     with Not_found -> false
 

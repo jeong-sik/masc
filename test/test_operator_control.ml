@@ -91,6 +91,10 @@ let () =
             Test_operator_control_keeper.test_snapshot_keeper_tool_audit_fallback;
           Alcotest.test_case "keeper msg auto team session bridge" `Quick
             Test_operator_control_keeper.test_keeper_msg_auto_team_session_bridge;
+          Alcotest.test_case "operator keeper_message rejects legacy models"
+            `Quick
+            Test_operator_control_keeper
+            .test_operator_keeper_message_rejects_legacy_model_args;
           Alcotest.test_case "expired confirmation rejected" `Quick
             Test_operator_control_swarm.test_confirm_rejects_expired_token;
           Alcotest.test_case "swarm run continue removed from operator actions" `Quick

@@ -381,15 +381,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">모델</div>
         <${ModelList} models=${c.execution.models} />
       </div>
-      ${'' /* Show allowed_models only when it differs from models */}
-      ${c.execution.allowed_models.length > 0
-        && JSON.stringify(c.execution.allowed_models.slice().sort()) !== JSON.stringify(c.execution.models.slice().sort())
-        ? html`
-        <div class="mt-1.5">
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">허용 모델</div>
-          <${ModelList} models=${c.execution.allowed_models} />
-        </div>
-      ` : null}
 
       ${'' /* --- Compaction (read-only) --- */}
       <${SectionHeader} title="컴팩션" />

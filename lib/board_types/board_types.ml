@@ -40,12 +40,12 @@ end = struct
 
   (* Only alphanumeric, dash, underscore. Max 64 chars.
      Note: OCaml Str does not support \{n,m\} quantifiers, so we use + with length check *)
-  let valid_pattern = Str.regexp "^[a-zA-Z0-9_-]+$"
+  let valid_pattern = Re.Str.regexp "^[a-zA-Z0-9_-]+$"
 
   let of_string s =
     let s = String.trim s in
     let len = String.length s in
-    if len >= 1 && len <= 64 && Str.string_match valid_pattern s 0 then Ok s
+    if len >= 1 && len <= 64 && Re.Str.string_match valid_pattern s 0 then Ok s
     else Error (Invalid_id (Printf.sprintf "Invalid post_id: %s" s))
 
   let to_string t = t
@@ -69,12 +69,12 @@ module Comment_id : sig
 end = struct
   type t = string
 
-  let valid_pattern = Str.regexp "^[a-zA-Z0-9_-]+$"
+  let valid_pattern = Re.Str.regexp "^[a-zA-Z0-9_-]+$"
 
   let of_string s =
     let s = String.trim s in
     let len = String.length s in
-    if len >= 1 && len <= 64 && Str.string_match valid_pattern s 0 then Ok s
+    if len >= 1 && len <= 64 && Re.Str.string_match valid_pattern s 0 then Ok s
     else Error (Invalid_id (Printf.sprintf "Invalid comment_id: %s" s))
 
   let to_string t = t
@@ -97,12 +97,12 @@ end = struct
   type t = string
 
   (* Agent names: alphanumeric, dash, underscore, dot. Max 32 chars *)
-  let valid_pattern = Str.regexp "^[a-zA-Z0-9._-]+$"
+  let valid_pattern = Re.Str.regexp "^[a-zA-Z0-9._-]+$"
 
   let of_string s =
     let s = String.trim s in
     let len = String.length s in
-    if len >= 1 && len <= 32 && Str.string_match valid_pattern s 0 then Ok s
+    if len >= 1 && len <= 32 && Re.Str.string_match valid_pattern s 0 then Ok s
     else Error (Validation_error (Printf.sprintf "Invalid agent_id: %s" s))
 
   let to_string t = t

@@ -196,9 +196,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int) : (keeper_meta, string) result =
   (* 1. Check API keys *)
-  let model_labels =
-    Keeper_coordination.effective_model_labels_for_turn meta ~inline_models:[]
-  in
+  let model_labels = Keeper_coordination.effective_model_labels_for_turn meta in
   match ensure_api_keys_for_labels model_labels with
   | Error e -> Error e
   | Ok () ->

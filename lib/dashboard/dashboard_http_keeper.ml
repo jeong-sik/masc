@@ -103,13 +103,13 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           let trace_history_count = List.length m.trace_history in
           let active_model = Keeper_exec_status.active_model_of_meta m in
           let next_model_hint = Keeper_exec_status.next_model_hint_of_meta m in
+          let cascade_models =
+            Oas_model_resolve.models_of_cascade_name m.cascade_name
+          in
           let primary_model =
-            match m.models with
+            match cascade_models with
             | model :: _ -> model
-            | [] ->
-              (match Oas_model_resolve.models_of_cascade_name m.cascade_name with
-               | model :: _ -> model
-               | [] -> "")
+            | [] -> ""
           in
           let primary_model_norm = normalize_model_name primary_model in
           let last_compaction_saved_tokens =
@@ -188,9 +188,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                     ("max_context", `Int 0);
                   ])
               | _ -> None
-            ) (let ms = m.models in
-               if ms <> [] then ms
-               else Oas_model_resolve.models_of_cascade_name m.cascade_name))
+            ) cascade_models)
           in
 
           (* In compact mode (used by execution surface), skip heavy memory bank I/O.
@@ -283,9 +281,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 ]
             | None ->
                 (let effective_models =
-                   let ms = m.models in
-                   if ms <> [] then ms
-                   else Oas_model_resolve.models_of_cascade_name m.cascade_name
+                   Oas_model_resolve.models_of_cascade_name m.cascade_name
                  in
                  let cfgs = Llm_provider.Cascade_config.parse_model_strings effective_models in
                  match cfgs with
@@ -410,7 +406,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
                 ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
               ]);
-              ("models", `List (List.map (fun s -> `String s) m.models));
+              ("models", `List (List.map (fun s -> `String s) cascade_models));
               ("models_resolved", models_resolved);
               ("primary_model", `String primary_model);
               ("active_model", `String active_model);
@@ -595,8 +591,10 @@ let keeper_config_json (config : Room.config) (name : string)
       in
       let execution =
         `Assoc [
-          ("models", `List (List.map (fun s -> `String s) m.models));
-          ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
+          ( "models",
+            `List
+              (List.map (fun s -> `String s)
+                 (Oas_model_resolve.models_of_cascade_name m.cascade_name)) );
           ("active_model", `String active_model);
           ("verify", `Bool false);
         ]

@@ -249,7 +249,7 @@ spawn 시 인자로 직접 설정하는 필드.
 | `last_heartbeat` | MASC | 마지막 heartbeat 타임스탬프 | keepalive 미실행 |
 | `trace_id` | MASC | `trace-{timestamp}-{random}` 형식 | (항상 존재) |
 | `agent_name` | MASC | `keeper-{name}-agent` 형식 | (항상 존재) |
-| `active_model` | Cascade | 현재 실행 모델 (아래 5장 참조) | models 미설정 |
+| `active_model` | Cascade | `last_model_used` 우선, 없으면 `cascade_name`의 첫 모델 fallback | 아직 실행 기록 없음 |
 | `total_cost_usd` | MASC | 누적 MODEL 호출 비용 | 아직 호출 없음 |
 | `compaction_count` | MASC | compaction 수행 횟수 | 아직 compaction 없음 |
 
@@ -259,8 +259,8 @@ spawn 시 인자로 직접 설정하는 필드.
 
 | 필드 | 결정 로직 | 코드 위치 |
 |------|----------|----------|
-| **Active Model** | (1) `active_model` 인자 → (2) `last_model_used` → (3) `allowed_models[0]` → (4) `models[0]` | `keeper_exec_status.ml:active_model_of_meta` |
-| **Next Model Hint** | `(allowed_models ++ models)`에서 중복 제거 후, active_model과 다른 첫 번째 모델. 없으면 현재 모델 반환 | `keeper_exec_status.ml:next_model_hint_of_meta` |
+| **Active Model** | `last_model_used` 우선, 없으면 `cascade_name`의 첫 모델 fallback | `keeper_exec_status.ml:active_model_of_meta` |
+| **Next Model Hint** | `config/cascade.json`에서 해석한 cascade 목록에서 현재 active_model과 다른 첫 모델. 없으면 현재 모델 또는 `None` | `keeper_exec_status.ml:next_model_hint_of_meta` |
 | **Skill (Primary/Secondary)** | 마지막 메트릭 항목의 `skill_primary`, `skill_secondary` 필드 | `keeper_status.ml:last_skill_route` |
 
 ---
@@ -288,9 +288,6 @@ spawn 시 인자로 직접 설정하는 필드.
     "needs": "(선택) 필요 — 무엇이 필요한가",
     "desires": "(선택) 욕구 — 무엇을 원하는가",
     "instructions": "(선택) 커스텀 시스템 프롬프트",
-    "models": ["(필수) provider:model_id", "..."],
-    "allowed_models": ["(선택) 허용 모델 목록"],
-    "active_model": "(선택) 초기 활성 모델",
     "soul_profile": "(선택) compaction 시 보존 우선순위 결정"
   }
 }
@@ -309,21 +306,18 @@ Soul Profile은 compaction 시 어떤 정보를 우선 보존할지 결정하는
 | `minimal` | 현재 목표, 가장 중요한 결정 1개, 최우선 차단 요소, 다음 행동만 보존 |
 | `balanced` (기본) | 안전/신뢰 → 목표 진행/결정 → 미해결 리스크 → 도구 결과 → 스타일 선호 순서 |
 
-### 4.3 Profile Defaults --- 모델 Cascade 입력
+### 4.3 Profile Defaults --- 모델 해석
 
-`profile.json`의 `keeper` 오브젝트에 설정된 `models`, `allowed_models`, `active_model`이 모델 cascade의 입력이 된다. spawn 시 인자가 없으면 매니페스트 값이 사용된다.
-
-모델 선택 우선순위: spawn 인자 > profile.json > fallback.
+Keeper 모델 선택은 profile.json 인자가 아니라 `cascade_name`으로 결정된다. 기본 keeper는 `keeper_unified` cascade를 사용하고, 실제 모델 목록은 `config/cascade.json`에서 해석된다.
 
 ### 4.4 작성 예시
 
-**최소 (name + model만)**:
+**최소**:
 ```json
 {
   "name": "helper",
   "keeper": {
-    "goal": "사용자 질문에 응답",
-    "models": ["glm:glm-4.7-flash"]
+    "goal": "사용자 질문에 응답"
   }
 }
 ```
@@ -337,8 +331,6 @@ Soul Profile은 compaction 시 어떤 정보를 우선 보존할지 결정하는
   "keeper": {
     "goal": "에이전트 커뮤니티의 건강한 소통을 촉진",
     "soul_profile": "relationship",
-    "models": ["glm:glm-4.7-flash"],
-    "allowed_models": ["glm:glm-4.7-flash"],
     "will": "공동체의 화합과 성장을 돕겠다",
     "needs": "구성원들의 신뢰와 참여",
     "desires": "모든 에이전트가 자기 역할에서 보람을 느끼는 환경"
@@ -359,9 +351,6 @@ Soul Profile은 compaction 시 어떤 정보를 우선 보존할지 결정하는
     "long_goal": "팀의 기술 의사결정에 근거 기반 인사이트 제공",
     "soul_profile": "research",
     "instructions": "arXiv, HuggingFace, 공식 블로그를 우선 참조하라. 검증 안 된 수치는 사용하지 마라.",
-    "models": ["glm:glm-4.7-flash"],
-    "allowed_models": ["glm:glm-4.7-flash", "claude:sonnet"],
-    "active_model": "glm:glm-4.7-flash",
     "will": "정확한 정보를 찾아 전달하겠다",
     "needs": "충분한 탐색 시간과 다양한 소스",
     "desires": "팀이 데이터 기반으로 판단하는 문화"
@@ -399,13 +388,10 @@ masc_keeper_create_from_persona(persona_name: "sangsu")
 
 ```mermaid
 flowchart TD
-    A[spawn 인자: active_model] -->|있으면| Z[Active Model 결정]
-    A -->|없으면| B[profile.json: keeper.active_model]
-    B -->|있으면| Z
-    B -->|없으면| C[last_model_used 확인]
-    C -->|비어있지 않으면| Z
-    C -->|비어있으면| D["allowed_models ++ models 첫 번째"]
-    D --> Z
+    A[last_model_used 확인] -->|있으면| Z[Active Model 결정]
+    A -->|없으면| B[cascade_name 해석]
+    B --> C[config/cascade.json 첫 모델]
+    C --> Z
 
     style Z fill:#e8f5e9
 ```
@@ -414,10 +400,10 @@ flowchart TD
 
 Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 
-1. `allowed_models`와 `models`를 결합하여 중복 제거 (순서 유지)
-2. 결합된 pool에서 현재 `active_model`과 다른 첫 번째 모델을 선택
-3. pool에 현재 모델만 있으면 그 모델을 반환
-4. pool이 비어있으면 `None`
+1. `config/cascade.json`에서 `cascade_name`의 모델 목록을 읽는다
+2. 현재 `active_model`과 다른 첫 번째 모델을 고른다
+3. 다른 모델이 없으면 현재 모델을 반환한다
+4. cascade가 비어 있으면 `None`
 
 코드 근거: `keeper_exec_status.ml:next_model_hint_of_meta`
 
@@ -435,9 +421,9 @@ Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 
 ### 5.4 모델 변경 시 주의사항
 
-- `active_model`은 반드시 `models` 또는 `allowed_models`에 포함되어야 한다 (유효성 검증에서 에러 발생)
+- keeper는 per-call `models` override나 persisted `active_model` pinning을 지원하지 않는다
 - handoff 시 cross-model 정규화가 자동 적용된다: Llama는 Tool 메시지 변환, Claude는 alternating 규칙 적용
-- cascade fallback은 `models` 리스트 순서대로 시도한다
+- cascade fallback은 `config/cascade.json`의 해당 cascade 순서대로 시도한다
 
 ---
 
@@ -591,7 +577,7 @@ flowchart TD
 |------|----------|
 | 의도한 모델이 사용 안 됨 | `active_model` vs `last_model_used` 비교 |
 | cascade가 fallback으로 넘어감 | MODEL provider 연결 상태 확인 (API key, 서버 상태 등) |
-| `active_model`이 빈 문자열 | `models` 리스트가 비어있지 않은지 확인 |
+| `active_model`이 빈 문자열 | `config/cascade.json`의 `keeper_unified` 설정 확인 |
 
 **Cascade 디버깅**:
 ```

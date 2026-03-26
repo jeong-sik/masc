@@ -137,70 +137,53 @@ let get_env_float_logged name ~default =
 *)
 
 let json_string ?(default = "") key json =
-  let open Yojson.Safe.Util in
-  try json |> member key |> to_string
-  with Type_error _ -> default
+  match Yojson.Safe.Util.member key json with
+  | `String s -> s
+  | _ -> default
 
 let json_int ?(default = 0) key json =
-  let open Yojson.Safe.Util in
-  try
-    match json |> member key with
-    | `Float f -> int_of_float f
-    | j -> to_int j
-  with Type_error _ -> default
+  match Yojson.Safe.Util.member key json with
+  | `Int i -> i
+  | `Float f -> int_of_float f
+  | _ -> default
 
 let json_float ?(default = 0.0) key json =
-  let open Yojson.Safe.Util in
-  try
-    match json |> member key with
-    | `Int i -> float_of_int i
-    | j -> to_float j
-  with Type_error _ -> default
+  match Yojson.Safe.Util.member key json with
+  | `Float f -> f
+  | `Int i -> float_of_int i
+  | _ -> default
 
 let json_bool ?(default = false) key json =
-  let open Yojson.Safe.Util in
-  try json |> member key |> to_bool
-  with Type_error _ -> default
+  match Yojson.Safe.Util.member key json with
+  | `Bool b -> b
+  | _ -> default
 
 let json_string_list key json =
-  let open Yojson.Safe.Util in
-  try
-    json |> member key |> to_list |> List.filter_map (fun v ->
-      try Some (to_string v) with Type_error _ -> None)
-  with Type_error _ -> []
+  match Yojson.Safe.Util.member key json with
+  | `List l ->
+      List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) l
+  | _ -> []
 
 let json_string_opt key json =
-  let open Yojson.Safe.Util in
-  try
-    match json |> member key with
-    | `Null -> None
-    | j -> Some (to_string j)
-  with Type_error _ -> None
+  match Yojson.Safe.Util.member key json with
+  | `String s -> Some s
+  | _ -> None
 
 let json_int_opt key json =
-  let open Yojson.Safe.Util in
-  try
-    match json |> member key with
-    | `Null -> None
-    | j -> Some (to_int j)
-  with Type_error _ -> None
+  match Yojson.Safe.Util.member key json with
+  | `Int i -> Some i
+  | _ -> None
 
 let json_float_opt key json =
-  let open Yojson.Safe.Util in
-  try
-    match json |> member key with
-    | `Null -> None
-    | `Int i -> Some (float_of_int i)
-    | j -> Some (to_float j)
-  with Type_error _ -> None
+  match Yojson.Safe.Util.member key json with
+  | `Float f -> Some f
+  | `Int i -> Some (float_of_int i)
+  | _ -> None
 
 let json_bool_opt key json =
-  let open Yojson.Safe.Util in
-  try
-    match json |> member key with
-    | `Null -> None
-    | j -> Some (to_bool j)
-  with Type_error _ -> None
+  match Yojson.Safe.Util.member key json with
+  | `Bool b -> Some b
+  | _ -> None
 
 (** {1 Safe Process Execution} *)
 

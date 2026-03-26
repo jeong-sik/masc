@@ -6,7 +6,7 @@
  (modules board_types)
  (libraries
    yojson
-   str
+   re.str
    eio
    mirage-crypto
    mirage-crypto-rng)

@@ -116,6 +116,10 @@ let update_meta ~base_path name meta =
     | Some entry -> entry.meta <- meta
     | None -> ())
 
+let () =
+  register_runtime_meta_write_sync (fun config meta ->
+      update_meta ~base_path:config.base_path meta.name meta)
+
 let set_state ~base_path name state =
   with_lock_rw (fun () ->
     match Hashtbl.find_opt registry (registry_key ~base_path name) with

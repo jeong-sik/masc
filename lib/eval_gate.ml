@@ -137,8 +137,8 @@ let detect_evasion (command : string) : (string * string) option =
   let cmd_lower = String.lowercase_ascii command in
   List.find_opt (fun (pattern, _desc) ->
     try
-      let re = Str.regexp pattern in
-      ignore (Str.search_forward re cmd_lower 0);
+      let re = Re.Str.regexp pattern in
+      ignore (Re.Str.search_forward re cmd_lower 0);
       true
     with Not_found -> false
   ) evasion_indicators

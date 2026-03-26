@@ -77,6 +77,14 @@
  (libraries masc_mcp agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))
 
+; ============================================================
+; Property-based tests (QCheck)
+; ============================================================
+(tests
+ (names test_pbt_mention test_pbt_validation)
+ (modules test_pbt_mention test_pbt_validation)
+ (libraries masc_mcp alcotest qcheck-core qcheck-alcotest str))
+
 ; Runtime params + governance registry tests (requires Eio.Mutex)
 (test
  (name test_runtime_params)

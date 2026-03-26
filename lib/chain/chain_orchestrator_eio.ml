@@ -75,15 +75,15 @@ let default_config = {
 let parse_chain_design (response: string) : (chain, string) result =
   (* Try to extract Mermaid graph or JSON from response anywhere in the text *)
   (* NOTE: Must use regular string for \n to be interpreted as newline *)
-  let mermaid_pattern = Str.regexp "```mermaid\n\\(graph[^`]+\\)```" in
-  let json_pattern = Str.regexp "```json\n\\([^`]+\\)```" in
+  let mermaid_pattern = Re.Str.regexp "```mermaid\n\\(graph[^`]+\\)```" in
+  let json_pattern = Re.Str.regexp "```json\n\\([^`]+\\)```" in
   let extract_template_vars (s : string) =
-    let re = Str.regexp "{{\\([^}]+\\)}}" in
+    let re = Re.Str.regexp "{{\\([^}]+\\)}}" in
     let rec loop pos acc =
       try
-        let _ = Str.search_forward re s pos in
-        let var = Str.matched_group 1 s |> String.trim in
-        loop (Str.match_end ()) (var :: acc)
+        let _ = Re.Str.search_forward re s pos in
+        let var = Re.Str.matched_group 1 s |> String.trim in
+        loop (Re.Str.match_end ()) (var :: acc)
       with Not_found -> List.rev acc
     in
     loop 0 []
@@ -174,13 +174,13 @@ let parse_chain_design (response: string) : (chain, string) result =
   in
 
   try
-    let _ = Str.search_forward mermaid_pattern response 0 in
-    let mermaid_code = Str.matched_group 1 response in
+    let _ = Re.Str.search_forward mermaid_pattern response 0 in
+    let mermaid_code = Re.Str.matched_group 1 response in
     try_parse_mermaid mermaid_code
   with Not_found ->
     try
-      let _ = Str.search_forward json_pattern response 0 in
-      let json_str = Str.matched_group 1 response in
+      let _ = Re.Str.search_forward json_pattern response 0 in
+      let json_str = Re.Str.matched_group 1 response in
       try_parse_json json_str
     with Not_found ->
       let trimmed = String.trim response in
@@ -198,7 +198,7 @@ let parse_chain_design (response: string) : (chain, string) result =
               | Ok chain -> Ok chain
               | Error _ ->
                   let graph_idx =
-                    try Some (Str.search_forward (Str.regexp "graph") response 0)
+                    try Some (Re.Str.search_forward (Re.Str.regexp "graph") response 0)
                     with Not_found -> None
                   in
                   (match graph_idx with

@@ -42,7 +42,7 @@
   fs_compat
   yojson
   unix
-  str
+  re.str
   eio
   eio.unix
   caqti

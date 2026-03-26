@@ -536,9 +536,9 @@ let available_flairs = [
 
 (** Extract flair from content (format: [flair:name] at start) *)
 let extract_flair content =
-  let re = Str.regexp {|\[flair:\([a-z]+\)\]|} in
-  if Str.string_match re content 0 then
-    let flair_name = Str.matched_group 1 content in
+  let re = Re.Str.regexp {|\[flair:\([a-z]+\)\]|} in
+  if Re.Str.string_match re content 0 then
+    let flair_name = Re.Str.matched_group 1 content in
     match List.find_opt (fun (name, _, _) -> name = flair_name) available_flairs with
     | Some f -> Some f
     | None -> None

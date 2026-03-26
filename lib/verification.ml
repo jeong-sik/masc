@@ -213,13 +213,13 @@ let evaluate_criterion output criterion =
        | _ -> Pass)  (* Basic check; full JSON schema validation could be added *)
   | Contains needle ->
       if String.length needle > 0 && (
-        try ignore (Str.search_forward (Str.regexp_string needle) output_str 0); true
+        try ignore (Re.Str.search_forward (Re.Str.regexp_string needle) output_str 0); true
         with Not_found -> false
       ) then Pass
       else Fail (Printf.sprintf "output does not contain '%s'" needle)
   | Not_contains needle ->
       if String.length needle > 0 && (
-        try ignore (Str.search_forward (Str.regexp_string needle) output_str 0); true
+        try ignore (Re.Str.search_forward (Re.Str.regexp_string needle) output_str 0); true
         with Not_found -> false
       ) then Fail (Printf.sprintf "output contains forbidden '%s'" needle)
       else Pass

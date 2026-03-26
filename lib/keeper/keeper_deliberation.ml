@@ -398,9 +398,9 @@ let extract_json_from_response (raw : string) : (Yojson.Safe.t, string) result =
   | json -> Ok json
   | exception Yojson.Json_error _ ->
       (* Try to find JSON between code fences *)
-      let re_fenced = Str.regexp {|```\(json\)?\n?\(.*\)\n?```|} in
-      if Str.string_match re_fenced trimmed 0 then
-        let inner = Str.matched_group 2 trimmed in
+      let re_fenced = Re.Str.regexp {|```\(json\)?\n?\(.*\)\n?```|} in
+      if Re.Str.string_match re_fenced trimmed 0 then
+        let inner = Re.Str.matched_group 2 trimmed in
         match Yojson.Safe.from_string (String.trim inner) with
         | json -> Ok json
         | exception Yojson.Json_error _ -> Error "JSON parse failed after fence extraction"

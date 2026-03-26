@@ -15,9 +15,6 @@ type parsed_args = {
   short_goal_opt : string option;
   mid_goal_opt : string option;
   long_goal_opt : string option;
-  models_in : string list;
-  allowed_models_in : string list;
-  active_model_opt : string option;
   policy_voice_enabled_opt : bool option;
   allowed_paths_opt : string list option;
   room_scope_opt : string option;
@@ -51,6 +48,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
   if not (validate_name name) then
     Error (false, "invalid keeper name (allowed: [A-Za-z0-9._-])")
   else
+    match reject_legacy_model_args ~tool_name:"masc_keeper_up" args with
+    | Error e -> Error (false, e)
+    | Ok () ->
     let soul_profile_opt_res = parse_soul_profile_opt args "soul_profile" in
     let compaction_profile_opt_res =
       parse_compaction_profile_opt args "compaction_profile"
@@ -62,9 +62,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
     let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
-    let models_in = get_string_list args "models" in
-    let allowed_models_in = get_string_list args "allowed_models" in
-    let active_model_opt = get_string_opt args "active_model" in
     let policy_voice_enabled_opt = get_bool_opt args "policy_voice_enabled" in
     let allowed_paths_opt =
       let raw = get_string_list args "allowed_paths" in
@@ -131,9 +128,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       short_goal_opt;
       mid_goal_opt;
       long_goal_opt;
-      models_in;
-      allowed_models_in;
-      active_model_opt;
       policy_voice_enabled_opt;
       allowed_paths_opt;
       room_scope_opt;

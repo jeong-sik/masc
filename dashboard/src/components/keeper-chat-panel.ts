@@ -88,7 +88,7 @@ async function sendChat(keeperName: string): Promise<void> {
   activeAbort = new AbortController()
 
   try {
-    await streamKeeperMessage(keeperName, text, undefined, {
+    await streamKeeperMessage(keeperName, text, {
       signal: activeAbort.signal,
       onEvent: (event: KeeperChatStreamEvent) => {
         if (isKeeperTextContentEvent(event) && event.delta) {

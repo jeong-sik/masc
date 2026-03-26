@@ -101,3 +101,6 @@ val explicit_metadata : (string * metadata) list
 (** Explicitly configured tool metadata entries (for test verification). *)
 
 val hidden_placeholder_tools : unit -> string list
+
+val implementation_allows_public_visibility : implementation_status -> bool
+(** [true] when an implementation status permits public surface listing. *)

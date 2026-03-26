@@ -460,6 +460,33 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    meta_after_triage)
               else meta_after_triage
             in
+            (* Recurring task dispatch (#3190) *)
+            let _recurring_dispatched =
+              try
+                Keeper_recurring.dispatch_due
+                  ~keeper_name:meta_after_proactive.name
+                  ~now_ts
+                  ~dispatch:(fun task action ->
+                    match action with
+                    | Keeper_recurring.Broadcast msg ->
+                      (try
+                         let _ = Room.broadcast ctx.config
+                           ~from_agent:meta_after_proactive.agent_name
+                           ~content:(Printf.sprintf "[loop:%s] %s" task.label msg) in
+                         Log.Keeper.info "[recurring] %s dispatched: %s"
+                           task.id task.label;
+                         Ok ()
+                       with exn ->
+                         Log.Keeper.warn "[recurring] %s failed: %s"
+                           task.id (Printexc.to_string exn);
+                         Error (Printexc.to_string exn)))
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Keeper.warn "[recurring] dispatch error: %s"
+                  (Printexc.to_string exn);
+                0
+            in
             let base =
               float_of_int
                 (max 30 (min 300 meta_after_proactive.presence_keepalive_sec))

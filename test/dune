@@ -1125,3 +1125,9 @@
  (name test_prompt_registry_defaults)
  (modules test_prompt_registry_defaults)
  (libraries masc_mcp alcotest str yojson unix))
+
+; Keeper recurring task loop tests (#3190)
+(test
+ (name test_keeper_recurring)
+ (modules test_keeper_recurring)
+ (libraries masc_mcp alcotest yojson unix))

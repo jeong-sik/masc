@@ -369,7 +369,8 @@ let session_to_swarm_config
     max_agent_retries = 1;
     collaboration = Some collaboration;
     resource_check = Some (fun () -> Room.is_initialized config);
-    max_concurrent_agents = Some (max 1 (List.length entries)) }
+    max_concurrent_agents = Some (max 1 (List.length entries));
+    enable_streaming = false }
 
 (* ── Inverse: swarm result -> session update ───────────────────── *)
 

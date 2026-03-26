@@ -451,7 +451,6 @@ export interface KeeperConfigPrompt {
 
 export interface KeeperConfigExecution {
   models: string[]
-  allowed_models: string[]
   active_model: string
   verify: boolean
 }

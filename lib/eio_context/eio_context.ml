@@ -71,39 +71,40 @@ let get_switch () =
             "Eio switch not initialized - ensure set_switch is called during server startup")
 
 (** TLS connector for Cohttp_eio HTTPS support. *)
-let https_connector :
+let _https_connector_cache :
   (Uri.t ->
    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-   [> Eio.Flow.two_way_ty ] Eio.Resource.t) Eio.Lazy.t =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let fail_closed msg =
-      Log.Misc.info "%s" msg;
-      (fun _uri _raw -> failwith msg)
-    in
-    match Ca_certs.authenticator () with
-    | Error (`Msg msg) ->
-        fail_closed ("CA certs unavailable: " ^ msg)
-    | Error _ ->
-        fail_closed "CA certs unavailable: unknown error"
-    | Ok authenticator ->
-        (match Tls.Config.client ~authenticator () with
-         | Error (`Msg msg) ->
-             fail_closed ("TLS config error: " ^ msg)
-         | Ok tls_config ->
-             fun uri (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t) ->
-               let flow : [> Eio.Flow.two_way_ty ] Eio.Resource.t = (raw :> _) in
-             let host =
-               match Uri.host uri with
-               | None -> None
-               | Some h ->
-                   (match Domain_name.of_string h with
-                    | Ok d -> Some (Domain_name.host_exn d)
-                    | Error _ -> None)
-             in
-             match host with
-             | None -> failwith "TLS host missing/invalid"
-             | Some host -> Tls_eio.client_of_flow tls_config ~host flow)
-  )
+   [> Eio.Flow.two_way_ty ] Eio.Resource.t) option ref = ref None
+
+let build_https_connector () =
+  match Ca_certs.authenticator () with
+  | Error (`Msg msg) ->
+      failwith ("CA certs unavailable: " ^ msg)
+  | Error _ ->
+      failwith "CA certs unavailable: unknown error"
+  | Ok authenticator ->
+      (match Tls.Config.client ~authenticator () with
+       | Error (`Msg msg) ->
+           failwith ("TLS config error: " ^ msg)
+       | Ok tls_config ->
+           fun uri (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t) ->
+             let flow : [> Eio.Flow.two_way_ty ] Eio.Resource.t = (raw :> _) in
+           let host =
+             match Uri.host uri with
+             | None -> None
+             | Some h ->
+                 (match Domain_name.of_string h with
+                  | Ok d -> Some (Domain_name.host_exn d)
+                  | Error _ -> None)
+           in
+           match host with
+           | None -> failwith "TLS host missing/invalid"
+           | Some host -> Tls_eio.client_of_flow tls_config ~host flow)
 
 let get_https_connector () =
-  Eio.Lazy.force https_connector
+  match !_https_connector_cache with
+  | Some c -> c
+  | None ->
+    let c = build_https_connector () in
+    _https_connector_cache := Some c;
+    c

@@ -400,10 +400,15 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Eio.Time.sleep clock 0.5;
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
       Eio.Time.sleep clock 0.5;
-      (* Remaining loops are lighter (no PG or use cached data). *)
+      (* transport_health is light (no PG), start immediately. *)
       Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
+      (* mission and operator loops are PG-heavy — stagger to avoid pool
+         exhaustion that causes "Invalid concurrent usage" errors. *)
+      Eio.Time.sleep clock 1.0;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
+      Eio.Time.sleep clock 1.0;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
+      Eio.Time.sleep clock 1.0;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
       (* Start auxiliary transports before optional warmups and resident loops.
          Otherwise HTTP can report ready while gRPC/WS startup is still stuck

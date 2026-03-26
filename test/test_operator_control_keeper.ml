@@ -113,7 +113,6 @@ let test_keeper_status_exposes_summary_and_recoverable () =
               [
                 ("name", `String keeper_name);
                 ("goal", `String "Probe keeper runtime");
-                ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
                 ("presence_keepalive", `Bool false);
                 ("proactive_enabled", `Bool false);
               ])
@@ -183,7 +182,6 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
         {|
 [keeper]
 goal = "Defaults goal"
-models = ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
 room_scope = "all"
 proactive_enabled = true
 |};
@@ -331,7 +329,6 @@ let test_snapshot_keeper_tool_audit_fallback () =
               [
                 ("name", `String keeper_name);
                 ("goal", `String "Expose dashboard fallback keeper audit");
-                ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
                 ("presence_keepalive", `Bool false);
                 ("proactive_enabled", `Bool false);
               ])
@@ -411,7 +408,6 @@ let test_keeper_msg_auto_team_session_bridge () =
               [
                 ("name", `String keeper_name);
                 ("goal", `String "Start projected team sessions from explicit keeper messages");
-                ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
                 ("presence_keepalive", `Bool false);
                 ("proactive_enabled", `Bool false);
               ])
@@ -578,3 +574,35 @@ let test_keeper_msg_auto_team_session_bridge () =
           meta_after_down.last_team_session_started_at;
         Alcotest.(check int) "start count retained on down" 1
           meta_after_down.team_session_start_count_total)
+
+let test_operator_keeper_message_rejects_legacy_model_args () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      match
+        Operator_control.action_json ctx
+          (`Assoc
+            [
+              ("actor", `String "operator");
+              ("action_type", `String "keeper_message");
+              ("target_type", `String "keeper");
+              ("target_id", `String "sangsu");
+              ( "payload",
+                `Assoc
+                  [
+                    ("message", `String "ping");
+                    ("models", `List [ `String "llama:test-model" ]);
+                  ] );
+            ])
+      with
+      | Ok _ -> Alcotest.fail "keeper_message should reject legacy models payload"
+      | Error err ->
+          Alcotest.(check bool) "legacy model error surfaced" true
+            (contains_substring err "legacy keeper model args removed"))

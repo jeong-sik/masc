@@ -83,7 +83,25 @@ let request_curl ~timeout_sec body =
              with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn))))
 
 (** Cohttp_eio primary transport with curl fallback. *)
-let request ?(timeout_sec=10.0) body : (string, string) result =
+let is_transport_error msg =
+  let m = String.lowercase_ascii msg in
+  let has pat =
+    let plen = String.length pat in
+    let mlen = String.length m in
+    if plen > mlen then false
+    else
+      let rec scan i =
+        if i > mlen - plen then false
+        else if String.sub m i plen = pat then true
+        else scan (i + 1)
+      in scan 0
+  in
+  List.exists has
+    [ "eio net not initialized"; "connection refused"; "name resolution";
+      "dns"; "timed out"; "timeout"; "broken pipe"; "eof";
+      "connection reset"; "network is unreachable" ]
+
+let request ?(timeout_sec=10.0) ?(fallback=true) body : (string, string) result =
   let url = graphql_url () in
   let key = api_key () in
   let max_response_bytes = 1_000_000 in
@@ -132,8 +150,9 @@ let request ?(timeout_sec=10.0) body : (string, string) result =
   in
   match cohttp_result with
   | Ok _ as success -> success
-  | Error _cohttp_err ->
+  | Error cohttp_err when fallback && is_transport_error cohttp_err ->
     request_curl ~timeout_sec body
+  | Error _ as err -> err
 
 (** {1 GraphQL Response Parsing} *)
 
@@ -171,11 +190,11 @@ let query ?(timeout_sec=10.0) ~query:q ?(variables=`Null) ()
   | Error msg -> Error msg
   | Ok raw -> parse_response raw
 
-(** Execute a GraphQL mutation. Same as [query] but named for clarity. *)
+(** Execute a GraphQL mutation. Does not fall back to curl to prevent replay. *)
 let mutate ?(timeout_sec=10.0) ~mutation ?(variables=`Null) ()
     : (Yojson.Safe.t, string) result =
   let body = build_body ~query:mutation ~variables () in
-  match request ~timeout_sec body with
+  match request ~timeout_sec ~fallback:false body with
   | Error msg -> Error msg
   | Ok raw -> parse_response raw
 

@@ -32,8 +32,7 @@ val keeper_write_done : string list -> bool
 
 val keeper_action_kind_of_tool_names : string list -> string
 
-val effective_model_labels_for_turn :
-  keeper_meta -> inline_models:string list -> string list
+val effective_model_labels_for_turn : keeper_meta -> string list
 
 val room_cursor_for : keeper_meta -> string -> int
 

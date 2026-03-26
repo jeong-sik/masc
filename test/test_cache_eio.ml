@@ -21,6 +21,8 @@ let with_temp_masc_dir f =
   Unix.mkdir base 0o755;
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* Reset cached entry count to prevent cross-test contamination *)
+  Cache_eio.reset_cached_entry_count ();
   let config = Room.default_config base in
   let _ = Room.init config ~agent_name:None in
   try

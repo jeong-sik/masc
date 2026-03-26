@@ -333,24 +333,30 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   in
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
-      let events = Agent_sdk.Event_bus.drain keeper_lifecycle_sub in
-      List.iter
-        (function
-          | Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", payload) ->
-              (match
-                 ( Safe_ops.json_string_opt "event" payload,
-                   Safe_ops.json_string_opt "keeper_name" payload )
-               with
-              | Some event, Some keeper_name ->
-                  Server_dashboard_http.patch_keeper_dependent_caches
-                    ~keeper_name ~event
-              | _ -> ())
-          | _ -> ())
-        events;
-      if events <> [] then
-        Log.Dashboard.info
-          "patched keeper-dependent dashboard caches (%d lifecycle event(s))"
-          (List.length events);
+      (try
+        let events = Agent_sdk.Event_bus.drain keeper_lifecycle_sub in
+        List.iter
+          (function
+            | Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", payload) ->
+                (match
+                   ( Safe_ops.json_string_opt "event" payload,
+                     Safe_ops.json_string_opt "keeper_name" payload )
+                 with
+                | Some event, Some keeper_name ->
+                    Server_dashboard_http.patch_keeper_dependent_caches
+                      ~keeper_name ~event
+                | _ -> ())
+            | _ -> ())
+          events;
+        if events <> [] then
+          Log.Dashboard.info
+            "patched keeper-dependent dashboard caches (%d lifecycle event(s))"
+            (List.length events)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Dashboard.error "keeper lifecycle listener iteration failed: %s"
+          (Printexc.to_string exn));
       Eio.Time.sleep clock 0.25;
       loop ()
     in
@@ -493,58 +499,68 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
 let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
      Replaces the old mutex + synchronous file I/O pattern. *)
-  Eio.Fiber.fork ~sw (fun () -> Metrics_store_eio.start_flush_fiber ~clock);
+  Eio.Fiber.fork ~sw (fun () ->
+    try Metrics_store_eio.start_flush_fiber ~clock
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Server.error "metrics_flush fiber crashed: %s"
+        (Printexc.to_string exn));
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
   (match Board_dispatch.get_pg_pool () with
   | Some pool ->
       let listener = Board_listener.create pool in
-      Eio.Fiber.fork ~sw (fun () -> Board_listener.start listener);
+      Eio.Fiber.fork ~sw (fun () ->
+        try Board_listener.start listener
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.BoardListener.error "board listener fiber crashed: %s"
+            (Printexc.to_string exn));
       Log.BoardListener.info "Fiber started for real-time Board events"
   | None ->
       Log.BoardListener.info "Skipped (not using PostgreSQL backend)");
   Eio.Fiber.fork ~sw (fun () ->
       let rec loop () =
         Eio.Time.sleep clock 60.0;
-        let stale_sids = Sse.cleanup_stale () in
-        List.iter stop_sse_session stale_sids;
-        if stale_sids <> [] then
-          Log.Server.info "Reaped %d stale connections (active: %d)"
-            (List.length stale_sids) (Sse.client_count ());
-        let evicted_events = Sse.cleanup_expired_events () in
-        if evicted_events > 0 then
-          Log.Server.info "Evicted %d expired SSE buffer events" evicted_events;
-        (* Cache eviction: remove expired entries *)
-        let evicted = Cache_eio.evict_expired state.room_config in
-        if evicted > 0 then
-          Log.Server.info "Cache: evicted %d expired entries" evicted;
-        let sse_guards_reaped = Server_mcp_transport_http_sse.reap_stale_guards () in
-        let http_guards_reaped = Server_mcp_transport_http.reap_stale_guards () in
-        let is_active sid =
-          Server_mcp_transport_http_sse.is_active_sse_session sid
-          || Server_mcp_transport_http.is_active_sse_session sid
-        in
-        let sessions_reaped =
-          Server_mcp_transport_http_session.reap_stale_sessions
-            ~is_active_session:is_active
-        in
-        if sse_guards_reaped + http_guards_reaped + sessions_reaped > 0 then
-          Log.Server.info "reaped %d SSE guards + %d HTTP guards + %d stale sessions"
-            sse_guards_reaped http_guards_reaped sessions_reaped;
-        (* Reap dead external subscribers (gRPC, WebSocket, etc.)
-           that remain registered after their transport connection drops.
-           Without this, stale subscribers accumulate when no broadcasts
-           occur to trigger the lazy is_alive check. *)
-        let ext_reaped = Sse.reap_dead_external_subscribers () in
-        if ext_reaped > 0 then
-          Log.Server.info "reaped %d dead external subscribers" ext_reaped;
-        (* Clean up expired WebRTC signaling offers.
-           Offers older than 60s are removed to prevent indefinite
-           accumulation from failed handshake attempts. *)
-        if Server_webrtc_transport.is_enabled () then begin
-          let webrtc_expired = Server_webrtc_transport.cleanup_expired_offers () in
-          if webrtc_expired > 0 then
-            Log.Server.info "WebRTC: cleaned %d expired offers" webrtc_expired
-        end;
+        (try
+          let stale_sids = Sse.cleanup_stale () in
+          List.iter stop_sse_session stale_sids;
+          if stale_sids <> [] then
+            Log.Server.info "Reaped %d stale connections (active: %d)"
+              (List.length stale_sids) (Sse.client_count ());
+          let evicted_events = Sse.cleanup_expired_events () in
+          if evicted_events > 0 then
+            Log.Server.info "Evicted %d expired SSE buffer events" evicted_events;
+          let evicted = Cache_eio.evict_expired state.room_config in
+          if evicted > 0 then
+            Log.Server.info "Cache: evicted %d expired entries" evicted;
+          let sse_guards_reaped = Server_mcp_transport_http_sse.reap_stale_guards () in
+          let http_guards_reaped = Server_mcp_transport_http.reap_stale_guards () in
+          let is_active sid =
+            Server_mcp_transport_http_sse.is_active_sse_session sid
+            || Server_mcp_transport_http.is_active_sse_session sid
+          in
+          let sessions_reaped =
+            Server_mcp_transport_http_session.reap_stale_sessions
+              ~is_active_session:is_active
+          in
+          if sse_guards_reaped + http_guards_reaped + sessions_reaped > 0 then
+            Log.Server.info "reaped %d SSE guards + %d HTTP guards + %d stale sessions"
+              sse_guards_reaped http_guards_reaped sessions_reaped;
+          let ext_reaped = Sse.reap_dead_external_subscribers () in
+          if ext_reaped > 0 then
+            Log.Server.info "reaped %d dead external subscribers" ext_reaped;
+          if Server_webrtc_transport.is_enabled () then begin
+            let webrtc_expired = Server_webrtc_transport.cleanup_expired_offers () in
+            if webrtc_expired > 0 then
+              Log.Server.info "WebRTC: cleaned %d expired offers" webrtc_expired
+          end
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Server.error "cleanup loop iteration failed: %s"
+            (Printexc.to_string exn));
         loop ()
       in
       loop ());
@@ -1040,17 +1056,23 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
      Prevents zombie-listener state where the socket is open but HTTP
      requests hang because init is stuck. *)
   Eio.Fiber.fork ~sw (fun () ->
-    let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
-    Eio.Time.sleep clock timeout_sec;
-    let current = Server_startup_state.(!state) in
-    if not current.state_ready then (
-      let elapsed = Server_startup_state.elapsed_since_start () in
-      Log.Server.error
-        "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s, backend=%s). Exiting."
-        timeout_sec elapsed
-        (Server_startup_state.phase_to_string current.phase)
-        current.backend_mode;
-      exit 1));
+    try
+      let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
+      Eio.Time.sleep clock timeout_sec;
+      let current = Server_startup_state.(!state) in
+      if not current.state_ready then (
+        let elapsed = Server_startup_state.elapsed_since_start () in
+        Log.Server.error
+          "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s, backend=%s). Exiting."
+          timeout_sec elapsed
+          (Server_startup_state.phase_to_string current.phase)
+          current.backend_mode;
+        exit 1)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Server.error "startup watchdog fiber failed: %s"
+        (Printexc.to_string exn));
 
   (* 3. Start serving -- /health responds before init completes *)
   match http_mode with

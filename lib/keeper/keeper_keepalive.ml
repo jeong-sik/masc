@@ -507,14 +507,16 @@ let run_grpc_heartbeat_fiber ~sw ~stop
     let rec loop () =
       if !stop || !close_ref then ()
       else (
-        (* Log the gRPC heartbeat attempt — actual delivery is
-           deferred to when full env integration is wired in the
-           server bootstrap. For now this fiber acts as a
-           placeholder that logs transport selection. *)
-        Log.Keeper.info "grpc heartbeat tick: agent=%s session=%s"
-          agent_name session_id;
-        let no_wakeup = ref false in
-        interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec;
+        (try
+          Log.Keeper.info "grpc heartbeat tick: agent=%s session=%s"
+            agent_name session_id;
+          let no_wakeup = ref false in
+          interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Keeper.error "grpc heartbeat tick failed: %s"
+            (Printexc.to_string exn));
         if not !stop then loop ())
     in
     loop ());
@@ -578,7 +580,12 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
            ~keeper_name:live_meta.name ~detail:"keepalive"
      | None -> ());
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
-        run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup))
+        try run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Keeper.error "heartbeat loop for %s crashed: %s"
+            live_meta.name (Printexc.to_string exn)))
 
 let stop_keepalive name =
   let entries =

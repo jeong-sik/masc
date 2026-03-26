@@ -238,7 +238,13 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   let zombie_consumer = make_zero_zombie_consumer ~room_config in
   let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Perpetual ~consumers:[zombie_consumer] in
   with_pulse_rw (fun () -> zombie_pulse := Some zp);
-  Eio.Fiber.fork ~sw (fun () -> Pulse.run ~sw zp);
+  Eio.Fiber.fork ~sw (fun () ->
+    try Pulse.run ~sw zp
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Orchestrator.error "zombie cleanup pulse crashed: %s"
+        (Printexc.to_string exn));
 
   (* Orchestrator check: respects enabled flag via should_act *)
   if config.enabled then
@@ -250,7 +256,13 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   let orch_consumer = make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config () in
   let op = Pulse.create ~clock ~rhythm:(fixed_rhythm config.check_interval_s) ~lifecycle:Perpetual ~consumers:[orch_consumer] in
   with_pulse_rw (fun () -> orchestrator_pulse := Some op);
-  Eio.Fiber.fork ~sw (fun () -> Pulse.run ~sw op);
+  Eio.Fiber.fork ~sw (fun () ->
+    try Pulse.run ~sw op
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Orchestrator.error "orchestrator check pulse crashed: %s"
+        (Printexc.to_string exn));
 
   (* Return cancel function — shuts down both Pulse engines *)
   fun () ->

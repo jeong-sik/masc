@@ -187,8 +187,16 @@ let get_or_compute_eio key ~ttl compute =
          "Switch accessed from wrong domain!" — fall back to inline compute. *)
       (match !_bg_sw with
        | Some sw ->
-           (try Eio.Fiber.fork ~sw do_bg_compute
-            with Invalid_argument _ -> do_bg_compute ())
+           (try Eio.Fiber.fork ~sw (fun () ->
+              try do_bg_compute ()
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.error "cache revalidation failed: %s"
+                  (Printexc.to_string exn))
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | Invalid_argument _ -> do_bg_compute ())
        | None -> do_bg_compute ());
       stale_value
     | `Compute cond ->

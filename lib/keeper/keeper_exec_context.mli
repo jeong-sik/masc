@@ -165,25 +165,11 @@ type proactive_generation_result = {
 val proactive_retry_instruction : int -> reason:string -> string
 val proactive_temperature : cascade_name:string -> int -> float
 
-(** {1 Text Processing} *)
+(** {1 Text Processing and Proactive Quality Checks}
 
-val strip_state_blocks_text : string -> string
-val trim_to_option : string -> string option
-val state_snapshot_reply_fallback : keeper_state_snapshot option -> string option
-val strip_internal_reply_markup : string -> string
-val user_visible_reply_text : ?fallback:string -> string -> string
-val normalize_proactive_text : string -> string
-val extract_checkin_text : string -> string option
+    Re-exported from [Keeper_text_processing]. *)
 
-(** {1 Proactive Quality Checks} *)
-
-val proactive_has_terminal_punct : string -> bool
-val proactive_has_terminal_korean_ending : string -> bool
-val proactive_has_terminal_ending : string -> bool
-val proactive_looks_fragmentary : string -> bool
-val proactive_fallback_reply : meta:keeper_meta -> idle_seconds:int -> string
-val proactive_quality_check : string -> (string, string) result
-val looks_fragmentary_history_text : string -> bool
+include module type of Keeper_text_processing
 
 (** {1 Proactive Generation Entry Point} *)
 

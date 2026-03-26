@@ -478,6 +478,7 @@
    keeper_exec_persona
    keeper_working_context
    keeper_checkpoint_store
+   keeper_text_processing
    keeper_exec_context
    keeper_tools_oas
    keeper_hooks_oas
@@ -644,6 +645,7 @@
   keeper_exec_persona
   keeper_working_context
   keeper_checkpoint_store
+  keeper_text_processing
   keeper_exec_context
   keeper_turn_session
   keeper_turn_setup

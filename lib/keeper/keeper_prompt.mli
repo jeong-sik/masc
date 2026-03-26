@@ -50,28 +50,8 @@ val proactive_retry_instruction : int -> reason:string -> string
 
 val proactive_temperature : cascade_name:string -> int -> float
 
-val strip_state_blocks_text : string -> string
+(** {1 Text Processing and Proactive Quality Checks}
 
-val trim_to_option : string -> string option
+    Re-exported from [Keeper_text_processing]. *)
 
-val state_snapshot_reply_fallback :
-  Keeper_memory.keeper_state_snapshot option -> string option
-
-val strip_internal_reply_markup : string -> string
-
-val user_visible_reply_text : ?fallback:string -> string -> string
-
-val normalize_proactive_text : string -> string
-
-val extract_checkin_text : string -> string option
-
-val proactive_has_terminal_ending : string -> bool
-
-val proactive_looks_fragmentary : string -> bool
-
-val proactive_fallback_reply :
-  meta:Keeper_types.keeper_meta -> idle_seconds:int -> string
-
-val proactive_quality_check : string -> (string, string) result
-
-val looks_fragmentary_history_text : string -> bool
+include module type of Keeper_text_processing

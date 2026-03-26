@@ -185,6 +185,26 @@ let json_bool_opt key json =
   | `Bool b -> Some b
   | _ -> None
 
+let json_list key json =
+  match Yojson.Safe.Util.member key json with
+  | `List l -> l
+  | _ -> []
+
+let json_list_opt key json =
+  match Yojson.Safe.Util.member key json with
+  | `List l -> Some l
+  | _ -> None
+
+let json_assoc key json =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc a -> a
+  | _ -> []
+
+let json_member_opt key json =
+  match Yojson.Safe.Util.member key json with
+  | `Null -> None
+  | v -> Some v
+
 (** {1 Safe Process Execution} *)
 
 (* Intentionally empty: process execution lives in Process_eio (argv-only). *)

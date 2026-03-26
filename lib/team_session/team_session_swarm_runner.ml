@@ -7,6 +7,18 @@
 
 module Swarm = Agent_sdk_swarm
 
+(** Build a minimal env object for OAS Swarm Runner.
+    Runner uses [Eio.Stdenv.clock env] and [Eio.Stdenv.process_mgr env]. *)
+let make_swarm_env ~clock =
+  let proc_mgr = match Process_eio.get_proc_mgr () with
+    | Ok mgr -> mgr
+    | Error _ -> failwith "Process_eio not initialized"
+  in
+  object
+    method clock = clock
+    method process_mgr = proc_mgr
+  end
+
 let run_swarm ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     ~(session_id : string)
     ~(masc_tools : Types.tool_schema list)
@@ -38,7 +50,8 @@ let run_swarm ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         let callbacks =
           Team_session_swarm_callbacks.make_callbacks ~config ~session_id
         in
-        match Swarm.Runner.run ~sw ~clock ~callbacks swarm_config with
+        let env = make_swarm_env ~clock in
+        match Swarm.Runner.run ~sw ~env ~callbacks swarm_config with
         | Ok swarm_result ->
           let updated =
             Team_session_oas_bridge.apply_swarm_result session swarm_result

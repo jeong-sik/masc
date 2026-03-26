@@ -301,6 +301,18 @@ let test_backend_config_for_requires_explicit_pg_url () =
         (Invalid_argument "MASC_STORAGE_TYPE=postgres requires MASC_POSTGRES_URL")
         (fun () -> ignore (Room_utils.backend_config_for "/tmp/test-room-utils")))
 
+let test_backend_config_for_rejects_legacy_pg_envs_in_explicit_postgres_mode () =
+  with_envs
+    (pg_env_bindings ~masc_storage_type:"postgres"
+       ~database_url:"postgresql://legacy/db"
+       ~supabase_db_url:"postgresql://legacy/supabase"
+       ~sb_pg_url:"postgresql://legacy/sb" ())
+    (fun () ->
+      check_raises "legacy pg envs do not satisfy explicit postgres mode"
+        (Invalid_argument
+           "MASC_STORAGE_TYPE=postgres requires MASC_POSTGRES_URL; ignored legacy envs: DATABASE_URL, SUPABASE_DB_URL, SB_PG_URL")
+        (fun () -> ignore (Room_utils.backend_config_for "/tmp/test-room-utils")))
+
 let test_backend_config_for_uses_explicit_masc_pg_url () =
   let url = "postgresql://masc.example/test_backend_config" in
   with_envs
@@ -553,6 +565,8 @@ let () =
         test_backend_config_for_ignores_generic_pg_urls_without_explicit_storage;
       test_case "requires explicit pg url" `Quick
         test_backend_config_for_requires_explicit_pg_url;
+      test_case "rejects legacy pg envs in explicit postgres mode" `Quick
+        test_backend_config_for_rejects_legacy_pg_envs_in_explicit_postgres_mode;
       test_case "uses explicit masc pg url" `Quick
         test_backend_config_for_uses_explicit_masc_pg_url;
       test_case "normalizes supabase pooler" `Quick

@@ -169,6 +169,29 @@ let env_opt name =
         Some value
   | _ -> None
 
+let legacy_pg_env_var_names =
+  [| "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" |]
+
+let configured_legacy_pg_envs () =
+  legacy_pg_env_var_names
+  |> Array.to_list
+  |> List.filter (fun name -> env_opt name <> None)
+
+let legacy_pg_warning_signature : string option ref = ref None
+
+let warn_ignored_legacy_pg_envs storage_type =
+  if storage_type <> "postgres" then
+    let configured = configured_legacy_pg_envs () in
+    if configured <> [] then begin
+      let signature = String.concat "," configured in
+      if !legacy_pg_warning_signature <> Some signature then begin
+        legacy_pg_warning_signature := Some signature;
+        Log.Backend.warn
+          "Ignoring legacy PG envs for MASC backend selection: %s. Use MASC_STORAGE_TYPE=postgres with MASC_POSTGRES_URL for explicit PG mode."
+          (String.concat ", " configured)
+      end
+    end
+
 let explicit_storage_type_from_env () =
   match env_opt "MASC_STORAGE_TYPE" with
   | Some raw ->
@@ -205,9 +228,13 @@ let auto_detect_backend () =
 
 (** Storage type from environment variable *)
 let storage_type_from_env () =
-  match explicit_storage_type_from_env () with
-  | Some value -> value
-  | None -> auto_detect_backend ()
+  let storage_type =
+    match explicit_storage_type_from_env () with
+    | Some value -> value
+    | None -> auto_detect_backend ()
+  in
+  warn_ignored_legacy_pg_envs storage_type;
+  storage_type
 
 (* ============================================ *)
 (* Backend creation                             *)
@@ -234,7 +261,12 @@ let backend_config_for base_path =
   let postgres_url = postgres_url_from_env () in
   if storage_type = "postgres" && postgres_url = None then
     invalid_arg
-      "MASC_STORAGE_TYPE=postgres requires MASC_POSTGRES_URL";
+      (match configured_legacy_pg_envs () with
+       | [] -> "MASC_STORAGE_TYPE=postgres requires MASC_POSTGRES_URL"
+       | configured ->
+           Printf.sprintf
+             "MASC_STORAGE_TYPE=postgres requires MASC_POSTGRES_URL; ignored legacy envs: %s"
+             (String.concat ", " configured));
   let cluster_name =
     match env_opt "MASC_CLUSTER_NAME" with
     | Some name -> name

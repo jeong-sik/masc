@@ -1109,6 +1109,9 @@ let test_chain_error_yojson_all () =
    ============================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "chain_category_coverage" [
     "Result_monad", [
       test_case "pure" `Quick test_result_monad_pure;

@@ -362,6 +362,9 @@ let test_main_eio_serves_health_before_lazy_startup () =
           end))
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   Alcotest.run "Server_runtime_bootstrap"
     [
       ( "bootstrap",

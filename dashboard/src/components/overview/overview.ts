@@ -195,6 +195,25 @@ function AgentPulse() {
 
 // --- Overview (Home) ---
 
+function FreshnessIndicator({ generatedAt }: { generatedAt?: string | null }) {
+  if (!generatedAt) return null
+  const ts = new Date(generatedAt).getTime()
+  if (isNaN(ts)) return null
+  const ageSeconds = Math.floor((Date.now() - ts) / 1000)
+  const isStale = ageSeconds > 300 // 5 minutes
+  const label = ageSeconds < 60
+    ? '방금 갱신'
+    : ageSeconds < 3600
+      ? `${Math.floor(ageSeconds / 60)}분 전 갱신`
+      : `${Math.floor(ageSeconds / 3600)}시간 전 갱신`
+  return html`
+    <div class="flex items-center gap-1.5 text-xs ${isStale ? 'text-[color:var(--warn)]' : 'text-[color:var(--text-dim)]'}">
+      <span class="inline-block w-1.5 h-1.5 rounded-full ${isStale ? 'bg-[var(--warn)]' : 'bg-[var(--ok)]'}" />
+      ${label}
+    </div>
+  `
+}
+
 export function Overview() {
   const snap = missionSnapshot.value
   const roomHealth = snap?.summary?.room_health ?? null
@@ -219,6 +238,10 @@ export function Overview() {
       <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
         <${HomeSectionHeader} label="최근 활동" />
         <${NarrativeTimeline} entries=${journal} maxItems=${8} />
+      </div>
+
+      <div class="flex justify-end px-1">
+        <${FreshnessIndicator} generatedAt=${snap?.generated_at} />
       </div>
     </div>
   `

@@ -134,13 +134,14 @@ let execute_goal_driven ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : exe
     | "exec_test" ->
         (* For test execution: extract coverage/pass rate from output *)
         (* Expected format: "coverage: 0.85" or JSON with metric field *)
-        let regex = Re.Str.regexp (goal_metric ^ "[: ]+\\([0-9.]+\\)") in
-        (try
-          let _ = Re.Str.search_forward regex output 0 in
-          Some (float_of_string (Re.Str.matched_group 1 output))
-        with Not_found ->
-          try Some (float_of_string (String.trim output))
-          with Failure _ -> None)
+        let regex = Re.Pcre.re (Re.Pcre.quote goal_metric ^ {|[: ]+([0-9.]+)|}) |> Re.compile in
+        (match Re.exec_opt regex output with
+         | Some group ->
+           (try Some (float_of_string (Re.Group.get group 1))
+            with Failure _ -> None)
+         | None ->
+           try Some (float_of_string (String.trim output))
+           with Failure _ -> None)
     | "call_api" ->
         (* For API calls: expect JSON response with metric *)
         (try
@@ -283,11 +284,12 @@ let execute_feedback_loop ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : e
              let cleaned = String.trim score_str in
              (try min 1.0 (max 0.0 (float_of_string cleaned))
               with Failure _ ->
-                let regex = Re.Str.regexp "[0-9]+\\.[0-9]+" in
-                try
-                  let _ = Re.Str.search_forward regex cleaned 0 in
-                  min 1.0 (max 0.0 (float_of_string (Re.Str.matched_string cleaned)))
-                with Not_found | Failure _ -> 0.5)
+                let regex = Re.Pcre.re {|[0-9]+\.[0-9]+|} |> Re.compile in
+                match Re.exec_opt regex cleaned with
+                | Some group ->
+                    (try min 1.0 (max 0.0 (float_of_string (Re.Group.get group 0)))
+                     with Failure _ -> 0.5)
+                | None -> 0.5)
          | Error _ -> 0.5)
     | "regex_match" ->
         float_of_int (String.length output) /. 1000.0
@@ -323,11 +325,14 @@ let execute_feedback_loop ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : e
   in
 
   (* Helper: Substitute variables in improver_prompt *)
+  let score_re = Re.compile (Re.str "{{score}}") in
+  let feedback_re = Re.compile (Re.str "{{feedback}}") in
+  let prev_output_re = Re.compile (Re.str "{{previous_output}}") in
   let substitute_prompt template ~score ~feedback ~previous_output =
     template
-    |> Re.Str.global_replace (Re.Str.regexp "{{score}}") (Printf.sprintf "%.2f" score)
-    |> Re.Str.global_replace (Re.Str.regexp "{{feedback}}") feedback
-    |> Re.Str.global_replace (Re.Str.regexp "{{previous_output}}") previous_output
+    |> Re.replace_string score_re ~by:(Printf.sprintf "%.2f" score)
+    |> Re.replace_string feedback_re ~by:feedback
+    |> Re.replace_string prev_output_re ~by:previous_output
   in
 
   (* Create a mutable copy of the generator for prompt updates *)

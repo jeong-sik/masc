@@ -509,16 +509,18 @@ let string_contains = Chain_utils.string_contains
 (** {2 Cascade helpers} *)
 
 (** Parse confidence level from MODEL output. Returns (confidence_level, cleaned_output) *)
+let confidence_re = Re.Pcre.re ~flags:[`CASELESS] {|[Cc]onfidence:[ \t]*(High|Medium|Low)|} |> Re.compile
+let confidence_line_re = Re.Pcre.re ~flags:[`CASELESS] {|[Cc]onfidence:[ \t]*(High|Medium|Low)\n?|} |> Re.compile
+
 let parse_confidence_from_output (output : string) : (Chain_types.confidence_level * string) =
-  let re = Re.Str.regexp_case_fold {|[Cc]onfidence:[ \t]*\(High\|Medium\|Low\)|} in
-  try
-    ignore (Re.Str.search_forward re output 0);
-    let level_str = Re.Str.matched_group 1 output in
+  match Re.exec_opt confidence_re output with
+  | Some group ->
+    let level_str = Re.Group.get group 1 in
     let level = Chain_types.confidence_of_string level_str in
     (* Remove the confidence line from output *)
-    let cleaned = Re.Str.global_replace (Re.Str.regexp_case_fold {|[Cc]onfidence:[ \t]*\(High\|Medium\|Low\)\n?|}) "" output in
+    let cleaned = Re.replace_string confidence_line_re ~by:"" output in
     (level, String.trim cleaned)
-  with Not_found ->
+  | None ->
     (Low, output)
 
 let build_confidence_system_prompt ~confidence_prompt task_hint =

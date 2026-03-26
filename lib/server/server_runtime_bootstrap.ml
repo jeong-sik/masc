@@ -966,9 +966,18 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in
       Server_dashboard_http.set_executor_pool exec_pool;
       Log.Server.info "Executor_pool created (2 domains) for dashboard";
+      (* Stagger PG-heavy refresh loop warm-cache runs at startup.
+         Each Proactive_refresh.start forks a fiber that immediately calls
+         compute(), so starting all 7 loops at once creates 7+ concurrent PG
+         queries — exceeding pool capacity on Supabase session pooler.
+         A short sleep between PG-heavy launches spreads the initial burst. *)
       Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
+      Eio.Time.sleep clock 0.5;
       Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
+      Eio.Time.sleep clock 0.5;
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
+      Eio.Time.sleep clock 0.5;
+      (* Remaining loops are lighter (no PG or use cached data). *)
       Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;

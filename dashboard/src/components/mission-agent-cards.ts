@@ -7,6 +7,7 @@ import { StatusChip } from './common/status-chip'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
 import { workflowActionLabel } from '../workflow-context'
+import { formatPct } from '../lib/format-number'
 import type {
   DashboardMissionInternalSignal,
   Keeper,
@@ -87,8 +88,8 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
   const continuity = [
     `세대 ${row.brief.generation ?? row.keeper?.generation ?? 0}`,
     row.brief.context_ratio != null
-      ? `컨텍스트 ${Math.round(row.brief.context_ratio * 100)}%`
-      : (row.keeper?.context_ratio != null ? `컨텍스트 ${Math.round(row.keeper.context_ratio * 100)}%` : null),
+      ? `컨텍스트 ${formatPct(row.brief.context_ratio)}`
+      : (row.keeper?.context_ratio != null ? `컨텍스트 ${formatPct(row.keeper.context_ratio)}` : null),
     row.brief.last_turn_ago_s != null ? `최근 턴 ${Math.round(row.brief.last_turn_ago_s)}초 전` : null,
   ]
     .filter((value): value is string => value !== null)

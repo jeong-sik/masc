@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { formatPct } from '../lib/format-number'
 import type { Keeper, KeeperMetricPoint } from '../types'
 
 // ── Utility functions ────────────────────────────────────
@@ -203,7 +204,7 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
     { title: 'Activity', key: 'activityLevel', value: String(keeper.activityLevel ?? '-') },
     { title: 'Gen', key: 'generation', value: String(keeper.generation ?? '-') },
     { title: 'Turns', key: 'turn_count', value: String(keeper.turn_count ?? '-') },
-    { title: 'Context', key: 'context_ratio', value: keeper.context_ratio != null ? `${Math.round(keeper.context_ratio * 100)}%` : '-' },
+    { title: 'Context', key: 'context_ratio', value: formatPct(keeper.context_ratio) },
     { title: 'Heartbeat', key: 'last_heartbeat', value: keeper.last_heartbeat ?? '-' },
     { title: 'Traits', key: 'traits', value: keeper.traits?.join(', ') || '-' },
     { title: 'Interests', key: 'interests', value: keeper.interests?.join(', ') || '-' },

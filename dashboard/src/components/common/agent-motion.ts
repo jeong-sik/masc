@@ -1,3 +1,4 @@
+import { formatPct } from '../../lib/format-number'
 import type { Message, Task, JournalEntry, BoardPost, Keeper } from '../../types'
 import { trimText as trimTextBase } from '../../lib/truncate'
 
@@ -51,9 +52,7 @@ function boardPreview(post: BoardPost): string {
 
 function keeperPreview(keeper: Keeper): string {
   const generation = keeper.generation ?? '?'
-  const ratio = typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio)
-    ? `${Math.round(keeper.context_ratio * 100)}%`
-    : '?'
+  const ratio = formatPct(keeper.context_ratio, '?')
   return keeper.last_heartbeat
     ? `Heartbeat gen=${generation} ctx=${ratio}`
     : `Keeper snapshot gen=${generation} ctx=${ratio}`

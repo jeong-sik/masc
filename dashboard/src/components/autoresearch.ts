@@ -6,6 +6,7 @@ import { signal, computed } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { SurfaceCard } from './common/card'
 import { EmptyState } from './common/empty-state'
+import { formatElapsedCompact } from '../lib/format-time'
 import {
   fetchAutoresearchLoops,
   fetchAutoresearchLoopDetail,
@@ -141,13 +142,6 @@ function decisionLabel(decision: string): string {
   return decision === 'keep' ? '유지' : '삭제'
 }
 
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
-  const h = Math.floor(seconds / 3600)
-  const m = Math.round((seconds % 3600) / 60)
-  return `${h}h ${m}m`
-}
 
 function formatDelta(delta: number): string {
   const sign = delta >= 0 ? '+' : ''
@@ -220,7 +214,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           </div>
           <div>
             <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">경과 시간</div>
-            <div class="text-[var(--text-body)] text-sm font-mono">${formatElapsed(loop.elapsed_s)}</div>
+            <div class="text-[var(--text-body)] text-sm font-mono">${formatElapsedCompact(loop.elapsed_s)}</div>
           </div>
           <div>
             <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">모델</div>

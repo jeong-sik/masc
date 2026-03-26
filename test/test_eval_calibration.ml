@@ -269,6 +269,39 @@ let test_calibration_stats () =
   Cal.reset_store_for_testing ()
 
 (* ================================================================ *)
+(* OAS Harness.verdict conversion tests (#3165)                      *)
+(* ================================================================ *)
+
+let test_to_harness_verdict_approve () =
+  let record : Cal.verdict_record = {
+    record_type = "verdict"; notes_hash = "abc";
+    task_id = "t1"; task_title = "Fix login";
+    agent_name = "dreamer"; verdict = "approve";
+    gate = "llm"; evaluator_cascade = "glm5";
+    generator_cascade = Some "claude"; timestamp = 0.0;
+  } in
+  let hv = Cal.to_harness_verdict record in
+  check bool "passed" true hv.Agent_sdk.Harness.passed;
+  check (option (float 0.01)) "score 1.0" (Some 1.0) hv.score;
+  check bool "evidence has gate" true
+    (List.exists (fun s -> contains ~sub:"gate=llm" s) hv.evidence);
+  check (option string) "no detail" None hv.detail
+
+let test_to_harness_verdict_reject () =
+  let record : Cal.verdict_record = {
+    record_type = "verdict"; notes_hash = "def";
+    task_id = "t2"; task_title = "Deploy fix";
+    agent_name = "coder"; verdict = "reject:too short";
+    gate = "length"; evaluator_cascade = "local";
+    generator_cascade = None; timestamp = 0.0;
+  } in
+  let hv = Cal.to_harness_verdict record in
+  check bool "not passed" false hv.passed;
+  check (option (float 0.01)) "score 0.0" (Some 0.0) hv.score;
+  check bool "detail mentions gate" true
+    (match hv.detail with Some d -> contains ~sub:"length" d | None -> false)
+
+(* ================================================================ *)
 (* Test Suite                                                        *)
 (* ================================================================ *)
 
@@ -301,5 +334,9 @@ let () =
     ];
     "stats", [
       test_case "counts" `Quick test_calibration_stats;
+    ];
+    "oas_conversion", [
+      test_case "approve verdict" `Quick test_to_harness_verdict_approve;
+      test_case "reject verdict" `Quick test_to_harness_verdict_reject;
     ];
   ]

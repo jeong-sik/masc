@@ -14,6 +14,7 @@ export type SurfaceSectionId =
   | 'warroom'
   | 'tools'
   | 'autoresearch'
+  | 'harness'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 const OPERATIONS_COMMAND_SURFACES = new Set([
@@ -193,6 +194,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '오토리서치',
       description: '자율 실험 루프 상태와 이력을 봅니다.',
       params: { section: 'autoresearch' },
+    },
+    {
+      id: 'harness',
+      label: '하네스 헬스',
+      description: 'Evaluator 캘리브레이션, 컴팩션 전략, DNA 품질 추이를 봅니다.',
+      params: { section: 'harness' },
     },
   ],
 }

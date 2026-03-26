@@ -94,6 +94,15 @@ val format_few_shot_block : calibration_example list -> string
 (** Format examples into a text block for prompt injection.
     Returns [""] for an empty list. *)
 
+(** {1 OAS Integration} *)
+
+val to_harness_verdict : verdict_record -> Agent_sdk.Harness.verdict
+(** Convert a MASC verdict record to an OAS [Harness.verdict].
+    "approve" maps to [passed=true, score=1.0];
+    "reject:*" maps to [passed=false, score=0.0] with gate detail. *)
+
+(** {1 Statistics} *)
+
 val calibration_stats :
   ?since:string -> ?until:string -> unit -> Yojson.Safe.t
 (** Compute summary statistics: verdict counts, gate distribution,

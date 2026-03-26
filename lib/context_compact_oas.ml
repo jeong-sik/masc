@@ -210,6 +210,39 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
     MASC and OAS share the same [Agent_sdk.Types.message] type with
     the same 4 roles (System, User, Assistant, Tool). *)
 (* ================================================================ *)
+(* MASC Dynamic vs OAS Dynamic — Complementary, NOT Duplicated       *)
+(* ================================================================ *)
+
+(** {2 OAS [Context_reducer.Dynamic]}
+
+    OAS defines [Dynamic of (turn:int -> messages:message list -> strategy)].
+    It selects a {i single} OAS strategy per reduction pass based on
+    conversation-level inputs (turn index, message list).  The reducer
+    invokes the selector once per [reduce] call.
+
+    {2 MASC [Dynamic of (observation_context -> strategy list)]}
+
+    MASC's Dynamic takes a {i world-state} observation (context ratio,
+    active agent count, model family, task topology) and returns a
+    {i composed} list of MASC strategies.  Each strategy is then mapped
+    to an OAS [Custom] closure and applied in sequence.
+
+    {2 Why both exist}
+
+    OAS Dynamic is turn-scoped and message-scoped — it answers
+    "given this conversation state, which single reduction to apply?".
+    MASC Dynamic is world-scoped — it answers "given the multi-agent
+    room state, which {i combination} of reductions is appropriate?".
+
+    They operate at different abstraction levels:
+    - OAS Dynamic:  per-conversation, single strategy, inside [reduce]
+    - MASC Dynamic: per-keeper-turn, strategy list, before [compact]
+
+    MASC Dynamic resolves to concrete MASC strategies, which are then
+    mapped to OAS [Custom] closures.  OAS Dynamic is not called.
+    The two do not interact at runtime. *)
+
+(* ================================================================ *)
 (* Dynamic strategy resolution (#3070)                               *)
 (* ================================================================ *)
 

@@ -135,4 +135,66 @@ describe('Governance surface', () => {
       .toBeGreaterThanOrEqual(2)
     expect(container.textContent).toContain('command:governance 렌더링 오류')
   }, 20000)
+
+  it('shows keeper guidance when governance feed is empty', async () => {
+    const emptyResponse: DashboardGovernanceResponse = {
+      generated_at: '2026-03-26T00:00:00Z',
+      summary: {
+        cases_open: 0,
+        pending_ruling: 0,
+        ready_auto_execute: 0,
+        needs_human_gate: 0,
+        executed: 0,
+      },
+      items: [],
+      activity: [],
+      pending_actions: [],
+    }
+
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: vi.fn().mockResolvedValue(emptyResponse),
+      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('keeper가 활동 중일 때 자동 생성됩니다')
+  }, 20000)
+
+  it('shows last activity age when governance feed is empty but has past activity', async () => {
+    const emptyWithAge: DashboardGovernanceResponse = {
+      generated_at: '2026-03-26T00:00:00Z',
+      summary: {
+        cases_open: 0,
+        pending_ruling: 0,
+        ready_auto_execute: 0,
+        needs_human_gate: 0,
+        executed: 0,
+        last_activity_age_s: 7200,
+      },
+      items: [],
+      activity: [],
+      pending_actions: [],
+    }
+
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: vi.fn().mockResolvedValue(emptyWithAge),
+      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('마지막 활동: 2시간 전')
+    expect(container.textContent).toContain('keeper가 활동 중일 때 자동 생성됩니다')
+  }, 20000)
 })

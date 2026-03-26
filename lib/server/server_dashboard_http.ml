@@ -483,11 +483,16 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
       Log.Dashboard.warn "room-truth fiber %s failed: %s" label (Printexc.to_string exn);
       fallback
   in
+  let is_cold = not (cached_surface_has_success _execution_cache) in
+  let base_timeout_s =
+    Safe_ops.get_env_float_logged "MASC_ROOM_TRUTH_TIMEOUT_SEC"
+      ~default:(if is_cold then 15.0 else default_timeout_s)
+  in
   let shell_timeout_s =
-    if !_shell_warmed then default_timeout_s else 15.0
+    if !_shell_warmed then base_timeout_s else 15.0
   in
   let execution_timeout_s =
-    if cached_surface_has_success _execution_cache then default_timeout_s else 20.0
+    if is_cold then Float.max base_timeout_s 20.0 else base_timeout_s
   in
   Eio.Fiber.all [
     (fun () -> shell_ref := fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
@@ -496,7 +501,7 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
       (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
       (cached_surface_json _execution_cache));
     (fun () ->
-      command_ref := fiber_with_timeout "command"
+      command_ref := fiber_with_timeout ~timeout_s:base_timeout_s "command"
         (fun () ->
           if Room.is_initialized config then
             Server_command_plane_http.command_plane_summary_http_json ~state

@@ -203,9 +203,10 @@ export type KeeperReplyStatus =
   | 'unknown'
 
 export type KeeperContinuityState =
-  | 'desired_offline'
+  | 'not_running'
   | 'recovering'
   | 'healthy'
+  | 'disabled'
   | 'offline'
 
 export interface KeeperDiagnostic {
@@ -304,9 +305,8 @@ export type PipelineStage =
 export interface Keeper {
   name: string
   pipeline_stage?: PipelineStage
-  runtime_class?: 'resident_keeper' | 'persistent_agent'
-  desired?: boolean
-  resident_registered?: boolean
+  runtime_class?: 'keeper'
+  registered?: boolean
   reconcile_status?: string | null
   emoji?: string
   koreanName?: string
@@ -492,8 +492,7 @@ export interface KeeperConfigAutoTeamSession {
 
 export interface KeeperConfigRuntime {
   paused: boolean
-  desired: boolean
-  resident_registered: boolean
+  registered: boolean
   keepalive_running: boolean
   fiber_health: string
   presence_keepalive: boolean

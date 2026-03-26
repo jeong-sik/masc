@@ -202,7 +202,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
               Keeper_exec_status.keeper_diagnostic_json ~meta
                 ~agent_status:agent_json ~keepalive_running ~history_items:[]
                 ~now_ts
-              |> Keeper_exec_status.augment_keeper_diagnostic_json ~desired:true
+              |> Keeper_exec_status.augment_keeper_diagnostic_json ~registered:true
                    ~meta ~keepalive_running ~keepalive_started_at ~now_ts
             in
             let allowed_tool_names, latest_tool_names, latest_tool_call_count,
@@ -220,9 +220,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
             Some
               (`Assoc
                 [
-                  ("runtime_class", `String "resident_keeper");
-                  ("desired", `Bool true);
-                  ("resident_registered", `Bool true);
+                  ("runtime_class", `String "keeper");
+                  ("registered", `Bool true);
                   ("pipeline_stage", `String pipeline_stage);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
@@ -302,9 +301,8 @@ let persistent_agents_json ?keeper_names config =
             Some
               (`Assoc
                 [
-                  ("runtime_class", `String "persistent_agent");
-                  ("desired", `Bool false);
-                  ("resident_registered", `Bool false);
+                  ("runtime_class", `String "keeper");
+                  ("registered", `Bool false);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
                   ("trace_id", `String meta.trace_id);

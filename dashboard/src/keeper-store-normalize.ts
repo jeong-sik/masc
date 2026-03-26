@@ -200,12 +200,9 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
 
       return {
         name,
-        runtime_class:
-          row.runtime_class === 'persistent_agent' ? 'persistent_agent' : 'resident_keeper',
-        desired:
-          typeof row.desired === 'boolean' ? row.desired : undefined,
-        resident_registered:
-          typeof row.resident_registered === 'boolean' ? row.resident_registered : undefined,
+        runtime_class: 'keeper' as const,
+        registered:
+          typeof row.registered === 'boolean' ? row.registered : undefined,
         reconcile_status: asString(row.reconcile_status) ?? null,
         emoji: asString(row.emoji),
         koreanName: asString(row.koreanName) ?? asString(row.korean_name),

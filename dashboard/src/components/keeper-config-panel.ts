@@ -406,12 +406,8 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${BoolBadge} value=${c.runtime.paused} />
       </div>
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">원하는 상태</span>
-        <${BoolBadge} value=${c.runtime.desired} />
-      </div>
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">레지던트 등록</span>
-        <${BoolBadge} value=${c.runtime.resident_registered} />
+        <span class="text-xs text-[var(--text-muted)]">자동 부팅 등록</span>
+        <${BoolBadge} value=${c.runtime.registered} />
       </div>
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">킵얼라이브 실행</span>

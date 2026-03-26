@@ -23,12 +23,12 @@ let maybe_promote_live_persistent_keeper config name =
               | _ -> ""
             in
             if agent_type = "keeper" && List.mem status [ "active"; "busy"; "idle"; "listening" ] then
-              (match register_resident_keeper_from_meta config meta with
-               | Ok () -> () | Error e -> Log.Keeper.warn "register_from_meta failed: %s" e))
+              (match register_resident_keeper config meta.name with
+               | Ok () -> () | Error e -> Log.Keeper.warn "register_keeper failed: %s" e))
         | _ -> ()
 
-let ensure_resident_meta config (spec : resident_keeper_spec) =
-  match read_meta config spec.persistent_name with
+let ensure_keeper_meta config name =
+  match read_meta config name with
   | Ok (Some meta) ->
     (* Re-sync proactive_enabled from persona defaults on bootstrap.
        Persisted meta may have stale values from a previous session;
@@ -40,7 +40,7 @@ let ensure_resident_meta config (spec : resident_keeper_spec) =
       | None -> Keeper_config.default_proactive_enabled
     in
     if meta.proactive.enabled <> target_proactive then begin
-      Log.Keeper.info "ensure_resident_meta: re-syncing proactive.enabled %b -> %b for %s"
+      Log.Keeper.info "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b for %s"
         meta.proactive.enabled target_proactive meta.name;
       let updated = { meta with
         proactive = { meta.proactive with enabled = target_proactive };
@@ -49,37 +49,14 @@ let ensure_resident_meta config (spec : resident_keeper_spec) =
       match write_meta config updated with
       | Ok () -> Ok updated
       | Error e ->
-        Log.Keeper.warn "ensure_resident_meta: write_meta re-sync failed: %s" e;
+        Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
         Ok meta
     end
     else Ok meta
   | Ok None ->
-    (* No persistent meta on disk. Try legacy seed_meta for backward compat,
-       otherwise require manual keeper_up (which loads fresh from template). *)
-    (match spec.seed_meta with
-     | `Assoc (_ :: _) ->
-       (* Legacy resident-keeper with full seed_meta snapshot *)
-       (match meta_of_json spec.seed_meta with
-        | Ok meta ->
-          let meta =
-            { meta with
-              name = spec.persistent_name;
-              agent_name = keeper_agent_name spec.persistent_name;
-              updated_at = now_iso ();
-            }
-          in
-          (match write_meta config meta with
-           | Ok () -> Ok meta
-           | Error msg -> Error msg)
-        | Error msg -> Error msg)
-     | _ ->
-       (* Thin format: persona_name only. Cannot auto-create meta;
-          user must run keeper_up to initialize from template. *)
-       Log.Keeper.warn
-         "ensure_resident_meta: no persistent meta for %s (persona=%s) — run keeper_up to initialize"
-         spec.persistent_name spec.persona_name;
-       Error (Printf.sprintf "no persistent meta for %s — run keeper_up to initialize"
-                spec.persistent_name))
+    Log.Keeper.warn
+      "ensure_keeper_meta: no persistent meta for %s — run keeper_up to initialize" name;
+    Error (Printf.sprintf "no persistent meta for %s — run keeper_up to initialize" name)
   | Error msg -> Error msg
 
 type keeper_bootstrap_stats = {
@@ -120,15 +97,14 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
          else
            max_int)
     in
-    let specs =
+    let entries =
       list_resident_keepers ctx.config
-      |> List.filter (fun (spec : resident_keeper_spec) -> spec.desired)
       |> take max_scan
     in
     let (enabled, scanned, started, stale, recovering) =
       List.fold_left
-        (fun (enabled_acc, scanned_acc, started_acc, stale_acc, recovering_acc) spec ->
-          match ensure_resident_meta ctx.config spec with
+        (fun (enabled_acc, scanned_acc, started_acc, stale_acc, recovering_acc) entry ->
+          match ensure_keeper_meta ctx.config entry.name with
           | Error _ ->
               (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
           | Ok m ->
@@ -161,7 +137,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 stale_acc + (if stale_now then 1 else 0),
                 recovering_acc + (if stale_now && started_here then 1 else 0) ))
         (false, 0, 0, 0, 0)
-        specs
+        entries
     in
     { enabled; scanned; started; stale; recovering }
 
@@ -228,15 +204,14 @@ let bootstrap_done_mu = Eio.Mutex.create ()
 
 let with_bootstrap_rw f = Eio_guard.with_mutex bootstrap_done_mu f
 
-let has_desired_resident_keepers config =
-  list_resident_keepers config
-  |> List.exists (fun (spec : resident_keeper_spec) -> spec.desired)
+let has_boot_entries config =
+  list_resident_keepers config <> []
 
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
   if stats.enabled
      && (stats.started > 0
          || Keeper_registry.count_running ~base_path:ctx.config.base_path () > 0
-         || has_desired_resident_keepers ctx.config)
+         || has_boot_entries ctx.config)
   then start_supervisor_sweep ctx
 
 let start_existing_keepalives ctx =

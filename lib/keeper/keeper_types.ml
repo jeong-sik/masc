@@ -541,15 +541,8 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
 
-type resident_keeper_spec = {
+type keeper_boot_entry = {
   name : string;
-  persistent_name : string;
-  desired : bool;
-  voice_enabled : bool;
-  voice_channel : string;
-  voice_agent_id : string;
-  persona_name : string;
-  seed_meta : Yojson.Safe.t;  (* legacy: kept for backward-compat reads only *)
   created_at : string;
   updated_at : string;
 }
@@ -562,62 +555,19 @@ let resident_keeper_dir (config : Room.config) =
 let resident_keeper_path config name =
   Filename.concat (resident_keeper_dir config) (name ^ ".json")
 
-let resident_keeper_to_json (spec : resident_keeper_spec) =
+let keeper_boot_to_json (entry : keeper_boot_entry) =
   `Assoc
     [
-      ("name", `String spec.name);
-      ("persistent_name", `String spec.persistent_name);
-      ("desired", `Bool spec.desired);
-      ("voice_enabled", `Bool spec.voice_enabled);
-      ("voice_channel", `String spec.voice_channel);
-      ("voice_agent_id", `String spec.voice_agent_id);
-      ("persona_name", `String spec.persona_name);
-      ("created_at", `String spec.created_at);
-      ("updated_at", `String spec.updated_at);
+      ("name", `String entry.name);
+      ("created_at", `String entry.created_at);
+      ("updated_at", `String entry.updated_at);
     ]
 
-let resident_keeper_of_json (json : Yojson.Safe.t) :
-    (resident_keeper_spec, string) result =
+let keeper_boot_of_json (json : Yojson.Safe.t) :
+    (keeper_boot_entry, string) result =
   try
     let open Yojson.Safe.Util in
     let name = json |> member "name" |> to_string in
-    let persistent_name =
-      json |> member "persistent_name" |> to_string_option
-      |> Option.value ~default:name
-    in
-    let desired =
-      match json |> member "desired" with
-      | `Bool value -> value
-      | _ -> true
-    in
-    let voice_enabled =
-      match json |> member "voice_enabled" with
-      | `Bool value -> value
-      | _ -> default_voice_enabled_for name
-    in
-    let voice_channel =
-      match json |> member "voice_channel" |> to_string_option with
-      | Some value -> canonical_voice_channel value
-      | None -> default_voice_channel_for name
-    in
-    let voice_agent_id =
-      json |> member "voice_agent_id" |> to_string_option
-      |> Option.value ~default:(default_voice_agent_id_for name)
-    in
-    let seed_meta =
-      match json |> member "seed_meta" with
-      | `Assoc _ as value -> value
-      | _ -> `Assoc []
-    in
-    let persona_name =
-      match json |> member "persona_name" |> to_string_option with
-      | Some pn -> pn
-      | None ->
-        (* Legacy: extract name from seed_meta or fall back to spec name *)
-        (match seed_meta with
-         | `Assoc _ -> Safe_ops.json_string ~default:name "name" seed_meta
-         | _ -> name)
-    in
     let created_at =
       json |> member "created_at" |> to_string_option
       |> Option.value ~default:(now_iso ())
@@ -626,26 +576,14 @@ let resident_keeper_of_json (json : Yojson.Safe.t) :
       json |> member "updated_at" |> to_string_option
       |> Option.value ~default:created_at
     in
-    Ok
-      {
-        name;
-        persistent_name;
-        desired;
-        voice_enabled;
-        voice_channel;
-        voice_agent_id;
-        persona_name;
-        seed_meta;
-        created_at;
-        updated_at;
-      }
+    Ok { name; created_at; updated_at }
   with Yojson.Safe.Util.Type_error (msg, _) | Failure msg ->
-    Error ("resident keeper parse error: " ^ msg)
+    Error ("keeper boot entry parse error: " ^ msg)
 
-let write_resident_keeper config (spec : resident_keeper_spec) :
+let write_resident_keeper config (entry : keeper_boot_entry) :
     (unit, string) result =
-  let path = resident_keeper_path config spec.name in
-  let content = Yojson.Safe.pretty_to_string (resident_keeper_to_json spec) in
+  let path = resident_keeper_path config entry.name in
+  let content = Yojson.Safe.pretty_to_string (keeper_boot_to_json entry) in
   try
     Fs_compat.save_file path content;
     Ok ()
@@ -654,14 +592,14 @@ let write_resident_keeper config (spec : resident_keeper_spec) :
       (Printf.sprintf "failed to write resident keeper %s: %s" path
          (Printexc.to_string exn))
 
-let read_resident_keeper config name : (resident_keeper_spec option, string) result =
+let read_resident_keeper config name : (keeper_boot_entry option, string) result =
   let path = resident_keeper_path config name in
   if not (Sys.file_exists path) then Ok None
   else
     try
       let json = Room_utils.read_json_local path in
-      match resident_keeper_of_json json with
-      | Ok spec -> Ok (Some spec)
+      match keeper_boot_of_json json with
+      | Ok entry -> Ok (Some entry)
       | Error msg -> Error msg
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Error
@@ -672,14 +610,7 @@ let remove_resident_keeper config name =
   Safe_ops.remove_file_logged ~context:"resident_keeper_remove"
     (resident_keeper_path config name)
 
-let deactivate_resident_keeper config name =
-  match read_resident_keeper config name with
-  | Ok (Some spec) ->
-      write_resident_keeper config
-        { spec with desired = false; updated_at = now_iso () }
-  | _ -> Ok ()
-
-let list_resident_keepers config : resident_keeper_spec list =
+let list_resident_keepers config : keeper_boot_entry list =
   let dir = resident_keeper_dir config in
   match Safe_ops.list_dir_safe dir with
   | Error _ -> []
@@ -695,38 +626,20 @@ let list_resident_keepers config : resident_keeper_spec list =
       |> List.sort (fun a b -> String.compare a.name b.name)
 
 let resident_keeper_names config =
-  list_resident_keepers config |> List.map (fun spec -> spec.name)
+  list_resident_keepers config |> List.map (fun entry -> entry.name)
 
 let is_resident_keeper config name =
-  match read_resident_keeper config name with
-  | Ok (Some spec) -> spec.desired
-  | _ -> false
+  let path = resident_keeper_path config name in
+  Sys.file_exists path
 
-let register_resident_keeper_from_meta config (meta : keeper_meta) :
-    (unit, string) result =
-  let existing =
-    match read_resident_keeper config meta.name with
-    | Ok (Some spec) -> Some spec
-    | _ -> None
-  in
+let register_resident_keeper config name : (unit, string) result =
   let created_at =
-    match existing with
-    | Some spec -> spec.created_at
-    | None -> now_iso ()
+    match read_resident_keeper config name with
+    | Ok (Some entry) -> entry.created_at
+    | _ -> now_iso ()
   in
   write_resident_keeper config
-    {
-      name = meta.name;
-      persistent_name = meta.name;
-      desired = true;
-      voice_enabled = meta.voice_enabled;
-      voice_channel = meta.voice_channel;
-      voice_agent_id = meta.voice_agent_id;
-      persona_name = meta.name;
-      seed_meta = `Assoc [];
-      created_at;
-      updated_at = now_iso ();
-    }
+    { name; created_at; updated_at = now_iso () }
 
 let persistent_agent_names ?resident_names config =
   let dir = keeper_dir config in
@@ -744,11 +657,11 @@ let persistent_agent_names ?resident_names config =
       |> List.filter (fun name -> not (List.mem name resident))
       |> List.sort String.compare
 
-let sync_registered_resident_keeper_from_meta config (meta : keeper_meta) :
+let sync_registered_resident_keeper config name :
     (unit, string) result =
-  match read_resident_keeper config meta.name with
+  match read_resident_keeper config name with
   | Ok None -> Ok ()
-  | Ok (Some _) -> register_resident_keeper_from_meta config meta
+  | Ok (Some _) -> register_resident_keeper config name
   | Error e -> Error e
 
 let fresher_meta config (meta : keeper_meta) : keeper_meta =
@@ -776,7 +689,7 @@ let write_meta config (m : keeper_meta) : (unit, string) result =
   try
     Fs_compat.save_file path content;
     (!runtime_meta_write_sync_hook) config persisted;
-    (match sync_registered_resident_keeper_from_meta config persisted with
+    (match sync_registered_resident_keeper config persisted.name with
      | Ok () -> Ok ()
      | Error e ->
          Error

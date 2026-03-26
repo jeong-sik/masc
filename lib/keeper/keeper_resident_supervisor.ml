@@ -98,13 +98,11 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
 
 (* ── Sweep and recover ───────────────────────────────────── *)
 
-let reconcile_desired_resident_keepers (ctx : _ context) =
+let reconcile_resident_keepers (ctx : _ context) =
   let base_path = ctx.config.base_path in
   Keeper_types.list_resident_keepers ctx.config
-  |> List.iter (fun (spec : Keeper_types.resident_keeper_spec) ->
-       if not spec.desired then ()
-       else
-         match read_meta ctx.config spec.persistent_name with
+  |> List.iter (fun (entry : Keeper_types.keeper_boot_entry) ->
+         match read_meta ctx.config entry.name with
          | Ok (Some meta)
            when not meta.paused
                 && meta.presence_keepalive
@@ -119,7 +117,7 @@ let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Env_config.KeeperResidentSupervisor.max_restarts in
   let base_path = ctx.config.base_path in
-  reconcile_desired_resident_keepers ctx;
+  reconcile_resident_keepers ctx;
   let entries = Keeper_registry.all ~base_path () in
   let to_restart = ref [] in
   let to_unregister = ref [] in
@@ -170,4 +168,4 @@ let sweep_and_recover (ctx : _ context) =
           old_entry.name;
         Keeper_registry.unregister ~base_path old_entry.name
   ) !to_restart;
-  reconcile_desired_resident_keepers ctx
+  reconcile_resident_keepers ctx

@@ -69,7 +69,7 @@ let patch_keeper_diagnostic ~keepalive_running (json : Yojson.Safe.t) =
         if keepalive_running then
           let fields =
             match List.assoc_opt "continuity_state" fields with
-            | Some (`String ("not_running" | "desired_offline" | "disabled")) ->
+            | Some (`String ("not_running" | "disabled")) ->
                 upsert_assoc_field "continuity_state" (`String "recovering") fields
             | _ -> fields
           in

@@ -19,7 +19,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_create_from_persona";
-    description = "Create or dry-run a resident keeper configuration from a persona profile.json. Resident keepers are desired always-on keepers.";
+    description = "Create or dry-run a keeper configuration from a persona profile.json. Registered keepers auto-start on server boot.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -69,7 +69,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_up";
-    description = "Create or update a resident keeper. Resident keepers are desired always-on keepers and are reconciled back into live presence.";
+    description = "Create or update a keeper. Registered keepers auto-start on server boot and are reconciled back into live presence.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -200,7 +200,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_status";
-    description = "Get resident keeper status (desired/live/reconcile state plus current context and monitoring tails).";
+    description = "Get keeper status (registered/live/reconcile state plus current context and monitoring tails).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -362,7 +362,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_down";
-    description = "Stop a resident keeper and remove it from resident desired state. Optionally remove underlying files.";
+    description = "Stop a keeper and unregister it from auto-boot. Optionally remove underlying files.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -385,7 +385,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_list";
-    description = "List resident keepers from the resident desired-state registry.";
+    description = "List registered keepers that auto-start on server boot.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

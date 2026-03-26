@@ -568,6 +568,19 @@ module Memory = struct
     mutex = Eio.Mutex.create ();
   }
 
+  (* Shared instances keyed by base_path — ensures multiple configs for the
+     same directory share state (matching FileSystem backend semantics).
+     Used by tests that create multiple Room.default_config for one tmpdir. *)
+  let shared_instances : (string, t) Hashtbl.t = Hashtbl.create 8
+
+  let get_or_create ~base_path =
+    match Hashtbl.find_opt shared_instances base_path with
+    | Some t -> t
+    | None ->
+      let t = create () in
+      Hashtbl.replace shared_instances base_path t;
+      t
+
   let get t key =
     with_lock t (fun () ->
       match Hashtbl.find_opt t.data key with

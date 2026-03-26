@@ -275,16 +275,17 @@ let create_backend cfg =
   match cfg.Backend_types.backend_type with
   | Backend_types.Memory ->
       (* Backend.Memory now has Effect.Unhandled/Poisoned fallback
-         built in, so it works in both Eio and non-Eio contexts. *)
-      Ok (Memory (Backend.Memory.create ()))
+         built in, so it works in both Eio and non-Eio contexts.
+         get_or_create shares state across configs for the same path. *)
+      Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name))
   | Backend_types.FileSystem ->
       (match Fs_compat.get_fs_opt () with
        | Some fs -> Ok (FileSystem (Backend.FileSystem.create ~fs cfg))
        | None ->
            (* No Eio fs context available (e.g., test without Fs_compat.set_fs).
-              Fall back to Memory backend which works without Eio context. *)
+              Fall back to shared Memory backend for the same base path. *)
            Log.Backend.warn "No Eio fs context for FileSystem backend, falling back to Memory";
-           Ok (Memory (Backend.Memory.create ())))
+           Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name)))
   | Backend_types.PostgresNative ->
       (* PostgresNative requires Eio context - use create_backend_eio instead *)
       Error (Backend_types.BackendNotSupported "PostgresNative requires Eio context (use create_backend_eio)")
@@ -329,8 +330,8 @@ let default_config base_path =
         (match create_backend fallback_cfg with
          | Ok fb -> fb
          | Error _ ->
-             (* Final fallback: in-memory to keep server alive *)
-             Memory (Backend.Memory.create ()))
+             (* Final fallback: shared in-memory to keep server alive *)
+             Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
   in
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
@@ -369,8 +370,8 @@ let default_config_eio ~sw ~env ?(on_backend_ready = fun _backend -> ()) base_pa
         (match create_backend fallback_cfg with
          | Ok fb -> fb
          | Error _ ->
-             (* Final fallback: in-memory to keep server alive *)
-             Memory (Backend.Memory.create ()))
+             (* Final fallback: shared in-memory to keep server alive *)
+             Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
   in
   {
     base_path = resolved_path;

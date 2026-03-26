@@ -314,13 +314,13 @@ let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
 
       let run () =
         Eio.Switch.run (fun sw ->
-          let is_https = Uri.scheme endpoint_uri = Some "https" in
           let client =
-            if not is_https then Cohttp_eio.Client.make ~https:None net
+            if Uri.scheme endpoint_uri <> Some "https" then
+              Masc_http_client.make_closing_client ~sw ~net ~https:None
             else
               match ctx.https_connector with
               | Some (Https_connector c) ->
-                  Cohttp_eio.Client.make ~https:(Some c) net
+                  Masc_http_client.make_closing_client ~sw ~net ~https:(Some c)
               | None ->
                   failwith "HTTPS requested but no https_connector provided to eio_context"
           in

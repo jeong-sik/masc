@@ -95,14 +95,14 @@ let voice_mcp_port () =
   | Some port -> port
   | None -> Env_config_runtime.Voice.default_port
 
-let client_for_uri ~net uri =
-  if Uri.scheme uri = Some "https" then
-    Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net
-  else
-    Cohttp_eio.Client.make ~https:None net
+let client_for_uri ~sw ~net uri =
+  let https = if Uri.scheme uri = Some "https" then
+    Some (Eio_context.get_https_connector ())
+  else None in
+  Masc_http_client.make_closing_client ~sw ~net ~https
 
-let client_for_uri_result ~net uri =
-  try Ok (client_for_uri ~net uri)
+let client_for_uri_result ~sw ~net uri =
+  try Ok (client_for_uri ~sw ~net uri)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

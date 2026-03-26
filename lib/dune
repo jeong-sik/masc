@@ -733,6 +733,7 @@
    caqti-driver-postgresql
    sqlite3
    unix
+   re
    re.str
    mirage-crypto
    mirage-crypto-ec

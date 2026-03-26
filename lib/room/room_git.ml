@@ -216,9 +216,7 @@ let list ~base_path =
                 ("path", `String !path);
                 ("branch", `String !branch);
                 (* Check if path contains .worktrees - stdlib compatible *)
-                ("is_masc", `Bool (try
-                  let _ = Re.Str.search_forward (Re.Str.regexp_string ".worktrees") !path 0 in true
-                with Not_found -> false));
+                ("is_masc", `Bool (Re.execp (Re.compile (Re.str ".worktrees")) !path));
               ])
         else None
       in

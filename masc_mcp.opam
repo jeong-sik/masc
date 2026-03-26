@@ -58,6 +58,8 @@ depends: [
   "h2" {>= "0.10"}
   "h2-eio" {>= "0.10"}
   "alcotest" {with-test & >= "1.6"}
+  "qcheck-core" {with-test & >= "0.21"}
+  "qcheck-alcotest" {with-test & >= "0.21"}
   "bisect_ppx" {with-test & >= "2.8"}
   "mtime" {>= "2.0"}
   "uuidm" {>= "0.9"}

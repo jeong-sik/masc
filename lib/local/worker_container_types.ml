@@ -97,17 +97,18 @@ let inject_default_agent_name ~(worker_name : string)
   | _ -> args
 
 let extract_prompt_block ~start_marker ~end_marker (text : string) =
-  try
-    let start_idx =
-      Re.Str.search_forward (Re.Str.regexp_string start_marker) text 0
-      + String.length start_marker
-    in
-    let end_idx =
-      Re.Str.search_forward (Re.Str.regexp_string end_marker) text start_idx
-    in
-    let raw = String.sub text start_idx (end_idx - start_idx) |> String.trim in
-    if raw = "" then None else Some raw
-  with Not_found -> None
+  let start_re = Re.str start_marker |> Re.compile in
+  let end_re = Re.str end_marker |> Re.compile in
+  match Re.exec_opt start_re text with
+  | None -> None
+  | Some g ->
+    let start_idx = Re.Group.stop g 0 in
+    (match Re.exec_opt ~pos:start_idx end_re text with
+    | None -> None
+    | Some g2 ->
+      let end_idx = Re.Group.start g2 0 in
+      let raw = String.sub text start_idx (end_idx - start_idx) |> String.trim in
+      if raw = "" then None else Some raw)
 
 let inject_prompt_full_context ~(prompt : string) ~(tool_name : string)
     (args : Yojson.Safe.t) =

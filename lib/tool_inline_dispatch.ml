@@ -421,8 +421,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
                  let desc_l = String.lowercase_ascii schema.description in
                  let haystack = name_l ^ " " ^ desc_l in
                  words |> List.exists (fun w ->
-                   try ignore (Re.Str.search_forward (Re.Str.regexp_string w) haystack 0); true
-                   with Not_found -> false))
+                   Re.execp (Re.str w |> Re.compile) haystack))
           |> List.filteri (fun i _ -> i < limit)
         in
         let results = List.map (fun (schema : Types.tool_schema) ->

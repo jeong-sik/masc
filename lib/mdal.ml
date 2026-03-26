@@ -281,7 +281,7 @@ let builtin_profile name =
 let parse_goal s =
   let s = String.trim s in
   (* Try to match: metric_name op value *)
-  let parts = Re.Str.split (Re.Str.regexp "[ \t]+") s in
+  let parts = Re.split (Re.Pcre.re "[ \t]+" |> Re.compile) s in
   match parts with
   | [path; op; value_str] ->
     let value = float_of_string value_str in
@@ -343,13 +343,14 @@ let measure_metric (cmd : string) : (float, string) result =
       | Some v -> Ok v
       | None ->
         (* Try to extract first float-like substring *)
-        let re = Re.Str.regexp "[0-9]+\\(\\.[0-9]+\\)?" in
-        if Re.Str.string_match re trimmed 0 then
-          match float_of_string_opt (Re.Str.matched_string trimmed) with
+        let re = Re.Pcre.re {|[0-9]+(?:\.[0-9]+)?|} |> Re.compile in
+        (match Re.exec_opt re trimmed with
+        | Some g ->
+          (match float_of_string_opt (Re.Group.get g 0) with
           | Some v -> Ok v
-          | None -> Error (Printf.sprintf "Cannot parse float from: %s" trimmed)
-        else
-          Error (Printf.sprintf "No numeric value found in: %s" trimmed)
+          | None -> Error (Printf.sprintf "Cannot parse float from: %s" trimmed))
+        | None ->
+          Error (Printf.sprintf "No numeric value found in: %s" trimmed))
   with
   | exn ->
     Error (Printf.sprintf "Metric command failed: %s — %s" cmd (Printexc.to_string exn))

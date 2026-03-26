@@ -238,14 +238,14 @@ let handle_promote ctx args =
         try
           let content = In_channel.with_open_text src_path In_channel.input_all in
           (* Update confidence in frontmatter *)
-          let updated = Re.Str.global_replace
-            (Re.Str.regexp {|confidence: [0-9.]+|})
-            (sprintf "confidence: %.2f" new_confidence)
+          let updated = Re.replace_string
+            (Re.Pcre.re {|confidence: [0-9.]+|} |> Re.compile)
+            ~by:(sprintf "confidence: %.2f" new_confidence)
             content in
           (* Add verifier *)
-          let with_verifier = Re.Str.global_replace
-            (Re.Str.regexp {|verified_by: \[\]|})
-            (sprintf "verified_by: [%s]" ctx.agent_name)
+          let with_verifier = Re.replace_string
+            (Re.Pcre.re {|verified_by: \[\]|} |> Re.compile)
+            ~by:(sprintf "verified_by: [%s]" ctx.agent_name)
             updated in
           (* Move to library *)
           let dest_path = Filename.concat (library_root ()) (Filename.basename src_path) in

@@ -392,10 +392,7 @@ let content_matches_query content query =
     let content_lower = String.lowercase_ascii content in
     List.exists (fun hint ->
       String.length hint >= 3 &&
-      try
-        let _ = Re.Str.search_forward (Re.Str.regexp_string (String.lowercase_ascii hint)) content_lower 0 in
-        true
-      with Not_found -> false
+      Re.execp (Re.str (String.lowercase_ascii hint) |> Re.compile) content_lower
     ) hints
 
 (** Fetch context with query-based relevance boosting *)

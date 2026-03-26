@@ -32,10 +32,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
 let contains_casefold haystack needle =
   let haystack = String.lowercase_ascii haystack in
   let needle = String.lowercase_ascii needle in
-  try
-    ignore (Re.Str.search_forward (Re.Str.regexp_string needle) haystack 0);
-    true
-  with Not_found -> false
+  Re.execp (Re.str needle |> Re.compile) haystack
 
 let parse_status_from_message ~success ~message =
   if not success then

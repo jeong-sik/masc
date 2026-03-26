@@ -139,27 +139,22 @@ let default_config hat =
 (** Parse "@agent:hat" format from message
     @return Some (agent, hat) or None *)
 let parse_hatted_mention msg =
-  let re = Re.Str.regexp "@\\([a-zA-Z0-9_-]+\\):\\([a-zA-Z0-9_-]+\\)" in
-  try
-    let _ = Re.Str.search_forward re msg 0 in
-    let agent = Re.Str.matched_group 1 msg in
-    let hat_str = Re.Str.matched_group 2 msg in
+  let re = Re.Pcre.re {|@([a-zA-Z0-9_-]+):([a-zA-Z0-9_-]+)|} |> Re.compile in
+  match Re.exec_opt re msg with
+  | Some g ->
+    let agent = Re.Group.get g 1 in
+    let hat_str = Re.Group.get g 2 in
     Some (agent, of_string hat_str)
-  with Not_found -> None
+  | None -> None
 
 (** Extract all hatted mentions from a message *)
 let extract_hatted_mentions msg =
-  let re = Re.Str.regexp "@\\([a-zA-Z0-9_-]+\\):\\([a-zA-Z0-9_-]+\\)" in
-  let rec find_all start acc =
-    try
-      let _ = Re.Str.search_forward re msg start in
-      let agent = Re.Str.matched_group 1 msg in
-      let hat_str = Re.Str.matched_group 2 msg in
-      let end_pos = Re.Str.match_end () in
-      find_all end_pos ((agent, of_string hat_str) :: acc)
-    with Not_found -> List.rev acc
-  in
-  find_all 0 []
+  let re = Re.Pcre.re {|@([a-zA-Z0-9_-]+):([a-zA-Z0-9_-]+)|} |> Re.compile in
+  Re.all re msg
+  |> List.map (fun g ->
+    let agent = Re.Group.get g 1 in
+    let hat_str = Re.Group.get g 2 in
+    (agent, of_string hat_str))
 
 (** {1 Hat Registry} *)
 

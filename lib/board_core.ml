@@ -245,14 +245,17 @@ let state_start_marker = "[STATE]"
 let state_end_marker = "[/STATE]"
 
 let extract_state_block (text : string) : string option * string =
-  let start_re = Re.Str.regexp_string state_start_marker in
-  let end_re = Re.Str.regexp_string state_end_marker in
-  try
-    let start_idx = Re.Str.search_forward start_re text 0 in
+  let start_re = Re.str state_start_marker |> Re.compile in
+  let end_re = Re.str state_end_marker |> Re.compile in
+  match Re.exec_opt start_re text with
+  | None -> None, String.trim text
+  | Some g ->
+    let start_idx = Re.Group.start g 0 in
     let block_body_start = start_idx + String.length state_start_marker in
     let end_idx =
-      try Re.Str.search_forward end_re text block_body_start
-      with Not_found -> String.length text
+      match Re.exec_opt ~pos:block_body_start end_re text with
+      | Some g2 -> Re.Group.start g2 0
+      | None -> String.length text
     in
     let block_end =
       min (String.length text) (end_idx + String.length state_end_marker)
@@ -268,7 +271,6 @@ let extract_state_block (text : string) : string option * string =
       else String.sub text block_end (String.length text - block_end)
     in
     Some state_block, String.trim (before ^ after)
-  with Not_found -> None, String.trim text
 
 let meta_state_block (meta_json : Yojson.Safe.t option) =
   match meta_json with

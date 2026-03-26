@@ -86,16 +86,10 @@ type prompt_resolution = {
 (** Extract variable names from a template string.
     Matches {{variable_name}} patterns. *)
 let extract_variables template =
-  let regex = Re.Str.regexp "{{\\([^}]+\\)}}" in
-  let rec find_all start acc =
-    try
-      let _ = Re.Str.search_forward regex template start in
-      let var = Re.Str.matched_group 1 template in
-      let next = Re.Str.match_end () in
-      find_all next (var :: acc)
-    with Not_found -> acc
+  let regex = Re.Pcre.re {|\{\{([^}]+)\}\}|} |> Re.compile in
+  let vars = Re.all regex template
+    |> List.map (fun g -> Re.Group.get g 1)
   in
-  let vars = find_all 0 [] in
   (* Remove duplicates and sort alphabetically *)
   List.sort_uniq String.compare vars
 
@@ -377,14 +371,11 @@ let render_template ~template ~vars () : (string, string) result =
     let result = ref template in
     List.iter (fun (name, value) ->
       let pattern = Printf.sprintf "{{%s}}" name in
-      result := Re.Str.global_replace (Re.Str.regexp_string pattern) value !result
+      result := Re.replace_string (Re.str pattern |> Re.compile) ~by:value !result
     ) vars;
     (* Check for unresolved variables anywhere in the result *)
-    let regex = Re.Str.regexp "{{[^}]+}}" in
-    let has_unresolved =
-      try ignore (Re.Str.search_forward regex !result 0); true
-      with Not_found -> false
-    in
+    let regex = Re.Pcre.re {|\{\{[^}]+\}\}|} |> Re.compile in
+    let has_unresolved = Re.execp regex !result in
     if has_unresolved then
       Error "Unresolved variables in template"
     else

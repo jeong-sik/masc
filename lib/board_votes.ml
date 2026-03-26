@@ -536,13 +536,14 @@ let available_flairs = [
 
 (** Extract flair from content (format: [flair:name] at start) *)
 let extract_flair content =
-  let re = Re.Str.regexp {|\[flair:\([a-z]+\)\]|} in
-  if Re.Str.string_match re content 0 then
-    let flair_name = Re.Str.matched_group 1 content in
-    match List.find_opt (fun (name, _, _) -> name = flair_name) available_flairs with
+  let re = Re.Pcre.re {|\[flair:([a-z]+)\]|} |> Re.compile in
+  match Re.exec_opt re content with
+  | Some g ->
+    let flair_name = Re.Group.get g 1 in
+    (match List.find_opt (fun (name, _, _) -> name = flair_name) available_flairs with
     | Some f -> Some f
-    | None -> None
-  else None
+    | None -> None)
+  | None -> None
 
 (** Get flair info as JSON *)
 let flair_to_yojson (name, emoji, label) =

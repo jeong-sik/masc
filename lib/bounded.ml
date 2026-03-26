@@ -96,10 +96,7 @@ let is_retryable_error msg =
   let msg_lower = String.lowercase_ascii msg in
   List.exists (fun pattern ->
     let pattern_lower = String.lowercase_ascii pattern in
-    try
-      let _ = Re.Str.search_forward (Re.Str.regexp_string pattern_lower) msg_lower 0 in
-      true
-    with Not_found -> false
+    Re.execp (Re.str pattern_lower |> Re.compile) msg_lower
   ) [
     "timeout";
     "timed out";

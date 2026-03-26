@@ -488,11 +488,10 @@ let reconcile_failed_spawn_actor config session_id actor_name =
     |> Result.map (fun () -> `Detached)
 
 let extract_vote_id (text : string) =
-  let re = Re.Str.regexp "vote-[0-9-]+-[0-9]+" in
-  try
-    let _ = Re.Str.search_forward re text 0 in
-    Some (Re.Str.matched_string text)
-  with Not_found -> None
+  let re = Re.Pcre.re "vote-[0-9-]+-[0-9]+" |> Re.compile in
+  match Re.exec_opt re text with
+  | Some g -> Some (Re.Group.get g 0)
+  | None -> None
 
 let status_of_engine_status_json (json : Yojson.Safe.t) =
   match Yojson.Safe.Util.member "session" json |> Yojson.Safe.Util.member "status" with

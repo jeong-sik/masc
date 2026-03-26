@@ -532,7 +532,7 @@ end
 
 module Memory = struct
   type t = {
-    mutable data: (string, string) Hashtbl.t;
+    data: (string, string) Hashtbl.t;
     mutex: Eio.Mutex.t;
   }
 

@@ -90,7 +90,9 @@ let test_keeper_status_exposes_summary_and_recoverable () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
+    ~finally:(fun () ->
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
     (fun () ->
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
@@ -169,6 +171,7 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
   let cwd = Sys.getcwd () in
   Fun.protect
     ~finally:(fun () ->
+      Keeper_runtime.reset_test_state base_dir;
       Unix.chdir cwd;
       cleanup_dir base_dir)
     (fun () ->
@@ -300,7 +303,9 @@ let test_snapshot_keeper_tool_audit_fallback () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
+    ~finally:(fun () ->
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
     (fun () ->
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
@@ -373,7 +378,9 @@ let test_keeper_msg_auto_team_session_bridge () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
+    ~finally:(fun () ->
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
     (fun () ->
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));

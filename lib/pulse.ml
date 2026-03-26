@@ -263,11 +263,19 @@ let create ~clock ~rhythm ~lifecycle ~consumers =
 let run ~sw t =
   t.alive    <- true;
   t.start_ts <- now t.clock;
-  Eio.Fiber.fork ~sw (fun () ->
-    Fun.protect
-      (fun () -> loop t)
-      ~finally:(fun () -> t.alive <- false)
-  )
+  match t.lifecycle with
+  | Perpetual ->
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Fun.protect
+        (fun () -> loop t; `Stop_daemon)
+        ~finally:(fun () -> t.alive <- false)
+    )
+  | Bounded _ ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Fun.protect
+        (fun () -> loop t)
+        ~finally:(fun () -> t.alive <- false)
+    )
 
 let nudge t ~reason =
   if t.alive && Eio.Stream.is_empty t.nudge_stream then

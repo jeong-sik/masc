@@ -29,7 +29,7 @@ let cascade_counters : (string, cascade_counter) Hashtbl.t = Hashtbl.create 8
 let cascade_max_keys = 256
 
 let record_cascade ~cascade_name ~outcome =
-  Eio.Mutex.use_rw ~protect:true cascade_counters_mu (fun () ->
+  Eio_guard.with_mutex cascade_counters_mu (fun () ->
     let c = match Hashtbl.find_opt cascade_counters cascade_name with
       | Some c -> c
       | None ->
@@ -47,7 +47,7 @@ let record_cascade ~cascade_name ~outcome =
     | `Rejected -> c.rejected <- c.rejected + 1)
 
 let cascade_metrics_json () : Yojson.Safe.t =
-  Eio.Mutex.use_ro cascade_counters_mu (fun () ->
+  Eio_guard.with_mutex_ro cascade_counters_mu (fun () ->
     let entries = Hashtbl.fold (fun name c acc ->
       let error_rate = if c.calls > 0
         then float_of_int (c.failures + c.rejected) /. float_of_int c.calls

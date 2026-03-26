@@ -1,74 +1,69 @@
 
 (** Global Eio context for shared network/clock access.
-    Set during server startup (main_eio.ml). *)
+    Set once during server startup (main_eio.ml), read from any context.
+
+    Uses Atomic.t (lock-free WORM pattern): each field is written once at
+    init and read many times from Eio fibers, CI tests, and OAS callbacks.
+    No mutex needed — Atomic.get/set are single-instruction operations. *)
 
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
-let current_net : eio_net option ref = ref None
-let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
-let current_mono_clock : Eio.Time.Mono.ty Eio.Resource.t option ref = ref None
-let current_sw : Eio.Switch.t option ref = ref None
-let net_initialized : bool ref = ref false
-let global_ctx_mutex = Eio.Mutex.create ()
+let current_net : eio_net option Atomic.t = Atomic.make None
+let current_clock : float Eio.Time.clock_ty Eio.Resource.t option Atomic.t = Atomic.make None
+let current_mono_clock : Eio.Time.Mono.ty Eio.Resource.t option Atomic.t = Atomic.make None
+let current_sw : Eio.Switch.t option Atomic.t = Atomic.make None
+let net_initialized : bool Atomic.t = Atomic.make false
 
 let set_net net =
-  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
-      current_net := Some (net :> eio_net);
-      net_initialized := true)
+  Atomic.set current_net (Some (net :> eio_net));
+  Atomic.set net_initialized true
 
 let set_clock clock =
-  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
-      current_clock := Some clock)
+  Atomic.set current_clock (Some clock)
 
 let set_mono_clock mc =
-  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
-      current_mono_clock := Some mc)
+  Atomic.set current_mono_clock (Some mc)
 
 let get_mono_clock () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
-      match !current_mono_clock with
-      | Some mc -> mc
-      | None -> invalid_arg "Eio mono_clock not initialized")
+  match Atomic.get current_mono_clock with
+  | Some mc -> mc
+  | None -> invalid_arg "Eio mono_clock not initialized"
 
 let set_switch sw =
-  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
-      current_sw := Some sw)
+  Atomic.set current_sw (Some sw)
 
 let get_net_opt () : eio_net option =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_net)
+  Atomic.get current_net
 
 let get_clock_opt () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_clock)
+  Atomic.get current_clock
 
 let get_switch_opt () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_sw)
+  Atomic.get current_sw
 
 let get_net () : eio_net =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
-      match !current_net with
-      | Some net -> net
-      | None ->
-          if !net_initialized then
-            invalid_arg "Eio net was set but is now None (unexpected state)"
-          else
-            invalid_arg
-              "Eio net not initialized - ensure set_net is called during server startup")
+  match Atomic.get current_net with
+  | Some net -> net
+  | None ->
+      if Atomic.get net_initialized then
+        invalid_arg "Eio net was set but is now None (unexpected state)"
+      else
+        invalid_arg
+          "Eio net not initialized - ensure set_net is called during server startup"
 
 let get_clock () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
-      match !current_clock with
-      | Some clock -> clock
-      | None ->
-          invalid_arg
-            "Eio clock not initialized - ensure set_clock is called during server startup")
+  match Atomic.get current_clock with
+  | Some clock -> clock
+  | None ->
+      invalid_arg
+        "Eio clock not initialized - ensure set_clock is called during server startup"
 
 let get_switch () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
-      match !current_sw with
-      | Some sw -> sw
-      | None ->
-          invalid_arg
-            "Eio switch not initialized - ensure set_switch is called during server startup")
+  match Atomic.get current_sw with
+  | Some sw -> sw
+  | None ->
+      invalid_arg
+        "Eio switch not initialized - ensure set_switch is called during server startup"
 
 (** TLS connector for Cohttp_eio HTTPS support. *)
 let _https_connector_cache :

@@ -271,7 +271,7 @@ let chdir_mutex = Eio.Mutex.create ()
 (** Fork a subprocess with optional CWD change, holding [chdir_mutex]
     only for the chdir-fork-restore window.  Returns (pid, stdout_read_fd). *)
 let fork_with_cwd ~cmd_array ~stdin_content ~working_dir ~config_working_dir =
-  Eio.Mutex.use_rw ~protect:true chdir_mutex (fun () ->
+  Eio_guard.with_mutex chdir_mutex (fun () ->
     let original_dir = Sys.getcwd () in
     let target_dir = match working_dir with
       | Some dir -> Some dir

@@ -32,14 +32,27 @@ let init config ~agent_name =
       speculation_budget = None;
     } in
     write_json_root config (root_state_path config) (room_state_to_yojson root_state)
+  end else begin
+    (* Sync PG state to local file on startup so filesystem fallback has fresh data *)
+    let root_json = read_json_root config (root_state_path config) in
+    (try write_json_local (root_state_path config) root_json
+     with _exn -> ())
   end;
   if not (path_exists_root config root_backlog_path) then begin
     let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
     write_json_root config root_backlog_path (backlog_to_yojson root_backlog)
+  end else begin
+    let root_backlog_json = read_json_root config root_backlog_path in
+    (try write_json_local root_backlog_path root_backlog_json
+     with _exn -> ())
   end;
 
-  if is_initialized config then
+  if is_initialized config then begin
+    (* Sync PG scoped state to local file so filesystem fallback has fresh data *)
+    let scoped_json = read_json config (state_path config) in
+    (try write_json_local (state_path config) scoped_json with _exn -> ());
     "MASC already initialized."
+  end
   else begin
     (* Create directories *)
     List.iter mkdir_p [

@@ -44,6 +44,13 @@ let _execution_cache =
         ("message", `String "Execution data is being computed. Refresh in a few seconds.");
       ])
 
+(** Bypass the proactive warm-up guard so tests that call
+    [dashboard_room_truth_http_json] get the full response instead of
+    the "initializing" short-circuit. *)
+let seed_execution_cache_for_test () =
+  mark_cached_surface_success _execution_cache
+    (`Assoc [("status", `String "seeded_for_test")])
+
 let _transport_health_cache =
   create_cached_surface
     (`Assoc

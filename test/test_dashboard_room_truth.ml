@@ -4,6 +4,13 @@ module Lib = Masc_mcp
 
 open Alcotest
 
+(* Force filesystem backend so tests run without PG auto-detect dependency. *)
+let () = Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
+
+(* Bypass the proactive execution cache warm-up guard so tests get the full
+   room-truth response instead of the "initializing" short-circuit. *)
+let () = Lib.Server_dashboard_http.seed_execution_cache_for_test ()
+
 let test_dir () =
   let tmp = Filename.temp_file "masc_dashboard_room_truth" "" in
   Sys.remove tmp;

@@ -13,4 +13,5 @@
    eio
    unix
    yojson
+   re
    re.str))

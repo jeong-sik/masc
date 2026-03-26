@@ -231,11 +231,13 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
         let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
         let entry = { key; value; created_at = now; expires_at; tags } in
         let path = cache_file config key in
+        let is_overwrite = Sys.file_exists path in
         let json = entry_to_json entry in
         let content = Yojson.Safe.pretty_to_string json in
         try
           Fs_compat.save_file path content;
-          ignore (Atomic.fetch_and_add cached_entry_count 1);
+          if not is_overwrite then
+            ignore (Atomic.fetch_and_add cached_entry_count 1);
           Ok entry
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -246,11 +248,13 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
       let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
       let entry = { key; value; created_at = now; expires_at; tags } in
       let path = cache_file config key in
+      let is_overwrite = Sys.file_exists path in
       let json = entry_to_json entry in
       let content = Yojson.Safe.pretty_to_string json in
       try
         Fs_compat.save_file path content;
-        ignore (Atomic.fetch_and_add cached_entry_count 1);
+        if not is_overwrite then
+          ignore (Atomic.fetch_and_add cached_entry_count 1);
         Ok entry
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

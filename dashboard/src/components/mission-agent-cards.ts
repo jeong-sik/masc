@@ -3,6 +3,7 @@ import { extractAgentInfo } from './common/agent-info'
 import { linkedRecentToolsEmptyState, observedToolsEmptyState, toolAuditStateLabel } from './common/tool-audit'
 import { StatCell } from './common/stat-cell'
 import { ActionBar, ActionBtn } from './common/action-bar'
+import { InlineKeeperAction } from './common/inline-keeper-action'
 import { StatusChip } from './common/status-chip'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
@@ -133,6 +134,20 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
           ${row.keeper?.skill_reason ? html`<small>판단 요약 · ${trimText(row.keeper.skill_reason, 120)}</small>` : null}
         </div>
       </button>
+
+      <${ActionBar} class="pt-2 border-t border-[var(--white-6)]">
+        <${InlineKeeperAction} keeperName=${row.brief.name} />
+        <${ActionBtn} label="상세 보기" onClick=${(e: Event) => {
+          e.stopPropagation()
+          const keeper: Keeper = row.keeper ?? {
+            name: row.brief.name,
+            agent_name: row.brief.agent_name ?? row.brief.name,
+            status: row.brief.status ?? 'unknown',
+            context_ratio: row.brief.context_ratio ?? null,
+          } as Keeper
+          openKeeperDetail(keeper)
+        }} />
+      <//>
 
       <details class="pt-2 border-t border-[var(--white-6)]">
         <summary>연속성 상세</summary>

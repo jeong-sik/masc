@@ -51,8 +51,8 @@ let run_cmd_timed ~timeout_sec (argv : string list) ~cwd : (int * string * float
 let parse_test_counts ~returncode (stdout : string) : int * int =
   let lines = String.split_on_char '\n' stdout in
   let str_contains haystack needle =
-    try ignore (Re.Str.search_forward (Re.Str.regexp_string needle) haystack 0); true
-    with Not_found -> false
+    let re = Re.str needle |> Re.compile in
+    Re.execp re haystack
   in
   let assert_lines = List.filter (fun l -> str_contains l "ASSERT") lines in
   let total = List.length assert_lines in

@@ -68,8 +68,13 @@ val record_verdict :
   task_id:string ->
   req:Anti_rationalization.review_request ->
   result:Anti_rationalization.review_result ->
+  ?on_harness_verdict:(Agent_sdk.Harness.verdict -> unit) ->
+  unit ->
   unit
-(** Append a verdict record to the JSONL store. *)
+(** Append a verdict record to the JSONL store.
+    If [~on_harness_verdict] is provided, converts the record to an OAS
+    [Harness.verdict] and invokes the callback after persistence.
+    This enables wiring to [Eval.add_verdict] or SSE event publishers. *)
 
 val record_human_label :
   notes_hash:string ->

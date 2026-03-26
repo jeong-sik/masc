@@ -110,13 +110,35 @@ let label_record_to_json (r : label_record) : Yojson.Safe.t =
   ]
 
 (* ================================================================ *)
+(* OAS Harness.verdict conversion (#3165)                            *)
+(* ================================================================ *)
+
+(** Convert a MASC [verdict_record] to an OAS [Harness.verdict].
+    Maps "approve" → passed=true, "reject:*" → passed=false.
+    The gate name is recorded as evidence for traceability. *)
+let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
+  let passed = r.verdict = "approve" in
+  let score = if passed then Some 1.0 else Some 0.0 in
+  let evidence = [
+    Printf.sprintf "gate=%s" r.gate;
+    Printf.sprintf "evaluator=%s" r.evaluator_cascade;
+    Printf.sprintf "task_id=%s" r.task_id;
+  ] in
+  let detail = if passed then None
+    else Some (Printf.sprintf "rejected at %s gate: %s" r.gate r.verdict)
+  in
+  { Agent_sdk.Harness.passed; score; evidence; detail }
+
+(* ================================================================ *)
 (* Record writing                                                    *)
 (* ================================================================ *)
 
 let record_verdict
     ~(task_id : string)
     ~(req : Anti_rationalization.review_request)
-    ~(result : Anti_rationalization.review_result) : unit =
+    ~(result : Anti_rationalization.review_result)
+    ?(on_harness_verdict : (Agent_sdk.Harness.verdict -> unit) option)
+    () : unit =
   let hash = notes_hash ~task_title:req.task_title ~notes:req.completion_notes in
   let verdict_str = match result.verdict with
     | Anti_rationalization.Approve -> "approve"
@@ -134,7 +156,14 @@ let record_verdict
     generator_cascade = result.generator_cascade;
     timestamp = Unix.gettimeofday ();
   } in
-  Dated_jsonl.append (get_store ()) (verdict_record_to_json record)
+  Dated_jsonl.append (get_store ()) (verdict_record_to_json record);
+  match on_harness_verdict with
+  | Some cb ->
+    (try cb (to_harness_verdict record)
+     with exn ->
+       Log.Harness.warn "[eval_calibration] on_harness_verdict callback failed: %s"
+         (Printexc.to_string exn))
+  | None -> ()
 
 let record_human_label
     ~(notes_hash : string)
@@ -240,25 +269,6 @@ let format_few_shot_block (examples : calibration_example list) : string =
     "Here are examples of correct verdicts for calibration:\n\n"
     ^ String.concat "\n\n" lines
 
-(* ================================================================ *)
-(* OAS Harness.verdict conversion (#3165)                            *)
-(* ================================================================ *)
-
-(** Convert a MASC [verdict_record] to an OAS [Harness.verdict].
-    Maps "approve" → passed=true, "reject:*" → passed=false.
-    The gate name is recorded as evidence for traceability. *)
-let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
-  let passed = r.verdict = "approve" in
-  let score = if passed then Some 1.0 else Some 0.0 in
-  let evidence = [
-    Printf.sprintf "gate=%s" r.gate;
-    Printf.sprintf "evaluator=%s" r.evaluator_cascade;
-    Printf.sprintf "task_id=%s" r.task_id;
-  ] in
-  let detail = if passed then None
-    else Some (Printf.sprintf "rejected at %s gate: %s" r.gate r.verdict)
-  in
-  { Agent_sdk.Harness.passed; score; evidence; detail }
 
 (* ================================================================ *)
 (* Statistics                                                        *)

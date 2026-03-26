@@ -70,7 +70,7 @@ let test_record_verdict_writes () =
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
-  Cal.record_verdict ~task_id:"task-1" ~req ~result;
+  Cal.record_verdict ~task_id:"task-1" ~req ~result ();
   let store = Cal.get_store () in
   let records = Dated_jsonl.read_recent store 10 in
   check bool "at least 1 record written" true (List.length records >= 1);
@@ -86,7 +86,7 @@ let test_record_verdict_reject () =
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req () in
   let result = make_result ~verdict:(AR.Reject "vague notes") ~gate:"excuse" () in
-  Cal.record_verdict ~task_id:"task-2" ~req ~result;
+  Cal.record_verdict ~task_id:"task-2" ~req ~result ();
   let store = Cal.get_store () in
   let records = Dated_jsonl.read_recent store 10 in
   let first = List.hd records in
@@ -101,7 +101,7 @@ let test_record_verdict_hash_matches () =
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
-  Cal.record_verdict ~task_id:"task-3" ~req ~result;
+  Cal.record_verdict ~task_id:"task-3" ~req ~result ();
   let expected_hash = Cal.notes_hash
     ~task_title:req.task_title ~notes:req.completion_notes in
   let store = Cal.get_store () in
@@ -143,7 +143,7 @@ let test_find_divergences_false_positive () =
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req ~title:"FP task" ~notes:"looks ok but not" () in
   let result = make_result ~verdict:AR.Approve ~gate:"llm" () in
-  Cal.record_verdict ~task_id:"t1" ~req ~result;
+  Cal.record_verdict ~task_id:"t1" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"FP task" ~notes:"looks ok but not" in
   Cal.record_human_label
     ~notes_hash:hash ~human_verdict:"reject"
@@ -162,7 +162,7 @@ let test_find_divergences_false_negative () =
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req ~title:"FN task" ~notes:"actually good work" () in
   let result = make_result ~verdict:(AR.Reject "unclear") ~gate:"excuse" () in
-  Cal.record_verdict ~task_id:"t2" ~req ~result;
+  Cal.record_verdict ~task_id:"t2" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"FN task" ~notes:"actually good work" in
   Cal.record_human_label
     ~notes_hash:hash ~human_verdict:"approve"
@@ -180,7 +180,7 @@ let test_find_divergences_agreement () =
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req ~title:"OK task" ~notes:"done correctly" () in
   let result = make_result ~verdict:AR.Approve () in
-  Cal.record_verdict ~task_id:"t3" ~req ~result;
+  Cal.record_verdict ~task_id:"t3" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"OK task" ~notes:"done correctly" in
   Cal.record_human_label
     ~notes_hash:hash ~human_verdict:"approve"
@@ -196,7 +196,7 @@ let test_find_divergences_no_labels () =
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
-  Cal.record_verdict ~task_id:"t4" ~req ~result;
+  Cal.record_verdict ~task_id:"t4" ~req ~result ();
   let divs = Cal.find_divergences () in
   check int "no divergences without labels" 0 (List.length divs);
   Cal.reset_store_for_testing ()
@@ -216,7 +216,7 @@ let test_select_examples_max () =
     let notes = Printf.sprintf "notes-%d" i in
     let req = make_req ~title ~notes () in
     let result = make_result ~verdict:AR.Approve () in
-    Cal.record_verdict ~task_id:(Printf.sprintf "t%d" i) ~req ~result;
+    Cal.record_verdict ~task_id:(Printf.sprintf "t%d" i) ~req ~result ();
     let hash = Cal.notes_hash ~task_title:title ~notes in
     Cal.record_human_label
       ~notes_hash:hash ~human_verdict:"reject"
@@ -263,13 +263,13 @@ let test_calibration_stats () =
   (* 2 approvals, 1 rejection *)
   let req1 = make_req ~title:"t1" ~notes:"n1" () in
   Cal.record_verdict ~task_id:"id1" ~req:req1
-    ~result:(make_result ~verdict:AR.Approve ~gate:"llm" ());
+    ~result:(make_result ~verdict:AR.Approve ~gate:"llm" ()) ();
   let req2 = make_req ~title:"t2" ~notes:"n2" () in
   Cal.record_verdict ~task_id:"id2" ~req:req2
-    ~result:(make_result ~verdict:AR.Approve ~gate:"length" ());
+    ~result:(make_result ~verdict:AR.Approve ~gate:"length" ()) ();
   let req3 = make_req ~title:"t3" ~notes:"n3" () in
   Cal.record_verdict ~task_id:"id3" ~req:req3
-    ~result:(make_result ~verdict:(AR.Reject "bad") ~gate:"excuse" ());
+    ~result:(make_result ~verdict:(AR.Reject "bad") ~gate:"excuse" ()) ();
   let stats = Cal.calibration_stats () in
   let total = Yojson.Safe.Util.(stats |> member "total_verdicts" |> to_int) in
   let approves = Yojson.Safe.Util.(stats |> member "approve_count" |> to_int) in
@@ -312,6 +312,55 @@ let test_to_harness_verdict_reject () =
   check bool "detail mentions gate" true
     (match hv.detail with Some d -> contains ~sub:"length" d | None -> false)
 
+let test_on_harness_verdict_callback () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.set_store_for_testing ~base_dir:dir;
+  let received = ref None in
+  let req = make_req () in
+  let result = make_result () in
+  Cal.record_verdict ~task_id:"cb-1" ~req ~result
+    ~on_harness_verdict:(fun hv -> received := Some hv) ();
+  (match !received with
+   | None -> Alcotest.fail "on_harness_verdict not called"
+   | Some hv ->
+     check bool "passed" true hv.Agent_sdk.Harness.passed;
+     check (option (float 0.01)) "score" (Some 1.0) hv.score);
+  Cal.reset_store_for_testing ()
+
+let test_on_harness_verdict_with_collector () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.set_store_for_testing ~base_dir:dir;
+  let collector = Agent_sdk.Eval.create_collector
+    ~agent_name:"test-agent" ~run_id:"run-1" in
+  let req = make_req () in
+  let result = make_result () in
+  Cal.record_verdict ~task_id:"col-1" ~req ~result
+    ~on_harness_verdict:(Agent_sdk.Eval.add_verdict collector) ();
+  let metrics = Agent_sdk.Eval.finalize collector in
+  check int "1 harness verdict" 1 (List.length metrics.harness_verdicts);
+  let hv = List.hd metrics.harness_verdicts in
+  check bool "passed" true hv.passed;
+  Cal.reset_store_for_testing ()
+
+let test_on_harness_verdict_exception_safe () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.set_store_for_testing ~base_dir:dir;
+  let req = make_req () in
+  let result = make_result () in
+  Cal.record_verdict ~task_id:"exc-1" ~req ~result
+    ~on_harness_verdict:(fun _hv -> failwith "boom") ();
+  let store = Cal.get_store () in
+  let records = Dated_jsonl.read_recent store 10 in
+  check bool "record persisted despite callback failure" true
+    (List.length records >= 1);
+  Cal.reset_store_for_testing ()
+
 (* ================================================================ *)
 (* Test Suite                                                        *)
 (* ================================================================ *)
@@ -349,5 +398,10 @@ let () =
     "oas_conversion", [
       test_case "approve verdict" `Quick test_to_harness_verdict_approve;
       test_case "reject verdict" `Quick test_to_harness_verdict_reject;
+    ];
+    "oas_integration", [
+      test_case "callback invoked" `Quick test_on_harness_verdict_callback;
+      test_case "with Eval.collector" `Quick test_on_harness_verdict_with_collector;
+      test_case "callback exception safe" `Quick test_on_harness_verdict_exception_safe;
     ];
   ]

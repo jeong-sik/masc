@@ -294,7 +294,7 @@ let handle_transition ctx args =
         } in
         let on_verdict result =
           Eval_calibration.record_verdict
-            ~task_id ~req:ar_req ~result in
+            ~task_id ~req:ar_req ~result () in
         let few_shot_block =
           Eval_calibration.format_few_shot_block
             (Eval_calibration.select_examples ~max_examples:3) in

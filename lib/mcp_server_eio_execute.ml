@@ -40,19 +40,25 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let identity = Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments in
   Log.Mcp.debug "[Identity] %s" (Agent_identity.to_display_string identity);
 
-  (* Legacy helper for backward compatibility - reads from file if identity not in args *)
+  (* Deprecated: /tmp file-based agent identity. Use Agent_identity system instead.
+     Kept for backward compat with pre-identity MCP clients. Remove when
+     deprecation log shows zero hits over a release cycle. *)
   let read_mcp_session_agent () =
     match mcp_session_id with
     | None -> None
     | Some sid ->
         let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
-        try
+        (try
           let name = Fs_compat.load_file file |> String.trim in
-          if name = "" then None else Some name
-        with Sys_error _ | Eio.Io _ -> None
+          if name = "" then None
+          else begin
+            Log.Mcp.warn "[deprecated] agent name resolved via /tmp file for session %s — migrate to Agent_identity" sid;
+            Some name
+          end
+        with Sys_error _ | Eio.Io _ -> None)
   in
 
-  (* Legacy helper - write to file for backward compat with non-identity-aware tools *)
+  (* Deprecated: write agent name to /tmp file. *)
   let write_mcp_session_agent agent_name =
     match mcp_session_id with
     | None -> ()
@@ -105,7 +111,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
             let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
             (try
               let name = Fs_compat.load_file term_file |> String.trim in
-              if name <> "" then name else raise Not_found
+              if name <> "" then begin
+                Log.Mcp.warn "[deprecated] agent name resolved via /tmp TERM file — migrate to Agent_identity";
+                name
+              end else raise Not_found
             with Sys_error _ | Not_found ->
               generated_fallback_agent_name)
   in

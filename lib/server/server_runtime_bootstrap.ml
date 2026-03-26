@@ -309,21 +309,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       |> String.lowercase_ascii
     in
     let init_state_blocking () =
-      let pg_pool_timeout =
-        Safe_ops.get_env_float_logged "MASC_PG_POOL_TIMEOUT_SEC" ~default:30.0
-      in
       let t0 = Eio.Time.now clock in
       let state =
-        (try
-           Eio.Time.with_timeout_exn clock pg_pool_timeout (fun () ->
-             create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr
-               ~fs)
-         with Eio.Time.Timeout ->
-           Log.Server.error
-             "PG pool creation timed out after %.0fs (inner limit); \
-              outer timeout will trigger JSONL fallback"
-             pg_pool_timeout;
-           raise Eio.Time.Timeout)
+        create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       in
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (PG pool) in %.1fs" (t1 -. t0);

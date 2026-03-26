@@ -87,16 +87,20 @@ include Dashboard_http_monitoring
 include Dashboard_http_keeper
 include Dashboard_http_mdal
 
-(** Wrap a dashboard computation with a 30-second timeout.
+let _dashboard_request_timeout_s =
+  float_of_env_default "MASC_DASHBOARD_REQUEST_TIMEOUT_S"
+    ~default:30.0 ~min_v:5.0 ~max_v:120.0
+
+(** Wrap a dashboard computation with a configurable timeout.
     Returns a partial-response JSON on timeout instead of hanging. *)
 let with_dashboard_timeout ~clock compute =
-  match Eio.Time.with_timeout clock 30.0 (fun () -> Ok (compute ())) with
+  match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () -> Ok (compute ())) with
   | Ok v -> v
   | Error `Timeout ->
       `Assoc [
         ("error", `String "timeout");
         ("partial", `Bool true);
-        ("message", `String "Dashboard computation timed out after 30s. First request may be slow due to filesystem scan.");
+        ("message", `String (Printf.sprintf "Dashboard computation timed out after %.0fs." _dashboard_request_timeout_s));
         ("generated_at", `String (Types.now_iso ()));
       ]
 
@@ -109,7 +113,9 @@ let room_scoped_cache_key (config : Room.config) prefix suffix =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
     (room_scope_cache_segment config) suffix
 
-let dashboard_session_list_timeout_s = 5.0
+let dashboard_session_list_timeout_s =
+  float_of_env_default "MASC_DASHBOARD_SESSION_LIST_TIMEOUT_S"
+    ~default:5.0 ~min_v:1.0 ~max_v:30.0
 
 let dashboard_active_or_recent_sessions ~clock config =
   let cutoff_unix = Time_compat.now () -. 86400.0 in
@@ -528,7 +534,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     let mode =
       if include_command_plane then Offloaded_readonly else Inline_shared
     in
-    match Eio.Time.with_timeout clock 30.0 (fun () ->
+    match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
       Ok
         (run_dashboard_compute ~mode ~sw ~clock
            ~config:state.Mcp_server.room_config
@@ -592,7 +598,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
     let effective_target_type =
       Option.value ~default:"room" target_type
     in
-    match Eio.Time.with_timeout clock 30.0 (fun () ->
+    match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
       Ok
         (run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
            ~config:state.Mcp_server.room_config

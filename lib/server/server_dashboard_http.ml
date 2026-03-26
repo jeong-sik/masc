@@ -466,10 +466,10 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
      scheduleWarmRetry; the proactive refresh loop will populate
      _execution_cache in background.
      Escape hatch: if the first attempt started more than (timeout + 15s)
-     ago, the proactive warm-up has timed out or failed silently — fall
-     through to normal on-demand computation.  Note: Proactive_refresh
-     timeout only logs a warning without calling mark_cached_surface_error,
-     so we cannot rely on last_error_unix alone. *)
+     ago, the proactive warm-up has timed out or failed — fall through to
+     normal on-demand computation.  Since #3278 Proactive_refresh.start
+     calls on_error on timeout, so last_error_unix is populated. The
+     time-based escape remains as defense in depth. *)
   let warm_escape_s =
     float_of_env_default "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
       ~default:75.0 ~min_v:30.0 ~max_v:300.0
@@ -500,11 +500,19 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let shell_ref = ref (`Assoc []) in
   let execution_ref = ref (`Assoc []) in
   let command_ref = ref (`Assoc []) in
-  let default_timeout_s =
+  (* Single env var for room-truth fiber timeouts.
+     Cold start uses higher defaults to allow PG + caching to warm up. *)
+  let warm_timeout_s =
     float_of_env_default "MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S"
       ~default:5.0 ~min_v:2.0 ~max_v:25.0
   in
-  let fiber_with_timeout ?(timeout_s = default_timeout_s) label f fallback =
+  let cold_timeout_s =
+    float_of_env_default "MASC_DASHBOARD_ROOM_TRUTH_COLD_TIMEOUT_S"
+      ~default:15.0 ~min_v:5.0 ~max_v:60.0
+  in
+  let is_cold = not (cached_surface_has_success _execution_cache) in
+  let base_timeout_s = if is_cold then cold_timeout_s else warm_timeout_s in
+  let fiber_with_timeout ?(timeout_s = base_timeout_s) label f fallback =
     try
       match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
       | Ok v -> v
@@ -515,13 +523,8 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
       Log.Dashboard.warn "room-truth fiber %s failed: %s" label (Printexc.to_string exn);
       fallback
   in
-  let is_cold = not (cached_surface_has_success _execution_cache) in
-  let base_timeout_s =
-    Safe_ops.get_env_float_logged "MASC_ROOM_TRUTH_TIMEOUT_SEC"
-      ~default:(if is_cold then 15.0 else default_timeout_s)
-  in
   let shell_timeout_s =
-    if !_shell_warmed then base_timeout_s else 15.0
+    if !_shell_warmed then base_timeout_s else cold_timeout_s
   in
   let execution_timeout_s =
     if is_cold then Float.max base_timeout_s 20.0 else base_timeout_s

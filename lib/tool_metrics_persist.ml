@@ -79,7 +79,19 @@ let drain_to_store (store : Dated_jsonl.t) : int =
 
 let flush_now () =
   match !store_ref with
-  | None -> ()
+  | None ->
+    (* Store not yet initialized — drain and discard to prevent unbounded growth.
+       In practice, restore() initializes store_ref before any enqueue calls. *)
+    let dropped = ref 0 in
+    let rec drain () =
+      match Eio.Stream.take_nonblocking write_queue with
+      | None -> ()
+      | Some _ -> incr dropped; drain ()
+    in
+    drain ();
+    if !dropped > 0 then
+      Log.Metrics.warn "tool_metrics_persist: flush_now called before init, dropped %d records"
+        !dropped
   | Some (_, store) -> ignore (drain_to_store store)
 
 let start_flush_fiber ~sw ~clock ~base_path =

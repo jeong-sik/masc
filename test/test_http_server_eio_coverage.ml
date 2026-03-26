@@ -124,6 +124,9 @@ let test_compress_wrapper_large_data () =
    ============================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "Http Server Eio Coverage" [
     "config", [
       test_case "type" `Quick test_config_type;

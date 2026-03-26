@@ -338,6 +338,9 @@ let test_post_eval_to_json () =
 (* ================================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   Alcotest.run "Eval_gate" [
     ("destructive_detection", [
       Alcotest.test_case "detect rm -rf" `Quick test_detect_rm_rf;

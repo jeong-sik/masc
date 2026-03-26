@@ -489,6 +489,9 @@ let test_decrypt_invalid_ciphertext () =
    ============================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "Encryption Coverage" [
     "config", [
       test_case "default enabled" `Quick test_default_config_enabled;

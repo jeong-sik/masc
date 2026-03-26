@@ -183,6 +183,9 @@ let request_tests = [
 ]
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   Alcotest.run "Http_server_eio" [
     "compression", compression_tests;  (* Compact Protocol v4 *)
     "router", router_tests;

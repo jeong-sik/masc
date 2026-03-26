@@ -735,7 +735,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
            bootstrap that success instead of staying "initializing" forever
            when proactive warm-up misses its first build window. *)
         cached_surface_or_first_success_json _mission_cache
-          ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:120.0
+          ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:25.0
           (fun () -> compute ())
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
@@ -744,7 +744,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
           (Option.value ~default:"" actor)
       in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-        ~clock ~timeout_sec:120.0 (compute ?actor)
+        ~clock ~timeout_sec:25.0 (compute ?actor)
   in
   full_json
 
@@ -787,7 +787,7 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
         (Option.value ~default:"" actor)
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:5.0
-      ~clock ~timeout_sec:60.0 compute
+      ~clock ~timeout_sec:25.0 compute
 
 let dashboard_proof_http_json ~state request =
   let session_id = query_param request "session_id" in

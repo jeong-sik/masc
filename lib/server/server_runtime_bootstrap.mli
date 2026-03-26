@@ -54,20 +54,6 @@ val bootstrap_keepers :
   Mcp_server.server_state ->
   unit
 
-(** {1 PG Schema Initialization} *)
-
-val init_task_backend : unit -> unit
-val inject_shared_pg_pool : unit -> unit
-val init_memory_pg_schema : unit -> unit
-
-(** {1 Background Maintenance} *)
-
-val start_background_maintenance :
-  sw:Eio.Switch.t ->
-  clock:_ Eio.Time.clock ->
-  Mcp_server.server_state ->
-  string * string
-
 (** {1 Main Entry Point} *)
 
 val run :

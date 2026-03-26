@@ -97,24 +97,9 @@ let with_graph_lock config f =
   let start_time = Time_compat.now () in
   (* Acquire lock in systhread (non-blocking F_TLOCK + retry) *)
   let fd = run_blocking_op (fun () ->
-    let fd = Unix.openfile lock_file [Unix.O_WRONLY; Unix.O_CREAT] 0o600 in
-    let rec acquire attempts =
-      if attempts <= 0 then begin
-        Unix.close fd;
-        raise (Failure "hebbian_eio: graph lock timeout after 200 attempts")
-      end
-      else
-        try Unix.lockf fd Unix.F_TLOCK 0; fd
-        with
-        | Unix.Unix_error (Unix.EAGAIN, _, _)
-        | Unix.Unix_error (Unix.EACCES, _, _) ->
-            (* Safe: inside run_blocking_op (Eio_unix.run_in_systhread).
-               Blocks systhread only, not Eio domain. *)
-            Unix.sleepf 0.01;
-            acquire (attempts - 1)
-    in
-    try acquire 200
-    with exn -> Unix.close fd; raise exn
+    File_lock_eio.acquire_flock_retry ~lock_path:lock_file
+      ~mode:[Unix.O_WRONLY; Unix.O_CREAT] ~perm:0o600
+      ~caller:"hebbian_eio" ()
   ) in
   (* Record lock metrics *)
   let wait_ms = (Time_compat.now () -. start_time) *. 1000.0 in

@@ -283,24 +283,9 @@ let submit_petition base_path ~title ~origin ~subject_type ~risk_class
      Uses F_TLOCK (non-blocking) in systhread to avoid blocking Eio scheduler. *)
   let lock_path = Filename.concat (cases_dir base_path) "_submit.lock" in
   let fd = run_blocking_lock_op (fun () ->
-    let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
-    let rec acquire attempts =
-      if attempts <= 0 then begin
-        Unix.close fd;
-        raise (Failure "governance_v2: submit lock timeout after 200 attempts")
-      end
-      else
-        try Unix.lockf fd Unix.F_TLOCK 0; fd
-        with
-        | Unix.Unix_error (Unix.EAGAIN, _, _)
-        | Unix.Unix_error (Unix.EACCES, _, _) ->
-            (* Safe: inside run_blocking_lock_op (Eio_unix.run_in_systhread).
-               Blocks systhread only, not Eio domain. *)
-            Unix.sleepf 0.01;
-            acquire (attempts - 1)
-    in
-    try acquire 200
-    with exn -> Unix.close fd; raise exn
+    File_lock_eio.acquire_flock_retry ~lock_path
+      ~mode:[Unix.O_CREAT; Unix.O_WRONLY] ~perm:0o644
+      ~caller:"governance_v2" ()
   ) in
   Fun.protect ~finally:(fun () ->
       run_blocking_lock_op (fun () ->

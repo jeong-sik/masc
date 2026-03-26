@@ -36,7 +36,7 @@ let test_repo_synthesis_swarm_start_creates_operation_session_and_run () =
   let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_ ~program_note:_ =
     Lib.Team_session_engine_eio.start_session
       ~sw
-      ~clock
+      ~env
       ~config
       ~created_by:"owner"
       ~goal

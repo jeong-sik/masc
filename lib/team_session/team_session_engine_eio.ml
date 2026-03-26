@@ -7,7 +7,7 @@ open Result_syntax
    All modes now use Team_session_swarm_runner.run_swarm via OAS Runner.
    Checkpoint/policy logic is handled by swarm callbacks. *)
 
-let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
+let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.Process.mgr ; .. >) ~(config : Room.config)
     ~(created_by : string) ~(goal : string) ~(duration_seconds : int)
     ~(execution_scope : Team_session_types.execution_scope)
     ~(checkpoint_interval_sec : int) ~(min_agents : int)
@@ -197,10 +197,10 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         let result =
           match Team_session_oas_bridge.supported_local_worker_tools () with
           | Ok masc_tools ->
-            Team_session_swarm_runner.run_swarm ~sw ~clock ~config
+            Team_session_swarm_runner.run_swarm ~sw ~env ~config
               ~session_id ~masc_tools
               ~dispatch:(Team_session_oas_bridge.dispatch_supported_tool
-                ~sw ~clock ~config)
+                ~sw ~clock:env#clock ~config)
           | Error reason -> Error reason
         in
         match result with
@@ -613,7 +613,7 @@ let record_turn ~(config : Room.config) ~(session_id : string) ~(actor : string)
               ]))
 
 
-let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
+let recover_running_sessions ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.Process.mgr ; .. >)
     ~(config : Room.config) : unit =
   let sessions = Team_session_store.list_sessions config in
   let now = Time_compat.now () in
@@ -687,10 +687,10 @@ let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
                 let result =
                   match Team_session_oas_bridge.supported_local_worker_tools () with
                   | Ok masc_tools ->
-                    Team_session_swarm_runner.run_swarm ~sw ~clock ~config
+                    Team_session_swarm_runner.run_swarm ~sw ~env ~config
                       ~session_id:session.session_id ~masc_tools
                       ~dispatch:(Team_session_oas_bridge.dispatch_supported_tool
-                        ~sw ~clock ~config)
+                        ~sw ~clock:env#clock ~config)
                   | Error reason -> Error reason
                 in
                 match result with

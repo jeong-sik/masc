@@ -14,6 +14,7 @@ export default defineConfig(({ command }) => {
     build: {
       outDir: '../assets/dashboard',
       emptyOutDir: true,
+      sourcemap: true,
       rollupOptions: {
         output: {
           manualChunks: {

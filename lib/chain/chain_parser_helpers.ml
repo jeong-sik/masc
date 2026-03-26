@@ -227,17 +227,11 @@ let parse_select_strategy json =
   | other -> Error (Printf.sprintf "Unknown select strategy: %s" (Yojson.Safe.to_string other))
 
 (** Extract input mappings from prompt template *)
+let template_var_re = Re.Pcre.re {|\{\{([^}]+)\}\}|} |> Re.compile
+
 let extract_input_mappings (prompt : string) : (string * string) list =
-  let regex = Re.Str.regexp "{{\\([^}]+\\)}}" in
-  let rec find_all pos acc =
-    try
-      let _ = Re.Str.search_forward regex prompt pos in
-      let matched = Re.Str.matched_group 1 prompt in
-      let next_pos = Re.Str.match_end () in
-      find_all next_pos (matched :: acc)
-    with Not_found -> List.rev acc
-  in
-  find_all 0 []
+  Re.all template_var_re prompt
+  |> List.map (fun group -> Re.Group.get group 1)
   |> List.map (fun ref ->
       (* Split "node.output" or just use as-is *)
       match String.split_on_char '.' ref with

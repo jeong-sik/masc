@@ -702,6 +702,9 @@ let test_spawn_sync_is_spawn () =
    ============================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "Spawn Coverage" [
     "spawn_config", [
       test_case "creation" `Quick test_spawn_config_creation;

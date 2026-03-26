@@ -615,17 +615,7 @@ let plan_to_steps (plan : execution_plan) : execution_step list =
 let execute ~sw ~(clock : _ Eio.Time.clock) ~timeout ~trace ~(exec_fn : exec_fn) ~(tool_exec : tool_exec) ?input ?checkpoint (plan : execution_plan) : chain_result =
   let start_time = Time_compat.now () in
 
-  (* Create Langfuse trace for observability if enabled *)
-  let langfuse_trace =
-    if Langfuse.is_enabled () then
-      Some (Langfuse.create_trace
-        ~name:plan.chain.Chain_types.id
-        ~metadata:[("type", "chain"); ("nodes", string_of_int (List.length plan.chain.Chain_types.nodes))]
-        ())
-    else None
-  in
-
-  let ctx = make_context ~start_time ~trace_enabled:trace ~timeout ~chain_id:plan.chain.Chain_types.id ?langfuse_trace ?checkpoint ()  in
+  let ctx = make_context ~start_time ~trace_enabled:trace ~timeout ~chain_id:plan.chain.Chain_types.id ?checkpoint ()  in
 
   (* Inject chain.run input as a reserved output key *)
   (match input with
@@ -649,18 +639,6 @@ let execute ~sw ~(clock : _ Eio.Time.clock) ~timeout ~trace ~(exec_fn : exec_fn)
     let duration_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
     let trace_raw = traces_to_entries (List.rev !(ctx.traces)) in
     let trace = Chain_run_store.enrich_trace_entries ~chain:plan.chain ~outputs:ctx.outputs trace_raw in
-
-    (* End Langfuse trace if enabled *)
-    (match langfuse_trace with
-     | Some t ->
-         (* Update trace metadata with final status *)
-         t.Langfuse.metadata <- [
-           ("success", string_of_bool success);
-           ("duration_ms", string_of_int duration_ms);
-           ("output_length", string_of_int (String.length output));
-         ];
-         Langfuse.end_trace t
-     | None -> ());
 
     let run_id = ctx.checkpoint.run_id in
     Chain_run_store.record

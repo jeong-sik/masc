@@ -475,6 +475,9 @@ let test_wear_builds_history () =
    ============================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "Hat Coverage" [
     "to_string", [
       test_case "builder" `Quick test_to_string_builder;

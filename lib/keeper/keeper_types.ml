@@ -549,8 +549,7 @@ type keeper_boot_entry = {
 
 let resident_keeper_dir (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "resident-keepers" in
-  mkdir_p d;
-  d
+  ensure_dir d
 
 let resident_keeper_path config name =
   Filename.concat (resident_keeper_dir config) (name ^ ".json")

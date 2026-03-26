@@ -238,7 +238,7 @@
 (test
  (name test_server_runtime_bootstrap)
  (modules test_server_runtime_bootstrap)
- (libraries masc_mcp alcotest unix))
+ (libraries masc_mcp alcotest unix eio eio_main))
 
 (test
  (name test_harness_shell_helpers)
@@ -902,7 +902,7 @@
 (test
  (name test_eval_gate)
  (modules test_eval_gate)
- (libraries masc_mcp alcotest str yojson unix))
+ (libraries masc_mcp alcotest str yojson unix eio eio_main))
 
 (test
  (name test_eval_harness)
@@ -1071,13 +1071,13 @@
 (test
  (name test_chain_coverage)
  (modules test_chain_coverage)
- (libraries masc_mcp alcotest str yojson))
+ (libraries masc_mcp alcotest str yojson eio eio_main))
 
 ; Chain category/error/types coverage tests
 (test
  (name test_chain_category_coverage)
  (modules test_chain_category_coverage)
- (libraries masc_mcp alcotest str yojson))
+ (libraries masc_mcp alcotest str yojson eio eio_main))
 
 ; Auto_recall + Activity_feed coverage tests
 (test

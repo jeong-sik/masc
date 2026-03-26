@@ -64,7 +64,7 @@ type exec_context = {
   mutable conversation: conversation_ctx option;
   cache: (string, string * float) Hashtbl.t;
   mutable total_tokens: Chain_category.token_usage;
-  langfuse_trace: Langfuse.trace option;
+  langfuse_trace: unit option;
   checkpoint: checkpoint_config;
   node_status: (string, exec_phase) Hashtbl.t;
   node_attempts: (string, int) Hashtbl.t;
@@ -102,7 +102,7 @@ val make_context :
   trace_enabled:bool ->
   timeout:int ->
   chain_id:string ->
-  ?langfuse_trace:Langfuse.trace ->
+  ?langfuse_trace:unit ->
   ?checkpoint:checkpoint_config ->
   unit -> exec_context
 

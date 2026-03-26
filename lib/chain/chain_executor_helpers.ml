@@ -65,7 +65,7 @@ type exec_context = {
   mutable conversation: conversation_ctx option; (** Conversation context for conversational mode *)
   cache: (string, string * float) Hashtbl.t;  (** Node cache: key -> (result, timestamp) *)
   mutable total_tokens: Chain_category.token_usage; (** Accumulated token usage *)
-  langfuse_trace: Langfuse.trace option;     (** Langfuse trace for observability *)
+  langfuse_trace: unit option;                (** Reserved, unused (Langfuse removed) *)
   checkpoint: checkpoint_config;             (** Checkpoint/resume configuration *)
   node_status: (string, exec_phase) Hashtbl.t; (** Node status for observability *)
   node_attempts: (string, int) Hashtbl.t;       (** Node execution attempts *)

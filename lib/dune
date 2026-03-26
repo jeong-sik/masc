@@ -205,7 +205,6 @@
    checkpoint_store
    server_checkpoint
    run_log_eio
-   langfuse
    chain_spawn_registry
    chain_executor_helpers
    chain_executor_leaf
@@ -514,6 +513,7 @@
    keeper_persona
    ;; Context management (used by keeper agents)
    masc_eio_env
+   masc_http_client
    discovery_cache
    oas_model_resolve
    context_compact_oas

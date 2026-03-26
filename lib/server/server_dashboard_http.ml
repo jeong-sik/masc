@@ -529,20 +529,20 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let execution_timeout_s =
     if is_cold then Float.max base_timeout_s 20.0 else base_timeout_s
   in
-  Eio.Fiber.all [
-    (fun () -> shell_ref := fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
-      (fun () -> dashboard_shell_http_json config) (`Assoc []));
-    (fun () -> execution_ref := fiber_with_timeout ~timeout_s:execution_timeout_s "execution"
-      (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
-      (cached_surface_json _execution_cache));
+  (* Sequential fetch to avoid PG connection concurrent usage (#3305).
+     Each component has its own timeout guard and cache fallback,
+     so sequential execution adds minimal latency on cache hit. *)
+  shell_ref := fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
+    (fun () -> dashboard_shell_http_json config) (`Assoc []);
+  execution_ref := fiber_with_timeout ~timeout_s:execution_timeout_s "execution"
+    (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
+    (cached_surface_json _execution_cache);
+  command_ref := fiber_with_timeout ~timeout_s:base_timeout_s "command"
     (fun () ->
-      command_ref := fiber_with_timeout ~timeout_s:base_timeout_s "command"
-        (fun () ->
-          if Room.is_initialized config then
-            Server_command_plane_http.command_plane_summary_http_json ~state
-          else `Assoc [])
-        (`Assoc []));
-  ];
+      if Room.is_initialized config then
+        Server_command_plane_http.command_plane_summary_http_json ~state
+      else `Assoc [])
+    (`Assoc []);
   let shell_json = !shell_ref in
   if (not !_shell_warmed) && shell_json <> `Assoc [] then
     _shell_warmed := true;

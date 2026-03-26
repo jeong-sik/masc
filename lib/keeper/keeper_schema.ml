@@ -490,6 +490,69 @@ let resident_schemas : tool_schema list = [
       ("required", `List [`String "name"]);
     ];
   };
+
+  {
+    name = "masc_keeper_add_loop";
+    description = "Register a recurring broadcast task on a keeper. The keeper dispatches it automatically on each heartbeat cycle when the interval has elapsed.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("keeper_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Target keeper handle");
+        ]);
+        ("label", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Short label for this recurring task");
+        ]);
+        ("interval_sec", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Seconds between dispatches (minimum 10)");
+        ]);
+        ("message", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Broadcast message content");
+        ]);
+        ("max_failures", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Auto-disable after this many consecutive failures (default 5)");
+        ]);
+      ]);
+      ("required", `List [
+        `String "keeper_name"; `String "label";
+        `String "interval_sec"; `String "message"
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_list_loops";
+    description = "List recurring tasks registered on a keeper.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("keeper_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle (omit for all keepers)");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_remove_loop";
+    description = "Remove a recurring task by its ID.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Recurring task ID (from add_loop or list_loops)");
+        ]);
+      ]);
+      ("required", `List [`String "id"]);
+    ];
+  };
 ]
 
 let persistent_alias_name = function

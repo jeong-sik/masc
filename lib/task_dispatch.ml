@@ -21,8 +21,8 @@ type backend_state =
 let backend_state : backend_state ref = ref Uninitialized
 
 let task_mu = Eio.Mutex.create ()
-let with_task_rw f = Eio_guard.with_rw task_mu f
-let with_task_ro f = Eio_guard.with_ro task_mu f
+let with_task_rw f = Eio_guard.with_mutex task_mu f
+let with_task_ro f = Eio_guard.with_mutex_ro task_mu f
 
 let is_initialized () =
   with_task_ro (fun () ->

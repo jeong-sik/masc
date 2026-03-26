@@ -156,8 +156,8 @@ let orchestrator_pulse : Pulse.t option ref = ref None
 let zombie_pulse : Pulse.t option ref = ref None
 
 let pulse_mu = Eio.Mutex.create ()
-let with_pulse_rw f = Eio_guard.with_rw pulse_mu f
-let with_pulse_ro f = Eio_guard.with_ro pulse_mu f
+let with_pulse_rw f = Eio_guard.with_mutex pulse_mu f
+let with_pulse_ro f = Eio_guard.with_mutex_ro pulse_mu f
 
 (** Build the orchestrator check consumer.
     Checks if orchestration is needed and spawns coordinator if so. *)

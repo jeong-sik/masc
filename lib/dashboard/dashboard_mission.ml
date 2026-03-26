@@ -57,6 +57,18 @@ let room_scoped_cache_key (config : Room_utils.config) prefix actor_name =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
     (room_scope_cache_segment config) actor_name
 
+let slow_phase_threshold_ms = 1000.0
+let slow_projection_threshold_ms = 5000.0
+
+let log_phase_if_slow ~actor ~phase started_at =
+  let finished_at = Time_compat.now () in
+  let phase_ms = (finished_at -. started_at) *. 1000.0 in
+  if phase_ms >= slow_phase_threshold_ms then
+    Log.Dashboard.info
+      "[dashboard_mission] slow phase actor=%s phase=%s %.0fms"
+      actor phase phase_ms;
+  finished_at
+
 
 let dedup_strings items =
   List.sort_uniq String.compare
@@ -578,9 +590,11 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
       mcp_session_id = None;
     }
   in
+  let t_start = Time_compat.now () in
   let tracked_sessions =
     if Room.is_initialized config then active_or_recent_sessions config else []
   in
+  let t_sessions = log_phase_if_slow ~actor:actor_name ~phase:"session_list" t_start in
   let snapshot_json =
     Dashboard_cache.get_or_compute
       (room_scoped_cache_key config "snapshot" actor_name)
@@ -598,12 +612,16 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
           ~sessions:tracked_sessions
           ctx)
   in
+  let t_snapshot = log_phase_if_slow ~actor:actor_name ~phase:"snapshot" t_sessions in
   let command_json =
     Dashboard_cache.get_or_compute
       (room_scoped_cache_key config "command_projection" actor_name)
       ~ttl:3.0
       (fun () ->
         Command_plane_v2.dashboard_projection_json ~sessions:tracked_sessions config)
+  in
+  let t_command =
+    log_phase_if_slow ~actor:actor_name ~phase:"command_projection" t_snapshot
   in
   let digest_json =
     Dashboard_cache.get_or_compute
@@ -627,6 +645,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
                 ("error", `String message);
               ])
   in
+  let t_digest = log_phase_if_slow ~actor:actor_name ~phase:"digest" t_command in
   let room_json = member_assoc "room" snapshot_json in
   let incidents =
     list_field "attention_items" digest_json
@@ -655,6 +674,19 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
   in
   let keeper_briefs = Dashboard_mission_assembly.build_keeper_briefs keeper_items in
   let internal_signals = Dashboard_mission_assembly.build_internal_signals incidents recommended_actions in
+  let t_assemble = log_phase_if_slow ~actor:actor_name ~phase:"assembly" t_digest in
+  let total_ms = (t_assemble -. t_start) *. 1000.0 in
+  let sessions_ms = (t_sessions -. t_start) *. 1000.0 in
+  let snapshot_ms = (t_snapshot -. t_sessions) *. 1000.0 in
+  let command_ms = (t_command -. t_snapshot) *. 1000.0 in
+  let digest_ms = (t_digest -. t_command) *. 1000.0 in
+  let assembly_ms = (t_assemble -. t_digest) *. 1000.0 in
+  if total_ms >= slow_projection_threshold_ms then
+    Log.Dashboard.warn
+      "[dashboard_mission] slow projection actor=%s total=%.0fms sessions=%.0fms snapshot=%.0fms command=%.0fms digest=%.0fms assembly=%.0fms (sessions=%d keepers=%d incidents=%d)"
+      actor_name total_ms sessions_ms snapshot_ms command_ms digest_ms
+      assembly_ms (List.length sessions) (List.length keeper_briefs)
+      (List.length incidents);
   {
     generated_at = Types.now_iso ();
     snapshot_json;

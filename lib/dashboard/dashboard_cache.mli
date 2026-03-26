@@ -43,6 +43,9 @@ val get_or_compute_with_timeout :
     preserved (not overwritten by error JSON).  On timeout with no stale
     data, returns a timeout-error JSON without caching it. *)
 
+val remember_context : string -> string -> unit
+(** Attach request context to a cache key for later timeout/failure logs. *)
+
 val invalidate : string -> unit
 (** Remove a single cache entry.  If the key is currently being computed,
     waiting fibers are woken and will recompute. *)

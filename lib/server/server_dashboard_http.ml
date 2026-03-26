@@ -286,6 +286,11 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     (* Default light mode: stay instant after first success, but avoid
        serving the empty initializing payload forever when proactive warm-up
        misses its first build window. *)
+    remember_dashboard_request_context
+      ~surface:"execution"
+      ~cache_key:"execution:default:light"
+      request
+      [ ("actor", "dashboard"); ("fixture", ""); ("mode", "light") ];
     cached_surface_or_first_success_json _execution_cache
       ~cache_key:"execution:default:light" ~ttl:120.0 ~clock
       ~timeout_sec:120.0
@@ -299,6 +304,13 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
         (Option.value ~default:"" fixture)
         (if full_mode then "full" else "light")
     in
+    remember_dashboard_request_context
+      ~surface:"execution" ~cache_key request
+      [
+        ("actor", Option.value ~default:"dashboard" actor);
+        ("fixture", Option.value ~default:"" fixture);
+        ("mode", if full_mode then "full" else "light");
+      ];
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
       ~clock ~timeout_sec:120.0 (compute ?actor ?fixture ~light)
 

@@ -99,6 +99,18 @@ let render_timeout_s =
 
 let session_list_timeout_s = 5.0
 
+let slow_phase_threshold_ms = 1000.0
+let slow_render_threshold_ms = 10000.0
+
+let log_phase_if_slow ~actor ~phase started_at =
+  let finished_at = Time_compat.now () in
+  let phase_ms = (finished_at -. started_at) *. 1000.0 in
+  if phase_ms >= slow_phase_threshold_ms then
+    Log.Dashboard.info
+      "[dashboard_execution] slow phase actor=%s phase=%s %.0fms"
+      actor phase phase_ms;
+  finished_at
+
 let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let ctx : _ Operator_control.context =
         {
@@ -137,6 +149,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
               [])
         else []
       in
+      let t_sessions = log_phase_if_slow ~actor:effective_actor ~phase:"session_list" t_start in
       let cutoff_iso =
         let tm = Unix.gmtime cutoff_unix in
         Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
@@ -149,7 +162,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         | _ -> s.updated_at_iso >= cutoff_iso
       in
       let sessions = List.filter is_active_or_recent all_sessions in
-      let t_sessions = Time_compat.now () in
       Eio.Fiber.yield ();
       (* Compute directly without Dashboard_cache to avoid nested
          get_or_compute deadlock — the caller (dashboard_execution_http_json)
@@ -167,7 +179,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ~sessions
           ctx
       in
-      let t_snapshot = Time_compat.now () in
+      let t_snapshot = log_phase_if_slow ~actor:effective_actor ~phase:"snapshot" t_sessions in
       Eio.Fiber.yield ();
       let session_cards =
         if light then []
@@ -197,6 +209,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let command_plane_json =
         Command_plane_v2.dashboard_projection_json ~sessions config
       in
+      let t_command = log_phase_if_slow ~actor:effective_actor ~phase:"command_projection" t_snapshot in
       (* Yield between heavy computation phases to prevent fiber starvation.
          Eio's cooperative scheduler needs explicit yields in CPU-bound paths
          so other fibers (SSE, health checks) can progress. *)
@@ -214,6 +227,9 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         | `List items -> items
         | _ -> []
       in
+      let t_contexts =
+        log_phase_if_slow ~actor:effective_actor ~phase:"context_build" t_command
+      in
       Eio.Fiber.yield ();
       (* Load tasks/agents/messages — needed for worker_support_briefs.
          In light mode, tasks and messages are NOT serialized in the
@@ -222,6 +238,9 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let tasks = tasks_safe config in
       let agents = agents_safe config in
       let messages = messages_safe config in
+      let t_state_load =
+        log_phase_if_slow ~actor:effective_actor ~phase:"state_load" t_contexts
+      in
       let now_ts = Time_compat.now () in
       let worker_rows =
         build_worker_support_briefs ~now_ts ~tasks ~agents ~messages session_contexts
@@ -234,6 +253,9 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       in
       let continuity_rows =
         build_continuity_briefs ~now_ts keepers session_contexts
+      in
+      let t_briefs =
+        log_phase_if_slow ~actor:effective_actor ~phase:"brief_build" t_state_load
       in
       (* --- Payload size reduction: filter + limit --- *)
       (* Sessions: running/paused first, then by severity, max 15 *)
@@ -287,17 +309,23 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let total_ms = (t_end -. t_start) *. 1000.0 in
       let sessions_ms = (t_sessions -. t_start) *. 1000.0 in
       let snapshot_ms = (t_snapshot -. t_sessions) *. 1000.0 in
-      let render_ms = (t_end -. t_snapshot) *. 1000.0 in
-      if total_ms > 10000.0 then
+      let command_ms = (t_command -. t_snapshot) *. 1000.0 in
+      let contexts_ms = (t_contexts -. t_command) *. 1000.0 in
+      let state_load_ms = (t_state_load -. t_contexts) *. 1000.0 in
+      let briefs_ms = (t_briefs -. t_state_load) *. 1000.0 in
+      let assemble_ms = (t_end -. t_briefs) *. 1000.0 in
+      if total_ms > slow_render_threshold_ms then
         Log.Dashboard.warn
-          "[dashboard_execution] slow render: total=%.0fms sessions=%.0fms snapshot=%.0fms render=%.0fms (sessions=%d keepers=%d)"
-          total_ms sessions_ms snapshot_ms render_ms
+          "[dashboard_execution] slow render actor=%s light=%b total=%.0fms sessions=%.0fms snapshot=%.0fms command=%.0fms contexts=%.0fms state=%.0fms briefs=%.0fms assemble=%.0fms (sessions=%d keepers=%d)"
+          effective_actor light total_ms sessions_ms snapshot_ms command_ms
+          contexts_ms state_load_ms briefs_ms assemble_ms
           (List.length sessions)
           (List.length keepers)
       else
         Log.Dashboard.debug
-          "[dashboard_execution] timing: total=%.0fms sessions=%.0fms snapshot=%.0fms render=%.0fms"
-          total_ms sessions_ms snapshot_ms render_ms;
+          "[dashboard_execution] timing actor=%s light=%b total=%.0fms sessions=%.0fms snapshot=%.0fms command=%.0fms contexts=%.0fms state=%.0fms briefs=%.0fms assemble=%.0fms"
+          effective_actor light total_ms sessions_ms snapshot_ms command_ms
+          contexts_ms state_load_ms briefs_ms assemble_ms;
       if light then
         `Assoc (base_fields @ task_fields)
       else

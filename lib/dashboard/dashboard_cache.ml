@@ -36,6 +36,7 @@ type slot =
   | Computing of { cond : Eio.Condition.t; started_at : float; stale : Yojson.Safe.t option }
 
 let table : (string, slot) Hashtbl.t = Hashtbl.create 16
+let context_table : (string, string) Hashtbl.t = Hashtbl.create 16
 let mu = Eio.Mutex.create ()
 (** Background revalidation switch — must be set via [set_sw] before
     stale-while-revalidate can fork background fibers. *)
@@ -50,6 +51,27 @@ let set_clock clk = clock_ref := Some (Clock clk)
 let set_sw sw = _bg_sw := Some sw
 
 let now () = Time_compat.now ()
+
+let with_context_table f =
+  if Eio_guard.is_ready () then
+    Eio.Mutex.use_rw ~protect:true mu f
+  else
+    f ()
+
+let[@warning "-32"] remember_context key context =
+  with_context_table (fun () -> Hashtbl.replace context_table key context)
+
+let[@warning "-32"] forget_context key =
+  with_context_table (fun () -> Hashtbl.remove context_table key)
+
+let context_suffix key =
+  let context_opt =
+    with_context_table (fun () -> Hashtbl.find_opt context_table key)
+  in
+  match context_opt with
+  | Some context when String.trim context <> "" ->
+      Printf.sprintf " [%s]" context
+  | _ -> ""
 
 (** Default stale grace multiplier: stale data is served for [ttl * stale_factor]
     seconds after expiry while recomputation runs in the background.
@@ -168,8 +190,8 @@ let get_or_compute_eio key ~ttl compute =
                 key);
           Eio.Condition.broadcast cond
         | exception exn ->
-          Log.Dashboard.warn "cache bg-revalidate failed (%s): %s"
-            key (Printexc.to_string exn);
+          Log.Dashboard.warn "cache bg-revalidate failed (%s%s): %s"
+            key (context_suffix key) (Printexc.to_string exn);
           Eio.Mutex.use_rw ~protect:true mu (fun () ->
             match Hashtbl.find_opt table key with
             | Some (Computing { cond = c; _ }) when c == cond ->
@@ -290,7 +312,8 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
       with
       | Ok value -> value
       | Error `Timeout ->
-        Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
+        Log.Dashboard.warn "cache compute timeout: %s (%.0fs)%s"
+          key timeout_sec (context_suffix key);
         raise (Compute_timeout key))
   with Compute_timeout k ->
     timeout_error_json k timeout_sec
@@ -305,10 +328,14 @@ let invalidate key =
           | _ -> None
         in
         Hashtbl.remove table key;
+        Hashtbl.remove context_table key;
         c)
     in
     Option.iter Eio.Condition.broadcast cond_opt
-  else Hashtbl.remove table key
+  else begin
+    Hashtbl.remove table key;
+    Hashtbl.remove context_table key
+  end
 
 let invalidate_all () =
   if Eio_guard.is_ready () then
@@ -321,10 +348,14 @@ let invalidate_all () =
             table []
         in
         Hashtbl.clear table;
+        Hashtbl.clear context_table;
         cs)
     in
     List.iter Eio.Condition.broadcast conds
-  else Hashtbl.clear table
+  else begin
+    Hashtbl.clear table;
+    Hashtbl.clear context_table
+  end
 
 let stats () =
   let compute () =

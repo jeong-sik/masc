@@ -398,6 +398,42 @@ let operator_actor_hint request =
       if sanitized = "" then None else Some sanitized
   | None -> None
 
+let is_sensitive_dashboard_query_key key =
+  match String.lowercase_ascii (String.trim key) with
+  | "token" | "auth" | "authorization" -> true
+  | _ -> false
+
+let sanitize_dashboard_request_target target =
+  match String.split_on_char '?' (String.trim target) with
+  | [ path ] -> path
+  | path :: query_parts ->
+      let query = String.concat "?" query_parts in
+      let sanitized_query =
+        Uri.query_of_encoded query
+        |> List.map (fun (key, values) ->
+               let values =
+                 if is_sensitive_dashboard_query_key key then [ "REDACTED" ]
+                 else values
+               in
+               (key, values))
+        |> Uri.encoded_of_query
+      in
+      if sanitized_query = "" then path else path ^ "?" ^ sanitized_query
+  | [] -> ""
+
+let remember_dashboard_request_context ~surface ~cache_key request fields =
+  let target =
+    sanitize_dashboard_request_target request.Httpun.Request.target
+  in
+  let context =
+    (("surface", surface) :: ("target", target) :: fields)
+    |> List.filter_map (fun (key, value) ->
+           let trimmed = String.trim value in
+           if trimmed = "" then None else Some (Printf.sprintf "%s=%s" key trimmed))
+    |> String.concat " "
+  in
+  Dashboard_cache.remember_context cache_key context
+
 (* --- Operator proactive refresh ---
    Default (no-param) requests are served from a background-refreshed ref.
    Parameterized requests fall back to on-demand compute with SWR cache.
@@ -791,6 +827,11 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
            after the first success, but let the very first default read
            bootstrap that success instead of staying "initializing" forever
            when proactive warm-up misses its first build window. *)
+        remember_dashboard_request_context
+          ~surface:"mission"
+          ~cache_key:"mission:default"
+          request
+          [ ("actor", "dashboard") ];
         cached_surface_or_first_success_json _mission_cache
           ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:25.0
           (fun () -> compute ())
@@ -800,6 +841,9 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
         room_scoped_cache_key state.Mcp_server.room_config "mission"
           (Option.value ~default:"" actor)
       in
+      remember_dashboard_request_context
+        ~surface:"mission" ~cache_key request
+        [ ("actor", Option.value ~default:"dashboard" actor) ];
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
         ~clock ~timeout_sec:25.0 (compute ?actor)
   in

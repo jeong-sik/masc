@@ -73,6 +73,12 @@ val command_plane_summary_cache_parts :
 (** {1 Sanitization and Request Helpers} *)
 
 val operator_actor_hint : Httpun.Request.t -> string option
+val remember_dashboard_request_context :
+  surface:string ->
+  cache_key:string ->
+  Httpun.Request.t ->
+  (string * string) list ->
+  unit
 
 (** {1 Semantics} *)
 

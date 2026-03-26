@@ -313,12 +313,12 @@ let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "")
       (* Extract @mentions from initial_content using simple regex *)
       let mentions =
         try
-          let re = Str.regexp "@\\([a-zA-Z0-9_-]+\\)" in
+          let re = Re.Str.regexp "@\\([a-zA-Z0-9_-]+\\)" in
           let rec collect pos acc =
             try
-              let _ = Str.search_forward re initial_content pos in
-              let target = Str.matched_group 1 initial_content in
-              let next_pos = Str.match_end () in
+              let _ = Re.Str.search_forward re initial_content pos in
+              let target = Re.Str.matched_group 1 initial_content in
+              let next_pos = Re.Str.match_end () in
               collect next_pos (target :: acc)
             with Not_found -> List.rev acc
           in

@@ -13,7 +13,7 @@ let contains_ci (haystack : string) (needle : string) : bool =
   let n = String.lowercase_ascii needle in
   if n = "" then false
   else
-    try ignore (Str.search_forward (Str.regexp_string n) h 0); true
+    try ignore (Re.Str.search_forward (Re.Str.regexp_string n) h 0); true
     with Not_found -> false
 
 let exact_direct_mention_present ~(targets : string list) (content : string) :

@@ -22,7 +22,7 @@ let contains_ci (haystack : string) (needle : string) : bool =
   if n = "" then false
   else
     try
-      let _ = Str.search_forward (Str.regexp_string n) h 0 in
+      let _ = Re.Str.search_forward (Re.Str.regexp_string n) h 0 in
       true
     with Not_found -> false
 

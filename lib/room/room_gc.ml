@@ -247,7 +247,7 @@ let gc config ?(days=7) () =
   (* Helper to check if content mentions an open task *)
   let mentions_open_task content =
     List.exists (fun task_id ->
-      try ignore (Str.search_forward (Str.regexp_string task_id) content 0); true
+      try ignore (Re.Str.search_forward (Re.Str.regexp_string task_id) content 0); true
       with Not_found -> false
     ) open_task_ids
   in

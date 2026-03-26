@@ -99,11 +99,11 @@ let inject_default_agent_name ~(worker_name : string)
 let extract_prompt_block ~start_marker ~end_marker (text : string) =
   try
     let start_idx =
-      Str.search_forward (Str.regexp_string start_marker) text 0
+      Re.Str.search_forward (Re.Str.regexp_string start_marker) text 0
       + String.length start_marker
     in
     let end_idx =
-      Str.search_forward (Str.regexp_string end_marker) text start_idx
+      Re.Str.search_forward (Re.Str.regexp_string end_marker) text start_idx
     in
     let raw = String.sub text start_idx (end_idx - start_idx) |> String.trim in
     if raw = "" then None else Some raw

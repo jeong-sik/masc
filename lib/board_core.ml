@@ -245,13 +245,13 @@ let state_start_marker = "[STATE]"
 let state_end_marker = "[/STATE]"
 
 let extract_state_block (text : string) : string option * string =
-  let start_re = Str.regexp_string state_start_marker in
-  let end_re = Str.regexp_string state_end_marker in
+  let start_re = Re.Str.regexp_string state_start_marker in
+  let end_re = Re.Str.regexp_string state_end_marker in
   try
-    let start_idx = Str.search_forward start_re text 0 in
+    let start_idx = Re.Str.search_forward start_re text 0 in
     let block_body_start = start_idx + String.length state_start_marker in
     let end_idx =
-      try Str.search_forward end_re text block_body_start
+      try Re.Str.search_forward end_re text block_body_start
       with Not_found -> String.length text
     in
     let block_end =

@@ -21,13 +21,13 @@ type context = {
 (** Extract task_id from Room.add_task result string.
     Expected format: "... task-NNN: ..." *)
 let extract_task_id result_str =
-  let re = Str.regexp {|task-[0-9]+|} in
-  if Str.string_match re result_str 0 then
-    Some (Str.matched_string result_str)
+  let re = Re.Str.regexp {|task-[0-9]+|} in
+  if Re.Str.string_match re result_str 0 then
+    Some (Re.Str.matched_string result_str)
   else
     try
-      let _ = Str.search_forward re result_str 0 in
-      Some (Str.matched_string result_str)
+      let _ = Re.Str.search_forward re result_str 0 in
+      Some (Re.Str.matched_string result_str)
     with Not_found -> None
 
 (** Build the prompt that the spawned agent will receive. *)

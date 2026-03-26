@@ -228,12 +228,12 @@ let parse_select_strategy json =
 
 (** Extract input mappings from prompt template *)
 let extract_input_mappings (prompt : string) : (string * string) list =
-  let regex = Str.regexp "{{\\([^}]+\\)}}" in
+  let regex = Re.Str.regexp "{{\\([^}]+\\)}}" in
   let rec find_all pos acc =
     try
-      let _ = Str.search_forward regex prompt pos in
-      let matched = Str.matched_group 1 prompt in
-      let next_pos = Str.match_end () in
+      let _ = Re.Str.search_forward regex prompt pos in
+      let matched = Re.Str.matched_group 1 prompt in
+      let next_pos = Re.Str.match_end () in
       find_all next_pos (matched :: acc)
     with Not_found -> List.rev acc
   in

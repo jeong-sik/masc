@@ -175,9 +175,16 @@ export function KeeperDetailOverlay() {
               <div class="flex items-center gap-2.5">
                 <h2 class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
                 <${KeeperStatusPill} status=${keeper.status} />
-                ${keeper.model ? html`
-                  <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-mono bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.2)]">${keeper.model}</span>
-                ` : null}
+                ${(() => {
+                  const series = keeper.metrics_series ?? []
+                  const lastUsed = series.length > 0 ? series[series.length - 1]?.model_used : null
+                  const display = lastUsed || keeper.active_model || keeper.model
+                  return display ? html`
+                    <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-mono bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.2)]"
+                      title=${lastUsed && keeper.model ? `마지막 호출: ${lastUsed}\n설정: ${keeper.model}` : ''}
+                    >${display}</span>
+                  ` : null
+                })()}
               </div>
               ${keeper.koreanName ? html`<span class="text-xs text-[var(--text-muted)]">${keeper.koreanName}</span>` : null}
             </div>

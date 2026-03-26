@@ -46,7 +46,7 @@ function statusLabel(status: string | undefined): string {
   if (!status) return '상태 미수집'
   const labels: Record<string, string> = {
     active: '온라인', busy: '처리 중', listening: '응답 대기', working: '작업 실행 중',
-    idle: '작업 없음', offline: '연결 끊김', inactive: '중지됨',
+    idle: '대기', offline: '오프라인', inactive: '종료됨',
   }
   return labels[status.toLowerCase()] ?? status
 }
@@ -59,8 +59,8 @@ function statusDescription(status: string | undefined): string {
     listening: '연결된 상태에서 입력이나 다음 지시를 기다리고 있습니다.',
     working: '현재 작업을 수행 중입니다.',
     idle: '연결은 유지되지만 지금 표시할 작업은 없습니다.',
-    offline: '현재 런타임이 보이지 않거나 하트비트가 없습니다.',
-    inactive: '등록은 남아 있지만 현재는 내려간 상태입니다.',
+    offline: '하트비트가 없어 현재 접근할 수 없습니다. 수동으로 내렸거나 연결이 끊겼을 수 있습니다.',
+    inactive: '등록은 남아 있지만 명시적으로 내려간 상태입니다.',
   }
   return descriptions[status.toLowerCase()] ?? '정의되지 않은 상태값입니다.'
 }
@@ -494,7 +494,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </span>
                   ${isKeeper ? html`
                     <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1 text-[11px] text-[var(--text-muted)]">
-                      컨텍스트 ${ctxPct != null ? `${ctxPct}% 사용` : '수집 전'}
+                      컨텍스트 ${ctxPct != null ? `${ctxPct}% 사용` : '대기 중'}
                     </span>
                   ` : null}
                 </div>
@@ -518,9 +518,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <div class="rounded-2xl border border-dashed border-[var(--white-8)] bg-[var(--white-2)] px-3 py-3">
                       <div class="flex items-center justify-between gap-3 text-[11px]">
                         <span class="text-[var(--text-muted)]">컨텍스트 사용량</span>
-                        <strong class="text-[var(--text-strong)]">수집 전</strong>
+                        <strong class="text-[var(--text-strong)]">대기 중</strong>
                       </div>
-                      <p class="mt-2 text-[11px] leading-[1.45] text-[var(--text-muted)]">키퍼가 아직 컨텍스트 메트릭을 보고하지 않았습니다.</p>
+                      <p class="mt-2 text-[11px] leading-[1.45] text-[var(--text-muted)]">아직 메트릭이 보고되지 않았습니다. 키퍼가 첫 턴을 시작하면 자동으로 갱신됩니다.</p>
                     </div>
                   `}
                 ` : null}

@@ -2,6 +2,17 @@ module U = Yojson.Safe.Util
 include Operator_pending_confirm
 include Operator_digest
 
+let compute_context_ratio (meta : Keeper_types.keeper_meta) : float option =
+  let input_tokens = meta.usage.last_input_tokens in
+  if input_tokens = 0 then None
+  else
+    let active_model = Keeper_exec_status.active_model_of_meta meta in
+    if active_model = "" then None
+    else
+      let max_ctx = Oas_model_resolve.max_context_of_label active_model in
+      if max_ctx = 0 then None
+      else Some (float_of_int input_tokens /. float_of_int max_ctx)
+
 type action_log_entry = {
   trace_id : string;
   actor : string;
@@ -225,7 +236,10 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
                   ("diagnostic", diagnostic);
                   ("generation", `Int meta.generation);
                   ("turn_count", `Int meta.usage.total_turns);
-                  ("context_ratio", `Null);
+                  ("context_ratio",
+                    (match compute_context_ratio meta with
+                     | Some r -> `Float r
+                     | None -> `Null));
                   ("context_tokens", `Int meta.usage.last_total_tokens);
                   ("last_model_used", `String meta.usage.last_model_used);
                   ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
@@ -301,7 +315,10 @@ let persistent_agents_json ?keeper_names config =
                   ("status", `String agent_status);
                   ("generation", `Int meta.generation);
                   ("turn_count", `Int meta.usage.total_turns);
-                  ("context_ratio", `Null);
+                  ("context_ratio",
+                    (match compute_context_ratio meta with
+                     | Some r -> `Float r
+                     | None -> `Null));
                   ("context_tokens", `Int meta.usage.last_total_tokens);
                   ("last_model_used", `String meta.usage.last_model_used);
                   ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));

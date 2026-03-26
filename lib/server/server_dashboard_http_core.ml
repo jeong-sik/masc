@@ -428,7 +428,10 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     ~config:{ (Proactive_refresh.default_config
                  ~label:"operator_snapshot"
                  ~interval_s:_operator_refresh_interval_s)
-              with timeout_s = 15.0 }
+              with timeout_s =
+                     float_of_env_default
+                       "MASC_DASHBOARD_OPERATOR_SNAPSHOT_TIMEOUT_S"
+                       ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _operator_snapshot_cache)
 
@@ -478,7 +481,10 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     ~config:{ (Proactive_refresh.default_config
                  ~label:"operator_digest"
                  ~interval_s:_operator_refresh_interval_s)
-              with timeout_s = 30.0 }
+              with timeout_s =
+                     float_of_env_default
+                       "MASC_DASHBOARD_OPERATOR_DIGEST_TIMEOUT_S"
+                       ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _operator_digest_cache)
 

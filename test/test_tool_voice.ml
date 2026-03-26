@@ -399,8 +399,8 @@ let test_voice_transcript_without_net_errors () =
       let ok, body =
         dispatch_exn ctx ~name:"masc_voice_transcript" ~args:(`Assoc [])
       in
-      check bool "returns not_available (STT not integrated)" false ok;
-      check bool "mentions not_available" true (contains body "not_available"))
+      check bool "returns not_implemented (STT not integrated)" false ok;
+      check bool "mentions not_implemented" true (contains body "not_implemented"))
 
 let test_voice_conference_end_without_net_errors () =
   with_ctx_no_net (fun ctx ->

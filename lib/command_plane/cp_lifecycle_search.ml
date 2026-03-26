@@ -8,7 +8,7 @@ let unit_guard_json config unit_id =
   | Some unit ->
       let live_count =
         unit.roster
-        |> List.filter (fun name -> List.mem name (live_agent_names agents))
+        |> List.filter (roster_name_is_live (live_agent_names agents))
         |> List.length
       in
       let active_count =
@@ -779,4 +779,3 @@ let operation_search_json config units operations (operation : operation_record)
              ] )
         :: fields )
   | other -> other
-

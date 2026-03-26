@@ -105,6 +105,29 @@ let test_read_events_limit () =
   Alcotest.(check (list int)) "tail events kept" [ 16; 17; 18; 19; 20 ] seqs;
   cleanup_dir base_dir
 
+let test_memory_backend_event_lock_serializes_fibers () =
+  let cluster_name = "team-session-lock-" ^ Team_session_store.make_session_id () in
+  with_env "MASC_STORAGE_TYPE" (Some "memory") @@ fun () ->
+  with_env "MASC_CLUSTER_NAME" (Some cluster_name) @@ fun () ->
+  with_eio @@ fun _env ->
+  Eio_guard.enable ();
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) @@ fun () ->
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let path = Team_session_store.events_jsonl_path config "lock-regression" in
+  let active = ref 0 in
+  let overlapped = ref false in
+  Eio.Fiber.all
+    (List.init 16 (fun _ ->
+         fun () ->
+           Room_utils.with_file_lock config path (fun () ->
+               incr active;
+               if !active > 1 then overlapped := true;
+               Eio.Fiber.yield ();
+               decr active)));
+  Alcotest.(check bool) "memory event lock is exclusive" false !overlapped
+
 let test_list_and_compare () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->

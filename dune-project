@@ -1,7 +1,7 @@
 (lang dune 3.13)
 
 (name masc_mcp)
-(version 2.151.0)
+(version 2.152.0)
 
 (generate_opam_files true)
 
@@ -70,6 +70,8 @@
   (h2 (>= 0.10))
   (h2-eio (>= 0.10))
   (alcotest (and :with-test (>= 1.6)))
+  (qcheck-core (and :with-test (>= 0.21)))
+  (qcheck-alcotest (and :with-test (>= 0.21)))
   (bisect_ppx (and :with-test (>= 2.8)))
   (mtime (>= 2.0))
   (uuidm (>= 0.9))

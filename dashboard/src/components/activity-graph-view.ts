@@ -163,7 +163,7 @@ export function GraphView({ data }: GraphViewProps) {
     ctx.fillRect(0, 0, width, height)
 
     // Draw edges
-    for (const edge of data.edges) {
+    for (const edge of data.edges ?? []) {
       const sp = positions.get(edge.source)
       const tp = positions.get(edge.target)
       if (!sp || !tp) continue
@@ -185,7 +185,7 @@ export function GraphView({ data }: GraphViewProps) {
     }
 
     // Draw nodes
-    for (const node of data.nodes) {
+    for (const node of data.nodes ?? []) {
       const pos = positions.get(node.id)
       if (!pos) continue
 
@@ -273,7 +273,7 @@ export function GraphView({ data }: GraphViewProps) {
   // Edges connected to selected node
   const connectedEdges: Array<{ edge: ActivityGraphEdge; otherLabel: string }> = []
   if (selectedNode) {
-    for (const edge of data.edges) {
+    for (const edge of data.edges ?? []) {
       if (edge.source === selectedNode.id || edge.target === selectedNode.id) {
         const otherId = edge.source === selectedNode.id ? edge.target : edge.source
         const otherNode = data.nodes.find(n => n.id === otherId)

@@ -706,9 +706,35 @@ let register_default ~key ~default ~description ?(category="general") () =
       Hashtbl.replace version_index key versions
   )
 
+(** Resolve a prompt with file I/O performed outside the mutex.
+    Reads the markdown file first, then acquires the mutex for
+    hashtbl lookups only. Prevents Eio.Mutex contention when
+    file I/O blocks a fiber (#3335). *)
+let resolve_prompt key =
+  let file_path = prompt_markdown_path key in
+  let file_value = Option.bind file_path read_file_if_exists in
+  with_mutex (fun () ->
+    let override_value = Hashtbl.find_opt override_tbl key in
+    let default_value = default_prompt_value_unlocked key in
+    let source, effective =
+      match override_value with
+      | Some value -> ("override", value)
+      | None -> (
+          match file_value with
+          | Some value -> ("file", value)
+          | None -> (
+              match default_value with
+              | Some value -> ("default", value)
+              | None -> ("missing", "")))
+    in
+    {
+      effective; source; file_value; override_value; default_value;
+      file_path; file_exists = Option.is_some file_value;
+      has_override = Option.is_some override_value;
+    })
+
 (** Get a prompt value. Resolution: override > file > registered default *)
-let get_prompt key =
-  with_mutex (fun () -> (resolve_prompt_unlocked key).effective)
+let get_prompt key = (resolve_prompt key).effective
 
 let render_prompt_template key vars =
   let template = get_prompt key in
@@ -752,8 +778,7 @@ let clear_prompt_override key =
   with_mutex (fun () -> Hashtbl.remove override_tbl key)
 
 (** Get source of current value *)
-let prompt_source key =
-  with_mutex (fun () -> (resolve_prompt_unlocked key).source)
+let prompt_source key = (resolve_prompt key).source
 
 let validate_required_prompt_files () =
   with_mutex (fun () ->

@@ -374,6 +374,9 @@ jobs:
             sleep 15
           done
 
+      - name: Install OS dependencies (ripgrep for lint scripts)
+        run: sudo apt-get install -y ripgrep bc
+
       - name: Check Eio conventions
         run: |
           chmod +x scripts/check-eio-conventions.sh

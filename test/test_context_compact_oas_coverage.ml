@@ -146,6 +146,64 @@ let test_scoring_single () =
   check bool "score in range" true (score >= 0.0 && score <= 1.0)
 
 (* ================================================================ *)
+(* Dynamic Strategy Resolution Tests (#3164)                        *)
+(* ================================================================ *)
+
+let strategy_names strategies =
+  List.map (function
+    | Compact.PruneToolOutputs -> "PruneToolOutputs"
+    | Compact.MergeContiguous -> "MergeContiguous"
+    | Compact.DropLowImportance -> "DropLowImportance"
+    | Compact.SummarizeOld -> "SummarizeOld"
+    | Compact.Dynamic _ -> "Dynamic") strategies
+
+let test_dynamic_high_pressure_multi_agent () =
+  let obs : Compact.observation_context = {
+    context_ratio = 0.85; active_agent_count = 3;
+    unclaimed_task_count = 2; is_single_focused_task = false;
+    model_family = "medium_cloud" } in
+  let msgs = [msg Agent_sdk.Types.User "test"] in
+  let _result, _tokens = Compact.compact
+    ~system_prompt:"sys" ~messages:msgs
+    ~strategies:[Compact.Dynamic Compact.default_dynamic_selector]
+    ~observation:obs () in
+  (* Verify high-pressure path: PruneToolOutputs + DropLowImportance + MergeContiguous *)
+  let resolved = Compact.resolve_strategies ~obs:(Some obs)
+    [Compact.Dynamic Compact.default_dynamic_selector] in
+  let names = strategy_names resolved in
+  check (list string) "high pressure strategies"
+    ["PruneToolOutputs"; "DropLowImportance"; "MergeContiguous"] names
+
+let test_dynamic_single_focused_task () =
+  let obs : Compact.observation_context = {
+    context_ratio = 0.75; active_agent_count = 1;
+    unclaimed_task_count = 0; is_single_focused_task = true;
+    model_family = "large_cloud" } in
+  let resolved = Compact.resolve_strategies ~obs:(Some obs)
+    [Compact.Dynamic Compact.default_dynamic_selector] in
+  let names = strategy_names resolved in
+  check (list string) "single focus strategies"
+    ["PruneToolOutputs"; "SummarizeOld"] names
+
+let test_dynamic_small_local_model () =
+  let obs : Compact.observation_context = {
+    context_ratio = 0.50; active_agent_count = 1;
+    unclaimed_task_count = 1; is_single_focused_task = true;
+    model_family = "small_local" } in
+  let resolved = Compact.resolve_strategies ~obs:(Some obs)
+    [Compact.Dynamic Compact.default_dynamic_selector] in
+  let names = strategy_names resolved in
+  check (list string) "small local strategies"
+    ["PruneToolOutputs"; "MergeContiguous"] names
+
+let test_dynamic_no_observation () =
+  let resolved = Compact.resolve_strategies ~obs:None
+    [Compact.Dynamic Compact.default_dynamic_selector] in
+  let names = strategy_names resolved in
+  check (list string) "default (no observation)"
+    ["DropLowImportance"] names
+
+(* ================================================================ *)
 (* Test Suite                                                       *)
 (* ================================================================ *)
 
@@ -167,5 +225,11 @@ let () =
       test_case "sticky goal" `Quick test_scoring_goal_sticky;
       test_case "empty input" `Quick test_scoring_empty;
       test_case "single message" `Quick test_scoring_single;
+    ];
+    "dynamic_strategy", [
+      test_case "high pressure multi-agent" `Quick test_dynamic_high_pressure_multi_agent;
+      test_case "single focused task" `Quick test_dynamic_single_focused_task;
+      test_case "small local model" `Quick test_dynamic_small_local_model;
+      test_case "no observation fallback" `Quick test_dynamic_no_observation;
     ];
   ]

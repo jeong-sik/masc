@@ -276,6 +276,22 @@ let compact
     ()
   : Agent_sdk.Types.message list * int =
   let resolved = resolve_strategies ~obs:observation strategies in
+  (* Log selected strategies for observability (#3164) *)
+  let strategy_names = List.map (function
+    | PruneToolOutputs -> "PruneToolOutputs"
+    | MergeContiguous -> "MergeContiguous"
+    | DropLowImportance -> "DropLowImportance"
+    | SummarizeOld -> "SummarizeOld"
+    | Dynamic _ -> "Dynamic(unresolved)"
+  ) resolved in
+  (match observation with
+   | Some obs ->
+     Log.Harness.info "[compact] strategies=[%s] ratio=%.2f agents=%d model=%s"
+       (String.concat "," strategy_names) obs.context_ratio
+       obs.active_agent_count obs.model_family
+   | None ->
+     Log.Harness.info "[compact] strategies=[%s] (no observation)"
+       (String.concat "," strategy_names));
   let oas_strategies = List.map oas_strategy_of resolved in
   let reducer = Agent_sdk.Context_reducer.compose
     (List.map (fun s -> { Agent_sdk.Context_reducer.strategy = s }) oas_strategies) in

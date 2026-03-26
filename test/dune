@@ -1013,6 +1013,12 @@
  (modules test_tool_metrics)
  (libraries masc_mcp alcotest yojson))
 
+; Tool Metrics Persist — JSONL disk persistence round-trip (#3280)
+(test
+ (name test_tool_metrics_persist)
+ (modules test_tool_metrics_persist)
+ (libraries masc_mcp masc_mcp.fs_compat alcotest eio eio_main unix yojson))
+
 ; Tool Unified — unified query interface across catalog, registry, dispatch (P4 Phase 4.4)
 (test
  (name test_tool_unified)

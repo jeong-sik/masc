@@ -124,6 +124,18 @@ let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
      Log.Misc.error "tool registry warm-up failed: %s"
        (Printexc.to_string exn))
 
+let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
+  (try
+     let n = Tool_metrics_persist.restore
+       ~base_path:state.room_config.base_path in
+     if n > 0 then
+       Log.Misc.info "tool metrics: restored %d records from disk" n
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Misc.error "tool metrics restore failed: %s"
+       (Printexc.to_string exn))
+
 let startup_prune_jsonl (state : Mcp_server.server_state) =
   (try
      let days =
@@ -135,10 +147,14 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
          Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
        else 0
      in
+     let tool_metrics_dir =
+       Filename.concat state.room_config.base_path "data/tool-metrics"
+     in
      let total =
        prune_dir (Filename.concat masc "audit")
        + prune_dir (Filename.concat masc "telemetry")
        + prune_dir (Filename.concat (Filename.concat masc "governance") "judgments")
+       + prune_dir tool_metrics_dir
        + (let keepers = Filename.concat masc "perpetual-keepers" in
           if not (Sys.file_exists keepers) then 0
           else
@@ -345,6 +361,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                 ~config:state.Mcp_server.room_config );
           ("chain_bootstrap", fun () -> bootstrap_chain_state state);
           ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);
+          ("tool_metrics_restore", fun () -> restore_tool_metrics_from_disk state);
           ("jsonl_prune", fun () -> startup_prune_jsonl state);
           ( "keeper_checkpoint_prune",
             fun () -> startup_prune_keeper_checkpoints state );

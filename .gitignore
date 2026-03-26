@@ -19,6 +19,9 @@ Thumbs.db
 .masc/
 .worktrees/
 
+# Tool metrics JSONL persistence (runtime data)
+data/tool-metrics/
+
 # Local heartbeat model-pool override
 config/llm_cascade.json
 

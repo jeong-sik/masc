@@ -11,7 +11,7 @@ homepage: "https://github.com/jeong-sik/masc-mcp"
 doc: "https://github.com/jeong-sik/masc-mcp"
 bug-reports: "https://github.com/jeong-sik/masc-mcp/issues"
 depends: [
-  "ocaml" {>= "5.1"}
+  "ocaml" {>= "5.4"}
   "dune" {>= "3.13" & >= "3.13"}
   "mcp_protocol" {>= "0.15.0"}
   "ocaml-webrtc" {>= "0.2.3"}

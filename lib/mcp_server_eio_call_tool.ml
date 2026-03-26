@@ -251,9 +251,16 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
 
-  (* Audit log (tool_call) if enabled *)
+  (* Resolve agent_name: session identity > arguments > fallback *)
   let agent_name =
-    Safe_ops.json_string ~default:"unknown" "agent_name" arguments
+    let from_args = Safe_ops.json_string ~default:"" "agent_name" arguments in
+    if from_args <> "" then from_args
+    else
+      let identity =
+        Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments
+      in
+      let resolved = identity.Agent_identity.agent_name in
+      if resolved <> "" then resolved else "unknown"
   in
   let error_msg = if success then None else Some (Printf.sprintf "timeout=%d|duration_ms=%d" (if !timeout_hit then 1 else 0) duration_ms) in
   Audit_log.log_tool_call state.Mcp_server.room_config

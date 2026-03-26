@@ -97,17 +97,9 @@ let make_tools
     Keeper_exec_tools.keeper_allowed_model_tools meta
   in
   let failure_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let failure_counts_mu : Eio.Mutex.t option ref = ref None in
+  let failure_counts_mu = Eio.Mutex.create () in
   let with_failure_counts f =
-    match !failure_counts_mu with
-    | Some mu -> Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
-    | None -> (
-        match Eio_context.get_switch_opt () with
-        | Some _ ->
-            let mu = Eio.Mutex.create () in
-            failure_counts_mu := Some mu;
-            Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
-        | None -> f ())
+    Eio_guard.with_mutex failure_counts_mu f
   in
   let args_key name input =
     let h = Hashtbl.hash (Yojson.Safe.to_string input) in

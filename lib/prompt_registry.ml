@@ -81,6 +81,44 @@ type prompt_resolution = {
   has_override: bool;
 }
 
+(** {1 Frontmatter Parsing} *)
+
+(** Parse YAML-style frontmatter from a markdown file.
+    Expects: --- \n key: value \n --- \n body
+    Returns (assoc list of key-value pairs, body after frontmatter).
+    If no frontmatter found, returns ([], full content). *)
+let parse_frontmatter content =
+  let lines = String.split_on_char '\n' content in
+  match lines with
+  | first :: rest when String.trim first = "---" ->
+      let rec collect_meta acc = function
+        | [] -> (List.rev acc, "")
+        | line :: remaining when String.trim line = "---" ->
+            (List.rev acc, String.concat "\n" remaining)
+        | line :: remaining ->
+            let pair =
+              match String.index_opt line ':' with
+              | Some i ->
+                  let key = String.trim (String.sub line 0 i) in
+                  let value = String.trim (String.sub line (i + 1) (String.length line - i - 1)) in
+                  Some (key, value)
+              | None -> None
+            in
+            collect_meta (match pair with Some p -> p :: acc | None -> acc) remaining
+      in
+      collect_meta [] rest
+  | _ -> ([], content)
+
+(** Parse a bracketed list value like [a, b, c] into string list. *)
+let parse_list_value s =
+  let s = String.trim s in
+  if String.length s >= 2 && s.[0] = '[' && s.[String.length s - 1] = ']' then
+    let inner = String.sub s 1 (String.length s - 2) in
+    String.split_on_char ',' inner
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
+  else []
+
 (** {1 Variable Extraction} *)
 
 (** Extract variable names from a template string.
@@ -164,6 +202,8 @@ let init ?persist_dir () =
 let set_markdown_dir dir =
   markdown_dir := Some dir
 
+let get_markdown_dir () = !markdown_dir
+
 let is_valid_prompt_key key =
   key <> ""
   && String.for_all
@@ -177,9 +217,13 @@ let prompt_markdown_path key =
   else
     Option.map (fun dir -> Filename.concat dir (key ^ ".md")) !markdown_dir
 
+(** Read a markdown file, stripping YAML frontmatter if present.
+    Returns only the body after the closing [---] delimiter. *)
 let read_file_if_exists path =
   if Sys.file_exists path && not (Sys.is_directory path) then
-    Some (In_channel.with_open_text path In_channel.input_all)
+    let content = In_channel.with_open_text path In_channel.input_all in
+    let _meta, body = parse_frontmatter content in
+    Some body
   else None
 
 (** {1 Registration and Lookup} *)
@@ -584,6 +628,54 @@ let register_prompt ~key ~description ?(category = "general")
           required_file;
           template_variables = List.sort_uniq String.compare template_variables;
         })
+
+(** Auto-discover and register prompts from markdown files with frontmatter.
+    Scans [dir] for [*.md] files. Files with YAML frontmatter get metadata
+    from frontmatter; files without frontmatter are skipped (require explicit
+    registration via [register_prompt]).
+
+    Frontmatter format:
+    {[
+      ---
+      description: keeper continuity rules
+      category: keeper
+      template_variables: [keeper_name, goal, triggers]
+      ---
+    ]}
+
+    The key is derived from the filename: [keeper.constitution.md] -> [keeper.constitution]. *)
+let load_prompts_from_directory dir =
+  if Sys.file_exists dir && Sys.is_directory dir then begin
+    let files = Sys.readdir dir in
+    Array.iter (fun file ->
+      if Filename.check_suffix file ".md" then begin
+        let key = Filename.remove_extension file in
+        if is_valid_prompt_key key then begin
+          let path = Filename.concat dir file in
+          try
+            let content = In_channel.with_open_text path In_channel.input_all in
+            let meta_pairs, _body = parse_frontmatter content in
+            match List.assoc_opt "description" meta_pairs with
+            | None -> ()  (* no frontmatter or no description — skip *)
+            | Some description ->
+                let category =
+                  Option.value ~default:"general"
+                    (List.assoc_opt "category" meta_pairs)
+                in
+                let template_variables =
+                  match List.assoc_opt "template_variables" meta_pairs with
+                  | Some v -> parse_list_value v
+                  | None -> []
+                in
+                register_prompt ~key ~description ~category ~required_file:true
+                  ~template_variables ()
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+            Log.Misc.error "load_prompts_from_directory: failed to read %s: %s"
+              file (Printexc.to_string exn)
+        end
+      end
+    ) files
+  end
 
 (** Register a hardcoded prompt with its default value.
     This also registers it in the versioned template system as a fallback. *)

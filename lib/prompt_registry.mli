@@ -60,6 +60,7 @@ val extract_variables : string -> string list
 
 val init : ?persist_dir:string -> unit -> unit
 val set_markdown_dir : string -> unit
+val get_markdown_dir : unit -> string option
 
 (** {1 Registration and Lookup} *)
 
@@ -113,6 +114,10 @@ val register_prompt :
   ?template_variables:string list ->
   unit ->
   unit
+
+val load_prompts_from_directory : string -> unit
+(** Auto-discover and register prompts from markdown files with frontmatter.
+    Files without frontmatter are skipped. Key is derived from filename. *)
 
 val register_default :
   key:string ->

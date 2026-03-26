@@ -177,6 +177,14 @@ let supervisor_sweep_running base_path =
     | Some pulse -> Pulse.is_alive pulse
     | None -> false)
 
+let stop_supervisor_sweep base_path =
+  with_sweeps_rw (fun () ->
+    match Hashtbl.find_opt supervisor_sweeps base_path with
+    | Some pulse ->
+      Pulse.shutdown pulse;
+      Hashtbl.remove supervisor_sweeps base_path
+    | None -> ())
+
 let start_supervisor_sweep ctx =
   let base_path = ctx.config.base_path in
   if supervisor_sweep_running base_path then ()
@@ -247,3 +255,8 @@ let start_existing_keepalives ctx =
 
 let stop_keepalive name =
   Keeper_keepalive.stop_keepalive name
+
+let reset_test_state base_path =
+  stop_supervisor_sweep base_path;
+  with_bootstrap_rw (fun () ->
+    Hashtbl.remove existing_keepalive_bootstrap_done base_path)

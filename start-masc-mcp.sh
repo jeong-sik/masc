@@ -223,11 +223,6 @@ raise_open_file_limit() {
 
 raise_open_file_limit
 
-# Default: enable internal guardian unless explicitly disabled
-if [ -z "$MASC_GUARDIAN_ENABLED" ]; then
-    export MASC_GUARDIAN_ENABLED=true
-fi
-
 # Default: enable realtime transports unless explicitly disabled.
 if [ -z "${MASC_WS_ENABLED+x}" ]; then
     export MASC_WS_ENABLED=1

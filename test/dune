@@ -303,7 +303,7 @@
  (modules test_verifier_oas_bridge)
  (libraries masc_mcp agent_sdk alcotest yojson))
 
-; OAS adapter tests (sentinel roundtrip, context_compact_oas strategies)
+; OAS adapter tests (legacy roundtrip removal, context_compact_oas strategies)
 (test
  (name test_oas_adapters)
  (modules test_oas_adapters)
@@ -350,11 +350,6 @@
  (name test_cache_eio)
  (modules test_cache_eio)
  (libraries masc_mcp alcotest str yojson eio eio_main))
-
-(test
- (name test_chain_native_eio_bootstrap)
- (modules test_chain_native_eio_bootstrap)
- (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
  (name test_race_cancel)

@@ -1,7 +1,7 @@
 (** Tests for Context_compact_oas — strategy mapping,
     shared scoring consistency, and edge cases.
 
-    Sentinel roundtrip tests removed: roles are natively compatible
+    Legacy roundtrip tests removed: roles are natively compatible
     (no masc_msg_to_oas/oas_msg_to_masc conversion needed). *)
 
 open Alcotest

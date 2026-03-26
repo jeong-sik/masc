@@ -15,6 +15,12 @@ let resolve_join_state ~room_initialized ~join_required ~agent_name ~check_join 
   else
     false
 
+let is_ephemeral_agent_name name =
+  String.length name >= 6 && String.sub name 0 6 = "agent-"
+
+let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
+  (not has_explicit_agent_name) && is_ephemeral_agent_name agent_name
+
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
@@ -150,10 +156,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   let persisted_agent_name () =
-    match read_mcp_session_agent () with
-    | Some n -> Some n
-    | None ->
-        if Option.is_some mcp_session_id then None else read_term_session_agent ()
+    if should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name
+    then
+      match read_mcp_session_agent () with
+      | Some n -> Some n
+      | None ->
+          if Option.is_some mcp_session_id then None else read_term_session_agent ()
+    else
+      None
   in
 
   let agent_name =
@@ -164,10 +174,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
            && not (Nickname.is_generated_nickname agent_name) ->
         persisted
     | _ -> agent_name
-  in
-
-  let is_ephemeral_agent_name name =
-    String.length name >= 6 && String.sub name 0 6 = "agent-"
   in
 
   let agent_name =

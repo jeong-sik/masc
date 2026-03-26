@@ -241,7 +241,7 @@ export function isKeeperAttention(item: OperatorAttentionItem): boolean {
 export function actionTypeLabel(value?: string | null): string {
   switch (value) {
     case 'broadcast':
-      return '방송'
+      return '전체 공지'
     case 'room_pause':
       return '방 일시정지'
     case 'room_resume':
@@ -249,9 +249,9 @@ export function actionTypeLabel(value?: string | null): string {
     case 'team_turn':
       return '세션 업데이트'
     case 'team_note':
-      return '세션 노트'
+      return '세션 메모'
     case 'team_broadcast':
-      return '세션 방송'
+      return '세션 공지'
     case 'team_task_inject':
       return '세션 작업 주입'
     case 'team_worker_spawn_batch':

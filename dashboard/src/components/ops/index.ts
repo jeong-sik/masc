@@ -33,6 +33,7 @@ import {
   isSessionAttention,
   keeperPriorityTone,
   normalizeStatus,
+  persistActorName,
   selectedSessionId,
   sessionPriorityTone,
   submitPause,
@@ -154,10 +155,15 @@ export function Ops() {
     <section class="flex flex-col gap-4">
       <div class="${CARD_STANDARD} flex justify-end items-center gap-4 flex-wrap">
         <div class="flex items-center gap-3 flex-wrap max-[880px]:w-full">
-          <div class="grid gap-0.5">
-            <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.06em] font-medium">실행 actor</span>
-            <strong class="text-[13px] text-[var(--text-strong)]">${currentActor}</strong>
-            <span class="text-[12px] text-[var(--text-muted)]">변경은 아래 고급 room 제어에서 합니다.</span>
+          <div class="flex items-center gap-1.5">
+            <input
+              type="text"
+              class="bg-transparent border-b border-transparent text-[13px] text-[var(--text-strong)] font-semibold px-1 py-0.5 outline-none hover:border-[var(--white-8)] focus:border-[var(--accent)] transition-colors w-[140px]"
+              value=${currentActor}
+              onInput=${(event: Event) => { persistActorName((event.target as HTMLInputElement).value) }}
+              disabled=${operatorActionBusy.value}
+              title="메시지 발신자 이름"
+            />
           </div>
           <button type="button"
             class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"

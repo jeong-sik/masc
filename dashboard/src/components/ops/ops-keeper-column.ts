@@ -123,7 +123,6 @@ export function OpsKeeperColumn() {
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">선택한 Keeper 상태</h3>
         </div>
-        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">목록에서는 상태를 보고, 직접 메시지는 아래 고급 패널에서만 보냅니다.</p>
         ${selectedKeeper ? html`
           <article class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-2">
             <div class="flex justify-between items-center gap-3 max-[880px]:flex-col max-[880px]:items-start">
@@ -142,34 +141,22 @@ export function OpsKeeperColumn() {
               <span>${relativeAge(selectedKeeper.last_turn_ago_s)}</span>
             </div>
           </article>
-        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">먼저 keeper를 하나 고르세요.</div>`}
 
-        <details class="ops-control-disclosure mt-0.5 border border-[var(--white-8)] rounded-xl bg-[var(--white-2)]">
-          <summary class="ops-control-summary list-none cursor-pointer grid gap-1 p-3 px-3.5">
-            <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 keeper 개입</span>
-            <strong>${selectedKeeper ? `${selectedKeeper.name}에게 직접 메시지` : 'keeper를 선택하면 메시지 입력이 열립니다.'}</strong>
-            <span>상세 진단은 keeper 상세 보기에서, 직접 개입은 이 패널에서 진행합니다.</span>
-          </summary>
-
-          <div class="grid gap-3 px-3.5 pb-3.5 border-t border-[var(--white-8)]">
+          <div class="grid gap-2 mt-1">
             <textarea
               class="control-textarea"
-              rows=${3}
-              placeholder="keeper에게 보낼 메시지"
+              rows=${2}
+              placeholder="${selectedKeeper.name}에게 보낼 메시지"
               value=${keeperMessage.value}
               onInput=${(event: Event) => { keeperMessage.value = (event.target as HTMLTextAreaElement).value }}
-              disabled=${busy || !selectedKeeper}
+              onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void submitKeeperMessage() }}
+              disabled=${busy}
             ></textarea>
-            <div class="control-row items-stretch">
-              <${ActionButton} variant="primary" size="lg" onClick=${() => { void submitKeeperMessage() }} disabled=${busy || !selectedKeeper || !keeperMessage.value.trim()}>
-                메시지 보내기
-              <//>
-              <span class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">
-                현재 선택한 keeper에만 적용됩니다.
-              </span>
-            </div>
+            <${ActionButton} variant="primary" size="lg" onClick=${() => { void submitKeeperMessage() }} disabled=${busy || !keeperMessage.value.trim()}>
+              메시지 보내기
+            <//>
           </div>
-        </details>
+        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">키퍼를 선택하면 바로 메시지를 보낼 수 있습니다.</div>`}
       </section>
 
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0">

@@ -38,7 +38,6 @@ import {
   taskTitle,
   formatMessageContent,
   logEntryBorderClass,
-  persistActorName,
   type PendingQueueFilter,
 } from './helpers'
 import { selectPendingConfirmState } from '../../pending-confirm'
@@ -140,7 +139,7 @@ export function OpsRoomColumn() {
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">승인 대기</h3>
         </div>
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">
-          전역 승인 대기를 기본으로 보여줍니다. 현재 실행 actor는 <strong>${currentActor}</strong>이고, 다른 actor가 만든 항목은 여기서 읽기 전용입니다.
+          전역 승인 대기입니다. <strong>${currentActor}</strong> 이름으로 만든 항목만 실행할 수 있습니다.
         </p>
         ${confirmActionLabels.length > 0 ? html`
           <div class="text-[12px] text-[var(--text-muted)] leading-[1.45]">
@@ -194,9 +193,7 @@ export function OpsRoomColumn() {
                 </div>
                 ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[11px] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
                 <div class="mt-2 text-[12px] leading-[1.45] text-[var(--text-muted)]">
-                  ${canManage
-                    ? '현재 실행 actor가 이 승인 대기를 처리할 수 있습니다.'
-                    : '다른 actor가 만든 승인 대기라서 여기서는 읽기만 가능합니다.'}
+                  ${canManage ? '' : '읽기 전용'}
                 </div>
                 <div class="flex justify-between items-center gap-3 mt-3 max-[880px]:flex-col max-[880px]:items-start">
                   <${ActionButton} variant="primary" size="lg" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value || !canManage}>
@@ -255,22 +252,12 @@ export function OpsRoomColumn() {
         >
           <summary class="ops-control-summary list-none cursor-pointer grid gap-1 p-3 px-3.5">
             <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 room 제어</span>
-            <strong>${room.paused ? '지금은 room이 멈춰 있어 재개 동선이 열려 있습니다.' : '실행 actor 설정, 방송, room 쓰기 액션'}</strong>
+            <strong>${room.paused ? '지금은 room이 멈춰 있어 재개 동선이 열려 있습니다.' : '전체 공지, 일시정지, 작업 주입'}</strong>
             <span>${room.paused ? '운영 점검 후 재개하거나 공지를 보내세요.' : '기본 화면은 읽기 중심이고, 실제 room 변경은 이 안에서만 합니다.'}</span>
           </summary>
 
           <div class="grid gap-3 px-3.5 pb-3.5 border-t border-[var(--white-8)]">
-            <label class="control-label" for="ops-actor">실행 actor</label>
-            <input
-              id="ops-actor"
-              class="control-input"
-              type="text"
-              value=${actorName.value}
-              onInput=${(event: Event) => { persistActorName((event.target as HTMLInputElement).value) }}
-              disabled=${operatorActionBusy.value}
-            />
-
-            <label class="control-label" for="ops-broadcast">Room 방송</label>
+            <label class="control-label" for="ops-broadcast">전체 공지</label>
             <div class="control-row">
               <input
                 id="ops-broadcast"

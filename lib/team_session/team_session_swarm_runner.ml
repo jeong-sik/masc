@@ -7,7 +7,7 @@
 
 module Swarm = Agent_sdk_swarm
 
-let run_swarm ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
+let run_swarm ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.Process.mgr ; .. >) ~(config : Room.config)
     ~(session_id : string)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -38,7 +38,7 @@ let run_swarm ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         let callbacks =
           Team_session_swarm_callbacks.make_callbacks ~config ~session_id
         in
-        match Swarm.Runner.run ~sw ~clock ~callbacks swarm_config with
+        match Swarm.Runner.run ~sw ~env ~callbacks swarm_config with
         | Ok swarm_result ->
           let updated =
             Team_session_oas_bridge.apply_swarm_result session swarm_result

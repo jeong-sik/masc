@@ -194,7 +194,9 @@ let get_or_compute_eio key ~ttl compute =
               | exn ->
                 Log.Dashboard.error "cache revalidation failed: %s"
                   (Printexc.to_string exn))
-            with Invalid_argument _ -> do_bg_compute ())
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | Invalid_argument _ -> do_bg_compute ())
        | None -> do_bg_compute ());
       stale_value
     | `Compute cond ->

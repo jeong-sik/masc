@@ -188,24 +188,23 @@ and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : n
   record_start ctx parent.id;
   let start = Time_compat.now () in
 
-  (* Collect results from parallel execution *)
-  let results = ref [] in
-  let mutex = Eio.Mutex.create () in
+  (* Collect results from parallel execution via Eio.Stream *)
+  let n = List.length nodes in
+  let stream = Eio.Stream.create n in
 
   Eio.Fiber.all (List.map (fun node ->
     fun () ->
       let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
-      Eio.Mutex.use_rw mutex ~protect:true (fun () ->
-        results := (node.id, result) :: !results
-      )
+      Eio.Stream.add stream (node.id, result)
   ) nodes);
 
+  let results = List.init n (fun _ -> Eio.Stream.take stream) in
   let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
 
   (* Check if all succeeded *)
   let outputs = List.filter_map (fun (id, r) ->
     match r with Ok o -> Some (id, o) | Error _ -> None
-  ) !results in
+  ) results in
 
   if List.length outputs = List.length nodes then begin
     let combined = String.concat "\n---\n"
@@ -349,30 +348,28 @@ and execute_parallel_group ctx ~sw ~clock ~exec_fn ~tool_exec (group : string li
     | Some node -> execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
     | None -> Error (Printf.sprintf "Node '%s' not found in subgraph" node_id)
   else
-    (* Multiple nodes - execute in parallel with Eio.Fiber.all *)
-    let results = ref [] in
-    let mutex = Eio.Mutex.create () in
-    let has_error = ref None in
+    (* Multiple nodes - execute in parallel via Eio.Stream *)
+    let n = List.length group in
+    let stream = Eio.Stream.create n in
 
     Eio.Fiber.all (List.map (fun node_id ->
       fun () ->
         match Hashtbl.find_opt node_map node_id with
         | Some node ->
             let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
-            Eio.Mutex.use_rw mutex ~protect:true (fun () ->
-              results := (node_id, result) :: !results;
-              match result with
-              | Error msg when !has_error = None -> has_error := Some msg
-              | _ -> ()
-            )
+            Eio.Stream.add stream (node_id, result)
         | None ->
-            Eio.Mutex.use_rw mutex ~protect:true (fun () ->
-              has_error := Some (Printf.sprintf "Node '%s' not found" node_id)
-            )
+            Eio.Stream.add stream
+              (node_id, Error (Printf.sprintf "Node '%s' not found" node_id))
     ) group);
 
+    let results = List.init n (fun _ -> Eio.Stream.take stream) in
+    let has_error = List.find_map (fun (_, r) ->
+      match r with Error msg -> Some msg | Ok _ -> None
+    ) results in
+
     (* Return first error if any, otherwise success with last output *)
-    match !has_error with
+    match has_error with
     | Some msg -> Error msg
     | None ->
         let outputs = List.filter_map (fun (_, r) ->
@@ -482,9 +479,9 @@ and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (
   record_start ctx parent.id;
   let start = Time_compat.now () in
 
-  (* Execute all nodes in parallel, handling ChainRef nodes specially *)
-  let results = ref [] in
-  let mutex = Eio.Mutex.create () in
+  (* Execute all nodes in parallel via Eio.Stream, handling ChainRef nodes specially *)
+  let n = List.length nodes in
+  let stream = Eio.Stream.create n in
 
   Eio.Fiber.all (List.map (fun (node : node) ->
     fun () ->
@@ -498,17 +495,16 @@ and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (
             (* For non-ChainRef nodes, execute normally *)
             execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
       in
-      Eio.Mutex.use_rw mutex ~protect:true (fun () ->
-        results := (node.id, result) :: !results
-      )
+      Eio.Stream.add stream (node.id, result)
   ) nodes);
 
+  let results = List.init n (fun _ -> Eio.Stream.take stream) in
   let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
 
   (* Merge results based on strategy *)
   let outputs = List.filter_map (fun (id, r) ->
     match r with Ok o -> Some (id, o) | Error _ -> None
-  ) !results in
+  ) results in
 
   match outputs with
   | [] ->
@@ -726,26 +722,25 @@ let execute ~sw ~(clock : _ Eio.Time.clock) ~timeout ~trace ~(exec_fn : exec_fn)
                 Ok ""  (* All nodes already completed *)
               end
               else begin
-                (* Execute remaining nodes in parallel *)
-                let results = ref [] in
-                let mutex = Eio.Mutex.create () in
+                (* Execute remaining nodes in parallel via Eio.Stream *)
+                let n_exec = List.length nodes_to_execute in
+                let stream = Eio.Stream.create n_exec in
                 Eio.Fiber.all (List.map (fun (node : node) ->
                   fun () ->
                     let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
-                    Eio.Mutex.use_rw mutex ~protect:true (fun () ->
-                      results := (node.id, r) :: !results
-                    )
+                    Eio.Stream.add stream (node.id, r)
                 ) nodes_to_execute);
+                let results = List.init n_exec (fun _ -> Eio.Stream.take stream) in
                 (* Save checkpoint for all successfully completed parallel nodes *)
                 List.iter (fun (node_id, r) ->
                   match r with
                   | Ok _ -> save_checkpoint ctx ~chain_id:plan.chain.Chain_types.id ~node_id
                   | Error e -> Log.Chain.debug "parallel node %s failed, skipping checkpoint: %s" node_id e
-                ) !results;
+                ) results;
                 (* Check all succeeded *)
                 let errors = List.filter_map (fun (id, r) ->
                   match r with Error e -> Some (id ^ ": " ^ e) | Ok _ -> None
-                ) !results in
+                ) results in
                 if List.length errors = 0 then Ok ""
                 else Error (String.concat "; " errors)
               end

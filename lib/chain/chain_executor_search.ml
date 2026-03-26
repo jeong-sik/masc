@@ -216,9 +216,10 @@ let execute_mcts ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_no
   let rec mcts_iteration iteration =
     if iteration >= max_iterations then ()
     else begin
-      (* Run parallel simulations *)
-      let sim_results = ref [] in
-      let results_mutex = Eio.Mutex.create () in
+      (* Run parallel simulations via Eio.Stream.
+         Not all sims succeed (select/expand may fail), so drain with
+         take_nonblocking after Fiber.all completes. *)
+      let sim_stream = Eio.Stream.create parallel_sims in
 
       Eio.Fiber.all (List.init parallel_sims (fun _ ->
         fun () ->
@@ -234,15 +235,22 @@ let execute_mcts ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_no
               Log.Chain.warn "MCTS expand failed: %s" msg
           | Ok expanded ->
           let score = simulate expanded in
-          Eio.Mutex.use_rw results_mutex ~protect:true (fun () ->
+          Eio.Stream.add sim_stream (expanded, score)
+      ));
+
+      (* Drain results and track best *)
+      let sim_results = ref [] in
+      let continue = ref true in
+      while !continue do
+        match Eio.Stream.take_nonblocking sim_stream with
+        | Some (expanded, score) ->
             sim_results := (expanded, score) :: !sim_results;
-            (* Track best result *)
             if score > !best_score then begin
               best_score := score;
               best_output := !(expanded.last_output)
             end
-          )
-      ));
+        | None -> continue := false
+      done;
 
       (* Backpropagate all results *)
       List.iter (fun (node, score) ->
@@ -296,17 +304,17 @@ let execute_evaluator ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execu
   record_start ctx parent.id;
   let start = Time_compat.now () in
 
-  (* Execute all candidates in parallel *)
-  let results = ref [] in
-  let mutex = Eio.Mutex.create () in
+  (* Execute all candidates in parallel via Eio.Stream *)
+  let n = List.length candidates in
+  let stream = Eio.Stream.create n in
 
   Eio.Fiber.all (List.map (fun (candidate : node) ->
     fun () ->
       let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec candidate in
-      Eio.Mutex.use_rw mutex ~protect:true (fun () ->
-        results := (candidate.id, result) :: !results
-      )
+      Eio.Stream.add stream (candidate.id, result)
   ) candidates);
+
+  let results = List.init n (fun _ -> Eio.Stream.take stream) in
 
   (* Helper: MODEL-based scoring via OAS chain_judge cascade *)
   let model_score output =
@@ -465,7 +473,7 @@ Reply with ONLY a number between 0.0 and 1.0:|}
                with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> 0.5)
         in
         Some (id, output, score)
-  ) !results in
+  ) results in
 
   let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
 

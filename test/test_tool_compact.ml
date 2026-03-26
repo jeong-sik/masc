@@ -206,6 +206,9 @@ let test_backend_create_local_explicit () =
 (* ================================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "tool_compact + fs_compat_backend" [
     ("compact_dispatch", [
       test_case "basic compact" `Quick test_basic_compact;

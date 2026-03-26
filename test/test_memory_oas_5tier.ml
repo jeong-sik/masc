@@ -486,6 +486,9 @@ let test_flush_episodes_appends_only_new_records () =
 (* ================================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   Alcotest.run "memory_oas_5tier" [
     ("oas_procedure_of_masc", [
       Alcotest.test_case "basic conversion" `Quick test_procedure_basic;

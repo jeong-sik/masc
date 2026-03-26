@@ -290,7 +290,7 @@
 (test
  (name test_memory_oas_5tier)
  (modules test_memory_oas_5tier)
- (libraries masc_mcp agent_sdk alcotest yojson unix))
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
 
 ; Verifier_oas bridge tests (eval_gate→guardrails, verdict→hook, read-only)
 (test
@@ -624,13 +624,13 @@
 (test
  (name test_pubsub_postgres)
  (modules test_pubsub_postgres)
- (libraries masc_mcp alcotest))
+ (libraries masc_mcp alcotest eio eio_main))
 
 ; Fs_compat tests (mkdir_p fallback must be shell-free and safe)
 (test
  (name test_fs_compat)
  (modules test_fs_compat)
- (libraries masc_mcp alcotest unix))
+ (libraries masc_mcp alcotest eio eio_main unix))
 
 ; ============================================================
 ; Concurrency stress tests (20+ agents)
@@ -888,7 +888,7 @@
 (test
  (name test_tool_compact)
  (modules test_tool_compact)
- (libraries masc_mcp fs_compat alcotest str yojson))
+ (libraries masc_mcp fs_compat alcotest eio eio_main str yojson))
 
 
 ; ============================================================

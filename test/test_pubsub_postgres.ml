@@ -82,6 +82,9 @@ let test_hybrid_approach_doc () =
   ()
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "Pubsub Postgres" [
     "compile", [
       test_case "notify_q query compiles" `Quick test_notify_query_compiles;

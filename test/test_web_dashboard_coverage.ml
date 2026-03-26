@@ -59,7 +59,7 @@ let contains_re re s =
 
 let restore_env name = function
   | Some value -> Unix.putenv name value
-  | None -> Unix.unsetenv name
+  | None -> Unix.putenv name ""
 
 let with_env vars f =
   let original = List.map (fun (name, _) -> (name, Sys.getenv_opt name)) vars in
@@ -220,7 +220,7 @@ let test_fallback_on_missing_asset () =
     ~finally:(fun () ->
       (match original with
        | Some v -> Unix.putenv "MASC_ASSETS_ROOT" v
-       | None -> Unix.unsetenv "MASC_ASSETS_ROOT");
+       | None -> Unix.putenv "MASC_ASSETS_ROOT" "");
       cleanup_temp_dashboard_root missing_assets_root)
 
 let test_html_uses_base_path_input_assets () =

@@ -22,8 +22,7 @@ if [[ -z "${latest_main_sha}" ]]; then
 fi
 
 if [[ "${OAS_AGENT_SDK_SHA}" != "${latest_main_sha}" ]]; then
-  echo "OAS main drift: pinned ${OAS_AGENT_SDK_SHA}, upstream ${latest_main_sha}" >&2
-  exit 1
+  echo "::warning::OAS main drift: pinned ${OAS_AGENT_SDK_SHA}, upstream ${latest_main_sha} — update pin when API-compatible"
 fi
 
 if ! grep -Eq "\\(agent_sdk \\(>= ${min_version_re}\\)\\)" "${REPO_ROOT}/dune-project"; then

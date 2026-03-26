@@ -22,6 +22,7 @@ interface TransportHealthData {
     queue_pressure: string
     recent_messages: number | null
     recent_messages_available: boolean
+    recent_messages_source: string
     external_fanout_targets: number
   }
   sse: {
@@ -84,6 +85,7 @@ interface TransportHealthData {
     cluster: string
     room_id: string
     topology_available: boolean
+    topology_source: string
     total_units: number | null
     managed_units: number | null
     live_agents: number | null
@@ -372,10 +374,10 @@ export function TransportHealthPanel() {
   const clusterStatus = data.cluster.topology_available ? staleTone(data.agent_health.stale_total) : 'warn'
   const clusterEyebrow = data.cluster.topology_available
     ? `${formatMetricValue(data.cluster.live_agents)} live`
-    : 'metrics-only'
+    : data.cluster.topology_source
   const managedUnitsSub = data.cluster.topology_available
     ? `${formatMetricValue(data.cluster.total_units)} 전체`
-    : 'topology unavailable'
+    : `topology ${data.cluster.topology_source}`
 
   return html`
     <div class="space-y-4">

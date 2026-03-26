@@ -270,17 +270,21 @@ let transport_health_json ~config =
   (* Keep transport-health free of Room/PG reads so proactive refresh does not
      contend with dashboard and MCP writes on the shared backend. *)
   let recent_messages = None in
+  let recent_messages_available = Option.is_some recent_messages in
   let grpc_subscribers_i = int_of_float grpc_subscribers in
   let primary_path =
     primary_path ~webrtc_channels ~grpc_subscribers:grpc_subscribers_i
       ~ws_sessions ~sse_sessions:sse_total
   in
+  let topology_available = Option.is_some topology_summary in
+  let degraded_source = "metrics_only" in
   `Assoc [
     ("summary", `Assoc [
       ("primary_path", `String primary_path);
       ("queue_pressure", `String (queue_pressure sse_queue_max));
       ("recent_messages", int_option_json recent_messages);
-      ("recent_messages_available", `Bool false);
+      ("recent_messages_available", `Bool recent_messages_available);
+      ("recent_messages_source", `String degraded_source);
       ("external_fanout_targets", `Int sse_external_subscribers);
     ]);
     ("sse", `Assoc [
@@ -343,7 +347,8 @@ let transport_health_json ~config =
     ("cluster", `Assoc [
       ("cluster", `String cluster_name);
       ("room_id", `String room_id);
-      ("topology_available", `Bool false);
+      ("topology_available", `Bool topology_available);
+      ("topology_source", `String degraded_source);
       ("total_units", int_option_json (int_field_opt "total_units" topology_summary));
       ("managed_units", int_option_json (int_field_opt "managed_unit_count" topology_summary));
       ("live_agents", int_option_json (int_field_opt "live_agent_count" topology_summary));

@@ -411,9 +411,10 @@ let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
     (file_contains_pattern "lib/mcp_server_eio.ml"
        {|"masc_worktree_list"; "masc_pending_interrupts";|});
-  check bool "worktree mutations stay join-required" true
+  check bool "worktree list excluded from join-required adjacency" true
     (file_contains_pattern "lib/mcp_server_eio.ml"
-       {|"masc_worktree_create"; "masc_worktree_remove";|})
+       {|"masc_worktree_create"; "masc_worktree_remove";
+  "masc_portal_open"; "masc_portal_send"; "masc_portal_close";|})
 
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true

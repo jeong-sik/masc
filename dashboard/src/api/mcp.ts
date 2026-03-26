@@ -110,7 +110,7 @@ async function ensureSession(): Promise<void> {
             jsonrpc: '2.0',
             method: 'notifications/initialized',
           }),
-        }, 5000).catch(() => {})
+        }, 5000).catch(err => console.warn('[mcp] initialized notification failed:', err))
       }
     } catch (err) {
       if (err instanceof Error && err.message.includes('403')) {

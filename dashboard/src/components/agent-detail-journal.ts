@@ -4,7 +4,8 @@ import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { TimeAgo } from './common/time-ago'
-import { agentJournalEntries, compactCopy, journalKindIcon } from './agent-detail-state'
+import { agentJournalEntries, journalKindIcon } from './agent-detail-state'
+import { trimText } from '../lib/truncate'
 import type { JournalEntry } from '../types'
 
 export function AgentJournalStream({ agentName }: { agentName: string }) {
@@ -20,7 +21,7 @@ export function AgentJournalStream({ agentName }: { agentName: string }) {
                 <div class="agent-journal-entry flex items-baseline gap-1.5 py-1 px-2 text-[13px] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
                   <span class="agent-journal-kind">${journalKindIcon(entry)}</span>
                   <span class="agent-journal-type">${entry.eventType}</span>
-                  <span class="agent-journal-text">${compactCopy(entry.text, 120) ?? ''}</span>
+                  <span class="agent-journal-text">${trimText(entry.text, 120) ?? ''}</span>
                   ${entry.timestamp ? html`<${TimeAgo} timestamp=${entry.timestamp} />` : null}
                 </div>
               `)}

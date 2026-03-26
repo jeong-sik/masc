@@ -4,7 +4,8 @@ import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { TimeAgo } from './common/time-ago'
-import { agentTimeline, compactCopy } from './agent-detail-state'
+import { agentTimeline } from './agent-detail-state'
+import { trimText } from '../lib/truncate'
 import type { AgentTimelineEvent } from '../api'
 
 function timelineEventIcon(type: string): string {
@@ -54,7 +55,7 @@ export function AgentTimelineSection() {
                   <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-[13px] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
                     <span class="agent-journal-kind">${timelineEventIcon(evt.type)}</span>
                     <span class="agent-timeline-type">${timelineEventLabel(evt.type)}</span>
-                    ${title ? html`<span class="agent-timeline-detail">${compactCopy(title, 80)}</span>` : null}
+                    ${title ? html`<span class="agent-timeline-detail">${trimText(title, 80)}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
                   </div>
                 `

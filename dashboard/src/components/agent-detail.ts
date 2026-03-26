@@ -23,7 +23,6 @@ import {
   keeperForAgent,
   missionAgentBrief,
   continuityBriefForAgent,
-  compactCopy,
   closeAgentDetail,
   refreshAgentDetail,
   submitMention,
@@ -31,6 +30,7 @@ import {
   type TaskHistoryRow,
 } from './agent-detail-state'
 import { openKeeperDetail } from './keeper-detail'
+import { trimText } from '../lib/truncate'
 import type { Task } from '../types'
 
 // Re-export public API for external consumers
@@ -102,8 +102,8 @@ export function AgentDetailOverlay() {
   const koreanName = rawKoreanName && rawKoreanName !== agentName && rawKoreanName !== displayName
     ? rawKoreanName : null
   const continuitySummary =
-    compactCopy(continuityBrief?.continuity_summary)
-    ?? compactCopy(continuityBrief?.skill_route_summary)
+    trimText(continuityBrief?.continuity_summary, 160)
+    ?? trimText(continuityBrief?.skill_route_summary, 160)
     ?? null
   const keeperIdentity = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   // Skip secondaryLabel when keeperIdentity already shows the agent runtime name

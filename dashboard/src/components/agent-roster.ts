@@ -370,7 +370,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   return html`
     <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
-      <section class="rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(17,26,46,0.94),rgba(11,18,32,0.92))] p-5 shadow-[0_12px_30px_rgba(0,0,0,0.16)]">
+      <section class="monitor-surface-card monitor-surface-card-strong bg-[linear-gradient(180deg,rgba(17,26,46,0.94),rgba(11,18,32,0.92))] p-5">
         <div class="flex flex-col gap-5">
           <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div class="flex min-w-0 flex-col gap-3">
@@ -395,7 +395,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             </label>
           </div>
 
-          <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(8,16,32,0.55)] p-3.5 md:p-4">
+          <div class="monitor-muted-panel p-3.5 md:p-4">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div class="flex flex-col gap-1">
                 <div class="text-[11px] font-semibold tracking-[0.08em] text-[var(--text-strong)] uppercase">연결 상태</div>
@@ -431,7 +431,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             ${legendCards.map(card => html`
-              <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(8,16,32,0.55)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
+              <div class="monitor-muted-panel px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
                 <div class="text-[11px] font-semibold text-[var(--text-strong)]">${card.title}</div>
                 <p class="m-0 mt-2 text-[12px] leading-[1.55] text-[var(--text-muted)]">${card.body}</p>
               </div>
@@ -453,7 +453,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <button type="button"
-              class="group flex min-h-[308px] w-full flex-col gap-4 rounded-[22px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(17,26,46,0.92),rgba(11,18,32,0.92))] p-5 text-left shadow-[0_10px_24px_rgba(0,0,0,0.14)] transition-all duration-200 cursor-pointer hover:border-[rgba(71,184,255,0.3)] hover:bg-[linear-gradient(180deg,rgba(20,30,52,0.96),rgba(12,19,35,0.94))] hover:-translate-y-0.5"
+              class="monitor-surface-card monitor-surface-card-medium group flex min-h-[308px] w-full flex-col gap-4 rounded-[22px] bg-[linear-gradient(180deg,rgba(17,26,46,0.92),rgba(11,18,32,0.92))] p-5 text-left transition-all duration-200 cursor-pointer hover:border-[rgba(71,184,255,0.3)] hover:bg-[linear-gradient(180deg,rgba(20,30,52,0.96),rgba(12,19,35,0.94))] hover:-translate-y-0.5"
               key=${agent.name}
               aria-label=${`${agent.name} 상세 보기`}
               onClick=${() => openAgentDetail(agent.name)}

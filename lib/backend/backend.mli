@@ -32,6 +32,7 @@ module FileSystem : sig
   }
 
   val lock_info_to_json : lock_info -> string
+  val lock_info_of_json : string -> lock_info option
   val acquire_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
   val release_lock : t -> key:string -> owner:string -> bool result
   val extend_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result

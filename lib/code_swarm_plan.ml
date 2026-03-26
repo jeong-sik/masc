@@ -78,8 +78,9 @@ let validate_plan_id plan_id =
 
 let plan_file base_path plan_id =
   if not (validate_plan_id plan_id) then
-    failwith (sprintf "Invalid plan_id: %s" plan_id);
-  Filename.concat (plans_dir base_path) (plan_id ^ ".json")
+    Error (sprintf "Invalid plan_id: %s" plan_id)
+  else
+    Ok (Filename.concat (plans_dir base_path) (plan_id ^ ".json"))
 
 let save_plan (plan : swarm_plan) =
   let workers_json =
@@ -108,11 +109,14 @@ let save_plan (plan : swarm_plan) =
         ("base_path", `String plan.base_path);
       ]
   in
-  let path = plan_file plan.base_path plan.plan_id in
-  Fs_compat.save_file path (Yojson.Safe.pretty_to_string json)
+  match plan_file plan.base_path plan.plan_id with
+  | Error e -> Log.Misc.error "save_plan: %s" e
+  | Ok path -> Fs_compat.save_file path (Yojson.Safe.pretty_to_string json)
 
 let load_plan base_path plan_id : (swarm_plan, string) result =
-  let path = plan_file base_path plan_id in
+  match plan_file base_path plan_id with
+  | Error e -> Error e
+  | Ok path ->
   if not (Sys.file_exists path) then Error (sprintf "Plan not found: %s" plan_id)
   else
     try

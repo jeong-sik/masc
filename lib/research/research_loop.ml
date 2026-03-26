@@ -208,8 +208,7 @@ let generate_hypothesis ~sw ~net ~clock ~(config : Research_config.t)
       ~defaults:config.cascade_defaults
       ~messages
       ~system_prompt:config.system_prompt
-      ~temperature:(Cascade_inference.resolve_temperature
-        ~cascade_name:config.cascade_name ~fallback:(fun () -> 0.7))
+      ~temperature:config.temperature
       ~max_tokens:config.max_tokens
       ~timeout_sec:config.timeout_sec
       ()

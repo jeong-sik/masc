@@ -20,6 +20,7 @@ type t = {
   cascade_defaults : string list;  (** fallback model labels when no cascade config file *)
   timeout_sec : int;           (** per-request timeout (seconds) *)
   max_tokens : int;            (** max tokens per LLM response *)
+  temperature : float;         (** LLM sampling temperature *)
   system_prompt : string;
 }
 
@@ -42,6 +43,7 @@ let default ?(repo = default_repo_config ()) () : t =
     cascade_defaults = ["llama:auto"];
     timeout_sec = 120;
     max_tokens = 8192;
+    temperature = 0.7;
     system_prompt =
       "You are a code improvement researcher for an OCaml codebase (MASC MCP server). \
        Propose ONE focused, small change per experiment. Prioritize: \

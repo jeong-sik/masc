@@ -68,9 +68,13 @@ let dispatch (ctx : context) ~name ~args : (bool * string) option =
       ~repo:(Research_config.default_repo_config ~path:repo_path ())
       ()
     in
+    let temperature = Cascade_inference.resolve_temperature
+      ~cascade_name ~fallback:(fun () -> 0.7)
+    in
     let config = { config with
       max_iterations;
       cascade_name;
+      temperature;
       results_file = Printf.sprintf "%s/research_results.tsv" repo_path;
     } in
     let results = Research_loop.run ~sw:ctx.sw ~net:ctx.net ~clock:ctx.clock ~config in

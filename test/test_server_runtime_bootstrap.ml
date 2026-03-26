@@ -270,7 +270,7 @@ let test_watchdog_timeout_env () =
       Alcotest.(check (float 0.1)) "clamps to 600 max" 600.0
         (Server_startup_state.watchdog_timeout_sec ()));
   with_env "MASC_STARTUP_WATCHDOG_SEC" None (fun () ->
-      Alcotest.(check (float 0.1)) "default 120" 120.0
+      Alcotest.(check (float 0.1)) "default 240" 240.0
         (Server_startup_state.watchdog_timeout_sec ()))
 
 let test_startup_state_json_includes_watchdog () =

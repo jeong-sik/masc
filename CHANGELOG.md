@@ -3,6 +3,29 @@
 
 ## [Unreleased]
 
+## [2.150.0] - 2026-03-26
+
+### Added
+- **Keeper recurring task loop** — register, list, remove scheduled broadcast tasks dispatched on each heartbeat cycle (#3190, #3229).
+- **masc_autoresearch sub-library** — extract 6 leaf autoresearch modules (788 LOC) as first C-5 kitchen sink separation slice (#3232).
+- **EIO Executor_pool for chain adapter** — offload Extract/ValidateSchema/ParseJson transforms to shared domain pool (#3210).
+
+### Changed
+- **Module decomposition (P8)** — extract newtypes into `ids.ml`, `text_similarity` into `masc_core`, server bootstrap into focused sub-modules (#3219, #3225).
+- **Dashboard utilities** — extract `formatPct` and remove inline duplicates (#3224).
+- **EIO refactoring issues** — update resolution status for all 4 issues in `EIO_REFACTOR_ISSUES.md` (#3211).
+
+### Fixed
+- **CI timeout** — raise quick suite timeout from 600s to 900s to prevent false failures (#3235).
+- **MCP session retry storm** — add cooldown after init failure to prevent rapid reconnection loops (#3236).
+- **Room-truth cold startup** — raise fiber timeout during cold startup with env-configurable override (#3231).
+- **PG startup stagger** — spread PG-heavy refresh loop launches at startup to avoid connection pool exhaustion (#3233).
+- **Server stability** — reduce backoff cap, isolate outbound HTTP into local switch scope, adaptive room-truth timeout (#3220).
+- **Team session artifacts** — stabilize session proof and keeper test fixtures (#3230).
+
+### Removed
+- **Dead code** — remove `context_router.ml` (381 LOC, 0 external callers) (#3232).
+
 ## [2.149.0] - 2026-03-26
 
 ### Added

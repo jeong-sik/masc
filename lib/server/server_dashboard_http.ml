@@ -491,7 +491,9 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let shell_timeout_s =
     if !_shell_warmed then base_timeout_s else 15.0
   in
-  let execution_timeout_s = if is_cold then 20.0 else base_timeout_s in
+  let execution_timeout_s =
+    if is_cold then Float.max base_timeout_s 20.0 else base_timeout_s
+  in
   Eio.Fiber.all [
     (fun () -> shell_ref := fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
       (fun () -> dashboard_shell_http_json config) (`Assoc []));

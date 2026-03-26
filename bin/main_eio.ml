@@ -335,6 +335,8 @@ let run_cmd host port base_path =
   Unix.putenv "MASC_BASE_PATH" base_path;
   (* Persist logs to .masc/logs/ so they survive restarts *)
   let log_dir = Filename.concat base_path "logs" in
+  Fs_compat.mkdir_p base_path;
+  Fs_compat.mkdir_p log_dir;
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
   Eio_main.run @@ fun env ->

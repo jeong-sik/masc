@@ -20,6 +20,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
   let module U = Yojson.Safe.Util in
 
+  (* Defensive: ensure Eio global context is set for downstream OAS calls *)
+  if Eio_context.get_switch_opt () = None then Eio_context.set_switch sw;
+
   (* Prometheus: count every inbound tool call *)
   Prometheus.record_request ();
 

@@ -123,6 +123,7 @@ harness_start_server() {
     export MASC_GARDENER_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_ALLOW_LEGACY_ACCEPT="1"
+    export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-90}"
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     exec "$server_exe" --port "$port" --base-path "$base_path"

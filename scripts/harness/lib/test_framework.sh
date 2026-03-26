@@ -14,6 +14,8 @@ export MCP_SESSION_ID
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/harness/jsonrpc_sse.sh
 source "${_HARNESS_DIR}/jsonrpc_sse.sh"
+# shellcheck source=scripts/harness/lib/mcp_jsonrpc.sh
+source "${_HARNESS_DIR}/lib/mcp_jsonrpc.sh"
 
 # Contract harness validates MCP semantics, not h2c prior-knowledge support.
 # Use normal HTTP negotiation here so the suite doesn't hang when the server
@@ -143,11 +145,7 @@ extract_error() {
 # Usage: require_ok "$response"
 require_ok() {
   local payload="$1"
-  if ! printf "%s" "$payload" | jq -e . >/dev/null 2>&1; then
-    echo "FAIL: invalid json payload"
-    printf "%s\n" "$payload"
-    exit 1
-  fi
+  mcp_require_tool_ok "$payload" "harness tool call"
 }
 
 # Print pass/fail summary line.

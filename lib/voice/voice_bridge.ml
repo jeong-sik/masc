@@ -393,7 +393,7 @@ let single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str =
     Error (Printf.sprintf "Connection error: %s" (Printexc.to_string exn))
 
 (** Make HTTP POST request to Voice MCP server with timeout and retry - Eio version *)
-let call_voice_mcp ~sw ~clock ~net ~tool_name ~arguments =
+let call_voice_mcp ~sw:_ ~clock ~net ~tool_name ~arguments =
   log_debug (Printf.sprintf "Calling tool: %s" tool_name);
   let uri = voice_mcp_uri () in
   let request_body = `Assoc [
@@ -410,15 +410,14 @@ let call_voice_mcp ~sw ~clock ~net ~tool_name ~arguments =
     ("Content-Type", "application/json");
     ("Accept", "application/json");
   ] in
-  match client_for_uri_result ~net uri with
-  | Error error ->
-      log_error (Printf.sprintf "Tool %s failed: %s" tool_name error);
-      Error error
-  | Ok client ->
-      let operation () =
+  let operation () =
+    Eio.Switch.run @@ fun inner_sw ->
+    match client_for_uri_result ~net uri with
+    | Error error -> Error error
+    | Ok client ->
         with_timeout ~clock (fun () ->
-          single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str)
-      in
+          single_voice_mcp_call ~sw:inner_sw ~client ~uri ~headers ~body_str)
+  in
       let result = retry_with_backoff ~clock
         ~attempt:1
         ~max_attempts:(max_retries ())
@@ -561,7 +560,7 @@ let session_endpoint_result () =
   | Error message -> Error message
   | Ok config -> Provider_adapter.voice_session_endpoint_result config
 
-let is_voice_server_available ~sw ~clock ~net =
+let is_voice_server_available ~sw:_ ~clock ~net =
   match session_endpoint_result () with
   | Error _ ->
       voice_server_available := Some false;
@@ -583,6 +582,7 @@ let is_voice_server_available ~sw ~clock ~net =
         voice_server_check_time := now;
         let check () =
           try
+            Eio.Switch.run @@ fun inner_sw ->
             let uri =
               match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
               | Ok url -> Uri.of_string url
@@ -591,7 +591,7 @@ let is_voice_server_available ~sw ~clock ~net =
             match client_for_uri_result ~net uri with
             | Error error -> Error error
             | Ok client ->
-                let resp, _ = Cohttp_eio.Client.get ~sw client uri in
+                let resp, _ = Cohttp_eio.Client.get ~sw:inner_sw client uri in
                 let status = Cohttp.Response.status resp in
                 let available =
                   Cohttp.Code.is_success (Cohttp.Code.code_of_status status)
@@ -834,7 +834,7 @@ let get_transcript ~sw ~clock ~net () =
     ============================================ *)
 
 (** Health check for Voice MCP server *)
-let health_check ~sw ~clock:_ ~net () =
+let health_check ~sw:_ ~clock:_ ~net () =
   match session_endpoint_result () with
   | Error error -> Error error
   | Ok endpoint ->
@@ -844,8 +844,9 @@ let health_check ~sw ~clock:_ ~net () =
         | Error _ -> voice_health_uri ()
       in
       try
+        Eio.Switch.run @@ fun inner_sw ->
         let client = client_for_uri ~net uri in
-        let resp, body = Cohttp_eio.Client.get ~sw client uri in
+        let resp, body = Cohttp_eio.Client.get ~sw:inner_sw client uri in
         let status = Cohttp.Response.status resp in
         let body_str = Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int in
         if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then

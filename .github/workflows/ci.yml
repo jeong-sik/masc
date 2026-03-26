@@ -362,6 +362,9 @@ jobs:
       - name: Refresh system package index
         run: sudo apt-get update -qq
 
+      - name: Install lint OS dependencies
+        run: sudo apt-get install -y -qq ripgrep
+
       - name: Install dependencies
         run: |
           for attempt in 1 2 3; do

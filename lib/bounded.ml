@@ -265,144 +265,157 @@ let update_state state result =
 (** Main bounded execution loop *)
 let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
   (* Pre-check: empty agents *)
-  if List.length agents = 0 then
-    {
-      status = `Error;
-      reason = "No agents available";
-      final_output = None;
-      stats = create_state constraints;
-      history = [];
-      warning = None;
-    }
-  else
-    let state = create_state constraints in
-    let history = ref [] in
-    let sleep_s = Time_compat.sleep in
+  match agents with
+  | [] ->
+      {
+        status = `Error;
+        reason = "No agents available";
+        final_output = None;
+        stats = create_state constraints;
+        history = [];
+        warning = None;
+      }
+  | fallback_agent :: _ ->
+      let state = create_state constraints in
+      let history = ref [] in
+      let sleep_s = Time_compat.sleep in
 
-    let rec loop () =
-      (* 1. Hard limit check (failsafe) *)
-      if state.turns >= constraints.hard_max_iterations then
-        {
-          status = `Constraint_exceeded;
-          reason = Printf.sprintf "Hard iteration limit reached (%d)"
-            constraints.hard_max_iterations;
-          final_output = None;
-          stats = state;
-          history = List.rev !history;
-          warning = None;
-        }
-      else
-      (* 2. Predictive constraint check *)
-      match check_constraints_with_buffer state with
-      | Some reason ->
+      let rec loop () =
+        (* 1. Hard limit check (failsafe) *)
+        if state.turns >= constraints.hard_max_iterations then
           {
             status = `Constraint_exceeded;
-            reason;
+            reason = Printf.sprintf "Hard iteration limit reached (%d)"
+              constraints.hard_max_iterations;
             final_output = None;
             stats = state;
             history = List.rev !history;
             warning = None;
           }
-      | None ->
-          (* 3. Select next agent (round-robin) *)
-          let agent_idx = state.turns mod (List.length agents) in
-          let agent = match List.nth_opt agents agent_idx with
-            | Some a -> a
-            | None -> assert false (* unreachable: idx = turns mod length *)
-          in
-
-          (* 4. Execute agent with retry logic *)
-          let rec try_spawn attempt =
-            let result =
-              try Ok (spawn_fn agent prompt)
-              with e -> Error (Printexc.to_string e)
+        else
+        (* 2. Predictive constraint check *)
+        match check_constraints_with_buffer state with
+        | Some reason ->
+            {
+              status = `Constraint_exceeded;
+              reason;
+              final_output = None;
+              stats = state;
+              history = List.rev !history;
+              warning = None;
+            }
+        | None ->
+            (* 3. Select next agent (round-robin) *)
+            let agent_idx = state.turns mod (List.length agents) in
+            let agent =
+              match List.nth_opt agents agent_idx with
+              | Some a -> a
+              | None -> fallback_agent
             in
-            match result with
-            | Ok spawn_result when spawn_result.success ->
-                (* Success - return result with retry count *)
-                Ok (spawn_result, attempt)
-            | Ok spawn_result ->
-                (* Agent returned failure (non-zero exit) *)
-                let err_msg = spawn_result.output in
-                if attempt < constraints.retry.max_retries && is_retryable_error err_msg then begin
-                  let delay_ms = calc_backoff_delay constraints.retry attempt in
-                  sleep_s (float_of_int delay_ms /. 1000.0);
-                  state.total_retries <- state.total_retries + 1;
-                  try_spawn (attempt + 1)
-                end else
-                  Error (Printf.sprintf "Agent failed after %d attempts: %s" (attempt + 1) err_msg)
-            | Error msg ->
-                (* Exception during spawn *)
-                if attempt < constraints.retry.max_retries && is_retryable_error msg then begin
-                  let delay_ms = calc_backoff_delay constraints.retry attempt in
-                  sleep_s (float_of_int delay_ms /. 1000.0);
-                  state.total_retries <- state.total_retries + 1;
-                  try_spawn (attempt + 1)
-                end else
-                  Error (Printf.sprintf "Agent execution failed after %d attempts: %s" (attempt + 1) msg)
-          in
 
-          match try_spawn 0 with
-          | Error msg ->
-              {
-                status = `Error;
-                reason = msg;
-                final_output = None;
-                stats = state;
-                history = List.rev !history;
-                warning = None;
-              }
-          | Ok (spawn_result, retries_used) ->
-              (* 5. Update state AFTER execution *)
-              update_state state spawn_result;
-
-              (* 6. Parse output as JSON for goal check *)
-              let output_json =
-                try Yojson.Safe.from_string spawn_result.output
-                with Yojson.Json_error _ -> `Assoc [("raw", `String spawn_result.output)]
+            (* 4. Execute agent with retry logic *)
+            let rec try_spawn attempt =
+              let result =
+                try Ok (spawn_fn agent prompt)
+                with e -> Error (Printexc.to_string e)
               in
+              match result with
+              | Ok spawn_result when spawn_result.success ->
+                  (* Success - return result with retry count *)
+                  Ok (spawn_result, attempt)
+              | Ok spawn_result ->
+                  (* Agent returned failure (non-zero exit) *)
+                  let err_msg = spawn_result.output in
+                  if attempt < constraints.retry.max_retries
+                     && is_retryable_error err_msg
+                  then begin
+                    let delay_ms = calc_backoff_delay constraints.retry attempt in
+                    sleep_s (float_of_int delay_ms /. 1000.0);
+                    state.total_retries <- state.total_retries + 1;
+                    try_spawn (attempt + 1)
+                  end else
+                    Error
+                      (Printf.sprintf "Agent failed after %d attempts: %s"
+                         (attempt + 1) err_msg)
+              | Error msg ->
+                  (* Exception during spawn *)
+                  if attempt < constraints.retry.max_retries
+                     && is_retryable_error msg
+                  then begin
+                    let delay_ms = calc_backoff_delay constraints.retry attempt in
+                    sleep_s (float_of_int delay_ms /. 1000.0);
+                    state.total_retries <- state.total_retries + 1;
+                    try_spawn (attempt + 1)
+                  end else
+                    Error
+                      (Printf.sprintf
+                         "Agent execution failed after %d attempts: %s"
+                         (attempt + 1) msg)
+            in
 
-              let goal_met = check_goal output_json goal in
-
-              (* 7. Record history *)
-              let entry = {
-                turn = state.turns;
-                agent;
-                retries = retries_used;
-                tokens_in = Option.value spawn_result.input_tokens ~default:0;
-                tokens_out = Option.value spawn_result.output_tokens ~default:0;
-                cost_usd = Option.value spawn_result.cost_usd ~default:0.0;
-                elapsed_ms = spawn_result.elapsed_ms;
-                goal_met;
-              } in
-              history := entry :: !history;
-
-              (* 8. Post-check: did we exceed constraints? *)
-              let warning = check_constraints state in
-
-              if goal_met then
+            match try_spawn 0 with
+            | Error msg ->
                 {
-                  status = `Goal_reached;
-                  reason = Printf.sprintf "Goal met: %s" goal.path;
-                  final_output = Some spawn_result.output;
+                  status = `Error;
+                  reason = msg;
+                  final_output = None;
                   stats = state;
                   history = List.rev !history;
-                  warning;
+                  warning = None;
                 }
-              else match warning with
-                | Some warn_msg ->
-                  (* Exceeded but return partial result *)
+            | Ok (spawn_result, retries_used) ->
+                (* 5. Update state AFTER execution *)
+                update_state state spawn_result;
+
+                (* 6. Parse output as JSON for goal check *)
+                let output_json =
+                  try Yojson.Safe.from_string spawn_result.output
+                  with Yojson.Json_error _ ->
+                    `Assoc [ ("raw", `String spawn_result.output) ]
+                in
+
+                let goal_met = check_goal output_json goal in
+
+                (* 7. Record history *)
+                let entry = {
+                  turn = state.turns;
+                  agent;
+                  retries = retries_used;
+                  tokens_in = Option.value spawn_result.input_tokens ~default:0;
+                  tokens_out = Option.value spawn_result.output_tokens ~default:0;
+                  cost_usd = Option.value spawn_result.cost_usd ~default:0.0;
+                  elapsed_ms = spawn_result.elapsed_ms;
+                  goal_met;
+                } in
+                history := entry :: !history;
+
+                (* 8. Post-check: did we exceed constraints? *)
+                let warning = check_constraints state in
+
+                if goal_met then
                   {
-                    status = `Constraint_exceeded;
-                    reason = warn_msg;
+                    status = `Goal_reached;
+                    reason = Printf.sprintf "Goal met: %s" goal.path;
                     final_output = Some spawn_result.output;
                     stats = state;
                     history = List.rev !history;
                     warning;
                   }
-                | None -> loop ()
-    in
-    loop ()
+                else
+                  match warning with
+                  | Some warn_msg ->
+                      (* Exceeded but return partial result *)
+                      {
+                        status = `Constraint_exceeded;
+                        reason = warn_msg;
+                        final_output = Some spawn_result.output;
+                        stats = state;
+                        history = List.rev !history;
+                        warning;
+                      }
+                  | None -> loop ()
+      in
+      loop ()
 
 (** Convert bounded_result to JSON *)
 let result_to_json result =

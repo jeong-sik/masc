@@ -6,6 +6,9 @@ let () =
   Mirage_crypto_rng_unix.use_default ();
 
   Printf.printf "\n=== Board TTL Tests ===\n";
+  let fail_board_test label error =
+    failwith (Printf.sprintf "%s: %s" label (show_board_error error))
+  in
 
   (* Test 1: Default TTL is 0 (permanent) - no Eio needed *)
   let test_default_ttl () =
@@ -27,9 +30,7 @@ let () =
     | Ok post ->
         assert (post.expires_at = 0.0);
         Printf.printf "✓ Permanent post has expires_at = 0.0\n"
-    | Error e ->
-        Printf.printf "✗ Failed to create post: %s\n" (show_board_error e);
-        assert false
+    | Error e -> fail_board_test "Failed to create post" e
   in
 
   (* Test 3: Create post with explicit TTL *)
@@ -39,16 +40,17 @@ let () =
     | Ok post ->
         assert (post.expires_at > 0.0);
         Printf.printf "✓ Expiring post has expires_at > 0.0 (%.0f)\n" post.expires_at
-    | Error e ->
-        Printf.printf "✗ Failed to create post: %s\n" (show_board_error e);
-        assert false
+    | Error e -> fail_board_test "Failed to create expiring post" e
   in
 
   (* Test 4: Sweeper skips permanent posts *)
   let test_sweeper_skips_permanent () =
     let store = create_store () in
     (* Create permanent post *)
-    let _ = create_post store ~author:"test-agent" ~content:"Permanent" () in
+    (match create_post store ~author:"test-agent" ~content:"Permanent" () with
+     | Ok _ -> ()
+     | Error e ->
+         fail_board_test "Failed to create permanent post for sweep test" e);
     (* Run sweep *)
     let (removed_posts, _) = sweep store in
     assert (removed_posts = 0);
@@ -63,9 +65,7 @@ let () =
         let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
         assert (String.equal kind "human");
         Printf.printf "✓ Default board post kind is human\n"
-    | Error e ->
-        Printf.printf "✗ Failed to create human post: %s\n" (show_board_error e);
-        assert false
+    | Error e -> fail_board_test "Failed to create human post" e
   in
 
   let test_post_kind_automation_contract () =
@@ -77,9 +77,7 @@ let () =
         let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
         assert (String.equal kind "automation");
         Printf.printf "✓ Harness metadata classifies post as automation\n"
-    | Error e ->
-        Printf.printf "✗ Failed to create automation post: %s\n" (show_board_error e);
-        assert false
+    | Error e -> fail_board_test "Failed to create automation post" e
   in
 
   let test_post_kind_system_author () =
@@ -90,9 +88,7 @@ let () =
         let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
         assert (String.equal kind "system");
         Printf.printf "✓ System author classifies post as system\n"
-    | Error e ->
-        Printf.printf "✗ Failed to create system post: %s\n" (show_board_error e);
-        assert false
+    | Error e -> fail_board_test "Failed to create system post" e
   in
 
   (* Run Eio tests *)

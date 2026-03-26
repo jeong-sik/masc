@@ -38,22 +38,22 @@ let test_router_add_multiple () =
   Alcotest.(check int) "three routes" 3 (List.length routes)
 
 let test_router_prefix_specificity () =
-  let matched = ref "" in
-  let generic_handler _req _reqd = matched := "generic" in
-  let asset_handler _req _reqd = matched := "asset" in
+  let generic_handler _req _reqd = () in
+  let asset_handler _req _reqd = () in
   let routes =
     Router.empty
     |> Router.prefix_get "/dashboard/assets/" asset_handler
     |> Router.prefix_get "/dashboard/" generic_handler
   in
   let request = Httpun.Request.create `GET "/dashboard/assets/index.css" in
-  (* Httpun.Reqd.t is opaque and cannot be constructed outside the HTTP
-     stack. The test handlers ignore the reqd parameter entirely.
-     This unsafe cast is a known limitation; Router.dispatch should be
-     refactored to separate route resolution from request handling.
-     See: https://github.com/jeong-sik/masc-mcp/issues/1498 *)
-  Router.dispatch routes request (Obj.magic () : Httpun.Reqd.t);
-  Alcotest.(check string) "longest prefix route should win" "asset" !matched
+  match Router.resolve routes request with
+  | `Matched route ->
+      Alcotest.(check string) "longest prefix route should win"
+        "PREFIX:/dashboard/assets/" route.path
+  | `Method_not_allowed ->
+      Alcotest.fail "expected a matched prefix route, got method_not_allowed"
+  | `Not_found ->
+      Alcotest.fail "expected a matched prefix route, got not_found"
 
 let test_frontend_transport_routes_present () =
   let routes =

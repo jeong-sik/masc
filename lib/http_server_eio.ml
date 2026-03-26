@@ -374,6 +374,11 @@ module Router = struct
     handler: request_handler;
   }
 
+  type resolution =
+    [ `Matched of route
+    | `Method_not_allowed
+    | `Not_found ]
+
   type t = route list
 
   let empty : t = []
@@ -398,7 +403,7 @@ module Router = struct
   let prefix_post prefix handler routes =
     add ~path:("PREFIX:" ^ prefix) ~methods:[`POST] ~handler routes
 
-  let dispatch routes request reqd =
+  let resolve routes request =
     let req_path = Request.path request in
     let req_method = Request.method_ request in
     (* Try exact matches first *)
@@ -410,7 +415,7 @@ module Router = struct
       ) routes
     in
     match List.find_opt (fun route -> List.mem req_method route.methods) path_matches with
-    | Some route -> route.handler request reqd
+    | Some route -> `Matched route
     | None ->
         (* Try prefix matches *)
         let prefix_matches =
@@ -432,12 +437,18 @@ module Router = struct
             prefix_matches
         in
         (match prefix_matches with
-         | route :: _ -> route.handler request reqd
+         | route :: _ -> `Matched route
          | [] ->
              if path_matches = [] then
-               Response.not_found reqd
+               `Not_found
              else
-               Response.method_not_allowed reqd)
+               `Method_not_allowed)
+
+  let dispatch routes request reqd =
+    match resolve routes request with
+    | `Matched route -> route.handler request reqd
+    | `Not_found -> Response.not_found reqd
+    | `Method_not_allowed -> Response.method_not_allowed reqd
 end
 
 (** Health check endpoint - JSON response *)

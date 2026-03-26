@@ -204,11 +204,13 @@ let handle_agent_fitness ctx args =
     (true, Yojson.Safe.pretty_to_string json)
 
 (** Pick random from list *)
-let pick_random lst =
-  let idx = Random.int (List.length lst) in
-  match List.nth_opt lst idx with
-  | Some x -> x
-  | None -> assert false (* unreachable: idx < length *)
+let pick_random = function
+  | [] -> invalid_arg "Tool_agent.pick_random: empty list"
+  | fallback :: _ as lst ->
+      let idx = Random.int (List.length lst) in
+      match List.nth_opt lst idx with
+      | Some x -> x
+      | None -> fallback
 
 (** Handle masc_select_agent *)
 let handle_select_agent ctx args =

@@ -73,19 +73,19 @@ let default_mappings : action_mapping list = [
 
 let match_pattern pattern text =
   try
-    let re = Str.regexp_case_fold pattern in
+    let re = Re.Str.regexp_case_fold pattern in
     let text_lower = String.lowercase_ascii text in
-    if Str.string_match re text_lower 0 then
-      Some (Str.matched_string text_lower)
+    if Re.Str.string_match re text_lower 0 then
+      Some (Re.Str.matched_string text_lower)
     else
       None
   with Failure _ | Not_found -> None
 
 let extract_number text =
   try
-    let re = Str.regexp "[0-9]+" in
-    if Str.search_forward re text 0 >= 0 then
-      Some (int_of_string (Str.matched_string text))
+    let re = Re.Str.regexp "[0-9]+" in
+    if Re.Str.search_forward re text 0 >= 0 then
+      Some (int_of_string (Re.Str.matched_string text))
     else
       None
   with Failure _ | Not_found -> None

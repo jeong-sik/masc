@@ -358,10 +358,10 @@ let strip_prefix_ci ~(prefix : string) (s : string) : string option =
 
 let find_state_block (reply : string) : string option =
   try
-    let start_idx = Str.search_forward (Str.regexp_string "[STATE]") reply 0 in
+    let start_idx = Re.Str.search_forward (Re.Str.regexp_string "[STATE]") reply 0 in
     let body_start = start_idx + String.length "[STATE]" in
     let end_idx =
-      Str.search_forward (Str.regexp_string "[/STATE]") reply body_start
+      Re.Str.search_forward (Re.Str.regexp_string "[/STATE]") reply body_start
     in
     if end_idx <= body_start then None
     else Some (String.sub reply body_start (end_idx - body_start))
@@ -555,7 +555,7 @@ let contains_any_ci (text : string) (needles : string list) : bool =
       n <> ""
       &&
       try
-        let _ = Str.search_forward (Str.regexp_string n) hay 0 in
+        let _ = Re.Str.search_forward (Re.Str.regexp_string n) hay 0 in
         true
       with Not_found -> false)
     needles

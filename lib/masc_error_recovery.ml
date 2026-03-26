@@ -6,7 +6,7 @@
 
 let contains s sub =
   try
-    let _ = Str.search_forward (Str.regexp_string sub) s 0 in
+    let _ = Re.Str.search_forward (Re.Str.regexp_string sub) s 0 in
     true
   with Not_found -> false
 

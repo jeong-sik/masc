@@ -56,7 +56,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
 
   | Template tpl ->
       (* Simple {{value}} substitution *)
-      let result = Str.global_replace (Str.regexp "{{value}}") input tpl in
+      let result = Re.Str.global_replace (Re.Str.regexp "{{value}}") input tpl in
       Ok result
 
   | Summarize max_tokens ->
@@ -97,8 +97,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
 
   | Regex (pattern, replacement) ->
       (try
-        let re = Str.regexp pattern in
-        Ok (Str.global_replace re replacement input)
+        let re = Re.Str.regexp pattern in
+        Ok (Re.Str.global_replace re replacement input)
       with Failure _ -> Error (Printf.sprintf "Invalid regex pattern: %s" pattern))
 
   | ValidateSchema schema_str ->
@@ -259,7 +259,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
         in
         if String.length cond >= 9 && String.sub cond 0 9 = "contains:" then
           let text = String.sub cond 9 (String.length cond - 9) in
-          try Str.search_forward (Str.regexp_string text) inp 0 >= 0
+          try Re.Str.search_forward (Re.Str.regexp_string text) inp 0 >= 0
           with Not_found -> false
         else if String.length cond >= 3 && String.sub cond 0 3 = "eq:" then
           let value = String.sub cond 3 (String.length cond - 3) in
@@ -308,8 +308,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
                - Nested quantifiers: (a+)+, (a[*])+, (a+)[*], (a[*])[*]
                - Overlapping alternations with quantifiers *)
             try
-              let redos_re = Str.regexp "\\([+*]\\)[+*]\\|[+*])\\+\\|[+*])\\*" in
-              Str.search_forward redos_re p 0 >= 0
+              let redos_re = Re.Str.regexp "\\([+*]\\)[+*]\\|[+*])\\+\\|[+*])\\*" in
+              Re.Str.search_forward redos_re p 0 >= 0
             with Not_found -> false
           in
           if String.length pattern > max_pattern_len then
@@ -318,13 +318,13 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
             false  (* Potentially catastrophic pattern - reject *)
           else
             (try
-              let re = Str.regexp pattern in
+              let re = Re.Str.regexp pattern in
               (* Use search_forward for contains-like matching *)
-              Str.search_forward re inp 0 >= 0
+              Re.Str.search_forward re inp 0 >= 0
             with Not_found | Failure _ -> false)
         else
           (* Legacy: plain text means "contains" *)
-          try Str.search_forward (Str.regexp_string cond) inp 0 >= 0
+          try Re.Str.search_forward (Re.Str.regexp_string cond) inp 0 >= 0
           with Not_found -> false
       in
       let result = evaluate_condition condition input in
@@ -354,16 +354,16 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
         | "line" -> String.split_on_char '\n' text
         | "paragraph" ->
             (* Split by double newline, preserving structure *)
-            let re = Str.regexp "\n\n+" in
-            Str.split re text
+            let re = Re.Str.regexp "\n\n+" in
+            Re.Str.split re text
         | "sentence" ->
             (* Split by sentence endings: . ! ? followed by space or newline *)
-            let re = Str.regexp "[.!?][ \n]+" in
-            Str.split re text
+            let re = Re.Str.regexp "[.!?][ \n]+" in
+            Re.Str.split re text
         | custom ->
             (* Split by custom delimiter string *)
-            let re = Str.regexp_string custom in
-            Str.split re text
+            let re = Re.Str.regexp_string custom in
+            Re.Str.split re text
       in
       let merge_chunks_by_size chunks max_chars overlap_chars =
         (* Merge small chunks until they reach max_chars, with overlap *)
@@ -479,7 +479,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
            *)
            let lower = String.lowercase_ascii input in
            let find_from start needle =
-             try Some (Str.search_forward (Str.regexp_string needle) lower start)
+             try Some (Re.Str.search_forward (Re.Str.regexp_string needle) lower start)
              with Not_found -> None
            in
            let start_candidates =

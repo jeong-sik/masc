@@ -97,7 +97,7 @@ let is_retryable_error msg =
   List.exists (fun pattern ->
     let pattern_lower = String.lowercase_ascii pattern in
     try
-      let _ = Str.search_forward (Str.regexp_string pattern_lower) msg_lower 0 in
+      let _ = Re.Str.search_forward (Re.Str.regexp_string pattern_lower) msg_lower 0 in
       true
     with Not_found -> false
   ) [

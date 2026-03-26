@@ -142,7 +142,7 @@ let board_signal_match
              needle <> "@"
              &&
              try
-               let _ = Str.search_forward (Str.regexp_string needle) haystack 0 in
+               let _ = Re.Str.search_forward (Re.Str.regexp_string needle) haystack 0 in
                true
              with Not_found -> false)
     in
@@ -272,7 +272,7 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
                  in
                  try
                    let _ =
-                     Str.search_forward (Str.regexp_string needle) haystack 0
+                     Re.Str.search_forward (Re.Str.regexp_string needle) haystack 0
                    in
                    true
                  with Not_found -> false)

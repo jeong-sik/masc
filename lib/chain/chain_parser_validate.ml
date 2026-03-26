@@ -124,12 +124,12 @@ let extract_ref_root ~known_ids (s : string) : string option =
       None
 
 let extract_template_vars (s : string) : string list =
-  let re = Str.regexp "{{\\([^}]+\\)}}" in
+  let re = Re.Str.regexp "{{\\([^}]+\\)}}" in
   let rec loop pos acc =
     try
-      let _ = Str.search_forward re s pos in
-      let var = Str.matched_group 1 s |> String.trim in
-      let next = Str.match_end () in
+      let _ = Re.Str.search_forward re s pos in
+      let var = Re.Str.matched_group 1 s |> String.trim in
+      let next = Re.Str.match_end () in
       loop next (var :: acc)
     with Not_found -> List.rev acc
   in

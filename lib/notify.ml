@@ -61,7 +61,7 @@ let focus_on_osascript () =
 
 let render_focus_template template payload =
   let replace token value acc =
-    Str.global_replace (Str.regexp_string token) value acc
+    Re.Str.global_replace (Re.Str.regexp_string token) value acc
   in
   template
   |> replace "{{target}}" (token_value payload.target_agent)

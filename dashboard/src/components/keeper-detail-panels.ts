@@ -86,13 +86,20 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const ctxTone: KpiTone = ctxPct == null ? 'default' : ctxPct > 85 ? 'bad' : ctxPct > 70 ? 'warn' : ctxPct > 0 ? 'ok' : 'default'
   const ctxHint = ctxPct != null && ctxPct > 80 ? '한계 접근 중' : undefined
 
-  const actLevel = typeof keeper.activityLevel === 'number' ? keeper.activityLevel : null
-  const actTone: KpiTone = actLevel == null ? 'default' : actLevel >= 4 ? 'ok' : actLevel >= 2 ? 'warn' : 'default'
+  // Provider-model call statistics from metrics_series
+  const modelCounts: Record<string, number> = {}
+  for (const pt of series) {
+    if (pt.model_used) {
+      modelCounts[pt.model_used] = (modelCounts[pt.model_used] ?? 0) + 1
+    }
+  }
+  const modelEntries = Object.entries(modelCounts).sort((a, b) => b[1] - a[1])
+  const totalCalls = modelEntries.reduce((s, [, c]) => s + c, 0)
 
   return html`
     <div class="flex flex-col gap-3 mb-5">
-      ${'' /* Primary KPIs — 4 cols */}
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      ${'' /* Primary KPIs — 3 cols (activityLevel removed) */}
+      <div class="grid grid-cols-3 gap-3">
         <${KpiCard}
           label="Generation"
           value=${keeper.generation ?? '-'}
@@ -110,13 +117,30 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
           tone=${ctxTone}
           progress=${ctxPct ?? undefined}
         />
-        <${KpiCard}
-          label="Activity"
-          value=${keeper.activityLevel ?? '-'}
-          hint="레벨 0-5"
-          tone=${actTone}
-        />
       </div>
+      ${'' /* Model usage distribution */}
+      ${totalCalls > 0 ? html`
+        <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] p-3">
+          <div class="mb-2 text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">Provider-Model 호출 분포</div>
+          <div class="flex flex-col gap-1.5">
+            ${modelEntries.slice(0, 4).map(([model, count]) => {
+              const pct = Math.round((count / totalCalls) * 100)
+              return html`
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="shrink-0 w-[140px] truncate font-mono text-[11px] text-[#9ad9ff]" title=${model}>${model}</span>
+                  <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden">
+                    <div class="h-full rounded-full bg-[var(--accent)]" style="width:${pct}%"></div>
+                  </div>
+                  <span class="shrink-0 w-10 text-right text-[var(--text-muted)]">${count}회</span>
+                </div>
+              `
+            })}
+          </div>
+          ${modelEntries.length > 4 ? html`
+            <div class="mt-1 text-[10px] text-[var(--text-muted)]">외 ${modelEntries.length - 4}개 모델</div>
+          ` : null}
+        </div>
+      ` : null}
       ${'' /* Secondary KPIs — 3-4 cols, smaller feel */}
       <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
         <${KpiCard}
@@ -201,7 +225,6 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
     { title: 'Model', key: 'model', value: keeper.model ?? '-' },
     { title: 'Status', key: 'status', value: keeper.status },
     { title: 'Primary', key: 'primaryValue', value: keeper.primaryValue ?? '-' },
-    { title: 'Activity', key: 'activityLevel', value: String(keeper.activityLevel ?? '-') },
     { title: 'Gen', key: 'generation', value: String(keeper.generation ?? '-') },
     { title: 'Turns', key: 'turn_count', value: String(keeper.turn_count ?? '-') },
     { title: 'Context', key: 'context_ratio', value: formatPct(keeper.context_ratio) },

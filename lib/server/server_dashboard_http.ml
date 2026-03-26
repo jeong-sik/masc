@@ -534,9 +534,13 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
      so sequential execution adds minimal latency on cache hit. *)
   shell_ref := fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
     (fun () -> dashboard_shell_http_json config) (`Assoc []);
-  execution_ref := fiber_with_timeout ~timeout_s:execution_timeout_s "execution"
-    (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
-    (cached_surface_json _execution_cache);
+  execution_ref := (
+    if cached_surface_has_success _execution_cache then
+      cached_surface_json _execution_cache
+    else
+      fiber_with_timeout ~timeout_s:execution_timeout_s "execution"
+        (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
+        (cached_surface_json _execution_cache));
   command_ref := fiber_with_timeout ~timeout_s:base_timeout_s "command"
     (fun () ->
       if Room.is_initialized config then

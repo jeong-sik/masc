@@ -513,6 +513,7 @@
    keeper_persona
    ;; Context management (used by keeper agents)
    masc_eio_env
+   masc_http_client
    discovery_cache
    oas_model_resolve
    context_compact_oas

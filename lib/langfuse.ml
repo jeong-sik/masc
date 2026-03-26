@@ -200,26 +200,20 @@ let send_to_langfuse ~endpoint ~body () =
     | None, _ | _, None ->
         Log.Langfuse.info "Eio context not yet initialized, skipping telemetry"
     | Some net, Some clock ->
-        let uri = Uri.of_string url in
         Log.Langfuse.info "Sending to %s, endpoint=%s" url endpoint;
         Log.Langfuse.info "Body: %s" (String.sub body_str 0 (min 500 (String.length body_str)));
         (try
-          Eio.Switch.run (fun sw ->
+          Eio.Switch.run (fun _sw ->
             let result = Eio.Time.with_timeout clock 2.0 (fun () ->
-              let client = Cohttp_eio.Client.make ~https:None net in
-              let headers = Cohttp.Header.of_list [
+              let headers = [
                 ("Content-Type", "application/json");
                 ("Authorization", "Basic " ^ auth);
               ] in
-              let body_content = Eio.Flow.string_source body_str in
-              let resp, resp_body =
-                Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content
+              let code, resp_str =
+                Masc_http_client.post_sync ~net ~url
+                  ~headers ~body:body_str ()
               in
-              let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
-              let resp_str =
-                Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024)
-              in
-              Ok (status, resp_str))
+              Ok (code, resp_str))
             in
             match result with
             | Ok (status, resp_str) ->

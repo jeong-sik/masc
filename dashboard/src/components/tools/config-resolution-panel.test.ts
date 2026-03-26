@@ -88,4 +88,44 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('/tmp/root-extra/personas')
     expect(container.textContent).toContain('outside config root')
   })
+
+  it('renders the same-as-root case without repeating the full path', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/tmp/root', exists: true, source: 'env' },
+          cascade: { path: '/tmp/root', exists: true, source: 'env' },
+          prompts: { path: '/tmp/root/prompts', exists: true, source: 'env' },
+          keepers: { path: '/tmp/root/keepers', exists: true, source: 'env' },
+          personas: { path: '/tmp/root/personas', exists: true, source: 'env' },
+        }}
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('same as config root')
+    expect(container.textContent).toContain('.')
+  })
+
+  it('treats slash root as a valid root-relative prefix', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/', exists: true, source: 'cwd' },
+          cascade: { path: '/etc/cascade.json', exists: true, source: 'cwd' },
+          prompts: { path: '/var/prompts', exists: true, source: 'cwd' },
+          keepers: { path: '/opt/keepers', exists: true, source: 'cwd' },
+          personas: { path: '/srv/personas', exists: true, source: 'cwd' },
+        }}
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('etc/cascade.json')
+    expect(container.textContent).toContain('root-relative')
+  })
 })

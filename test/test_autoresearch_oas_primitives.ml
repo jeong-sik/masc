@@ -110,6 +110,24 @@ let test_measure_metric_parses_tagged_output () =
   | Error err ->
     failf "expected tagged metric to parse, got %s" err
 
+let test_measure_metric_rejects_shell_metacharacters () =
+  let cases =
+    [
+      "echo $(whoami)";
+      "echo foo\\ bar";
+      "echo test | cat";
+      "echo (\n)";
+    ]
+  in
+  List.iter (fun metric_fn ->
+      match Lib.Autoresearch.validate_metric_fn metric_fn with
+      | Ok _ -> failf "expected metric_fn to be rejected: %S" metric_fn
+      | Error msg ->
+        check bool "mentions dangerous chars" true
+          (contains msg "dangerous shell metacharacters"
+           || contains msg "single-line command"))
+    cases
+
 let test_cycle_reinjects_diff_guard_lesson () =
   with_temp_dir "masc_cycle_oas" @@ fun root ->
   with_me_root root @@ fun () ->
@@ -188,6 +206,8 @@ let () =
         [
           test_case "tagged metric output parses" `Quick
             test_measure_metric_parses_tagged_output;
+          test_case "dangerous shell metacharacters rejected" `Quick
+            test_measure_metric_rejects_shell_metacharacters;
         ] );
       ( "feedback_loop",
         [

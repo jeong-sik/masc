@@ -21,7 +21,7 @@ let contains_substring haystack needle =
 (** Shell metacharacters that indicate injection risk in metric_fn when they
     appear outside quotes. *)
 let dangerous_shell_chars =
-  [';'; '|'; '&'; '`'; '$'; '{'; '}'; '<'; '>'; '#'; '!'; '~'; '['; ']'; '*'; '?']
+  [';'; '|'; '&'; '`'; '$'; '('; ')'; '{'; '}'; '<'; '>'; '#'; '!'; '~'; '['; ']'; '*'; '?'; '\\']
 
 type quote_mode = Single | Double
 

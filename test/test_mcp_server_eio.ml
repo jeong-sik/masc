@@ -1460,6 +1460,7 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
 
 let test_execute_tool_explicit_alias_reuses_joined_nickname () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -2188,6 +2189,7 @@ let test_handle_request_tool_help_resource_read () =
 
 let test_handle_request_resources_read_matrix () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in

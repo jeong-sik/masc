@@ -160,6 +160,18 @@ let test_resolve_join_state_skips_unknown_agent () =
   Alcotest.(check bool) "unknown agent skipped" false !called;
   Alcotest.(check bool) "unknown agent treated unjoined" false joined
 
+let test_should_read_legacy_persisted_agent_name () =
+  let should_read =
+    Masc_mcp.Mcp_server_eio_execute.should_read_legacy_persisted_agent_name
+  in
+  Alcotest.(check bool) "ephemeral fallback reads legacy state" true
+    (should_read ~has_explicit_agent_name:false ~agent_name:"agent-12345678");
+  Alcotest.(check bool) "stable nickname skips legacy read" false
+    (should_read ~has_explicit_agent_name:false
+       ~agent_name:"codex-swift-fox");
+  Alcotest.(check bool) "explicit agent name skips legacy read" false
+    (should_read ~has_explicit_agent_name:true ~agent_name:"agent-12345678")
+
 let rec collect_tools ~clock ~sw ?profile ?cursor state acc =
   let response = tools_list_response ~clock ~sw ?profile ?cursor state in
   let tools = tools_from_response response in
@@ -2611,6 +2623,8 @@ let eio_tests = [
   "coding mode allows governance status", `Quick, test_execute_tool_coding_mode_allows_governance_status;
   "canonical team_session_step direct call", `Quick,
     test_execute_tool_team_session_step_direct_call;
+  "legacy persisted agent read only for ephemeral names", `Quick,
+    test_should_read_legacy_persisted_agent_name;
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
   "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
   "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;

@@ -20,7 +20,7 @@
 ; Pure synchronous tests
 ; ============================================================
 (tests
- (names test_room test_types test_auth test_http_negotiation
+ (names test_room test_room_state_recovery test_types test_auth test_http_negotiation
         test_sse test_encryption test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_mitosis test_spawn
@@ -47,7 +47,7 @@
         test_worktree_live_context
         test_tool_input_validation
 )
- (modules test_room test_types test_auth test_http_negotiation
+ (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
           test_sse test_encryption test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_mitosis test_spawn

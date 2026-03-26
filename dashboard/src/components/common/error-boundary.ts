@@ -28,7 +28,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <strong class="text-[var(--bad)]">${this.props.label ?? 'Component'} 렌더링 오류</strong>
           <pre class="text-xs whitespace-pre-wrap mt-2 opacity-70">${this.state.error.message}</pre>
           <button type="button"
-            class="mt-2 px-3 py-1 cursor-pointer rounded border border-[var(--card rounded-xl-border)] bg-[var(--white-6)] text-[var(--text-body)] text-sm hover:bg-[var(--white-10)]"
+            class="mt-2 px-3 py-1 cursor-pointer rounded border border-[var(--card-border)] bg-[var(--white-6)] text-[var(--text-body)] text-sm hover:bg-[var(--white-10)]"
             onClick=${() => this.setState({ error: null })}
           >다시 시도</button>
         </div>

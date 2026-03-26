@@ -9,8 +9,7 @@
 
 open Chain_types
 
-(** Helper: Result bind operator *)
-let ( let* ) = Result.bind
+open Result_syntax
 
 (** Recursively collect all input_mapping dependencies from nested nodes *)
 let rec collect_nested_dependencies (node : Chain_types.node) : string list =

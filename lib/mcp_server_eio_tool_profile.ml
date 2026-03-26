@@ -266,7 +266,7 @@ type tools_list_params = {
   cursor : string option;
 }
 
-let ( let* ) = Result.bind
+open Result_syntax
 
 let strict_assoc_params params =
   match params with

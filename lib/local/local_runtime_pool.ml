@@ -1,7 +1,7 @@
 open Printf
 open Yojson.Safe.Util
 
-let ( let* ) = Result.bind
+open Result_syntax
 
 type runtime = {
   id : string;

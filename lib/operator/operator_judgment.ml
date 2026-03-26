@@ -1,6 +1,6 @@
 open Yojson.Safe.Util
 
-let ( let* ) = Result.bind
+open Result_syntax
 
 type target_type =
   | Room

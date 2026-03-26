@@ -1,4 +1,5 @@
 include Cp_lifecycle
+open Result_syntax
 
 let request_or_apply_assignment config ~(actor : string) ~requested_action json =
   let operation_id =

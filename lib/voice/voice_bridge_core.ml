@@ -26,7 +26,6 @@ let default_timeout_seconds = 5.0
 let default_max_retries = 3
 let default_initial_backoff_seconds = 1.0
 let default_backoff_multiplier = 2.0
-let ( let* ) = Result.bind
 
 let default_agent_voices =
   [

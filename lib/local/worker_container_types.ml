@@ -2,8 +2,6 @@ open Printf
 
 module Oas = Agent_sdk
 
-let ( let* ) = Result.bind
-
 type tool_exec_result = {
   text : string;
   is_error : bool;

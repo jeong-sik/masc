@@ -1,5 +1,6 @@
 include Chain_parser_helpers
 open Chain_types
+open Result_syntax
 
 (** Parse adapter transform from JSON *)
 let rec parse_adapter_transform (json : Yojson.Safe.t) : (adapter_transform, string) result =

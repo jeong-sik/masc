@@ -7,6 +7,7 @@
 *)
 
 include Governance_v2_serde
+open Result_syntax
 
 let governance_root base_path =
   Filename.concat (Filename.concat base_path ".masc") "governance_v2"

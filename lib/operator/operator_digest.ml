@@ -1,4 +1,5 @@
 open Operator_pending_confirm
+open Result_syntax
 
 include Operator_digest_types
 include Operator_digest_session

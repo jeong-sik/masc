@@ -1,4 +1,5 @@
 include Cp_lifecycle_intents
+open Result_syntax
 
 let snapshot_json ?sessions config =
   let state = build_snapshot_state ?sessions config in

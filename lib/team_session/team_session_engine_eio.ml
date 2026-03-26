@@ -1,6 +1,7 @@
 (** Eio runtime engine for long-running team sessions. *)
 
 include Team_session_engine_policy
+open Result_syntax
 
 (* Phase C-2d: start_runtime_loop removed.
    All modes now use Team_session_swarm_runner.run_swarm via OAS Runner.

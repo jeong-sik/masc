@@ -6,6 +6,7 @@
     file I/O, and normalization utilities. *)
 
 open Yojson.Safe.Util
+open Result_syntax
 
 include Governance_v2_types
 

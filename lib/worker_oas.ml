@@ -14,6 +14,7 @@
     @since Phase 5 — OAS Agent.run adapter for workers *)
 
 open Printf
+open Result_syntax
 
 module Oas = Agent_sdk
 
@@ -279,7 +280,6 @@ let rec run_worker_via_oas
     ?(gate_config : Eval_gate.gate_config option)
     ?worker_run_id
     () : (Worker_container_types.run_result, string) result =
-  let ( let* ) = Result.bind in
   let session_id = meta.mcp_session_id in
   let team_session_id = meta.team_session_id in
   let worker_name = meta.worker_name in
@@ -347,7 +347,6 @@ and run_existing_worker_agent
     ~(tool_names_ref : string list ref)
     (agent : Oas.Agent.t)
   : (Worker_container_types.run_result, string) result =
-  let ( let* ) = Result.bind in
   let team_session_id = meta.team_session_id in
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
@@ -439,7 +438,6 @@ let orchestrate_workers
     ?on_task_start
     ?on_task_complete
     () : (Oas.Orchestrator.task_result list, string) result =
-  let ( let* ) = Result.bind in
   let rec build_agents acc = function
     | [] -> Ok (List.rev acc)
     | (meta, provider, system_prompt, tools, raw_trace, heartbeat_cbs) :: rest ->

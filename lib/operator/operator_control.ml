@@ -1,4 +1,5 @@
 open Tool_args
+open Result_syntax
 
 include Operator_control_action
 

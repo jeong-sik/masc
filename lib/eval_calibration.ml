@@ -241,6 +241,26 @@ let format_few_shot_block (examples : calibration_example list) : string =
     ^ String.concat "\n\n" lines
 
 (* ================================================================ *)
+(* OAS Harness.verdict conversion (#3165)                            *)
+(* ================================================================ *)
+
+(** Convert a MASC [verdict_record] to an OAS [Harness.verdict].
+    Maps "approve" → passed=true, "reject:*" → passed=false.
+    The gate name is recorded as evidence for traceability. *)
+let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
+  let passed = r.verdict = "approve" in
+  let score = if passed then Some 1.0 else Some 0.0 in
+  let evidence = [
+    Printf.sprintf "gate=%s" r.gate;
+    Printf.sprintf "evaluator=%s" r.evaluator_cascade;
+    Printf.sprintf "task_id=%s" r.task_id;
+  ] in
+  let detail = if passed then None
+    else Some (Printf.sprintf "rejected at %s gate: %s" r.gate r.verdict)
+  in
+  { Agent_sdk.Harness.passed; score; evidence; detail }
+
+(* ================================================================ *)
 (* Statistics                                                        *)
 (* ================================================================ *)
 

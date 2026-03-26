@@ -160,3 +160,47 @@ let publish_institution_episode (bus : Agent_sdk.Event_bus.t) ~episode_id ~event
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:institution_episode", payload))
+
+(** {1 Harness Observability Events (#3165)} *)
+
+(** Publish a verdict-recorded event.
+    Emitted after [Eval_calibration.record_verdict] persists a verdict. *)
+let publish_verdict_recorded (bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
+    ~gate ~verdict =
+  let payload = `Assoc [
+    ("agent_name", `String agent_name);
+    ("task_id", `String task_id);
+    ("gate", `String gate);
+    ("verdict", `String verdict);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.Custom ("masc:harness:verdict_recorded", payload))
+
+(** Publish a pre-compaction observation event.
+    Emitted before [Context_compact_oas.compact] runs in keeper. *)
+let publish_pre_compact (bus : Agent_sdk.Event_bus.t) ~keeper_name
+    ~context_ratio ~strategy_names ~active_agent_count ~model_family =
+  let payload = `Assoc [
+    ("keeper_name", `String keeper_name);
+    ("context_ratio", `Float context_ratio);
+    ("strategies", `List (List.map (fun s -> `String s) strategy_names));
+    ("active_agent_count", `Int active_agent_count);
+    ("model_family", `String model_family);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.Custom ("masc:harness:pre_compact", payload))
+
+(** Publish a DNA quality assessment event.
+    Emitted when [Mitosis.prepare_for_division] validates DNA quality. *)
+let publish_dna_quality (bus : Agent_sdk.Event_bus.t) ~keeper_name
+    ~score ~dimensions =
+  let payload = `Assoc [
+    ("keeper_name", `String keeper_name);
+    ("score", `Float score);
+    ("dimensions", dimensions);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.Custom ("masc:harness:dna_quality", payload))

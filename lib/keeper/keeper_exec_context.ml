@@ -330,13 +330,19 @@ let compact_if_needed
       if String.starts_with ~prefix:"skipped:" reason then
         (ctx, None, reason)
       else
-        let messages, token_count =
+        (* PreCompact observability: log strategy and context state (#3165) *)
+      let strategies = Context_compact_oas.[
+        PruneToolOutputs; MergeContiguous;
+        DropLowImportance; SummarizeOld]
+      in
+      Log.Harness.info
+        "[pre_compact] keeper=%s ratio=%.4f messages=%d tokens=%d trigger=%s"
+        meta.name ratio message_count token_count reason;
+      let messages, token_count =
           Context_compact_oas.compact
             ~system_prompt:ctx.system_prompt
             ~messages:ctx.messages
-            ~strategies:Context_compact_oas.[
-              PruneToolOutputs; MergeContiguous;
-              DropLowImportance; SummarizeOld]
+            ~strategies
             ()
         in
         let compacted_ctx =

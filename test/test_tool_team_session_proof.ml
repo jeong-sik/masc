@@ -275,6 +275,7 @@ let test_report_and_proof_expose_spawn_tool_usage () =
 let test_bootstrap_grace_suppresses_min_agents_violation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio.Switch.run @@ fun _sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -305,6 +306,7 @@ let test_bootstrap_grace_suppresses_min_agents_violation () =
 let test_min_agents_violation_after_bootstrap_grace () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio.Switch.run @@ fun _sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in

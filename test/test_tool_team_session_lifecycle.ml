@@ -67,7 +67,8 @@ let test_start_status_report_stop () =
     report_result |> Yojson.Safe.Util.member "json_path"
     |> Yojson.Safe.Util.to_string
   in
-  Alcotest.(check bool) "markdown exists" true (Sys.file_exists md_path);
+  Alcotest.(check bool) "markdown exists" true
+    (Room_utils.path_exists config md_path);
   Alcotest.(check bool) "json report exists" true
     (Room_utils.path_exists config json_path);
   let report_doc = Room_utils.read_json config json_path in

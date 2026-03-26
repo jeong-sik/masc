@@ -90,6 +90,13 @@ let release_flock_fd fd =
       (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
       Unix.close fd)
 
+(** Run [f] while holding only the cooperative per-path mutex.
+    Use this for in-memory backends that need single-process fiber
+    serialization but do not have a real filesystem artifact to flock. *)
+let with_mutex path f =
+  let mu = get_lock path in
+  Eio_guard.with_mutex mu f
+
 (** Run [f] while holding both the cooperative Eio.Mutex and an
     OS-level flock on [path].lock.  The flock is acquired with F_TLOCK
     (non-blocking) from a system thread so the Eio scheduler stays free.
@@ -105,8 +112,7 @@ let with_lock path f =
       ~finally:(fun () -> release_flock_fd fd)
       f
   in
-  let mu = get_lock path in
-  Eio_guard.with_mutex mu (fun () -> run_with_flock ())
+  with_mutex path (fun () -> run_with_flock ())
 
 (** Number of tracked lock paths (for diagnostics). *)
 let lock_count () = Hashtbl.length table

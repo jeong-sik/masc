@@ -66,6 +66,27 @@ function governanceBundle(): GovernanceCaseBundle {
   }
 }
 
+function emptyGovernanceResponse(): DashboardGovernanceResponse {
+  return {
+    generated_at: '2026-03-24T00:00:00Z',
+    summary: {
+      cases_open: 0,
+      pending_ruling: 0,
+      ready_auto_execute: 0,
+      needs_human_gate: 0,
+      executed: 0,
+      blocked: 0,
+      oldest_open_case_age_s: null,
+      last_activity_age_s: 3 * 86400,
+      judge_online: true,
+      judge_last_seen_at: '2026-03-21T00:00:00Z',
+    },
+    items: [],
+    activity: [],
+    pending_actions: [],
+  }
+}
+
 async function loadComponentWithApi(api: {
   decideGovernanceExecutionOrder: () => Promise<void>
   fetchDashboardGovernance: () => Promise<DashboardGovernanceResponse>
@@ -135,4 +156,22 @@ describe('Governance surface', () => {
       .toBeGreaterThanOrEqual(2)
     expect(container.textContent).toContain('command:governance 렌더링 오류')
   }, 20000)
+
+  it('explains why the governance inbox is empty when no cases exist yet', async () => {
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: vi.fn().mockResolvedValue(emptyGovernanceResponse()),
+      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('거버넌스 사건이 아직 없습니다')
+    expect(container.textContent).toContain('마지막 활동: 3일 전')
+    expect(container.textContent).toContain('청원 콘솔에서 새 청원을 접수하세요')
+  })
 })

@@ -35,6 +35,26 @@ import {
 // Re-export for consumers that import from './governance'
 export { refreshGovernance, loadRuntimeParams } from './governance-store'
 
+function GovernanceEmptyState() {
+  const summary = governanceData.value?.summary
+  const lastActivityAge = formatAgeSummary(summary?.last_activity_age_s)
+
+  return html`
+    <${EmptyState}
+      icon="⚖️"
+      message="거버넌스 사건이 아직 없습니다. keeper 활동이나 청원 접수 후 이곳에 자동으로 사건이 쌓입니다."
+      action=${html`
+        <div class="mt-1 flex flex-col items-center gap-1.5 text-[12px] text-[var(--text-muted)]">
+          ${lastActivityAge
+            ? html`<span>마지막 활동: ${lastActivityAge} 전</span>`
+            : html`<span>최근 거버넌스 활동 기록이 아직 없습니다.</span>`}
+          <span>지금 시작하려면 위 청원 콘솔에서 새 청원을 접수하세요.</span>
+        </div>
+      `}
+    />
+  `
+}
+
 function GovernanceSummaryStrip() {
   const data = governanceData.value
   const summary = data?.summary
@@ -132,12 +152,15 @@ function GovernanceToolbar() {
 }
 
 function DecisionInbox() {
-  const items = filteredItemsByFilter(governanceFilter.value, governanceData.value?.items ?? [])
+  const allItems = governanceData.value?.items ?? []
+  const items = filteredItemsByFilter(governanceFilter.value, allItems)
   return html`
     <${Card} title="사건 수신함" class="section mb-5" variant="compact">
       <div class="flex flex-col gap-3 governance-inbox">
         ${items.length === 0
-          ? html`<${EmptyState} message="이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요." />`
+          ? allItems.length === 0
+            ? html`<${GovernanceEmptyState} />`
+            : html`<${EmptyState} message="이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요." />`
           : items.map(item => {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`

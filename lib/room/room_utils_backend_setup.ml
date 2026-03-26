@@ -161,7 +161,7 @@ let is_unresolved_template value =
 let env_opt name =
   match Sys.getenv_opt name with
   | Some value when String.trim value <> "" ->
-      if is_unresolved_template value then begin
+      if Backend_pg_url.is_unresolved_template value then begin
         Log.Backend.warn
           "%s contains unresolved 1Password template; skipping" name;
         None
@@ -169,53 +169,23 @@ let env_opt name =
         Some value
   | _ -> None
 
-let supabase_pooler_host_and_port url =
-  let uri = Uri.of_string url in
-  match Uri.host uri, Uri.port uri with
-  | Some host, Some port when String.ends_with ~suffix:".pooler.supabase.com" host ->
-      Some (host, port)
-  | _ -> None
-
-let maybe_prefer_supabase_transaction_pooler ~primary ~fallbacks =
-  match supabase_pooler_host_and_port primary with
-  | Some (host, 5432) ->
-      let transaction_companion =
-        List.find_opt
-          (fun candidate ->
-            match supabase_pooler_host_and_port candidate with
-            | Some (candidate_host, 6543) -> String.equal host candidate_host
-            | _ -> false)
-          fallbacks
-      in
-      (match transaction_companion with
-       | Some companion ->
-           Log.Backend.info
-             "Supabase Session Pooler selected on %s:5432; preferring available Transaction Pooler companion on :6543"
-             host;
-           companion
-       | None -> primary)
-  | _ -> primary
-
 let postgres_url_from_env () =
-  let candidates =
+  let candidates : string option list =
     [
-      ("MASC_POSTGRES_URL", env_opt "MASC_POSTGRES_URL");
-      ("DATABASE_URL", env_opt "DATABASE_URL");
-      ("SUPABASE_DB_URL", env_opt "SUPABASE_DB_URL");
-      ("SB_PG_URL", env_opt "SB_PG_URL");
+      env_opt "MASC_POSTGRES_URL";
+      env_opt "DATABASE_URL";
+      env_opt "SUPABASE_DB_URL";
+      env_opt "SB_PG_URL";
     ]
   in
-  let rec choose = function
-    | [] -> None
-    | (_name, Some primary) :: rest ->
-        let fallbacks =
-          rest
-          |> List.filter_map (fun (_name, value) -> value)
-        in
-        Some (maybe_prefer_supabase_transaction_pooler ~primary ~fallbacks)
-    | (_name, None) :: rest -> choose rest
-  in
-  choose candidates
+  match Backend_pg_url.choose_preferred_url candidates with
+  | Some { url; preferred_supabase_transaction_companion = true; preferred_host = Some host } ->
+      Log.Backend.info
+        "Supabase Session Pooler selected on %s:5432; preferring available Transaction Pooler companion on :6543"
+        host;
+      Some url
+  | Some { url; _ } -> Some url
+  | None -> None
 
 (** Auto-detect best backend based on environment variables
     Priority order:

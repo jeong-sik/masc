@@ -159,12 +159,20 @@ let int_field key json =
 
 let room_id_from_config (config : Room.config) =
   match config.scope with
-  | Room_utils_backend_setup.Default -> "default"
   | Room_utils_backend_setup.Named room_id -> room_id
+  | _ -> "default"
 
 let cluster_summary_json (_config : Room.config) =
   (* Transport health should stay metrics-only and avoid command-plane/Room I/O. *)
-  `Assoc []
+  None
+
+let int_field_opt key = function
+  | Some json -> Some (int_field key json)
+  | None -> None
+
+let int_option_json = function
+  | Some value -> `Int value
+  | None -> `Null
 
 let http_listener_mode () =
   match Sys.getenv_opt "MASC_USE_H2" with
@@ -261,7 +269,7 @@ let transport_health_json ~config =
   in
   (* Keep transport-health free of Room/PG reads so proactive refresh does not
      contend with dashboard and MCP writes on the shared backend. *)
-  let recent_messages = 0 in
+  let recent_messages = None in
   let grpc_subscribers_i = int_of_float grpc_subscribers in
   let primary_path =
     primary_path ~webrtc_channels ~grpc_subscribers:grpc_subscribers_i
@@ -271,7 +279,8 @@ let transport_health_json ~config =
     ("summary", `Assoc [
       ("primary_path", `String primary_path);
       ("queue_pressure", `String (queue_pressure sse_queue_max));
-      ("recent_messages", `Int recent_messages);
+      ("recent_messages", int_option_json recent_messages);
+      ("recent_messages_available", `Bool false);
       ("external_fanout_targets", `Int sse_external_subscribers);
     ]);
     ("sse", `Assoc [
@@ -334,11 +343,12 @@ let transport_health_json ~config =
     ("cluster", `Assoc [
       ("cluster", `String cluster_name);
       ("room_id", `String room_id);
-      ("total_units", `Int (int_field "total_units" topology_summary));
-      ("managed_units", `Int (int_field "managed_unit_count" topology_summary));
-      ("live_agents", `Int (int_field "live_agent_count" topology_summary));
-      ("active_operations", `Int (int_field "active_operation_count" topology_summary));
-      ("stale_units", `Int (int_field "stale_unit_count" topology_summary));
+      ("topology_available", `Bool false);
+      ("total_units", int_option_json (int_field_opt "total_units" topology_summary));
+      ("managed_units", int_option_json (int_field_opt "managed_unit_count" topology_summary));
+      ("live_agents", int_option_json (int_field_opt "live_agent_count" topology_summary));
+      ("active_operations", int_option_json (int_field_opt "active_operation_count" topology_summary));
+      ("stale_units", int_option_json (int_field_opt "stale_unit_count" topology_summary));
     ]);
     ("agent_health", `Assoc [
       ("stale_total", `Int (int_of_float stale_agents));

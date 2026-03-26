@@ -2,6 +2,8 @@
 
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Server_runtime_bootstrap = Masc_mcp.Server_runtime_bootstrap
+module Server_bootstrap_pg = Masc_mcp.Server_bootstrap_pg
+module Server_bootstrap_loops = Masc_mcp.Server_bootstrap_loops
 module Shutdown_hooks = Masc_mcp.Shutdown_hooks
 module Board_dispatch = Masc_mcp.Board_dispatch
 
@@ -30,10 +32,10 @@ let run_cmd base_path =
   Server_runtime_bootstrap.bootstrap_server_state_blocking state;
   Server_runtime_bootstrap.bootstrap_chain_state state;
   Server_runtime_bootstrap.bootstrap_keepers ~sw ~clock state;
-  Server_runtime_bootstrap.init_task_backend ();
-  Server_runtime_bootstrap.inject_shared_pg_pool ();
-  Server_runtime_bootstrap.init_memory_pg_schema ();
-  ignore (Server_runtime_bootstrap.start_background_maintenance ~sw ~clock state);
+  Server_bootstrap_pg.init_task_backend ();
+  Server_bootstrap_pg.inject_shared_pg_pool ();
+  Server_bootstrap_pg.init_memory_pg_schema ();
+  ignore (Server_bootstrap_loops.start_background_maintenance ~sw ~clock state);
   Fun.protect
     ~finally:(fun () ->
       (try Board_dispatch.flush () with _ -> ());

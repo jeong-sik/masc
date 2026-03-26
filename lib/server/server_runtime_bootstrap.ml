@@ -2,7 +2,6 @@
 open Server_auth
 open Server_routes_http
 
-module Http = Http_server_eio
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
@@ -239,582 +238,6 @@ let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
         (Printexc.to_string exn)
     end
 
-let init_task_backend () =
-  match Board_dispatch.get_pg_pool () with
-  | Some pool -> (
-      match Task_dispatch.init_pg pool with
-      | Ok () ->
-          Log.Task.info "PostgreSQL backend initialized"
-      | Error e ->
-          Log.Task.error "PG init failed: %s, using JSONL"
-            (Types.show_masc_error e))
-  | None -> Task_dispatch.init_jsonl ()
-
-let inject_shared_pg_pool () =
-  match Board_dispatch.get_pg_pool () with
-  | Some _ ->
-      Log.Server.info "PG shared pool available"
-  | None ->
-      Log.Server.info "No PG pool available"
-
-let init_memory_pg_schema () =
-  match Board_dispatch.get_pg_pool () with
-  | Some pool -> (
-      match Memory_pg.ensure_schema pool with
-      | Ok () -> ()
-      | Error msg ->
-          Log.MemoryPg.error "Schema init failed: %s (long_term_backend will use no-op)" msg)
-  | None ->
-      Log.MemoryPg.info "No PG pool available; long_term_backend will use JSONL fallback"
-
-(** Run PG schema/bootstrap steps in a fixed order.
-    These steps share the same PG pool and some of them mutate startup state,
-    so deterministic sequencing is preferred over parallel fan-out. *)
-let init_pg_schemas_sequential () =
-  let errors = ref [] in
-  let run_step label f =
-    try f ()
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        errors := Printf.sprintf "%s: %s" label (Printexc.to_string exn) :: !errors
-  in
-  run_step "task_backend" init_task_backend;
-  run_step "shared_pg_pool" inject_shared_pg_pool;
-  run_step "memory_pg_schema" init_memory_pg_schema;
-  match List.rev !errors with
-  | [] -> ()
-  | errs ->
-      Log.Server.warn "PG schema init completed with errors: %s"
-        (String.concat "; " errs)
-
-let install_tooling ~governance_level (state : Mcp_server.server_state) =
-  Governance_pipeline.install ~config:state.room_config ~governance_level;
-  Tool_permissions.install ~get_agent_name:(fun () -> None)
-
-let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
-    (state : Mcp_server.server_state) =
-  Progress.set_sse_callback Sse.broadcast;
-  Sse.set_clock clock;
-  (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
-  let event_bus = Agent_sdk.Event_bus.create () in
-  (* Eio fiber isolation: each subsystem runs in its own fiber.
-     If one crashes, others keep running — Eio's structured concurrency.
-     Subsystem_health tracks liveness at module level (no init timing dependency). *)
-  let fork_subsystem name f =
-    Subsystem_health.register name;
-    Eio.Fiber.fork ~sw (fun () ->
-      try f ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Subsystem_health.mark_dead name;
-        Log.Server.error "subsystem %s crashed: %s" name
-          (Printexc.to_string exn))
-  in
-  (* Event_bus → SSE bridge: relay masc:* events to dashboard *)
-  Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
-  let keeper_lifecycle_sub =
-    Agent_sdk.Event_bus.subscribe event_bus
-      ~filter:(function
-        | Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", _) -> true
-        | _ -> false)
-  in
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      (try
-        let events = Agent_sdk.Event_bus.drain keeper_lifecycle_sub in
-        List.iter
-          (function
-            | Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", payload) ->
-                (match
-                   ( Safe_ops.json_string_opt "event" payload,
-                     Safe_ops.json_string_opt "keeper_name" payload )
-                 with
-                | Some event, Some keeper_name ->
-                    Server_dashboard_http.patch_keeper_dependent_caches
-                      ~keeper_name ~event
-                | _ -> ())
-            | _ -> ())
-          events;
-        if events <> [] then
-          Log.Dashboard.info
-            "patched keeper-dependent dashboard caches (%d lifecycle event(s))"
-            (List.length events)
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Log.Dashboard.error "keeper lifecycle listener iteration failed: %s"
-          (Printexc.to_string exn));
-      Eio.Time.sleep clock 0.25;
-      loop ()
-    in
-    loop ());
-  (* Inject Event_bus into keeper resident runtime for telemetry publishing *)
-  Keeper_keepalive.set_bus event_bus;
-  Board_dispatch.set_keeper_board_signal_hook (fun signal ->
-    Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
-      ~config:state.room_config
-      signal);
-  (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
-     can react to new tasks, mentions, or room activity immediately. *)
-  Room_eio.on_broadcast_mention := (fun mention ->
-    match mention with
-    | Some target ->
-        Keeper_keepalive.wakeup_keeper target;
-        Log.Keeper.info "broadcast mention → wakeup keeper %s" target
-    | None ->
-        Keeper_keepalive.wakeup_all_keepers ();
-        Log.Keeper.info "broadcast → wakeup all keepers (reactive push)");
-  (* Orchestrator needs synchronous registration for shutdown hook *)
-  (try
-    let cancel_orchestrator =
-      Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config
-    in
-    Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Server.error "subsystem orchestrator failed to start: %s"
-      (Printexc.to_string exn));
-  (* Build read-only tool surface shared by both judges. *)
-  let judge_tool_names =
-    [ "masc_status"; "masc_tasks"; "masc_agents"; "masc_board_list" ]
-  in
-  let judge_masc_tools =
-    match
-      Agent_tool_surfaces.local_worker_tool_schemas ~names:judge_tool_names ()
-    with
-    | Ok schemas -> schemas
-    | Error _ -> []
-  in
-  let judge_dispatch ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
-    let config = state.room_config in
-    let agent_name = "operator-judge" in
-    let ctx_room : Tool_room.context = { config; agent_name } in
-    let ctx_task : Tool_task.context = { config; agent_name } in
-    let ctx_agent : Tool_agent.context = { config; agent_name } in
-    match name with
-    | "masc_status" -> (
-        match Tool_room.dispatch ctx_room ~name ~args with
-        | Some result -> result
-        | None -> (false, "masc_status: dispatch failed"))
-    | "masc_tasks" -> (
-        match Tool_task.dispatch ctx_task ~name ~args with
-        | Some result -> result
-        | None -> (false, "masc_tasks: dispatch failed"))
-    | "masc_agents" -> (
-        match Tool_agent.dispatch ctx_agent ~name ~args with
-        | Some result -> result
-        | None -> (false, "masc_agents: dispatch failed"))
-    | "masc_board_list" ->
-        Tool_board.handle_tool name args
-    | _ -> (false, Printf.sprintf "judge: tool '%s' not allowed" name)
-  in
-  fork_subsystem "governance_judge" (fun () ->
-    Dashboard_governance_judge.start ~sw ~clock
-      ~base_path:state.room_config.base_path
-      ~masc_tools:judge_masc_tools ~dispatch:judge_dispatch
-      ~build_facts:(fun () ->
-        Dashboard_governance.factual_snapshot_json
-          ~base_path:state.room_config.base_path)
-      ());
-  fork_subsystem "operator_judge" (fun () ->
-    let operator_judge_ctx : _ Operator_control.context =
-      {
-        config = state.room_config;
-        agent_name = "operator-judge";
-        sw;
-        clock;
-        proc_mgr = Some proc_mgr;
-        mcp_session_id = None;
-      }
-    in
-    Dashboard_operator_judge.start ~sw ~clock ~config:state.room_config
-      ~masc_tools:judge_masc_tools ~dispatch:judge_dispatch
-      ~build_facts:(fun () ->
-        Operator_control.snapshot_json ~actor:"operator-judge" ~view:"summary"
-          ~include_messages:false ~include_keepers:false operator_judge_ctx)
-      ());
-  fork_subsystem "session_cleanup" (fun () ->
-    Session.start_mcp_session_cleanup_loop ~sw ~clock ());
-  (* Auto-boot resident keepers: read .masc/resident-keepers/*.json,
-     load or parse each keeper's meta, and start keepalive loops. *)
-  fork_subsystem "keeper_autoboot" (fun () ->
-    if not Env_config.KeeperBootstrap.enabled then
-      Log.Keeper.info "autoboot: disabled via MASC_KEEPER_BOOTSTRAP_ENABLED=false"
-    else begin
-    (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
-    Eio.Time.sleep clock 5.0;
-    let config = state.room_config in
-    let specs = Keeper_types.list_resident_keepers config in
-    let booted = ref 0 in
-    List.iter (fun (spec : Keeper_types.resident_keeper_spec) ->
-      if not spec.desired then
-        Log.Keeper.info "autoboot: skipping %s (desired=false)" spec.name
-      else
-        try
-          let meta = Keeper_runtime.ensure_resident_meta config spec in
-          match meta with
-          | Error e ->
-            Log.Keeper.error "autoboot: failed to load meta for %s: %s" spec.name e
-          | Ok m ->
-            if not m.presence_keepalive then
-              Log.Keeper.info "autoboot: skipping %s (presence_keepalive=false)" spec.name
-            else begin
-              let ctx : _ Keeper_types.context = {
-                config;
-                agent_name = m.agent_name;
-                sw;
-                clock;
-                proc_mgr = Some proc_mgr;
-              } in
-              Keeper_keepalive.start_keepalive ~proactive_warmup_sec:60 ctx m;
-              incr booted;
-              Log.Keeper.info "autoboot: started keepalive for %s" m.name
-            end
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Keeper.error "autoboot: exception for %s: %s" spec.name
-            (Printexc.to_string exn)
-    ) specs;
-    Log.Keeper.info "autoboot: %d/%d resident keepers started"
-      !booted (List.length specs)
-    end);
-  (* Phase 5: unified startup subsystem summary *)
-  Log.info ~ctx:"startup" "subsystems: resident loops started"
-
-let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
-  (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
-     Replaces the old mutex + synchronous file I/O pattern. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    try Metrics_store_eio.start_flush_fiber ~clock
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Server.error "metrics_flush fiber crashed: %s"
-        (Printexc.to_string exn));
-  Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
-  (match Board_dispatch.get_pg_pool () with
-  | Some pool ->
-      let listener = Board_listener.create pool in
-      Eio.Fiber.fork ~sw (fun () ->
-        try Board_listener.start listener
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.BoardListener.error "board listener fiber crashed: %s"
-            (Printexc.to_string exn));
-      Log.BoardListener.info "Fiber started for real-time Board events"
-  | None ->
-      Log.BoardListener.info "Skipped (not using PostgreSQL backend)");
-  Eio.Fiber.fork ~sw (fun () ->
-      let rec loop () =
-        Eio.Time.sleep clock 60.0;
-        (try
-          let stale_sids = Sse.cleanup_stale () in
-          List.iter stop_sse_session stale_sids;
-          if stale_sids <> [] then
-            Log.Server.info "Reaped %d stale connections (active: %d)"
-              (List.length stale_sids) (Sse.client_count ());
-          let evicted_events = Sse.cleanup_expired_events () in
-          if evicted_events > 0 then
-            Log.Server.info "Evicted %d expired SSE buffer events" evicted_events;
-          let evicted = Cache_eio.evict_expired state.room_config in
-          if evicted > 0 then
-            Log.Server.info "Cache: evicted %d expired entries" evicted;
-          let sse_guards_reaped = Server_mcp_transport_http_sse.reap_stale_guards () in
-          let http_guards_reaped = Server_mcp_transport_http.reap_stale_guards () in
-          let is_active sid =
-            Server_mcp_transport_http_sse.is_active_sse_session sid
-            || Server_mcp_transport_http.is_active_sse_session sid
-          in
-          let sessions_reaped =
-            Server_mcp_transport_http_session.reap_stale_sessions
-              ~is_active_session:is_active
-          in
-          if sse_guards_reaped + http_guards_reaped + sessions_reaped > 0 then
-            Log.Server.info "reaped %d SSE guards + %d HTTP guards + %d stale sessions"
-              sse_guards_reaped http_guards_reaped sessions_reaped;
-          let ext_reaped = Sse.reap_dead_external_subscribers () in
-          if ext_reaped > 0 then
-            Log.Server.info "reaped %d dead external subscribers" ext_reaped;
-          if Server_webrtc_transport.is_enabled () then begin
-            let webrtc_expired = Server_webrtc_transport.cleanup_expired_offers () in
-            if webrtc_expired > 0 then
-              Log.Server.info "WebRTC: cleaned %d expired offers" webrtc_expired
-          end
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Server.error "cleanup loop iteration failed: %s"
-            (Printexc.to_string exn));
-        loop ()
-      in
-      loop ());
-  let resolved_base = state.room_config.base_path in
-  let masc_dir = Room.masc_root_dir state.room_config in
-  A2a_tools.init ~masc_dir;
-  (resolved_base, masc_dir)
-
-let make_http_config ~host ~port : Http.config =
-  let config = { Http.default_config with port; host } in
-  Unix.putenv "MASC_HTTP_BIND_HOST" config.host;
-  Unix.putenv "MASC_HTTP_PORT" (string_of_int config.port);
-  (match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
-  | Some existing when String.trim existing <> "" -> ()
-  | _ ->
-      let advertised_host =
-        if is_unspecified_host config.host then "127.0.0.1" else config.host
-      in
-      Unix.putenv "MASC_HTTP_BASE_URL"
-        (Printf.sprintf "http://%s:%d" advertised_host config.port));
-  config
-
-let listen_socket ~sw ~net (config : Http.config) =
-  let ip =
-    match Ipaddr.of_string config.host with
-    | Ok addr -> Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets addr)
-    | Error _ -> Eio.Net.Ipaddr.V4.loopback
-  in
-  let addr = `Tcp (ip, config.port) in
-  Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr
-
-let print_startup_banner ~(config : Http.config) ~resolved_base ~base_path
-    ~masc_dir =
-  Printf.printf "MASC MCP Server listening on http://%s:%d\n%!" config.host
-    config.port;
-  Printf.printf "   Base path: %s\n%!" resolved_base;
-  if resolved_base <> base_path then
-    Printf.printf "   Base path (input): %s\n%!" base_path;
-  Printf.printf "   MASC dir: %s\n%!" masc_dir;
-  Printf.printf "   GET  /mcp → SSE stream (notifications)\n%!";
-  Printf.printf
-    "   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)\n\
-     %!";
-  Printf.printf "   DELETE /mcp → Session termination\n%!";
-  Printf.printf
-    "   GET  /mcp/operator → Remote operator MCP stream (bearer token required)\n\
-     %!";
-  Printf.printf
-    "   POST /mcp/operator → Remote operator JSON-RPC (4 curated tools only)\n\
-     %!";
-  Printf.printf
-    "   DELETE /mcp/operator → Remote operator session termination\n%!";
-  Printf.printf "   POST /graphql → GraphQL (read-only)\n%!";
-  Printf.printf "   GET  /sse → legacy SSE stream (deprecated; use /mcp)\n%!";
-  Printf.printf "   GET  /api/v1/activity/events → Activity replay API\n%!";
-  Printf.printf "   GET  /api/v1/activity/graph → Activity graph snapshot\n%!";
-  Printf.printf
-    "   POST /messages → legacy client->server messages (deprecated)\n%!";
-  Printf.printf "   GET  /health → Health check\n%!";
-  if Masc_grpc_server.is_enabled () then
-    Printf.printf
-      "   gRPC :%d → Coordination + grpc.health.v1.Health + reflection\n%!"
-      (Masc_grpc_server.configured_port ());
-  if Server_ws_standalone.is_enabled () then
-    Printf.printf
-      "   GET  /ws → WebSocket discovery (standalone ws://127.0.0.1:%d/)\n%!"
-      (Server_ws_standalone.configured_port ());
-  if Server_webrtc_transport.is_enabled () then
-    Printf.printf
-      "   POST /webrtc/offer, /webrtc/answer → WebRTC signaling\n%!"
-
-let serve ~sw ~clock ~socket ~request_handler =
-  let is_cancelled exn =
-    match exn with
-    | Eio.Cancel.Cancelled _ -> true
-    | _ -> false
-  in
-  let rec accept_loop backoff_s =
-    try
-      let flow, client_addr = Eio.Net.accept ~sw socket in
-      Eio.Fiber.fork ~sw (fun () ->
-          Eio.Switch.run (fun conn_sw ->
-              Eio.Switch.on_release conn_sw (fun () ->
-                  try Eio.Flow.close flow
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn -> Log.Misc.warn "flow close: %s" (Printexc.to_string exn));
-              try
-                let conn_handler =
-                  Httpun_eio.Server.create_connection_handler ~sw:conn_sw
-                    ~request_handler:(fun client_addr ->
-                      request_handler client_addr)
-                    ~error_handler:(fun _client_addr ?request:_ error respond ->
-                      let msg =
-                        match error with
-                        | `Exn exn -> Printexc.to_string exn
-                        | `Bad_request -> "Bad request"
-                        | `Bad_gateway -> "Bad gateway"
-                        | `Internal_server_error ->
-                            "Internal server error"
-                      in
-                      let body =
-                        respond
-                          (Httpun.Headers.of_list
-                             [ ("content-type", "text/plain") ])
-                      in
-                      Httpun.Body.Writer.write_string body msg;
-                      Httpun.Body.Writer.close body)
-                in
-                conn_handler client_addr flow
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Misc.error "Connection error: %s"
-                  (Printexc.to_string exn)))
-      ;
-      accept_loop 0.05
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      if is_cancelled exn then ()
-      else begin
-        Log.Misc.error "Accept error: %s" (Printexc.to_string exn);
-        (try Eio.Time.sleep clock backoff_s
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> Log.Misc.warn "backoff sleep: %s" (Printexc.to_string exn));
-        accept_loop (Float.min 2.0 (backoff_s *. 1.5))
-      end
-  in
-  accept_loop 0.05
-
-let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
-  let is_cancelled exn =
-    match exn with
-    | Eio.Cancel.Cancelled _ -> true
-    | _ -> false
-  in
-  Log.Server.info "HTTP/2 h2c mode activated (MASC_USE_H2=1)";
-  let rec accept_loop backoff_s =
-    try
-      let flow, client_addr = Eio.Net.accept ~sw socket in
-      Eio.Fiber.fork ~sw (fun () ->
-          Eio.Switch.run (fun conn_sw ->
-              Eio.Switch.on_release conn_sw (fun () ->
-                  try Eio.Flow.close flow
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn -> Log.Misc.warn "[h2] flow close: %s" (Printexc.to_string exn));
-              try
-                H2_eio.Server.create_connection_handler ~sw:conn_sw
-                  ~request_handler:h2_request_handler
-                  ~error_handler:h2_error_handler
-                  client_addr
-                  flow
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Misc.error "[h2] Connection error: %s"
-                  (Printexc.to_string exn)));
-      accept_loop 0.05
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      if is_cancelled exn then ()
-      else begin
-        Log.Misc.error "[h2] Accept error: %s" (Printexc.to_string exn);
-        (try Eio.Time.sleep clock backoff_s
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> Log.Misc.warn "[h2] backoff sleep: %s" (Printexc.to_string exn));
-        accept_loop (Float.min 2.0 (backoff_s *. 1.5))
-      end
-  in
-  accept_loop 0.05
-
-(** Accept loop with automatic HTTP/1.1 vs HTTP/2 detection.
-    Each connection is peeked (MSG_PEEK) to inspect the first bytes
-    before dispatching to httpun-eio or h2-eio.  The peek is
-    non-destructive, so both libraries read the socket normally. *)
-let serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler
-    ~h2_error_handler =
-  let is_cancelled exn =
-    match exn with
-    | Eio.Cancel.Cancelled _ -> true
-    | _ -> false
-  in
-  Log.Server.info "HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port";
-  let h2_count = Atomic.make 0 in
-  let h1_count = Atomic.make 0 in
-  let stats_logged = Atomic.make false in
-  let rec accept_loop backoff_s =
-    try
-      let flow, client_addr = Eio.Net.accept ~sw socket in
-      Eio.Fiber.fork ~sw (fun () ->
-          Eio.Switch.run (fun conn_sw ->
-              Eio.Switch.on_release conn_sw (fun () ->
-                  try Eio.Flow.close flow
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                    Log.Misc.warn "[auto] flow close: %s"
-                      (Printexc.to_string exn));
-              try
-                match Http_protocol_detect.detect flow with
-                | Ok Http_protocol_detect.Http2 ->
-                  ignore (Atomic.fetch_and_add h2_count 1);
-                  H2_eio.Server.create_connection_handler ~sw:conn_sw
-                    ~request_handler:h2_request_handler
-                    ~error_handler:h2_error_handler
-                    client_addr
-                    flow
-                | Ok Http_protocol_detect.Http1 ->
-                  ignore (Atomic.fetch_and_add h1_count 1);
-                  let conn_handler =
-                    Httpun_eio.Server.create_connection_handler ~sw:conn_sw
-                      ~request_handler:(fun client_addr ->
-                        request_handler client_addr)
-                      ~error_handler:
-                        (fun _client_addr ?request:_ error respond ->
-                        let msg =
-                          match error with
-                          | `Exn exn -> Printexc.to_string exn
-                          | `Bad_request -> "Bad request"
-                          | `Bad_gateway -> "Bad gateway"
-                          | `Internal_server_error -> "Internal server error"
-                        in
-                        let body =
-                          respond
-                            (Httpun.Headers.of_list
-                               [ ("content-type", "text/plain") ])
-                        in
-                        Httpun.Body.Writer.write_string body msg;
-                        Httpun.Body.Writer.close body)
-                  in
-                  conn_handler client_addr flow
-                | Error msg ->
-                  Log.Misc.debug "[auto] protocol detect skipped: %s" msg
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Misc.error "[auto] Connection error: %s"
-                  (Printexc.to_string exn)));
-      accept_loop 0.05
-    with
-    | Eio.Cancel.Cancelled _ as e ->
-      if Atomic.compare_and_set stats_logged false true then
-        Log.Server.info "[auto] stats: h2=%d h1=%d"
-          (Atomic.get h2_count) (Atomic.get h1_count);
-      raise e
-    | exn ->
-      if is_cancelled exn then begin
-        if Atomic.compare_and_set stats_logged false true then
-          Log.Server.info "[auto] stats: h2=%d h1=%d"
-            (Atomic.get h2_count) (Atomic.get h1_count)
-      end
-      else begin
-        Log.Misc.error "[auto] Accept error: %s" (Printexc.to_string exn);
-        (try Eio.Time.sleep clock backoff_s
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Misc.warn "[auto] backoff sleep: %s"
-             (Printexc.to_string exn));
-        accept_loop (Float.min 2.0 (backoff_s *. 1.5))
-      end
-  in
-  accept_loop 0.05
-
 let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler =
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
@@ -839,7 +262,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   in
 
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
-  let config = make_http_config ~host ~port in
+  let config = Server_bootstrap_http.make_http_config ~host ~port in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
   let request_handler = make_request_handler routes in
   let h2_request_handler =
@@ -856,7 +279,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Log.Server.warn "MASC_USE_H2=%s unrecognised, falling back to auto" other;
       `Auto
   in
-  let socket = listen_socket ~sw ~net config in
+  let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   let initial_backend_mode = requested_backend_mode () in
   server_state := None;
   Server_startup_state.reset ~backend_mode:initial_backend_mode ();
@@ -891,8 +314,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       bootstrap_server_state_blocking state;
       let t2 = Eio.Time.now clock in
       Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
-      install_tooling ~governance_level state;
-      init_pg_schemas_sequential ();
+      Server_bootstrap_loops.install_tooling ~governance_level state;
+      Server_bootstrap_pg.init_pg_schemas_sequential ();
       Log.Server.info "Tooling + schemas in %.1fs" (Eio.Time.now clock -. t2);
       state
     in
@@ -958,9 +381,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_startup_state.mark_state_ready
         ~backend_mode:(Room.backend_name state.room_config);
       let resolved_base, masc_dir =
-        start_background_maintenance ~sw ~clock state
+        Server_bootstrap_loops.start_background_maintenance ~sw ~clock state
       in
-      print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
+      Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
       (* Create Executor_pool for CPU-heavy dashboard compute.
          Runs in separate OS domains, bypassing fiber contention. *)
       let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in
@@ -1040,7 +463,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       (* Pre-warm shell cache so the first /dashboard load is instant.
          shell is the only room-truth component without a proactive refresh loop. *)
       Server_dashboard_http.warm_shell_cache state;
-      start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
+      Server_bootstrap_loops.start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
       start_lazy_startup state
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1075,9 +498,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   (* 3. Start serving -- /health responds before init completes *)
   match http_mode with
   | `H2_only ->
-    serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler
+    Server_bootstrap_http.serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler
   | `H1_only ->
-    serve ~sw ~clock ~socket ~request_handler
+    Server_bootstrap_http.serve ~sw ~clock ~socket ~request_handler
   | `Auto ->
-    serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler
+    Server_bootstrap_http.serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler
       ~h2_error_handler

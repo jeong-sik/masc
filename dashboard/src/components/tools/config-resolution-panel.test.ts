@@ -68,4 +68,24 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent?.match(/env override/g)?.length ?? 0).toBe(1)
     expect(container.textContent).toContain('cwd fallback')
   })
+
+  it('does not collapse sibling paths that only share the root prefix', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/tmp/root', exists: true, source: 'env' },
+          cascade: { path: '/tmp/root/cascade.json', exists: true, source: 'env' },
+          prompts: { path: '/tmp/root/prompts', exists: true, source: 'env' },
+          keepers: { path: '/tmp/root/keepers', exists: true, source: 'env' },
+          personas: { path: '/tmp/root-extra/personas', exists: true, source: 'env' },
+        }}
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('/tmp/root-extra/personas')
+    expect(container.textContent).toContain('outside config root')
+  })
 })

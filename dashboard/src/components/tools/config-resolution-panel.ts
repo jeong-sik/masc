@@ -105,14 +105,14 @@ function ConfigRow({
         </span>
         ${showSourceBadge
           ? html`
-              <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.04em] text-[var(--text-muted)]">
+              <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-muted)]">
                 ${sourceLabel(item.source)}
               </span>
             `
           : null}
         ${pathInfo.kind
           ? html`
-              <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.04em] text-[var(--text-muted)]">
+              <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-muted)]">
                 ${pathInfo.kind}
               </span>
             `

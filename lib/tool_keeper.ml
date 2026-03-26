@@ -352,28 +352,6 @@ let handle_resident_keeper_down ctx args : tool_result =
   invalidate_resident_keeper_list_cache ();
   Turn.handle_keeper_down ctx args
 
-let handle_resident_keeper_model_set ctx args : tool_result =
-  let name = get_string args "name" "" in
-  match read_resident_keeper ctx.config name with
-  | Error e -> (false, "❌ " ^ e)
-  | Ok None -> (false, Printf.sprintf "resident keeper not found: %s" name)
-  | Ok (Some _spec) ->
-      let ok, body = Turn.handle_keeper_model_set ctx args in
-      if not ok then (ok, body)
-      else begin
-        invalidate_resident_keeper_list_cache ();
-        (match read_meta ctx.config name with
-        | Ok (Some meta) -> ignore (register_resident_keeper_from_meta ctx.config meta)
-        | _ -> ());
-        let json =
-          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
-        in
-        (true,
-         Yojson.Safe.pretty_to_string
-           (annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true
-              ~resident_registered:true json))
-      end
-
 let handle_resident_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
@@ -497,9 +475,6 @@ let handle_persistent_agent_msg ctx args : tool_result =
 let handle_persistent_agent_down ctx args : tool_result =
   Turn.handle_keeper_down ctx args
 
-let handle_persistent_agent_model_set ctx args : tool_result =
-  Turn.handle_keeper_model_set ctx args
-
 let handle_persistent_agent_create_from_persona ctx args : tool_result =
   Persona.handle_keeper_create_from_persona ctx args
 
@@ -543,18 +518,29 @@ let handle_keeper_remove_loop _ctx (args : Yojson.Safe.t) : tool_result =
   else
     (false, Printf.sprintf "Task '%s' not found" id)
 
+let should_bootstrap_existing_keepalives name args =
+  match name with
+  | "masc_keeper_msg" | "masc_persistent_agent_msg" ->
+      String.trim (get_string args "message" "") <> ""
+  | _ -> false
+
+let maybe_bootstrap_existing_keepalives ctx ~name ~args =
+  if should_bootstrap_existing_keepalives name args then
+    (try start_existing_keepalives ctx
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       Log.Keeper.error "start_existing_keepalives failed: %s"
+         (Printexc.to_string exn))
+
 let dispatch ctx ~name ~args : tool_result option =
-  (* Resident keepers are bootstrapped lazily on tool use as a fallback.
+  (* Resident keepers are bootstrapped lazily on keeper messages as a fallback.
      Server startup also calls bootstrap_existing_keepers for always-on presence. *)
-  (try start_existing_keepalives ctx with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Keeper.error "start_existing_keepalives failed: %s" (Printexc.to_string exn));
+  maybe_bootstrap_existing_keepalives ctx ~name ~args;
   match name with
   | "masc_persona_list" -> Some (Persona.handle_persona_list ctx args)
   | "masc_keeper_create_from_persona" -> Some (handle_resident_keeper_create_from_persona ctx args)
   | "masc_keeper_up" -> Some (handle_resident_keeper_up ctx args)
   | "masc_keeper_status" -> Some (handle_resident_keeper_status ctx args)
   | "masc_keeper_msg" -> Some (handle_resident_keeper_msg ctx args)
-  | "masc_keeper_model_set" -> Some (handle_resident_keeper_model_set ctx args)
   | "masc_keeper_down" -> Some (handle_resident_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_resident_keeper_list ctx args)
   | "masc_keeper_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
@@ -564,7 +550,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_persistent_agent_up" -> Some (handle_persistent_agent_up ctx args)
   | "masc_persistent_agent_status" -> Some (handle_persistent_agent_status ctx args)
   | "masc_persistent_agent_msg" -> Some (handle_persistent_agent_msg ctx args)
-  | "masc_persistent_agent_model_set" -> Some (handle_persistent_agent_model_set ctx args)
   | "masc_persistent_agent_down" -> Some (handle_persistent_agent_down ctx args)
   | "masc_persistent_agent_list" -> Some (handle_persistent_agent_list ctx args)
   | "masc_persistent_agent_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
@@ -582,8 +567,7 @@ let dispatch ctx ~name ~args : tool_result option =
     Returns None for all other tool names.
     Called from server_routes_http_keeper_stream. *)
 let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
-  (try start_existing_keepalives ctx with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Keeper.error "start_existing_keepalives failed: %s" (Printexc.to_string exn));
+  maybe_bootstrap_existing_keepalives ctx ~name ~args;
   match name with
   | "masc_keeper_msg" ->
       Some (handle_resident_keeper_msg_stream ~on_text_delta ctx args)

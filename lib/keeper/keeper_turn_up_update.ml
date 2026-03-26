@@ -32,11 +32,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     Option.value ~default:long_goal_default p.long_goal_opt
     |> normalize_goal_horizon_text
   in
-  (* Legacy model fields: cascade_name is the authority.
-     Pass through empty defaults; downstream reads cascade_name. *)
-  let models = [] in
-  let allowed_models = [] in
-  let active_model = "" in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
@@ -119,9 +114,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
           (if String.trim old.instructions <> "" then old.instructions
            else Option.value ~default:"" p.profile_defaults.instructions)
         p.instructions_opt;
-    models;
-    allowed_models;
-    active_model;
     policy_voice_enabled;
     allowed_paths;
     scope_kind;

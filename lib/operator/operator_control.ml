@@ -443,16 +443,12 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         | Some value -> Ok value
         | None -> Error "payload.message is required"
       in
-      let models =
+      let* () =
         match request.payload |> U.member "models" with
-        | `List items ->
-            items
-            |> List.filter_map (function
-                   | `String value ->
-                       let trimmed = String.trim value in
-                       if trimmed = "" then None else Some (`String trimmed)
-                   | _ -> None)
-        | _ -> []
+        | `Null -> Ok ()
+        | _ ->
+            Error
+              "legacy keeper model args removed for masc_keeper_msg: models. Keepers now use cascade_name and last_model_used only."
       in
       let direct_reply =
         match request.payload |> U.member "direct_reply" with
@@ -475,8 +471,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
            @
            match timeout_sec with
            | Some value -> [ ("timeout_sec", `Int value) ]
-           | None -> []
-          @ if models = [] then [] else [ ("models", `List models) ])
+           | None -> [])
       in
       let keeper_ctx : _ Tool_keeper.context =
         {

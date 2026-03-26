@@ -6,7 +6,6 @@ module Mcp_eio = Mcp_server_eio
 type keeper_chat_stream_request = {
   name : string;
   message : string;
-  models : string list;
   timeout_sec : int option;
 }
 
@@ -139,22 +138,10 @@ let parse_keeper_chat_stream_request body_str =
         json |> member "message" |> to_string_option |> Option.value ~default:""
         |> String.trim
       in
-      let models =
+      let legacy_models_present =
         match json |> member "models" with
-        | `Null -> Ok []
-        | `List items ->
-            let rec collect acc = function
-              | [] -> Ok (List.rev acc)
-              | `String model :: rest ->
-                  let trimmed = String.trim model in
-                  if trimmed = "" then
-                    Error "models must be an array of non-empty strings"
-                  else
-                    collect (trimmed :: acc) rest
-              | _ -> Error "models must be an array of non-empty strings"
-            in
-            collect [] items
-        | _ -> Error "models must be an array of strings"
+        | `Null -> false
+        | _ -> true
       in
       let timeout_sec =
         match json |> member "timeout_sec" with
@@ -169,10 +156,13 @@ let parse_keeper_chat_stream_request body_str =
         Error "name is required"
       else if message = "" then
         Error "message is required"
+      else if legacy_models_present then
+        Error
+          "legacy keeper model args removed for masc_keeper_msg: models. Keepers now use cascade_name and last_model_used only."
       else
-        match models, timeout_sec with
-        | Ok models, Ok timeout_sec -> Ok { name; message; models; timeout_sec }
-        | Error err, _ | _, Error err -> Error err
+        match timeout_sec with
+        | Ok timeout_sec -> Ok { name; message; timeout_sec }
+        | Error err -> Error err
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
 
@@ -447,15 +437,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
               @
               (match payload.timeout_sec with
                | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
-               | None -> [])
-              @
-              (if payload.models = [] then []
-               else
-                  [ ("models",
-                    `List
-                      (List.map
-                         (fun model -> `String model)
-                         payload.models)) ]))
+               | None -> []))
           in
           let agent_name =
             match agent_from_request request with

@@ -141,14 +141,6 @@ let dedupe_keep_order items =
 
 let first_some = Dashboard_utils.first_some
 
-let resolve_allowed_models ~explicit_allowed_models ~seed_allowed_models ~models =
-  if explicit_allowed_models <> [] then
-    dedupe_keep_order explicit_allowed_models
-  else if seed_allowed_models <> [] then
-    dedupe_keep_order seed_allowed_models
-  else
-    dedupe_keep_order models
-
 let canonical_room_scope = function
   | "all" -> "all"
   | _ -> "current"

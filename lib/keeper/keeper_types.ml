@@ -60,9 +60,6 @@ type keeper_meta = {
   needs: string;
   desires: string;
   instructions: string;
-  models: string list;
-  allowed_models: string list;
-  active_model: string;
   policy_voice_enabled: bool;
   execution_scope: string;
   allowed_paths: string list;
@@ -114,6 +111,30 @@ type keeper_meta = {
 
 let now_iso () = Types.now_iso ()
 
+let keeper_legacy_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
+
+let runtime_meta_write_sync_hook : (Room.config -> keeper_meta -> unit) ref =
+  ref (fun _ _ -> ())
+
+let register_runtime_meta_write_sync f =
+  runtime_meta_write_sync_hook := f
+
+let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
+  let present =
+    keeper_legacy_model_arg_names
+    |> List.filter (fun key ->
+           match Yojson.Safe.Util.member key args with
+           | `Null -> false
+           | _ -> true)
+  in
+  match present with
+  | [] -> Ok ()
+  | fields ->
+      Error
+        (Printf.sprintf
+           "legacy keeper model args removed for %s: %s. Keepers now use cascade_name and last_model_used only."
+           tool_name (String.concat ", " fields))
+
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   `Assoc
     [
@@ -132,9 +153,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("needs", `String m.needs);
       ("desires", `String m.desires);
       ("instructions", `String m.instructions);
-      ("models", `List (List.map (fun s -> `String s) m.models));
-      ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
-      ("active_model", `String m.active_model);
       ("policy_voice_enabled", `Bool m.policy_voice_enabled);
       ("execution_scope", `String m.execution_scope);
       ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
@@ -250,17 +268,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let cascade_name =
       Safe_ops.json_string ~default:"keeper_unified" "cascade_name" json
     in
-    let models_raw = Safe_ops.json_string_list "models" json in
-    let models =
-      if models_raw <> [] then models_raw
-      else Oas_model_resolve.models_of_cascade_name cascade_name
-    in
-    let allowed_models_raw = Safe_ops.json_string_list "allowed_models" json in
-    let allowed_models =
-      let base = if allowed_models_raw <> [] then allowed_models_raw else models in
-      dedupe_keep_order base
-    in
-    let active_model = Safe_ops.json_string ~default:"" "active_model" json in
     let policy_voice_enabled =
       Safe_ops.json_bool ~default:(default_voice_enabled_for name) "policy_voice_enabled" json
     in
@@ -455,9 +462,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           needs;
           desires;
           instructions;
-          models;
-          allowed_models;
-          active_model;
           policy_voice_enabled;
           execution_scope;
           allowed_paths;
@@ -738,18 +742,38 @@ let sync_registered_resident_keeper_from_meta config (meta : keeper_meta) :
   | Ok (Some _) -> register_resident_keeper_from_meta config meta
   | Error e -> Error e
 
+let fresher_meta config (meta : keeper_meta) : keeper_meta =
+  let path = keeper_meta_path config meta.name in
+  match Safe_ops.read_json_file_safe path with
+  | Ok json -> (
+      match meta_of_json json with
+      | Ok existing ->
+          let existing_ts =
+            Resilience.Time.parse_iso8601_opt existing.updated_at
+            |> Option.value ~default:0.0
+          in
+          let incoming_ts =
+            Resilience.Time.parse_iso8601_opt meta.updated_at
+            |> Option.value ~default:0.0
+          in
+          if existing_ts > incoming_ts then existing else meta
+      | Error _ -> meta)
+  | Error _ -> meta
+
 let write_meta config (m : keeper_meta) : (unit, string) result =
-  let path = keeper_meta_path config m.name in
-  let content = Yojson.Safe.pretty_to_string (meta_to_json m) in
+  let persisted = fresher_meta config m in
+  let path = keeper_meta_path config persisted.name in
+  let content = Yojson.Safe.pretty_to_string (meta_to_json persisted) in
   try
     Fs_compat.save_file path content;
-    (match sync_registered_resident_keeper_from_meta config m with
+    (!runtime_meta_write_sync_hook) config persisted;
+    (match sync_registered_resident_keeper_from_meta config persisted with
      | Ok () -> Ok ()
      | Error e ->
          Error
            (Printf.sprintf
               "meta written but resident sync failed for %s: %s"
-              m.name e))
+              persisted.name e))
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "failed to write meta %s: %s" path (Printexc.to_string exn))
 

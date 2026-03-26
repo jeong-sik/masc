@@ -59,7 +59,6 @@ val bootstrap_keepers :
 val init_task_backend : unit -> unit
 val inject_shared_pg_pool : unit -> unit
 val init_memory_pg_schema : unit -> unit
-val init_pg_schemas_parallel : unit -> unit
 
 (** {1 Background Maintenance} *)
 

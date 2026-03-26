@@ -294,6 +294,18 @@ let test_backend_config_for_uses_fallback_pg_url () =
          | _ -> false);
       check (option string) "postgres url" (Some url) cfg.postgres_url)
 
+let test_backend_config_for_accepts_postgres_native_alias () =
+  let url = "postgresql://sb.example/test_backend_config_alias" in
+  with_envs
+    (pg_env_bindings ~masc_storage_type:"postgres-native" ~sb_pg_url:url ())
+    (fun () ->
+      let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
+      check bool "backend type is postgres native" true
+        (match cfg.backend_type with
+         | Backend_types.PostgresNative -> true
+         | _ -> false);
+      check (option string) "postgres url" (Some url) cfg.postgres_url)
+
 let test_postgres_url_from_env_normalizes_supabase_pooler () =
   (* normalize_postgres_url rewrites Supabase Transaction Pooler port 6543
      to Session Pooler port 5432 to avoid prepared-statement failures. *)
@@ -525,6 +537,8 @@ let () =
     ];
     "backend_config_for", [
       test_case "uses fallback pg url" `Quick test_backend_config_for_uses_fallback_pg_url;
+      test_case "accepts postgres-native alias" `Quick
+        test_backend_config_for_accepts_postgres_native_alias;
       test_case "normalizes supabase pooler" `Quick
         test_postgres_url_from_env_normalizes_supabase_pooler;
     ];

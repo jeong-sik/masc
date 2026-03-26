@@ -270,7 +270,7 @@ let terminal_response ?config (state : Mdal.loop_state) ~reason ~error_message =
 let emit_stop_event (state : Mdal.loop_state) ~reason =
   let final_metric = current_metric_of_state state in
   try
-    Sse.broadcast_to Coordinators
+    Sse.broadcast
       (`Assoc
         [
           ("type", `String "mdal_stopped");
@@ -286,7 +286,7 @@ let emit_stop_event (state : Mdal.loop_state) ~reason =
 
 let emit_completed_event ~loop_id ~final_metric ~iterations =
   try
-    Sse.broadcast_to Coordinators
+    Sse.broadcast
       (`Assoc
         [
           ("type", `String "mdal_completed");

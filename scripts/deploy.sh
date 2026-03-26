@@ -28,6 +28,25 @@ LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 SKIP_BUILD=false
 RESTART_TUNNEL=false
 
+preserve_env_override() {
+    local name="$1"
+    local flag_var="__PRESERVE_${name}_SET"
+    local value_var="__PRESERVE_${name}_VALUE"
+    if [ "${!name+x}" = "x" ]; then
+        printf -v "$flag_var" '%s' "1"
+        printf -v "$value_var" '%s' "${!name}"
+    fi
+}
+
+restore_env_override() {
+    local name="$1"
+    local flag_var="__PRESERVE_${name}_SET"
+    local value_var="__PRESERVE_${name}_VALUE"
+    if [ "${!flag_var:-}" = "1" ]; then
+        export "$name=${!value_var}"
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-build) SKIP_BUILD=true; shift ;;
@@ -114,6 +133,8 @@ else
     # Only repo-local env files are loaded; ~/.zshenv is intentionally skipped
     # to avoid environment contamination from user shell configuration.
     # Required env vars should be set in config/lodge.env or the repo .env files.
+    preserve_env_override MASC_CONFIG_DIR
+    preserve_env_override MASC_PERSONAS_DIR
     LODGE_ENV="$REPO_DIR/config/lodge.env"
     if [ -f "$LODGE_ENV" ]; then
         set -a; source "$LODGE_ENV" 2>/dev/null || true; set +a
@@ -121,6 +142,8 @@ else
     if [ -f "$REPO_DIR/.env" ]; then
         set -a; source "$REPO_DIR/.env" 2>/dev/null || true; set +a
     fi
+    restore_env_override MASC_CONFIG_DIR
+    restore_env_override MASC_PERSONAS_DIR
 
     mkdir -p "$LOG_DIR"
 

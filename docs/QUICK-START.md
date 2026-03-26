@@ -110,17 +110,32 @@ Failed tool calls include recovery hints automatically. Common patterns:
 
 ## 7. Keeper Bootstrap
 
-Keeper를 시작하려면:
+Persona blueprint에서 keeper를 명시적으로 만들려면:
+
+```text
+masc_keeper_create_from_persona(persona_name: "sangsu")
+```
+
+이미 등록된 keeper를 다시 올리거나, template 기준으로 fresh 재생성하려면:
 
 ```text
 masc_keeper_up(name: "sangsu")
 ```
 
 전제조건:
-- `config/personas/<name>/profile.json`이 존재해야 한다 (또는 `config/keepers/<name>.toml`)
+- `PERSONAS_ROOT/<name>/profile.json`이 존재해야 한다 (또는 `CONFIG_ROOT/keepers/<name>.toml`)
+- `PERSONAS_ROOT`는 `MASC_PERSONAS_DIR` 우선, 없으면 resolved `CONFIG_ROOT/personas`를 사용한다.
 - 서버가 **repo root**에서 실행되어야 `.masc/` 디렉토리에 접근 가능. worktree에서 실행하면 keeper 상태를 찾지 못한다. 필요 시 `--base-path`를 repo root로 지정.
 - repo-managed config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `~/.masc/config`를 먼저 보고, 없을 때만 repo `config/` 자동 탐색을 사용한다.
-- `MASC_PERSONAS_DIR` 환경변수로 커스텀 persona 경로 지정 가능.
+- `MASC_PERSONAS_DIR` 환경변수로 persona만 repo 밖 경로로 분리할 수 있다.
+
+공유 config/persona를 repo 밖에 두고 실행하는 예시:
+
+```bash
+export MASC_CONFIG_DIR=/srv/masc/config
+export MASC_PERSONAS_DIR=/srv/masc/personas
+./start-masc-mcp.sh --http --port 8935 --base-path /srv/masc/runtime
+```
 
 상세: `docs/KEEPER-USER-MANUAL.md`
 

@@ -194,6 +194,7 @@ for env_name in \
     MASC_HOST \
     MASC_BASE_PATH \
     MASC_CONFIG_DIR \
+    MASC_PERSONAS_DIR \
     MASC_WS_ENABLED \
     MASC_WEBRTC_ENABLED
 do
@@ -224,6 +225,7 @@ for env_name in \
     MASC_HOST \
     MASC_BASE_PATH \
     MASC_CONFIG_DIR \
+    MASC_PERSONAS_DIR \
     MASC_WS_ENABLED \
     MASC_WEBRTC_ENABLED
 do
@@ -517,6 +519,8 @@ if [ -z "${MASC_CONFIG_DIR:-}" ]; then
         export MASC_CONFIG_DIR="$SCRIPT_DIR/config"
     fi
 fi
+# Leave MASC_PERSONAS_DIR unset unless the caller explicitly overrides it.
+# The server-side config resolver will then use "$MASC_CONFIG_DIR/personas".
 
 # Wait for port to become available.
 # Default behavior is fail-fast on conflict to prevent duplicate server startup.

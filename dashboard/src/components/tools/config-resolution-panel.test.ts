@@ -45,4 +45,27 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('invalid env')
     expect(container.textContent).toContain('outside config root')
   })
+
+  it('keeps the full path on hover title and hides duplicate source badges', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/tmp/root-config', exists: true, source: 'env' },
+          cascade: { path: '/tmp/root-config/cascade.json', exists: true, source: 'env' },
+          prompts: { path: '/tmp/root-config/prompts', exists: true, source: 'env' },
+          keepers: { path: '/tmp/root-config/keepers', exists: true, source: 'cwd' },
+          personas: { path: '/tmp/root-config/personas', exists: true, source: 'env' },
+        }}
+      />`,
+      container,
+    )
+
+    const cards = Array.from(container.querySelectorAll('[title]'))
+    expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config/cascade.json')
+    expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config')
+    expect(container.textContent?.match(/env override/g)?.length ?? 0).toBe(1)
+    expect(container.textContent).toContain('cwd fallback')
+  })
 })

@@ -108,26 +108,14 @@ module FileSystem = struct
 
   let with_locked_rw_fd path_str f =
     run_blocking_file_op (fun () ->
-        let fd = Unix.openfile path_str [ Unix.O_RDWR; Unix.O_CREAT ] 0o644 in
-        Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer"
-          ~finally:(fun () -> Unix.close fd)
-        @@ fun () ->
-        let rec try_lock retries =
-          if retries <= 0 then
-            raise (Failure "Failed to acquire lock after max retries")
-          else
-            try Unix.lockf fd Unix.F_TLOCK 0
-            with
-            | Unix.Unix_error (Unix.EAGAIN, _, _)
-            | Unix.Unix_error (Unix.EACCES, _, _) ->
-                (* Safe: inside run_blocking_file_op (Eio_unix.run_in_systhread).
-                   Blocks systhread only, not Eio domain. *)
-                Unix.sleepf 0.01;
-                try_lock (retries - 1)
+        let fd = File_lock_eio.acquire_flock_retry ~lock_path:path_str
+            ~mode:[ Unix.O_RDWR; Unix.O_CREAT ] ~perm:0o644
+            ~max_attempts:100 ~caller:"backend_eio" ()
         in
-        let _ = try_lock 100 in
         Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer"
-          ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0)
+          ~finally:(fun () ->
+            (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
+            Unix.close fd)
         @@ fun () -> f fd)
 
   (** {2 Core Operations} *)

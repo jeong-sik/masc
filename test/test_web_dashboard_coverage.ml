@@ -57,6 +57,48 @@ let contains_re re s =
     true
   with Not_found -> false
 
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.unsetenv name
+
+let with_env vars f =
+  let original = List.map (fun (name, _) -> (name, Sys.getenv_opt name)) vars in
+  List.iter (fun (name, value) -> Unix.putenv name value) vars;
+  Fun.protect f ~finally:(fun () ->
+    List.iter (fun (name, value) -> restore_env name value) original)
+
+let write_file path contents =
+  let oc = open_out_bin path in
+  output_string oc contents;
+  close_out oc
+
+let make_temp_dashboard_root label marker =
+  let root = Filename.temp_file ("masc-dashboard-" ^ label) "" in
+  Sys.remove root;
+  Unix.mkdir root 0o755;
+  let assets = Filename.concat root "assets" in
+  Unix.mkdir assets 0o755;
+  let dashboard = Filename.concat assets "dashboard" in
+  Unix.mkdir dashboard 0o755;
+  write_file (Filename.concat dashboard "index.html")
+    (Printf.sprintf "<!DOCTYPE html><html><body>%s</body></html>" marker);
+  root
+
+let cleanup_temp_dashboard_root root =
+  let assets = Filename.concat root "assets" in
+  let dashboard = Filename.concat assets "dashboard" in
+  let index = Filename.concat dashboard "index.html" in
+  if Sys.file_exists index then Sys.remove index;
+  if Sys.file_exists dashboard then Unix.rmdir dashboard;
+  if Sys.file_exists assets then Unix.rmdir assets;
+  if Sys.file_exists root then Unix.rmdir root
+
+let make_temp_dir label =
+  let root = Filename.temp_file ("masc-dashboard-" ^ label) "" in
+  Sys.remove root;
+  Unix.mkdir root 0o755;
+  root
+
 (* ============================================================
    html Tests — Vite SPA index.html
    When assets/dashboard/ is not built (e.g. CI without npm run build),
@@ -164,22 +206,44 @@ let test_etag_stable () =
    ============================================================ *)
 
 let test_fallback_on_missing_asset () =
-  (* Override MASC_ASSETS_ROOT to a nonexistent directory *)
+  (* Override MASC_ASSETS_ROOT to an existing directory without dashboard assets *)
   let original = Sys.getenv_opt "MASC_ASSETS_ROOT" in
-  Unix.putenv "MASC_ASSETS_ROOT" "/tmp/nonexistent_masc_assets_12345";
-  let html = Web_dashboard.html () in
-  let etag = Web_dashboard.etag () in
-  (* Restore *)
-  (match original with
-   | Some v -> Unix.putenv "MASC_ASSETS_ROOT" v
-   | None ->
-       (* Clear the env var by setting it to a value we can ignore,
-          since OCaml stdlib has no unsetenv. The next call to assets_root()
-          will use this path which doesn't exist, then fall through to cwd. *)
-       Unix.putenv "MASC_ASSETS_ROOT" "");
-  check bool "fallback html contains error message" true
-    (contains_substr "Dashboard build not found" html);
-  check string "fallback etag is none" "none" etag
+  let missing_assets_root = make_temp_dir "missing-assets" in
+  Fun.protect
+    (fun () ->
+      Unix.putenv "MASC_ASSETS_ROOT" missing_assets_root;
+      let html = Web_dashboard.html () in
+      let etag = Web_dashboard.etag () in
+      check bool "fallback html contains error message" true
+        (contains_substr "Dashboard build not found" html);
+      check string "fallback etag is none" "none" etag)
+    ~finally:(fun () ->
+      (match original with
+       | Some v -> Unix.putenv "MASC_ASSETS_ROOT" v
+       | None -> Unix.unsetenv "MASC_ASSETS_ROOT");
+      cleanup_temp_dashboard_root missing_assets_root)
+
+let test_html_uses_base_path_input_assets () =
+  let input_root = make_temp_dashboard_root "input" "dashboard-from-base-path-input" in
+  let base_root = make_temp_dashboard_root "base" "dashboard-from-base-path" in
+  Fun.protect
+    (fun () ->
+      with_env
+        [
+          ("MASC_ASSETS_ROOT", "");
+          ("MASC_ASSETS_DIR", "");
+          ("MASC_BASE_PATH_INPUT", input_root);
+          ("MASC_BASE_PATH", base_root);
+        ]
+        (fun () ->
+          let html = Web_dashboard.html () in
+          check bool "uses base_path_input assets first" true
+            (contains_substr "dashboard-from-base-path-input" html);
+          check bool "does not fall back to base_path assets" false
+            (contains_substr "dashboard-from-base-path</body>" html)))
+    ~finally:(fun () ->
+      cleanup_temp_dashboard_root input_root;
+      cleanup_temp_dashboard_root base_root)
 
 (* ============================================================
    Asset path safety
@@ -230,6 +294,7 @@ let () =
     ];
     "fallback", [
       test_case "missing asset dir" `Quick test_fallback_on_missing_asset;
+      test_case "base_path_input assets" `Quick test_html_uses_base_path_input_assets;
     ];
     "asset_path_safety", [
       test_case "accept normal" `Quick test_safe_asset_relative_path_accepts_normal;

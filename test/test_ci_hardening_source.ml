@@ -358,24 +358,7 @@ let test_dashboard_executor_pool_contracts () =
     (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
        "Server_dashboard_http.set_executor_pool exec_pool")
 
-let test_pg_schema_init_contracts () =
-  check bool "server bootstrap defines sequential pg schema init" true
-    (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
-       "let init_pg_schemas_sequential () =");
-  check bool "server bootstrap no longer defines parallel pg schema init" true
-    (not
-       (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
-          "let init_pg_schemas_parallel () ="));
-  check bool "server bootstrap runs task backend before shared pool and memory schema" true
-    (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
-       "run_step \"task_backend\" init_task_backend;\n  run_step \"shared_pg_pool\" inject_shared_pg_pool;\n  run_step \"memory_pg_schema\" init_memory_pg_schema");
-  check bool "server bootstrap no longer fans out pg schema init via fiber all" true
-    (not
-       (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
-          "Eio.Fiber.all ["));
-  check bool "startup path calls sequential pg schema init" true
-    (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
-       "init_pg_schemas_sequential ();")
+(* pg schema init contracts removed: init_pg_schemas_sequential was deleted in #3218 *)
 
 let test_transport_route_contracts () =
   check bool "frontend exposes ws discovery route" true
@@ -478,8 +461,6 @@ let () =
            test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;
            test_case "dashboard executor pool contracts" `Quick
              test_dashboard_executor_pool_contracts;
-           test_case "pg schema init contracts" `Quick
-             test_pg_schema_init_contracts;
            test_case "transport route contracts" `Quick
              test_transport_route_contracts;
            test_case "transport health contracts" `Quick

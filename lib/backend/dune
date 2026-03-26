@@ -5,16 +5,16 @@
  (wrapped false)
  (modules
   pg_infix
-  compression_dict
   backend_types
   backend_compression
   backend_pg
   backend
   task_pg)
  (libraries
-  masc_types
+ masc_types
   masc_core
   masc_process
+  masc_compression
   masc_log
   masc_eio_context
   time_compat

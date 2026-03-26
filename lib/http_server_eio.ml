@@ -62,14 +62,10 @@ module Compression = struct
   (** Compress with dictionary if beneficial
       @return (compressed_data, encoding_name option) *)
   let compress ?(level = 3) (data : string) : string * string option =
-    let (compressed, used_dict, did_compress) =
-      Compression_dict.compress ~level data
-    in
-    if did_compress then
-      let encoding = if used_dict then "zstd-dict" else "zstd" in
-      (compressed, Some encoding)
-    else
-      (data, None)
+    match Compression_codec.compress ~level data with
+    | Compression_codec.Unchanged payload -> (payload, None)
+    | Compression_codec.Compressed { payload; encoding } ->
+        (payload, Some (Compression_codec.content_encoding encoding))
 
   (** Legacy: Standard zstd without dictionary *)
   let compress_zstd ?(level = 3) (data : string) : (string * bool) =

@@ -203,6 +203,8 @@ let test_session_to_swarm_config_health_contract () =
     (Option.is_some swarm_cfg.convergence);
   Alcotest.(check bool) "resource_check present" true
     (Option.is_some swarm_cfg.resource_check);
+  Alcotest.(check bool) "streaming disabled by default" false
+    swarm_cfg.enable_streaming;
   Alcotest.(check (option (float 0.001))) "budget derived from duration"
     (Some 600.0) swarm_cfg.budget.max_total_time_sec;
   let convergence = Option.get swarm_cfg.convergence in

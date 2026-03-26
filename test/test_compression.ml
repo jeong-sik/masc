@@ -13,6 +13,7 @@
 (* ===== Backend Compression Tests ===== *)
 
 module BackendCompression = Backend.Compression
+module Compression_codec = Compression_codec
 
 let test_backend_compress_skip_small () =
   let small = "tiny" in  (* <32 bytes, below min_dict_size *)
@@ -56,6 +57,14 @@ let test_backend_non_compressed_passthrough () =
   let result = BackendCompression.decompress_auto plain in
   Alcotest.(check string) "non-compressed unchanged" plain result
 
+let test_backend_decompress_failure () =
+  let result = BackendCompression.decompress
+      ~orig_size:128
+      ~used_dict:false
+      "not-a-valid-zstd-payload"
+  in
+  Alcotest.(check (option string)) "invalid payload returns none" None result
+
 let test_backend_json_compression () =
   (* Need larger JSON (>256 bytes) to trigger compression *)
   let json_parts = List.init 10 (fun i ->
@@ -78,6 +87,7 @@ let backend_tests = [
   "roundtrip", `Quick, test_backend_roundtrip;
   "ZSTD header format", `Quick, test_backend_header_format;
   "non-compressed passthrough", `Quick, test_backend_non_compressed_passthrough;
+  "decompress failure", `Quick, test_backend_decompress_failure;
   "JSON compression ratio", `Quick, test_backend_json_compression;
 ]
 
@@ -95,6 +105,37 @@ let test_default_level () =
 let threshold_tests = [
   "backend min_size", `Quick, test_threshold_backend;
   "default compression level", `Quick, test_default_level;
+]
+
+let test_codec_encoding_tokens () =
+  Alcotest.(check string) "standard encoding"
+    "zstd" (Compression_codec.content_encoding Compression_codec.Standard);
+  Alcotest.(check string) "dictionary encoding"
+    "zstd-dict" (Compression_codec.content_encoding Compression_codec.Dictionary)
+
+let test_codec_compress_large () =
+  let large = String.make 1000 'x' in
+  match Compression_codec.compress large with
+  | Compression_codec.Unchanged _ ->
+      Alcotest.fail "expected large repetitive input to compress"
+  | Compression_codec.Compressed { payload; encoding } ->
+      Alcotest.(check bool) "payload shrinks" true (String.length payload < String.length large);
+      Alcotest.(check string) "encoding token"
+        "zstd" (Compression_codec.content_encoding encoding)
+
+let test_codec_decompress_failure () =
+  match Compression_codec.decompress
+          ~orig_size:256
+          ~encoding:Compression_codec.Standard
+          "not-a-valid-zstd-payload"
+  with
+  | Ok _ -> Alcotest.fail "expected invalid payload to fail decompression"
+  | Error _ -> ()
+
+let codec_tests = [
+  "encoding tokens", `Quick, test_codec_encoding_tokens;
+  "compress large", `Quick, test_codec_compress_large;
+  "decompress failure", `Quick, test_codec_decompress_failure;
 ]
 
 (* ===== Compression Ratio Benchmarks ===== *)
@@ -146,5 +187,6 @@ let () =
   Alcotest.run "Compression" [
     "Backend", backend_tests;
     "Thresholds", threshold_tests;
+    "Codec", codec_tests;
     "Compression Ratios", ratio_tests;
   ]

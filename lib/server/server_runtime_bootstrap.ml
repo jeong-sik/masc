@@ -338,6 +338,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ( "recover_running_team_sessions",
             fun () ->
               Team_session_engine_eio.recover_running_sessions ~sw ~clock
+                ~process_mgr:proc_mgr
                 ~config:state.Mcp_server.room_config );
           ("chain_bootstrap", fun () -> bootstrap_chain_state state);
           ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);

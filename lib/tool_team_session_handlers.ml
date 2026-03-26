@@ -37,6 +37,7 @@ let handle_start ctx args : result =
     let operation_id = get_string_opt args "operation_id" in
     match
       Team_session_engine_eio.start_session ~sw:ctx.sw ~clock:ctx.clock
+        ~process_mgr:(Option.get ctx.proc_mgr)
         ~config:ctx.config ~created_by:ctx.agent_name ~goal ~duration_seconds
         ~execution_scope ~checkpoint_interval_sec ~min_agents
         ~scale_profile ~control_profile

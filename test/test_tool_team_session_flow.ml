@@ -62,7 +62,8 @@ let test_recover_orphan_session () =
   in
   Team_session_store.save_session config session;
   Team_session_engine_eio.recover_running_sessions ~sw
-    ~clock:(Eio.Stdenv.clock env) ~config;
+    ~clock:(Eio.Stdenv.clock env)
+    ~process_mgr:(Eio.Stdenv.process_mgr env) ~config;
   let rec wait_loaded attempts =
     if attempts <= 0 then
       failwith "orphan session not transitioned after recover"

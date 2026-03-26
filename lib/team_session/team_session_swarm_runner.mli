@@ -20,6 +20,7 @@ module Swarm = Agent_sdk_swarm
 
     @param sw Eio switch for fiber management
     @param clock Eio clock for timeouts
+    @param process_mgr Eio process manager for shell metric evaluation
     @param config Room configuration
     @param session_id Session to execute
     @param masc_tools Available MCP tools for agents
@@ -28,6 +29,7 @@ module Swarm = Agent_sdk_swarm
 val run_swarm :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
+  process_mgr:_ Eio.Process.mgr ->
   config:Room.config ->
   session_id:string ->
   masc_tools:Types.tool_schema list ->

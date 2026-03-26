@@ -37,6 +37,7 @@ let test_repo_synthesis_swarm_start_creates_operation_session_and_run () =
     Lib.Team_session_engine_eio.start_session
       ~sw
       ~clock
+      ~process_mgr:(Eio.Stdenv.process_mgr env)
       ~config
       ~created_by:"owner"
       ~goal

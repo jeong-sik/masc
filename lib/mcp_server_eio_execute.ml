@@ -528,7 +528,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_autoresearch ->
         let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_
             ~program_note:_ =
-          Team_session_engine_eio.start_session ~sw ~clock ~config
+          Team_session_engine_eio.start_session ~sw ~clock
+            ~process_mgr:(Option.get state.Mcp_server.proc_mgr) ~config
             ~created_by:agent_name ~goal ~duration_seconds:900
             ~execution_scope:Team_session_types.Limited_code_change
             ~checkpoint_interval_sec:60 ~min_agents:1

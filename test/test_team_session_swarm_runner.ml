@@ -297,7 +297,8 @@ let test_run_swarm_empty_workers_keeps_session_running () =
   Team_session_store.ensure_session_dirs config session.session_id;
   Team_session_store.save_session config session;
   match
-    Team_session_swarm_runner.run_swarm ~sw ~clock:(Eio.Stdenv.clock env) ~config
+    Team_session_swarm_runner.run_swarm ~sw ~clock:(Eio.Stdenv.clock env)
+      ~process_mgr:(Eio.Stdenv.process_mgr env) ~config
       ~session_id:session.session_id ~masc_tools:[]
       ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
   with

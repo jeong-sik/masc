@@ -336,23 +336,22 @@ let save_worker_run_meta_json config session_id worker_run_id json =
 
 let list_worker_run_ids config session_id =
   let dir = worker_runs_dir config session_id in
-  if not (path_exists config dir) then
-    []
-  else
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.sort String.compare
+  list_dir config dir
+  |> List.filter_map (fun entry ->
+       match String.split_on_char '/' entry with
+       | name :: _ when name <> "" -> Some name
+       | _ -> None)
+  |> List.sort_uniq String.compare
 
 let list_checkpoint_paths config session_id =
   let dir = checkpoints_dir config session_id in
-  if not (path_exists config dir) then
-    []
-  else
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter (fun name -> Filename.check_suffix name ".json")
-    |> List.sort String.compare
-    |> List.map (Filename.concat dir)
+  list_dir config dir
+  |> List.filter_map (fun entry ->
+       match String.split_on_char '/' entry with
+       | name :: _ when Filename.check_suffix name ".json" -> Some name
+       | _ -> None)
+  |> List.sort_uniq String.compare
+  |> List.map (Filename.concat dir)
 
 let load_latest_checkpoint config session_id : Team_session_types.checkpoint option =
   match List.rev (list_checkpoint_paths config session_id) with

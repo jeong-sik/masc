@@ -1,7 +1,8 @@
 (** Keeper_recurring — In-memory recurring task registry.
 
-    Thread-safe via Stdlib.Mutex (this module may be accessed from
-    non-Eio contexts such as MCP tool handlers and tests).
+    Thread-safe via Eio.Mutex guarded by Eio_guard (falls through
+    without locking when Eio runtime is not yet active, e.g. in
+    non-Eio tests or module init).
 
     @since #3190 *)
 
@@ -25,12 +26,11 @@ type recurring_task = {
 (* Storage                                                           *)
 (* ================================================================ *)
 
-let mu = Mutex.create ()
+let mu = Eio.Mutex.create ()
 let tasks : (string, recurring_task) Hashtbl.t = Hashtbl.create 16
 
 let with_lock f =
-  Mutex.lock mu;
-  Fun.protect ~finally:(fun () -> Mutex.unlock mu) f
+  Eio_guard.with_mutex mu f
 
 (* ================================================================ *)
 (* ID generation                                                     *)

@@ -96,3 +96,9 @@ val severity_of_error : t -> severity
 (** Get error severity level. *)
 
 val string_of_severity : severity -> string
+
+(** {1 Migration Bridge} *)
+
+val to_masc_error : t -> Types_auth.masc_error
+(** Convert [Error.t] to [Types_auth.masc_error] for migration.
+    @since 2.104.0 *)

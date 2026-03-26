@@ -1,11 +1,11 @@
 (** Centralized error types for masc-mcp
 
-    This module provides structured error types to replace string-based errors.
-    Benefits:
-    - Compile-time exhaustiveness checking
-    - Rich error context (not just messages)
-    - Better debugging and logging
-    - Type-safe error handling
+    @deprecated Prefer [Types_auth.masc_error] which is the canonical
+    error type used across the codebase (72+ call sites). This module
+    has only 18 call sites and will be removed once they migrate.
+
+    Use {!to_masc_error} to bridge from [Error.t] to [masc_error]
+    during the migration period.
 
     @since 0.4.0
 *)
@@ -164,3 +164,37 @@ let string_of_severity = function
   | Warning -> "WARN"
   | Error -> "ERROR"
   | Critical -> "CRITICAL"
+
+(** {1 Migration Bridge}
+
+    Convert [Error.t] to [Types_auth.masc_error] for incremental
+    migration to the canonical error type. *)
+
+let to_masc_error : t -> Types_auth.masc_error = function
+  | Room (RoomNotFound id) -> Types_auth.IoError ("room not found: " ^ id)
+  | Room (RoomAlreadyExists id) -> Types_auth.IoError ("room exists: " ^ id)
+  | Room (RoomLocked id) -> Types_auth.IoError ("room locked: " ^ id)
+  | Room (RoomFull _) -> Types_auth.IoError "room full"
+  | Task (TaskNotFound id) -> Types_auth.TaskNotFound id
+  | Task (TaskAlreadyClaimed by) -> Types_auth.TaskAlreadyClaimed { task_id = ""; by }
+  | Task (TaskInvalidState (current, _expected)) -> Types_auth.TaskInvalidState current
+  | Task TaskCycleDetected -> Types_auth.TaskInvalidState "cycle detected"
+  | Agent (AgentNotFound id) -> Types_auth.AgentNotFound id
+  | Agent (AgentTimeout (id, _ms)) -> Types_auth.IoError ("agent timeout: " ^ id)
+  | Agent (AgentHeartbeatMissing id) -> Types_auth.IoError ("heartbeat missing: " ^ id)
+  | Agent (AgentCapabilityMismatch cap) -> Types_auth.IoError ("capability mismatch: " ^ cap)
+  | Federation (PortalConnectionFailed addr) -> Types_auth.IoError ("portal failed: " ^ addr)
+  | Federation (PortalAuthFailed reason) -> Types_auth.Unauthorized reason
+  | Federation (PortalTimeout _ms) -> Types_auth.IoError "portal timeout"
+  | Federation (PortalProtocolError msg) -> Types_auth.IoError ("portal protocol: " ^ msg)
+  | Storage (FileNotFound path) -> Types_auth.StorageError ("file not found: " ^ path)
+  | Storage (FilePermissionDenied path) -> Types_auth.StorageError ("permission denied: " ^ path)
+  | Storage (FileLocked path) -> Types_auth.StorageError ("file locked: " ^ path)
+  | Storage (PostgresError msg) -> Types_auth.StorageError ("pg: " ^ msg)
+  | Storage (GitError msg) -> Types_auth.StorageError ("git: " ^ msg)
+  | Mcp (McpParseError msg) -> Types_auth.InvalidJson msg
+  | Mcp (McpMethodNotFound name) -> Types_auth.IoError ("method not found: " ^ name)
+  | Mcp (McpInvalidParams msg) -> Types_auth.ValidationError msg
+  | Mcp (McpAuthError msg) -> Types_auth.Unauthorized msg
+  | Mcp (McpInternalError msg) -> Types_auth.IoError msg
+  | Internal msg -> Types_auth.IoError msg

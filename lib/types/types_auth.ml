@@ -120,6 +120,10 @@ type masc_error =
   | RateLimitExceeded of rate_limit_error
   (* Cache errors — file/memory caching *)
   | CacheError of cache_error
+  (* Storage/backend errors — PG, file, git *)
+  | StorageError of string
+  (* Input validation errors — parsing, format *)
+  | ValidationError of string
 
 (** Cache-specific errors *)
 and cache_error =
@@ -164,6 +168,8 @@ let rec masc_error_to_string = function
       Printf.sprintf "⏳ Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
         (show_rate_limit_category category) current limit wait_seconds
   | CacheError e -> cache_error_to_string e
+  | StorageError msg -> Printf.sprintf "Storage error: %s" msg
+  | ValidationError msg -> Printf.sprintf "Validation error: %s" msg
 
 (** Convert cache error to user-friendly message *)
 and cache_error_to_string = function

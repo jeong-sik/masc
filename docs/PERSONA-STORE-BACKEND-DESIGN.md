@@ -59,8 +59,8 @@ persona store를 3계층으로 나눈다.
     "soul_profile": "relationship",
     "mention_targets": ["sangsu", "상수"]
   },
-  "version": "2026-03-27T00:00:00Z",
-  "updated_at": "2026-03-27T00:00:00Z",
+  "version": "<published-version-or-etag>",
+  "updated_at": "<iso8601-timestamp>",
   "source": "api"
 }
 ```

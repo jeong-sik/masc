@@ -418,14 +418,14 @@ Keeper의 행동을 결정하는 설정은 3곳에서 공급된다.
 
 **새 keeper 생성 시** (`keeper_up`, meta 없음):
 
-```
-inline args > TOML (config/keepers/) > persona template (config/personas/) > 하드코딩 기본값
+```text
+inline args > TOML (<CONFIG_ROOT>/keepers/) > persona template (<PERSONAS_ROOT>/) > 하드코딩 기본값
 ```
 
 **기존 keeper resume 시** (`keeper_up`, meta 존재):
 
-```
-inline args > stored keeper_meta > TOML/persona template (fallback) > 하드코딩 기본값
+```text
+inline args > stored keeper_meta > TOML/persona template fallback > 하드코딩 기본값
 ```
 
 코드 경로: `keeper_turn_up_args.ml:parse()` → `load_keeper_profile_defaults()`가 TOML > persona 순서로 로드.

@@ -217,9 +217,13 @@ let prompt_markdown_path key =
   else
     Option.map (fun dir -> Filename.concat dir (key ^ ".md")) !markdown_dir
 
+(** Read a markdown file, stripping YAML frontmatter if present.
+    Returns only the body after the closing [---] delimiter. *)
 let read_file_if_exists path =
   if Sys.file_exists path && not (Sys.is_directory path) then
-    Some (In_channel.with_open_text path In_channel.input_all)
+    let content = In_channel.with_open_text path In_channel.input_all in
+    let _meta, body = parse_frontmatter content in
+    Some body
   else None
 
 (** {1 Registration and Lookup} *)

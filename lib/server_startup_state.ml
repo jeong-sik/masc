@@ -64,8 +64,9 @@ let is_live () = true
 let elapsed_since_start () =
   Unix.gettimeofday () -. !state.started_at
 
-(** Default startup watchdog timeout in seconds. Override with MASC_STARTUP_WATCHDOG_SEC. *)
-let default_watchdog_timeout_sec = 120.0
+(** Default startup watchdog timeout in seconds. Override with MASC_STARTUP_WATCHDOG_SEC.
+    Raised from 120 to 240 to accommodate PG cold-start + keeper bootstrap delays. *)
+let default_watchdog_timeout_sec = 240.0
 
 (** Read watchdog timeout from env, clamped to [30, 600]. *)
 let watchdog_timeout_sec () =

@@ -98,28 +98,57 @@ let last_batch_eviction = Atomic.make 0.0
 (** Minimum interval between batch evictions (seconds). *)
 let batch_eviction_interval = 60.0
 
-(** Evict all expired cache entries. Returns count of evicted entries. *)
+(** Cached entry count to avoid Sys.readdir on every set() call.
+    -1 = uninitialized; lazily populated on first count_entries call.
+    Updated incrementally on set/delete/evict/clear to prevent
+    file descriptor exhaustion from repeated concurrent directory scans.
+    See: system_log seq 8719 "Too many open files" on .masc/cache. *)
+let cached_entry_count = Atomic.make (-1)
+
+(** Reset cached entry count. Call when switching cache directories (tests). *)
+let reset_cached_entry_count () = Atomic.set cached_entry_count (-1)
+
+(** Guard to prevent concurrent directory scan stampedes.
+    Only one fiber may scan the cache directory at a time;
+    concurrent callers return [fallback] immediately. *)
+let scan_in_progress = Atomic.make false
+
+let with_scan_guard ~fallback f =
+  if Atomic.compare_and_set scan_in_progress false true then
+    Fun.protect ~finally:(fun () -> Atomic.set scan_in_progress false) f
+  else fallback
+
+(** Read .json filenames from cache directory. Single readdir call. *)
+let read_cache_filenames dir =
+  if not (Sys.file_exists dir) then []
+  else
+    Sys.readdir dir |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".json")
+
+(** Evict all expired cache entries. Returns count of evicted entries.
+    Guarded: only one scan runs at a time; concurrent calls return 0. *)
 let evict_expired config =
   let dir = cache_dir config in
-  if not (Sys.file_exists dir) then 0
-  else
-    let entries = Sys.readdir dir |> Array.to_list in
-    List.fold_left (fun count filename ->
-      if Filename.check_suffix filename ".json" then
-        let path = Filename.concat dir filename in
-        match Safe_ops.read_file_safe path with
+  with_scan_guard ~fallback:0 (fun () ->
+    let filenames = read_cache_filenames dir in
+    let evicted = List.fold_left (fun count filename ->
+      let path = Filename.concat dir filename in
+      match Safe_ops.read_file_safe path with
+      | Error _ -> count
+      | Ok content ->
+        match Safe_ops.parse_json_safe ~context:"cache_evict" content with
         | Error _ -> count
-        | Ok content ->
-          match Safe_ops.parse_json_safe ~context:"cache_evict" content with
-          | Error _ -> count
-          | Ok json ->
-            match entry_of_json json with
-            | Some entry when is_expired entry ->
-                Safe_ops.remove_file_logged ~context:"cache_evict" path;
-                count + 1
-            | _ -> count
-      else count
-    ) 0 entries
+        | Ok json ->
+          match entry_of_json json with
+          | Some entry when is_expired entry ->
+              Safe_ops.remove_file_logged ~context:"cache_evict" path;
+              count + 1
+          | _ -> count
+    ) 0 filenames in
+    (* Refresh cached count after eviction *)
+    let remaining = List.length filenames - evicted in
+    Atomic.set cached_entry_count remaining;
+    evicted)
 
 (** Check expired ratio and evict if > 50% are expired.
     Throttled to run at most once per [batch_eviction_interval] seconds.
@@ -135,8 +164,7 @@ let maybe_evict_expired config =
     let dir = cache_dir config in
     if not (Sys.file_exists dir) then 0
     else
-      let files = Sys.readdir dir |> Array.to_list
-        |> List.filter (fun f -> Filename.check_suffix f ".json") in
+      let files = read_cache_filenames dir in
       let total = List.length files in
       if total = 0 then 0
       else begin
@@ -163,14 +191,19 @@ let maybe_evict_expired config =
       end
   end
 
-(** Count current number of cache entries *)
+(** Count current number of cache entries.
+    Uses cached count when available; falls back to directory scan on first call. *)
 let count_entries config =
-  let dir = cache_dir config in
-  if not (Sys.file_exists dir) then 0
+  let c = Atomic.get cached_entry_count in
+  if c >= 0 then c
   else
-    Sys.readdir dir |> Array.to_list
-    |> List.filter (fun f -> Filename.check_suffix f ".json")
-    |> List.length
+    let dir = cache_dir config in
+    let count =
+      if not (Sys.file_exists dir) then 0
+      else List.length (read_cache_filenames dir)
+    in
+    Atomic.set cached_entry_count count;
+    count
 
 (** Set cache entry - synchronous *)
 let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []) ()
@@ -198,10 +231,13 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
         let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
         let entry = { key; value; created_at = now; expires_at; tags } in
         let path = cache_file config key in
+        let is_overwrite = Sys.file_exists path in
         let json = entry_to_json entry in
         let content = Yojson.Safe.pretty_to_string json in
         try
           Fs_compat.save_file path content;
+          if not is_overwrite then
+            ignore (Atomic.fetch_and_add cached_entry_count 1);
           Ok entry
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -212,10 +248,13 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
       let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
       let entry = { key; value; created_at = now; expires_at; tags } in
       let path = cache_file config key in
+      let is_overwrite = Sys.file_exists path in
       let json = entry_to_json entry in
       let content = Yojson.Safe.pretty_to_string json in
       try
         Fs_compat.save_file path content;
+        if not is_overwrite then
+          ignore (Atomic.fetch_and_add cached_entry_count 1);
         Ok entry
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
@@ -241,6 +280,7 @@ let get config ~key : (cache_entry option, string) result =
         if is_expired entry then begin
           (* Auto-delete expired entries *)
           Sys.remove path;
+          ignore (Atomic.fetch_and_add cached_entry_count (-1));
           let _evicted = maybe_evict_expired config in
           Ok None
         end else begin
@@ -260,22 +300,22 @@ let delete config ~key : (bool, string) result =
   else
     try
       Sys.remove path;
+      ignore (Atomic.fetch_and_add cached_entry_count (-1));
       Ok true
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Error (Printexc.to_string e)
 
-(** List all cache entries - synchronous *)
+(** List all cache entries - synchronous.
+    Guarded: concurrent calls return empty list to prevent FD stampede. *)
 let list config ?(tag : string option) () : cache_entry list =
   let dir = cache_dir config in
   if not (Sys.file_exists dir) then
     []
   else
-    let entries = Sys.readdir dir |> Array.to_list in
-    List.filter_map (fun filename ->
-      if not (Filename.check_suffix filename ".json") then
-        None
-      else
+    with_scan_guard ~fallback:[] (fun () ->
+      let entries = read_cache_filenames dir in
+      List.filter_map (fun filename ->
         let path = Filename.concat dir filename in
         match Safe_ops.read_file_safe path with
         | Error _ -> None  (* File read error - skip this entry *)
@@ -298,7 +338,7 @@ let list config ?(tag : string option) () : cache_entry list =
                   else None
               end
             | None -> None
-    ) entries
+      ) entries)
 
 (** Clear all cache entries - synchronous *)
 let clear config : (int, string) result =
@@ -307,30 +347,30 @@ let clear config : (int, string) result =
     Ok 0
   else
     try
-      let entries = Sys.readdir dir |> Array.to_list in
+      let entries = read_cache_filenames dir in
       let count = List.fold_left (fun acc filename ->
-        if Filename.check_suffix filename ".json" then begin
-          let path = Filename.concat dir filename in
-          Safe_ops.remove_file_logged ~context:"cache_clear" path;
-          acc + 1
-        end else acc
+        let path = Filename.concat dir filename in
+        Safe_ops.remove_file_logged ~context:"cache_clear" path;
+        acc + 1
       ) 0 entries in
+      Atomic.set cached_entry_count 0;
       Ok count
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Error (Printexc.to_string e)
 
-(** Get cache statistics - synchronous *)
+(** Get cache statistics - synchronous.
+    Guarded: concurrent calls return zeros to prevent FD stampede. *)
 let stats config : (int * int * float, string) result =
   (* Returns: (total_entries, expired_entries, total_size_bytes) *)
   let dir = cache_dir config in
   if not (Sys.file_exists dir) then
     Ok (0, 0, 0.0)
   else
-    try
-      let entries = Sys.readdir dir |> Array.to_list in
-      let total, expired, size = List.fold_left (fun (t, e, s) filename ->
-        if Filename.check_suffix filename ".json" then
+    with_scan_guard ~fallback:(Ok (0, 0, 0.0)) (fun () ->
+      try
+        let entries = read_cache_filenames dir in
+        let total, expired, size = List.fold_left (fun (t, e, s) filename ->
           let path = Filename.concat dir filename in
           let file_size = (Unix.stat path).st_size in
           let is_exp =
@@ -345,12 +385,11 @@ let stats config : (int * int * float, string) result =
                 | None -> false
           in
           (t + 1, e + (if is_exp then 1 else 0), s +. float_of_int file_size)
-        else (t, e, s)
-      ) (0, 0, 0.0) entries in
-      Ok (total, expired, size)
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (Printexc.to_string e)
+        ) (0, 0, 0.0) entries in
+        Ok (total, expired, size)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Printexc.to_string e))
 
 (** Format stats for display *)
 let format_stats (total, expired, size) =

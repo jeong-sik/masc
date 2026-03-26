@@ -270,6 +270,16 @@ let base_path =
 
 let pid_lock_path port = Printf.sprintf "/tmp/masc-%d.pid" port
 
+let is_server_responsive port =
+  try
+    let url = Printf.sprintf "http://127.0.0.1:%d/health/live" port in
+    let cmd = Printf.sprintf "curl -s --max-time 3 -o /dev/null -w '%%{http_code}' %s" url in
+    let ic = Unix.open_process_in cmd in
+    let code = In_channel.input_all ic |> String.trim in
+    let _ = Unix.close_process_in ic in
+    code = "200"
+  with _ -> false
+
 let acquire_pid_lock port =
   let path = pid_lock_path port in
   (let contents =
@@ -285,11 +295,30 @@ let acquire_pid_lock port =
      (match int_of_string_opt pid_str with
       | Some pid ->
         (try Unix.kill pid 0;
-           Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
-             (Printf.sprintf
-                "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it first: kill %d"
-                pid port pid);
-           exit 1
+           (* Process exists — check if it is actually responsive *)
+           if is_server_responsive port then begin
+             Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+               (Printf.sprintf
+                  "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it first: kill %d"
+                  pid port pid);
+             exit 1
+           end else begin
+             (* Process alive but unresponsive (e.g. FD exhaustion) — kill and take over *)
+             Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
+               (Printf.sprintf
+                  "[WARN] PID %d alive but unresponsive on port %d; sending SIGTERM to reclaim"
+                  pid port);
+             (try Unix.kill pid Sys.sigterm with _ -> ());
+             Unix.sleepf 1.0;
+             (* If still alive after SIGTERM, force kill *)
+             (try
+                Unix.kill pid 0;
+                Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
+                  (Printf.sprintf "[WARN] PID %d did not exit; sending SIGKILL" pid);
+                (try Unix.kill pid Sys.sigkill with _ -> ());
+                Unix.sleepf 0.5
+              with Unix.Unix_error (Unix.ESRCH, _, _) -> ())
+           end
          with Unix.Unix_error (Unix.ESRCH, _, _) ->
            Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
              (Printf.sprintf

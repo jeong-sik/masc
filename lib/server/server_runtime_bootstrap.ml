@@ -882,7 +882,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     in
     let init_state_blocking () =
       let pg_pool_timeout =
-        Safe_ops.get_env_float_logged "MASC_PG_POOL_TIMEOUT_SEC" ~default:15.0
+        Safe_ops.get_env_float_logged "MASC_PG_POOL_TIMEOUT_SEC" ~default:30.0
       in
       let t0 = Eio.Time.now clock in
       let state =

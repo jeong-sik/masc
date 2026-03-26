@@ -81,6 +81,7 @@ let test_schema_optional_fields () =
    ============================================================ *)
 
 let test_dispatch_unknown_tool () =
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio_main.run (fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     Eio.Switch.run (fun sw ->
@@ -95,6 +96,7 @@ let test_dispatch_unknown_tool () =
   )
 
 let test_dispatch_missing_goal () =
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio_main.run (fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     Eio.Switch.run (fun sw ->

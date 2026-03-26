@@ -180,7 +180,15 @@ let test_dashboard_shell_current_room_status () =
 
 let keeper_boot_entry name : Lib.Keeper_types.keeper_boot_entry =
   let now = "2026-03-25T08:05:54Z" in
-  { name; created_at = now; updated_at = now }
+  {
+    name;
+    persona_name = name;
+    voice_enabled = false;
+    voice_channel = "text_only";
+    voice_agent_id = "";
+    created_at = now;
+    updated_at = now;
+  }
 
 let test_dashboard_shell_counts_resident_keepers () =
   let dir = test_dir () in

@@ -10,12 +10,9 @@ type dashboard_compute_mode =
   | Inline_shared
   | Offloaded_readonly
 
-(** Executor pool for CPU-heavy dashboard compute.  Parameterized dashboard
-    requests can otherwise monopolize the main Eio domain long enough to
-    starve unrelated MCP tool calls. *)
-let _executor_pool : Eio.Executor_pool.t option ref = ref None
-
-let set_executor_pool pool = _executor_pool := Some pool
+(** Executor pool for CPU-heavy dashboard compute.
+    Pool reference is shared via [Executor_pool_ref] in masc_core. *)
+let set_executor_pool pool = Executor_pool_ref.set pool
 
 let isolated_readonly_dashboard_config ~sw ~clock ~(config : Room.config) =
   match config.backend_config.Backend.backend_type with
@@ -50,7 +47,7 @@ let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
         `Done (compute ~config ~sw:pool_sw)
   in
   let offloaded () =
-    match !_executor_pool with
+    match Executor_pool_ref.get () with
     | Some pool ->
         (try
            match

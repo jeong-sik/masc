@@ -81,9 +81,9 @@
 ; Property-based tests (QCheck)
 ; ============================================================
 (tests
- (names test_pbt_mention test_pbt_validation)
- (modules test_pbt_mention test_pbt_validation)
- (libraries masc_mcp alcotest qcheck-core qcheck-alcotest str))
+ (names test_pbt_mention test_pbt_validation test_pbt_text_processing)
+ (modules test_pbt_mention test_pbt_validation test_pbt_text_processing)
+ (libraries masc_mcp alcotest qcheck-core qcheck-alcotest str re))
 
 ; Runtime params + governance registry tests (requires Eio.Mutex)
 (test

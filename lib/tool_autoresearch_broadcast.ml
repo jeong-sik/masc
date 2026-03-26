@@ -1,7 +1,7 @@
 (** Tool_autoresearch_broadcast — SSE broadcast for autoresearch events. *)
 
 let broadcast_cycle_result (state : Autoresearch.loop_state) (record : Autoresearch.cycle_record) =
-  try Sse.broadcast_to Coordinators (`Assoc [
+  try Sse.broadcast (`Assoc [
     ("type", `String "autoresearch_cycle");
     ("loop_id", `String state.loop_id);
     ("cycle", `Int record.cycle);
@@ -16,7 +16,7 @@ let broadcast_cycle_result (state : Autoresearch.loop_state) (record : Autoresea
     Log.Autoresearch.warn "broadcast_cycle_result failed: %s" (Printexc.to_string exn)
 
 let broadcast_loop_lifecycle event_type (state : Autoresearch.loop_state) =
-  try Sse.broadcast_to Coordinators (`Assoc [
+  try Sse.broadcast (`Assoc [
     ("type", `String event_type);
     ("loop_id", `String state.loop_id);
     ("status", `String (Autoresearch.status_to_string state.status));

@@ -27,6 +27,7 @@ let with_temp_base f =
 
 let test_repo_synthesis_swarm_start_creates_operation_session_and_run () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   with_temp_base @@ fun base_path ->

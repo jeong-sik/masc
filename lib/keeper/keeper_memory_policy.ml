@@ -357,16 +357,19 @@ let strip_prefix_ci ~(prefix : string) (s : string) : string option =
       None
 
 let find_state_block (reply : string) : string option =
-  try
-    let start_idx = Re.Str.search_forward (Re.Str.regexp_string "[STATE]") reply 0 in
+  let start_re = Re.str "[STATE]" |> Re.compile in
+  let end_re = Re.str "[/STATE]" |> Re.compile in
+  match Re.exec_opt start_re reply with
+  | None -> None
+  | Some g ->
+    let start_idx = Re.Group.start g 0 in
     let body_start = start_idx + String.length "[STATE]" in
-    let end_idx =
-      Re.Str.search_forward (Re.Str.regexp_string "[/STATE]") reply body_start
-    in
-    if end_idx <= body_start then None
-    else Some (String.sub reply body_start (end_idx - body_start))
-  with Not_found ->
-    None
+    (match Re.exec_opt ~pos:body_start end_re reply with
+     | None -> None
+     | Some g2 ->
+       let end_idx = Re.Group.start g2 0 in
+       if end_idx <= body_start then None
+       else Some (String.sub reply body_start (end_idx - body_start)))
 
 let parse_state_snapshot_from_reply (reply : string) : keeper_state_snapshot option =
   match find_state_block reply with
@@ -552,12 +555,7 @@ let contains_any_ci (text : string) (needles : string list) : bool =
   List.exists
     (fun needle ->
       let n = String.lowercase_ascii needle in
-      n <> ""
-      &&
-      try
-        let _ = Re.Str.search_forward (Re.Str.regexp_string n) hay 0 in
-        true
-      with Not_found -> false)
+      n <> "" && Re.execp (Re.str n |> Re.compile) hay)
     needles
 
 let profile_signal_bonus ~(profile : string) ~(kind : string) ~(text : string) : int =

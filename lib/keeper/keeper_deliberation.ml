@@ -398,13 +398,14 @@ let extract_json_from_response (raw : string) : (Yojson.Safe.t, string) result =
   | json -> Ok json
   | exception Yojson.Json_error _ ->
       (* Try to find JSON between code fences *)
-      let re_fenced = Re.Str.regexp {|```\(json\)?\n?\(.*\)\n?```|} in
-      if Re.Str.string_match re_fenced trimmed 0 then
-        let inner = Re.Str.matched_group 2 trimmed in
-        match Yojson.Safe.from_string (String.trim inner) with
+      let re_fenced = Re.Pcre.re {|```(json)?\n?(.*)\n?```|} |> Re.compile in
+      (match Re.exec_opt re_fenced trimmed with
+      | Some g ->
+        let inner = Re.Group.get g 2 in
+        (match Yojson.Safe.from_string (String.trim inner) with
         | json -> Ok json
-        | exception Yojson.Json_error _ -> Error "JSON parse failed after fence extraction"
-      else
+        | exception Yojson.Json_error _ -> Error "JSON parse failed after fence extraction")
+      | None ->
         (* Try to find first { ... } substring *)
         let len = String.length trimmed in
         let rec find_brace i =
@@ -437,7 +438,7 @@ let extract_json_from_response (raw : string) : (Yojson.Safe.t, string) result =
             else Error "unmatched braces in response"
           else find_brace (i + 1)
         in
-        find_brace 0
+        find_brace 0)
 
 (** Parse a deliberation action from the "action" and "params" fields of the
     MODEL response JSON. Returns the typed action or an error string. *)

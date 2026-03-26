@@ -20,8 +20,8 @@ let bool_of_env_default name ~(default : bool) =
 
 let validate_name name =
   (* Same rule as keeper script: conservative handle chars only. *)
-  let re = Re.Str.regexp "^[A-Za-z0-9._-]+$" in
-  name <> "" && Re.Str.string_match re name 0
+  let re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile in
+  name <> "" && Re.execp re name
 
 let default_soul_profile = "balanced"
 let default_execution_scope = "observe_only"

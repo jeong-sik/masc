@@ -9,6 +9,9 @@
 
 module Compression = Backend_compression
 
+let _compress = Compression.compress_with_header
+let _decompress = Compression.decompress_auto
+
 (** {1 Types} *)
 
 include Backend_types
@@ -292,13 +295,13 @@ let get t key =
     let module C = (val conn : Caqti_eio.CONNECTION) in
     C.find_opt get_q nkey
   ) t.pool with
-  | Ok (Some v) -> Ok (Compression.decompress_auto v)
+  | Ok (Some v) -> Ok (_decompress v)
   | Ok None -> Error (NotFound key)
   | Error err -> Error (caqti_error_to_masc err)
 
 let set t key value =
   let nkey = namespaced_key t.namespace key in
-  let compressed = Compression.compress_with_header value in
+  let compressed = _compress value in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     C.exec set_q (nkey, compressed)
@@ -348,7 +351,7 @@ let get_all t ~prefix =
   ) t.pool with
   | Ok pairs ->
       Ok (List.map (fun (k, v) ->
-        (strip_namespace t.namespace k, Compression.decompress_auto v)
+        (strip_namespace t.namespace k, _decompress v)
       ) pairs)
   | Error err -> Error (caqti_error_to_masc err)
 
@@ -364,13 +367,13 @@ let get_all_matching_recent t ~prefix ~suffix ~updated_since ~limit =
     ) t.pool with
     | Ok pairs ->
         Ok (List.map (fun (k, v) ->
-          (strip_namespace t.namespace k, Compression.decompress_auto v)
+          (strip_namespace t.namespace k, _decompress v)
         ) pairs)
     | Error err -> Error (caqti_error_to_masc err)
 
 let set_if_not_exists t key value =
   let nkey = namespaced_key t.namespace key in
-  let compressed = Compression.compress_with_header value in
+  let compressed = _compress value in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     let* existing = C.find_opt exists_q nkey in
@@ -385,11 +388,11 @@ let set_if_not_exists t key value =
 
 let compare_and_swap t ~key ~expected ~value =
   let nkey = namespaced_key t.namespace key in
-  let compressed_new = Compression.compress_with_header value in
+  let compressed_new = _compress value in
   (* CAS compares stored payload bytes directly. This preserves the public
      raw-value contract because Backend_compression is deterministic for the
      current simplified zstd path (fixed level, no external dictionary). *)
-  let compressed_expected = Compression.compress_with_header expected in
+  let compressed_expected = _compress expected in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     let* row = C.find_opt compare_and_swap_q (nkey, compressed_expected, compressed_new) in
@@ -428,7 +431,7 @@ let extend_lock t ~key ~owner ~ttl_seconds =
 
 (* Pub/Sub using table as queue + NOTIFY for real-time *)
 let publish t ~channel ~message =
-  let compressed = Compression.compress_with_header message in
+  let compressed = _compress message in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     (* Insert into table for reliability (persistent queue) *)
@@ -453,7 +456,7 @@ let subscribe t ~channel ~callback =
     C.find_opt subscribe_q channel
   ) t.pool with
   | Ok (Some msg) ->
-      let decompressed = Compression.decompress_auto msg in
+      let decompressed = _decompress msg in
       callback decompressed;
       Ok ()
   | Ok None -> Ok ()

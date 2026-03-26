@@ -465,18 +465,24 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
      on cold-start on-demand compute.  The frontend retries every 3s via
      scheduleWarmRetry; the proactive refresh loop will populate
      _execution_cache in background.
-     Escape hatch: if the first attempt started more than 90s ago, the
-     proactive warm-up has timed out (75s) or failed silently — fall through
-     to normal on-demand computation.  Note: Proactive_refresh timeout only
-     logs a warning without calling mark_cached_surface_error, so we cannot
-     rely on last_error_unix alone. *)
+     Escape hatch: if the first attempt started more than (timeout + 15s)
+     ago, the proactive warm-up has timed out or failed silently — fall
+     through to normal on-demand computation.  Note: Proactive_refresh
+     timeout only logs a warning without calling mark_cached_surface_error,
+     so we cannot rely on last_error_unix alone. *)
+  let warm_escape_s =
+    float_of_env_default "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
+      ~default:75.0 ~min_v:30.0 ~max_v:300.0
+    +. 15.0
+  in
   let proactive_first_cycle_pending =
     not (cached_surface_has_success _execution_cache)
     && (match _execution_cache.last_attempt_unix with
         | None -> true (* proactive hasn't started yet *)
         | Some attempt_ts ->
             let elapsed = Time_compat.now () -. attempt_ts in
-            elapsed < 90.0 && Option.is_none _execution_cache.last_error_unix)
+            elapsed < warm_escape_s
+            && Option.is_none _execution_cache.last_error_unix)
   in
   if proactive_first_cycle_pending then
     `Assoc [

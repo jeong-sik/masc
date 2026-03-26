@@ -17,14 +17,10 @@ type handler = name:string -> args:Yojson.Safe.t -> (bool * string) option
 let registry : (string, handler) Hashtbl.t = Hashtbl.create 256
 
 (** Mutex protecting all mutable state in this module.
-    Uses Eio.Mutex with Effect.Unhandled fallback for non-Eio test contexts. *)
+    Uses Eio_guard for dual-mode (pre/post Eio runtime) locking. *)
 let dispatch_mu = Eio.Mutex.create ()
-let with_dispatch_rw f =
-  try Eio.Mutex.use_rw ~protect:true dispatch_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-let with_dispatch_ro f =
-  try Eio.Mutex.use_ro dispatch_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_dispatch_rw f = Eio_guard.with_mutex dispatch_mu f
+let with_dispatch_ro f = Eio_guard.with_mutex_ro dispatch_mu f
 
 (** Register a single tool name → handler mapping. *)
 let register ~tool_name ~(handler : handler) =

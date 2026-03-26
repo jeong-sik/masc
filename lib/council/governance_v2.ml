@@ -274,9 +274,7 @@ let is_terminal_case_status = function
   | Executed | Blocked | Closed -> true
   | Pending_ruling | Ready_auto_execute | Needs_human_gate -> false
 
-let run_blocking_lock_op f =
-  try Eio_unix.run_in_systhread f
-  with Stdlib.Effect.Unhandled _ -> f ()
+let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 
 let submit_petition base_path ~title ~origin ~subject_type ~risk_class
     ~requested_action ~source_refs ~created_by =

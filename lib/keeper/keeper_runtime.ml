@@ -168,13 +168,8 @@ let supervisor_sweeps : (string, Pulse.t) Hashtbl.t =
   Hashtbl.create 4
 let supervisor_sweeps_mu = Eio.Mutex.create ()
 
-let with_sweeps_ro f =
-  try Eio.Mutex.use_ro supervisor_sweeps_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-
-let with_sweeps_rw f =
-  try Eio.Mutex.use_rw ~protect:true supervisor_sweeps_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_sweeps_ro f = Eio_guard.with_mutex_ro supervisor_sweeps_mu f
+let with_sweeps_rw f = Eio_guard.with_mutex supervisor_sweeps_mu f
 
 let supervisor_sweep_running base_path =
   with_sweeps_ro (fun () ->
@@ -218,9 +213,7 @@ let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
   Hashtbl.create 4
 let bootstrap_done_mu = Eio.Mutex.create ()
 
-let with_bootstrap_rw f =
-  try Eio.Mutex.use_rw ~protect:true bootstrap_done_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_bootstrap_rw f = Eio_guard.with_mutex bootstrap_done_mu f
 
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
   if stats.enabled then start_supervisor_sweep ctx

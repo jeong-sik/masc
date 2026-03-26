@@ -20,8 +20,7 @@ let run_git_capture_lines ~workdir args =
       | _ -> None
     with Sys_error _ | Unix.Unix_error _ -> None
   in
-  try Eio_unix.run_in_systhread f
-  with Stdlib.Effect.Unhandled _ -> f ()
+  Eio_guard.run_in_systhread f
 
 let repo_root_for ~base_path =
   match run_git_capture_lines ~workdir:base_path [ "rev-parse"; "--show-toplevel" ] with

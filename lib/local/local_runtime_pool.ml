@@ -97,9 +97,7 @@ let empty_pool = {
 let pool : pool_state ref = ref empty_pool
 let pool_mu = Eio.Mutex.create ()
 
-let with_pool_lock f =
-  try Eio.Mutex.use_rw ~protect:true pool_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_pool_lock f = Eio_guard.with_mutex pool_mu f
 
 let reset () = with_pool_lock (fun () -> pool := empty_pool)
 

@@ -48,13 +48,8 @@ let registry_tbl : (string, erased) Hashtbl.t = Hashtbl.create 64
     Falls back to lock-free when Eio scheduler is absent (tests, init). *)
 let mu = Eio.Mutex.create ()
 
-let with_rw f =
-  try Eio.Mutex.use_rw ~protect:true mu f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-
-let with_ro f =
-  try Eio.Mutex.use_ro mu f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_rw f = Eio_guard.with_mutex mu f
+let with_ro f = Eio_guard.with_mutex_ro mu f
 
 (* ── registration ────────────────────────────────────────────── *)
 

@@ -190,9 +190,7 @@ let loaded_paths : (string, bool) Hashtbl.t = Hashtbl.create 4
 
 (* Mutex protecting balance_cache and loaded_paths. *)
 let economy_mu = Eio.Mutex.create ()
-let with_economy_rw f =
-  try Eio.Mutex.use_rw ~protect:true economy_mu (fun () -> f ())
-  with Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_economy_rw f = Eio_guard.with_mutex economy_mu f
 
 let load_balances_from_ledger base_path =
   if with_economy_rw (fun () -> Hashtbl.mem loaded_paths base_path) then ()

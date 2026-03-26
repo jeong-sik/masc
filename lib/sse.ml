@@ -77,13 +77,8 @@ let client_count_atomic = Atomic.make 0
     - [Effect.Unhandled _]: no Eio scheduler installed at all.
     - [Eio.Mutex.Poisoned _]: mutex created but scheduler not running
       (e.g. Alcotest without [Eio_main.run] wrapper). *)
-let with_registry_rw f =
-  try Eio.Mutex.use_rw ~protect:true registry_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-
-let with_registry_ro f =
-  try Eio.Mutex.use_ro registry_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_registry_rw f = Eio_guard.with_mutex registry_mutex f
+let with_registry_ro f = Eio_guard.with_mutex_ro registry_mutex f
 
 type session_snapshot = {
   session_id : string;
@@ -358,13 +353,8 @@ type external_subscriber = {
 let external_subscribers : (string, external_subscriber) Hashtbl.t = Hashtbl.create 8
 let ext_sub_mutex = Eio.Mutex.create ()
 
-let with_ext_sub_rw f =
-  try Eio.Mutex.use_rw ~protect:true ext_sub_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
-
-let with_ext_sub_ro f =
-  try Eio.Mutex.use_ro ext_sub_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+let with_ext_sub_rw f = Eio_guard.with_mutex ext_sub_mutex f
+let with_ext_sub_ro f = Eio_guard.with_mutex_ro ext_sub_mutex f
 
 let current_external_subscriber_count () =
   with_ext_sub_ro (fun () -> Hashtbl.length external_subscribers)

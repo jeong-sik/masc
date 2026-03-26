@@ -17,16 +17,16 @@ let client_count_atomic = Atomic.make 0
 let client_id_counter = Atomic.make 0
 
 let with_registry_rw f =
-  try Eio.Mutex.use_rw ~protect:true registry_mutex f
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Stdlib.Effect.Unhandled _ -> f ()
+  if Eio_guard.is_ready () then
+    (try Eio.Mutex.use_rw ~protect:true registry_mutex f
+     with Eio.Cancel.Cancelled _ as exn -> raise exn)
+  else f ()
 
 let with_registry_ro f =
-  try Eio.Mutex.use_ro registry_mutex f
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Stdlib.Effect.Unhandled _ -> f ()
+  if Eio_guard.is_ready () then
+    (try Eio.Mutex.use_ro registry_mutex f
+     with Eio.Cancel.Cancelled _ as exn -> raise exn)
+  else f ()
 
 let client_matches (client : client) (value : event) =
   let room_ok =

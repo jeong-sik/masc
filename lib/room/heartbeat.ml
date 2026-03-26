@@ -21,12 +21,9 @@ let mu = Eio.Mutex.create ()
     scheduler running) while allowing tests that execute outside
     [Eio_main.run] to proceed without [Effect.Unhandled]. *)
 let with_mu_safe mode f =
-  try
-    match mode with
-    | `RW -> Eio.Mutex.use_rw ~protect:true mu f
-    | `RO -> Eio.Mutex.use_ro mu f
-  with
-  | Stdlib.Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+  match mode with
+  | `RW -> Eio_guard.with_mutex mu f
+  | `RO -> Eio_guard.with_mutex_ro mu f
 
 let generate_id () =
   Atomic.incr heartbeat_counter;

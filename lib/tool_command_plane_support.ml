@@ -166,8 +166,7 @@ let run_process ~prog ~argv ~env =
     in
     { exit_code; stdout; stderr }
   in
-  try Eio_unix.run_in_systhread f
-  with Stdlib.Effect.Unhandled _ -> f ()
+  Eio_guard.run_in_systhread f
 
 let wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid =
   let start = Unix.gettimeofday () in

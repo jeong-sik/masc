@@ -1,0 +1,13 @@
+(include_subdirs no)
+(library
+ (name masc_board)
+ (public_name masc_mcp.masc_board)
+ (wrapped false)
+ (modules board_types)
+ (libraries
+   yojson
+   str
+   eio
+   mirage-crypto
+   mirage-crypto-rng)
+ (preprocess (pps ppx_deriving.show ppx_deriving.eq)))

@@ -1,5 +1,11 @@
 open Masc_mcp
 
+let with_eio f =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  f ()
+
 let with_env name value f =
   let saved = Sys.getenv_opt name in
   (match value with
@@ -178,6 +184,7 @@ let test_force_jsonl_fallback_env () =
         [ "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" ])
 
 let test_constructor_is_pure () =
+  with_eio @@ fun () ->
   with_temp_dir "startup-pure" (fun dir ->
       let agents_dir = Room.agents_dir (Room.default_config dir |> Room.config_with_resolved_scope) in
       Fs_compat.mkdir_p agents_dir;
@@ -187,6 +194,7 @@ let test_constructor_is_pure () =
         (List.length (Session.connected_agents state.Mcp_server.session_registry)))
 
 let test_restore_persisted_sessions_uses_scoped_agents_dir () =
+  with_eio @@ fun () ->
   with_temp_dir "startup-scope" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
       let root_agents = Room.agents_dir state.Mcp_server.room_config in
@@ -206,6 +214,7 @@ let test_restore_persisted_sessions_uses_scoped_agents_dir () =
         [ "room-agent" ] restored)
 
 let test_keeper_paths_use_cluster_root () =
+  with_eio @@ fun () ->
   with_temp_dir "startup-cluster" (fun dir ->
       with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
           let config = Room.default_config dir |> Room.config_with_resolved_scope in

@@ -47,13 +47,6 @@ type trajectory = {
 
 (** {1 Cost estimation} *)
 
-val model_token_pricing : string -> float * float
-(** Per-token pricing by model category. Scheduled for removal (#3029). *)
-
-val estimate_turn_cost :
-  model:string -> input_tokens:int -> output_tokens:int -> float
-(** Estimate cost for a single LLM turn. Scheduled for removal (#3029). *)
-
 val tool_cost_estimate : string -> float
 (** Rough per-call cost estimate for keeper tools. *)
 

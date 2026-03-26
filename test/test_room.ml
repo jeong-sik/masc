@@ -195,7 +195,9 @@ let test_event_log () =
 
 let contains_error result = String.sub result 0 3 = "\xE2\x9D\x8C"  (* ❌ *)
 
-(* Helper to create fresh test environment *)
+(* Helper to create fresh test environment.
+   Eio context + Fs_compat.set_fs are set up in the top-level runner,
+   so Room.default_config gets FileSystem backend. *)
 let with_test_env f =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
@@ -1438,7 +1440,9 @@ let test_heartbeat_concurrent_start_stop () =
   Alcotest.(check int) "list empty after cleanup" 0 (List.length (Heartbeat.list ()))
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Random.init 42;
   Alcotest.run "Room" [
     (* === Happy Path Tests === *)

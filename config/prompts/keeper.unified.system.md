@@ -1,3 +1,9 @@
+---
+description: keeper unified loop system prompt template
+category: keeper
+template_variables: [identity_header, trait_lines, instructions_block, goal_lines]
+---
+
 {{identity_header}}
 {{trait_lines}}{{instructions_block}}
 {{goal_lines}}

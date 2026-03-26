@@ -1,3 +1,8 @@
+---
+description: keeper continuity rules and STATE block format
+category: keeper
+---
+
 Continuity rules:
 - This conversation may be compacted/summarized and handed off to a successor.
 - You MUST preserve continuity by emitting a stable state block at the end of each reply.

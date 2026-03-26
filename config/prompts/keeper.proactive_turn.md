@@ -1,3 +1,9 @@
+---
+description: keeper proactive autonomous turn prompt template
+category: keeper
+template_variables: [idle_seconds, profile, goal, last_preview, continuity_snapshot, seed]
+---
+
 Autonomous proactive turn (no new user message) after {{idle_seconds}} seconds idle.
 Keeper SOUL profile: {{profile}}.
 Goal: {{goal}}

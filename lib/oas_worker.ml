@@ -396,8 +396,10 @@ let default_model_strings ~cascade_name:_ =
 (* Named model execution                                            *)
 (* ================================================================ *)
 
-let require_eio () =
-  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+let require_eio ?sw ?net () =
+  let sw = match sw with Some s -> Some s | None -> Eio_context.get_switch_opt () in
+  let net = match net with Some n -> Some n | None -> Eio_context.get_net_opt () in
+  match sw, net with
   | Some sw, Some net -> Ok (sw, net)
   | None, _ -> Error "Eio switch not available (running outside server context)"
   | _, None -> Error "Eio net not available (running outside server context)"
@@ -492,9 +494,11 @@ let run_named
     ?transport
     ?(allowed_paths = [])
     ?working_context
+    ?sw
+    ?net
     ()
   : (run_result, string) result =
-  match require_eio () with
+  match require_eio ?sw ?net () with
   | Error e -> Error e
   | Ok (sw, net) ->
   let defaults = default_model_strings ~cascade_name in

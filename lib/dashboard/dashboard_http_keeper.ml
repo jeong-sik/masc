@@ -11,11 +11,12 @@ open Keeper_status_bridge
 include Dashboard_http_keeper_detail
 
 let prompt_block_json key =
+  let resolved = Prompt_registry.resolve_prompt key in
   `Assoc
     [
       ("key", `String key);
-      ("source", `String (Prompt_registry.prompt_source key));
-      ("text", `String (Prompt_registry.get_prompt key));
+      ("source", `String resolved.source);
+      ("text", `String resolved.effective);
     ]
 
 let tokens_per_sec_json ~tokens ~latency_ms =

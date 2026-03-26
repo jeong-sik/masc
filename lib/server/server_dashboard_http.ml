@@ -460,6 +460,32 @@ let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_j
                 ]))
 
 let dashboard_room_truth_http_json ~state ~sw ~clock request =
+  (* Fast-path: if the proactive execution refresh hasn't produced a result
+     yet, return "initializing" immediately instead of blocking for 15-20s
+     on cold-start on-demand compute.  The frontend retries every 3s via
+     scheduleWarmRetry; the proactive refresh loop will populate
+     _execution_cache in background.
+     Escape hatch: if the first attempt started more than 90s ago, the
+     proactive warm-up has timed out (75s) or failed silently — fall through
+     to normal on-demand computation.  Note: Proactive_refresh timeout only
+     logs a warning without calling mark_cached_surface_error, so we cannot
+     rely on last_error_unix alone. *)
+  let proactive_first_cycle_pending =
+    not (cached_surface_has_success _execution_cache)
+    && (match _execution_cache.last_attempt_unix with
+        | None -> true (* proactive hasn't started yet *)
+        | Some attempt_ts ->
+            let elapsed = Time_compat.now () -. attempt_ts in
+            elapsed < 90.0 && Option.is_none _execution_cache.last_error_unix)
+  in
+  if proactive_first_cycle_pending then
+    `Assoc [
+      ("status", `String "initializing");
+      ("generated_at", `String (Types.now_iso ()));
+      ("message",
+       `String "Execution snapshot is still warming up. The dashboard will retry automatically.");
+    ]
+  else
   with_dashboard_timeout ~clock (fun () ->
   let config = state.Mcp_server.room_config in
   let started_at = Unix.gettimeofday () in

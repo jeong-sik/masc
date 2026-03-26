@@ -268,29 +268,30 @@ let parse_meta_comment (line : string) (meta : mermaid_meta) : mermaid_meta =
       | None -> meta)
     else meta
 
-(* Pre-compiled regexes for better performance and reliability *)
-(* Support both plain [text] and quoted ["text"] syntax *)
+(* Pre-compiled regexes for better performance and fiber safety.
+   All use Re (immutable compiled values) instead of Re.Str (global mutable state). *)
 (* Node IDs can contain hyphens (kebab-case like vision-analyze, parse-url) *)
-let rect_re = Re.Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)\[\([^]]*\)\]|}
-let diamond_re = Re.Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\){\([^}]*\)}|}
-let subroutine_re = Re.Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)\[\[\([^]]*\)\]\]|}
+let rect_re = Re.Pcre.re {|^([A-Za-z_][A-Za-z0-9_-]*)\[([^\]]*)\]|} |> Re.compile
+let diamond_re = Re.Pcre.re {|^([A-Za-z_][A-Za-z0-9_-]*)\{([^}]*)\}|} |> Re.compile
+let subroutine_re = Re.Pcre.re {|^([A-Za-z_][A-Za-z0-9_-]*)\[\[([^\]]*)\]\]|} |> Re.compile
 (* Stadium (rounded): (...) - used for Retry, Fallback, Race *)
-let stadium_re = Re.Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)(("\([^"]*\)"))|}
-let stadium_noquote_re = Re.Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)((\([^)]*\)))|}
-(* Circle: ((...)) - used for MASC nodes - checked first due to double parens *)
-let circle_re = Re.Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)((("\([^"]*\)")))|}
-let circle_noquote_re = Re.Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)(((\([^)]*\))))|}
+let stadium_re = Re.Pcre.re {|^([A-Za-z_][A-Za-z0-9_-]*)\(\("([^"]*)"\)\)|} |> Re.compile
+let stadium_noquote_re = Re.Pcre.re {|^([A-Za-z_][A-Za-z0-9_-]*)\(\(([^)]*)\)\)|} |> Re.compile
+(* Circle: (((...))) - used for MASC nodes - checked first due to double parens *)
+let circle_re = Re.Pcre.re {|^([A-Za-z_][A-Za-z0-9_-]*)\(\(\("([^"]*)"\)\)\)|} |> Re.compile
+let circle_noquote_re = Re.Pcre.re {|^([A-Za-z_][A-Za-z0-9_-]*)\(\(\(([^)]*)\)\)\)|} |> Re.compile
 (* Simple stadium without double parens: ("...") *)
-let stadium_simple_re = Re.Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)("\([^"]*\)")|}
+let stadium_simple_re = Re.Pcre.re {|^([A-Za-z_][A-Za-z0-9_-]*)\("([^"]*)"\)|} |> Re.compile
 (* Trapezoid shape: id>/"content"/ used for Adapter nodes *)
-let trap_re = Re.Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)>/"\([^"]*\)"/|}
-let arrow_re = Re.Str.regexp {|[ ]*-->[ ]*|}
-let ampersand_re = Re.Str.regexp {|[ ]*&[ ]*|}
-let quote_re = Re.Str.regexp {|\([^ "]+\)[ ]*"\([^"]*\)"|}
-let single_quote_re = Re.Str.regexp {|\([^ ']+\)[ ]*'\([^']*\)'|}  (* Also accept single quotes *)
-let simple_model_re = Re.Str.regexp {|\([^ ]+\)|}
-let quorum_id_re = Re.Str.regexp {|quorum_\([0-9]+\)|}
-let consensus_id_re = Re.Str.regexp {|consensus_\([0-9]+\)|}
+let trap_re = Re.Pcre.re {|^([A-Za-z_][A-Za-z0-9_-]*)>/"([^"]*)"/|} |> Re.compile
+let arrow_re = Re.Pcre.re {|[ ]*-->[ ]*|} |> Re.compile
+let ampersand_re = Re.Pcre.re {|[ ]*&[ ]*|} |> Re.compile
+let quote_re = Re.Pcre.re {|^([^ "]+)[ ]*"([^"]*)"|}  |> Re.compile
+let single_quote_re = Re.Pcre.re {|^([^ ']+)[ ]*'([^']*)'|} |> Re.compile  (* Also accept single quotes *)
+let simple_model_re = Re.Pcre.re {|^([^ ]+)|} |> Re.compile
+let quorum_id_re = Re.Pcre.re {|^quorum_([0-9]+)|} |> Re.compile
+let consensus_id_re = Re.Pcre.re {|^consensus_([0-9]+)|} |> Re.compile
+let base64_re = Re.Pcre.re {|^([^ ]+) *%\{([^}]+)\}$|} |> Re.compile
 
 (** Known MODEL model names *)
 let model_models = ["gemini"; "claude"; "codex"; "gpt"; "gpt4"; "gpt5"; "o1"; "o3"; "sonnet"; "opus"; "haiku"; "stub"]
@@ -329,24 +330,29 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
   match shape with
   | `Diamond ->
       (* Diamond nodes: Quorum, Gate, or Merge *)
-      if Re.Str.string_match quorum_id_re id_lower 0 then
-        let n = int_of_string (Re.Str.matched_group 1 id_lower) in
+      (match Re.exec_opt quorum_id_re id_lower with
+      | Some group ->
+        let n = int_of_string (Re.Group.get group 1) in
         Ok (Quorum { consensus = Count n; nodes = []; weights = [] })
-      else if Re.Str.string_match consensus_id_re id_lower 0 then
-        let n = int_of_string (Re.Str.matched_group 1 id_lower) in
+      | None ->
+      match Re.exec_opt consensus_id_re id_lower with
+      | Some group ->
+        let n = int_of_string (Re.Group.get group 1) in
         Ok (Quorum { consensus = Count n; nodes = []; weights = [] })
-      else if String.length id_lower >= 5 && String.sub id_lower 0 5 = "gate_" then
+      | None ->
+      if String.length id_lower >= 5 && String.sub id_lower 0 5 = "gate_" then
         Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None })
       else if String.length id_lower >= 6 && String.sub id_lower 0 6 = "merge_" then
         Ok (Merge { strategy = Concat; nodes = [] })
       else if String.length id_lower >= 5 && String.sub id_lower 0 5 = "goal_" then
         (* goal_metric node with text: "op:value:max_iter" e.g. "gte:0.90:10" *)
         let metric = String.sub id 5 (String.length id - 5) in
-        let goal_text_re = Re.Str.regexp {|^\([a-z]+\):\([0-9.]+\):\([0-9]+\)$|} in
-        if Re.Str.string_match goal_text_re text 0 then
-          let op_str = Re.Str.matched_group 1 text in
-          let value = float_of_string (Re.Str.matched_group 2 text) in
-          let max_iter = int_of_string (Re.Str.matched_group 3 text) in
+        let goal_text_re = Re.Pcre.re {|^([a-z]+):([0-9.]+):([0-9]+)$|} |> Re.compile in
+        (match Re.exec_opt goal_text_re text with
+        | Some group ->
+          let op_str = Re.Group.get group 1 in
+          let value = float_of_string (Re.Group.get group 2) in
+          let max_iter = int_of_string (Re.Group.get group 3) in
           let operator = match op_str with
             | "gt" -> Gt | "gte" -> Gte | "lt" -> Lt | "lte" -> Lte | "eq" -> Eq | "neq" -> Neq
             | _ -> Gte
@@ -362,7 +368,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
             conversational = false;
             relay_models = [];
           })
-        else
+        | None ->
           (* Fallback: use default values if text doesn't match pattern *)
           Ok (GoalDriven {
             goal_metric = metric;
@@ -374,7 +380,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
             strategy_hints = [];
             conversational = false;
             relay_models = [];
-          })
+          }))
       else if String.length id_lower >= 5 && String.sub id_lower 0 5 = "eval_" then
         (* eval_ prefix: Evaluator node *)
         Ok (Evaluator { candidates = []; scoring_func = "model_judge"; scoring_prompt = None; select_strategy = Best; min_score = None })
@@ -412,7 +418,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
             else
               Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None })
           with Invalid_argument _ ->
-            Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None }))
+            Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None })))
 
   | `Subroutine ->
       (* Subroutine nodes: Ref, Pipeline, Fanout, Map, Bind *)
@@ -433,26 +439,29 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
   | `Rect ->
       (* Rectangle nodes: MODEL or Tool *)
       (* First, check for explicit "model:<model>\nprompt" or "MODEL:<model>\nprompt" in content *)
-      let model_content_re = Re.Str.regexp_case_fold {|^model:\([a-z0-9_-]+\)[ \n\t]+\(.*\)$|} in
-      let tool_content_re = Re.Str.regexp_case_fold {|^tool:\([a-z0-9_-]+\)[ \n\t]*\(.*\)$|} in
+      let model_content_re = Re.Pcre.re ~flags:[`CASELESS; `DOTALL] {|^model:([a-z0-9_-]+)[ \n\t]+(.*)$|} |> Re.compile in
+      let tool_content_re = Re.Pcre.re ~flags:[`CASELESS; `DOTALL] {|^tool:([a-z0-9_-]+)[ \n\t]*(.*)$|} |> Re.compile in
 
-      if Re.Str.string_match model_content_re text 0 then
+      (match Re.exec_opt model_content_re text with
+      | Some group ->
         (* Explicit MODEL syntax in content: model:model\nprompt or model:model\nprompt +tools *)
-        let model = String.lowercase_ascii (Re.Str.matched_group 1 text) in
-        let raw_prompt = trim (Re.Str.matched_group 2 text) in
+        let model = String.lowercase_ascii (Re.Group.get group 1) in
+        let raw_prompt = trim (Re.Group.get group 2) in
         let (prompt_clean, has_tools) = extract_tools_flag raw_prompt in
         let prompt = if prompt_clean = "" then "{{input}}" else prompt_clean in
         let tools = make_tools_value has_tools in
         Ok (Model { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
-      else if Re.Str.string_match tool_content_re text 0 then
+      | None ->
+      match Re.exec_opt tool_content_re text with
+      | Some group ->
         (* Explicit Tool syntax in content: tool:name\nargs *)
-        let name = Re.Str.matched_group 1 text in
-        let args_str = trim (Re.Str.matched_group 2 text) in
+        let name = Re.Group.get group 1 in
+        let args_str = trim (Re.Group.get group 2) in
         let args = if args_str = "" then `Null else
           try Yojson.Safe.from_string args_str with Yojson.Json_error _ -> `String args_str
         in
         Ok (Tool { name; args })
-      else
+      | None ->
         (* Fallback: Check if ID starts with known MODEL model *)
         let is_model = List.exists (fun model ->
           String.length id_lower >= String.length model &&
@@ -480,7 +489,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
           let (text_clean, has_tools) = extract_tools_flag text in
           let prompt = if text_clean = "" then id else text_clean in
           let tools = make_tools_value has_tools in
-          Ok (Model { model = "gemini"; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
+          Ok (Model { model = "gemini"; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false }))
 
   | `Trap ->
       (* Trapezoid nodes: Adapter - parse "Adapt[input_ref → transform_type]" or similar *)
@@ -527,11 +536,12 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
       (* Strip emoji prefix if present *)
       let stripped =
         if String.length text > 2 then
-          (* Try to find MASC: prefix *)
-          try
-            let masc_idx = Re.Str.search_forward (Re.Str.regexp_string "MASC:") text 0 in
+          let masc_re = Re.compile (Re.str "MASC:") in
+          match Re.exec_opt masc_re text with
+          | Some group ->
+            let masc_idx = Re.Group.start group 0 in
             String.sub text masc_idx (String.length text - masc_idx)
-          with Not_found -> text
+          | None -> text
         else text
       in
       if String.length stripped >= 14 && String.sub (String.lowercase_ascii stripped) 0 14 = "masc:broadcast" then
@@ -559,49 +569,29 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
 (** Parse node shape and extract content *)
 let parse_node_definition (s : string) : (string * mermaid_node) option =
   let s = trim s in
+  let try_match re shape =
+    match Re.exec_opt re s with
+    | Some group ->
+      let id = Re.Group.get group 1 in
+      let content = Re.Group.get group 2 in
+      Some (id, { id; shape; content = trim content })
+    | None -> None
+  in
   if s = "" then None
   (* Try subroutine first (more specific pattern: [[...]]) *)
-  else if Re.Str.string_match subroutine_re s 0 then
-    let id = Re.Str.matched_group 1 s in
-    let content = Re.Str.matched_group 2 s in
-    Some (id, { id; shape = `Subroutine; content = trim content })
+  else match try_match subroutine_re `Subroutine with Some _ as r -> r | None ->
   (* Trapezoid: >/"..."/ used for Adapter nodes *)
-  else if Re.Str.string_match trap_re s 0 then
-    let id = Re.Str.matched_group 1 s in
-    let content = Re.Str.matched_group 2 s in
-    Some (id, { id; shape = `Trap; content = trim content })
+  match try_match trap_re `Trap with Some _ as r -> r | None ->
   (* Then diamond: {...} *)
-  else if Re.Str.string_match diamond_re s 0 then
-    let id = Re.Str.matched_group 1 s in
-    let content = Re.Str.matched_group 2 s in
-    Some (id, { id; shape = `Diamond; content = trim content })
+  match try_match diamond_re `Diamond with Some _ as r -> r | None ->
   (* Stadium (rounded): ("...") - used for Retry, Fallback, Race *)
-  else if Re.Str.string_match stadium_simple_re s 0 then
-    let id = Re.Str.matched_group 1 s in
-    let content = Re.Str.matched_group 2 s in
-    Some (id, { id; shape = `Stadium; content = trim content })
-  else if Re.Str.string_match stadium_re s 0 then
-    let id = Re.Str.matched_group 1 s in
-    let content = Re.Str.matched_group 2 s in
-    Some (id, { id; shape = `Stadium; content = trim content })
-  else if Re.Str.string_match stadium_noquote_re s 0 then
-    let id = Re.Str.matched_group 1 s in
-    let content = Re.Str.matched_group 2 s in
-    Some (id, { id; shape = `Stadium; content = trim content })
+  match try_match stadium_simple_re `Stadium with Some _ as r -> r | None ->
+  match try_match stadium_re `Stadium with Some _ as r -> r | None ->
+  match try_match stadium_noquote_re `Stadium with Some _ as r -> r | None ->
   (* Circle: (((...))) - used for MASC nodes *)
-  else if Re.Str.string_match circle_re s 0 then
-    let id = Re.Str.matched_group 1 s in
-    let content = Re.Str.matched_group 2 s in
-    Some (id, { id; shape = `Circle; content = trim content })
-  else if Re.Str.string_match circle_noquote_re s 0 then
-    let id = Re.Str.matched_group 1 s in
-    let content = Re.Str.matched_group 2 s in
-    Some (id, { id; shape = `Circle; content = trim content })
+  match try_match circle_re `Circle with Some _ as r -> r | None ->
+  match try_match circle_noquote_re `Circle with Some _ as r -> r | None ->
   (* Finally rectangle: [...] *)
-  else if Re.Str.string_match rect_re s 0 then
-    let id = Re.Str.matched_group 1 s in
-    let content = Re.Str.matched_group 2 s in
-    Some (id, { id; shape = `Rect; content = trim content })
-  else
-    None
+  match try_match rect_re `Rect with Some _ as r -> r | None ->
+  None
 

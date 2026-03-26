@@ -15,7 +15,8 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   | Tool { name; _ } -> name
   | Quorum { consensus; _ } -> Printf.sprintf "quorum_%s" (Chain_types.consensus_mode_to_string consensus)
   | Gate { condition; _ } ->
-      let safe_cond = Re.Str.global_replace (Re.Str.regexp "[^a-zA-Z0-9_]") "_" condition in
+      let non_alnum_re = Re.Pcre.re {|[^a-zA-Z0-9_]|} |> Re.compile in
+      let safe_cond = Re.replace_string non_alnum_re ~by:"_" condition in
       Printf.sprintf "gate_%s" (String.sub safe_cond 0 (min 10 (String.length safe_cond)))
   | Merge _ -> "merge"
   | Pipeline _ -> "seq"
@@ -63,10 +64,13 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
     - Newlines → space (Mermaid doesn't support \n in labels)
     - Double quotes → single quotes
     - Truncate very long text for readability *)
+let newline_re = Re.compile (Re.char '\n')
+let dquote_re = Re.compile (Re.char '"')
+
 let escape_for_mermaid ?(max_len=100) (text : string) : string =
   (* Replace newlines with spaces, double quotes with single quotes *)
-  let s1 = Re.Str.global_replace (Re.Str.regexp "\n") " " text in
-  let s2 = Re.Str.global_replace (Re.Str.regexp {|"|}) {|'|} s1 in
+  let s1 = Re.replace_string newline_re ~by:" " text in
+  let s2 = Re.replace_string dquote_re ~by:"'" s1 in
   if String.length s2 > max_len then
     String.sub s2 0 (max_len - 3) ^ "..."
   else
@@ -360,9 +364,11 @@ let chain_to_mermaid ?(styled=true) (chain : chain) : string =
     (* Escape double-quotes to single-quotes, but preserve backslash-escaped ones *)
     let text_escaped =
       let placeholder = "\x00ESCAPED_QUOTE\x00" in
-      let step1 = Re.Str.global_replace (Re.Str.regexp {|\\"|}) placeholder text in
-      let step2 = Re.Str.global_replace (Re.Str.regexp {|"|}) {|'|} step1 in
-      Re.Str.global_replace (Re.Str.regexp_string placeholder) {|\\"|} step2
+      let escaped_dquote_re = Re.Pcre.re {|\\"|} |> Re.compile in
+      let placeholder_re = Re.compile (Re.str placeholder) in
+      let step1 = Re.replace_string escaped_dquote_re ~by:placeholder text in
+      let step2 = Re.replace_string dquote_re ~by:"'" step1 in
+      Re.replace_string placeholder_re ~by:{|\\"|} step2
     in
     let class_suffix = if styled then ":::" ^ node_type_to_class node.node_type else "" in
     Buffer.add_string buf (Printf.sprintf "    %s%s\"%s\"%s%s\n"

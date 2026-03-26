@@ -455,15 +455,13 @@ let substitute_json ctx (json : Yojson.Safe.t) : Yojson.Safe.t =
   (* Tool args should not carry unresolved {{...}} placeholders, because
      external MCP servers may treat them as literal invalid values. *)
   let strip_unresolved_placeholders (s : string) : string =
-    let re = Re.Str.regexp "{{[^}]+}}" in
-    try
-      ignore (Re.Str.search_forward re s 0);
+    let re = Re.Pcre.re {|\{\{[^}]+\}\}|} |> Re.compile in
+    if Re.execp re s then begin
       Log.Misc.info "unresolved placeholder stripped in tool args: %s"
         (truncate_with_ellipsis s);
-      Re.Str.global_replace re "" s
-    with
-    | Not_found -> s
-    | _ -> s
+      Re.replace_string re ~by:"" s
+    end else
+      s
   in
   let rec map = function
     | `String s ->
@@ -540,8 +538,8 @@ let should_retry (retry_on : string list) (error_msg : string) : bool =
   | patterns ->
       List.exists (fun pattern ->
         try
-          let regex = Re.Str.regexp_case_fold pattern in
-          Re.Str.search_forward regex error_msg 0 >= 0
-        with Failure _ | Not_found | Invalid_argument _ ->
+          let regex = Re.Pcre.re ~flags:[`CASELESS] pattern |> Re.compile in
+          Re.execp regex error_msg
+        with Failure _ | Re.Pcre.Parse_error | Re.Pcre.Not_supported ->
           String.sub error_msg 0 (min (String.length pattern) (String.length error_msg)) = pattern
       ) patterns

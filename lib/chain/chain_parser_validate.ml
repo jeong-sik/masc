@@ -123,17 +123,11 @@ let extract_ref_root ~known_ids (s : string) : string option =
     else
       None
 
+let template_var_re = Re.Pcre.re {|\{\{([^}]+)\}\}|} |> Re.compile
+
 let extract_template_vars (s : string) : string list =
-  let re = Re.Str.regexp "{{\\([^}]+\\)}}" in
-  let rec loop pos acc =
-    try
-      let _ = Re.Str.search_forward re s pos in
-      let var = Re.Str.matched_group 1 s |> String.trim in
-      let next = Re.Str.match_end () in
-      loop next (var :: acc)
-    with Not_found -> List.rev acc
-  in
-  loop 0 []
+  Re.all template_var_re s
+  |> List.map (fun group -> Re.Group.get group 1 |> String.trim)
 
 let rec collect_template_vars_json acc (json : Yojson.Safe.t) =
   match json with

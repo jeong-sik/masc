@@ -3,7 +3,8 @@
 module Tool_registry = Masc_mcp.Tool_registry
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let open Alcotest in
   run "Tool_registry"
     [

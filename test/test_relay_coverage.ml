@@ -852,7 +852,8 @@ let test_estimate_context_claude_sonnet () =
    ============================================================ *)
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   run "Relay Coverage" [
     "relay_config.defaults", [
       test_case "threshold" `Quick test_default_config_threshold;

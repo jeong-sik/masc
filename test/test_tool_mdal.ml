@@ -593,7 +593,8 @@ let test_terminal_states_reject_iterate () =
   reset_loop_registry ()
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mdal.measure_metric_override := Some mock_measure_metric;
   Alcotest.run "Tool_mdal"
     [

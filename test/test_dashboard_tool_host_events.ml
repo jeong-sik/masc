@@ -60,7 +60,8 @@ let test_record_writes_audit_ring_and_telemetry () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config base_dir in
       let report =
         {

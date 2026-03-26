@@ -261,7 +261,7 @@
 (test
  (name test_tool_improve_loop)
  (modules test_tool_improve_loop)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
 ; Board TTL + metadata classification tests
 (test
  (name test_board_ttl)
@@ -336,7 +336,7 @@
 (test
  (name test_cache_eio)
  (modules test_cache_eio)
- (libraries masc_mcp alcotest str yojson))
+ (libraries masc_mcp alcotest str yojson eio eio_main))
 
 (test
  (name test_chain_native_eio_bootstrap)
@@ -356,12 +356,12 @@
 (test
  (name test_hebbian_eio)
  (modules test_hebbian_eio)
- (libraries masc_mcp alcotest str yojson))
+ (libraries masc_mcp alcotest str yojson eio eio_main))
 
 (test
  (name test_planning_eio)
  (modules test_planning_eio)
- (libraries masc_mcp alcotest str yojson))
+ (libraries masc_mcp alcotest str yojson eio eio_main))
 
 ; Thompson Sampling module tests (Thompson Sampling + Health Gate)
 (test
@@ -421,7 +421,7 @@
 (test
  (name test_room_messages_raw)
  (modules test_room_messages_raw)
- (libraries masc_mcp alcotest unix))
+ (libraries masc_mcp alcotest unix eio eio_main))
 
 (test
  (name test_room_messages_pg)
@@ -432,7 +432,7 @@
 (test
  (name test_tool_goals)
  (modules test_tool_goals)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 (test
  (name test_command_plane_v2)
@@ -458,7 +458,7 @@
 (test
  (name test_cp_section_cache)
  (modules test_cp_section_cache)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 (test
  (name test_cp_jsonl_tail)
@@ -468,7 +468,7 @@
 (executable
  (name test_cp_search_fabric_benchmark)
  (modules test_cp_search_fabric_benchmark)
- (libraries masc_mcp yojson unix))
+ (libraries masc_mcp yojson unix eio eio_main))
 
 (executable
  (name test_repo_synthesis_benchmark)
@@ -483,7 +483,7 @@
 (test
  (name test_swarm_persistence)
  (modules test_swarm_persistence)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 (test
  (name test_tool_team_session)
@@ -527,15 +527,15 @@
 (test
  (name test_keeper_tools_oas)
  (modules test_keeper_tools_oas)
- (libraries masc_mcp agent_sdk alcotest unix))
+ (libraries masc_mcp agent_sdk alcotest unix eio eio_main))
 (test
  (name test_keeper_tool_exposure)
  (modules test_keeper_tool_exposure)
- (libraries masc_mcp alcotest unix))
+ (libraries masc_mcp alcotest unix eio eio_main))
 (test
  (name test_keeper_task_dispatch)
  (modules test_keeper_task_dispatch)
- (libraries masc_mcp agent_sdk alcotest re unix))
+ (libraries masc_mcp agent_sdk alcotest re unix eio eio_main))
 (test
  (name test_autoresearch_knowledge)
  (modules test_autoresearch_knowledge)
@@ -670,7 +670,7 @@
 (test
  (name test_task_dispatch)
  (modules test_task_dispatch)
- (libraries masc_mcp alcotest unix))
+ (libraries masc_mcp alcotest unix eio eio_main))
 
 ; Board PostgreSQL backend tests (skipped when MASC_POSTGRES_URL is absent)
 (test
@@ -682,7 +682,7 @@
 (test
  (name test_drift_guard_core)
  (modules test_drift_guard_core)
- (libraries masc_mcp alcotest unix yojson))
+ (libraries masc_mcp alcotest unix yojson eio eio_main))
 
 (test
  (name test_verify_handoff_tool)
@@ -804,7 +804,7 @@
 (test
  (name test_operator_mcp_e2e)
  (modules test_operator_mcp_e2e)
- (libraries masc_mcp alcotest yojson unix mirage-crypto-rng mirage-crypto-rng.unix)
+ (libraries masc_mcp alcotest yojson unix eio eio_main mirage-crypto-rng mirage-crypto-rng.unix)
  (deps ../bin/main_eio.exe))
 
 ; Agent Registry Eio tests
@@ -905,7 +905,7 @@
 (test
  (name test_tool_goals_coverage)
  (modules test_tool_goals_coverage)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 ; Proof criteria pure-function unit tests (no server required)
 (test

@@ -36,6 +36,8 @@ let cleanup_dir dir =
   try rm dir with _ -> ()
 
 let make_config () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "verifier-agent"));

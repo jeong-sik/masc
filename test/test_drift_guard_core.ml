@@ -13,6 +13,8 @@ let rec rm_rf path =
       Sys.remove path
 
 let with_temp_masc_dir f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-drift-guard-%d-%d" (Unix.getpid ())

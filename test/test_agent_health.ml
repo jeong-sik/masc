@@ -9,7 +9,8 @@ open Alcotest
 
 (* Test: fresh agent is healthy *)
 let test_fresh_agent_healthy () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let name = "test-health-fresh-" ^ string_of_int (Random.int 100000) in
   let status = Agent_health.check_health ~agent_name:name in
   match status with
@@ -19,20 +20,23 @@ let test_fresh_agent_healthy () =
 
 (* Test: is_healthy returns true for fresh agent *)
 let test_is_healthy_fresh () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let name = "test-healthy-" ^ string_of_int (Random.int 100000) in
   check bool "fresh agent is healthy" true (Agent_health.is_healthy ~agent_name:name)
 
 (* Test: recording success keeps agent healthy *)
 let test_record_success_stays_healthy () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let name = "test-success-" ^ string_of_int (Random.int 100000) in
   Agent_health.record_success ~agent_name:name;
   check bool "still healthy after success" true (Agent_health.is_healthy ~agent_name:name)
 
 (* Test: repeated failures make agent unhealthy *)
 let test_failures_make_unhealthy () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let name = "test-fail-" ^ string_of_int (Random.int 100000) in
   (* Default threshold is 3 failures in 60s *)
   Agent_health.record_failure ~agent_name:name ~reason:"test-error-1";
@@ -43,7 +47,8 @@ let test_failures_make_unhealthy () =
 
 (* Test: check_health returns Unhealthy with reason after breaker opens *)
 let test_unhealthy_has_reason () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let name = "test-reason-" ^ string_of_int (Random.int 100000) in
   Agent_health.record_failure ~agent_name:name ~reason:"boom-1";
   Agent_health.record_failure ~agent_name:name ~reason:"boom-2";
@@ -55,7 +60,8 @@ let test_unhealthy_has_reason () =
 
 (* Test: filter_healthy separates healthy from unhealthy *)
 let test_filter_healthy () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let healthy_name = "test-filter-ok-" ^ string_of_int (Random.int 100000) in
   let sick_name = "test-filter-sick-" ^ string_of_int (Random.int 100000) in
   (* Make one agent unhealthy *)
@@ -71,7 +77,8 @@ let test_filter_healthy () =
 
 (* Test: get_summary returns correct structure *)
 let test_get_summary () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let name = "test-summary-" ^ string_of_int (Random.int 100000) in
   let s = Agent_health.get_summary ~agent_name:name in
   check string "agent_name matches" name s.agent_name;
@@ -80,7 +87,8 @@ let test_get_summary () =
 
 (* Test: get_summary shows failures after recording *)
 let test_get_summary_with_failures () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let name = "test-sumfail-" ^ string_of_int (Random.int 100000) in
   Agent_health.record_failure ~agent_name:name ~reason:"oops1";
   Agent_health.record_failure ~agent_name:name ~reason:"oops2";
@@ -96,7 +104,8 @@ let test_status_to_string () =
 
 (* Test: summary_to_json produces valid JSON *)
 let test_summary_to_json () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let name = "test-json-" ^ string_of_int (Random.int 100000) in
   let s = Agent_health.get_summary ~agent_name:name in
   let json = Agent_health.summary_to_json s in
@@ -112,7 +121,8 @@ let test_summary_to_json () =
 
 (* Test: success after failures resets health (if not yet opened) *)
 let test_success_resets_partial_failures () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let name = "test-reset-" ^ string_of_int (Random.int 100000) in
   Agent_health.record_failure ~agent_name:name ~reason:"err1";
   Agent_health.record_failure ~agent_name:name ~reason:"err2";

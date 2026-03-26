@@ -341,7 +341,8 @@ let setup () =
   Tool_dispatch.clear_hooks ()
 
 let test_hook_development_allows () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   Tool_dispatch.register
     ~tool_name:"__gov_test_delete"
@@ -355,7 +356,8 @@ let test_hook_development_allows () =
   cleanup_tmpdir tmpdir
 
 let test_hook_production_blocks_critical () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   Tool_dispatch.register
     ~tool_name:"__gov_test_delete2"
@@ -375,7 +377,8 @@ let test_hook_production_blocks_critical () =
   cleanup_tmpdir tmpdir
 
 let test_hook_production_allows_low () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   let tmpdir = make_tmpdir () in
   let config = Room.default_config tmpdir in
@@ -386,7 +389,8 @@ let test_hook_production_allows_low () =
   cleanup_tmpdir tmpdir
 
 let test_hook_enterprise_blocks_high () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   let tmpdir = make_tmpdir () in
   let config = Room.default_config tmpdir in
@@ -401,7 +405,8 @@ let test_hook_enterprise_blocks_high () =
   cleanup_tmpdir tmpdir
 
 let test_hook_paranoid_blocks_medium () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   let tmpdir = make_tmpdir () in
   let config = Room.default_config tmpdir in
@@ -418,7 +423,8 @@ let test_hook_paranoid_blocks_medium () =
 (* ── Response structure tests ───────────────────────────────── *)
 
 let test_blocked_response_structure () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmpdir = make_tmpdir () in
   let config = Room.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
@@ -440,7 +446,8 @@ let test_blocked_response_structure () =
   cleanup_tmpdir tmpdir
 
 let test_blocked_response_structure_claim_next () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmpdir = make_tmpdir () in
   let config = Room.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in

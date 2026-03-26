@@ -26,7 +26,8 @@ let test_empty_governance_structure () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
       let json =
@@ -78,7 +79,8 @@ let test_governance_dir_created_before_read () =
       check bool ".masc/governance/judgments exists" true
         (Sys.file_exists judgments && Sys.is_directory judgments);
       (* read_recent on empty dir returns [] — dashboard_json should still work *)
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
       let json =

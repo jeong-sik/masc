@@ -256,7 +256,8 @@ let test_schemas_names () =
    ============================================================ *)
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Alcotest.run "Tool_notifications coverage" [
     ("get_int", [
       Alcotest.test_case "present" `Quick test_get_int_present;

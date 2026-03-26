@@ -66,6 +66,8 @@ let test_parse_timestamp_invalid () =
 (* ===== generate Tests ===== *)
 
 let test_generate_compact () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Room_utils.default_config dir in
   setup_room config;
@@ -78,6 +80,8 @@ let test_generate_compact () =
   cleanup_dir dir
 
 let test_generate_full () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Room_utils.default_config dir in
   setup_room config;
@@ -92,6 +96,8 @@ let test_generate_full () =
 (* ===== Section Tests ===== *)
 
 let test_agents_section_empty () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Room_utils.default_config dir in
   setup_room config;
@@ -101,6 +107,8 @@ let test_agents_section_empty () =
   cleanup_dir dir
 
 let test_tasks_section_empty () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Room_utils.default_config dir in
   setup_room config;
@@ -110,6 +118,8 @@ let test_tasks_section_empty () =
   cleanup_dir dir
 
 let test_messages_section_empty () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Room_utils.default_config dir in
   setup_room config;
@@ -119,6 +129,8 @@ let test_messages_section_empty () =
   cleanup_dir dir
 
 let test_worktrees_section_empty () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Room_utils.default_config dir in
   setup_room config;

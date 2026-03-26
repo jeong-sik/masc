@@ -238,6 +238,8 @@ let cleanup_path_test_dir dir =
 let test_path_relative_within_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"lib/foo.ml" in
@@ -246,6 +248,8 @@ let test_path_relative_within_root () =
 let test_path_absolute_outside_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"/etc/passwd" in
@@ -266,6 +270,8 @@ let test_path_traversal_attack () =
   (try Unix.mkdir deep 0o755
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir base) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config deep in
     (* ../../../../etc/passwd should escape any reasonable root *)
     let result = Keeper_alerting_path.resolve_keeper_target_path
@@ -275,6 +281,8 @@ let test_path_traversal_attack () =
 let test_path_allowed_paths_filter () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config dir in
     (* lib is allowed, src is not *)
     let ok_result = Keeper_alerting_path.resolve_keeper_target_path
@@ -292,6 +300,8 @@ let test_path_allowed_paths_filter () =
 let test_path_empty_rejected () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"" in
@@ -300,6 +310,8 @@ let test_path_empty_rejected () =
 let test_path_whitespace_only_rejected () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"   " in
@@ -308,6 +320,8 @@ let test_path_whitespace_only_rejected () =
 let test_path_empty_allowed_permits_all_within_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config dir in
     (* Empty allowed_paths = permit all within root *)
     let r1 = Keeper_alerting_path.resolve_keeper_target_path

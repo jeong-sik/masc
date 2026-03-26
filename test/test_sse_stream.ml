@@ -175,7 +175,8 @@ let test_register_defaults_to_coordinator () =
   Sse.unregister "s-default"
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Alcotest.run "sse-stream"
     [
       ( "try_pop",

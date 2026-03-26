@@ -31,7 +31,8 @@ let cleanup_dir dir =
   try rm dir with _ -> ()
 
 let make_ctx () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "test-agent"));
@@ -150,7 +151,8 @@ let test_read_audit_events_empty () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let events =
         Tool_audit.read_audit_events ctx.config
           ~since:(Unix.gettimeofday () +. 0.001)
@@ -163,7 +165,8 @@ let test_read_audit_events_reads_canonical_store_and_normalizes_tool_call () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       Audit_log.log_action ctx.config ~agent_id:"test-agent"
         ~action:(Audit_log.ToolCall "masc_status")
         ~room_id:"default"
@@ -190,7 +193,8 @@ let test_audit_stats_counts_tool_call_prefixes () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       Audit_log.log_action ctx.config ~agent_id:"test-agent"
         ~action:(Audit_log.ToolCall "masc_status")
         ~room_id:"default" ~details:`Null ~outcome:Audit_log.Success ();

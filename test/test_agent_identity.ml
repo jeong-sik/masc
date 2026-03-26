@@ -151,7 +151,8 @@ module RegistryTests = struct
   (* Note: These tests require Eio runtime, run with test_integration *)
   
   let test_register_and_find () =
-    Eio_main.run @@ fun _env ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let reg = Agent_identity.Registry.create () in
     let identity = Agent_identity.from_agent_name "test-agent" in
     let _ = Agent_identity.Registry.register reg identity in
@@ -163,7 +164,8 @@ module RegistryTests = struct
     check bool "found by name" true (Option.is_some found_by_name)
 
   let test_unregister () =
-    Eio_main.run @@ fun _env ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let reg = Agent_identity.Registry.create () in
     let identity = Agent_identity.from_agent_name "test-agent" in
     let registered = Agent_identity.Registry.register reg identity in
@@ -173,7 +175,8 @@ module RegistryTests = struct
     check int "count after unregister" 0 (Agent_identity.Registry.count reg)
 
   let test_touch () =
-    Eio_main.run @@ fun _env ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let reg = Agent_identity.Registry.create () in
     (* Create identity with old timestamp *)
     let old_time = Unix.gettimeofday () -. 10.0 in
@@ -193,7 +196,8 @@ module RegistryTests = struct
     | None -> fail "identity not found after touch"
 
   let test_list_active () =
-    Eio_main.run @@ fun _env ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let reg = Agent_identity.Registry.create () in
     let id1 = Agent_identity.from_agent_name "active-agent" in
     let id2 = Agent_identity.({

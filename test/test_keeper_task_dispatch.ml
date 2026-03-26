@@ -16,6 +16,8 @@ let make_ctx_work () =
 (* Temp directory setup following test_keeper_tools_oas.ml pattern.
    Force filesystem backend by unsetting PG env vars. *)
 let with_room f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "test_keeper_task_%d" (Random.int 1_000_000)) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());

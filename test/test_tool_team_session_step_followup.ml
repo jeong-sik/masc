@@ -109,6 +109,7 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
         (Some "ctrl-worker-custom") explicit_worker.supervisor_actor)
 
 let test_reconcile_failed_spawn_actor_detaches_without_turn () =
+  with_eio @@ fun _env ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "owner"));

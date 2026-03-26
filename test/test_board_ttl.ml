@@ -17,7 +17,8 @@ let () =
   test_default_ttl ();
 
   (* Eio-dependent tests *)
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
 
   (* Test 2: Create permanent post (default) *)
   let test_permanent_post () =

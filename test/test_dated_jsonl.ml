@@ -19,7 +19,8 @@ let make_json i =
 (* ── append creates YYYY-MM/DD.jsonl ──────────────────── *)
 
 let test_append_creates_dated_file () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_append" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   Dated_jsonl.append store (make_json 1);
@@ -42,7 +43,8 @@ let test_append_creates_dated_file () =
 (* ── read_recent returns newest N in chronological order ─ *)
 
 let test_read_recent () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_recent" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   for i = 1 to 5 do
@@ -57,7 +59,8 @@ let test_read_recent () =
   check (list int) "newest 3 chronological" [3; 4; 5] values
 
 let test_read_recent_zero () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_zero" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   Dated_jsonl.append store (make_json 1);
@@ -65,7 +68,8 @@ let test_read_recent_zero () =
   check int "returns 0" 0 (List.length result)
 
 let test_read_recent_more_than_exists () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_overflow" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   Dated_jsonl.append store (make_json 1);
@@ -76,7 +80,8 @@ let test_read_recent_more_than_exists () =
 (* ── read_recent_lines returns raw strings ─────────────── *)
 
 let test_read_recent_lines () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_lines" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   for i = 1 to 4 do
@@ -94,7 +99,8 @@ let test_read_recent_lines () =
 (* ── read_range filters by date ────────────────────────── *)
 
 let test_read_range () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_range" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   Dated_jsonl.append store (make_json 1);
@@ -110,7 +116,8 @@ let test_read_range () =
   check int "empty for future" 0 (List.length result2)
 
 let test_read_range_malformed () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_badrange" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   let result = Dated_jsonl.read_range store ~since:"bad" ~until:"dates" in
@@ -119,7 +126,8 @@ let test_read_range_malformed () =
 (* ── prune removes old files ───────────────────────────── *)
 
 let test_prune () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_prune" in
   (* Create a fake old month dir with a day file *)
   let old_month = Filename.concat dir "2020-01" in
@@ -139,7 +147,8 @@ let test_prune () =
   check bool "today survives prune" true (List.length result > 0)
 
 let test_prune_zero_days () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_prune0" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   let deleted = Dated_jsonl.prune store ~days:0 in
@@ -148,7 +157,8 @@ let test_prune_zero_days () =
 (* ── concurrent append safety ──────────────────────────── *)
 
 let test_concurrent_append () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_concurrent" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   let n = 50 in
@@ -164,7 +174,8 @@ let test_concurrent_append () =
 (* ── empty store ───────────────────────────────────────── *)
 
 let test_empty_store () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "dated_jsonl_empty" in
   let store = Dated_jsonl.create ~base_dir:dir () in
   let result = Dated_jsonl.read_recent store 10 in

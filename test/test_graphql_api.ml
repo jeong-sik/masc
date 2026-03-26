@@ -29,6 +29,8 @@ let graphql_query config query =
   Yojson.Safe.from_string response.body
 
 let test_status_query () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
   let config = Room_utils.default_config base_path in
   let _ = Room.init config ~agent_name:None in
@@ -41,6 +43,8 @@ let test_status_query () =
   cleanup_dir base_path
 
 let test_tasks_connection () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
   let config = Room_utils.default_config base_path in
   let _ = Room.init config ~agent_name:None in

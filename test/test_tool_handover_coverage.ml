@@ -56,13 +56,15 @@ let test_get_string_list_missing () =
    ============================================================ *)
 
 let test_context_creation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test" in
   let ctx : Tool_handover.context = {
     config;
     agent_name = "test-agent";
     fs = None;
     proc_mgr = None;
-    sw = None;  (* Cannot create real switch without Eio runtime *)
+    sw = None;
   } in
   check string "agent_name" "test-agent" ctx.agent_name
 
@@ -71,14 +73,10 @@ let test_context_creation () =
    ============================================================ *)
 
 let make_ctx () : Tool_handover.context =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test-handover" in
-  {
-    config;
-    agent_name = "test-agent";
-    fs = None;
-    proc_mgr = None;
-    sw = None;
-  }
+  ({ config; agent_name = "test-agent"; fs = None; proc_mgr = None; sw = None } : Tool_handover.context)
 
 let test_dispatch_handover_create_no_fs () =
   let ctx = make_ctx () in

@@ -22,6 +22,8 @@ let contains_warning result = String.sub result 0 3 = "\xE2\x9A\xA0"  (* ⚠ *)
 let contains_portal result = String.sub result 0 4 = "\xF0\x9F\x8C\x80"  (* 🌀 *)
 
 let test_init_creates_folder () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -43,6 +45,8 @@ let test_init_creates_folder () =
   Unix.rmdir tmp_dir
 
 let test_join_creates_agent () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -66,6 +70,8 @@ let test_join_creates_agent () =
   Unix.rmdir tmp_dir
 
 let test_add_and_claim_task () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -90,6 +96,8 @@ let test_add_and_claim_task () =
   Unix.rmdir tmp_dir
 
 let test_add_task_uses_archive_max_id () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -115,6 +123,8 @@ let test_add_task_uses_archive_max_id () =
   Unix.rmdir tmp_dir
 
 let test_broadcast_message () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -135,6 +145,8 @@ let test_broadcast_message () =
   Unix.rmdir tmp_dir
 
 let test_worktree_list_no_git () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -155,6 +167,8 @@ let test_worktree_list_no_git () =
   Unix.rmdir tmp_dir
 
 let test_worktree_create_no_git () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -171,6 +185,8 @@ let test_worktree_create_no_git () =
   Unix.rmdir tmp_dir
 
 let test_event_log () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -199,6 +215,8 @@ let contains_error result = String.sub result 0 3 = "\xE2\x9D\x8C"  (* ❌ *)
    Eio context + Fs_compat.set_fs are set up in the top-level runner,
    so Room.default_config gets FileSystem backend. *)
 let with_test_env f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -214,6 +232,8 @@ let with_test_env f =
     raise e
 
 let with_memory_test_env f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_mem_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -488,6 +508,8 @@ let test_operations_preserve_state () =
 (* --- Event Log Verification --- *)
 
 let test_event_log_on_join () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -507,6 +529,8 @@ let test_event_log_on_join () =
   Unix.rmdir tmp_dir
 
 let test_event_log_on_claim_done () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -917,6 +941,8 @@ let test_unicode_task_title () =
 (* ============================================================ *)
 
 let test_reset_clears_all_state () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -935,6 +961,8 @@ let test_reset_clears_all_state () =
   Unix.rmdir tmp_dir
 
 let test_reinit_after_reset () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
@@ -1440,9 +1468,7 @@ let test_heartbeat_concurrent_start_stop () =
   Alcotest.(check int) "list empty after cleanup" 0 (List.length (Heartbeat.list ()))
 
 let () =
-  Eio_main.run @@ fun env ->
   Eio_guard.enable ();
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Random.init 42;
   Alcotest.run "Room" [
     (* === Happy Path Tests === *)

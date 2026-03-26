@@ -3,7 +3,8 @@
 open Masc_mcp
 
 let () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
 
   let test_register_and_get () =
     (* Registration creates a param with default *)

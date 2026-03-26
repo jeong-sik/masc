@@ -34,7 +34,8 @@ let test_identity_extraction () =
 
 (** Test: Agent identity persists in registry *)
 let test_identity_registry_persistence () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let reg = Agent_identity.Registry.create () in
   
   (* First call - register agent *)
@@ -51,7 +52,8 @@ let test_identity_registry_persistence () =
 
 (** Test: Multi-agent scenario - identities don't collide *)
 let test_multi_agent_isolation () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let reg = Agent_identity.Registry.create () in
   
   let agents = ["agent-a"; "agent-b"; "agent-c"] in
@@ -73,7 +75,8 @@ let test_multi_agent_isolation () =
 
 (** Test: Room context preserved in identity *)
 let test_room_context () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let reg = Agent_identity.Registry.create () in
   
   let id = Agent_identity.from_agent_name "room-agent" in
@@ -89,7 +92,8 @@ let test_room_context () =
 
 (** Test: Capability filtering *)
 let test_capability_filtering () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let reg = Agent_identity.Registry.create () in
   
   let params_with_caps = `Assoc [
@@ -105,7 +109,8 @@ let test_capability_filtering () =
 
 (** Test: Stale agent cleanup *)
 let test_stale_agent_cleanup () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let reg = Agent_identity.Registry.create () in
   
   (* Active agent *)
@@ -127,7 +132,8 @@ let test_stale_agent_cleanup () =
 
 (** Test: Concurrent registration safety *)
 let test_concurrent_registration () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let reg = Agent_identity.Registry.create () in
   
   (* Spawn multiple fibers registering agents *)
@@ -146,7 +152,8 @@ let test_concurrent_registration () =
 
 (** Test: Session key stability across updates *)
 let test_session_key_stability () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let reg = Agent_identity.Registry.create () in
   
   let id = Agent_identity.from_agent_name "stable-agent" in

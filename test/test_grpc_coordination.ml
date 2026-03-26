@@ -256,7 +256,8 @@ let test_grpc_server_registers_health_service () =
       | Some value -> Unix.putenv "MASC_STORAGE_TYPE" value
       | None -> Unix.putenv "MASC_STORAGE_TYPE" "")
     (fun () ->
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       with_temp_dir "masc-grpc-health" (fun dir ->
           let room_config = Room_utils.default_config dir in
           let server =

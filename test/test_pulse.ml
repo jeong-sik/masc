@@ -483,7 +483,8 @@ let () = test "backoff delay capped at max_delay_s" (fun () ->
 (* ── Test: circuit_breaker wrap ────────────────────────────── *)
 
 let () = test "circuit_breaker wrap records success/failure" (fun () ->
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let cb = Circuit_breaker.create
     ~failure_threshold:2 ~failure_window:60.0 ~cooldown:1.0 () in
   (* Success path *)
@@ -504,7 +505,8 @@ let () = test "circuit_breaker wrap records success/failure" (fun () ->
 (* ── Test: circuit_breaker wrap_exn ────────────────────────── *)
 
 let () = test "circuit_breaker wrap_exn catches exceptions" (fun () ->
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let cb = Circuit_breaker.create
     ~failure_threshold:3 ~failure_window:60.0 ~cooldown:1.0 () in
   let r = Circuit_breaker.wrap_exn cb ~agent_id:"exc-test" (fun () ->

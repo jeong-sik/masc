@@ -8,7 +8,8 @@ open Masc_mcp
 
 (** Test identity extraction from MCP-like params *)
 let test_identity_from_mcp_params () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   
   let params = `Assoc [
@@ -29,7 +30,8 @@ let test_identity_from_mcp_params () =
 
 (** Test MCP session persistence *)
 let test_mcp_session_persistence () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   
   let mcp_session = "mcp-session-e2e-test" in
@@ -50,7 +52,8 @@ let test_mcp_session_persistence () =
 
 (** Test room context updates *)
 let test_room_context_updates () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   
   let mcp_session = "mcp-room-test" in
@@ -67,7 +70,8 @@ let test_room_context_updates () =
 
 (** Test multi-agent isolation *)
 let test_multi_agent_isolation () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   
   (* Create 3 different agents *)
@@ -108,7 +112,8 @@ let test_display_string () =
 
 (** Test cleanup of stale sessions *)
 let test_stale_cleanup () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
   
   (* Create active agent *)

@@ -35,7 +35,8 @@ let test_ensure_bootstrap_omits_legacy_sentinel_prompts () =
         | None -> Sys.getcwd ()
       in
       Unix.putenv "MASC_CHAIN_SOURCE_BASE_PATH" source_root;
-      Eio_main.run @@ fun _env ->
+      Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Lib.Room.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       Lib.Chain_native_eio.ensure_bootstrap config;

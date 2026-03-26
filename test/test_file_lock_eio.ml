@@ -34,7 +34,8 @@ let test_with_lock_without_eio () =
 
 let test_with_lock_inside_eio () =
   with_temp_path @@ fun path ->
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let calls = ref 0 in
   let result =
     File_lock_eio.with_lock path (fun () ->

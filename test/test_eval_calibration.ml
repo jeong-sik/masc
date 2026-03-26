@@ -64,7 +64,8 @@ let test_notes_hash_length () =
 (* ================================================================ *)
 
 let test_record_verdict_writes () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req () in
@@ -79,7 +80,8 @@ let test_record_verdict_writes () =
   Cal.reset_store_for_testing ()
 
 let test_record_verdict_reject () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req () in
@@ -93,7 +95,8 @@ let test_record_verdict_reject () =
   Cal.reset_store_for_testing ()
 
 let test_record_verdict_hash_matches () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req () in
@@ -113,7 +116,8 @@ let test_record_verdict_hash_matches () =
 (* ================================================================ *)
 
 let test_record_human_label () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   Cal.record_human_label
@@ -133,7 +137,8 @@ let test_record_human_label () =
 (* ================================================================ *)
 
 let test_find_divergences_false_positive () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req ~title:"FP task" ~notes:"looks ok but not" () in
@@ -151,7 +156,8 @@ let test_find_divergences_false_positive () =
   Cal.reset_store_for_testing ()
 
 let test_find_divergences_false_negative () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req ~title:"FN task" ~notes:"actually good work" () in
@@ -168,7 +174,8 @@ let test_find_divergences_false_negative () =
   Cal.reset_store_for_testing ()
 
 let test_find_divergences_agreement () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req ~title:"OK task" ~notes:"done correctly" () in
@@ -183,7 +190,8 @@ let test_find_divergences_agreement () =
   Cal.reset_store_for_testing ()
 
 let test_find_divergences_no_labels () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req () in
@@ -198,7 +206,8 @@ let test_find_divergences_no_labels () =
 (* ================================================================ *)
 
 let test_select_examples_max () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   (* Create 3 false positives *)
@@ -218,7 +227,8 @@ let test_select_examples_max () =
   Cal.reset_store_for_testing ()
 
 let test_select_examples_empty () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let examples = Cal.select_examples ~max_examples:5 in
@@ -246,7 +256,8 @@ let test_format_few_shot_block_nonempty () =
 (* ================================================================ *)
 
 let test_calibration_stats () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   (* 2 approvals, 1 rejection *)

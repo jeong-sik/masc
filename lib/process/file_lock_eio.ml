@@ -68,6 +68,8 @@ let acquire_flock_fd lock_path =
           with
           | Unix.Unix_error (Unix.EAGAIN, _, _)
           | Unix.Unix_error (Unix.EACCES, _, _) ->
+              (* Safe: inside Eio_unix.run_in_systhread — blocks this OS
+                 thread only, not the Eio event loop. *)
               Unix.sleepf 0.01;
               acquire (attempts - 1)
       in

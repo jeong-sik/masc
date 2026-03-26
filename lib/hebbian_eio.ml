@@ -110,6 +110,8 @@ let with_graph_lock config f =
         with
         | Unix.Unix_error (Unix.EAGAIN, _, _)
         | Unix.Unix_error (Unix.EACCES, _, _) ->
+            (* Safe: inside run_blocking_op (Eio_unix.run_in_systhread).
+               Blocks systhread only, not Eio domain. *)
             Unix.sleepf 0.01;
             acquire (attempts - 1)
     in

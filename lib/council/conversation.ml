@@ -310,19 +310,12 @@ let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "")
   (* Create initial turn if content provided *)
   let turns, current_turn =
     if String.length initial_content > 0 then
-      (* Extract @mentions from initial_content using simple regex *)
+      (* Extract @mentions from initial_content using Re *)
       let mentions =
         try
-          let re = Re.Str.regexp "@\\([a-zA-Z0-9_-]+\\)" in
-          let rec collect pos acc =
-            try
-              let _ = Re.Str.search_forward re initial_content pos in
-              let target = Re.Str.matched_group 1 initial_content in
-              let next_pos = Re.Str.match_end () in
-              collect next_pos (target :: acc)
-            with Not_found -> List.rev acc
-          in
-          collect 0 []
+          let re = Re.Pcre.re "@([a-zA-Z0-9_-]+)" |> Re.compile in
+          Re.all re initial_content
+          |> List.map (fun group -> Re.Group.get group 1)
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Log.Misc.warn "Council: mention extraction failed: %s"
             (Printexc.to_string exn);

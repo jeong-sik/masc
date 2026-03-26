@@ -265,14 +265,12 @@ let apply_patch ~(worktree_path : string) ~(hypothesis : hypothesis) : bool =
     try
       if not (Sys.file_exists target) then false
       else if has_search_replace then begin
-        (* Search-replace mode: read file, substitute old_text → new_text *)
+        (* Search-replace mode: read file, substitute old_text -> new_text *)
         let content = Fs_compat.load_file target in
-        if String.length content > 0 &&
-           (try ignore (Re.Str.search_forward (Re.Str.regexp_string hypothesis.old_text) content 0); true
-            with Not_found -> false)
+        let re = Re.str hypothesis.old_text |> Re.compile in
+        if String.length content > 0 && Re.execp re content
         then begin
-          let replaced = Re.Str.global_replace
-            (Re.Str.regexp_string hypothesis.old_text) hypothesis.new_text content in
+          let replaced = Re.replace_string re ~by:hypothesis.new_text content in
           Fs_compat.save_file target replaced;
           true
         end else begin

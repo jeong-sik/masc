@@ -120,22 +120,18 @@ module Features = struct
 
   let contains_any words text =
     let lower = String.lowercase_ascii text in
-    List.exists (fun w -> 
+    List.exists (fun w ->
       let pattern = String.lowercase_ascii w in
-      try
-        let _ = Re.Str.search_forward (Re.Str.regexp_string pattern) lower 0 in
-        true
-      with Not_found -> false
+      let re = Re.str pattern |> Re.compile in
+      Re.execp re lower
     ) words
 
   let count_matches words text =
     let lower = String.lowercase_ascii text in
     List.fold_left (fun acc w ->
       let pattern = String.lowercase_ascii w in
-      if (try let _ = Re.Str.search_forward (Re.Str.regexp_string pattern) lower 0 in true
-          with Not_found -> false)
-      then acc + 1
-      else acc
+      let re = Re.str pattern |> Re.compile in
+      if Re.execp re lower then acc + 1 else acc
     ) 0 words
 end
 

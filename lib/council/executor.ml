@@ -46,23 +46,23 @@ type action_mapping = {
 (** {1 Built-in Patterns} *)
 
 let default_mappings : action_mapping list = [
-  (* PR merge pattern - OCaml Str uses \( \) for groups *)
+  (* PR merge pattern - PCRE syntax *)
   {
-    pattern = "merge pr #?\\([0-9]+\\)";
+    pattern = "merge pr #?([0-9]+)";
     action = GitHubAction (MergePR 0);  (* 0 = placeholder, extracted from match *)
     requires_unanimous = false;
     min_threshold = 0.6;
   };
   (* PR close pattern *)
   {
-    pattern = "close pr #?\\([0-9]+\\)";
+    pattern = "close pr #?([0-9]+)";
     action = GitHubAction (ClosePR 0);
     requires_unanimous = false;
     min_threshold = 0.5;
   };
   (* Deploy pattern *)
   {
-    pattern = "deploy \\(v?[0-9.]+\\)";
+    pattern = "deploy (v?[0-9.]+)";
     action = ExecCommand ["echo"; "Deploy placeholder"];
     requires_unanimous = true;
     min_threshold = 1.0;
@@ -73,21 +73,19 @@ let default_mappings : action_mapping list = [
 
 let match_pattern pattern text =
   try
-    let re = Re.Str.regexp_case_fold pattern in
+    let re = Re.Pcre.re ~flags:[`CASELESS] pattern |> Re.compile in
     let text_lower = String.lowercase_ascii text in
-    if Re.Str.string_match re text_lower 0 then
-      Some (Re.Str.matched_string text_lower)
-    else
-      None
+    match Re.exec_opt re text_lower with
+    | Some group -> Some (Re.Group.get group 0)
+    | None -> None
   with Failure _ | Not_found -> None
 
 let extract_number text =
   try
-    let re = Re.Str.regexp "[0-9]+" in
-    if Re.Str.search_forward re text 0 >= 0 then
-      Some (int_of_string (Re.Str.matched_string text))
-    else
-      None
+    let re = Re.Pcre.re "[0-9]+" |> Re.compile in
+    match Re.exec_opt re text with
+    | Some group -> Some (int_of_string (Re.Group.get group 0))
+    | None -> None
   with Failure _ | Not_found -> None
 
 (** {1 Action Execution} *)

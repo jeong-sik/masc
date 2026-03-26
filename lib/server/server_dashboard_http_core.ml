@@ -774,8 +774,14 @@ let start_mission_refresh_loop ~state ~sw ~clock =
 let dashboard_mission_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
   let compute ?actor () =
+    let started_at = Unix.gettimeofday () in
+    let command_plane_started_at = Unix.gettimeofday () in
     let command_plane_summary, swarm_status =
       command_plane_summary_cache_parts ~allow_initializing:false ~state
+    in
+    let command_plane_summary_ms =
+      int_of_float
+        ((Unix.gettimeofday () -. command_plane_started_at) *. 1000.0)
     in
     run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
       ~config:state.Mcp_server.room_config
@@ -783,6 +789,13 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
         Dashboard_mission.json ?actor ?command_plane_summary ?swarm_status
           ~config ~sw ~clock
           ~proc_mgr:state.Mcp_server.proc_mgr ())
+    |> with_projection_diagnostics ~surface:"mission" ~started_at
+         ~extra:
+           [
+             ("command_plane_summary_ms", `Int command_plane_summary_ms);
+             ("has_command_plane_summary", `Bool (Option.is_some command_plane_summary));
+             ("has_swarm_status", `Bool (Option.is_some swarm_status));
+           ]
   in
   let full_json =
     match actor with
@@ -936,20 +949,33 @@ let dashboard_messages_safe config ~since_seq ~limit =
 let provider_capacity_json () : Yojson.Safe.t =
   `Assoc []
 
+let dashboard_shell_timeout_s =
+  float_of_env_default "MASC_DASHBOARD_SHELL_TIMEOUT_S"
+    ~default:8.0 ~min_v:2.0 ~max_v:30.0
+
 let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in
   let cache_key =
     Printf.sprintf "shell:%s:%s" config.base_path current_room
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:15.0 (fun () ->
+  let compute () =
     let started_at = Unix.gettimeofday () in
-    let agents = dashboard_agents_safe config in
-    let tasks = dashboard_tasks_safe config in
-    let keepers_total = resident_keeper_count config in
+    let measure_ms f =
+      let t0 = Unix.gettimeofday () in
+      let value = f () in
+      let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
+      (value, elapsed_ms)
+    in
+    let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
+    let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
+    let tasks, tasks_ms = measure_ms (fun () -> dashboard_tasks_safe config) in
+    let keepers_total, keepers_ms =
+      measure_ms (fun () -> resident_keeper_count config)
+    in
     `Assoc
       [
         ("generated_at", `String (Types.now_iso ()));
-        ("status", dashboard_shell_status_json config);
+        ("status", status_json);
         ( "counts",
           `Assoc
             [
@@ -964,4 +990,15 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
            [
              ("current_room", `String current_room);
              ("keeper_count_source", `String "resident_registry");
-           ])
+             ("status_ms", `Int status_ms);
+             ("agents_ms", `Int agents_ms);
+             ("tasks_ms", `Int tasks_ms);
+             ("keepers_ms", `Int keepers_ms);
+           ]
+  in
+  match Eio_context.get_clock_opt () with
+  | Some clock ->
+      Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0 ~clock
+        ~timeout_sec:dashboard_shell_timeout_s compute
+  | None ->
+      Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute

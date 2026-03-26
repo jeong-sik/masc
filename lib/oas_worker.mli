@@ -39,6 +39,7 @@ val default_model_strings : cascade_name:string -> string list
 val run_named :
   cascade_name:string ->
   goal:string ->
+  ?sw:Eio.Switch.t ->
   ?system_prompt:string ->
   ?tools:Oas.Tool.t list ->
   ?initial_messages:Oas.Types.message list ->

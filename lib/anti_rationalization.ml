@@ -197,6 +197,7 @@ let check_contract ~(notes : string) ~(contract : string list) : string list =
   ) contract
 
 let review
+    ?sw
     ?(evaluator_cascade = default_evaluator_cascade)
     ?generator_cascade
     ?(completion_contract : string list option)
@@ -251,6 +252,7 @@ let review
      | _ -> ());
     (match
        Oas_worker.run_named
+         ?sw
          ~cascade_name:evaluator_cascade
          ~goal:prompt
          ~max_turns:1
@@ -276,8 +278,10 @@ let review
 
 (** Backward-compatible wrapper that returns only the verdict.
     Use [review] directly for structured results with audit metadata. *)
-let review_verdict ?evaluator_cascade ?generator_cascade ?completion_contract ?on_verdict ?few_shot_block req =
-  (review ?evaluator_cascade ?generator_cascade ?completion_contract ?on_verdict ?few_shot_block req).verdict
+let review_verdict ?sw ?evaluator_cascade ?generator_cascade ?completion_contract
+    ?on_verdict ?few_shot_block req =
+  (review ?sw ?evaluator_cascade ?generator_cascade ?completion_contract
+     ?on_verdict ?few_shot_block req).verdict
 
 let review_result_to_json (r : review_result) : Yojson.Safe.t =
   let base = [

@@ -45,6 +45,7 @@ type review_result = {
     @param generator_cascade Optional name of the generator's cascade.
       Logged for auditing; not used in verification logic. *)
 val review :
+  ?sw:Eio.Switch.t ->
   ?evaluator_cascade:string ->
   ?generator_cascade:string ->
   ?completion_contract:string list ->
@@ -54,6 +55,7 @@ val review :
 
 (** Backward-compatible wrapper returning only the verdict. *)
 val review_verdict :
+  ?sw:Eio.Switch.t ->
   ?evaluator_cascade:string ->
   ?generator_cascade:string ->
   ?completion_contract:string list ->

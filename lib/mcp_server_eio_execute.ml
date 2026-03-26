@@ -508,7 +508,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:arguments
     | Mod_task ->
-        Tool_task.dispatch { Tool_task.config; agent_name } ~name ~args:arguments
+        Tool_task.dispatch { Tool_task.config; agent_name; sw = Some sw }
+          ~name ~args:arguments
     | Mod_room ->
         Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args:arguments
     | Mod_control ->

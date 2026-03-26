@@ -396,8 +396,13 @@ let default_model_strings ~cascade_name:_ =
 (* Named model execution                                            *)
 (* ================================================================ *)
 
-let require_eio () =
-  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+let require_eio ?sw () =
+  let sw_opt =
+    match sw with
+    | Some _ -> sw
+    | None -> Eio_context.get_switch_opt ()
+  in
+  match sw_opt, Eio_context.get_net_opt () with
   | Some sw, Some net -> Ok (sw, net)
   | None, _ -> Error "Eio switch not available (running outside server context)"
   | _, None -> Error "Eio net not available (running outside server context)"
@@ -474,6 +479,7 @@ let config_for_label
 let run_named
     ~cascade_name
     ~goal
+    ?sw
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
@@ -494,7 +500,7 @@ let run_named
     ?working_context
     ()
   : (run_result, string) result =
-  match require_eio () with
+  match require_eio ?sw () with
   | Error e -> Error e
   | Ok (sw, net) ->
   let defaults = default_model_strings ~cascade_name in

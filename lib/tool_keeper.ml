@@ -348,7 +348,7 @@ let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
 
 let handle_resident_keeper_down ctx args : tool_result =
   let name = get_string args "name" "" in
-  if validate_name name then remove_resident_keeper ctx.config name;
+  if validate_name name then ignore (deactivate_resident_keeper ctx.config name);
   invalidate_resident_keeper_list_cache ();
   Turn.handle_keeper_down ctx args
 

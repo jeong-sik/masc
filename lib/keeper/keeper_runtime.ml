@@ -122,6 +122,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     in
     let specs =
       list_resident_keepers ctx.config
+      |> List.filter (fun (spec : resident_keeper_spec) -> spec.desired)
       |> take max_scan
     in
     let (enabled, scanned, started, stale, recovering) =

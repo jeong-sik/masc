@@ -668,6 +668,13 @@ let remove_resident_keeper config name =
   Safe_ops.remove_file_logged ~context:"resident_keeper_remove"
     (resident_keeper_path config name)
 
+let deactivate_resident_keeper config name =
+  match read_resident_keeper config name with
+  | Ok (Some spec) ->
+      write_resident_keeper config
+        { spec with desired = false; updated_at = now_iso () }
+  | _ -> Ok ()
+
 let list_resident_keepers config : resident_keeper_spec list =
   let dir = resident_keeper_dir config in
   match Safe_ops.list_dir_safe dir with
@@ -687,7 +694,9 @@ let resident_keeper_names config =
   list_resident_keepers config |> List.map (fun spec -> spec.name)
 
 let is_resident_keeper config name =
-  List.mem name (resident_keeper_names config)
+  match read_resident_keeper config name with
+  | Ok (Some spec) -> spec.desired
+  | _ -> false
 
 let register_resident_keeper_from_meta config (meta : keeper_meta) :
     (unit, string) result =

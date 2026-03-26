@@ -74,6 +74,8 @@ async function mcpPost(body: unknown, timeoutMs = DEFAULT_MCP_TIMEOUT_MS): Promi
   return res.text()
 }
 
+const INIT_COOLDOWN_MS = 2000
+
 async function ensureSession(): Promise<void> {
   if (mcpSessionId === '__blocked__') {
     throw new Error('MCP 연결이 차단되었습니다. 로컬 환경에서만 사용할 수 있는 기능입니다.')
@@ -112,13 +114,14 @@ async function ensureSession(): Promise<void> {
           }),
         }, 5000).catch(err => console.warn('[mcp] initialized notification failed:', err))
       }
+      initPromise = null
     } catch (err) {
       if (err instanceof Error && err.message.includes('403')) {
         mcpSessionId = '__blocked__'
       }
+      // Keep initPromise alive briefly to prevent retry storms
+      setTimeout(() => { initPromise = null }, INIT_COOLDOWN_MS)
       throw err
-    } finally {
-      initPromise = null
     }
   })()
   return initPromise

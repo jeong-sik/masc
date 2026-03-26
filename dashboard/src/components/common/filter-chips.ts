@@ -36,10 +36,10 @@ export function FilterChips<T extends string>({
     ? 'inline-flex min-h-9 items-center gap-1.5 rounded-2xl border px-3 py-2 text-[11px] font-medium'
     : 'inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[length:var(--fs-xs)]'
   const activeToneClass = tone === 'accent'
-    ? 'border-[rgba(71,184,255,0.45)] bg-[var(--accent-soft)] text-[#d9f2ff]'
+    ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'
     : 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
   const idleToneClass = tone === 'accent'
-    ? 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(71,184,255,0.35)] hover:text-[var(--text-body)]'
+    ? 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[var(--border-slate-22)] hover:text-[var(--text-body)]'
     : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'
 
   return html`

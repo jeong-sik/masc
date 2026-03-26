@@ -322,9 +322,9 @@ a:hover {
 }
 
 @utility monitor-muted-panel {
-  border: 1px solid var(--white-8);
+  border: 1px solid var(--border-slate-12);
   border-radius: 16px;
-  background: rgba(8, 16, 32, 0.55);
+  background: var(--white-3);
 }
 
 /* ── Section header (reusable pattern) ─────────────────────── */

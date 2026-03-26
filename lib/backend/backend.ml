@@ -120,6 +120,8 @@ module FileSystem = struct
             with
             | Unix.Unix_error (Unix.EAGAIN, _, _)
             | Unix.Unix_error (Unix.EACCES, _, _) ->
+                (* Safe: inside run_blocking_file_op (Eio_unix.run_in_systhread).
+                   Blocks systhread only, not Eio domain. *)
                 Unix.sleepf 0.01;
                 try_lock (retries - 1)
         in

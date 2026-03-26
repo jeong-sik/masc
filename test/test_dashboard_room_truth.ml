@@ -29,9 +29,9 @@ let test_dashboard_room_truth_empty_room () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
@@ -58,9 +58,9 @@ let test_dashboard_room_truth_execution_fixture () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
@@ -82,9 +82,9 @@ let test_dashboard_room_truth_empty_room_focus_label () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
@@ -104,9 +104,9 @@ let test_operator_digest_shape_matches_room_truth () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json

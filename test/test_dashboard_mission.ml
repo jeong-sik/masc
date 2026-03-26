@@ -498,11 +498,12 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       let session_id = "ts-mission-http-default-001" in
       seed_room config session_id;
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_mission_http_json

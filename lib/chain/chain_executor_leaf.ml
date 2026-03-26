@@ -82,17 +82,6 @@ let execute_model_node ctx ~clock ~(exec_fn : exec_fn) ~(node : node) (model : n
       record_start ctx node.id ~node_type:"model";
       let start = Time_compat.now () in
 
-      (* Create Langfuse generation if tracing is enabled *)
-      let langfuse_gen = match ctx.langfuse_trace with
-        | Some trace ->
-            let input_str = match final_system with
-              | Some sys -> Printf.sprintf "[system] %s\n[user] %s" sys prompt_with_context
-              | None -> prompt_with_context
-            in
-            Some (Langfuse.create_generation ~trace ~name:node.id ~model:effective_model ~input:input_str ())
-        | None -> None
-      in
-
       (* Phase 6: GLM thinking auto-activation
          Enable thinking for GLM models when:
          - Node explicitly requests thinking=true, OR
@@ -176,11 +165,6 @@ let execute_model_node ctx ~clock ~(exec_fn : exec_fn) ~(node : node) (model : n
                 ]
                 ();
 
-            (* End Langfuse generation with success *)
-            (match langfuse_gen with
-             | Some gen -> Langfuse.end_generation gen ~output ~prompt_tokens ~completion_tokens
-             | None -> ());
-
             (* Update Prompt Registry metrics if prompt_ref was used *)
             (match prompt_ref with
              | Some ref ->
@@ -227,11 +211,6 @@ let execute_model_node ctx ~clock ~(exec_fn : exec_fn) ~(node : node) (model : n
       | Error msg ->
           (* Calculate duration for error case *)
           let error_duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
-
-          (* End Langfuse generation with error *)
-          (match langfuse_gen with
-           | Some gen -> Langfuse.error_generation gen ~message:msg
-           | None -> ());
 
           (* Update Prompt Registry metrics with low score on error *)
           (match prompt_ref with

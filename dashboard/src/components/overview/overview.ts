@@ -16,6 +16,7 @@ import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
 import { AgentAvatar } from './agent-avatar'
 import { TransportHealthPanel } from '../transport-health'
+import { DataFreshnessBar } from './data-freshness'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type { DashboardMissionSessionBrief } from '../../types'
 
@@ -271,6 +272,7 @@ export function Overview() {
     <div class="flex flex-col gap-5">
       <${OverviewFreshnessStrip} />
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
+      <${DataFreshnessBar} />
       <${AttentionSpotlight} snap=${snap} />
 
       <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">

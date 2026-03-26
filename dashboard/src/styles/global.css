@@ -307,6 +307,26 @@ a:hover {
   margin-top: 6px;
 }
 
+@utility monitor-surface-card {
+  border: 1px solid var(--card-border);
+  border-radius: 24px;
+  background: var(--card);
+}
+
+@utility monitor-surface-card-strong {
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+}
+
+@utility monitor-surface-card-medium {
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+}
+
+@utility monitor-muted-panel {
+  border: 1px solid var(--white-8);
+  border-radius: 16px;
+  background: rgba(8, 16, 32, 0.55);
+}
+
 /* ── Section header (reusable pattern) ─────────────────────── */
 
 @utility section-header {

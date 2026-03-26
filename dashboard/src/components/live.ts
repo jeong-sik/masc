@@ -13,7 +13,7 @@ export function Live() {
 
   return html`
     <div class="flex flex-col gap-5">
-      <section class="rounded-[24px] border border-[var(--card-border)] bg-[var(--card)] px-5 py-4 shadow-[0_12px_30px_rgba(0,0,0,0.16)]">
+      <section class="monitor-surface-card monitor-surface-card-strong px-5 py-4">
         <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div class="flex flex-col gap-2">
             <h2 class="m-0 text-[1.25rem] font-semibold text-[var(--text-strong)]">라이브 모니터</h2>
@@ -35,10 +35,10 @@ export function Live() {
       </section>
 
       <div class="live-panels grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
-        <section class="live-panel-main min-h-[420px] xl:min-h-[520px] rounded-[24px] border border-[var(--card-border)] bg-[var(--card)] p-4 shadow-[0_10px_24px_rgba(0,0,0,0.14)]">
+        <section class="live-panel-main monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-[520px] p-4">
           <${ActivityStream} />
         </section>
-        <section class="live-panel-side min-h-[420px] xl:min-h-[520px] rounded-[24px] border border-[var(--card-border)] bg-[var(--card)] p-4 shadow-[0_10px_24px_rgba(0,0,0,0.14)]">
+        <section class="live-panel-side monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-[520px] p-4">
           <${FocusSidebar} />
         </section>
       </div>

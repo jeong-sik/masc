@@ -91,9 +91,9 @@ export function AgentsUnified() {
         }}
         size="md"
         tone="accent"
-        class="w-fit rounded-2xl border border-[var(--white-8)] bg-[rgba(8,16,32,0.55)] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+        class="monitor-muted-panel w-fit p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
       />
-      <div class="rounded-2xl border border-[var(--white-8)] bg-[linear-gradient(180deg,rgba(71,184,255,0.08),rgba(255,255,255,0.02))] px-4 py-3 text-[12px] leading-[1.5] text-[var(--text-body)]">
+      <div class="monitor-muted-panel bg-[linear-gradient(180deg,rgba(71,184,255,0.08),rgba(255,255,255,0.02))] px-4 py-3 text-[12px] leading-[1.5] text-[var(--text-body)]">
         <strong class="mr-2 text-[var(--text-strong)]">${currentViewMeta.label}</strong>
         <span>${currentViewMeta.description} ${currentViewSummary}</span>
       </div>

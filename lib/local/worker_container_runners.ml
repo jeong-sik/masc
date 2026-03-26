@@ -1,6 +1,7 @@
 (** Worker_container_runners — run_worker_oas, continue_worker, run_worker. *)
 
 open Printf
+open Result_syntax
 
 include Worker_container
 

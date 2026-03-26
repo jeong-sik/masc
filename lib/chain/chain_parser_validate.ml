@@ -1,5 +1,6 @@
 include Chain_parser_helpers
 open Chain_types
+open Result_syntax
 
 let rec has_placeholder_in_node_type = function
   | ChainRef "_" -> true

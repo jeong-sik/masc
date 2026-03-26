@@ -1,7 +1,5 @@
 module U = Yojson.Safe.Util
 
-let ( let* ) = Result.bind
-
 type unit_kind =
   | Company
   | Platoon

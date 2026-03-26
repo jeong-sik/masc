@@ -1,7 +1,7 @@
 open Tool_args
 include Operator_control_snapshot
 
-let ( let* ) = Result.bind
+open Result_syntax
 
 let judgment_surface_enums =
   [ "command.warroom"; "command.swarm"; "intervene" ]

@@ -7,8 +7,6 @@ type runtime_state = {
   mutable generate_report_on_finalize : bool;
 }
 
-let ( let* ) = Result.bind
-
 let runtimes : (string, runtime_state) Hashtbl.t = Hashtbl.create 16
 let runtimes_mutex = Eio.Mutex.create ()
 let finalize_mutex = Eio.Mutex.create ()

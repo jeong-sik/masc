@@ -1,8 +1,5 @@
 (** Governance V2 types *)
 
-
-let ( let* ) = Result.bind
-
 type risk_class =
   | Low
   | High

@@ -49,7 +49,7 @@ type t = {
   local_playback : local_playback_config;
 }
 
-let ( let* ) = Result.bind
+open Result_syntax
 
 let default_elevenlabs_base_url = "https://api.elevenlabs.io/v1"
 

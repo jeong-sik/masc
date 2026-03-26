@@ -4,6 +4,8 @@
     Legacy handlers have been removed.
 *)
 
+open Result_syntax
+
 (** Global state for Mitosis cell lifecycle.
     Protected by [mitosis_mutex]. Use [get_cell]/[set_cell]/[with_cell_rw]
     instead of direct ref access. *)
@@ -80,7 +82,6 @@ let is_valid_request_id = function
 
 (** Validate initialize params per MCP spec. *)
 let validate_initialize_params params =
-  let ( let* ) = Result.bind in
   let require_string label = function
     | Some (`String _) -> Ok ()
     | None | Some `Null -> Error ("Missing " ^ label)

@@ -1,4 +1,5 @@
 include Cp_lifecycle_search
+open Result_syntax
 
 let update_search_stats_for_operation config operation ~outcome =
   let stage = operation_stage_key operation in

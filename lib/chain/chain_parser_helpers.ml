@@ -52,9 +52,6 @@ let security_max_fanout =
   | Some s -> (try max 1 (int_of_string s) with Failure _ -> 20)
   | None -> 20
 
-(** Helper: Result bind operator *)
-let ( let* ) = Result.bind
-
 (** {1 Safe JSON Parsing Helpers - Explicit Error Handling} *)
 
 (** Parse float from JSON with explicit error message *)

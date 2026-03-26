@@ -1,4 +1,5 @@
 module Mcp_eio = Mcp_server_eio
+open Result_syntax
 
 let mcp_protocol_versions = Mcp_server.supported_protocol_versions
 
@@ -192,7 +193,6 @@ let validate_protocol_version_continuity ~session_id request =
   Eio.Mutex.use_ro session_mutex (fun () ->
       match Hashtbl.find_opt protocol_version_by_session session_id with
       | Some expected -> (
-          let ( let* ) = Result.bind in
           match provided with
           | None -> Ok ()
           | Some version ->

@@ -2,7 +2,7 @@ open Printf
 
 module U = Yojson.Safe.Util
 
-let ( let* ) = Result.bind
+open Result_syntax
 
 type runtime = {
   config : Room.config;

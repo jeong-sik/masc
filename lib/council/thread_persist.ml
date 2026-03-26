@@ -10,6 +10,8 @@
     - Recovery: server startup syncs file → Neo4j
 *)
 
+open Result_syntax
+
 (** {1 Types} *)
 
 type persist_result = {
@@ -294,7 +296,6 @@ let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
       Error "Eio net not initialized (Neo4j persistence disabled)"
   | Some ctx ->
       let net = ctx.net in
-      let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
       let* endpoint_uri = neo4j_tx_commit_uri () in
       let* auth_header = neo4j_auth_header () in
 

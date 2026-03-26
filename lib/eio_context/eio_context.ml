@@ -9,42 +9,46 @@ let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
 let current_mono_clock : Eio.Time.Mono.ty Eio.Resource.t option ref = ref None
 let current_sw : Eio.Switch.t option ref = ref None
 let net_initialized : bool ref = ref false
-let global_ctx_mutex = Eio.Mutex.create ()
+
+(** Stdlib.Mutex: these refs are set/read in non-yielding operations,
+    and the module is loaded before any Eio runtime exists. *)
+let global_ctx_mutex = Stdlib.Mutex.create ()
+
+let with_lock f =
+  Stdlib.Mutex.lock global_ctx_mutex;
+  Fun.protect f ~finally:(fun () -> Stdlib.Mutex.unlock global_ctx_mutex)
 
 let set_net net =
-  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
+  with_lock (fun () ->
       current_net := Some (net :> eio_net);
       net_initialized := true)
 
 let set_clock clock =
-  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
-      current_clock := Some clock)
+  with_lock (fun () -> current_clock := Some clock)
 
 let set_mono_clock mc =
-  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
-      current_mono_clock := Some mc)
+  with_lock (fun () -> current_mono_clock := Some mc)
 
 let get_mono_clock () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
+  with_lock (fun () ->
       match !current_mono_clock with
       | Some mc -> mc
       | None -> invalid_arg "Eio mono_clock not initialized")
 
 let set_switch sw =
-  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
-      current_sw := Some sw)
+  with_lock (fun () -> current_sw := Some sw)
 
 let get_net_opt () : eio_net option =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_net)
+  with_lock (fun () -> !current_net)
 
 let get_clock_opt () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_clock)
+  with_lock (fun () -> !current_clock)
 
 let get_switch_opt () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_sw)
+  with_lock (fun () -> !current_sw)
 
 let get_net () : eio_net =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
+  with_lock (fun () ->
       match !current_net with
       | Some net -> net
       | None ->
@@ -55,7 +59,7 @@ let get_net () : eio_net =
               "Eio net not initialized - ensure set_net is called during server startup")
 
 let get_clock () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
+  with_lock (fun () ->
       match !current_clock with
       | Some clock -> clock
       | None ->
@@ -63,7 +67,7 @@ let get_clock () =
             "Eio clock not initialized - ensure set_clock is called during server startup")
 
 let get_switch () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
+  with_lock (fun () ->
       match !current_sw with
       | Some sw -> sw
       | None ->

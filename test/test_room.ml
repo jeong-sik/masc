@@ -1235,7 +1235,7 @@ let test_cleanup_zombies_releases_tasks () =
     let agents_path = Filename.concat
       (Filename.concat config.base_path ".masc") "agents" in
     let agent_file = Filename.concat agents_path (test_agent_z ^ ".json") in
-    let json = Yojson.Safe.from_file agent_file in
+    let json = Room.read_json config agent_file in
     let updated_json = match json with
       | `Assoc pairs ->
           `Assoc (List.map (fun (k, v) ->
@@ -1243,7 +1243,7 @@ let test_cleanup_zombies_releases_tasks () =
           ) pairs)
       | other -> other
     in
-    Yojson.Safe.to_file agent_file updated_json;
+    Room.write_json config agent_file updated_json;
     (* Run cleanup — should remove zombie agent AND release its tasks *)
     let result = Room.cleanup_zombies config in
     Alcotest.(check bool) "cleanup ran" true (String.length result > 0);
@@ -1425,7 +1425,7 @@ let test_zombie_cleanup_transitions_to_inactive () =
     Unix.chmod path 0o644;
 
     (* Read agent file — should be Inactive now (Phase 2 ran before Phase 4 failed) *)
-    let json = Yojson.Safe.from_file path in
+    let json = Room.read_json config path in
     let status = Yojson.Safe.Util.(member "status" json |> to_string) in
     Alcotest.(check string) "status transitioned to inactive" "inactive" status
   )
@@ -1446,6 +1446,7 @@ let test_keeper_detection_by_agent_type () =
 
 (** BUG-6: Heartbeat Mutex protects concurrent access *)
 let test_heartbeat_concurrent_start_stop () =
+  Eio_main.run @@ fun _env ->
   (* Reset heartbeats *)
   List.iter (fun (hb : Heartbeat.t) -> ignore (Heartbeat.stop hb.id))
     (Heartbeat.list ());

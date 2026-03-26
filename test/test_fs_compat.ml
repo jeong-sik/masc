@@ -41,6 +41,9 @@ let test_mkdir_p_does_not_shell_inject () =
   check bool "dangerous path exists" true (Sys.file_exists dangerous && Sys.is_directory dangerous)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "fs_compat" [
     ( "mkdir_p"
     , [

@@ -492,6 +492,7 @@
    keeper_coordination
    keeper_execution
    keeper_keepalive
+   keeper_recurring
    keeper_registry
    keeper_resident_supervisor
    keeper_runtime

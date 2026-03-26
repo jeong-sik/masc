@@ -503,6 +503,46 @@ let handle_persistent_agent_model_set ctx args : tool_result =
 let handle_persistent_agent_create_from_persona ctx args : tool_result =
   Persona.handle_keeper_create_from_persona ctx args
 
+(* ================================================================ *)
+(* Recurring loop tools (#3190)                                      *)
+(* ================================================================ *)
+
+let handle_keeper_add_loop _ctx (args : Yojson.Safe.t) : tool_result =
+  let keeper_name = Safe_ops.json_string ~default:"" "keeper_name" args in
+  let label = Safe_ops.json_string ~default:"" "label" args in
+  let interval_sec = Safe_ops.json_int ~default:600 "interval_sec" args in
+  let message = Safe_ops.json_string ~default:"" "message" args in
+  let max_failures = Safe_ops.json_int ~default:5 "max_failures" args in
+  if keeper_name = "" then (false, "keeper_name required")
+  else if message = "" then (false, "message required")
+  else if interval_sec < 30 then (false, "interval_sec minimum is 30")
+  else
+    let task = Keeper_recurring.add
+      ~keeper_name ~label:(if label = "" then message else label)
+      ~interval_sec ~max_failures
+      (Keeper_recurring.Broadcast message) in
+    (true, Printf.sprintf "Recurring task registered: %s (every %ds)\n%s"
+       task.id interval_sec
+       (Yojson.Safe.to_string (Keeper_recurring.task_to_json task)))
+
+let handle_keeper_list_loops _ctx (args : Yojson.Safe.t) : tool_result =
+  let keeper_name = Safe_ops.json_string ~default:"" "keeper_name" args in
+  let tasks =
+    if keeper_name = "" then Keeper_recurring.list_all ()
+    else Keeper_recurring.list ~keeper_name
+  in
+  let tasks_json = `List (List.map Keeper_recurring.task_to_json tasks) in
+  (true, Printf.sprintf "%d recurring task(s)\n%s"
+     (List.length tasks) (Yojson.Safe.to_string tasks_json))
+
+let handle_keeper_remove_loop _ctx (args : Yojson.Safe.t) : tool_result =
+  let id = Safe_ops.json_string ~default:"" "id" args in
+  if id = "" then (false, "id required")
+  else if Keeper_recurring.remove ~id then
+    (true, Printf.sprintf "Task '%s' removed" id)
+  else
+    (false, Printf.sprintf "Task '%s' not found" id)
+
 let dispatch ctx ~name ~args : tool_result option =
   (* Resident keepers are bootstrapped lazily on tool use as a fallback.
      Server startup also calls bootstrap_existing_keepers for always-on presence. *)
@@ -529,6 +569,10 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_persistent_agent_list" -> Some (handle_persistent_agent_list ctx args)
   | "masc_persistent_agent_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
   | "masc_persistent_agent_eval" -> Some (Status.handle_keeper_eval ctx args)
+  (* Recurring loops (#3190) *)
+  | "masc_keeper_add_loop" -> Some (handle_keeper_add_loop ctx args)
+  | "masc_keeper_list_loops" -> Some (handle_keeper_list_loops ctx args)
+  | "masc_keeper_remove_loop" -> Some (handle_keeper_remove_loop ctx args)
   (* Housekeeping: keepers maintain their own world *)
   | "masc_housekeep_scan" | "masc_housekeep_delete" | "masc_housekeep_prune" ->
       Tool_housekeep.dispatch ctx.config ~name ~args

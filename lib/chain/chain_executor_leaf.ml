@@ -510,13 +510,13 @@ let string_contains = Chain_utils.string_contains
 
 (** Parse confidence level from MODEL output. Returns (confidence_level, cleaned_output) *)
 let parse_confidence_from_output (output : string) : (Chain_types.confidence_level * string) =
-  let re = Re.Str.regexp_case_fold {|[Cc]onfidence:\s*\(High\|Medium\|Low\)|} in
+  let re = Re.Str.regexp_case_fold {|[Cc]onfidence:[ \t]*\(High\|Medium\|Low\)|} in
   try
     ignore (Re.Str.search_forward re output 0);
     let level_str = Re.Str.matched_group 1 output in
     let level = Chain_types.confidence_of_string level_str in
     (* Remove the confidence line from output *)
-    let cleaned = Re.Str.global_replace (Re.Str.regexp_case_fold {|[Cc]onfidence:\s*\(High\|Medium\|Low\)\n?|}) "" output in
+    let cleaned = Re.Str.global_replace (Re.Str.regexp_case_fold {|[Cc]onfidence:[ \t]*\(High\|Medium\|Low\)\n?|}) "" output in
     (level, String.trim cleaned)
   with Not_found ->
     (Low, output)

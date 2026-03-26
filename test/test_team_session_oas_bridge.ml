@@ -211,8 +211,9 @@ let test_session_to_swarm_config_health_contract () =
   let metric_value =
     match convergence.metric with
     | Swarm.Swarm_types.Callback f -> f ()
-    | Swarm.Swarm_types.Shell_command cmd ->
-        Alcotest.failf "expected callback metric, got shell command %s" cmd
+    | Swarm.Swarm_types.Argv_command cmd ->
+        Alcotest.failf "expected callback metric, got argv command %s"
+          (String.concat " " cmd)
   in
   Alcotest.(check (float 0.001)) "initial success ratio" 0.0 metric_value;
   Alcotest.(check int) "single-pass convergence iterations" 1

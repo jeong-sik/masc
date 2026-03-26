@@ -80,6 +80,8 @@ let add_task_id config ~title =
 
 let with_eio f =
   Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Fun.protect
     ~finally:(fun () -> Time_compat.clear_clock ())

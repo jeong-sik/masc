@@ -606,6 +606,12 @@
  (modules test_compression)
  (libraries masc_mcp alcotest zstd))
 
+; Compression boundary tests (shared codec without root-library dependency)
+(test
+ (name test_compression_boundary)
+ (modules test_compression_boundary)
+ (libraries masc_mcp.masc_compression masc_mcp.masc_backend alcotest))
+
 ; PostgreSQL Pub/Sub LISTEN/NOTIFY test
 (test
  (name test_pubsub_postgres)

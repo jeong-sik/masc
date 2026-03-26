@@ -798,6 +798,8 @@
    masc_types
    ;; Core utilities (extracted sub-library)
    masc_core
+   ;; Shared compression codec (extracted sub-library)
+   masc_compression
    ;; Eio context (extracted sub-library)
    masc_eio_context
    ;; Backend storage (extracted sub-library)

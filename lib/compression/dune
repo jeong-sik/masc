@@ -1,0 +1,11 @@
+(include_subdirs no)
+(library
+ (name masc_compression)
+ (public_name masc_mcp.masc_compression)
+ (wrapped false)
+ (modules
+  compression_codec
+  compression_dict)
+ (libraries
+  masc_log
+  zstd))

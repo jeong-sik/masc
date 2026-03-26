@@ -107,6 +107,18 @@ let test_compress_zstd_level () =
   check bool "level 1 result exists" true (String.length result1 > 0);
   check bool "level 19 result exists" true (String.length result9 > 0)
 
+let test_compress_wrapper_small_data () =
+  let small_data = "hello" in
+  let (result, encoding) = Compression.compress small_data in
+  check string "small unchanged" small_data result;
+  check (option string) "no encoding" None encoding
+
+let test_compress_wrapper_large_data () =
+  let large_data = String.make 1000 'x' in
+  let (result, encoding) = Compression.compress large_data in
+  check bool "large shrinks" true (String.length result < String.length large_data);
+  check (option string) "standard encoding" (Some "zstd") encoding
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -131,5 +143,9 @@ let () =
       test_case "empty" `Quick test_compress_zstd_empty;
       test_case "below threshold" `Quick test_compress_zstd_below_threshold;
       test_case "level" `Quick test_compress_zstd_level;
+    ];
+    "compress", [
+      test_case "small data" `Quick test_compress_wrapper_small_data;
+      test_case "large repetitive" `Quick test_compress_wrapper_large_data;
     ];
   ]

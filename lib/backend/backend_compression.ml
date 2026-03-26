@@ -7,7 +7,7 @@
     - Automatically decompresses on load (ZSTD/ZSTDD header detection) *)
 
 (** Minimum size for dictionary compression *)
-let min_size = Compression_dict.min_dict_size  (* 32 bytes *)
+let min_size = Compression_codec.min_size  (* 32 bytes *)
 
 (** Default compression level *)
 let default_level = 3
@@ -20,7 +20,10 @@ let magic_dict = "ZSTDD"
 
 (** Compress with zstd + optional dictionary *)
 let compress ?(level = default_level) (data : string) : (string * bool * bool) =
-  Compression_dict.compress ~level data  (* returns (data, used_dict, did_compress) *)
+  match Compression_codec.compress ~level data with
+  | Compression_codec.Unchanged payload -> (payload, false, false)
+  | Compression_codec.Compressed { payload; encoding } ->
+      (payload, Compression_codec.uses_dict encoding, true)
 
 (** Encode with size header: MAGIC (5) + orig_size (4 BE) + compressed
     MAGIC = "ZSTD\x00" for standard, "ZSTDD" for dictionary *)
@@ -90,10 +93,15 @@ let decode_header (data : string) : (int * string * bool) option =
 
 (** Decompress with known original size and dict flag *)
 let decompress ~(orig_size : int) ~(used_dict : bool) (compressed : string) : string option =
-  try Some (Compression_dict.decompress ~orig_size ~used_dict compressed)
-  with e ->
-    Log.Misc.error "decompress failed: %s" (Printexc.to_string e);
-    None
+  match Compression_codec.decompress
+          ~orig_size
+          ~encoding:(Compression_codec.of_used_dict used_dict)
+          compressed
+  with
+  | Ok decompressed -> Some decompressed
+  | Error msg ->
+      Log.Misc.error "decompress failed: %s" msg;
+      None
 
 (** Auto-decompress if ZSTD/ZSTDD header present *)
 let decompress_auto (data : string) : string =

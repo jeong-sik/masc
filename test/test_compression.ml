@@ -13,6 +13,7 @@
 (* ===== Backend Compression Tests ===== *)
 
 module BackendCompression = Backend.Compression
+module Compression_codec = Compression_codec
 
 let test_backend_compress_skip_small () =
   let small = "tiny" in  (* <32 bytes, below min_dict_size *)
@@ -97,6 +98,27 @@ let threshold_tests = [
   "default compression level", `Quick, test_default_level;
 ]
 
+let test_codec_encoding_tokens () =
+  Alcotest.(check string) "standard encoding"
+    "zstd" (Compression_codec.content_encoding Compression_codec.Standard);
+  Alcotest.(check string) "dictionary encoding"
+    "zstd-dict" (Compression_codec.content_encoding Compression_codec.Dictionary)
+
+let test_codec_compress_large () =
+  let large = String.make 1000 'x' in
+  match Compression_codec.compress large with
+  | Compression_codec.Unchanged _ ->
+      Alcotest.fail "expected large repetitive input to compress"
+  | Compression_codec.Compressed { payload; encoding } ->
+      Alcotest.(check bool) "payload shrinks" true (String.length payload < String.length large);
+      Alcotest.(check string) "encoding token"
+        "zstd" (Compression_codec.content_encoding encoding)
+
+let codec_tests = [
+  "encoding tokens", `Quick, test_codec_encoding_tokens;
+  "compress large", `Quick, test_codec_compress_large;
+]
+
 (* ===== Compression Ratio Benchmarks ===== *)
 
 let test_compression_ratio_text () =
@@ -146,5 +168,6 @@ let () =
   Alcotest.run "Compression" [
     "Backend", backend_tests;
     "Thresholds", threshold_tests;
+    "Codec", codec_tests;
     "Compression Ratios", ratio_tests;
   ]

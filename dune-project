@@ -21,7 +21,7 @@
  (synopsis "Multi-Agent Streaming Coordination MCP Server in OCaml")
  (description "MASC Protocol: File-based coordination for Claude, Gemini, and Codex agents")
  (depends
-  (ocaml (>= 5.1))
+  (ocaml (>= 5.4))
   (dune (>= 3.13))
   ; External dependencies (opam pin)
   (mcp_protocol (>= 0.15.0))

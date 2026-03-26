@@ -13,17 +13,20 @@ let with_temp_dir prefix f =
       ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
     (fun () -> f dir)
 
-let make_ctx base_path =
+let with_ctx base_path f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config base_path in
-  {
-    Tool_improve_loop.config;
-    agent_name = "test-agent";
-    sw = None;
-    clock = None;
-    proc_mgr = None;
-  }
+  let ctx =
+    {
+      Tool_improve_loop.config;
+      agent_name = "test-agent";
+      sw = None;
+      clock = None;
+      proc_mgr = None;
+    }
+  in
+  f ctx
 
 let make_pr ?(head_ref_name = "feature/pr-1") ?(base_ref_name = Some "main")
     ?mergeable ?merge_state_status ?(failing_checks = []) ?(pending_checks = [])
@@ -106,7 +109,7 @@ let test_failure_counter_pauses_after_three () =
 
 let test_state_roundtrip () =
   with_temp_dir "masc-improve-loop-state" (fun dir ->
-      let ctx = make_ctx dir in
+    with_ctx dir (fun ctx ->
       let state =
         { (Tool_improve_loop.default_state ~repo:"jeong-sik/masc-mcp" ()) with
           enabled = true;
@@ -118,11 +121,11 @@ let test_state_roundtrip () =
       let loaded = Tool_improve_loop.load_state ctx.config in
       check bool "enabled" true loaded.enabled;
       check string "repo" "jeong-sik/masc-mcp" loaded.repo;
-      check string "keeper" "masc-improver" loaded.keeper_name)
+      check string "keeper" "masc-improver" loaded.keeper_name))
 
 let test_idle_tick_resets_failure_counters () =
   with_temp_dir "masc-improve-loop-idle" (fun dir ->
-      let ctx = make_ctx dir in
+    with_ctx dir (fun ctx ->
       let started =
         { (Tool_improve_loop.default_state ()) with
           enabled = true;
@@ -157,7 +160,7 @@ let test_idle_tick_resets_failure_counters () =
       let last_failure =
         json |> Yojson.Safe.Util.member "last_failure"
       in
-      check bool "last failure cleared" true (last_failure = `Null))
+      check bool "last failure cleared" true (last_failure = `Null)))
 
 let test_merge_command_requires_all_gates () =
   let state =
@@ -185,7 +188,7 @@ let test_merge_command_requires_all_gates () =
 
 let test_tick_picks_conflict_candidate () =
   with_temp_dir "masc-improve-loop-tick" (fun dir ->
-      let ctx = make_ctx dir in
+    with_ctx dir (fun ctx ->
       let started =
         { (Tool_improve_loop.default_state ()) with
           enabled = true;
@@ -226,11 +229,11 @@ let test_tick_picks_conflict_candidate () =
         |> Yojson.Safe.Util.member "number"
         |> Yojson.Safe.Util.to_int
       in
-      check int "conflict chosen first" 62 candidate_number)
+      check int "conflict chosen first" 62 candidate_number))
 
 let test_execute_without_runtime_returns_team_session_error () =
   with_temp_dir "masc-improve-loop-exec" (fun dir ->
-      let ctx = make_ctx dir in
+    with_ctx dir (fun ctx ->
       let started =
         { (Tool_improve_loop.default_state ()) with
           enabled = true;
@@ -261,7 +264,7 @@ let test_execute_without_runtime_returns_team_session_error () =
         |> Yojson.Safe.Util.to_string
       in
       check bool "runtime error surfaced" true
-        (Astring.String.is_infix ~affix:"team session runtime unavailable" error))
+        (Astring.String.is_infix ~affix:"team session runtime unavailable" error)))
 
 let test_tick_due_immediate_on_fresh_start () =
   let state =

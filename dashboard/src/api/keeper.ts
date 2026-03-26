@@ -4,11 +4,9 @@ import { isRecord } from '../components/common/normalize'
 import {
   formatKeeperVisibleReply,
   normalizeKeeperConversationDetails,
-  normalizeKeeperToolResponse,
 } from '../keeper-message'
 import type { KeeperConversationDetails } from '../types'
 import { currentDashboardActor, runOperatorAction } from './core'
-import { callMcpTool } from './mcp'
 
 // --- Types ---
 
@@ -32,19 +30,6 @@ export interface KeeperChatStreamEvent {
 }
 
 // --- Direct and operator-mediated messaging ---
-
-async function callKeeperMessageRaw(
-  name: string,
-  message: string,
-): Promise<string> {
-  const args: Record<string, unknown> = {
-    name,
-    message,
-    direct_reply: true,
-    timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
-  }
-  return callMcpTool('masc_keeper_msg', args)
-}
 
 async function callKeeperMessageViaOperator(
   name: string,
@@ -81,8 +66,7 @@ export async function sendKeeperMessageDetailed(
   name: string,
   message: string,
 ): Promise<KeeperToolReply> {
-  const raw = await callKeeperMessageRaw(name, message)
-  return normalizeKeeperToolResponse(raw)
+  return callKeeperMessageViaOperator(name, message)
 }
 
 // --- SSE streaming ---

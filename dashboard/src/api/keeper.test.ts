@@ -1,18 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { runOperatorAction, currentDashboardActor, callMcpTool } = vi.hoisted(() => ({
+const { runOperatorAction, currentDashboardActor } = vi.hoisted(() => ({
   runOperatorAction: vi.fn(),
   currentDashboardActor: vi.fn(() => 'dashboard'),
-  callMcpTool: vi.fn(),
 }))
 
 vi.mock('./core', () => ({
   currentDashboardActor,
   runOperatorAction,
-}))
-
-vi.mock('./mcp', () => ({
-  callMcpTool,
 }))
 
 import { sendKeeperMessageDetailed, streamKeeperMessage } from './keeper'
@@ -49,20 +44,6 @@ describe('sendKeeperMessageDetailed', () => {
         direct_reply: true,
         timeout_sec: 120,
       },
-    })
-    expect(reply.text).toBe('pong')
-  })
-
-  it('forces direct reply mode for raw keeper tool calls', async () => {
-    callMcpTool.mockResolvedValueOnce(JSON.stringify({ reply: 'pong' }))
-
-    const reply = await sendKeeperMessageDetailed('sangsu', 'ping')
-
-    expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_msg', {
-      name: 'sangsu',
-      message: 'ping',
-      direct_reply: true,
-      timeout_sec: 120,
     })
     expect(reply.text).toBe('pong')
   })

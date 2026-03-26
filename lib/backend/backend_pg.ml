@@ -276,8 +276,8 @@ let create_readonly ~sw ~env ~url ~cluster_name ~node_id =
   let uri = Uri.of_string url in
   (* Readonly pools need >1 connection to avoid "Invalid concurrent
      usage" when multiple Eio fibers within the same executor domain
-     call Pool.use concurrently. Use half the main pool size, minimum 3. *)
-  let max_pool = max 3 (configured_pool_size () / 2) in
+     call Pool.use concurrently. Use 2/3 of the main pool size, minimum 4. *)
+  let max_pool = max 4 (configured_pool_size () * 2 / 3) in
   let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
   let uri = uri_with_keepalive uri in
   match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with

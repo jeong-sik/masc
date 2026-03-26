@@ -215,7 +215,7 @@ and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : n
   end else begin
     let errors = List.filter_map (fun (id, r) ->
       match r with Error e -> Some (Printf.sprintf "%s: %s" id e) | Ok _ -> None
-    ) !results in
+    ) results in
     let msg = String.concat "; " errors in
     record_complete ctx parent.id ~duration_ms ~success:false;
     record_error ctx parent.id msg;
@@ -374,7 +374,7 @@ and execute_parallel_group ctx ~sw ~clock ~exec_fn ~tool_exec (group : string li
     | None ->
         let outputs = List.filter_map (fun (_, r) ->
           match r with Ok o -> Some o | Error _ -> None
-        ) !results in
+        ) results in
         Ok (String.concat "\n" outputs)
 
 (** Execute inline subgraph with dependency-based parallelization *)

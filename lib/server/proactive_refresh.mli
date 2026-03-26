@@ -21,9 +21,13 @@ val start :
   config:config ->
   compute:(unit -> 'a) ->
   on_result:('a -> unit) ->
+  ?on_error:(exn -> unit) ->
+  unit ->
   unit
 (** Start a refresh loop with warm cache and circuit breaker.
 
     [compute] produces a value; [on_result] stores it (typically writing
-    to a ref).  A warm-cache run executes synchronously before the async
-    loop, bounded by [config.timeout_s]. *)
+    to a ref).  [on_error], when provided, is called on timeout or
+    exception so callers can record the failure (e.g. cached surface
+    error tracking).  A warm-cache run executes synchronously before
+    the async loop, bounded by [config.timeout_s]. *)

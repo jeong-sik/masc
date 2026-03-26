@@ -45,7 +45,7 @@ let log_refresh_failure ~config ~consecutive_failures ~current_interval ~dt exn 
     config.label !consecutive_failures !current_interval dt
     (Printexc.to_string exn)
 
-let start ~sw ~clock ~config ~compute ~on_result =
+let start ~sw ~clock ~config ~compute ~on_result ?(on_error = fun _ -> ()) () =
   Eio.Fiber.fork ~sw (fun () ->
     let t0 = Time_compat.now () in
     (try
@@ -57,15 +57,17 @@ let start ~sw ~clock ~config ~compute ~on_result =
          Log.Dashboard.info "%s warm cache done (%.1fs)" config.label
            (Time_compat.now () -. t0)
        | Error `Timeout ->
+         on_error (Failure "timeout");
          Log.Dashboard.warn "%s warm cache skipped (%.1fs timeout)" config.label
            (Time_compat.now () -. t0)
      with
      | exn ->
        if should_reraise_cancel exn then
          raise exn
-       else
+       else (
+         on_error exn;
          Log.Dashboard.warn "%s warm cache failed (%.1fs): %s" config.label
-           (Time_compat.now () -. t0) (Printexc.to_string exn)));
+           (Time_compat.now () -. t0) (Printexc.to_string exn))));
   Eio.Fiber.fork ~sw (fun () ->
     Log.Dashboard.info "starting %s refresh loop" config.label;
     let consecutive_failures = ref 0 in
@@ -88,11 +90,13 @@ let start ~sw ~clock ~config ~compute ~on_result =
          Log.Dashboard.info "%s refreshed (%.1fs)" config.label dt
          | Error `Timeout ->
              let dt = Time_compat.now () -. t0 in
+             on_error (Failure "timeout");
              log_refresh_failure ~config ~consecutive_failures ~current_interval
                ~dt (Failure "timeout")
        with exn ->
          if should_reraise_cancel exn then raise exn;
          let dt = Time_compat.now () -. t0 in
+         on_error exn;
          log_refresh_failure ~config ~consecutive_failures ~current_interval
            ~dt exn);
       loop ()

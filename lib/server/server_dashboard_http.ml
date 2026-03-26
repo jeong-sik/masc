@@ -227,6 +227,8 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
               with timeout_s = execution_refresh_timeout_s }
     ~compute
     ~on_result:(mark_cached_surface_success _execution_cache)
+    ~on_error:(mark_cached_surface_error _execution_cache)
+    ()
 
 let start_transport_health_refresh_loop ~state ~sw ~clock =
   let timeout_s =
@@ -251,6 +253,8 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
         with timeout_s }
     ~compute
     ~on_result:(mark_cached_surface_success _transport_health_cache)
+    ~on_error:(mark_cached_surface_error _transport_health_cache)
+    ()
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let fixture = query_param request "fixture" in

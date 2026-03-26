@@ -124,6 +124,7 @@ let start_cp_snapshot_refresh_loop ~state ~sw ~clock =
               with timeout_s = 30.0 }
     ~compute:(fun () -> compute_cp_snapshot ~state)
     ~on_result:(fun snapshot -> _cp_snapshot_ref := snapshot)
+    ()
 
 let command_plane_snapshot_http_json ~state:_ =
   !_cp_snapshot_ref

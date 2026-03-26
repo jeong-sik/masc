@@ -434,6 +434,8 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
                        ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _operator_snapshot_cache)
+    ~on_error:(mark_cached_surface_error _operator_snapshot_cache)
+    ()
 
 let start_operator_digest_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
@@ -487,6 +489,8 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
                        ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _operator_digest_cache)
+    ~on_error:(mark_cached_surface_error _operator_digest_cache)
+    ()
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
@@ -707,6 +711,8 @@ let start_mission_refresh_loop ~state ~sw ~clock =
               with timeout_s = mission_refresh_timeout_s }
     ~compute
     ~on_result:(mark_cached_surface_success _mission_cache)
+    ~on_error:(mark_cached_surface_error _mission_cache)
+    ()
 
 let dashboard_mission_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in

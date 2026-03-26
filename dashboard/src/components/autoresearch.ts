@@ -142,7 +142,6 @@ function decisionLabel(decision: string): string {
   return decision === 'keep' ? '유지' : '삭제'
 }
 
-
 function formatDelta(delta: number): string {
   const sign = delta >= 0 ? '+' : ''
   return `${sign}${delta.toFixed(4)}`

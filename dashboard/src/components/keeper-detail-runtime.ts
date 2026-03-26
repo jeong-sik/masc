@@ -66,7 +66,6 @@ function missionKeeperBrief(keeper: Keeper): DashboardMissionKeeperBrief | null 
     ?? null
 }
 
-
 // ── Shared row component ─────────────────────────────────
 
 function SignalRow({ label, value }: { label: string; value: string | number }) {

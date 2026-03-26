@@ -173,7 +173,7 @@ let call_model_direct_sync ~agent_type ~prompt =
     Log.AutoResponder.error "MODEL call failed: %s" (Printexc.to_string exn);
     "no response"
 
-let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
+let masc_call ~sw:_ ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
   let uri = Uri.of_string (Env_config.masc_http_base_url () ^ "/mcp") in
   let body =
     `Assoc [
@@ -190,13 +190,14 @@ let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
   match Eio_context.get_net_opt () with
   | None -> Error "Eio net not initialized"
   | Some net ->
-      let client = Cohttp_eio.Client.make ~https:None net in
-      let headers = Cohttp.Header.of_list [
-        ("Content-Type", "application/json");
-        ("Accept", "application/json, text/event-stream");
-      ] in
-      let body_content = Eio.Flow.string_source body in
       try
+        Eio.Switch.run @@ fun sw ->
+        let client = Cohttp_eio.Client.make ~https:None net in
+        let headers = Cohttp.Header.of_list [
+          ("Content-Type", "application/json");
+          ("Accept", "application/json, text/event-stream");
+        ] in
+        let body_content = Eio.Flow.string_source body in
         let resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
         let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
         let body_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024) in

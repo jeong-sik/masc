@@ -18,10 +18,15 @@ let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
       ("tool_usage", Tool_unified.summary_report ());
     ]
 
+(** Track whether shell cache has been populated at least once.
+    Used for adaptive timeout in room-truth: cold path gets more time. *)
+let _shell_warmed = ref false
+
 let warm_shell_cache (state : Mcp_server.server_state) =
   let t0 = Time_compat.now () in
   (try
      ignore (dashboard_shell_http_json state.room_config);
+     _shell_warmed := true;
      Log.Dashboard.info "shell cache pre-warmed (%.1fms)"
        ((Time_compat.now () -. t0) *. 1000.0)
    with
@@ -463,7 +468,11 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let shell_ref = ref (`Assoc []) in
   let execution_ref = ref (`Assoc []) in
   let command_ref = ref (`Assoc []) in
-  let fiber_with_timeout ?(timeout_s = 5.0) label f fallback =
+  let default_timeout_s =
+    float_of_env_default "MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S"
+      ~default:5.0 ~min_v:2.0 ~max_v:25.0
+  in
+  let fiber_with_timeout ?(timeout_s = default_timeout_s) label f fallback =
     try
       match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
       | Ok v -> v
@@ -474,11 +483,14 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
       Log.Dashboard.warn "room-truth fiber %s failed: %s" label (Printexc.to_string exn);
       fallback
   in
+  let shell_timeout_s =
+    if !_shell_warmed then default_timeout_s else 15.0
+  in
   let execution_timeout_s =
-    if cached_surface_has_success _execution_cache then 5.0 else 20.0
+    if cached_surface_has_success _execution_cache then default_timeout_s else 20.0
   in
   Eio.Fiber.all [
-    (fun () -> shell_ref := fiber_with_timeout "shell"
+    (fun () -> shell_ref := fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
       (fun () -> dashboard_shell_http_json config) (`Assoc []));
     (fun () -> execution_ref := fiber_with_timeout ~timeout_s:execution_timeout_s "execution"
       (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
@@ -492,6 +504,8 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
         (`Assoc []));
   ];
   let shell_json = !shell_ref in
+  if (not !_shell_warmed) && shell_json <> `Assoc [] then
+    _shell_warmed := true;
   let execution_json = !execution_ref in
   let command_summary_json = !command_ref in
   let parallel_ms = (Time_compat.now () -. t0) *. 1000.0 in

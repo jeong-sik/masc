@@ -195,27 +195,28 @@ let extract_jsonrpc_error json =
       | _ -> None)
   | _ -> None
 
-let post_json_via_eio ~sw ~(auth_token : string option) ~session_id
+let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
     ~(request_body : string) : (string, string) result =
   match Eio_context.get_net_opt () with
   | None -> Error "Eio net not initialized"
   | Some net ->
-      let client = Cohttp_eio.Client.make ~https:None net in
-      let headers =
-        Cohttp.Header.of_list
-          ([
-             ("content-type", "application/json");
-             ("accept", "application/json, text/event-stream");
-             ("x-masc-force-json", "1");
-             ("mcp-session-id", session_id);
-           ]
-          @
-          match auth_token with
-          | Some token when String.trim token <> "" ->
-              [ ("authorization", "Bearer " ^ token) ]
-          | _ -> [])
-      in
       try
+        Eio.Switch.run @@ fun sw ->
+        let client = Cohttp_eio.Client.make ~https:None net in
+        let headers =
+          Cohttp.Header.of_list
+            ([
+               ("content-type", "application/json");
+               ("accept", "application/json, text/event-stream");
+               ("x-masc-force-json", "1");
+               ("mcp-session-id", session_id);
+             ]
+            @
+            match auth_token with
+            | Some token when String.trim token <> "" ->
+                [ ("authorization", "Bearer " ^ token) ]
+            | _ -> [])
+        in
         let uri = Uri.of_string (mcp_endpoint_url ~auth_token) in
         let body = Eio.Flow.string_source request_body in
         let response, response_body =

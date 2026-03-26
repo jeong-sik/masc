@@ -433,6 +433,17 @@ let test_dashboard_timeout_guard_contracts () =
     (file_contains_pattern "dashboard/src/components/transport-health.ts"
        "let inflightTransportHealthRefresh: Promise<void> | null = null")
 
+let test_room_truth_adaptive_timeout_contracts () =
+  check bool "shell fiber uses adaptive timeout" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "shell_timeout_s");
+  check bool "room-truth timeout configurable via env var" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S");
+  check bool "shell_warmed tracking exists" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "_shell_warmed")
+
 let test_mermaid_xss_contracts () =
   check bool "mermaid securityLevel is strict (not loose)" true
     (file_contains_pattern "dashboard/src/components/command/helpers.ts"
@@ -476,5 +487,7 @@ let () =
            test_case "dashboard timeout guard contracts" `Quick
              test_dashboard_timeout_guard_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
+           test_case "room-truth adaptive timeout contracts" `Quick
+             test_room_truth_adaptive_timeout_contracts;
          ]);
     ]

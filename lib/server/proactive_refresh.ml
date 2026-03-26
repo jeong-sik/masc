@@ -17,8 +17,8 @@ let default_config ~label ~interval_s =
   {
     label;
     interval_s;
-    max_backoff_s = 600.0;
-    failure_threshold = 3;
+    max_backoff_s = 120.0;
+    failure_threshold = 5;
     timeout_s = 10.0;
   }
 

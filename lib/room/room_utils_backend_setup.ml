@@ -169,29 +169,53 @@ let env_opt name =
         Some value
   | _ -> None
 
-let normalize_postgres_url url =
+let supabase_pooler_host_and_port url =
   let uri = Uri.of_string url in
   match Uri.host uri, Uri.port uri with
-  | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
-      Log.Backend.info
-        "Supabase Transaction Pooler detected (port 6543 on %s); rewriting to Session Pooler port 5432"
-        host;
-      Uri.with_port uri (Some 5432) |> Uri.to_string
-  | _ -> url
+  | Some host, Some port when String.ends_with ~suffix:".pooler.supabase.com" host ->
+      Some (host, port)
+  | _ -> None
+
+let maybe_prefer_supabase_transaction_pooler ~primary ~fallbacks =
+  match supabase_pooler_host_and_port primary with
+  | Some (host, 5432) ->
+      let transaction_companion =
+        List.find_opt
+          (fun candidate ->
+            match supabase_pooler_host_and_port candidate with
+            | Some (candidate_host, 6543) -> String.equal host candidate_host
+            | _ -> false)
+          fallbacks
+      in
+      (match transaction_companion with
+       | Some companion ->
+           Log.Backend.info
+             "Supabase Session Pooler selected on %s:5432; preferring available Transaction Pooler companion on :6543"
+             host;
+           companion
+       | None -> primary)
+  | _ -> primary
 
 let postgres_url_from_env () =
-  let raw_url =
-    match env_opt "MASC_POSTGRES_URL" with
-  | Some _ as url -> url
-  | None -> (
-      match env_opt "DATABASE_URL" with
-      | Some _ as url -> url
-      | None -> (
-          match env_opt "SUPABASE_DB_URL" with
-          | Some _ as url -> url
-          | None -> env_opt "SB_PG_URL"))
+  let candidates =
+    [
+      ("MASC_POSTGRES_URL", env_opt "MASC_POSTGRES_URL");
+      ("DATABASE_URL", env_opt "DATABASE_URL");
+      ("SUPABASE_DB_URL", env_opt "SUPABASE_DB_URL");
+      ("SB_PG_URL", env_opt "SB_PG_URL");
+    ]
   in
-  Option.map normalize_postgres_url raw_url
+  let rec choose = function
+    | [] -> None
+    | (_name, Some primary) :: rest ->
+        let fallbacks =
+          rest
+          |> List.filter_map (fun (_name, value) -> value)
+        in
+        Some (maybe_prefer_supabase_transaction_pooler ~primary ~fallbacks)
+    | (_name, None) :: rest -> choose rest
+  in
+  choose candidates
 
 (** Auto-detect best backend based on environment variables
     Priority order:

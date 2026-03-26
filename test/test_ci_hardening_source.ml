@@ -259,9 +259,9 @@ let test_dashboard_component_split_contracts () =
   check bool "swarm live panels exported from split file" true
     (file_contains_pattern "dashboard/src/components/command/swarm-live-panels.ts"
        "export function SwarmLivePanels");
-  check bool "room backend setup normalizes postgres pooler url before connect" true
+  check bool "room backend setup prefers supabase transaction companion when present" true
     (file_contains_pattern "lib/room/room_utils_backend_setup.ml"
-       "pooler.supabase.com")
+       "preferring available Transaction Pooler companion")
 
 let test_activity_surface_contracts () =
   check bool "activity tab exposes activity graph label" true
@@ -397,7 +397,24 @@ let test_transport_health_contracts () =
        {| | "0" | "false" -> false|});
   check bool "standalone ws reuses transport metrics env parser" true
     (file_contains_pattern "lib/server/server_ws_standalone.ml"
-       {|Transport_metrics.ws_enabled ()|})
+       {|Transport_metrics.ws_enabled ()|});
+  check bool "transport health avoids room message scans" true
+    (not
+       (file_contains_pattern "lib/transport_metrics.ml"
+          {|Room.get_messages_raw_in_room|}));
+  check bool "transport health avoids command plane topology reads" true
+    (not
+       (file_contains_pattern "lib/transport_metrics.ml"
+          {|Command_plane_v2.topology_summary_json|}))
+
+let test_worktree_list_contracts () =
+  check bool "worktree list stays read-only" true
+    (file_contains_pattern "lib/mcp_server_eio.ml"
+       {|"masc_worktree_list"; "masc_pending_interrupts";|});
+  check bool "worktree list no longer requires join" true
+    (not
+       (file_contains_pattern "lib/mcp_server_eio.ml"
+          {|"masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";|}))
 
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true
@@ -461,12 +478,14 @@ let () =
            test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;
            test_case "dashboard executor pool contracts" `Quick
              test_dashboard_executor_pool_contracts;
-           test_case "transport route contracts" `Quick
-             test_transport_route_contracts;
-           test_case "transport health contracts" `Quick
-             test_transport_health_contracts;
-           test_case "dashboard timeout guard contracts" `Quick
-             test_dashboard_timeout_guard_contracts;
+      test_case "transport route contracts" `Quick
+        test_transport_route_contracts;
+      test_case "transport health contracts" `Quick
+        test_transport_health_contracts;
+      test_case "worktree list contracts" `Quick
+        test_worktree_list_contracts;
+      test_case "dashboard timeout guard contracts" `Quick
+        test_dashboard_timeout_guard_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
            test_case "room-truth adaptive timeout contracts" `Quick
              test_room_truth_adaptive_timeout_contracts;

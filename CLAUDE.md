@@ -230,15 +230,15 @@ Board는 PostgreSQL (primary) 또는 JSONL (fallback) 백엔드를 지원.
 
 **설정 방법 (~/.zshenv):**
 ```bash
-# SB_PG_URL이 이미 있으면 포트만 변경
-export MASC_POSTGRES_URL="${SB_PG_URL/6543/5432}"
+# SB_PG_URL이 이미 있으면 그대로 사용 (transaction pooler 6543 권장)
+export MASC_POSTGRES_URL="${SB_PG_URL}"
 
 # 또는 직접 지정
-export MASC_POSTGRES_URL="postgresql://user:pass@host:5432/db"
+export MASC_POSTGRES_URL="postgresql://user:pass@host:6543/db"
 ```
 
 **Supabase 사용 시:**
-- **Session Pooler (port 5432)** 필수 — Transaction Pooler (6543)는 prepared statement 충돌
+- **Transaction Pooler (port 6543)** 권장 — MASC가 `oneshot` query policy로 prepared statement 충돌을 피함
 - Project: `vmsmphmratpkyubnwasn` (ap-south-1)
 - Pooler: `aws-1-ap-south-1.pooler.supabase.com`
 

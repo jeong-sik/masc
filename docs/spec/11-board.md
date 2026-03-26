@@ -164,7 +164,7 @@ Caqti 기반. `masc_board_posts`, `masc_board_comments`, `masc_board_votes` 3개
 
 **트랜잭션 원자성:** 투표 연산은 `C.with_transaction`으로 감싸 동시 투표 시 카운터 정합성 보장. 단순 조회는 트랜잭션 없음.
 
-**Supabase 호환:** Session Pooler (port 5432) 필수. Transaction Pooler (6543)는 prepared statement 충돌.
+**Supabase 호환:** Transaction Pooler (port 6543) 우선. MASC는 `oneshot` 질의로 prepared statement 충돌을 피한다. Session Pooler (`:5432`)는 legacy fallback으로만 간주한다.
 
 ---
 

@@ -157,10 +157,14 @@ let int_field key json =
   | Some (`Intlit raw) -> Safe_ops.int_of_string_with_default ~default:0 raw
   | _ -> 0
 
-let cluster_summary_json config =
-  match Command_plane_v2.topology_summary_json config with
-  | `Assoc _ as json -> json
-  | _ -> `Assoc []
+let room_id_from_config (config : Room.config) =
+  match config.scope with
+  | Room_utils_backend_setup.Default -> "default"
+  | Room_utils_backend_setup.Named room_id -> room_id
+
+let cluster_summary_json (_config : Room.config) =
+  (* Transport health should stay metrics-only and avoid command-plane/Room I/O. *)
+  `Assoc []
 
 let http_listener_mode () =
   match Sys.getenv_opt "MASC_USE_H2" with
@@ -251,21 +255,13 @@ let transport_health_json ~config =
   let webrtc_channels = Server_webrtc_transport.connected_channel_count () in
   let listener_mode = http_listener_mode () in
   let topology_summary = cluster_summary_json config in
-  let room_id =
-    try Room.current_room_id config
-    with exn ->
-      Log.Transport.debug "current_room_id failed: %s" (Printexc.to_string exn);
-      "default"
-  in
+  let room_id = room_id_from_config config in
   let cluster_name =
     Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")
   in
-  let recent_messages =
-    try Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit:20 |> List.length
-    with exn ->
-      Log.Transport.debug "recent_messages count failed: %s" (Printexc.to_string exn);
-      0
-  in
+  (* Keep transport-health free of Room/PG reads so proactive refresh does not
+     contend with dashboard and MCP writes on the shared backend. *)
+  let recent_messages = 0 in
   let grpc_subscribers_i = int_of_float grpc_subscribers in
   let primary_path =
     primary_path ~webrtc_channels ~grpc_subscribers:grpc_subscribers_i

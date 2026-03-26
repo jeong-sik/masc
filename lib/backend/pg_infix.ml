@@ -8,45 +8,69 @@
     Session Pooler (port 5432) and direct connections work normally with
     the default Static prepared statement policy.
 
-    NOTE: [Room_utils.normalize_postgres_url] rewrites Supabase `:6543` to
-    `:5432` at connection time. This module mirrors that normalization so
-    the oneshot policy matches the actual port the driver connects to. *)
+    When a legacy Session Pooler URL is configured via [MASC_POSTGRES_URL]
+    but a companion Supabase Transaction Pooler URL is still available in
+    lower-priority env vars, this module mirrors the runtime selector and
+    enables oneshot mode for the companion `:6543` target. *)
 
-(* Apply the same port normalization as Room_utils.normalize_postgres_url.
-   Supabase Transaction Pooler URLs on pooler.supabase.com:6543 are rewritten
-   to Session Pooler port 5432 at connection time, so the driver never actually
-   talks to port 6543. *)
-let normalize_pg_port url =
+let is_unresolved_template value =
+  let v = String.trim value in
+  (String.length v >= 2 && v.[0] = '{' && v.[1] = '{')
+  || (String.length v >= 5 && String.sub v 0 5 = "op://")
+
+let supabase_pooler_host_and_port url =
   let uri = Uri.of_string url in
   match Uri.host uri, Uri.port uri with
-  | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
-      Uri.with_port uri (Some 5432) |> Uri.to_string
-  | _ -> url
+  | Some host, Some port when String.ends_with ~suffix:".pooler.supabase.com" host ->
+      Some (host, port)
+  | _ -> None
 
-let use_oneshot =
+let maybe_prefer_supabase_transaction_pooler ~primary ~fallbacks =
+  match supabase_pooler_host_and_port primary with
+  | Some (host, 5432) ->
+      (match
+         List.find_opt
+           (fun candidate ->
+             match supabase_pooler_host_and_port candidate with
+             | Some (candidate_host, 6543) -> String.equal host candidate_host
+             | _ -> false)
+           fallbacks
+       with
+       | Some companion -> companion
+       | None -> primary)
+  | _ -> primary
+
+let preferred_url_from_env () =
   let env_url name =
     match Sys.getenv_opt name with
-    | Some v when String.trim v <> "" -> Some (String.trim v)
+    | Some v when String.trim v <> "" && not (is_unresolved_template v) ->
+        Some (String.trim v)
     | _ -> None
   in
-  let url =
-    match env_url "MASC_POSTGRES_URL" with
-    | Some _ as u -> u
-    | None -> (
-        match env_url "DATABASE_URL" with
-        | Some _ as u -> u
-        | None -> (
-            match env_url "SUPABASE_DB_URL" with
-            | Some _ as u -> u
-            | None -> env_url "SB_PG_URL"))
+  let candidates =
+    [
+      env_url "MASC_POSTGRES_URL";
+      env_url "DATABASE_URL";
+      env_url "SUPABASE_DB_URL";
+      env_url "SB_PG_URL";
+    ]
   in
-  match url with
+  let rec choose = function
+    | [] -> None
+    | Some primary :: rest ->
+        let fallbacks = List.filter_map Fun.id rest in
+        Some (maybe_prefer_supabase_transaction_pooler ~primary ~fallbacks)
+    | None :: rest -> choose rest
+  in
+  choose candidates
+
+let use_oneshot =
+  match preferred_url_from_env () with
   | None -> false
-  | Some raw_url ->
-      let url = normalize_pg_port raw_url in
+  | Some url ->
       (match Uri.port (Uri.of_string url) with
-      | Some 6543 -> true
-      | _ -> false)
+       | Some 6543 -> true
+       | _ -> false)
 
 let oneshot () = use_oneshot
 

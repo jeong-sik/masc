@@ -39,6 +39,18 @@ let warm_execution_cache () =
     Lib.Server_dashboard_http._execution_cache
     (`Assoc [("status", `String "ok")])
 
+let keeper_boot_entry name : Lib.Keeper_types.keeper_boot_entry =
+  let now = "2026-03-25T08:05:54Z" in
+  {
+    name;
+    persona_name = name;
+    voice_enabled = false;
+    voice_channel = "text_only";
+    voice_agent_id = "";
+    created_at = now;
+    updated_at = now;
+  }
+
 let test_dashboard_room_truth_empty_room () =
   let dir = test_dir () in
   Fun.protect
@@ -136,7 +148,7 @@ let test_dashboard_room_truth_keeper_only_room_not_reported_empty () =
            ());
       ignore
         (Lib.Keeper_types.write_resident_keeper config
-           { name = "sangsu"; created_at = "2026-03-25T08:05:54Z"; updated_at = "2026-03-25T08:05:54Z" });
+           (keeper_boot_entry "sangsu"));
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =

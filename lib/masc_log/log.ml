@@ -199,21 +199,26 @@ module Ring = struct
     | None -> ()
 
   let entry_of_json json =
-    let open Yojson.Safe.Util in
-    try
-      Some {
-        seq = json |> member "seq" |> to_int;
-        ts = json |> member "ts" |> to_string;
-        level = json |> member "level" |> to_string;
-        raw_level = json |> member "raw_level" |> to_string;
-        normalized_level = json |> member "normalized_level" |> to_string;
-        source = json |> member "source" |> to_string;
-        legacy_classified = json |> member "legacy_classified" |> to_bool;
-        module_name = json |> member "module" |> to_string;
-        message = json |> member "message" |> to_string;
-        details = (try json |> member "details" with Type_error _ -> `Null);
-      }
-    with Type_error _ -> None
+    match json with
+    | `Assoc _ ->
+        let open Yojson.Safe.Util in
+        (match
+           member "seq" json, member "ts" json, member "level" json,
+           member "raw_level" json, member "normalized_level" json,
+           member "source" json, member "legacy_classified" json,
+           member "module" json, member "message" json
+         with
+         | `Int seq, `String ts, `String level,
+           `String raw_level, `String normalized_level,
+           `String source, `Bool legacy_classified,
+           `String module_name, `String message ->
+             Some {
+               seq; ts; level; raw_level; normalized_level;
+               source; legacy_classified; module_name; message;
+               details = member "details" json;
+             }
+         | _ -> None)
+    | _ -> None
 
   let load_from_file dir =
     ensure_dir dir;

@@ -151,14 +151,10 @@ let parse_worktrees (json : Yojson.Safe.t) : (string * string) list =
   match json |> U.member "worktrees" with
   | `List items ->
       List.filter_map (fun item ->
-        try
-          let worktree = item |> U.member "worktree" |> U.to_string in
-          let branch = item |> U.member "branch" |> U.to_string in
-          if String.length branch > 0 && not (String.equal branch "HEAD") then
+        match U.member "worktree" item, U.member "branch" item with
+        | `String worktree, `String branch
+          when String.length branch > 0 && not (String.equal branch "HEAD") ->
             Some (branch, worktree)
-          else None
-        with
-        | Yojson.Safe.Util.Type_error _ -> None
         | _ -> None
       ) items
   | `Null -> []

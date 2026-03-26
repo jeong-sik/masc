@@ -12,7 +12,7 @@
 
 open Types
 
-let (let*) = Result.bind
+open Result_syntax
 
 type t = {
   pool: (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t;

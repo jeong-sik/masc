@@ -188,7 +188,7 @@ let cleanup_pubsub_limit_q =
      DELETE FROM masc_pubsub WHERE id IN (SELECT id FROM ranked WHERE rn > $1) RETURNING 1\
    ) SELECT COUNT(*)::int FROM deleted"
 
-let (let*) = Result.bind
+open Result_syntax
 
 (** Read MASC_PG_POOL_SIZE from env, clamped to [1, 50]. Default: 10. *)
 let configured_pool_size () =

@@ -21,14 +21,10 @@ type context = {
 (** Extract task_id from Room.add_task result string.
     Expected format: "... task-NNN: ..." *)
 let extract_task_id result_str =
-  let re = Re.Str.regexp {|task-[0-9]+|} in
-  if Re.Str.string_match re result_str 0 then
-    Some (Re.Str.matched_string result_str)
-  else
-    try
-      let _ = Re.Str.search_forward re result_str 0 in
-      Some (Re.Str.matched_string result_str)
-    with Not_found -> None
+  let re = Re.Pcre.re {|task-[0-9]+|} |> Re.compile in
+  match Re.exec_opt re result_str with
+  | Some g -> Some (Re.Group.get g 0)
+  | None -> None
 
 (** Build the prompt that the spawned agent will receive. *)
 let build_agent_prompt ~goal ~task_id ~worktree_path =

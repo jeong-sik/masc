@@ -5,10 +5,7 @@
     self-correct without human intervention. *)
 
 let contains s sub =
-  try
-    let _ = Re.Str.search_forward (Re.Str.regexp_string sub) s 0 in
-    true
-  with Not_found -> false
+  Re.execp (Re.str sub |> Re.compile) s
 
 (** Given an error message, return a suggested recovery action or None. *)
 let recovery_hint (message : string) : string option =

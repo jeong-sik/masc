@@ -36,30 +36,23 @@ let git_exit ~cwd args =
     constructing from a relative [.worktrees/...] segment. *)
 let extract_worktree_path ~base_path msg =
   (* Try absolute path from "Path: /..." *)
-  (* Note: use regular strings so \n is actual newline, not literal \+n.
-     Raw strings {|...|} pass \n as two chars which Str treats as
-     literal backslash and 'n' inside character classes. *)
-  let abs_re = Re.Str.regexp "Path: \\(/[^ \t\n\r]+\\)" in
-  try
-    let _ = Re.Str.search_forward abs_re msg 0 in
-    Some (Re.Str.matched_group 1 msg)
-  with Not_found ->
+  let abs_re = Re.Pcre.re {|Path: (/[^ \t\n\r]+)|} |> Re.compile in
+  match Re.exec_opt abs_re msg with
+  | Some g -> Some (Re.Group.get g 1)
+  | None ->
     (* Fallback: relative path *)
-    let rel_re = Re.Str.regexp "\\.worktrees/[^ \t\n\r]+" in
-    try
-      let _ = Re.Str.search_forward rel_re msg 0 in
-      let rel = Re.Str.matched_string msg in
-      Some (Filename.concat base_path rel)
-    with Not_found -> None
+    let rel_re = Re.Pcre.re {|\.worktrees/[^ \t\n\r]+|} |> Re.compile in
+    (match Re.exec_opt rel_re msg with
+    | Some g -> Some (Filename.concat base_path (Re.Group.get g 0))
+    | None -> None)
 
 (** Extract branch name from success message.
     Format: "Branch: agent/task-NNN" *)
 let extract_branch_name msg =
-  let re = Re.Str.regexp "Branch: \\([^ \t\n\r]+\\)" in
-  try
-    let _ = Re.Str.search_forward re msg 0 in
-    Some (Re.Str.matched_group 1 msg)
-  with Not_found -> None
+  let re = Re.Pcre.re {|Branch: ([^ \t\n\r]+)|} |> Re.compile in
+  match Re.exec_opt re msg with
+  | Some g -> Some (Re.Group.get g 1)
+  | None -> None
 
 (** Symlink [.masc/] from the repo root into the worktree for read-only
     access to room state. Idempotent: does nothing if link already exists. *)

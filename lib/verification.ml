@@ -212,16 +212,14 @@ let evaluate_criterion output criterion =
        | `Null -> Fail "output is null"
        | _ -> Pass)  (* Basic check; full JSON schema validation could be added *)
   | Contains needle ->
-      if String.length needle > 0 && (
-        try ignore (Re.Str.search_forward (Re.Str.regexp_string needle) output_str 0); true
-        with Not_found -> false
-      ) then Pass
+      if String.length needle > 0 &&
+        Re.execp (Re.str needle |> Re.compile) output_str
+      then Pass
       else Fail (Printf.sprintf "output does not contain '%s'" needle)
   | Not_contains needle ->
-      if String.length needle > 0 && (
-        try ignore (Re.Str.search_forward (Re.Str.regexp_string needle) output_str 0); true
-        with Not_found -> false
-      ) then Fail (Printf.sprintf "output contains forbidden '%s'" needle)
+      if String.length needle > 0 &&
+        Re.execp (Re.str needle |> Re.compile) output_str
+      then Fail (Printf.sprintf "output contains forbidden '%s'" needle)
       else Pass
   | Custom _ ->
       (* Custom criteria require human/MODEL verifier judgment *)

@@ -16,25 +16,24 @@ open Tool_args
 let strip_state_blocks_text (s : string) : string =
   let start_marker = "[STATE]" in
   let end_marker = "[/STATE]" in
-  let start_re = Re.Str.regexp_string start_marker in
-  let end_re = Re.Str.regexp_string end_marker in
+  let start_re = Re.str start_marker |> Re.compile in
+  let end_re = Re.str end_marker |> Re.compile in
   let len = String.length s in
   let rec loop from (buf : Buffer.t) =
     if from >= len then ()
     else
-      try
-        let i = Re.Str.search_forward start_re s from in
+      match Re.exec_opt ~pos:from start_re s with
+      | Some g ->
+        let i = Re.Group.start g 0 in
         if i > from then Buffer.add_substring buf s from (i - from);
         let block_start = i + String.length start_marker in
         let next_from =
-          try
-            let j = Re.Str.search_forward end_re s block_start in
-            j + String.length end_marker
-          with Not_found ->
-            len
+          match Re.exec_opt ~pos:block_start end_re s with
+          | Some g2 -> Re.Group.start g2 0 + String.length end_marker
+          | None -> len
         in
         loop next_from buf
-      with Not_found ->
+      | None ->
         Buffer.add_substring buf s from (len - from)
   in
   let buf = Buffer.create len in

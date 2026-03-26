@@ -22,7 +22,7 @@ let handle_walph_natural ctx args =
   else begin
     (* Phase 1: Heuristic-based intent classification (fast, no network) *)
     let msg_lower = String.lowercase_ascii message in
-    let contains s = try let _ = Re.Str.search_forward (Re.Str.regexp_string s) msg_lower 0 in true with Not_found -> false in
+    let contains s = Re.execp (Re.str s |> Re.compile) msg_lower in
 
     let intent =
       if contains "stop" || contains "정지" || contains "그만" || contains "멈춰" then

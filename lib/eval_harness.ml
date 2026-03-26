@@ -132,9 +132,9 @@ let apply_deterministic_grader (g : deterministic_grader) (value : string) : gra
         find_at 0
     | Regex pattern ->
         (try
-           let re = Re.Str.regexp pattern in
-           ignore (Re.Str.search_forward re value 0); true
-         with Not_found -> false)
+           let re = Re.Pcre.re pattern |> Re.compile in
+           Re.execp re value
+         with _ -> false)
     | NotContains ->
         let v_lower = String.lowercase_ascii value in
         let e_lower = String.lowercase_ascii g.expected in

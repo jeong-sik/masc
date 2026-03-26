@@ -93,18 +93,13 @@ let contains_ci (haystack : string) (needle : string) : bool =
   let h = String.lowercase_ascii haystack in
   let n = String.lowercase_ascii needle in
   if n = "" then false
-  else
-    try
-      ignore (Re.Str.search_forward (Re.Str.regexp_string n) h 0);
-      true
-    with Not_found ->
-      false
+  else Re.execp (Re.str n |> Re.compile) h
 
 let normalize_similarity_text (s : string) : string =
   s
   |> String.lowercase_ascii
-  |> Re.Str.global_replace (Re.Str.regexp "[^0-9a-z가-힣]+") " "
-  |> Re.Str.global_replace (Re.Str.regexp " +") " "
+  |> Re.replace_string (Re.Pcre.re {|[^0-9a-z가-힣]+|} |> Re.compile) ~by:" "
+  |> Re.replace_string (Re.Pcre.re {| +|} |> Re.compile) ~by:" "
   |> String.trim
 
 let token_set_of_text (s : string) : (string, unit) Hashtbl.t =

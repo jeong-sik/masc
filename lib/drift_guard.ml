@@ -56,7 +56,7 @@ let tokenize (s : string) : string list =
   let trimmed = String.trim s in
   if trimmed = "" then []
   else
-    let tokens = Re.Str.split (Re.Str.regexp "[ \t\r\n]+") trimmed in
+    let tokens = Re.split (Re.Pcre.re "[ \t\r\n]+" |> Re.compile) trimmed in
     let trim_punct token =
       let is_punct = function
         | '.'

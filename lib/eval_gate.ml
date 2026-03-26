@@ -126,7 +126,7 @@ let evasion_indicators : (string * string) list = [
   ({|\\[0-7][0-7]|}, "octal escape sequence");
   ({|base64.*-d|}, "base64 decode pipe (possible payload obfuscation)");
   ({|eval |}, "eval invocation (arbitrary code execution)");
-  ({|xargs.*rm\|xargs.*kill|}, "xargs with destructive command");
+  ({|xargs.*rm|xargs.*kill|}, "xargs with destructive command");
 ]
 
 (** Check for shell evasion indicators in the raw (un-normalized) command.
@@ -137,10 +137,9 @@ let detect_evasion (command : string) : (string * string) option =
   let cmd_lower = String.lowercase_ascii command in
   List.find_opt (fun (pattern, _desc) ->
     try
-      let re = Re.Str.regexp pattern in
-      ignore (Re.Str.search_forward re cmd_lower 0);
-      true
-    with Not_found -> false
+      let re = Re.Pcre.re pattern |> Re.compile in
+      Re.execp re cmd_lower
+    with _ -> false
   ) evasion_indicators
 
 (** Check if a bash command contains destructive patterns.

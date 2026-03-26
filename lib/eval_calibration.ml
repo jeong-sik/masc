@@ -21,6 +21,7 @@ type verdict_record = {
   gate : string;                  (** "length" | "excuse" | "contract" | "llm" | "fallback" *)
   evaluator_cascade : string;
   generator_cascade : string option;
+  fallback_reason : string option; (** Error message when gate="fallback" *)
   timestamp : float;
 }
 
@@ -85,7 +86,7 @@ let notes_hash ~(task_title : string) ~(notes : string) : string =
 (* ================================================================ *)
 
 let verdict_record_to_json (r : verdict_record) : Yojson.Safe.t =
-  `Assoc [
+  let base = [
     ("record_type", `String r.record_type);
     ("notes_hash", `String r.notes_hash);
     ("task_id", `String r.task_id);
@@ -97,7 +98,12 @@ let verdict_record_to_json (r : verdict_record) : Yojson.Safe.t =
     ("generator_cascade",
      (match r.generator_cascade with Some s -> `String s | None -> `Null));
     ("timestamp", `Float r.timestamp);
-  ]
+  ] in
+  let extra = match r.fallback_reason with
+    | Some reason -> [("fallback_reason", `String reason)]
+    | None -> []
+  in
+  `Assoc (base @ extra)
 
 let label_record_to_json (r : label_record) : Yojson.Safe.t =
   `Assoc [
@@ -154,6 +160,7 @@ let record_verdict
     gate = result.gate;
     evaluator_cascade = result.evaluator_cascade;
     generator_cascade = result.generator_cascade;
+    fallback_reason = result.fallback_reason;
     timestamp = Unix.gettimeofday ();
   } in
   Dated_jsonl.append (get_store ()) (verdict_record_to_json record);
@@ -290,6 +297,8 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   let gate_counts : (string, int) Hashtbl.t = Hashtbl.create 8 in
   let labeled_hashes : (string, string) Hashtbl.t = Hashtbl.create 64 in
   let verdict_hashes : (string, string) Hashtbl.t = Hashtbl.create 64 in
+  let recent_fallback_reasons : string list ref = ref [] in
+  let max_fallback_reasons = 5 in
   List.iter (fun json ->
     let rt = string_field json "record_type" in
     let hash = string_field json "notes_hash" in
@@ -301,7 +310,11 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       let gate = string_field json "gate" in
       let prev = try Hashtbl.find gate_counts gate with Not_found -> 0 in
       Hashtbl.replace gate_counts gate (prev + 1);
-      Hashtbl.replace verdict_hashes hash v
+      Hashtbl.replace verdict_hashes hash v;
+      if gate = "fallback" && List.length !recent_fallback_reasons < max_fallback_reasons then
+        (let reason = string_field json "fallback_reason" in
+         if reason <> "" then
+           recent_fallback_reasons := reason :: !recent_fallback_reasons)
     end else if rt = "label" then
       Hashtbl.replace labeled_hashes hash (string_field json "human_verdict")
   ) records;
@@ -328,6 +341,9 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   in
   let gate_json = Hashtbl.fold (fun k v acc ->
     (k, `Int v) :: acc) gate_counts [] in
+  let fallback_count =
+    try Hashtbl.find gate_counts "fallback" with Not_found -> 0
+  in
   `Assoc [
     ("total_verdicts", `Int !total_verdicts);
     ("approve_count", `Int !approve_count);
@@ -337,4 +353,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
     ("false_positive_count", `Int !false_pos);
     ("false_negative_count", `Int !false_neg);
     ("agreement_rate", `Float agreement_rate);
+    ("fallback_count", `Int fallback_count);
+    ("recent_fallback_reasons",
+     `List (List.rev_map (fun s -> `String s) !recent_fallback_reasons));
   ]

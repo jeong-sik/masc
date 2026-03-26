@@ -10,15 +10,23 @@ include Keeper_config
 let mkdir_p_ path =
   Fs_compat.mkdir_p path
 
+(* Directory-creation cache: avoid repeated mkdir_p syscalls for the same path. *)
+let _ensured_dirs_ : (string, unit) Hashtbl.t = Hashtbl.create 8
+
+let ensure_dir_ d =
+  if not (Hashtbl.mem _ensured_dirs_ d) then begin
+    mkdir_p_ d;
+    Hashtbl.replace _ensured_dirs_ d ()
+  end;
+  d
+
 let keeper_dir_ (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "perpetual-keepers" in
-  mkdir_p_ d;
-  d
+  ensure_dir_ d
 
 let session_base_dir_ (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "perpetual" in
-  mkdir_p_ d;
-  d
+  ensure_dir_ d
 
 let env_present name =
   match Sys.getenv_opt name with

@@ -151,6 +151,10 @@ let is_running ~base_path name =
   | Some { state = Running; _ } -> true
   | _ -> false
 
+(* Fast path for process-wide health snapshots. Updates stay serialized under
+   [mu], while the global count can be read lock-free and may lag momentarily
+   behind registry mutations in other fibers. Scoped reads still take the lock
+   so per-base-path counts remain exact. *)
 let count_running ?base_path () =
   match base_path with
   | None -> Atomic.get running_count_atomic

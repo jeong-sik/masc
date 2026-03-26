@@ -78,6 +78,22 @@ let test_count_running () =
   R.unregister ~base_path:bp "r1";
   check int "1 running" 1 (R.count_running ())
 
+let test_count_running_atomic_transitions () =
+  let bp2 = "/tmp/test-2" in
+  R.clear ();
+  ignore (R.register ~base_path:bp "fast1" (make_meta "fast1"));
+  ignore (R.register ~base_path:bp2 "fast2" (make_meta "fast2"));
+  check int "global fast-path count" 2 (R.count_running ());
+  check int "scoped count stays exact" 1 (R.count_running ~base_path:bp ());
+  R.set_state ~base_path:bp2 "fast2" R.Paused;
+  check int "pause decrements global fast-path" 1 (R.count_running ());
+  ignore (R.register ~base_path:bp "fast1" (make_meta "fast1"));
+  check int "replacing running entry keeps count stable" 1 (R.count_running ());
+  R.unregister ~base_path:bp "fast1";
+  check int "unregister decrements global fast-path" 0 (R.count_running ());
+  R.clear ();
+  check int "clear resets global fast-path" 0 (R.count_running ())
+
 let test_record_restart () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k5" (make_meta "k5") in
@@ -279,6 +295,7 @@ let () =
           eio_test "update meta" test_update_meta;
           eio_test "set state" test_set_state;
           eio_test "count running" test_count_running;
+          eio_test "count running atomic transitions" test_count_running_atomic_transitions;
           eio_test "record restart" test_record_restart;
           eio_test "record error" test_record_error;
           eio_test "get_exn not found" test_get_exn_not_found;

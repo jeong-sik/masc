@@ -337,6 +337,7 @@ let test_min_agents_violation_after_bootstrap_grace () =
   cleanup_dir base_dir
 
 let test_report_uses_participant_and_turn_metrics () =
+  with_eio @@ fun _env ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "owner"));

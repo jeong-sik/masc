@@ -16,6 +16,8 @@ let ready = Atomic.make false
 
 let enable () = Atomic.set ready true
 
+let disable () = Atomic.set ready false
+
 let is_ready () = Atomic.get ready
 
 (** {1 Mutex Guards}

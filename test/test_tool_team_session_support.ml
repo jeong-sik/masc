@@ -84,7 +84,9 @@ let with_eio f =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Fun.protect
-    ~finally:(fun () -> Time_compat.clear_clock ())
+    ~finally:(fun () ->
+      Time_compat.clear_clock ();
+      Eio_guard.disable ())
     (fun () -> f env)
 
 let transition_task_ok config ~agent_name ~task_id ~action =

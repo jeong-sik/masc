@@ -24,34 +24,35 @@ open Chain_types
 let rec apply_adapter_transform (transform : adapter_transform) (input : string) : (string, string) result =
   match transform with
   | Extract path ->
-      (* Simple dot-path extraction from JSON *)
-      (try
-        let json = Yojson.Safe.from_string input in
-        let parts = String.split_on_char '.' path in
-        let rec extract_path j = function
-          | [] -> Ok (Yojson.Safe.to_string j)
-          | key :: rest ->
-              (match j with
-               | `Assoc fields ->
-                   (match List.assoc_opt key fields with
-                    | Some v -> extract_path v rest
-                    | None -> Error (Printf.sprintf "Key '%s' not found in path '%s'" key path))
-               | `List items when String.length key >= 3 && key.[0] = '[' && key.[String.length key - 1] = ']' ->
-                   (* Handle array index: [0], [1], etc. - requires at least "[N]" format *)
-                   let idx_str = String.sub key 1 (String.length key - 2) in
-                   (try
-                     let idx = int_of_string idx_str in
-                     if idx < 0 then
-                       Error (Printf.sprintf "Index %d out of bounds" idx)
-                     else
-                       (match List.nth_opt items idx with
-                       | Some item -> extract_path item rest
-                       | None -> Error (Printf.sprintf "Index %d out of bounds" idx))
-                   with Invalid_argument _ | Failure _ -> Error (Printf.sprintf "Invalid index: %s" key))
-               | _ -> Error (Printf.sprintf "Cannot extract '%s' from non-object" key))
-        in
-        extract_path json parts
-      with Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse error: %s" msg))
+      (* JSON path extraction — offloaded to executor pool when available.
+         Domain-safe: only Yojson + stdlib string ops, no Str or global state. *)
+      Executor_pool_ref.submit_or_inline (fun () ->
+        try
+          let json = Yojson.Safe.from_string input in
+          let parts = String.split_on_char '.' path in
+          let rec extract_path j = function
+            | [] -> Ok (Yojson.Safe.to_string j)
+            | key :: rest ->
+                (match j with
+                 | `Assoc fields ->
+                     (match List.assoc_opt key fields with
+                      | Some v -> extract_path v rest
+                      | None -> Error (Printf.sprintf "Key '%s' not found in path '%s'" key path))
+                 | `List items when String.length key >= 3 && key.[0] = '[' && key.[String.length key - 1] = ']' ->
+                     let idx_str = String.sub key 1 (String.length key - 2) in
+                     (try
+                       let idx = int_of_string idx_str in
+                       if idx < 0 then
+                         Error (Printf.sprintf "Index %d out of bounds" idx)
+                       else
+                         (match List.nth_opt items idx with
+                         | Some item -> extract_path item rest
+                         | None -> Error (Printf.sprintf "Index %d out of bounds" idx))
+                     with Invalid_argument _ | Failure _ -> Error (Printf.sprintf "Invalid index: %s" key))
+                 | _ -> Error (Printf.sprintf "Cannot extract '%s' from non-object" key))
+          in
+          extract_path json parts
+        with Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse error: %s" msg))
 
   | Template tpl ->
       (* Simple {{value}} substitution *)
@@ -101,118 +102,110 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
       with Failure _ -> Error (Printf.sprintf "Invalid regex pattern: %s" pattern))
 
   | ValidateSchema schema_str ->
-      (* JSON Schema validation (subset of draft-07).
+      (* JSON Schema validation (subset of draft-07) — offloaded to executor pool.
+         Domain-safe: Yojson parsing + local ref only, no Str or global state.
+
          schema_str can be:
          - Inline JSON Schema: {"type":"object","required":["name"]}
-         - Simple type name: "object", "string", "number", "array"
-
-         Supported validations:
-         - type: string, number, integer, boolean, array, object, null
-         - required: array of field names (for objects)
-         - enum: array of allowed values
-         - minLength/maxLength: for strings
-         - minimum/maximum: for numbers *)
-      let validate_type expected json =
-        match expected, json with
-        | "string", `String _ -> true
-        | "number", `Float _ | "number", `Int _ -> true
-        | "integer", `Int _ -> true
-        | "boolean", `Bool _ -> true
-        | "array", `List _ -> true
-        | "object", `Assoc _ -> true
-        | "null", `Null -> true
-        | _ -> false
-      in
-      let validate_required required json =
-        match json with
-        | `Assoc fields ->
-            let field_names = List.map fst fields in
-            List.for_all (fun r -> List.mem r field_names) required
-        | _ -> false
-      in
-      let validate_enum allowed json =
-        List.exists (fun v -> v = json) allowed
-      in
-      let validate_string_length min_len max_len json =
-        match json with
-        | `String s ->
-            let len = String.length s in
-            (match min_len with Some m -> len >= m | None -> true) &&
-            (match max_len with Some m -> len <= m | None -> true)
-        | _ -> true
-      in
-      let validate_number_range minimum maximum json =
-        match json with
-        | `Float f ->
-            (match minimum with Some m -> f >= m | None -> true) &&
-            (match maximum with Some m -> f <= m | None -> true)
-        | `Int i ->
-            let f = float_of_int i in
-            (match minimum with Some m -> f >= m | None -> true) &&
-            (match maximum with Some m -> f <= m | None -> true)
-        | _ -> true
-      in
-      (try
-        let data = Yojson.Safe.from_string input in
-        (* Parse schema - either inline JSON or simple type name *)
-        let schema =
-          if String.length schema_str > 0 && schema_str.[0] = '{' then
-            Yojson.Safe.from_string schema_str
-          else
-            `Assoc [("type", `String schema_str)]
+         - Simple type name: "object", "string", "number", "array" *)
+      Executor_pool_ref.submit_or_inline (fun () ->
+        let validate_type expected json =
+          match expected, json with
+          | "string", `String _ -> true
+          | "number", `Float _ | "number", `Int _ -> true
+          | "integer", `Int _ -> true
+          | "boolean", `Bool _ -> true
+          | "array", `List _ -> true
+          | "object", `Assoc _ -> true
+          | "null", `Null -> true
+          | _ -> false
         in
-        let open Yojson.Safe.Util in
-        let errors = ref [] in
+        let validate_required required json =
+          match json with
+          | `Assoc fields ->
+              let field_names = List.map fst fields in
+              List.for_all (fun r -> List.mem r field_names) required
+          | _ -> false
+        in
+        let validate_enum allowed json =
+          List.exists (fun v -> v = json) allowed
+        in
+        let validate_string_length min_len max_len json =
+          match json with
+          | `String s ->
+              let len = String.length s in
+              (match min_len with Some m -> len >= m | None -> true) &&
+              (match max_len with Some m -> len <= m | None -> true)
+          | _ -> true
+        in
+        let validate_number_range minimum maximum json =
+          match json with
+          | `Float f ->
+              (match minimum with Some m -> f >= m | None -> true) &&
+              (match maximum with Some m -> f <= m | None -> true)
+          | `Int i ->
+              let f = float_of_int i in
+              (match minimum with Some m -> f >= m | None -> true) &&
+              (match maximum with Some m -> f <= m | None -> true)
+          | _ -> true
+        in
+        try
+          let data = Yojson.Safe.from_string input in
+          let schema =
+            if String.length schema_str > 0 && schema_str.[0] = '{' then
+              Yojson.Safe.from_string schema_str
+            else
+              `Assoc [("type", `String schema_str)]
+          in
+          let open Yojson.Safe.Util in
+          let errors = ref [] in
 
-        (* Validate type *)
-        (match schema |> member "type" with
-         | `String t when not (validate_type t data) ->
-             errors := Printf.sprintf "expected type '%s'" t :: !errors
-         | _ -> ());
+          (match schema |> member "type" with
+           | `String t when not (validate_type t data) ->
+               errors := Printf.sprintf "expected type '%s'" t :: !errors
+           | _ -> ());
 
-        (* Validate required fields *)
-        (match schema |> member "required" with
-         | `List req_list ->
-             let required = List.filter_map (function `String s -> Some s | _ -> None) req_list in
-             if not (validate_required required data) then
-               errors := Printf.sprintf "missing required fields: %s"
-                 (String.concat ", " required) :: !errors
-         | _ -> ());
+          (match schema |> member "required" with
+           | `List req_list ->
+               let required = List.filter_map (function `String s -> Some s | _ -> None) req_list in
+               if not (validate_required required data) then
+                 errors := Printf.sprintf "missing required fields: %s"
+                   (String.concat ", " required) :: !errors
+           | _ -> ());
 
-        (* Validate enum *)
-        (match schema |> member "enum" with
-         | `List enum_list when not (validate_enum enum_list data) ->
-             errors := "value not in enum" :: !errors
-         | _ -> ());
+          (match schema |> member "enum" with
+           | `List enum_list when not (validate_enum enum_list data) ->
+               errors := "value not in enum" :: !errors
+           | _ -> ());
 
-        (* Validate string length *)
-        let min_len = match schema |> member "minLength" with `Int n -> Some n | _ -> None in
-        let max_len = match schema |> member "maxLength" with `Int n -> Some n | _ -> None in
-        if not (validate_string_length min_len max_len data) then
-          errors := "string length constraint violated" :: !errors;
+          let min_len = match schema |> member "minLength" with `Int n -> Some n | _ -> None in
+          let max_len = match schema |> member "maxLength" with `Int n -> Some n | _ -> None in
+          if not (validate_string_length min_len max_len data) then
+            errors := "string length constraint violated" :: !errors;
 
-        (* Validate number range *)
-        let minimum = match schema |> member "minimum" with
-          | `Float f -> Some f | `Int i -> Some (float_of_int i) | _ -> None in
-        let maximum = match schema |> member "maximum" with
-          | `Float f -> Some f | `Int i -> Some (float_of_int i) | _ -> None in
-        if not (validate_number_range minimum maximum data) then
-          errors := "number range constraint violated" :: !errors;
+          let minimum = match schema |> member "minimum" with
+            | `Float f -> Some f | `Int i -> Some (float_of_int i) | _ -> None in
+          let maximum = match schema |> member "maximum" with
+            | `Float f -> Some f | `Int i -> Some (float_of_int i) | _ -> None in
+          if not (validate_number_range minimum maximum data) then
+            errors := "number range constraint violated" :: !errors;
 
-        if !errors = [] then Ok input
-        else Error (Printf.sprintf "Schema validation failed: %s" (String.concat "; " !errors))
-      with
-      | Yojson.Json_error msg ->
-          Error (Printf.sprintf "Invalid JSON: %s" msg)
-      | _ ->
-          Error "Schema validation error")
+          if !errors = [] then Ok input
+          else Error (Printf.sprintf "Schema validation failed: %s" (String.concat "; " !errors))
+        with
+        | Yojson.Json_error msg ->
+            Error (Printf.sprintf "Invalid JSON: %s" msg)
+        | _ ->
+            Error "Schema validation error")
 
   | ParseJson ->
-      (* Validate input is valid JSON and return as-is *)
-      (try
-        let _ = Yojson.Safe.from_string input in
-        Ok input
-      with Yojson.Json_error msg -> Error (Printf.sprintf "Not valid JSON: %s" msg))
+      (* JSON validation — offloaded to executor pool when available.
+         Domain-safe: single Yojson.Safe.from_string call. *)
+      Executor_pool_ref.submit_or_inline (fun () ->
+        try
+          let _ = Yojson.Safe.from_string input in
+          Ok input
+        with Yojson.Json_error msg -> Error (Printf.sprintf "Not valid JSON: %s" msg))
 
   | Stringify ->
       (* Wrap in JSON string if not already *)

@@ -487,7 +487,7 @@ let handle_request
                    | method_ -> make_error ~id (-32601) ("Method not found: " ^ method_))
                  with
                  | Invalid_argument msg
-                   when contains_casefold msg "invalid_argument(\"masc not initialized" ->
+                   when contains_casefold msg "masc not initialized" ->
                      make_error ~id (-32603) (Types.masc_error_to_string Types.NotInitialized)
                    | Eio.Cancel.Cancelled _ as exn -> raise exn
                    | exn ->

@@ -31,6 +31,7 @@ let test_dashboard_room_truth_empty_room () =
     (fun () ->
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
@@ -59,6 +60,7 @@ let test_dashboard_room_truth_execution_fixture () =
     (fun () ->
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
@@ -82,6 +84,7 @@ let test_dashboard_room_truth_empty_room_focus_label () =
     (fun () ->
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
@@ -103,6 +106,7 @@ let test_operator_digest_shape_matches_room_truth () =
     (fun () ->
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json

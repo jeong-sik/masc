@@ -322,6 +322,7 @@ let test_type_compatibility () =
 
 let test_eio_context_delegation () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
   Mcp_eio.set_net net;
@@ -422,6 +423,7 @@ let test_make_error () =
 
 let test_handle_request_initialize () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -465,6 +467,7 @@ let test_handle_request_initialize () =
 
 let test_handle_request_initialize_rejects_unsupported_protocol_version () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -494,6 +497,7 @@ let test_handle_request_initialize_rejects_unsupported_protocol_version () =
 
 let test_handle_request_tools_list () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -560,6 +564,7 @@ let test_handle_request_tools_list () =
 let test_handle_request_tools_list_mdal_descriptions () =
   with_env "MASC_FULL_SURFACE" "1" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -600,6 +605,7 @@ let test_handle_request_tools_list_mdal_descriptions () =
 
 let test_handle_request_initialize_operator_profile () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -639,6 +645,7 @@ let test_handle_request_initialize_operator_profile () =
 
 let test_handle_request_tools_list_operator_profile () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -723,6 +730,7 @@ let test_handle_request_tools_list_operator_profile () =
 
 let test_handle_request_initialize_managed_profile () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -762,6 +770,7 @@ let test_handle_request_initialize_managed_profile () =
 
 let test_handle_request_tools_list_managed_profile () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -805,6 +814,7 @@ let test_handle_request_tools_list_managed_profile () =
 
 let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -849,6 +859,7 @@ let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
 
 let test_handle_request_tools_call_transition_claim_guidance () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -900,6 +911,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
 
 let test_handle_request_tools_call_transition_done_guidance () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -965,6 +977,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
 
 let test_handle_request_tools_call_transition_claim_requires_action () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -1011,6 +1024,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
 
 let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1042,6 +1056,7 @@ let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
 
 let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1072,6 +1087,7 @@ let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
 let test_handle_request_tools_list_with_placeholder_flag () =
   with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" "1" (fun () ->
     Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
     let clock = Eio.Stdenv.clock env in
     Eio.Switch.run @@ fun sw ->
 
@@ -1094,6 +1110,7 @@ let test_handle_request_tools_list_with_placeholder_flag () =
 
 let test_handle_request_tools_list_include_hidden_metadata () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -1122,6 +1139,7 @@ let test_handle_request_tools_list_include_hidden_metadata () =
 
 let test_handle_request_tools_list_include_deprecated_claim_alias_metadata () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -1158,6 +1176,7 @@ let test_handle_request_tools_list_include_deprecated_claim_alias_metadata () =
 
 let test_handle_request_tools_list_hides_team_session_turn_by_default () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1177,6 +1196,7 @@ let test_handle_request_tools_list_hides_team_session_turn_by_default () =
 
 let test_handle_request_tools_list_include_usage_metadata () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1207,6 +1227,7 @@ let test_handle_request_tools_list_include_usage_metadata () =
 
 let _test_execute_tool_trpg_flow () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -1277,6 +1298,7 @@ let _test_execute_tool_trpg_flow () =
 
 let test_execute_tool_coding_mode_allows_governance_status () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -1298,6 +1320,7 @@ let test_execute_tool_coding_mode_allows_governance_status () =
 
 let test_execute_tool_team_session_step_direct_call () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -1360,6 +1383,7 @@ let test_execute_tool_team_session_step_direct_call () =
 
 let _test_execute_tool_trpg_validation () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -1418,6 +1442,7 @@ let _test_execute_tool_trpg_validation () =
 
 let test_execute_tool_explicit_agent_name_not_overridden () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -1520,6 +1545,7 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
 
 let test_execute_tool_mcp_session_ignores_term_persistence () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -1561,6 +1587,7 @@ let test_execute_tool_mcp_session_ignores_term_persistence () =
 
 let test_convo_start_uses_current_room () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -1608,6 +1635,7 @@ let test_convo_start_uses_current_room () =
 
 let _test_handle_request_tools_call_trpg () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -1641,6 +1669,7 @@ let _test_handle_request_tools_call_trpg () =
 
 let test_handle_request_invalid_json () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -1658,6 +1687,7 @@ let test_handle_request_invalid_json () =
 
 let test_handle_request_tools_call_cache_get_structured_content () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -1683,6 +1713,7 @@ let test_handle_request_tools_call_cache_get_structured_content () =
 
 let test_handle_request_tools_call_board_post_structured_content () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -1711,6 +1742,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
 
 let test_handle_request_batch_rejected () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1736,6 +1768,7 @@ let test_handle_request_batch_rejected () =
 
 let test_handle_request_jsonrpc_response_returns_null () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1755,6 +1788,7 @@ let test_handle_request_jsonrpc_response_returns_null () =
 
 let test_handle_request_method_not_found () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -1784,6 +1818,7 @@ let test_handle_request_method_not_found () =
 
 let test_handle_request_tools_list_rejects_empty_cursor () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1807,6 +1842,7 @@ let test_handle_request_tools_list_rejects_empty_cursor () =
 
 let test_handle_request_tools_list_rejects_invalid_tier () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1829,6 +1865,7 @@ let test_handle_request_tools_list_rejects_invalid_tier () =
 
 let test_handle_request_resources_list_rejects_unknown_field () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1851,6 +1888,7 @@ let test_handle_request_resources_list_rejects_unknown_field () =
 
 let test_handle_request_resources_templates_rejects_invalid_cursor () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1874,6 +1912,7 @@ let test_handle_request_resources_templates_rejects_invalid_cursor () =
 
 let test_handle_request_prompts_list_rejects_invalid_cursor () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1897,6 +1936,7 @@ let test_handle_request_prompts_list_rejects_invalid_cursor () =
 
 let test_handle_request_prompts_list_non_empty () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1929,6 +1969,7 @@ let test_handle_request_prompts_list_non_empty () =
 
 let test_handle_request_prompts_list_cursor () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -1961,6 +2002,7 @@ let test_handle_request_prompts_list_cursor () =
 
 let test_handle_request_prompts_get_tool_help () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -2054,6 +2096,7 @@ let test_handle_request_prompts_get_command_truth_filters_run_id () =
 let test_handle_request_resources_list_includes_tool_help () =
   with_env "MASC_LIST_PAGE_SIZE" "10" @@ fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -2071,6 +2114,7 @@ let test_handle_request_resources_list_includes_tool_help () =
 
 let test_handle_request_resources_list_paginates () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -2106,6 +2150,7 @@ let test_handle_request_resources_list_paginates () =
 let test_handle_request_tools_list_paginates () =
   with_env "MASC_LIST_PAGE_SIZE" "10" @@ fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -2154,6 +2199,7 @@ let test_handle_request_tools_list_paginates () =
 
 let test_handle_request_tool_help_resource_read () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -2278,6 +2324,7 @@ Alpha body
 
 let test_handle_request_resources_subscribe_requires_session () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -2302,6 +2349,7 @@ let test_handle_request_resources_subscribe_requires_session () =
 
 let test_handle_request_resources_subscribe_roundtrip () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -2348,6 +2396,7 @@ let test_handle_request_resources_subscribe_roundtrip () =
 
 let test_execute_tool_help_tool () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -2366,6 +2415,7 @@ let test_execute_tool_help_tool () =
 
 let test_execute_tool_tag_dispatch_respects_pre_hooks () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
@@ -2399,6 +2449,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
 
 let test_execute_tool_autoresearch_uses_resolved_session_agent () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in

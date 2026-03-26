@@ -124,7 +124,8 @@ let () = test "dispatch_removed_named_room_tools" (fun () ->
 )
 
 let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
-  Eio_main.run @@ fun _ ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
   let task_ctx = { Tool_task.config = ctx.config; agent_name = ctx.agent_name } in
@@ -150,7 +151,8 @@ let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
 )
 
 let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
-  Eio_main.run @@ fun _ ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
   let task_ctx = { Tool_task.config = ctx.config; agent_name = ctx.agent_name } in

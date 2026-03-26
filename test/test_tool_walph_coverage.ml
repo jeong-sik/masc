@@ -18,6 +18,7 @@ let test name f =
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-walph-test-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
@@ -31,6 +32,7 @@ let () = test "dispatch_unknown_tool" (fun () ->
 (* Test walph_control dispatch *)
 let () = test "dispatch_walph_control" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-walph-test2-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
@@ -47,6 +49,7 @@ let () = test "dispatch_walph_control" (fun () ->
 (* Test walph_status dispatch *)
 let () = test "dispatch_walph_status" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-walph-test-status-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
@@ -70,6 +73,7 @@ let () = test "dispatch_walph_status" (fun () ->
 (* Test walph_natural with stop command *)
 let () = test "walph_natural_stop" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-walph-test3-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
@@ -85,6 +89,7 @@ let () = test "walph_natural_stop" (fun () ->
 (* Test walph_natural with pause command *)
 let () = test "walph_natural_pause" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-walph-test4-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
@@ -100,6 +105,7 @@ let () = test "walph_natural_pause" (fun () ->
 (* Test walph_natural with resume command *)
 let () = test "walph_natural_resume" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-walph-test5-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
@@ -115,6 +121,7 @@ let () = test "walph_natural_resume" (fun () ->
 (* Test walph_natural with status command *)
 let () = test "walph_natural_status" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-walph-test6-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
@@ -130,6 +137,7 @@ let () = test "walph_natural_status" (fun () ->
 (* Test walph_natural with unrecognized message *)
 let () = test "walph_natural_ignore" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-walph-test7-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;
@@ -145,6 +153,7 @@ let () = test "walph_natural_ignore" (fun () ->
 (* Test walph_natural with empty message *)
 let () = test "walph_natural_empty" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-walph-test8-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
   Unix.mkdir tmp 0o755;

@@ -201,7 +201,12 @@ proactive_enabled = true
       let keeper_name = "config-provenance" in
       let ok, _ =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
-          ~args:(`Assoc [ ("name", `String keeper_name) ])
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("presence_keepalive", `Bool false);
+              ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       let meta =
@@ -353,7 +358,12 @@ let test_snapshot_keeper_tool_audit_fallback () =
       Alcotest.(check string) "diagnostic health offline" "offline"
         (keeper |> member "diagnostic" |> member "health_state" |> to_string);
       Alcotest.(check string) "diagnostic continuity disabled" "disabled"
-        (keeper |> member "diagnostic" |> member "continuity_state" |> to_string))
+        (keeper |> member "diagnostic" |> member "continuity_state" |> to_string);
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      Alcotest.(check bool) "keeper down ok" true ok)
 
 let test_keeper_msg_auto_team_session_bridge () =
   (* This test triggers a real LLM cascade call (keeper_msg -> run_turn).

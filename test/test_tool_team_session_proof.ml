@@ -143,11 +143,7 @@ let test_proof_exposes_spawn_selection_rationale () =
     prove_result |> Yojson.Safe.Util.member "proof_md_path"
     |> Yojson.Safe.Util.to_string
   in
-  let ic = open_in proof_md_path in
-  let proof_md =
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        really_input_string ic (in_channel_length ic))
-  in
+  let proof_md = Team_session_store.read_artifact_text config proof_md_path in
   Alcotest.(check bool) "markdown includes model" true
     (try
        let _ = Str.search_forward (Str.regexp_string spawn_model) proof_md 0 in
@@ -247,7 +243,7 @@ let test_report_and_proof_expose_spawn_tool_usage () =
   let report_json_path =
     report_result |> Yojson.Safe.Util.member "json_path" |> Yojson.Safe.Util.to_string
   in
-  let report_json = Yojson.Safe.from_file report_json_path in
+  let report_json = Room_utils.read_json config report_json_path in
   let report_evidence = report_json |> Yojson.Safe.Util.member "evidence" in
   Alcotest.(check int) "report spawn tool call count" 3
     Yojson.Safe.Util.(report_evidence |> member "spawn_tool_call_count" |> to_int);

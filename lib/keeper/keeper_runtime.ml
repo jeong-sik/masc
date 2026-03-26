@@ -124,15 +124,17 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
       list_resident_keepers ctx.config
       |> take max_scan
     in
-    let (scanned, started, stale, recovering) =
+    let (enabled, scanned, started, stale, recovering) =
       List.fold_left
-        (fun (scanned_acc, started_acc, stale_acc, recovering_acc) spec ->
+        (fun (enabled_acc, scanned_acc, started_acc, stale_acc, recovering_acc) spec ->
           match ensure_resident_meta ctx.config spec with
-          | Error _ -> (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
+          | Error _ ->
+              (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
           | Ok m ->
               if m.paused then
-                (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
+                (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
               else
+              let wants_keepalive = m.presence_keepalive in
               let stale_now =
                 stale_turn_sec > 0.0
                 && (m.usage.last_turn_ts <= 0.0
@@ -142,7 +144,8 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
               in
               let started_here =
-                if already_running then false
+                if not wants_keepalive then false
+                else if already_running then false
                 else if max_keepers > 0 && !remaining_slots <= 0 then false
                 else (
                   Keeper_resident_supervisor.supervise_keepalive
@@ -151,14 +154,15 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                   true
                 )
               in
-              ( scanned_acc + 1,
+              ( enabled_acc || wants_keepalive,
+                scanned_acc + 1,
                 started_acc + (if started_here then 1 else 0),
                 stale_acc + (if stale_now then 1 else 0),
                 recovering_acc + (if stale_now && started_here then 1 else 0) ))
-        (0, 0, 0, 0)
+        (false, 0, 0, 0, 0)
         specs
     in
-    { enabled = true; scanned; started; stale; recovering }
+    { enabled; scanned; started; stale; recovering }
 
 (** Start the supervisor sweep Pulse loop.
     Runs alongside existing keepalive bootstrap, scanning for

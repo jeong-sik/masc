@@ -44,7 +44,8 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
                | Ok (proof_json, proof_markdown) ->
                    Room_utils.write_json config path proof_json;
                    let md_path = Team_session_store.proof_md_path config current in
-                   Team_session_store.write_text_file md_path proof_markdown;
+                   Team_session_store.write_artifact_text config md_path
+                     proof_markdown;
                    Some proof_json
                | Error e ->
                    Log.Misc.error "dashboard proof auto-gen failed: %s" e;

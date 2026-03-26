@@ -324,7 +324,7 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
     prove_result |> Yojson.Safe.Util.member "proof_md_path"
     |> Yojson.Safe.Util.to_string
   in
-  let proof_md = Stdlib.In_channel.with_open_bin proof_md_path Stdlib.In_channel.input_all in
+  let proof_md = Team_session_store.read_artifact_text config proof_md_path in
   Alcotest.(check bool) "markdown includes failed spawn count" true
     (try
        let _ = Str.search_forward (Str.regexp_string "Failed spawn events: 1") proof_md 0 in
@@ -438,7 +438,7 @@ let test_report_and_proof_expose_empty_note_turn_evidence () =
     prove_result |> Yojson.Safe.Util.member "proof_md_path"
     |> Yojson.Safe.Util.to_string
   in
-  let proof_md = Stdlib.In_channel.with_open_bin proof_md_path Stdlib.In_channel.input_all in
+  let proof_md = Team_session_store.read_artifact_text config proof_md_path in
   Alcotest.(check bool) "proof markdown includes empty note evidence" true
     (try
        let _ =

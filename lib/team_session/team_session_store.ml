@@ -132,6 +132,15 @@ let append_text_file path content =
   Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.append_file path content
 
+let read_artifact_text config path =
+  Room_utils.read_text config path
+
+let write_artifact_text config path content =
+  Room_utils.write_text config path content
+
+let append_artifact_text config path content =
+  Room_utils.append_text config path content
+
 let save_session config (session : Team_session_types.session) =
   let path = session_json_path config session.session_id in
   with_file_lock config path (fun () ->
@@ -206,7 +215,7 @@ let append_event config session_id ~(event_type : string) ~(detail : Yojson.Safe
   in
   let line = Yojson.Safe.to_string (Team_session_types.event_entry_to_yojson entry) ^ "\n" in
   let path = events_jsonl_path config session_id in
-  with_file_lock config path (fun () -> append_text_file path line);
+  with_file_lock config path (fun () -> append_artifact_text config path line);
   emit_activity_event config ~session_id ~event_type ~detail
 
 let take_last n lst =
@@ -280,25 +289,33 @@ let read_events ?max_events config session_id : Yojson.Safe.t list =
   if not (path_exists config path) then
     []
   else
-    match max_events with
-    | Some n when n > 0 ->
-        let tail_lines =
-          read_tail_lines path
-            ~max_bytes:(max 262_144 (n * 4096))
-            ~max_lines:(n * 3)
-        in
-        let tail_parsed = parse_event_lines tail_lines in
-        if List.length tail_parsed >= n then
-          take_last n tail_parsed
-        else
-          (* Fallback for unusually large JSON lines or sparse parseable rows. *)
-          let content = Fs_compat.load_file path in
-          let all_lines = String.split_on_char '\n' content in
-          parse_event_lines all_lines |> take_last n
+    match config.backend with
+    | FileSystem _ when Fs_compat.file_exists path -> (
+        match max_events with
+        | Some n when n > 0 ->
+            let tail_lines =
+              read_tail_lines path
+                ~max_bytes:(max 262_144 (n * 4096))
+                ~max_lines:(n * 3)
+            in
+            let tail_parsed = parse_event_lines tail_lines in
+            if List.length tail_parsed >= n then
+              take_last n tail_parsed
+            else
+              let content = read_artifact_text config path in
+              let all_lines = String.split_on_char '\n' content in
+              parse_event_lines all_lines |> take_last n
+        | _ ->
+            let content = read_artifact_text config path in
+            let all_lines = String.split_on_char '\n' content in
+            parse_event_lines all_lines)
     | _ ->
-        let content = Fs_compat.load_file path in
+        let content = read_artifact_text config path in
         let all_lines = String.split_on_char '\n' content in
-        parse_event_lines all_lines
+        let parsed = parse_event_lines all_lines in
+        (match max_events with
+         | Some n when n > 0 -> take_last n parsed
+         | _ -> parsed)
 
 let write_checkpoint config session_id (checkpoint : Team_session_types.checkpoint) =
   let filename = Printf.sprintf "%Ld.json" (Int64.of_float (checkpoint.ts *. 1000.0)) in

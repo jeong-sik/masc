@@ -86,7 +86,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 - **Identity**: `name`, `agent_name`, `trace_id`, `trace_history`
 - **Goal (3-horizon)**: `goal`, `short_goal`, `mid_goal`, `long_goal`
 - **Self-Model (BDI)**: `soul_profile`, `will`, `needs`, `desires`
-- **Model**: `models`, `allowed_models`, `active_model`
+- **Model**: `cascade_name`, `last_model_used`, derived `active_model`
 - **Capability**: `policy_voice_enabled`, `allowed_paths`
 - **Scope**: `scope_kind`, `room_scope`, `mention_targets`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`

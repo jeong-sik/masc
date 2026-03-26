@@ -287,8 +287,6 @@ let permission_for_tool = function
   | "masc_persistent_agent_create_from_persona"
   | "masc_persistent_agent_up" | "masc_persistent_agent_down"
   | "masc_persistent_agent_msg"
-  | "masc_keeper_model_set"
-  | "masc_persistent_agent_model_set"
   | "masc_voice_speak" | "masc_voice_session_start"
   | "masc_voice_session_end" | "masc_voice_conference_start"
   | "masc_voice_conference_end"

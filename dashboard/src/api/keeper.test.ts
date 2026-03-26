@@ -56,14 +56,13 @@ describe('sendKeeperMessageDetailed', () => {
   it('forces direct reply mode for raw keeper tool calls', async () => {
     callMcpTool.mockResolvedValueOnce(JSON.stringify({ reply: 'pong' }))
 
-    const reply = await sendKeeperMessageDetailed('sangsu', 'ping', ['llama:test'])
+    const reply = await sendKeeperMessageDetailed('sangsu', 'ping')
 
     expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_msg', {
       name: 'sangsu',
       message: 'ping',
       direct_reply: true,
       timeout_sec: 120,
-      models: ['llama:test'],
     })
     expect(reply.text).toBe('pong')
   })
@@ -80,7 +79,7 @@ describe('streamKeeperMessage', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const events: string[] = []
-    await streamKeeperMessage('sangsu', 'ping', undefined, {
+    await streamKeeperMessage('sangsu', 'ping', {
       onEvent: event => {
         events.push(event.type)
       },

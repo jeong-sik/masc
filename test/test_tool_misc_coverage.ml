@@ -408,7 +408,6 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           [
             ("name", `String "admin-keeper");
             ("goal", `String "Admin tool policy test");
-            ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
             ("presence_keepalive", `Bool false);
             ("proactive_enabled", `Bool false);
           ])

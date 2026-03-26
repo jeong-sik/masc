@@ -16,13 +16,9 @@ let write_meta_logged config (meta : keeper_meta) =
       Log.Keeper.error "write_meta failed: %s" msg
 
 let _keeper_team_session_model (meta : keeper_meta) =
-  let active_model = String.trim meta.active_model in
-  if active_model <> "" && not (String.equal active_model "default") then
-    active_model
-  else
-    match meta.models with
-    | model :: _ -> model
-    | [] ->
+  match String.trim meta.usage.last_model_used with
+  | value when value <> "" -> value
+  | _ ->
       (match Oas_model_resolve.models_of_cascade_name meta.cascade_name with
        | model :: _ -> model
        | [] -> "default")
@@ -183,10 +179,12 @@ let start_keeper_auto_team_session (ctx : _ context) (meta : keeper_meta)
         ("communication_mode", `String "hybrid");
         ("instruction_profile", `String "strict");
         ("alert_channel", `String "both");
-        ("model_cascade", `List (List.map (fun model -> `String model)
-           (let m = meta.models in
-            if m <> [] then m
-            else Oas_model_resolve.models_of_cascade_name meta.cascade_name)));
+        ( "model_cascade",
+          `List
+            (List.map (fun model -> `String model)
+               (Team_session_types.dedup_strings
+                  (_keeper_team_session_model meta
+                  :: Oas_model_resolve.models_of_cascade_name meta.cascade_name))) );
         ( "agents",
           `List
             (Team_session_types.dedup_strings

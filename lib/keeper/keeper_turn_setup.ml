@@ -21,7 +21,6 @@ let ensure_keeper_exists
     ~inline_needs
     ~inline_desires
     ~inline_soul_profile
-    ~inline_models:_inline_models_ignored
   : (keeper_meta, string) result =
   match read_meta ctx.config name with
   | Error e -> Error e
@@ -37,8 +36,6 @@ let ensure_keeper_exists
           profile_defaults.goal |> Option.value ~default:""
           |> normalize_goal_horizon_text
     in
-    (* Legacy model resolution removed: cascade_name is the authority. *)
-    let inline_models = [] in
     if goal = "" then Error "keeper not found and goal not provided"
     else
     let now_ts = Time_compat.now () in
@@ -81,8 +78,6 @@ let ensure_keeper_exists
       Option.value ~default:(Option.value ~default:"" profile_defaults.instructions)
         inline_instructions
     in
-    let allowed_models = [] in
-    let active_model = "" in
     let policy_voice_enabled =
       profile_defaults.policy_voice_enabled
       |> Option.value ~default:false
@@ -120,9 +115,6 @@ let ensure_keeper_exists
       needs;
       desires;
       instructions;
-      models = inline_models;
-      allowed_models;
-      active_model;
       policy_voice_enabled;
       execution_scope = default_execution_scope;
       allowed_paths;

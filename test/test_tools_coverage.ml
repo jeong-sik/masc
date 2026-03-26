@@ -675,6 +675,12 @@ let test_masc_keeper_up_schema () =
       | Some props ->
           Alcotest.(check bool) "has scope_kind" true
             (List.mem_assoc "scope_kind" props);
+          Alcotest.(check bool) "omits models" false
+            (List.mem_assoc "models" props);
+          Alcotest.(check bool) "omits allowed_models" false
+            (List.mem_assoc "allowed_models" props);
+          Alcotest.(check bool) "omits active_model" false
+            (List.mem_assoc "active_model" props);
           Alcotest.(check bool) "has presence_keepalive" true
             (List.mem_assoc "presence_keepalive" props)
       | None -> Alcotest.fail "masc_keeper_up missing properties"

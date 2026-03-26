@@ -36,7 +36,6 @@ export interface KeeperChatStreamEvent {
 async function callKeeperMessageRaw(
   name: string,
   message: string,
-  models?: string[],
 ): Promise<string> {
   const args: Record<string, unknown> = {
     name,
@@ -44,21 +43,18 @@ async function callKeeperMessageRaw(
     direct_reply: true,
     timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
   }
-  if (models && models.length > 0) args.models = models
   return callMcpTool('masc_keeper_msg', args)
 }
 
 async function callKeeperMessageViaOperator(
   name: string,
   message: string,
-  models?: string[],
 ): Promise<KeeperToolReply> {
   const payload: Record<string, unknown> = {
     message,
     direct_reply: true,
     timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
   }
-  if (models && models.length > 0) payload.models = models
   const response = await runOperatorAction({
     actor: currentDashboardActor(),
     action_type: 'keeper_message',
@@ -84,13 +80,9 @@ async function callKeeperMessageViaOperator(
 export async function sendKeeperMessageDetailed(
   name: string,
   message: string,
-  models?: string[],
 ): Promise<KeeperToolReply> {
-  if (models && models.length > 0) {
-    const raw = await callKeeperMessageRaw(name, message, models)
-    return normalizeKeeperToolResponse(raw)
-  }
-  return callKeeperMessageViaOperator(name, message)
+  const raw = await callKeeperMessageRaw(name, message)
+  return normalizeKeeperToolResponse(raw)
 }
 
 // --- SSE streaming ---
@@ -150,7 +142,6 @@ function isTerminalKeeperStreamEvent(event: KeeperChatStreamEvent): boolean {
 export async function streamKeeperMessage(
   name: string,
   message: string,
-  models: string[] | undefined,
   {
     signal,
     onEvent,
@@ -170,7 +161,6 @@ export async function streamKeeperMessage(
       message,
       direct_reply: true,
       timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
-      ...(models && models.length > 0 ? { models } : {}),
     }),
     signal,
   })

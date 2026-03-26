@@ -35,8 +35,7 @@ let find_jsonl_row_by_action_id rows action_id =
 
 let resolved_keeper_args_to_json
     ~name ~persona_name ~persona_profile_path ~goal ~short_goal ~mid_goal ~long_goal
-    ~instructions ~soul_profile ~will ~needs ~desires ~models ~allowed_models
-    ~active_model ~policy_voice_enabled
+    ~instructions ~soul_profile ~will ~needs ~desires ~policy_voice_enabled
     ~room_scope ~scope_kind ~mention_targets
     ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
@@ -54,9 +53,6 @@ let resolved_keeper_args_to_json
       ("will", `String will);
       ("needs", `String needs);
       ("desires", `String desires);
-      ("models", string_list_to_json models);
-      ("allowed_models", string_list_to_json allowed_models);
-      ("active_model", `String active_model);
       ("policy_voice_enabled", `Bool policy_voice_enabled);
       ("room_scope", `String room_scope);
       ("scope_kind", `String scope_kind);
@@ -93,6 +89,9 @@ let resolved_keeper_args_from_persona args :
       if not (validate_name persona_name) then
         Error "persona_name is required"
       else
+        match reject_legacy_model_args ~tool_name:"masc_keeper_create_from_persona" args with
+        | Error err -> Error err
+        | Ok () ->
         match load_persona_summary persona_name with
         | None ->
             Error
@@ -153,13 +152,6 @@ let resolved_keeper_args_from_persona args :
               |> first_some defaults.desires
               |> Option.value ~default:default_keeper_desires
             in
-            (* Legacy model fields: cascade_name is the authority. *)
-            let _explicit_models = get_string_list args "models" in
-            let _explicit_allowed_models = get_string_list args "allowed_models" in
-            let _active_model_opt = get_string_opt args "active_model" in
-            let base_models = [] in
-            let allowed_models = [] in
-            let active_model = "" in
             let policy_voice_enabled =
               first_some
                 (get_bool_opt args "policy_voice_enabled")
@@ -221,7 +213,6 @@ let resolved_keeper_args_from_persona args :
                 ~persona_profile_path:persona.profile_path
                 ~goal ~short_goal ~mid_goal ~long_goal
                 ~instructions ~soul_profile ~will ~needs ~desires
-                ~models:base_models ~allowed_models ~active_model
                 ~policy_voice_enabled
                 ~room_scope ~scope_kind ~mention_targets
                 ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled

@@ -185,54 +185,76 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "provenance" "fallback" resolved.provenance;
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
-(* Model-set now returns cascade_name instead of active_model/allowed_models.
-   cascade_name is the authority for model resolution. *)
-let test_keeper_model_set_persists_active_model () =
-  let _provider_model = "custom:test-model@http://127.0.0.1:9999" in
+let test_keeper_model_set_removed () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
-      rm_rf base_dir)
+    ~finally:(fun () -> rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
         { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
-      let dispatch name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some result -> result
-        | None -> fail ("missing dispatch for " ^ name)
-      in
-      let ok, _ =
-        dispatch "masc_keeper_up"
-          (`Assoc
-            [
-              ("name", `String "sangsu");
-              ("goal", `String "Maintain Sangsu persona");
-              ("room_scope", `String "all");
-              ("trigger_mode", `String "explicit_only");
-              ("mention_targets", `List [ `String "sangsu" ]);
-              ("presence_keepalive", `Bool false);
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "keeper up ok" true ok;
-      let ok, body =
-        dispatch "masc_keeper_model_set"
+      match
+        Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_model_set"
+          ~args:
           (`Assoc
             [
               ("name", `String "sangsu");
               ("model", `String "any-model");
             ])
+      with
+      | None -> ()
+      | Some _ -> fail "masc_keeper_model_set should be removed")
+
+let test_keeper_up_rejects_legacy_model_args () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let keeper_ctx : _ Masc_mcp.Keeper_types.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
-      check bool "model set ok" true ok;
-      let json = Yojson.Safe.from_string body in
-      check string "cascade_name present" "keeper_unified"
-        Yojson.Safe.Util.(json |> member "cascade_name" |> to_string))
+      let ok, body =
+        Masc_mcp.Keeper_turn.handle_keeper_up keeper_ctx
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("goal", `String "Maintain Sangsu persona");
+              ("models", `List [ `String "llama:test-model" ]);
+            ])
+      in
+      check bool "keeper up rejects legacy model args" false ok;
+      check bool "legacy model error surfaced" true
+        (contains_substring body "legacy keeper model args removed"))
+
+let test_keeper_msg_rejects_legacy_model_args () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let keeper_ctx : _ Masc_mcp.Keeper_types.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let ok, body =
+        Masc_mcp.Keeper_turn.handle_keeper_msg keeper_ctx
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("message", `String "ping");
+              ("models", `List [ `String "llama:test-model" ]);
+            ])
+      in
+      check bool "keeper msg rejects legacy model args" false ok;
+      check bool "legacy model error surfaced" true
+        (contains_substring body "legacy keeper model args removed"))
 
 (* write_persona_profile removed: persona concept deleted, see CLAUDE.md *)
 
@@ -641,7 +663,6 @@ let test_resident_keeper_and_persistent_agent_lists_split () =
             [
               ("name", `String "resident-demo");
               ("goal", `String "Stay resident");
-              ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -654,7 +675,6 @@ let test_resident_keeper_and_persistent_agent_lists_split () =
             [
               ("name", `String "persistent-demo");
               ("goal", `String "Stay on demand");
-              ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -710,7 +730,6 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
             [
               ("name", `String "resident-demo");
               ("goal", `String "Stay resident");
-              ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -722,7 +741,6 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
             [
               ("name", `String "persistent-demo");
               ("goal", `String "Stay on demand");
-              ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -792,7 +810,6 @@ let test_resident_list_items_expose_runtime_config_summary () =
             [
               ("name", `String "resident-demo");
               ("goal", `String "Stay resident");
-              ("models", `List [ `String "custom:test-model" ]);
               ("room_scope", `String "all");
               ("scope_kind", `String "global");
               ("presence_keepalive", `Bool true);
@@ -859,7 +876,6 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
             [
               ("name", `String "resident-demo");
               ("goal", `String "Stay resident");
-              ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool true);
             ])
@@ -926,7 +942,6 @@ let test_resident_keeper_msg_bootstraps_then_requires_message () =
             [
               ("name", `String "bootstrap-demo");
               ("goal", `String "Bootstrap resident keeper");
-              ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -962,7 +977,6 @@ let test_persistent_agent_msg_rejects_missing_message () =
             [
               ("name", `String "persistent-demo");
               ("goal", `String "Stay on demand");
-              ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -1005,7 +1019,6 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
             [
               ("name", `String "resident-demo");
               ("goal", `String "Stay resident");
-              ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -1017,7 +1030,6 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
             [
               ("name", `String "persistent-demo");
               ("goal", `String "Stay on demand");
-              ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -1051,19 +1063,18 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
       in
       check bool "resident eval ok" true ok;
       check bool "eval body non-empty" true (String.length eval_body > 0);
-      let ok, model_set_body =
-        dispatch "masc_persistent_agent_model_set"
-          (`Assoc
-            [
-              ("name", `String "persistent-demo");
-              ("model", `String "custom:alt-model");
-            ])
-      in
-      check bool "persistent model set ok" true ok;
-      let model_set_json = parse_json_exn model_set_body in
-      (* model_set now returns cascade_name instead of active_model *)
-      check string "persistent cascade_name" "keeper_unified"
-        Yojson.Safe.Util.(model_set_json |> member "cascade_name" |> to_string);
+      (match
+         Masc_mcp.Tool_keeper.dispatch keeper_ctx
+           ~name:"masc_persistent_agent_model_set"
+           ~args:
+             (`Assoc
+               [
+                 ("name", `String "persistent-demo");
+                 ("model", `String "custom:alt-model");
+               ])
+       with
+      | None -> ()
+      | Some _ -> fail "masc_persistent_agent_model_set should be removed");
       let ok, persistent_status_body =
         dispatch "masc_persistent_agent_status"
           (`Assoc
@@ -1115,7 +1126,6 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
             [
               ("name", `String "detail-demo");
               ("goal", `String "Inspect detailed status");
-              ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -1218,7 +1228,6 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Maintain Sangsu persona");
-              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -1272,7 +1281,6 @@ let test_keeper_up_update_preserves_proactive_when_omitted () =
           [
             ("name", `String "buddy");
             ("goal", `String "Stay focused");
-            ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
             ("presence_keepalive", `Bool false);
             ("proactive_enabled", `Bool true);
           ]
@@ -1352,7 +1360,6 @@ let test_write_meta_syncs_registered_resident_seed () =
             [
               ("name", `String "buddy");
               ("goal", `String "Stay resident");
-              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool true);
             ])
@@ -1390,6 +1397,13 @@ let test_write_meta_syncs_registered_resident_seed () =
         Yojson.Safe.Util.(resident_json |> member "voice_agent_id" |> to_string);
       check string "persona_name in resident spec" "buddy"
         Yojson.Safe.Util.(resident_json |> member "persona_name" |> to_string);
+      (match Masc_mcp.Keeper_registry.get ~base_path:config.base_path "buddy" with
+       | Some entry ->
+           check bool "registry meta syncs proactive" false
+             entry.Masc_mcp.Keeper_registry.meta.proactive.enabled;
+           check bool "registry meta syncs voice enabled" false
+             entry.Masc_mcp.Keeper_registry.meta.voice_enabled
+       | None -> ());
       check bool "seed_meta absent in thin format" true
         (Yojson.Safe.Util.(resident_json |> member "seed_meta") = `Null))
 
@@ -1417,7 +1431,6 @@ let test_keeper_up_persists_allowed_paths_to_status_policy () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Stay resident");
-              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
               ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
@@ -1553,7 +1566,6 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Stay resident");
-              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
               ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool false);
             ])
@@ -1628,7 +1640,6 @@ let test_resident_supervisor_recovers_missing_desired_keeper () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Stay resident");
-              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
               ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool false);
             ])
@@ -1680,8 +1691,12 @@ let () =
            test_resolved_keeper_skill_route_marks_agent_judgment;
          test_case "resolved skill route falls back when parse missing" `Quick
            test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing;
-         test_case "keeper model set persists active model" `Quick
-           test_keeper_model_set_persists_active_model;
+         test_case "keeper model set removed" `Quick
+           test_keeper_model_set_removed;
+         test_case "keeper up rejects legacy model args" `Quick
+           test_keeper_up_rejects_legacy_model_args;
+         test_case "keeper msg rejects legacy model args" `Quick
+           test_keeper_msg_rejects_legacy_model_args;
          test_case "resident and persistent lists split" `Quick
            test_resident_keeper_and_persistent_agent_lists_split;
          test_case "resident and persistent detailed lists annotate runtime class" `Quick

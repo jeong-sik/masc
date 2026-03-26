@@ -20,18 +20,8 @@ let keeper_board_write_tool_names = Keeper_exec_context.keeper_board_write_tool_
 let keeper_write_done = Keeper_exec_context.keeper_write_done
 let keeper_action_kind_of_tool_names = Keeper_exec_context.keeper_action_kind_of_tool_names
 
-let effective_model_labels_for_turn
-    (m : keeper_meta)
-    ~(inline_models : string list) : string list =
-  if inline_models <> [] then
-    inline_models
-  else
-    match Keeper_exec_status.active_model_of_meta m with
-    | "" ->
-        let pool = dedupe_keep_order (m.allowed_models @ m.models) in
-        if pool = [] then Oas_model_resolve.models_of_cascade_name m.cascade_name
-        else pool
-    | model -> [ model ]
+let effective_model_labels_for_turn (m : keeper_meta) : string list =
+  Keeper_exec_context.effective_model_labels_for_turn m
 
 let room_cursor_for meta room_id =
   meta.last_seen_seq_by_room

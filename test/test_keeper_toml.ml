@@ -170,9 +170,6 @@ will = "detect issues"
 needs = "log access"
 desires = "low false positives"
 instructions = "You are a log analyzer."
-models = ["llama:qwen3.5-35b-a3b-ud-q4-xl"]
-allowed_models = ["llama:qwen3.5-35b-a3b-ud-q4-xl", "llama:qwen3.5-35b-a3b-ud-q8-xl"]
-active_model = "llama:qwen3.5-35b-a3b-ud-q4-xl"
 room_scope = "all"
 scope_kind = "global"
 mention_targets = ["sherlock", "log-analyzer"]
@@ -225,7 +222,6 @@ let test_load_from_file () =
 [keeper]
 name = "test-keeper"
 goal = "testing file load"
-models = ["llama:test-model"]
 soul_profile = "balanced"
 |} in
   let oc = open_out tmp in
@@ -245,7 +241,6 @@ let test_load_name_from_filename () =
   let content = {|
 [keeper]
 goal = "analyze stuff"
-models = ["llama:test"]
 |} in
   let oc = open_out path in
   output_string oc content;
@@ -297,12 +292,10 @@ let test_discover_with_files () =
   write_file "alpha.toml" {|
 [keeper]
 goal = "alpha goal"
-models = ["llama:alpha"]
 |};
   write_file "beta.toml" {|
 [keeper]
 goal = "beta goal"
-models = ["llama:beta"]
 |};
   write_file "not-toml.json" {|{"ignored": true}|};
   let result = KTP.discover_keepers_toml tmp_dir in
@@ -333,7 +326,6 @@ let test_discover_skips_bad_files () =
   write_file "good.toml" {|
 [keeper]
 goal = "works"
-models = ["llama:test"]
 |};
   write_file "bad.toml" "[broken";
   let result = KTP.discover_keepers_toml tmp_dir in

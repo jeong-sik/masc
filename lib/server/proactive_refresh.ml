@@ -81,7 +81,8 @@ let start ~sw ~clock ~config ~compute ~on_result =
     let consecutive_failures = ref 0 in
     let current_interval = ref config.interval_s in
     let rec loop () =
-      Eio.Time.sleep clock !current_interval;
+      let jitter = Random.float (min 5.0 (!current_interval *. 0.1)) in
+      Eio.Time.sleep clock (!current_interval +. jitter);
       let t0 = Time_compat.now () in
       (try
          match

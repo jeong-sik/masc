@@ -9,6 +9,11 @@
 val enable : unit -> unit
 (** Activate mutex guards. Call once after Eio runtime starts. *)
 
+val disable : unit -> unit
+(** Deactivate mutex guards. Useful in tests to reset state between
+    [Eio_main.run] invocations so subsequent code outside the Eio
+    runtime does not attempt Eio.Mutex operations. *)
+
 val is_ready : unit -> bool
 (** [true] after {!enable} has been called. *)
 

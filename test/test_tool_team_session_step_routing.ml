@@ -188,6 +188,7 @@ let test_step_spawn_batch_applies_hybrid_routing () =
         Yojson.Safe.Util.(summary |> member "task_profile_counts" |> member "synthesize" |> to_int))
 
 let test_parse_step_spawn_specs_applies_top_level_batch_timeout () =
+  with_eio @@ fun _env ->
   let args =
     `Assoc
       [
@@ -217,6 +218,7 @@ let test_parse_step_spawn_specs_applies_top_level_batch_timeout () =
   | _ -> Alcotest.fail "expected exactly two parsed spawn specs"
 
 let test_parse_step_spawn_specs_applies_worker_policy_fields () =
+  with_eio @@ fun _env ->
   let args =
     `Assoc
       [

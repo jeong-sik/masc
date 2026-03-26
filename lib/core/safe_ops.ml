@@ -136,72 +136,81 @@ let get_env_float_logged name ~default =
     These replace `with _ -> default` patterns in JSON parsing code.
 *)
 
+(** Safe member access: returns [`Null] for non-[`Assoc] inputs
+    instead of raising [Type_error]. *)
+let safe_member key = function
+  | `Assoc l ->
+    (match List.assoc_opt key l with
+     | Some v -> v
+     | None -> `Null)
+  | _ -> `Null
+
 let json_string ?(default = "") key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `String s -> s
   | _ -> default
 
 let json_int ?(default = 0) key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Int i -> i
   | `Float f -> int_of_float f
   | _ -> default
 
 let json_float ?(default = 0.0) key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Float f -> f
   | `Int i -> float_of_int i
   | _ -> default
 
 let json_bool ?(default = false) key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Bool b -> b
   | _ -> default
 
 let json_string_list key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `List l ->
       List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) l
   | _ -> []
 
 let json_string_opt key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `String s -> Some s
   | _ -> None
 
 let json_int_opt key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Int i -> Some i
   | _ -> None
 
 let json_float_opt key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Float f -> Some f
   | `Int i -> Some (float_of_int i)
   | _ -> None
 
 let json_bool_opt key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Bool b -> Some b
   | _ -> None
 
 let json_list key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `List l -> l
   | _ -> []
 
 let json_list_opt key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `List l -> Some l
   | _ -> None
 
 let json_assoc key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Assoc a -> a
   | _ -> []
 
 let json_member_opt key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Null -> None
   | v -> Some v
 

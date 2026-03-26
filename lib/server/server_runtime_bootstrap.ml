@@ -491,6 +491,10 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   Log.info ~ctx:"startup" "subsystems: resident loops started"
 
 let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
+  (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
+     Replaces the old mutex + synchronous file I/O pattern. *)
+  Eio.Fiber.fork ~sw (fun () -> Metrics_store_eio.start_flush_fiber ~clock);
+  Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
   (match Board_dispatch.get_pg_pool () with
   | Some pool ->
       let listener = Board_listener.create pool in

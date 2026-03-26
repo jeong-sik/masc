@@ -5,10 +5,13 @@ include Chain_mermaid_parse
 
 (** Mermaid labels coming from MODEL JSON responses often escape inner quotes.
     Normalize those escapes before parsing the semantic node payload. *)
+let escaped_dquote_re = Re.Pcre.re {|\\"|} |> Re.compile
+let escaped_squote_re = Re.Pcre.re {|\\'|} |> Re.compile
+
 let normalize_label_content (content : string) : string =
   content
-  |> Re.Str.global_replace (Re.Str.regexp {|\\\"|}) "\""
-  |> Re.Str.global_replace (Re.Str.regexp {|\\'|}) "'"
+  |> Re.replace_string escaped_dquote_re ~by:"\""
+  |> Re.replace_string escaped_squote_re ~by:"'"
 
 (** Parse node content into Chain node_type *)
 let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stadium | `Circle ]) (content : string)
@@ -260,12 +263,13 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         (* {GoalDriven:metric:op:value:max_iter} - e.g., {GoalDriven:coverage:gte:0.90:10} *)
         let rest = String.sub content 11 (String.length content - 11) in
         (* Format: metric:op:value:max_iter *)
-        let goaldriven_re = Re.Str.regexp {|^\([a-z_]+\):\([a-z]+\):\([0-9.]+\):\([0-9]+\)$|} in
-        if Re.Str.string_match goaldriven_re rest 0 then
-          let metric = Re.Str.matched_group 1 rest in
-          let op_str = Re.Str.matched_group 2 rest in
-          let value = float_of_string (Re.Str.matched_group 3 rest) in
-          let max_iter = int_of_string (Re.Str.matched_group 4 rest) in
+        let goaldriven_re = Re.Pcre.re {|^([a-z_]+):([a-z]+):([0-9.]+):([0-9]+)$|} |> Re.compile in
+        (match Re.exec_opt goaldriven_re rest with
+        | Some group ->
+          let metric = Re.Group.get group 1 in
+          let op_str = Re.Group.get group 2 in
+          let value = float_of_string (Re.Group.get group 3) in
+          let max_iter = int_of_string (Re.Group.get group 4) in
           let operator = match op_str with
             | "gt" -> Gt | "gte" -> Gte | "lt" -> Lt | "lte" -> Lte | "eq" -> Eq | "neq" -> Neq
             | _ -> Gte  (* default *)
@@ -282,8 +286,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
             conversational = false;
             relay_models = [];
           })
-        else
-          Error (Printf.sprintf "Invalid GoalDriven format (expected metric:op:value:max_iter): %s" content)
+        | None ->
+          Error (Printf.sprintf "Invalid GoalDriven format (expected metric:op:value:max_iter): %s" content))
       else if String.length content > 5 && String.sub content 0 5 = "MCTS:" then
         (* {MCTS:policy:iterations} - e.g., {MCTS:ucb1:1.41:10} or {MCTS:greedy:10} *)
         let rest = String.sub content 5 (String.length content - 5) in
@@ -403,26 +407,31 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
       if String.length content_clean > 6 && String.sub content_clean 0 6 = "MODEL:" then
         let rest = String.sub content_clean 6 (String.length content_clean - 6) in
         (* Parse: model "prompt" or model 'prompt' or just model *)
-        if Re.Str.string_match quote_re rest 0 then
-          let model = Re.Str.matched_group 1 rest in
-          let prompt = Re.Str.matched_group 2 rest in
+        (match Re.exec_opt quote_re rest with
+        | Some group ->
+          let model = Re.Group.get group 1 in
+          let prompt = Re.Group.get group 2 in
           Ok (Model { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
-        else if Re.Str.string_match single_quote_re rest 0 then
-          let model = Re.Str.matched_group 1 rest in
-          let prompt = Re.Str.matched_group 2 rest in
+        | None ->
+        match Re.exec_opt single_quote_re rest with
+        | Some group ->
+          let model = Re.Group.get group 1 in
+          let prompt = Re.Group.get group 2 in
           Ok (Model { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
-        else if Re.Str.string_match simple_model_re rest 0 then
-          let model = Re.Str.matched_group 1 rest in
+        | None ->
+        match Re.exec_opt simple_model_re rest with
+        | Some group ->
+          let model = Re.Group.get group 1 in
           Ok (Model { model = trim model; system = None; prompt = "{{input}}"; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
-        else
-          Error (Printf.sprintf "Invalid MODEL format: %s" content)
+        | None ->
+          Error (Printf.sprintf "Invalid MODEL format: %s" content))
       else if String.length content_clean > 5 && String.sub content_clean 0 5 = "Tool:" then
         let rest = String.sub content_clean 5 (String.length content_clean - 5) in
         (* Try Base64 encoded args first: "name %{base64}" *)
-        let base64_re = Re.Str.regexp {|^\([^ ]+\) *%{\([^}]+\)}$|} in
-        if Re.Str.string_match base64_re rest 0 then
-          let name = trim (Re.Str.matched_group 1 rest) in
-          let encoded = Re.Str.matched_group 2 rest in
+        (match Re.exec_opt base64_re rest with
+        | Some group ->
+          let name = trim (Re.Group.get group 1) in
+          let encoded = Re.Group.get group 2 in
           (try
              let decoded = Base64.decode_exn encoded in
              let args = Yojson.Safe.from_string decoded in
@@ -430,17 +439,21 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
            with Invalid_argument _ | Yojson.Json_error _ ->
              (* Fallback: if Base64 decode or JSON parse fails, store as-is *)
              Ok (Tool { name; args = `Assoc [("input", `String encoded)] }))
+        | None ->
         (* Parse: name "args" or name 'args' or name {...json...} or just name *)
-        else if Re.Str.string_match quote_re rest 0 then
-          let name = trim (Re.Str.matched_group 1 rest) in
-          let args_str = trim (Re.Str.matched_group 2 rest) in
+        match Re.exec_opt quote_re rest with
+        | Some group ->
+          let name = trim (Re.Group.get group 1) in
+          let args_str = trim (Re.Group.get group 2) in
           (* Create args with "input" key holding the args string *)
           Ok (Tool { name; args = `Assoc [("input", `String args_str)] })
-        else if Re.Str.string_match single_quote_re rest 0 then
-          let name = trim (Re.Str.matched_group 1 rest) in
-          let args_str = trim (Re.Str.matched_group 2 rest) in
+        | None ->
+        match Re.exec_opt single_quote_re rest with
+        | Some group ->
+          let name = trim (Re.Group.get group 1) in
+          let args_str = trim (Re.Group.get group 2) in
           Ok (Tool { name; args = `Assoc [("input", `String args_str)] })
-        else
+        | None ->
           (* Try to find name followed by JSON: "name {...}" *)
           let json_start = String.index_opt rest '{' in
           (match json_start with
@@ -448,7 +461,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
                let name = trim (String.sub rest 0 idx) in
                let json_str = String.sub rest idx (String.length rest - idx) in
                (* Un-escape Mermaid quotes: \" -> " *)
-               let json_unescaped = Re.Str.global_replace (Re.Str.regexp {|\\"|}) {|"|} json_str in
+               let json_unescaped = Re.replace_string escaped_dquote_re ~by:{|"|} json_str in
                (try
                   let args = Yojson.Safe.from_string json_unescaped in
                   Ok (Tool { name; args })
@@ -457,11 +470,12 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
                   Ok (Tool { name; args = `Assoc [("input", `String json_unescaped)] }))
            | _ ->
                (* No JSON, try simple name *)
-               if Re.Str.string_match simple_model_re rest 0 then
-                 let name = trim (Re.Str.matched_group 1 rest) in
+               match Re.exec_opt simple_model_re rest with
+               | Some group ->
+                 let name = trim (Re.Group.get group 1) in
                  Ok (Tool { name; args = `Assoc [] })
-               else
-                 Error (Printf.sprintf "Invalid Tool format: %s" content))
+               | None ->
+                 Error (Printf.sprintf "Invalid Tool format: %s" content)))
       else
         (* Default: treat as MODEL with content as prompt, model = gemini *)
         Ok (Model { model = "gemini"; system = None; prompt = content_clean; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
@@ -508,10 +522,12 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
       let content_lower = String.lowercase_ascii content in
       let stripped =
         if String.length content > 2 then
-          try
-            let masc_idx = Re.Str.search_forward (Re.Str.regexp_string "MASC:") content 0 in
+          let masc_re = Re.compile (Re.str "MASC:") in
+          match Re.exec_opt masc_re content with
+          | Some group ->
+            let masc_idx = Re.Group.start group 0 in
             String.sub content masc_idx (String.length content - masc_idx)
-          with Not_found -> content
+          | None -> content
         else content
       in
       if String.length stripped >= 14 && String.sub (String.lowercase_ascii stripped) 0 14 = "masc:broadcast" then

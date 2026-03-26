@@ -68,6 +68,9 @@ let test_collaboration_evidence_counts_runtime_signals () =
         (json |> member "evidence_status" |> to_string))
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "Dashboard_collaboration_evidence"
     [
       ( "collaboration_evidence",

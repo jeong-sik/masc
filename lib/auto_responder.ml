@@ -191,18 +191,16 @@ let masc_call ~sw:_ ~tool_name ~(args : Yojson.Safe.t) : (string, string) result
   | None -> Error "Eio net not initialized"
   | Some net ->
       try
-        Eio.Switch.run @@ fun sw ->
-        let client = Cohttp_eio.Client.make ~https:None net in
-        let headers = Cohttp.Header.of_list [
+        let headers = [
           ("Content-Type", "application/json");
           ("Accept", "application/json, text/event-stream");
         ] in
-        let body_content = Eio.Flow.string_source body in
-        let resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
-        let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
-        let body_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024) in
-        if not (Cohttp.Code.is_success status) then
-          Error (Printf.sprintf "MASC HTTP %d" status)
+        let code, body_str =
+          Masc_http_client.post_sync ~net ~url:(Uri.to_string uri)
+            ~headers ~body ()
+        in
+        if not (Cohttp.Code.is_success code) then
+          Error (Printf.sprintf "MASC HTTP %d" code)
         else
           (* Extract MCP tool text: result.content[0].text *)
           try

@@ -197,6 +197,7 @@ let test_full_lifecycle () =
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote bare_dir)))
   ) (fun () ->
     Eio_main.run (fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       (* Setup git repo with origin *)
       let git d args =
         run_cmd (Printf.sprintf "git -C %s %s" (Filename.quote d) args)
@@ -286,6 +287,7 @@ let test_with_sandbox_lifecycle () =
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote bare_dir)))
   ) (fun () ->
     Eio_main.run (fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let git d args =
         run_cmd (Printf.sprintf "git -C %s %s" (Filename.quote d) args)
       in
@@ -335,6 +337,7 @@ let test_with_sandbox_cleans_up_on_exception () =
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote bare_dir)))
   ) (fun () ->
     Eio_main.run (fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
       let git d args =
         run_cmd (Printf.sprintf "git -C %s %s" (Filename.quote d) args)
       in

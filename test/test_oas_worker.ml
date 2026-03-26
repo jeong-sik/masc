@@ -677,6 +677,9 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
 (* ================================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   Alcotest.run "OAS Worker" [
     "sse_event_bridge", [
       Alcotest.test_case "text delta extraction" `Quick

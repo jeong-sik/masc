@@ -87,6 +87,7 @@ let prepare_code_surface ~clock:_ ~sw:_ _state = ()
 
 let test_code_search_basic () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -166,6 +167,7 @@ let test_code_search_basic () =
 
 let test_code_symbols_basic () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -218,6 +220,7 @@ let test_code_symbols_basic () =
 
 let test_code_read_basic () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -283,6 +286,7 @@ let test_code_read_basic () =
 
 let test_code_read_offset_limit () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->

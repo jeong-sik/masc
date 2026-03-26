@@ -390,6 +390,7 @@ let () = test "dispatch_tool_admin_update_unit_policy" (fun () ->
 
 let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
   let ctx = make_test_ctx () in
   let keeper_ctx : _ Tool_keeper.context =

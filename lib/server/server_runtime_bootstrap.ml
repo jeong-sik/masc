@@ -325,7 +325,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ("reconcile_active_agents", fun () -> reconcile_active_agents_gauge state);
           ( "recover_running_team_sessions",
             fun () ->
-              Team_session_engine_eio.recover_running_sessions ~sw ~clock
+              let env = object
+                method clock = clock
+                method process_mgr = match state.Mcp_server.proc_mgr with Some pm -> pm | None -> failwith "process_mgr not available"
+              end in
+              Team_session_engine_eio.recover_running_sessions ~sw ~env
                 ~config:state.Mcp_server.room_config );
           ("chain_bootstrap", fun () -> bootstrap_chain_state state);
           ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);

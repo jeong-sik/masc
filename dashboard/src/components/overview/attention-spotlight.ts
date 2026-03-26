@@ -22,12 +22,12 @@ type SessionItem = DashboardMissionSessionBrief | DashboardMissionSessionCard
 function gatherSpotlightItems(snap: DashboardMissionResponse): SpotlightItem[] {
   const items: SpotlightItem[] = []
 
-  for (const aq of snap.attention_queue) {
+  for (const aq of snap.attention_queue ?? []) {
     items.push({
       id: aq.id,
       severity: aq.severity,
       summary: aq.summary,
-      relatedNames: [...aq.related_agent_names],
+      relatedNames: [...(aq.related_agent_names ?? [])],
       lastSeen: aq.last_seen_at ?? null,
     })
   }

@@ -2,8 +2,8 @@
   "version": 1,
   "counts": {
     "lib_failwith": 21,
-    "lib_list_hd": 1,
-    "lib_list_tl": 1,
+    "lib_list_hd": 2,
+    "lib_list_tl": 2,
     "lib_option_get": 0,
     "lib_obj_magic": 0,
     "test_failwith": 247,

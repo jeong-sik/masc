@@ -49,24 +49,10 @@ let is_http_error_response = function
 let server_start_time = Unix.gettimeofday ()
 
 let configured_http_port () =
-  let parse name =
-    match Sys.getenv_opt name with
-    | Some value -> int_of_string_opt (String.trim value)
-    | None -> None
-  in
-  match parse "MASC_HTTP_PORT" with
-  | Some port when port > 0 && port < 65536 -> port
-  | _ -> (
-      match parse "MASC_PORT" with
-      | Some port when port > 0 && port < 65536 -> port
-      | _ -> 8935)
+  Env_config_core.masc_http_port_int ()
 
 let configured_http_host () =
-  match Sys.getenv_opt "MASC_HOST" with
-  | Some value ->
-      let trimmed = String.trim value in
-      if trimmed = "" then "127.0.0.1" else trimmed
-  | None -> "127.0.0.1"
+  Env_config_core.masc_host ()
 
 let advertised_host_port request =
   parse_host_port

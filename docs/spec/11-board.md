@@ -55,7 +55,7 @@ type post = {
 ```
 
 **post_kind 분류:** 명시 지정이 없으면 `infer_post_kind`로 자동 추론.
-- `System_post`: author가 lodge-system, team-session, sentinel, keeper 등
+- `System_post`: author가 lodge-system, team-session, operator, keeper 등
 - `Automation_post`: Internal + TTL + MDAL/harness hearth, 또는 author가 auto-/qa- prefix
 - `Human_post`: 기본값
 

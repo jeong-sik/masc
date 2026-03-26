@@ -218,7 +218,7 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
   | Some pool ->
       let listener = Board_listener.create pool in
       Eio.Fiber.fork ~sw (fun () ->
-        try Board_listener.start listener
+        try Board_listener.start ~clock listener
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

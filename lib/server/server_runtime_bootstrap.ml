@@ -79,6 +79,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
 
 let bootstrap_chain_state (state : Mcp_server.server_state) =
   Chain_native_eio.ensure_bootstrap state.room_config;
+  Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   (* Initialize prompt registry with defaults and restore saved overrides *)
   let prompt_markdown_dir =
     Prompt_defaults.bootstrap_runtime
@@ -404,20 +405,17 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          queries — exceeding pool capacity on Supabase session pooler.
          A short sleep between PG-heavy launches spreads the initial burst. *)
       Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 0.5;
+      Eio.Time.sleep clock 2.0;
       Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 0.5;
+      Eio.Time.sleep clock 2.0;
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
-      Eio.Time.sleep clock 0.5;
       (* transport_health is light (no PG), start immediately. *)
       Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
-      (* mission and operator loops are PG-heavy — stagger to avoid pool
-         exhaustion that causes "Invalid concurrent usage" errors. *)
-      Eio.Time.sleep clock 1.0;
+      Eio.Time.sleep clock 2.0;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 1.0;
+      Eio.Time.sleep clock 2.0;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 1.0;
+      Eio.Time.sleep clock 2.0;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
       (* Start auxiliary transports before optional warmups and resident loops.
          Otherwise HTTP can report ready while gRPC/WS startup is still stuck

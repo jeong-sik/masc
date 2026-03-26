@@ -360,23 +360,9 @@ let run_with_masc_tools
 (* Cascade profile defaults (moved from Cascade module)              *)
 (* ================================================================ *)
 
-(** Locate config/cascade.json via CWD or ME_ROOT.
-    Returns [Some path] when the file exists on disk.
-    Inlined from Model_spec to remove the dependency. *)
 let default_config_path () : string option =
-  let base dir name = Filename.concat (Filename.concat dir "config") name in
-  let cwd = Sys.getcwd () in
-  let me_root =
-    Sys.getenv_opt "ME_ROOT"
-    |> Option.value
-         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
-  in
-  let masc_root = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
-  let candidates =
-    [ base cwd "cascade.json";
-      base masc_root "cascade.json" ]
-  in
-  List.find_opt Sys.file_exists candidates
+  Config_dir_resolver.log_warnings ~context:"OasWorker" ();
+  Config_dir_resolver.cascade_path_opt ()
 
 (** Hardcoded fallback defaults — used only when cascade.json is missing
     and the cascade name has no "{name}_models" entry.
@@ -396,13 +382,10 @@ let default_model_strings ~cascade_name:_ =
 (* Named model execution                                            *)
 (* ================================================================ *)
 
-let require_eio ?sw () =
-  let sw_opt =
-    match sw with
-    | Some _ -> sw
-    | None -> Eio_context.get_switch_opt ()
-  in
-  match sw_opt, Eio_context.get_net_opt () with
+let require_eio ?sw ?net () =
+  let sw = match sw with Some s -> Some s | None -> Eio_context.get_switch_opt () in
+  let net = match net with Some n -> Some n | None -> Eio_context.get_net_opt () in
+  match sw, net with
   | Some sw, Some net -> Ok (sw, net)
   | None, _ -> Error "Eio switch not available (running outside server context)"
   | _, None -> Error "Eio net not available (running outside server context)"
@@ -479,7 +462,6 @@ let config_for_label
 let run_named
     ~cascade_name
     ~goal
-    ?sw
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
@@ -498,9 +480,11 @@ let run_named
     ?transport
     ?(allowed_paths = [])
     ?working_context
+    ?sw
+    ?net
     ()
   : (run_result, string) result =
-  match require_eio ?sw () with
+  match require_eio ?sw ?net () with
   | Error e -> Error e
   | Ok (sw, net) ->
   let defaults = default_model_strings ~cascade_name in

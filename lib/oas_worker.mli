@@ -39,7 +39,6 @@ val default_model_strings : cascade_name:string -> string list
 val run_named :
   cascade_name:string ->
   goal:string ->
-  ?sw:Eio.Switch.t ->
   ?system_prompt:string ->
   ?tools:Oas.Tool.t list ->
   ?initial_messages:Oas.Types.message list ->
@@ -58,6 +57,8 @@ val run_named :
   ?transport:Masc_grpc_transport.t ->
   ?allowed_paths:string list ->
   ?working_context:Yojson.Safe.t ->
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
   (run_result, string) result
 

@@ -152,7 +152,7 @@
 - **OAS-only model surface** — confine Llm_provider to 2 facade modules (#1895, #1869)
 - **Replace Spawn.spawn with Oas_worker.run_model** — Phase C-3a (#1896)
 - **Remove memory_stream.ml** — 3.6GB JSONL crash fix (#1891)
-- **Remove legacy agents** — gardener/guardian/sentinel references (#1874, #1877)
+- **Remove legacy agents** — retired loop references (#1874, #1877)
 - **Delegate model_spec to OAS** — Provider_registry + Pricing (#1865)
 - **Room surface simplification** — align claim semantics (#1893)
 
@@ -188,7 +188,7 @@
 
 ### Fixed
 - **Keeper cascade routing** — route through `Model_orchestration`, fix broken main build (#1582)
-- **C2 sentinel tag corruption** — protect from OAS `Merge_contiguous` + add `.mli` (#1540)
+- **C2 legacy tag corruption** — protect from OAS `Merge_contiguous` + add `.mli` (#1540)
 - **Context scoring** — adapt to unified message type (#1554)
 - **Local-only cascade** — don't block when endpoints are down (#1563)
 - **Discovery cache** — initialize at server startup (#1568)
@@ -215,7 +215,7 @@
 
 ### Changed
 - **Spawn via OAS** — route all agents through `Provider_adapter` (#1512)
-- **Gardener OAS migration** — spawn decision via OAS instead of `Lodge_cascade.call` (#1528)
+- **Spawn decision OAS migration** — route spawn decisions through OAS instead of `Lodge_cascade.call` (#1528)
 - **Mode hardcode** — hardcode Mode to Full, remove mode switching (#1519)
 - **Remove CLI spawn artifacts** — `proc_mgr`, `cli_adapters`, `spawn_config` (#1526)
 - **Remove 292 orphaned CSS selectors** across 21 files (#1514)
@@ -242,7 +242,7 @@
 - **Dashboard warm cache** on startup + agent profile page (#1505)
 - **Agent card click** — wire to detail overlay in agents tab (#1507)
 - **Dashboard i18n** — replace unicode escapes with UTF-8 Korean, translate English strings (#1482)
-- **Gardener default** — change `enabled` from false to true (#1483)
+- **Internal loop default** — change `enabled` from false to true (#1483)
 - **5 of 7 CI test failures** on main (#1506)
 
 ## [2.109.0] - 2026-03-18
@@ -305,7 +305,7 @@
 - **Replace Stdlib.Mutex with Eio.Mutex** — guard HTTP session Hashtbl, split tool_council JSON (#1449)
 - **17 remaining Stdlib.Mutex** migrated to Eio.Mutex (#1364)
 - **MCP transport hang** — global timeout, relax Accept, fix pagination (#1434)
-- **Gardener duplicate tasks** — prevent accumulation (#1450)
+- **Background loop duplicate tasks** — prevent accumulation (#1450)
 - **Dashboard honest staleness** — eliminate fake information (#1408, #1413)
 - **Dashboard status-aware session severity** (#1416)
 - **Dashboard execution queue** — active/terminal separation (#1405)
@@ -423,7 +423,7 @@
 - **tool_schemas_core, tool_trpg, tool_mitosis** — sub-module split (#1226)
 - **4 god files under 900 lines** — phase8-batch6 (#1233)
 - **dashboard_mission, keeper_types, trpg_action** — sub-module split (#1237)
-- **gardener, tool_protocol_game_view, trpg_types, dashboard_http_keeper** — sub-module split (#1234)
+- **legacy loop, tool_protocol_game_view, trpg_types, dashboard_http_keeper** — sub-module split (#1234)
 - **OAS/MASC responsibility-boundary** — module split Phase 1-4 (#1235, #1241)
 - **room scope** — scope-based config to eliminate dual-path fallbacks (#1223)
 - **OAS heartbeat** — migrate to Agent.periodic_callback (#1240)
@@ -437,7 +437,7 @@
 ## [2.99.0] - 2026-03-16
 
 ### Fixed
-- **Social system recovery** — sentinel auto-brief for governance deadlock, social eligibility relaxation, Standard+Consensus mode (#1179)
+- **Social system recovery** — auto-brief for governance deadlock, social eligibility relaxation, Standard+Consensus mode (#1179)
 - **QA AS1 critical+high bugs** — zombie detection, agent count, MODEL permit, governance race condition, decision TTL, claim guard (#1196)
 - **Cloudflare Rocket Loader** — `data-cfasync="false"` on dashboard script tags
 - **Exhaustive match** — `Provider.Custom_registered` in agent_swarm_runner
@@ -461,7 +461,7 @@
 ### Added
 - **Role_filtered tool_profile** — mode-based tool filtering for agent profiles (#1163)
 - **A2A dynamic skill registry** — tool discoverability metadata for agent-to-agent (#1115)
-- **OAS Guardian/Sentinel/Gardener integration** — Agent Card + Event_bus (#1112)
+- **OAS loop integration** — Agent Card + Event_bus (#1112)
 - **OAS type adapters** — Context_reducer integration (#1111)
 - **.mli interfaces** — chain_executor_eio, keeper_execution, keeper_turn (#1160)
 
@@ -473,7 +473,7 @@
 - **room** — split `room.ml` into Room_state + Room_vote + Room_gc (#1124)
 - **dashboard** — split 1000+ line files into domain modules (#1117)
 - **operator** — extract pending_confirm and digest to dedicated modules (#1135)
-- **sentinel** — MODEL-first governance sweep with threshold fallback (#1123)
+- **Governance sweep** — MODEL-first governance sweep with threshold fallback (#1123)
 - **team_session** — replace manual JSON converters with OAS SDK yojson (#1166)
 - **OAS** — bump to v0.24.0, remove oas_compat, extract magic numbers (#1116)
 - **OAS** — fix responsibility boundary violations at OAS interface (#1136)
@@ -493,7 +493,7 @@
 - **deploy** — Railway healthcheck timeout adjustments (#1161, #1165)
 - **deploy** — add MASC_WORKSPACE_ROOT env (#1113)
 - **CI** — smoke healthcheck non-fatal and --network host (#1131), timeout increase (#1130)
-- **config** — add MASC_GUARDIAN_ENABLED=true to lodge.env (#1134)
+- **config** — add internal cleanup toggle to lodge.env (#1134)
 - **test** — align spawn tests with removed tool surface entries (#1170)
 - **test** — update source_guard assertion for gitignored dashboard assets (#1114)
 
@@ -568,7 +568,7 @@
 ### Fixed
 - **H2 Tool Auth Alignment** — H2 write routes now use tool-level auth instead of coarse broadcast permissions (#966)
 - **Baseline Compatibility** — restored team-session and auth compatibility on the current baseline, including legacy task alias task-op classification (#967, #970)
-- **Sentinel Board Noise** — routine board patrol posts are suppressed to reduce unnecessary baseline chatter (#971)
+- **Board Patrol Noise** — routine board patrol posts are suppressed to reduce unnecessary baseline chatter (#971)
 
 All notable changes to this project will be documented in this file.
 
@@ -582,14 +582,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Audit Telemetry Phase 1** — core collaboration events now emit audit logging for traceability (#833)
 - **Room-wide Orchestra Map** — dashboard adds an orchestra overview surface and backing command-plane read model (#834)
 - **Tool Registry P4** — tool-registry metadata and dispatch surfaces are expanded through the phase-4 enhancement set (#830)
-- **Truth-only Gardener Status** — gardener runtime now exposes a truth-only status surface for downstream consumers (#829)
+- **Truth-only Ecosystem Status** — runtime now exposes a truth-only status surface for downstream consumers (#829)
 
 ### Changed
 - **Keeper Facade Follow-up** — keeper split follow-up shrinks the facade and tightens module boundaries after the core runtime split (#827)
 - **Direct Mention Detection** — keeper mention observation now uses shared exact-mention handling instead of hardcoded direct-mention assumptions (#835)
 
 ### Fixed
-- Gardener structured-post tests now guard empty content with a non-empty generated title fixture (#836)
+- Structured-post tests now guard empty content with a non-empty generated title fixture (#836)
 
 ## [2.84.0] - 2026-03-12
 
@@ -598,7 +598,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Resident Judgment Overlay** — operator snapshot includes resident judgment and dashboard surfacing (#811)
 - **Admin Snapshot Surface** — admin-level snapshot and update tools for keeper inspection (#814)
 - **Local Voice Playback** — internal local voice playback selection for browser-based voice (#816)
-- **Gardener Backlog Triage** — gardener starts backlog triage sessions on worker pressure signals (#812)
+- **Backlog Triage** — backlog triage sessions now start on worker pressure signals (#812)
 
 ### Changed
 - **Generated Agent SDK Control Tools** — swarm-facing MASC control tools are now generated from shared contract metadata instead of hand-written wrappers
@@ -617,7 +617,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.83.0] - 2026-03-11
 
 ### Added
-- **Gardener Signal Observation** — full signal-based observation with MODEL-primary decision making for spawn/retire (#773)
+- **Signal Observation** — full signal-based observation with MODEL-primary decision making for spawn/retire (#773)
 - **CP Workload Templates** — `masc_operation_start` accepts workload templates and attached team sessions (#769)
 - **Voice Tools** — expose public voice tools for browser-based voice interaction (#775)
 - **Dashboard Tool Audit** — raw tool audit view in agent and keeper detail pages (#776)
@@ -652,7 +652,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Execution Surface** — session-first diagnostics with actor parameter passthrough (#757)
 
 ### Fixed
-- Gardener provenance derived from actual decision path instead of config flag (#765)
+- Provenance derived from actual decision path instead of config flag (#765)
 - Execution uses passed `actor` parameter instead of hardcoded `"dashboard"` (#770)
 
 ## [2.81.1] - 2026-03-11
@@ -697,8 +697,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mission Briefing Interactive UI** — full panel with MODEL cascade reorder, async SWR (#734, #720, #701)
 - **Live Monitor Tab** — 3-panel real-time swarm/agent view (#688)
 - **Command War Room** — centralized operator console (#681)
-- **Board Gardener Keeper** — force task ops + zombie cascade (#666)
-- **Sentinel Default Resident** — MODEL judgment layer for board/task/keeper consumers (#699, #709)
+- **Board Admin Keeper** — force task ops + zombie cascade (#666)
+- **Default Resident** — MODEL judgment layer for board/task/keeper consumers (#699, #709)
 - **Intent-Backed Predictive Control** — CPv2 intent forecast + correction loop (#668)
 - **Swarm Live Run** — `masc_swarm_live_run` MCP tool for inline benchmark (#689)
 - **64-Agent Structural Gaps** — checkpoint, goal loop, MDAL swarm (#693)
@@ -721,7 +721,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Normalize Helpers** consolidated into `common/normalize.ts` shared module (#727)
 - Dashboard components consolidated, dead code removed (#722)
 - Planning tab hierarchy inverted — tasks first, empty features collapsed (#712)
-- Sentinel heuristic fallback removed in favor of MODEL-driven consumers (#714)
+- Heuristic fallback removed in favor of MODEL-driven consumers (#714)
 - Ollama implicit fallback bias removed — explicit provider selection (#694)
 - Silent error cleanup and code hygiene across modules (#700)
 - Dashboard and workspace runtime config encapsulated (#673)
@@ -1047,7 +1047,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Orchestrator → Pulse migration**: Replaced ad-hoc timer loop with dual Pulse engines (orchestrator 300s, zombie cleanup 60s)
 - **Lodge → Pulse migration**: Main tick loop now uses Pulse with configurable rhythm
-- **Guardian → Pulse migration**: All 3 timer loops (spawn, retire, health check) consolidated to Pulse
+- **Internal Cleanup → Pulse migration**: All 3 timer loops (spawn, retire, health check) consolidated to Pulse
 
 ### Fixed
 - TRPG round run unblocked by handling MCP SSE responses with proper timeout propagation
@@ -1147,12 +1147,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.58.0] - 2026-02-05
 
 ### Added
-- **Gardener Agent**: Self-Organizing Agent Ecosystem Manager
+- **Ecosystem Agent**: Self-Organizing Agent Manager
   - Homeostatic balance (min=5, target=15, max=30 agents)
   - Gap signal processing for spawn decisions
   - Retirement management with grace periods
   - Circuit breaker, daily budgets, cooldowns
-  - 7 MCP tools for the legacy gardener surface
+  - 7 MCP tools for the legacy ecosystem surface
   - 62 tests covering all safety mechanisms
 
 ## [2.57.0] - 2026-02-05

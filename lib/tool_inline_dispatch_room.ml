@@ -254,7 +254,10 @@ let handle_join (ctx : context) : result option =
   let _ = Session.register registry ~agent_name:nickname in
   ctx.write_mcp_session_agent nickname;
   Log.Misc.debug "masc_join: saved nickname=%s to MCP session (original=%s)" nickname agent_name;
+  (* Deprecated: /tmp file agent identity. Agent_identity system is primary.
+     Remove when deprecation log shows zero hits over a release cycle. *)
   if Option.is_none mcp_session_id then begin
+    Log.Misc.warn "[deprecated] writing agent name to /tmp file for TERM session — migrate to Agent_identity";
     let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
     let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
     (try

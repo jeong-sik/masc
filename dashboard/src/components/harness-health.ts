@@ -78,10 +78,10 @@ function handleHarnessSSE(): void {
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return html`
-    <div class="bg-slate-800 rounded-lg p-3 text-center">
-      <div class="text-2xl font-bold text-amber-400">${value}</div>
-      <div class="text-xs text-slate-400 mt-1">${label}</div>
-      ${sub ? html`<div class="text-xs text-slate-500 mt-0.5">${sub}</div>` : null}
+    <div class="bg-[var(--white-4)] rounded-lg p-3 text-center">
+      <div class="text-2xl font-bold text-[color:var(--accent)]">${value}</div>
+      <div class="text-xs text-[color:var(--text-muted)] mt-1">${label}</div>
+      ${sub ? html`<div class="text-xs text-[color:var(--text-muted)] mt-0.5">${sub}</div>` : null}
     </div>
   `
 }
@@ -90,20 +90,20 @@ function GateChart({ distribution }: { distribution: GateDistribution }) {
   const entries = Object.entries(distribution).sort((a, b) => b[1] - a[1])
   const max = entries[0]?.[1] ?? 1
   if (entries.length === 0) {
-    return html`<div class="text-slate-500 text-sm">아직 verdict 기록 없음</div>`
+    return html`<div class="text-[color:var(--text-muted)] text-sm">아직 verdict 기록 없음</div>`
   }
   return html`
     <div class="space-y-2">
       ${entries.map(([gate, count]) => html`
         <div class="flex items-center gap-2">
-          <span class="text-xs text-slate-400 w-16 text-right font-mono">${gate}</span>
-          <div class="flex-1 bg-slate-700 rounded h-4 overflow-hidden">
+          <span class="text-xs text-[color:var(--text-muted)] w-16 text-right font-mono">${gate}</span>
+          <div class="flex-1 bg-[var(--white-6)] rounded h-4 overflow-hidden">
             <div
-              class="h-full bg-amber-500/70 rounded transition-all"
+              class="h-full bg-[var(--accent)] rounded transition-all"
               style=${{ width: `${(count / max) * 100}%` }}
             />
           </div>
-          <span class="text-xs text-slate-300 w-8 text-right">${count}</span>
+          <span class="text-xs text-[color:var(--text-body)] w-8 text-right">${count}</span>
         </div>
       `)}
     </div>
@@ -115,14 +115,14 @@ function RecentVerdictsFeed() {
   if (items.length === 0) return null
   return html`
     <div class="mt-3 space-y-1">
-      <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">Live Feed</div>
+      <div class="text-xs text-[color:var(--text-muted)] uppercase tracking-wider mb-1">Live Feed</div>
       ${items.slice(0, 8).map(v => html`
         <div class="flex items-center gap-2 text-xs">
           <span class=${`inline-block w-2 h-2 rounded-full ${
-            v.verdict === 'approve' ? 'bg-green-500' : 'bg-red-500'
+            v.verdict === 'approve' ? 'bg-[var(--ok)]' : 'bg-[var(--bad)]'
           }`} />
-          <span class="font-mono text-slate-400">${v.gate}</span>
-          <span class="text-slate-500">${v.verdict}</span>
+          <span class="font-mono text-[color:var(--text-muted)]">${v.gate}</span>
+          <span class="text-[color:var(--text-muted)]">${v.verdict}</span>
         </div>
       `)}
     </div>
@@ -151,25 +151,25 @@ export function HarnessHealth() {
     <div class="space-y-4">
       <${Card} title="Evaluator 캘리브레이션" class="section">
         ${harnessLoading.value ? html`
-          <div class="text-slate-500 text-sm">로딩 중...</div>
+          <div class="text-[color:var(--text-muted)] text-sm">로딩 중...</div>
         ` : harnessError.value ? html`
-          <div class="text-red-400 text-sm">${harnessError.value}</div>
+          <div class="text-[color:var(--bad)] text-sm">${harnessError.value}</div>
         ` : !cal ? html`
-          <div class="text-slate-500 text-sm">데이터 없음</div>
+          <div class="text-[color:var(--text-muted)] text-sm">데이터 없음</div>
         ` : html`
           ${isFallbackDominant ? html`
-            <div class="mb-4 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3">
-              <div class="text-yellow-400 text-sm font-medium mb-1">Evaluator 미연결</div>
-              <div class="text-yellow-400/80 text-xs">
+            <div class="mb-4 rounded-lg border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3">
+              <div class="text-[color:var(--warn)] text-sm font-medium mb-1">Evaluator 미연결</div>
+              <div class="text-[color:var(--warn)] opacity-80 text-xs">
                 전체 ${cal.total_verdicts}건 중 ${fallbackCount}건이 fallback으로 처리됨.
                 LLM evaluator cascade가 동작하지 않아 모든 verdict가 자동 승인 상태입니다.
               </div>
               ${fallbackReasons.length > 0 ? html`
                 <details class="mt-2">
-                  <summary class="text-yellow-400/60 text-xs cursor-pointer">최근 에러 (${fallbackReasons.length}건)</summary>
+                  <summary class="text-[color:var(--warn)] opacity-60 text-xs cursor-pointer">최근 에러 (${fallbackReasons.length}건)</summary>
                   <div class="mt-1 space-y-1">
                     ${fallbackReasons.map(r => html`
-                      <div class="text-xs text-yellow-400/50 font-mono break-all">${r}</div>
+                      <div class="text-xs text-[color:var(--warn)] opacity-50 font-mono break-all">${r}</div>
                     `)}
                   </div>
                 </details>
@@ -188,12 +188,12 @@ export function HarnessHealth() {
             />
           </div>
 
-          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">Gate별 분포</div>
+          <div class="text-xs text-[color:var(--text-muted)] uppercase tracking-wider mb-2">Gate별 분포</div>
           <${GateChart} distribution=${cal.gate_distribution} />
           <${RecentVerdictsFeed} />
 
           <button
-            class="mt-3 text-xs text-slate-500 hover:text-amber-400 transition-colors"
+            class="mt-3 text-xs text-[color:var(--text-muted)] hover:text-[color:var(--accent)] transition-colors"
             onClick=${() => void loadHarnessHealth()}
           >새로고침</button>
         `}

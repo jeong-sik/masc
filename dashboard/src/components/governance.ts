@@ -131,13 +131,31 @@ function GovernanceToolbar() {
   `
 }
 
+function governanceEmptyMessage(): string {
+  const data = governanceData.value
+  const allItems = data?.items ?? []
+  const lastActivityAge = data?.summary?.last_activity_age_s
+
+  // All items empty (not just filtered) — show guidance
+  if (allItems.length === 0) {
+    const ageText = formatAgeSummary(lastActivityAge)
+    if (ageText != null) {
+      return `거버넌스 사건이 없습니다. 마지막 활동: ${ageText} 전. keeper가 활동 중일 때 자동 생성됩니다.`
+    }
+    return '거버넌스 사건은 keeper가 활동 중일 때 자동 생성됩니다.'
+  }
+
+  // Items exist but filtered results are empty
+  return '이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.'
+}
+
 function DecisionInbox() {
   const items = filteredItemsByFilter(governanceFilter.value, governanceData.value?.items ?? [])
   return html`
     <${Card} title="사건 수신함" class="section mb-5" variant="compact">
       <div class="flex flex-col gap-3 governance-inbox">
         ${items.length === 0
-          ? html`<${EmptyState} message="이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요." />`
+          ? html`<${EmptyState} message=${governanceEmptyMessage()} />`
           : items.map(item => {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`

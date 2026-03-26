@@ -278,23 +278,24 @@ let fork_with_cwd ~cmd_array ~stdin_content ~working_dir ~config_working_dir =
       | None -> config_working_dir
     in
     Option.iter Sys.chdir target_dir;
-    let stdout_read, stdout_write = Unix.pipe () in
-    let stdin_read, stdin_write = Unix.pipe () in
-    let pid =
-      Unix.create_process (Array.get cmd_array 0) cmd_array stdin_read
-        stdout_write Unix.stderr
-    in
-    Unix.close stdout_write;
-    Unix.close stdin_read;
-    (* Write stdin before restoring CWD — data goes to pipe, not filesystem *)
-    let _ =
-      Unix.write_substring stdin_write stdin_content 0
-        (String.length stdin_content)
-    in
-    Unix.close stdin_write;
-    (* Restore CWD while still holding mutex *)
-    if Option.is_some target_dir then Sys.chdir original_dir;
-    (pid, stdout_read))
+    Fun.protect
+      ~finally:(fun () ->
+        if Option.is_some target_dir then Sys.chdir original_dir)
+      (fun () ->
+        let stdout_read, stdout_write = Unix.pipe () in
+        let stdin_read, stdin_write = Unix.pipe () in
+        let pid =
+          Unix.create_process (Array.get cmd_array 0) cmd_array stdin_read
+            stdout_write Unix.stderr
+        in
+        Unix.close stdout_write;
+        Unix.close stdin_read;
+        let _ =
+          Unix.write_substring stdin_write stdin_content 0
+            (String.length stdin_content)
+        in
+        Unix.close stdin_write;
+        (pid, stdout_read)))
 
 let add_default_model_arg agent_name argv =
   match Provider_adapter.resolve_direct_adapter agent_name with

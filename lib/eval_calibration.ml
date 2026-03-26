@@ -158,7 +158,11 @@ let record_verdict
   } in
   Dated_jsonl.append (get_store ()) (verdict_record_to_json record);
   match on_harness_verdict with
-  | Some cb -> cb (to_harness_verdict record)
+  | Some cb ->
+    (try cb (to_harness_verdict record)
+     with exn ->
+       Log.Harness.warn "[eval_calibration] on_harness_verdict callback failed: %s"
+         (Printexc.to_string exn))
   | None -> ()
 
 let record_human_label

@@ -346,6 +346,21 @@ let test_on_harness_verdict_with_collector () =
   check bool "passed" true hv.passed;
   Cal.reset_store_for_testing ()
 
+let test_on_harness_verdict_exception_safe () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.set_store_for_testing ~base_dir:dir;
+  let req = make_req () in
+  let result = make_result () in
+  Cal.record_verdict ~task_id:"exc-1" ~req ~result
+    ~on_harness_verdict:(fun _hv -> failwith "boom") ();
+  let store = Cal.get_store () in
+  let records = Dated_jsonl.read_recent store 10 in
+  check bool "record persisted despite callback failure" true
+    (List.length records >= 1);
+  Cal.reset_store_for_testing ()
+
 (* ================================================================ *)
 (* Test Suite                                                        *)
 (* ================================================================ *)
@@ -387,5 +402,6 @@ let () =
     "oas_integration", [
       test_case "callback invoked" `Quick test_on_harness_verdict_callback;
       test_case "with Eval.collector" `Quick test_on_harness_verdict_with_collector;
+      test_case "callback exception safe" `Quick test_on_harness_verdict_exception_safe;
     ];
   ]

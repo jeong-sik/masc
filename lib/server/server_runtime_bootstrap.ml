@@ -365,7 +365,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                  pg_init_timeout
              in
              Log.Server.error "%s" reason;
-             raise (Failure reason))
+             raise (Invalid_argument reason))
         else
           init_state_blocking ()
       in

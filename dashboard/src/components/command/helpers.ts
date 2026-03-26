@@ -61,8 +61,6 @@ export async function getMermaid(): Promise<MermaidApi> {
   return mermaid
 }
 
-export { formatPct } from '../../lib/format-number'
-
 export function formatPercent(value?: number | null): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '정보 없음'
   return `${Math.round(value * 100)}%`

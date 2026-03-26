@@ -444,8 +444,8 @@ let dashboard_room_truth_focus_json ~initialized ~runtime_count ~operator_digest
                     "orchestra",
                     "derived" )
                 else if runtime_count = 0 then
-                  ( "에이전트가 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.",
-                    "No agents joined yet; room is idle.",
+                  ( "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.",
+                    "No agents or keepers joined yet; room is idle.",
                     "room",
                     "fallback" )
                 else

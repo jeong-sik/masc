@@ -31,14 +31,16 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let make_ctx () =
+let with_ctx f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "test-agent"));
   let ctx : Tool_agent.context = { config; agent_name = "test-agent" } in
-  (ctx, base_dir)
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () -> f ctx)
 
 let dispatch_exn ctx ~name ~args =
   match Tool_agent.dispatch ctx ~name ~args with
@@ -50,129 +52,129 @@ let dispatch_exn ctx ~name ~args =
    ============================================================ *)
 
 let test_dispatch_unknown () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let result = Tool_agent.dispatch ctx ~name:"unknown_tool" ~args:(`Assoc []) in
   Alcotest.(check bool) "unknown returns None" true (result = None);
-  cleanup_dir base_dir
+  )
 
 let test_dispatch_agents () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let result = Tool_agent.dispatch ctx ~name:"masc_agents" ~args:(`Assoc []) in
   Alcotest.(check bool) "agents dispatches" true (result <> None);
-  cleanup_dir base_dir
+  )
 
 let test_dispatch_register_capabilities () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let result = Tool_agent.dispatch ctx ~name:"masc_register_capabilities" ~args:(`Assoc []) in
   Alcotest.(check bool) "register_capabilities dispatches" true (result <> None);
-  cleanup_dir base_dir
+  )
 
 let test_dispatch_agent_update () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let result = Tool_agent.dispatch ctx ~name:"masc_agent_update" ~args:(`Assoc []) in
   Alcotest.(check bool) "agent_update dispatches" true (result <> None);
-  cleanup_dir base_dir
+  )
 
 let test_dispatch_select_agent () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let result = Tool_agent.dispatch ctx ~name:"masc_select_agent" ~args:(`Assoc []) in
   Alcotest.(check bool) "select_agent dispatches" true (result <> None);
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Handler tests — masc_agents
    ============================================================ *)
 
 let test_handle_agents () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let (ok, msg) = Tool_agent.handle_agents ctx (`Assoc []) in
   Alcotest.(check bool) "agents succeeds" true ok;
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Handler tests — register_capabilities
    ============================================================ *)
 
 let test_register_capabilities () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("capabilities", `List [`String "test"; `String "code"])] in
   let (ok, _msg) = Tool_agent.handle_register_capabilities ctx args in
   Alcotest.(check bool) "registers capabilities" true ok;
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Handler tests — agent_update
    ============================================================ *)
 
 let test_agent_update_status () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("status", `String "busy")] in
   let (_ok, msg) = Tool_agent.handle_agent_update ctx args in
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  cleanup_dir base_dir
+  )
 
 let test_agent_update_capabilities () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("capabilities", `List [`String "review"; `String "refactor"])] in
   let (_ok, msg) = Tool_agent.handle_agent_update ctx args in
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Handler tests — find_by_capability
    ============================================================ *)
 
 let test_find_by_capability () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("capability", `String "test")] in
   let (ok, msg) = Tool_agent.handle_find_by_capability ctx args in
   Alcotest.(check bool) "find succeeds" true ok;
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Handler tests — get_metrics
    ============================================================ *)
 
 let test_get_metrics_no_data () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("agent_name", `String "nonexistent"); ("days", `Int 7)] in
   let (_ok, msg) = dispatch_exn ctx ~name:"masc_get_metrics" ~args in
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Handler tests — agent_fitness
    ============================================================ *)
 
 let test_agent_fitness_no_agents () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let (ok, msg) = Tool_agent.handle_agent_fitness ctx (`Assoc []) in
   Alcotest.(check bool) "fitness succeeds" true ok;
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  cleanup_dir base_dir
+  )
 
 let test_agent_fitness_specific () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("agent_name", `String "test-agent"); ("days", `Int 7)] in
   let (ok, msg) = Tool_agent.handle_agent_fitness ctx args in
   Alcotest.(check bool) "fitness with agent" true ok;
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Handler tests — select_agent (3 strategies)
    ============================================================ *)
 
 let test_select_agent_missing_agents () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let (ok, _msg) = Tool_agent.handle_select_agent ctx (`Assoc []) in
   Alcotest.(check bool) "missing agents fails" false ok;
-  cleanup_dir base_dir
+  )
 
 let test_select_agent_capability_first () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [
     ("available_agents", `List [`String "agent-a"; `String "agent-b"]);
     ("strategy", `String "capability_first");
@@ -181,89 +183,89 @@ let test_select_agent_capability_first () =
   let (ok, msg) = Tool_agent.handle_select_agent ctx args in
   Alcotest.(check bool) "capability_first succeeds" true ok;
   Alcotest.(check bool) "returns JSON" true (String.contains msg '{');
-  cleanup_dir base_dir
+  )
 
 let test_select_agent_random () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [
     ("available_agents", `List [`String "agent-x"; `String "agent-y"]);
     ("strategy", `String "random");
   ] in
   let (ok, _msg) = Tool_agent.handle_select_agent ctx args in
   Alcotest.(check bool) "random succeeds" true ok;
-  cleanup_dir base_dir
+  )
 
 let test_select_agent_roulette () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [
     ("available_agents", `List [`String "a-1"; `String "a-2"; `String "a-3"]);
     ("strategy", `String "roulette_wheel");
   ] in
   let (ok, _msg) = Tool_agent.handle_select_agent ctx args in
   Alcotest.(check bool) "roulette succeeds" true ok;
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Handler tests — collaboration_graph
    ============================================================ *)
 
 let test_collaboration_graph_text () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("format", `String "text")] in
   let (ok, msg) = Tool_agent.handle_collaboration_graph ctx args in
   Alcotest.(check bool) "text format succeeds" true ok;
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  cleanup_dir base_dir
+  )
 
 let test_collaboration_graph_json () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("format", `String "json")] in
   let (ok, msg) = Tool_agent.handle_collaboration_graph ctx args in
   Alcotest.(check bool) "json format succeeds" true ok;
   Alcotest.(check bool) "returns JSON" true (String.contains msg '{');
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Handler tests — consolidate_learning
    ============================================================ *)
 
 let test_consolidate_learning () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("decay_after_days", `Int 30)] in
   let (ok, msg) = Tool_agent.handle_consolidate_learning ctx args in
   Alcotest.(check bool) "consolidate succeeds" true ok;
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Handler tests — agent_card
    ============================================================ *)
 
 let test_agent_card_get () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("action", `String "get")] in
   let (ok, msg) = Tool_agent.handle_agent_card ctx args in
   Alcotest.(check bool) "get succeeds" true ok;
   Alcotest.(check bool) "returns JSON" true (String.contains msg '{');
-  cleanup_dir base_dir
+  )
 
 let test_agent_card_refresh () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let args = `Assoc [("action", `String "refresh")] in
   let (ok, msg) = Tool_agent.handle_agent_card ctx args in
   Alcotest.(check bool) "refresh succeeds" true ok;
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Dispatch test — masc_agent_relations
    ============================================================ *)
 
 let test_dispatch_agent_relations () =
-  let ctx, base_dir = make_ctx () in
+  with_ctx (fun ctx ->
   let result = Tool_agent.dispatch ctx ~name:"masc_agent_relations" ~args:(`Assoc []) in
   Alcotest.(check bool) "agent_relations dispatches" true (result <> None);
-  cleanup_dir base_dir
+  )
 
 (* ============================================================
    Schema coverage — masc_agent_relations is registered

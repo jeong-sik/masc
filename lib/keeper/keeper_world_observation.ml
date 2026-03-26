@@ -140,11 +140,7 @@ let board_signal_match
       |> List.filter (fun target ->
              let needle = "@" ^ String.lowercase_ascii (String.trim target) in
              needle <> "@"
-             &&
-             try
-               let _ = Re.Str.search_forward (Re.Str.regexp_string needle) haystack 0 in
-               true
-             with Not_found -> false)
+             && Re.execp (Re.str needle |> Re.compile) haystack)
     in
     if matched_targets <> [] then
       { explicit_mention = true; matched_targets; score = 100 }
@@ -270,12 +266,7 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
                  let needle =
                    "@" ^ String.lowercase_ascii target
                  in
-                 try
-                   let _ =
-                     Re.Str.search_forward (Re.Str.regexp_string needle) haystack 0
-                   in
-                   true
-                 with Not_found -> false)
+                 Re.execp (Re.str needle |> Re.compile) haystack)
                targets)
            recent)
     in

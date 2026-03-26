@@ -29,11 +29,7 @@ let contains_ci (haystack : string) (needle : string) : bool =
   let h = String.lowercase_ascii haystack in
   let n = String.lowercase_ascii needle in
   if n = "" then false
-  else
-    try
-      let _ = Re.Str.search_forward (Re.Str.regexp_string n) h 0 in
-      true
-    with Not_found -> false
+  else Re.execp (Re.str n |> Re.compile) h
 
 let keeper_skill_selection_mode () : keeper_skill_selection_mode =
   match Sys.getenv_opt "MASC_KEEPER_SKILL_SELECTION" with
@@ -221,12 +217,12 @@ let parse_skill_line (line : string) : (string * string list) option =
         in
         let secondary_raw_opt =
           if String.length rest >= 2 && String.sub rest 0 2 = "(+" then
-            try
-              let close_idx = Re.Str.search_forward (Re.Str.regexp_string ")") rest 2 in
+            match Re.exec_opt ~pos:2 (Re.str ")" |> Re.compile) rest with
+            | Some g ->
+              let close_idx = Re.Group.start g 0 in
               let inside = String.sub rest 2 (close_idx - 2) |> String.trim in
               if inside = "" then None else Some inside
-            with Not_found ->
-              None
+            | None -> None
           else
             None
         in

@@ -72,22 +72,19 @@ let is_memory_recall_query (s : string) : bool =
   ] in
   let needles = en_keywords @ ko_keywords in
   List.exists (fun n ->
-    try
-      let _ = Re.Str.search_forward (Re.Str.regexp_string n) q 0 in
-      true
-    with Not_found -> false
+    Re.execp (Re.str n |> Re.compile) q
   ) needles
 
 let expected_topic_hint (s : string) : string option =
   let q = String.lowercase_ascii s in
   let has_ko needle =
-    try let _ = Re.Str.search_forward (Re.Str.regexp_string needle) s 0 in true with Not_found -> false
+    Re.execp (Re.str needle |> Re.compile) s
   in
   let has_en needle =
-    try let _ = Re.Str.search_forward (Re.Str.regexp_string needle) q 0 in true with Not_found -> false
+    Re.execp (Re.str needle |> Re.compile) q
   in
-  if (try let _ = Re.Str.search_forward (Re.Str.regexp_string "날씨") s 0 in true with Not_found -> false)
-     || (try let _ = Re.Str.search_forward (Re.Str.regexp_string "weather") q 0 in true with Not_found -> false)
+  if Re.execp (Re.str "날씨" |> Re.compile) s
+     || Re.execp (Re.str "weather" |> Re.compile) q
   then
     Some "weather"
   else if has_ko "첫 질문"
@@ -599,8 +596,8 @@ let evaluate_memory_recall
   let expected_topic = expected_topic_hint user_message in
   let has_weather_word (s : string) =
     let q = String.lowercase_ascii s in
-    (try let _ = Re.Str.search_forward (Re.Str.regexp_string "날씨") s 0 in true with Not_found -> false)
-    || (try let _ = Re.Str.search_forward (Re.Str.regexp_string "weather") q 0 in true with Not_found -> false)
+    Re.execp (Re.str "날씨" |> Re.compile) s
+    || Re.execp (Re.str "weather" |> Re.compile) q
   in
   (* Similarity threshold for recall match acceptance.
      0.18 (default): Jaccard + character n-gram combined score.
@@ -670,8 +667,8 @@ let evaluate_memory_recall
           if has_weather_reply then 0.08 else -.0.08
       | Some "first_question" ->
           let has_first =
-            (try let _ = Re.Str.search_forward (Re.Str.regexp_string "첫") assistant_reply 0 in true with Not_found -> false)
-            || (try let _ = Re.Str.search_forward (Re.Str.regexp_string "first") (String.lowercase_ascii assistant_reply) 0 in true with Not_found -> false)
+            Re.execp (Re.str "첫" |> Re.compile) assistant_reply
+            || Re.execp (Re.str "first" |> Re.compile) (String.lowercase_ascii assistant_reply)
           in
           if has_first then 0.05 else -.0.05
       | _ -> 0.0

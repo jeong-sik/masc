@@ -45,7 +45,7 @@ let normalize_memory_text_key (s : string) : string =
   s
   |> String.trim
   |> String.lowercase_ascii
-  |> Re.Str.global_replace (Re.Str.regexp "[ \t\n\r!\"#$%&'()*+,-./:;<=>?@\\[\\]^_`{|}~]+") ""
+  |> Re.replace_string (Re.Pcre.re {re|[ \t\n\r!"#$%&'()*+,\-./:;<=>?@\[\]^_`{|}~]+|re} |> Re.compile) ~by:""
 
 let is_meaningful_memory_text (s : string) : bool =
   let key = normalize_memory_text_key s in

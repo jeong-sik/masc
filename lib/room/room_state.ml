@@ -29,20 +29,22 @@ let read_state config =
   in
   match room_state_of_yojson json with
   | Ok state -> state
-  | Error _ -> {
-      protocol_version = "0.1.0";
-      project = Filename.basename config.base_path;
-      started_at = now_iso ();
-      message_seq = 0;
-      active_agents = [];
-      paused = false;
-      pause_reason = None;
-      paused_by = None;
-      paused_at = None;
-      search_strategy_default = Some "best_first_v1";
-      speculation_enabled = false;
-      speculation_budget = None;
-    }
+  | Error msg ->
+      Log.Misc.warn "read_state: deserialization failed (%s), returning empty default — dashboard will show stale data" msg;
+      {
+        protocol_version = "0.1.0";
+        project = Filename.basename config.base_path;
+        started_at = now_iso ();
+        message_seq = 0;
+        active_agents = [];
+        paused = false;
+        pause_reason = None;
+        paused_by = None;
+        paused_at = None;
+        search_strategy_default = Some "best_first_v1";
+        speculation_enabled = false;
+        speculation_budget = None;
+      }
 
 (** Write room state — persists to both filesystem and PostgreSQL *)
 let write_state config state =

@@ -157,7 +157,10 @@ let write_json_root config path json =
       let content = Yojson.Safe.pretty_to_string json in
       (match backend_set config ~key ~value:content with
        | Ok () -> ()
-       | Error e -> Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e))
+       | Error e -> Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e));
+      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
+      (try write_json_local path json
+       with _exn -> ())
   | None -> write_json_local path json
 
 let delete_path_root config path =
@@ -205,8 +208,17 @@ let write_json config path json =
       let content = Yojson.Safe.pretty_to_string json in
       (match backend_set config ~key ~value:content with
        | Ok () -> ()
-       | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e))
+       | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e));
+      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
+      (try write_json_local path json
+       with _exn -> ())
   | None -> write_json_local path json
+
+let write_text_local path content =
+  mkdir_p (Filename.dirname path);
+  let tmp_path = path ^ ".tmp" in
+  Fs_compat.save_file tmp_path content;
+  Unix.rename tmp_path path
 
 let write_text config path content =
   match key_of_path config path with
@@ -215,12 +227,11 @@ let write_text config path content =
        | Ok () -> ()
        | Error e ->
            Log.Misc.warn "write_text backend_set failed for %s: %s" key
-             (Backend_types.show_error e))
-  | None ->
-      mkdir_p (Filename.dirname path);
-      let tmp_path = path ^ ".tmp" in
-      Fs_compat.save_file tmp_path content;
-      Unix.rename tmp_path path
+             (Backend_types.show_error e));
+      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
+      (try write_text_local path content
+       with _exn -> ())
+  | None -> write_text_local path content
 
 let delete_path config path =
   match key_of_path config path with

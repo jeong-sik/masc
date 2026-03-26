@@ -178,20 +178,9 @@ let test_dashboard_shell_current_room_status () =
       check string "shell diagnostics surface" "shell"
         (json |> member "projection_diagnostics" |> member "surface" |> to_string))
 
-let resident_keeper_spec name : Lib.Keeper_types.resident_keeper_spec =
+let keeper_boot_entry name : Lib.Keeper_types.keeper_boot_entry =
   let now = "2026-03-25T08:05:54Z" in
-  {
-    name;
-    persistent_name = name;
-    persona_name = name;
-    desired = true;
-    voice_enabled = false;
-    voice_channel = "";
-    voice_agent_id = "";
-    seed_meta = `Assoc [];
-    created_at = now;
-    updated_at = now;
-  }
+  { name; created_at = now; updated_at = now }
 
 let test_dashboard_shell_counts_resident_keepers () =
   let dir = test_dir () in
@@ -204,10 +193,10 @@ let test_dashboard_shell_counts_resident_keepers () =
       ignore (Lib.Room.init config ~agent_name:None);
       ignore
         (Lib.Keeper_types.write_resident_keeper config
-           (resident_keeper_spec "keeper-alpha"));
+           (keeper_boot_entry "keeper-alpha"));
       ignore
         (Lib.Keeper_types.write_resident_keeper config
-           (resident_keeper_spec "keeper-beta"));
+           (keeper_boot_entry "keeper-beta"));
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       let counts = json |> member "counts" in

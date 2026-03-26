@@ -153,8 +153,8 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
       ());
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
-  (* Auto-boot resident keepers: read .masc/resident-keepers/*.json,
-     load or parse each keeper's meta, and start keepalive loops. *)
+  (* Auto-boot keepers: read .masc/resident-keepers/*.json,
+     load each keeper's meta, and start keepalive loops. *)
   fork_subsystem "keeper_autoboot" (fun () ->
     if not Env_config.KeeperBootstrap.enabled then
       Log.Keeper.info "autoboot: disabled via MASC_KEEPER_BOOTSTRAP_ENABLED=false"
@@ -162,20 +162,16 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
     Eio.Time.sleep clock 5.0;
     let config = state.room_config in
-    let specs = Keeper_types.list_resident_keepers config in
+    let entries = Keeper_types.list_resident_keepers config in
     let booted = ref 0 in
-    List.iter (fun (spec : Keeper_types.resident_keeper_spec) ->
-      if not spec.desired then
-        Log.Keeper.info "autoboot: skipping %s (desired=false)" spec.name
-      else
+    List.iter (fun (entry : Keeper_types.keeper_boot_entry) ->
         try
-          let meta = Keeper_runtime.ensure_resident_meta config spec in
-          match meta with
+          match Keeper_runtime.ensure_keeper_meta config entry.name with
           | Error e ->
-            Log.Keeper.error "autoboot: failed to load meta for %s: %s" spec.name e
+            Log.Keeper.error "autoboot: failed to load meta for %s: %s" entry.name e
           | Ok m ->
             if not m.presence_keepalive then
-              Log.Keeper.info "autoboot: skipping %s (presence_keepalive=false)" spec.name
+              Log.Keeper.info "autoboot: skipping %s (presence_keepalive=false)" entry.name
             else begin
               let ctx : _ Keeper_types.context = {
                 config;
@@ -191,11 +187,11 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-          Log.Keeper.error "autoboot: exception for %s: %s" spec.name
+          Log.Keeper.error "autoboot: exception for %s: %s" entry.name
             (Printexc.to_string exn)
-    ) specs;
-    Log.Keeper.info "autoboot: %d/%d resident keepers started"
-      !booted (List.length specs)
+    ) entries;
+    Log.Keeper.info "autoboot: %d/%d keepers started"
+      !booted (List.length entries)
     end);
   (* Phase 5: unified startup subsystem summary *)
   Log.info ~ctx:"startup" "subsystems: resident loops started"

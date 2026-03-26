@@ -429,9 +429,8 @@ export interface OperatorSessionSnapshot {
 
 export interface OperatorKeeperSnapshot {
   name: string
-  runtime_class?: 'resident_keeper' | 'persistent_agent'
-  desired?: boolean
-  resident_registered?: boolean
+  runtime_class?: 'keeper'
+  registered?: boolean
   agent_name?: string
   status?: string
   context_ratio?: number

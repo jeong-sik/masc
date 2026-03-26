@@ -334,7 +334,7 @@ let keeper_diagnostic_summary ~health_state ~quiet_reason =
       | _ -> "Keeper is reachable. Send a direct message for an immediate response.")
 
 let keeper_continuity_state
-    ~(desired : bool)
+    ~(registered : bool)
     ~(meta : keeper_meta)
     ~(keepalive_running : bool)
     ~(keepalive_started_at : float option)
@@ -352,11 +352,11 @@ let keeper_continuity_state
         now_ts -. started_at < recovery_window_s
     | None -> false
   in
-  if desired && meta.presence_keepalive then
+  if registered && meta.presence_keepalive then
     if not keepalive_running then "not_running"
     else if recently_started || not healthy_like then "recovering"
     else "healthy"
-  else if desired then "disabled"
+  else if registered then "disabled"
   else if keepalive_running && healthy_like then "healthy"
   else if keepalive_running then "recovering"
   else "offline"
@@ -364,17 +364,17 @@ let keeper_continuity_state
 let keeper_continuity_summary continuity_state =
   match continuity_state with
   | "not_running" ->
-      "Desired always-on keeper is not running. The runtime should reconcile it back into live presence."
+      "Registered keeper is not running. The runtime should reconcile it back into live presence."
   | "recovering" ->
       "Keeper runtime is reconciling back into live presence."
   | "healthy" ->
-      "Keeper runtime is aligned with the desired live presence."
+      "Keeper runtime is aligned with the registered live presence."
   | "disabled" ->
       "Resident live presence is disabled by configuration."
   | _ -> "Keeper runtime is offline."
 
 let augment_keeper_diagnostic_json
-    ~(desired : bool)
+    ~(registered : bool)
     ~(meta : keeper_meta)
     ~(keepalive_running : bool)
     ~(keepalive_started_at : float option)
@@ -384,7 +384,7 @@ let augment_keeper_diagnostic_json
     json_string_opt "health_state" diagnostic |> Option.value ~default:"offline"
   in
   let continuity_state =
-    keeper_continuity_state ~desired ~meta ~keepalive_running
+    keeper_continuity_state ~registered ~meta ~keepalive_running
       ~keepalive_started_at ~health_state ~now_ts
   in
   let continuity_summary = keeper_continuity_summary continuity_state in

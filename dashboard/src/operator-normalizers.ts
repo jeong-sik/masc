@@ -308,10 +308,8 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
   const contextRaw = isRecord(raw.context) ? raw.context : undefined
   return {
     name,
-    runtime_class:
-      raw.runtime_class === 'persistent_agent' ? 'persistent_agent' : 'resident_keeper',
-    desired: asBoolean(raw.desired),
-    resident_registered: asBoolean(raw.resident_registered),
+    runtime_class: 'keeper' as const,
+    registered: asBoolean(raw.registered),
     agent_name: asString(raw.agent_name),
     status: asString(raw.status),
     context_ratio: asNumber(raw.context_ratio) ?? asNumber(contextRaw?.context_ratio),

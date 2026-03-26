@@ -83,8 +83,10 @@ function continuityStateLabel(state?: KeeperDiagnostic['continuity_state']): str
       return 'healthy'
     case 'recovering':
       return 'recovering'
-    case 'desired_offline':
-      return 'desired offline'
+    case 'disabled':
+      return 'disabled'
+    case 'not_running':
+      return 'not running'
     case 'offline':
       return 'offline'
     default:

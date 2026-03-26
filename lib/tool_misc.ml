@@ -337,24 +337,24 @@ let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
     @ policy_json)
 
 let keeper_policies_json ctx =
-  let resident_rows =
+  let registered_rows =
     Keeper_types.resident_keeper_names ctx.config
     |> List.filter_map (fun name ->
            match Keeper_types.read_meta ctx.config name with
-           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"resident_keeper" meta)
+           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"keeper" meta)
            | Ok None | Error _ -> None)
   in
-  let persistent_rows =
+  let unregistered_rows =
     Keeper_types.persistent_agent_names ctx.config
     |> List.filter_map (fun name ->
            match Keeper_types.read_meta ctx.config name with
-           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"persistent_agent" meta)
+           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"keeper" meta)
            | Ok None | Error _ -> None)
   in
   `Assoc
     [
-      ("resident_keepers", `List resident_rows);
-      ("persistent_agents", `List persistent_rows);
+      ("registered_keepers", `List registered_rows);
+      ("unregistered_keepers", `List unregistered_rows);
     ]
 
 let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
@@ -495,8 +495,9 @@ let apply_keeper_policy_update config ~runtime_class args =
   let name = get_string args "name" "" |> String.trim in
   let membership_ok =
     match runtime_class with
-    | "resident_keeper" -> List.mem name (Keeper_types.resident_keeper_names config)
-    | "persistent_agent" -> List.mem name (Keeper_types.persistent_agent_names config)
+    | "keeper" ->
+      List.mem name (Keeper_types.resident_keeper_names config)
+      || List.mem name (Keeper_types.persistent_agent_names config)
     | _ -> false
   in
   if not (Keeper_types.validate_name name) then

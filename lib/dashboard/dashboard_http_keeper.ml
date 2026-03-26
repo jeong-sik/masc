@@ -344,7 +344,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ~history_items:conversation_items
                   ~now_ts
                 |> Keeper_exec_status.augment_keeper_diagnostic_json
-                     ~desired:true
+                     ~registered:true
                      ~meta:m
                      ~keepalive_running
                      ~keepalive_started_at:(runtime_keepalive_started_at config m)
@@ -369,9 +369,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                    ~surface_status:(Keeper_exec_status.keeper_surface_status
                                       ~agent_status:agent ~diagnostic)
                    ~now_ts));
-              ("runtime_class", `String "resident_keeper");
-              ("desired", `Bool true);
-              ("resident_registered", `Bool true);
+              ("runtime_class", `String "keeper");
+              ("registered", `Bool true);
               ("registry_state",
                 match registry_state with
                 | Some state -> `String state

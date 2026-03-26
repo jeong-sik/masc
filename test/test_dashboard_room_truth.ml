@@ -35,11 +35,17 @@ let with_fs_backend f =
   Unix.putenv "SUPABASE_DB_URL" "";
   Unix.putenv "SB_PG_URL" "";
   Unix.putenv "DATABASE_URL" "";
+  (* OCaml stdlib has no unsetenv; empty string is equivalent for PG
+     auto-detect since all callers filter empty values. *)
+  let restore key = function
+    | Some v -> Unix.putenv key v
+    | None -> Unix.putenv key ""
+  in
   Fun.protect ~finally:(fun () ->
-    (match saved with Some v -> Unix.putenv "MASC_POSTGRES_URL" v | None -> ());
-    (match saved2 with Some v -> Unix.putenv "SUPABASE_DB_URL" v | None -> ());
-    (match saved3 with Some v -> Unix.putenv "SB_PG_URL" v | None -> ());
-    (match saved4 with Some v -> Unix.putenv "DATABASE_URL" v | None -> ()))
+    restore "MASC_POSTGRES_URL" saved;
+    restore "SUPABASE_DB_URL" saved2;
+    restore "SB_PG_URL" saved3;
+    restore "DATABASE_URL" saved4)
   f
 
 let test_dashboard_room_truth_empty_room () =

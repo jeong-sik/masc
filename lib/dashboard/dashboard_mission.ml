@@ -573,8 +573,8 @@ type mission_projection = {
   internal_signals : Yojson.Safe.t list;
 }
 
-let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock
-    ~proc_mgr () =
+let build_projection ?actor ?command_plane_summary ?snapshot_json
+    ?digest_json ?swarm_status ~config ~sw ~clock ~proc_mgr () =
   let actor_name =
     match actor with
     | Some value when String.trim value <> "" -> String.trim value
@@ -596,21 +596,24 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
   in
   let t_sessions = log_phase_if_slow ~actor:actor_name ~phase:"session_list" t_start in
   let snapshot_json =
-    Dashboard_cache.get_or_compute
-      (room_scoped_cache_key config "snapshot" actor_name)
-      ~ttl:3.0
-      (fun () ->
-        Operator_control.snapshot_json
-          ~actor:actor_name
-          ~view:"summary"
-          ~include_messages:false
-          ~include_sessions:true
-          ~include_keepers:true
-          ~include_summary_fields:false
-          ~include_command_plane:false
-          ~lightweight_summary:true
-          ~sessions:tracked_sessions
-          ctx)
+    match snapshot_json with
+    | Some json -> json
+    | None ->
+        Dashboard_cache.get_or_compute
+          (room_scoped_cache_key config "snapshot" actor_name)
+          ~ttl:3.0
+          (fun () ->
+            Operator_control.snapshot_json
+              ~actor:actor_name
+              ~view:"summary"
+              ~include_messages:false
+              ~include_sessions:true
+              ~include_keepers:true
+              ~include_summary_fields:false
+              ~include_command_plane:false
+              ~lightweight_summary:true
+              ~sessions:tracked_sessions
+              ctx)
   in
   let t_snapshot = log_phase_if_slow ~actor:actor_name ~phase:"snapshot" t_sessions in
   let command_json =
@@ -624,26 +627,29 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     log_phase_if_slow ~actor:actor_name ~phase:"command_projection" t_snapshot
   in
   let digest_json =
-    Dashboard_cache.get_or_compute
-      (room_scoped_cache_key config "digest" actor_name)
-      ~ttl:5.0
-      (fun () ->
-        match
-          Operator_control.digest_json ~actor:actor_name ~sessions:tracked_sessions
-            ?command_plane_summary ?swarm_status ctx
-        with
-        | Ok json -> json
-        | Error message ->
-            `Assoc
-              [
-                ("health", `String "warn");
-                ("attention_items", `List []);
-                ("recommended_actions", `List []);
-                ("session_cards", `List []);
-                ("swarm_status", Swarm_status.empty_json);
-                ("command_plane", `Assoc []);
-                ("error", `String message);
-              ])
+    match digest_json with
+    | Some json -> json
+    | None ->
+        Dashboard_cache.get_or_compute
+          (room_scoped_cache_key config "digest" actor_name)
+          ~ttl:5.0
+          (fun () ->
+            match
+              Operator_control.digest_json ~actor:actor_name ~sessions:tracked_sessions
+                ?command_plane_summary ?swarm_status ctx
+            with
+            | Ok json -> json
+            | Error message ->
+                `Assoc
+                  [
+                    ("health", `String "warn");
+                    ("attention_items", `List []);
+                    ("recommended_actions", `List []);
+                    ("session_cards", `List []);
+                    ("swarm_status", Swarm_status.empty_json);
+                    ("command_plane", `Assoc []);
+                    ("error", `String message);
+                  ])
   in
   let t_digest = log_phase_if_slow ~actor:actor_name ~phase:"digest" t_command in
   let room_json = member_assoc "room" snapshot_json in
@@ -703,11 +709,11 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     internal_signals;
   }
 
-let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mgr
-    () =
+let json ?actor ?command_plane_summary ?snapshot_json ?digest_json ?swarm_status
+    ~config ~sw ~clock ~proc_mgr () =
   let projection =
-    build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw
-      ~clock ~proc_mgr ()
+    build_projection ?actor ?command_plane_summary ?snapshot_json ?digest_json
+      ?swarm_status ~config ~sw ~clock ~proc_mgr ()
   in
   let operations_summary =
     member_assoc "operations" projection.command_json |> member_assoc "summary"

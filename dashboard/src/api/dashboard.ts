@@ -172,7 +172,7 @@ export function fetchDashboardRoomTruth(): Promise<DashboardRoomTruthResponse> {
 }
 
 export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {
-  return get('/api/v1/dashboard/execution')
+  return get('/api/v1/dashboard/execution', { includeActorHeader: false })
 }
 
 export function fetchDashboardMemory(
@@ -269,7 +269,7 @@ export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
 }
 
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
-  return get('/api/v1/dashboard/mission')
+  return get('/api/v1/dashboard/mission', { includeActorHeader: false })
 }
 
 export function fetchDashboardMissionSession(sessionId: string): Promise<DashboardMissionSessionDetailResponse> {

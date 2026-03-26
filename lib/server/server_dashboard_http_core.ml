@@ -778,6 +778,30 @@ let _mission_cache =
         ("internal_signals", `List []);
       ])
 
+let cached_surface_json_if_ready cache ~is_ready =
+  let json = cached_surface_json cache in
+  if is_ready json then Some json else None
+
+let operator_snapshot_json_if_ready () =
+  cached_surface_json_if_ready _operator_snapshot_cache ~is_ready:(function
+      | `Assoc fields -> (
+          match List.assoc_opt "status" fields with
+          | Some (`String "initializing") -> false
+          | _ -> true)
+      | _ -> false)
+
+let operator_digest_json_if_ready () =
+  cached_surface_json_if_ready _operator_digest_cache ~is_ready:(function
+      | `Assoc fields -> (
+          match List.assoc_opt "health" fields with
+          | Some (`String "initializing") -> false
+          | _ -> true)
+      | _ -> false)
+
+let default_dashboard_actor = function
+  | None -> true
+  | Some raw -> String.equal (String.trim raw) "dashboard"
+
 let start_mission_refresh_loop ~state ~sw ~clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
@@ -791,10 +815,12 @@ let start_mission_refresh_loop ~state ~sw ~clock =
       let command_plane_summary, swarm_status =
         command_plane_summary_cache_parts ~allow_initializing:false ~state
       in
+      let snapshot_json = operator_snapshot_json_if_ready () in
+      let digest_json = operator_digest_json_if_ready () in
       run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
         (fun ~config ~sw ->
-          Dashboard_mission.json ?command_plane_summary ?swarm_status ~config ~sw
-            ~clock ~proc_mgr ())
+          Dashboard_mission.json ?command_plane_summary ?snapshot_json
+            ?digest_json ?swarm_status ~config ~sw ~clock ~proc_mgr ())
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -813,11 +839,16 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
     let command_plane_summary, swarm_status =
       command_plane_summary_cache_parts ~allow_initializing:false ~state
     in
+    let snapshot_json = operator_snapshot_json_if_ready () in
+    let digest_json =
+      if default_dashboard_actor actor then operator_digest_json_if_ready ()
+      else None
+    in
     run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
       ~config:state.Mcp_server.room_config
       (fun ~config ~sw ->
-        Dashboard_mission.json ?actor ?command_plane_summary ?swarm_status
-          ~config ~sw ~clock
+        Dashboard_mission.json ?actor ?command_plane_summary ?snapshot_json
+          ?digest_json ?swarm_status ~config ~sw ~clock
           ~proc_mgr:state.Mcp_server.proc_mgr ())
   in
   let full_json =

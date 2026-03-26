@@ -31,7 +31,7 @@ let validate_room_id room_id =
     Error "Room id cannot contain path separators"
   else if contains_substring room_id ".." then
     Error "Room id cannot contain traversal segments"
-  else if not (Re.Str.string_match (Re.Str.regexp "^[A-Za-z0-9._-]+$") room_id 0) then
+  else if not (Re.execp (Re.compile (Re.(whole_string (rep1 (alt [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '.'; char '_'; char '-']))))) room_id) then
     Error "Room id may only contain letters, digits, dot, underscore, and hyphen"
   else Ok room_id
 

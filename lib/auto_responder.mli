@@ -4,6 +4,7 @@ type mode = Disabled | Spawn | Model
 
 val get_mode : unit -> mode
 val is_enabled : unit -> bool
+val activity_log_file : unit -> string
 
 (** Mention helpers (re-exported from Mention) *)
 val spawnable_agents : string list

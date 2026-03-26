@@ -31,6 +31,7 @@ module FileSystem : sig
     expires_at: float;
   }
 
+  val lock_info_to_json : lock_info -> string
   val acquire_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
   val release_lock : t -> key:string -> owner:string -> bool result
   val extend_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
@@ -58,6 +59,7 @@ module Memory : sig
   val get_all : t -> prefix:string -> (string * string) list result
   val set_if_not_exists : t -> string -> string -> bool result
   val clear : t -> unit
+  val get_or_create : base_path:string -> t
 end
 
 (** {1 PostgreSQL Backend (Eio)} *)

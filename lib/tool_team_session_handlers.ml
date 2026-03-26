@@ -36,11 +36,7 @@ let handle_start ctx args : result =
     let agents = get_agent_names args "agents" in
     let operation_id = get_string_opt args "operation_id" in
     match
-      let env = object
-        method clock = ctx.clock
-        method process_mgr = match ctx.proc_mgr with Some pm -> pm | None -> failwith "process_mgr not available"
-      end in
-      Team_session_engine_eio.start_session ~sw:ctx.sw ~env
+      Team_session_engine_eio.start_session ~sw:ctx.sw ~clock:ctx.clock
         ~config:ctx.config ~created_by:ctx.agent_name ~goal ~duration_seconds
         ~execution_scope ~checkpoint_interval_sec ~min_agents
         ~scale_profile ~control_profile

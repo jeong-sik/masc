@@ -27,7 +27,7 @@ module Swarm = Agent_sdk_swarm
     @return Updated session or error message *)
 val run_swarm :
   sw:Eio.Switch.t ->
-  env:< clock : _ Eio.Time.clock ; process_mgr : _ Eio.Process.mgr ; .. > ->
+  clock:_ Eio.Time.clock ->
   config:Room.config ->
   session_id:string ->
   masc_tools:Types.tool_schema list ->

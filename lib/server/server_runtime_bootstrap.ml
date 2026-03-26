@@ -207,52 +207,10 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
      Log.Misc.error "startup checkpoint prune failed: %s"
        (Printexc.to_string exn))
 
-let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
-  let timeout_s =
-    Safe_ops.get_env_float_logged "MASC_KEEPER_BOOTSTRAP_TIMEOUT_S" ~default:15.0
-  in
-  let keeper_ctx : _ Tool_keeper.context =
-    {
-      config = state.room_config;
-      agent_name = "keeper-bootstrap";
-      sw;
-      clock;
-      proc_mgr = state.Mcp_server.proc_mgr;
-    }
-  in
-  let fallback_stats : Keeper_runtime.keeper_bootstrap_stats =
-    {
-      enabled = Env_config.KeeperBootstrap.enabled;
-      scanned = 0;
-      started = 0;
-      stale = 0;
-      recovering = 0;
-    }
-  in
-  try
-    match
-      Eio.Time.with_timeout clock timeout_s (fun () ->
-        let stats = Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
-        Keeper_runtime.maybe_start_supervisor_sweep keeper_ctx stats;
-        if stats.enabled then
-          Log.Keeper.info "scanned=%d started=%d stale=%d recovering=%d"
-            stats.scanned stats.started stats.stale stats.recovering;
-        Ok ())
-    with
-    | Ok () -> ()
-    | Error `Timeout -> begin
-        Keeper_runtime.maybe_start_supervisor_sweep keeper_ctx fallback_stats;
-        Log.Server.warn
-          "keeper bootstrap timed out after %.0fs; resident supervisor sweep will retry recovery"
-          timeout_s
-      end
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> begin
-      Keeper_runtime.maybe_start_supervisor_sweep keeper_ctx fallback_stats;
-      Log.Server.error "keeper bootstrap failed: %s"
-        (Printexc.to_string exn)
-    end
+(* bootstrap_keepers removed: the keeper_autoboot subsystem in
+   start_resident_loops now handles keeper startup in a dedicated
+   fiber with a 5-second delay, avoiding PG pool contention with
+   the 7+ dashboard refresh loops that share the same pool. *)
 
 let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler =
@@ -324,8 +282,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       state
     in
     let run_lazy_task (task_name, task_fn) =
+      Log.Server.info "lazy_task: starting %s" task_name;
       try
         task_fn ();
+        Log.Server.info "lazy_task: finished %s" task_name;
         Server_startup_state.finish_lazy_task ~task:task_name
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
@@ -353,7 +313,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ("jsonl_prune", fun () -> startup_prune_jsonl state);
           ( "keeper_checkpoint_prune",
             fun () -> startup_prune_keeper_checkpoints state );
-          ("keeper_bootstrap", fun () -> bootstrap_keepers ~sw ~clock state);
+          (* keeper_bootstrap removed: keeper_autoboot subsystem in
+             start_resident_loops handles this in a dedicated fiber,
+             avoiding PG pool contention with dashboard refresh loops. *)
         ]
       in
       let task_names = List.map fst tasks in
@@ -474,9 +436,22 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         Server_webrtc_transport.set_connection_starter
           (fun peer_id ->
             Server_webrtc_transport.start_webrtc_connection ~sw ~env peer_id));
-      (* Pre-warm shell cache so the first /dashboard load is instant.
-         shell is the only room-truth component without a proactive refresh loop. *)
-      Server_dashboard_http.warm_shell_cache state;
+      (* Pre-warm shell cache in a separate fiber so it cannot block
+         resident loop startup or lazy tasks (#keeper-bootstrap-stuck). *)
+      Eio.Fiber.fork ~sw (fun () ->
+        (try
+           match Eio.Time.with_timeout clock 10.0 (fun () ->
+             Server_dashboard_http.warm_shell_cache state;
+             Ok ())
+           with
+           | Ok () -> ()
+           | Error `Timeout ->
+             Log.Dashboard.warn "shell cache pre-warm timed out (10s)"
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Dashboard.warn "shell cache pre-warm failed: %s"
+             (Printexc.to_string exn)));
       Server_bootstrap_loops.start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
       start_lazy_startup state
     with

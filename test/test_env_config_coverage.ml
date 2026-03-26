@@ -108,11 +108,10 @@ let test_masc_http_base_url_uses_explicit_host_and_port () =
         check string "base url from host+port" "http://masc.example.test:7777" (Env_config.masc_http_base_url ()))))
 
 let test_sb_path_result_missing_is_error () =
-  with_env "MASC_SB_PATH" "" (fun () ->
-    with_env "MASC_WORKSPACE_ROOT" "" (fun () ->
-      with_env "ME_ROOT" "" (fun () ->
-        check bool "sb path result is error" true
-          (match Env_config.sb_path_result () with Error _ -> true | Ok _ -> false))))
+  with_env "MASC_WORKSPACE_ROOT" "" (fun () ->
+    with_env "ME_ROOT" "" (fun () ->
+      check bool "sb path result is error" true
+        (match Env_config.sb_path_result () with Error _ -> true | Ok _ -> false)))
 
 let test_libdatachannel_candidates_include_env_override () =
   with_env "LIBDATACHANNEL_PATH" "/tmp/libdatachannel-custom.dylib" (fun () ->

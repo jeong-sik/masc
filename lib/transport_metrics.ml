@@ -260,9 +260,7 @@ let transport_health_json ~config =
       Log.Transport.debug "current_room_id failed: %s" (Printexc.to_string exn);
       "default"
   in
-  let cluster_name =
-    Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")
-  in
+  let cluster_name = Env_config_core.cluster_name () in
   let recent_messages =
     try Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit:20 |> List.length
     with exn ->

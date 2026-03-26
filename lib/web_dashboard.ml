@@ -9,15 +9,7 @@
 *)
 
 let assets_root () =
-  let env_assets =
-    match Sys.getenv_opt "MASC_ASSETS_ROOT" with
-    | Some d when String.trim d <> "" -> Some d
-    | _ ->
-        (match Sys.getenv_opt "MASC_ASSETS_DIR" with
-         | Some d when String.trim d <> "" -> Some d
-         | _ -> None)
-  in
-  match env_assets with
+  match Env_config_core.assets_dir_opt () with
   | Some d -> d
   | None ->
       let exe_dir = Filename.dirname Sys.executable_name in

@@ -41,9 +41,9 @@ let project_root () =
             | None -> Sys.getcwd ()))
 
 let () =
-  if Sys.getenv_opt "MASC_ASSETS_ROOT" = None then
+  if Sys.getenv_opt "MASC_ASSETS_DIR" = None && Sys.getenv_opt "MASC_ASSETS_ROOT" = None then
     let assets = Filename.concat (project_root ()) "assets" in
-    if Sys.file_exists assets then Unix.putenv "MASC_ASSETS_ROOT" assets
+    if Sys.file_exists assets then Unix.putenv "MASC_ASSETS_DIR" assets
 
 let contains_substr sub s =
   try
@@ -164,19 +164,20 @@ let test_etag_stable () =
    ============================================================ *)
 
 let test_fallback_on_missing_asset () =
-  (* Override MASC_ASSETS_ROOT to a nonexistent directory *)
-  let original = Sys.getenv_opt "MASC_ASSETS_ROOT" in
-  Unix.putenv "MASC_ASSETS_ROOT" "/tmp/nonexistent_masc_assets_12345";
+  (* Override MASC_ASSETS_DIR to a nonexistent directory *)
+  let original_dir = Sys.getenv_opt "MASC_ASSETS_DIR" in
+  let original_root = Sys.getenv_opt "MASC_ASSETS_ROOT" in
+  Unix.putenv "MASC_ASSETS_DIR" "/tmp/nonexistent_masc_assets_12345";
+  Unix.putenv "MASC_ASSETS_ROOT" "";
   let html = Web_dashboard.html () in
   let etag = Web_dashboard.etag () in
   (* Restore *)
-  (match original with
+  (match original_dir with
+   | Some v -> Unix.putenv "MASC_ASSETS_DIR" v
+   | None -> Unix.putenv "MASC_ASSETS_DIR" "");
+  (match original_root with
    | Some v -> Unix.putenv "MASC_ASSETS_ROOT" v
-   | None ->
-       (* Clear the env var by setting it to a value we can ignore,
-          since OCaml stdlib has no unsetenv. The next call to assets_root()
-          will use this path which doesn't exist, then fall through to cwd. *)
-       Unix.putenv "MASC_ASSETS_ROOT" "");
+   | None -> Unix.putenv "MASC_ASSETS_ROOT" "");
   check bool "fallback html contains error message" true
     (contains_substr "Dashboard build not found" html);
   check string "fallback etag is none" "none" etag

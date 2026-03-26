@@ -295,7 +295,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
           (if Room.is_initialized config then Room.current_room_id config
            else Filename.basename config.base_path) );
       ("room_base_path", `String config.base_path);
-      ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+      ("cluster", `String (Env_config_core.cluster_name ()));
       ("project", `String room_state.project);
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);
@@ -864,9 +864,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
       ("room", `String current_room);
       ("current_room", `String current_room);
       ("room_base_path", `String config.base_path);
-      ( "cluster",
-        `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME"))
-      );
+      ("cluster", `String (Env_config_core.cluster_name ()));
       ("project", `String room_state.project);
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);

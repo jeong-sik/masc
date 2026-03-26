@@ -387,7 +387,7 @@ let room_json config =
     `Assoc
       [
         ("initialized", `Bool true);
-        ("cluster", `String (Option.value ~default:"default" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+        ("cluster", `String (Env_config_core.cluster_name ()));
         ("project", `String state.project);
         ("current_room", string_option_to_json (Room.read_current_room config));
         ("paused", `Bool state.paused);

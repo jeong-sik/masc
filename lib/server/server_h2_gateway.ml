@@ -783,7 +783,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let room_state = Room.read_state config in
           let tempo = Tempo.get_tempo config in
           let json = `Assoc [
-            ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+            ("cluster", `String (Env_config_core.cluster_name ()));
             ("project", `String room_state.project);
             ("tempo_interval_s", `Float tempo.current_interval_s);
             ("paused", `Bool room_state.paused);

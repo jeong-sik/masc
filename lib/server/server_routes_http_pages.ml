@@ -159,11 +159,7 @@ let assets_root () =
     let root = Filename.dirname (Filename.dirname (Filename.dirname exe_dir)) in
     Filename.concat root "assets"
   in
-  let env_assets =
-    match Sys.getenv_opt "MASC_ASSETS_ROOT" with
-    | Some path when String.trim path <> "" -> Some path
-    | _ -> Sys.getenv_opt "MASC_ASSETS_DIR"
-  in
+  let env_assets = Env_config_core.assets_dir_opt () in
   match env_assets with
   | Some path when is_dir path -> path
   | _ when is_dir exe_assets -> exe_assets

@@ -1417,8 +1417,8 @@ let parse_args () =
   (* Resolve room *)
   let r = if !room <> "" then !room
     else match Sys.getenv_opt "MASC_CLUSTER_NAME" with
-      | Some n -> n
-      | None -> Filename.basename base
+      | Some n when String.trim n <> "" -> n
+      | _ -> Filename.basename base
   in
 
   (base, r, !port, !refresh)

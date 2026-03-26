@@ -6,22 +6,16 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
 let pg_env_var_names =
-  [| "MASC_POSTGRES_URL" |]
+  [| "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" |]
 
 let force_jsonl_fallback_env () =
   Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
   Array.iter (fun name -> Unix.putenv name "") pg_env_var_names
 
 let requested_backend_mode () =
-  match Sys.getenv_opt "MASC_STORAGE_TYPE" with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "" -> "filesystem"
-      | "postgres" | "postgresql" | "postgres-native" -> "postgres-native"
-      | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
-      | "memory" -> "memory"
-      | other -> other)
-  | None -> "filesystem"
+  match Room_utils.storage_type_from_env () with
+  | "postgres" -> "postgres-native"
+  | other -> other
 
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in

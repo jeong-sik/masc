@@ -173,11 +173,11 @@ let test_force_jsonl_fallback_env () =
         (Sys.getenv "MASC_STORAGE_TYPE");
       Alcotest.(check string) "MASC_POSTGRES_URL cleared" ""
         (Sys.getenv "MASC_POSTGRES_URL");
-      Alcotest.(check string) "DATABASE_URL preserved" "postgresql://fallback/db"
+      Alcotest.(check string) "DATABASE_URL cleared" ""
         (Sys.getenv "DATABASE_URL");
-      Alcotest.(check string) "SUPABASE_DB_URL preserved" "postgresql://supabase/db"
+      Alcotest.(check string) "SUPABASE_DB_URL cleared" ""
         (Sys.getenv "SUPABASE_DB_URL");
-      Alcotest.(check string) "SB_PG_URL preserved" "postgresql://sb/db"
+      Alcotest.(check string) "SB_PG_URL cleared" ""
         (Sys.getenv "SB_PG_URL"))
 
 let test_requested_backend_mode_ignores_generic_pg_urls () =
@@ -387,7 +387,7 @@ let () =
     [
       ( "bootstrap",
         [
-          Alcotest.test_case "force_jsonl_fallback_env clears only masc pg env"
+          Alcotest.test_case "force_jsonl_fallback_env clears all pg envs"
             `Quick
             test_force_jsonl_fallback_env;
           Alcotest.test_case "requested backend mode ignores generic pg urls"

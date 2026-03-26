@@ -466,10 +466,10 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
      scheduleWarmRetry; the proactive refresh loop will populate
      _execution_cache in background.
      Escape hatch: if the first attempt started more than (timeout + 15s)
-     ago, the proactive warm-up has timed out or failed silently — fall
-     through to normal on-demand computation.  Note: Proactive_refresh
-     timeout only logs a warning without calling mark_cached_surface_error,
-     so we cannot rely on last_error_unix alone. *)
+     ago, the proactive warm-up has timed out or failed — fall through to
+     normal on-demand computation.  Since #3278 Proactive_refresh.start
+     calls on_error on timeout, so last_error_unix is populated. The
+     time-based escape remains as defense in depth. *)
   let warm_escape_s =
     float_of_env_default "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
       ~default:75.0 ~min_v:30.0 ~max_v:300.0

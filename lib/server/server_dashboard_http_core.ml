@@ -17,8 +17,12 @@ let set_executor_pool pool = Executor_pool_ref.set pool
 (** Cached readonly PG config for the main domain.
     Created once on first use and reused by all proactive refresh loops
     instead of creating a new Caqti pool per call.  Tied to the server's
-    root switch, which lives for the entire process. *)
+    root switch, which lives for the entire process.
+
+    Protected by [_readonly_config_mu] to prevent two fibers from
+    creating duplicate pools when the first creation yields on I/O. *)
 let _cached_readonly_pg_config : Room.config option ref = ref None
+let _readonly_config_mu = Eio.Mutex.create ()
 
 let isolated_readonly_dashboard_config ~sw ~clock ~(config : Room.config) =
   match config.backend_config.Backend.backend_type with
@@ -30,18 +34,25 @@ let isolated_readonly_dashboard_config ~sw ~clock ~(config : Room.config) =
   | Backend.Memory | Backend.FileSystem -> Some config
 
 (** Return a cached readonly config for the main domain.
-    Avoids creating a new PG pool on every proactive refresh cycle. *)
+    Avoids creating a new PG pool on every proactive refresh cycle.
+    Mutex-protected: pool creation involves network I/O that yields,
+    so without the lock two fibers could both see [None] and create
+    duplicate pools (one would be orphaned, leaking connections). *)
 let cached_isolated_readonly_config ~sw ~clock ~config =
   match !_cached_readonly_pg_config with
   | Some c -> Some c
   | None ->
-      let result = isolated_readonly_dashboard_config ~sw ~clock ~config in
-      (match result with
-       | Some _ as r ->
-           _cached_readonly_pg_config := r;
-           Log.Dashboard.info "cached main-domain readonly PG config"
-       | None -> ());
-      result
+      Eio.Mutex.use_rw ~protect:true _readonly_config_mu (fun () ->
+        match !_cached_readonly_pg_config with
+        | Some c -> Some c
+        | None ->
+            let result = isolated_readonly_dashboard_config ~sw ~clock ~config in
+            (match result with
+             | Some _ as r ->
+                 _cached_readonly_pg_config := r;
+                 Log.Dashboard.info "cached main-domain readonly PG config"
+             | None -> ());
+            result)
 
 (** Semaphore limiting concurrent PG-heavy dashboard operations.
     Prevents pool exhaustion when multiple proactive refresh loops

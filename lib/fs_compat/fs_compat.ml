@@ -41,54 +41,66 @@ let with_io ~path f =
   with Eio.Io _ as e ->
     raise (Sys_error (Printf.sprintf "%s: %s" path (Printexc.to_string e)))
 
+let with_fs_or_fallback ~path ~fallback f =
+  match !global_fs with
+  | Some fs -> (
+      try with_io ~path (fun () -> f fs)
+      with Stdlib.Effect.Unhandled _ -> fallback ())
+  | None -> fallback ()
+
+let load_file_unix (path : string) : string =
+  let ic = open_in path in
+  Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+    let len = in_channel_length ic in
+    really_input_string ic len
+  )
+
+let save_file_unix (path : string) (content : string) : unit =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc content
+  )
+
+let append_file_unix (path : string) (content : string) : unit =
+  let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc content
+  )
+
+let mkdir_p_unix (path : string) : unit =
+  let rec ensure_dir (p : string) : unit =
+    if p = "" || p = "." || p = "/" then ()
+    else if Sys.file_exists p then ()
+    else begin
+      ensure_dir (Filename.dirname p);
+      try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  ensure_dir path
+
 (** Load entire file contents as string.
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let load_file (path : string) : string =
-  match !global_fs with
-  | Some fs ->
-    with_io ~path (fun () ->
+  with_fs_or_fallback ~path ~fallback:(fun () -> load_file_unix path) (fun fs ->
       let eio_path = Eio.Path.(fs / path) in
       Eio.Path.load eio_path)
-  | None ->
-    (* Fallback: blocking Unix I/O *)
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
-      let len = in_channel_length ic in
-      really_input_string ic len
-    )
 
 (** Save string to file (overwrite).
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let save_file (path : string) (content : string) : unit =
-  match !global_fs with
-  | Some fs ->
-    with_io ~path (fun () ->
+  with_fs_or_fallback ~path ~fallback:(fun () -> save_file_unix path content) (fun fs ->
       let eio_path = Eio.Path.(fs / path) in
       Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
-  | None ->
-    (* Fallback: blocking Unix I/O *)
-    let oc = open_out path in
-    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
-      output_string oc content
-    )
 
 (** Append string to file.
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let append_file (path : string) (content : string) : unit =
-  match !global_fs with
-  | Some fs ->
-    with_io ~path (fun () ->
+  with_fs_or_fallback ~path ~fallback:(fun () -> append_file_unix path content) (fun fs ->
       let eio_path = Eio.Path.(fs / path) in
       Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content)
-  | None ->
-    (* Fallback: blocking Unix I/O *)
-    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
-      output_string oc content
-    )
 
 (** Check if file exists.
     Uses Sys.file_exists (works in both Eio and non-Eio contexts). *)
@@ -98,22 +110,9 @@ let file_exists (path : string) : bool =
 (** Create directory recursively if not exists.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let mkdir_p (path : string) : unit =
-  match !global_fs with
-  | Some fs ->
-    with_io ~path (fun () ->
+  with_fs_or_fallback ~path ~fallback:(fun () -> mkdir_p_unix path) (fun fs ->
       let eio_path = Eio.Path.(fs / path) in
       Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path)
-  | None ->
-    (* Fallback: recursive mkdir without invoking a shell. *)
-    let rec ensure_dir (p : string) : unit =
-      if p = "" || p = "." || p = "/" then ()
-      else if Sys.file_exists p then ()
-      else begin
-        ensure_dir (Filename.dirname p);
-        try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-      end
-    in
-    ensure_dir path
 
 (** Load JSONL file as list of JSON values.
     Filters out malformed lines. *)

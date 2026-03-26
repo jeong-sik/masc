@@ -3,8 +3,11 @@
 
 import { html } from 'htm/preact'
 import { CountBadge } from '../common/badge'
-import { missionSnapshot } from '../../mission-store'
+import { ActionButton } from '../common/button'
+import { TimeAgo } from '../common/time-ago'
+import { missionLoading, missionSnapshot, refreshMissionSnapshot } from '../../mission-store'
 import { topActiveAgents } from '../../observatory-store'
+import { roomTruth, roomTruthLoading, refreshRoomTruth } from '../../room-truth-store'
 import { journal } from '../../sse'
 import { navigate } from '../../router'
 import { formatDuration, statusLabel } from '../mission-utils'
@@ -15,6 +18,71 @@ import { AgentAvatar } from './agent-avatar'
 import { TransportHealthPanel } from '../transport-health'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type { DashboardMissionSessionBrief } from '../../types'
+
+const OVERVIEW_STALE_MS = 300_000
+
+function timestampToMs(timestamp?: string | null): number | null {
+  if (!timestamp) return null
+  const value = Date.parse(timestamp)
+  return Number.isNaN(value) ? null : value
+}
+
+function oldestTimestamp(...timestamps: Array<string | null | undefined>): string | null {
+  const candidates = timestamps
+    .flatMap(timestamp => {
+      const value = timestampToMs(timestamp)
+      return value == null || !timestamp ? [] : [{ timestamp, value }]
+    })
+    .sort((a, b) => a.value - b.value)
+  return candidates[0]?.timestamp ?? null
+}
+
+function OverviewFreshnessStrip() {
+  const generatedAt = oldestTimestamp(
+    missionSnapshot.value?.generated_at ?? null,
+    roomTruth.value?.generated_at ?? null,
+  )
+  const generatedMs = timestampToMs(generatedAt)
+  const isStale = generatedMs != null && Date.now() - generatedMs > OVERVIEW_STALE_MS
+  const refreshing = missionLoading.value || roomTruthLoading.value
+
+  return html`
+    <div class="rounded-xl border px-4 py-3 shadow-sm shadow-black/8 ${isStale ? 'border-warn/35 bg-warn/10' : 'border-card-border/40 bg-card/24'}">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Overview Freshness</span>
+            ${isStale
+              ? html`<span class="rounded-full border border-warn/30 bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn">5분 이상 stale</span>`
+              : null}
+          </div>
+          <div class="mt-1 text-[13px] text-[var(--text-body)]">
+            마지막 갱신:
+            ${generatedAt
+              ? html` <strong class="text-[var(--text-strong)]"><${TimeAgo} timestamp=${generatedAt} /></strong>`
+              : html` <strong class="text-[var(--text-strong)]">아직 불러오지 않음</strong>`}
+          </div>
+          <div class="mt-1 text-[11px] text-[var(--text-muted)]">
+            기준: room truth와 mission snapshot 중 더 오래된 시각
+          </div>
+        </div>
+        <${ActionButton}
+          variant="ghost"
+          size="md"
+          disabled=${refreshing}
+          onClick=${() => {
+            void Promise.all([
+              refreshRoomTruth({ force: true }),
+              refreshMissionSnapshot({ force: true }),
+            ])
+          }}
+        >
+          ${refreshing ? '새로고침 중...' : '새로고침'}
+        <//>
+      </div>
+    </div>
+  `
+}
 
 // --- Hot Sessions: top 3 active sessions (critical/watch first) ---
 
@@ -201,6 +269,7 @@ export function Overview() {
 
   return html`
     <div class="flex flex-col gap-5">
+      <${OverviewFreshnessStrip} />
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
 

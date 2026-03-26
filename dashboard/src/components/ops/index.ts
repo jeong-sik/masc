@@ -27,7 +27,6 @@ import {
   attentionTone,
   hydratedWorkflowId,
   hydrateOpsWorkflow,
-  isSessionTerminal,
   isKeeperAttention,
   keeperPrioritySummary,
   isSessionAttention,
@@ -36,17 +35,14 @@ import {
   persistActorName,
   selectedSessionId,
   sessionPriorityTone,
-  submitPause,
-  submitResume,
-  submitTeamStop,
   workflowTargetReady,
   type OpsPriorityCardData,
-  type OpsPriorityTone,
 } from './helpers'
 import { selectPendingConfirmState } from '../../pending-confirm'
 import { OpsRoomColumn } from './ops-room-column'
 import { OpsSessionColumn } from './ops-session-column'
 import { OpsKeeperColumn } from './ops-keeper-column'
+import { QuickIntervene } from './quick-intervene'
 
 export function Ops() {
   const snapshot = operatorSnapshot.value
@@ -200,46 +196,7 @@ export function Ops() {
         </section>
       ` : null}
 
-      ${(() => {
-        const actions: Array<{ label: string; desc: string; tone: OpsPriorityTone; onClick: () => void }> = []
-        if (room.paused) {
-          actions.push({
-            label: '방 재개',
-            desc: `현재 일시정지 상태${room.pause_reason ? ` (${room.pause_reason})` : ''}`,
-            tone: 'warn',
-            onClick: () => void submitResume(),
-          })
-        } else {
-          actions.push({
-            label: '방 일시정지',
-            desc: '자동 spawn과 room automation을 잠시 멈춥니다',
-            tone: 'warn',
-            onClick: () => void submitPause(),
-          })
-        }
-        if (selectedSession && !isSessionTerminal(selectedSession)) {
-          actions.push({
-            label: '선택 세션 중지',
-            desc: `${selectedSession.session_id} · 실행 중인 세션을 즉시 멈춥니다`,
-            tone: 'bad',
-            onClick: () => void submitTeamStop(),
-          })
-        }
-        if (actions.length === 0) return null
-        return html`
-          <section class="${CARD_STANDARD}">
-            <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-3">지금 할 수 있는 것</h3>
-            <div class="flex flex-col gap-2">
-              ${actions.map(action => html`
-                <button type="button" class="ops-action-guide-item rounded-lg ${action.tone}" onClick=${action.onClick}>
-                  <strong class="font-semibold">${action.label}</strong>
-                  <span>${action.desc}</span>
-                </button>
-              `)}
-            </div>
-          </section>
-        `
-      })()}
+      <${QuickIntervene} />
 
       <section class="${CARD_STANDARD}">
         <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">개입 우선순위</h2>

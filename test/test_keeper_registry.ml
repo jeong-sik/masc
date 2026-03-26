@@ -11,7 +11,6 @@ let make_meta name =
     ("agent_name", `String ("agent-" ^ name));
     ("trace_id", `String ("trace-test-" ^ name));
     ("goal", `String "test goal");
-    ("models", `List [ `String "custom:test" ]);
   ] in
   match Keeper_types.meta_of_json json with
   | Ok meta -> meta

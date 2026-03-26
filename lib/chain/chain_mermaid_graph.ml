@@ -10,7 +10,7 @@ let parse_edge_line (line : string) : mermaid_edge list =
   (* Extract label from arrow if present: -->|label| becomes (-->, Some label) *)
   let extract_label_and_split s =
     (* Check for labeled edge pattern: A -->|label| B *)
-    (* Use string search instead of complex regex to avoid Str.regexp | escaping issues *)
+    (* Use string search instead of complex regex to avoid Re.Str.regexp | escaping issues *)
     match String.split_on_char '|' s with
     | [before_pipe; label_part; after_pipe] when String.length before_pipe > 0 ->
         (* Check if before_pipe ends with --> *)
@@ -22,9 +22,9 @@ let parse_edge_line (line : string) : mermaid_edge list =
         else
           (* No --> before |, try simple arrow pattern *)
           (try
-            if Str.string_match (Str.regexp {|^\([^-]*\)-->\(.*\)$|}) s 0 then
-              let from_part = Str.matched_group 1 s in
-              let to_part = Str.matched_group 2 s in
+            if Re.Str.string_match (Re.Str.regexp {|^\([^-]*\)-->\(.*\)$|}) s 0 then
+              let from_part = Re.Str.matched_group 1 s in
+              let to_part = Re.Str.matched_group 2 s in
               (trim from_part, trim to_part, None)
             else
               (s, "", None)
@@ -32,9 +32,9 @@ let parse_edge_line (line : string) : mermaid_edge list =
     | _ ->
         (* Try pattern: A --> B (no label) *)
         (try
-          if Str.string_match (Str.regexp {|^\([^-]*\)-->\(.*\)$|}) s 0 then
-            let from_part = Str.matched_group 1 s in
-            let to_part = Str.matched_group 2 s in
+          if Re.Str.string_match (Re.Str.regexp {|^\([^-]*\)-->\(.*\)$|}) s 0 then
+            let from_part = Re.Str.matched_group 1 s in
+            let to_part = Re.Str.matched_group 2 s in
             (trim from_part, trim to_part, None)
           else
             (s, "", None)
@@ -46,19 +46,19 @@ let parse_edge_line (line : string) : mermaid_edge list =
   (* Check if to_part contains another --> (chained arrows like A --> B --> C) *)
   let has_chained_arrows =
     to_part <> "" &&
-    (try let _ = Str.search_forward (Str.regexp "-->") to_part 0 in true
+    (try let _ = Re.Str.search_forward (Re.Str.regexp "-->") to_part 0 in true
      with Not_found -> false)
   in
 
   if to_part = "" || has_chained_arrows then
     (* Fall back to original logic for complex multi-arrow lines *)
-    let parts = Str.split arrow_re line in
+    let parts = Re.Str.split arrow_re line in
     let rec build_edges acc = function
       | [] | [_] -> List.rev acc
       | from_part :: to_part :: rest ->
           let from_nodes =
             from_part
-            |> Str.split ampersand_re
+            |> Re.Str.split ampersand_re
             |> List.map (fun s ->
                 let s = trim s in
                 match parse_node_definition s with
@@ -79,7 +79,7 @@ let parse_edge_line (line : string) : mermaid_edge list =
     (* Single labeled edge *)
     let from_nodes =
       from_part
-      |> Str.split ampersand_re
+      |> Re.Str.split ampersand_re
       |> List.map (fun s ->
           let s = trim s in
           match parse_node_definition s with
@@ -205,11 +205,11 @@ let parse_mermaid_text_with_meta (text : string) : ((mermaid_graph * mermaid_met
     (* Parse edges and collect nodes *)
     else begin
       (* Extract all node definitions from the line *)
-      let parts = Str.split arrow_re line in
+      let parts = Re.Str.split arrow_re line in
       List.iter (fun part ->
         let part = trim part in
         (* Split by & for multiple nodes *)
-        let sub_parts = Str.split ampersand_re part in
+        let sub_parts = Re.Str.split ampersand_re part in
         List.iter (fun sub ->
           match parse_node_definition (trim sub) with
           | Some (id, node) -> Hashtbl.replace nodes id node

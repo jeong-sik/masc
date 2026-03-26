@@ -39,26 +39,26 @@ let extract_worktree_path ~base_path msg =
   (* Note: use regular strings so \n is actual newline, not literal \+n.
      Raw strings {|...|} pass \n as two chars which Str treats as
      literal backslash and 'n' inside character classes. *)
-  let abs_re = Str.regexp "Path: \\(/[^ \t\n\r]+\\)" in
+  let abs_re = Re.Str.regexp "Path: \\(/[^ \t\n\r]+\\)" in
   try
-    let _ = Str.search_forward abs_re msg 0 in
-    Some (Str.matched_group 1 msg)
+    let _ = Re.Str.search_forward abs_re msg 0 in
+    Some (Re.Str.matched_group 1 msg)
   with Not_found ->
     (* Fallback: relative path *)
-    let rel_re = Str.regexp "\\.worktrees/[^ \t\n\r]+" in
+    let rel_re = Re.Str.regexp "\\.worktrees/[^ \t\n\r]+" in
     try
-      let _ = Str.search_forward rel_re msg 0 in
-      let rel = Str.matched_string msg in
+      let _ = Re.Str.search_forward rel_re msg 0 in
+      let rel = Re.Str.matched_string msg in
       Some (Filename.concat base_path rel)
     with Not_found -> None
 
 (** Extract branch name from success message.
     Format: "Branch: agent/task-NNN" *)
 let extract_branch_name msg =
-  let re = Str.regexp "Branch: \\([^ \t\n\r]+\\)" in
+  let re = Re.Str.regexp "Branch: \\([^ \t\n\r]+\\)" in
   try
-    let _ = Str.search_forward re msg 0 in
-    Some (Str.matched_group 1 msg)
+    let _ = Re.Str.search_forward re msg 0 in
+    Some (Re.Str.matched_group 1 msg)
   with Not_found -> None
 
 (** Symlink [.masc/] from the repo root into the worktree for read-only

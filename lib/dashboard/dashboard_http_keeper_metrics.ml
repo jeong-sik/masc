@@ -95,7 +95,7 @@ let contains_ci (haystack : string) (needle : string) : bool =
   if n = "" then false
   else
     try
-      ignore (Str.search_forward (Str.regexp_string n) h 0);
+      ignore (Re.Str.search_forward (Re.Str.regexp_string n) h 0);
       true
     with Not_found ->
       false
@@ -103,8 +103,8 @@ let contains_ci (haystack : string) (needle : string) : bool =
 let normalize_similarity_text (s : string) : string =
   s
   |> String.lowercase_ascii
-  |> Str.global_replace (Str.regexp "[^0-9a-z가-힣]+") " "
-  |> Str.global_replace (Str.regexp " +") " "
+  |> Re.Str.global_replace (Re.Str.regexp "[^0-9a-z가-힣]+") " "
+  |> Re.Str.global_replace (Re.Str.regexp " +") " "
   |> String.trim
 
 let token_set_of_text (s : string) : (string, unit) Hashtbl.t =

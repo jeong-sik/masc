@@ -47,7 +47,7 @@ end = struct
   type t = string
 
   (* Only allow alphanumeric, dash, underscore *)
-  let valid_pattern = Str.regexp "^[a-zA-Z0-9_-]+$"
+  let valid_pattern = Re.Str.regexp "^[a-zA-Z0-9_-]+$"
 
   let validate s =
     let reject reason =
@@ -62,7 +62,7 @@ end = struct
       reject "agent_id cannot contain path separators"
     else if String.contains s '.' && String.sub s 0 2 = ".." then
       reject "agent_id cannot contain path traversal"
-    else if not (Str.string_match valid_pattern s 0) then
+    else if not (Re.Str.string_match valid_pattern s 0) then
       reject (Printf.sprintf "agent_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, - allowed)" s)
     else
       Ok s
@@ -81,7 +81,7 @@ end = struct
   type t = string
 
   (* Allow alphanumeric, dash, underscore, colon (for namespacing) *)
-  let valid_pattern = Str.regexp "^[a-zA-Z0-9_:-]+$"
+  let valid_pattern = Re.Str.regexp "^[a-zA-Z0-9_:-]+$"
 
   let validate s =
     let reject reason =
@@ -96,7 +96,7 @@ end = struct
       reject "task_id cannot contain path separators"
     else if String.contains s '.' && String.length s >= 2 && String.sub s 0 2 = ".." then
       reject "task_id cannot contain path traversal"
-    else if not (Str.string_match valid_pattern s 0) then
+    else if not (Re.Str.string_match valid_pattern s 0) then
       reject (Printf.sprintf "task_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
     else
       Ok s
@@ -121,7 +121,7 @@ end = struct
       reject "absolute paths not allowed"
     else if String.length path >= 2 && String.sub path 0 2 = ".." then
       reject "path traversal not allowed"
-    else if Str.string_match (Str.regexp ".*\\.\\./.*") path 0 then
+    else if Re.Str.string_match (Re.Str.regexp ".*\\.\\./.*") path 0 then
       reject "path traversal not allowed"
     else
       Ok path
@@ -129,9 +129,9 @@ end = struct
   let sanitize_filename name =
     (* Remove any path separators and dangerous characters *)
     name
-    |> Str.global_replace (Str.regexp "[/\\\\]") "_"
-    |> Str.global_replace (Str.regexp "\\.\\.") "_"
-    |> Str.global_replace (Str.regexp "[^a-zA-Z0-9_.-]") "_"
+    |> Re.Str.global_replace (Re.Str.regexp "[/\\\\]") "_"
+    |> Re.Str.global_replace (Re.Str.regexp "\\.\\.") "_"
+    |> Re.Str.global_replace (Re.Str.regexp "[^a-zA-Z0-9_.-]") "_"
 end
 
 (** Numeric validation *)

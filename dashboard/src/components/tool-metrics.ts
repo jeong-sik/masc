@@ -117,6 +117,9 @@ export function ToolMetrics() {
       ${error ? html`<div class="px-2.5 py-3 bg-[var(--bad-12)] border border-[rgba(239,68,68,0.34)] text-[#fecaca] text-base rounded-lg">${error}</div>` : null}
 
       ${data ? html`
+        <div class="text-[11px] text-[var(--text-muted)] mb-3">
+          서버 시작 이후 메모리 기반 집계. 재시작 시 초기화됩니다.
+        </div>
         <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-3 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
           <div class="flex flex-col items-center gap-1 rounded-lg border border-[var(--card-border)] bg-[var(--card)] p-3">
             <span class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.total_calls}</span>

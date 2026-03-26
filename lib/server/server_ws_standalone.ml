@@ -120,6 +120,7 @@ let start
         (make_websocket_handler ~on_message)
     in
     Eio.Fiber.fork ~sw (fun () ->
+      (* Safe: finally is Atomic.set — no I/O, no exception risk *)
       Fun.protect
         ~finally:(fun () -> Transport_metrics.set_ws_runtime_listening false)
         (fun () ->

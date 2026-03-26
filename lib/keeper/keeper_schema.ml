@@ -44,15 +44,6 @@ let resident_schemas : tool_schema list = [
         ("will", `Assoc [("type", `String "string")]);
         ("needs", `Assoc [("type", `String "string")]);
         ("desires", `Assoc [("type", `String "string")]);
-        ("models", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-        ("allowed_models", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-        ("active_model", `Assoc [("type", `String "string")]);
         ("room_scope", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "current"; `String "all"]);
@@ -121,20 +112,6 @@ let resident_schemas : tool_schema list = [
         ("desires", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: keeper's desire/drive statement (욕구).");
-        ]);
-        ("models", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Model cascade. Accepts 'default' or 'default:<model>' as the primary public path, plus explicit 'provider:model' overrides when needed.");
-        ]);
-        ("allowed_models", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Explicitly allowed persistent models for this keeper. Used by exact model switching and explicit-only runtimes.");
-        ]);
-        ("active_model", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Current persisted model label. Prefer 'default' for adapter-managed selection; explicit-only keepers may still pin a concrete provider:model label.");
         ]);
         ("scope_kind", `Assoc [
           ("type", `String "string");
@@ -326,11 +303,6 @@ let resident_schemas : tool_schema list = [
           ("type", `String "string");
           ("description", `String "Optional: set keeper desires (욕구) when creating keeper inline");
         ]);
-        ("models", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional: set models when creating keeper inline. If keeper already exists, this acts as a runtime-only cascade override for this message call.");
-        ]);
         ("timeout_sec", `Assoc [
           ("type", `String "number");
           ("description", `String "Optional: overall cascade timeout (sec) for this keeper message call");
@@ -385,30 +357,6 @@ let resident_schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "name"; `String "message"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_model_set";
-    description = "Change a keeper's persisted active model explicitly. Restarts keepalive with the new exact model selection.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("model", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Exact provider:model label to persist as the active model.");
-        ]);
-        ("allowed_models", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional persistent allowlist extension to store alongside the newly active model.");
-        ]);
-      ]);
-      ("required", `List [`String "name"; `String "model"]);
     ];
   };
 

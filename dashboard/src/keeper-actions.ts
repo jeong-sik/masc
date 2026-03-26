@@ -158,7 +158,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
       }
     }, 5_000)
 
-    await streamKeeperMessage(keeperName, message, undefined, {
+    await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
       onEvent: event => {
         lastEventAt = Date.now()

@@ -37,9 +37,9 @@ let make_req ?(title = "Fix auth bug") ?(desc = "Fix the login issue")
     completion_notes = notes; agent_name = agent }
 
 let make_result ?(verdict = AR.Approve) ?(cascade = "verifier")
-    ?gen_cascade ?(gate = "llm") () : AR.review_result =
+    ?gen_cascade ?(gate = "llm") ?fallback_reason () : AR.review_result =
   { verdict; evaluator_cascade = cascade;
-    generator_cascade = gen_cascade; gate }
+    generator_cascade = gen_cascade; gate; fallback_reason }
 
 (* ================================================================ *)
 (* Hashing tests                                                     *)
@@ -289,7 +289,8 @@ let test_to_harness_verdict_approve () =
     task_id = "t1"; task_title = "Fix login";
     agent_name = "dreamer"; verdict = "approve";
     gate = "llm"; evaluator_cascade = "glm5";
-    generator_cascade = Some "claude"; timestamp = 0.0;
+    generator_cascade = Some "claude"; fallback_reason = None;
+    timestamp = 0.0;
   } in
   let hv = Cal.to_harness_verdict record in
   check bool "passed" true hv.Agent_sdk.Harness.passed;
@@ -304,7 +305,8 @@ let test_to_harness_verdict_reject () =
     task_id = "t2"; task_title = "Deploy fix";
     agent_name = "coder"; verdict = "reject:too short";
     gate = "length"; evaluator_cascade = "local";
-    generator_cascade = None; timestamp = 0.0;
+    generator_cascade = None; fallback_reason = None;
+    timestamp = 0.0;
   } in
   let hv = Cal.to_harness_verdict record in
   check bool "not passed" false hv.passed;

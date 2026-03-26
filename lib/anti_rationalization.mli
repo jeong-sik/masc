@@ -34,6 +34,7 @@ type review_result = {
   evaluator_cascade : string;
   generator_cascade : string option;
   gate : string;
+  fallback_reason : string option;  (** Error message when gate="fallback" *)
 }
 
 (** Review a task completion claim with optional cross-model separation.

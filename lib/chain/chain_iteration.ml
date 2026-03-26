@@ -64,28 +64,28 @@ let substitute_vars (prompt : string) (iter_ctx : iteration_ctx option) : string
       let result = replace_var result "strategy" (Option.value ctx.strategy ~default:"default") in
 
       (* Linear interpolation: {{linear:start,end}} *)
-      let linear_regex = Str.regexp "{{linear:\\([0-9.]+\\),\\([0-9.]+\\)}}" in
-      let result = Str.global_substitute linear_regex (fun s ->
+      let linear_regex = Re.Str.regexp "{{linear:\\([0-9.]+\\),\\([0-9.]+\\)}}" in
+      let result = Re.Str.global_substitute linear_regex (fun s ->
         try
-          let start_val = float_of_string (Str.matched_group 1 s) in
-          let end_val = float_of_string (Str.matched_group 2 s) in
+          let start_val = float_of_string (Re.Str.matched_group 1 s) in
+          let end_val = float_of_string (Re.Str.matched_group 2 s) in
           let t = float_of_int (ctx.iteration - 1) /. float_of_int (max 1 (ctx.max_iterations - 1)) in
           let interpolated = start_val +. (end_val -. start_val) *. t in
           Printf.sprintf "%.2f" interpolated
-        with Failure _ | Not_found -> Str.matched_string s
+        with Failure _ | Not_found -> Re.Str.matched_string s
       ) result in
 
       (* Step function: {{step:v1,v2,v3,...}} *)
-      let step_regex = Str.regexp "{{step:\\([^}]+\\)}}" in
-      let result = Str.global_substitute step_regex (fun s ->
+      let step_regex = Re.Str.regexp "{{step:\\([^}]+\\)}}" in
+      let result = Re.Str.global_substitute step_regex (fun s ->
         try
-          let values_str = Str.matched_group 1 s in
+          let values_str = Re.Str.matched_group 1 s in
           let values = String.split_on_char ',' values_str in
           let idx = min (ctx.iteration - 1) (max 0 (List.length values - 1)) in
           match Chain_utils.list_nth_opt values (max 0 idx) with
           | Some v -> String.trim v
-          | None -> Str.matched_string s
-        with Not_found | Failure _ -> Str.matched_string s
+          | None -> Re.Str.matched_string s
+        with Not_found | Failure _ -> Re.Str.matched_string s
       ) result in
 
       result

@@ -31,7 +31,7 @@ let contains_ci (haystack : string) (needle : string) : bool =
   if n = "" then false
   else
     try
-      let _ = Str.search_forward (Str.regexp_string n) h 0 in
+      let _ = Re.Str.search_forward (Re.Str.regexp_string n) h 0 in
       true
     with Not_found -> false
 
@@ -222,7 +222,7 @@ let parse_skill_line (line : string) : (string * string list) option =
         let secondary_raw_opt =
           if String.length rest >= 2 && String.sub rest 0 2 = "(+" then
             try
-              let close_idx = Str.search_forward (Str.regexp_string ")") rest 2 in
+              let close_idx = Re.Str.search_forward (Re.Str.regexp_string ")") rest 2 in
               let inside = String.sub rest 2 (close_idx - 2) |> String.trim in
               if inside = "" then None else Some inside
             with Not_found ->

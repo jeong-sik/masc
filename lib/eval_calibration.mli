@@ -19,6 +19,7 @@ type verdict_record = {
   gate : string;
   evaluator_cascade : string;
   generator_cascade : string option;
+  fallback_reason : string option;
   timestamp : float;
 }
 

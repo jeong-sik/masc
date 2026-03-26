@@ -30,11 +30,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     |> Option.value ~default:(if room_scope = "all" then "global" else "local")
     |> canonical_scope_kind
   in
-  (* Legacy model fields: cascade_name is the authority.
-     These fields are kept empty; downstream reads cascade_name. *)
-  let requested_models = [] in
-  let allowed_models = [] in
-  let active_model = "" in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
@@ -192,9 +187,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            needs;
            desires;
            instructions;
-           models = requested_models;
-           allowed_models;
-           active_model;
            policy_voice_enabled;
            execution_scope = default_execution_scope;
            allowed_paths;

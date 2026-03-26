@@ -33,6 +33,7 @@ type review_result = {
   evaluator_cascade : string;
   generator_cascade : string option;
   gate : string;  (** Which gate produced this verdict: "length", "excuse", "llm", "fallback" *)
+  fallback_reason : string option;  (** Error message when gate="fallback" — aids debugging *)
 }
 
 (* ================================================================ *)
@@ -211,7 +212,7 @@ let review
   if String.length notes_trimmed < min_notes_length then
     emit { verdict = Reject (sprintf "completion notes too short (%d chars, minimum %d)"
                           (String.length notes_trimmed) min_notes_length);
-      evaluator_cascade; generator_cascade; gate = "length" }
+      evaluator_cascade; generator_cascade; gate = "length"; fallback_reason = None }
   else
   (* Gate 2: local excuse pattern detection *)
   match find_excuse_pattern notes_trimmed with
@@ -220,7 +221,7 @@ let review
       req.agent_name req.task_title pattern;
     emit { verdict = Reject (sprintf "avoidance pattern detected: \"%s\" (%s). Revise your notes to describe actual completed work."
                           pattern reason);
-      evaluator_cascade; generator_cascade; gate = "excuse" }
+      evaluator_cascade; generator_cascade; gate = "excuse"; fallback_reason = None }
   | None ->
   (* Gate 2.5: contract verification (local, no LLM) *)
   let contract_rejection =
@@ -239,7 +240,7 @@ let review
   match contract_rejection with
   | Some reason ->
     emit { verdict = Reject reason;
-      evaluator_cascade; generator_cascade; gate = "contract" }
+      evaluator_cascade; generator_cascade; gate = "contract"; fallback_reason = None }
   | None ->
     (* Gate 3: LLM review via evaluator cascade *)
     let prompt = build_prompt ~few_shot_block req in
@@ -267,11 +268,11 @@ let review
         | Approve ->
           Log.Task.info "[anti-rationalization] LLM approved: agent=%s task=%s cascade=%s"
             req.agent_name req.task_title evaluator_cascade);
-       emit { verdict = v; evaluator_cascade; generator_cascade; gate = "llm" }
+       emit { verdict = v; evaluator_cascade; generator_cascade; gate = "llm"; fallback_reason = None }
      | Error msg ->
        (* Liveness > correctness: if LLM is unavailable, approve *)
        Log.Task.warn "[anti-rationalization] LLM unavailable: %s (approving by default)" msg;
-       emit { verdict = Approve; evaluator_cascade; generator_cascade; gate = "fallback" })
+       emit { verdict = Approve; evaluator_cascade; generator_cascade; gate = "fallback"; fallback_reason = Some msg })
 
 (** Backward-compatible wrapper that returns only the verdict.
     Use [review] directly for structured results with audit metadata. *)
@@ -279,9 +280,14 @@ let review_verdict ?evaluator_cascade ?generator_cascade ?completion_contract ?o
   (review ?evaluator_cascade ?generator_cascade ?completion_contract ?on_verdict ?few_shot_block req).verdict
 
 let review_result_to_json (r : review_result) : Yojson.Safe.t =
-  `Assoc [
+  let base = [
     ("verdict", `String (match r.verdict with Approve -> "approve" | Reject s -> "reject:" ^ s));
     ("evaluator_cascade", `String r.evaluator_cascade);
     ("generator_cascade", match r.generator_cascade with Some s -> `String s | None -> `Null);
     ("gate", `String r.gate);
-  ]
+  ] in
+  let extra = match r.fallback_reason with
+    | Some reason -> [("fallback_reason", `String reason)]
+    | None -> []
+  in
+  `Assoc (base @ extra)

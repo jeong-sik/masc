@@ -532,12 +532,6 @@
    tool_keeper
    ;; Autoresearch — Karpathy-inspired autonomous experiment loop
    autoresearch
-   autoresearch_types
-   autoresearch_serde
-   autoresearch_storage
-   autoresearch_metric
-   autoresearch_git
-   autoresearch_file
    autoresearch_codegen
    autoresearch_knowledge
    tool_autoresearch_schemas
@@ -690,12 +684,6 @@
   tool_council_json
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules
-  autoresearch_types
-  autoresearch_serde
-  autoresearch_storage
-  autoresearch_metric
-  autoresearch_git
-  autoresearch_file
   autoresearch_codegen
   autoresearch_knowledge
   tool_autoresearch_schemas
@@ -807,6 +795,8 @@
    masc_backend
    ;; Process execution + file locking (extracted sub-library)
    masc_process
+   ;; Autoresearch leaf modules (types, serde, storage, metric, git, file)
+   masc_autoresearch
    ;; Research loop — experimental, non-core (extracted sub-library)
    masc_research
    ;; Board types (extracted sub-library — first step toward board isolation)

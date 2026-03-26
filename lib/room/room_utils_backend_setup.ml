@@ -169,6 +169,18 @@ let env_opt name =
         Some value
   | _ -> None
 
+let explicit_storage_type_from_env () =
+  match env_opt "MASC_STORAGE_TYPE" with
+  | Some raw ->
+      let value = String.lowercase_ascii (String.trim raw) in
+      Some
+        (match value with
+         | "postgres" | "postgresql" | "postgres-native" -> "postgres"
+         | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
+         | "memory" -> "memory"
+         | other -> other)
+  | None -> None
+
 let normalize_postgres_url url =
   let uri = Uri.of_string url in
   match Uri.host uri, Uri.port uri with
@@ -180,38 +192,22 @@ let normalize_postgres_url url =
   | _ -> url
 
 let postgres_url_from_env () =
-  let raw_url =
-    match env_opt "MASC_POSTGRES_URL" with
-  | Some _ as url -> url
-  | None -> (
-      match env_opt "DATABASE_URL" with
-      | Some _ as url -> url
-      | None -> (
-          match env_opt "SUPABASE_DB_URL" with
-          | Some _ as url -> url
-          | None -> env_opt "SB_PG_URL"))
-  in
-  Option.map normalize_postgres_url raw_url
+  Option.map normalize_postgres_url (env_opt "MASC_POSTGRES_URL")
 
 (** Auto-detect best backend based on environment variables
-    Priority order:
-    1. MASC_POSTGRES_URL / DATABASE_URL / SUPABASE_DB_URL / SB_PG_URL
-       - if available, use PostgreSQL for distributed coordination
-    2. FileSystem - zero-dependency default for personal/small use *)
+    Stage-1 SSOT policy: no implicit PG auto-detect.
+    MASC defaults to the local filesystem unless the caller explicitly
+    selects another backend via MASC_STORAGE_TYPE. *)
 let auto_detect_backend () =
-  if postgres_url_from_env () <> None then begin
-    Log.Backend.info "Auto-detect: PostgreSQL URL found → PostgresNative backend";
-    "postgres"
-  end else begin
-    Log.Backend.info "Auto-detect: No distributed DB found → FileSystem backend (default)";
-    "filesystem"
-  end
+  Log.Backend.info
+    "Auto-detect disabled: defaulting to FileSystem backend unless MASC_STORAGE_TYPE is set";
+  "filesystem"
 
 (** Storage type from environment variable *)
 let storage_type_from_env () =
-  match env_opt "MASC_STORAGE_TYPE" with
-  | Some value -> String.lowercase_ascii value
-  | None -> auto_detect_backend ()  (* Smart default: PG if URL exists, else FileSystem *)
+  match explicit_storage_type_from_env () with
+  | Some value -> value
+  | None -> auto_detect_backend ()
 
 (* ============================================ *)
 (* Backend creation                             *)
@@ -234,12 +230,11 @@ let sanitize_namespace_segment name =
   if sanitized = "" then "default" else sanitized
 
 let backend_config_for base_path =
-  let raw_storage_type = storage_type_from_env () in
-  let storage_type =
-    if raw_storage_type = "auto" then auto_detect_backend ()
-    else raw_storage_type
-  in
+  let storage_type = storage_type_from_env () in
   let postgres_url = postgres_url_from_env () in
+  if storage_type = "postgres" && postgres_url = None then
+    invalid_arg
+      "MASC_STORAGE_TYPE=postgres requires MASC_POSTGRES_URL";
   let cluster_name =
     match env_opt "MASC_CLUSTER_NAME" with
     | Some name -> name
@@ -322,16 +317,23 @@ let default_config base_path =
            | PostgresNative _ -> "PostgresNative");
         backend
     | Error e ->
-        Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
-          (Backend_types.show_error e);
-        let fallback_cfg =
-          { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
-        in
-        (match create_backend fallback_cfg with
-         | Ok fb -> fb
-         | Error _ ->
-             (* Final fallback: shared in-memory to keep server alive *)
-             Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
+        (match backend_config.Backend_types.backend_type with
+         | Backend_types.PostgresNative ->
+             invalid_arg
+               (Printf.sprintf
+                  "MASC_STORAGE_TYPE=postgres failed to initialize backend: %s"
+                  (Backend_types.show_error e))
+         | Backend_types.Memory | Backend_types.FileSystem ->
+             Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
+               (Backend_types.show_error e);
+             let fallback_cfg =
+               { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
+             in
+             (match create_backend fallback_cfg with
+              | Ok fb -> fb
+              | Error _ ->
+                  (* Final fallback: shared in-memory to keep server alive *)
+                  Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name)))
   in
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
@@ -362,16 +364,23 @@ let default_config_eio ~sw ~env ?(on_backend_ready = fun _backend -> ()) base_pa
         on_backend_ready backend;
         backend
     | Error e ->
-        Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
-          (Backend_types.show_error e);
-        let fallback_cfg =
-          { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
-        in
-        (match create_backend fallback_cfg with
-         | Ok fb -> fb
-         | Error _ ->
-             (* Final fallback: shared in-memory to keep server alive *)
-             Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
+        (match backend_config.Backend_types.backend_type with
+         | Backend_types.PostgresNative ->
+             invalid_arg
+               (Printf.sprintf
+                  "MASC_STORAGE_TYPE=postgres failed to initialize backend: %s"
+                  (Backend_types.show_error e))
+         | Backend_types.Memory | Backend_types.FileSystem ->
+             Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
+               (Backend_types.show_error e);
+             let fallback_cfg =
+               { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
+             in
+             (match create_backend fallback_cfg with
+              | Ok fb -> fb
+              | Error _ ->
+                  (* Final fallback: shared in-memory to keep server alive *)
+                  Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name)))
   in
   {
     base_path = resolved_path;

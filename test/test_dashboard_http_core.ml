@@ -63,12 +63,20 @@ let with_pg_test_env f =
           Eio.Switch.run @@ fun sw ->
           Eio_context.set_net (Eio.Stdenv.net env);
           Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-          let config =
-            Room_utils.default_config_eio ~sw ~env:(env :> Caqti_eio.stdenv) dir
-          in
-          match config.Room_utils.backend with
-          | Room_utils.PostgresNative _ -> f ~env ~sw ~config
-          | Room_utils.Memory _ | Room_utils.FileSystem _ -> ())
+          match
+            try
+              Ok
+                (Room_utils.default_config_eio ~sw ~env:(env :> Caqti_eio.stdenv)
+                   dir)
+            with
+            | Invalid_argument _ ->
+                Error `Backend_unavailable
+          with
+          | Error `Backend_unavailable -> ()
+          | Ok config ->
+              match config.Room_utils.backend with
+              | Room_utils.PostgresNative _ -> f ~env ~sw ~config
+              | Room_utils.Memory _ | Room_utils.FileSystem _ -> ())
 
 let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
   with_test_env @@ fun ~env ~sw ~config ->

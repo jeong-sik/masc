@@ -263,36 +263,59 @@ let test_auto_detect_backend_returns_string () =
 
 let test_auto_detect_backend_valid_value () =
   let backend = Room_utils.auto_detect_backend () in
-  check bool "valid backend" true
-    (backend = "filesystem" || backend = "postgres")
+  check string "defaults to filesystem" "filesystem" backend
 
-let test_auto_detect_backend_supabase_url () =
+let test_auto_detect_backend_ignores_supabase_url () =
   let url = "postgresql://supabase.example/test_room_utils" in
   with_envs
     (pg_env_bindings ~supabase_db_url:url ())
     (fun () ->
-      check string "supabase pg url triggers postgres" "postgres"
+      check string "generic supabase url does not trigger postgres" "filesystem"
         (Room_utils.auto_detect_backend ()))
 
-let test_auto_detect_backend_sb_pg_url () =
+let test_auto_detect_backend_ignores_sb_pg_url () =
   let url = "postgresql://sb.example/test_room_utils" in
   with_envs
     (pg_env_bindings ~sb_pg_url:url ())
     (fun () ->
-      check string "sb pg url triggers postgres" "postgres"
+      check string "generic sb url does not trigger postgres" "filesystem"
         (Room_utils.auto_detect_backend ()))
 
-let test_backend_config_for_uses_fallback_pg_url () =
+let test_backend_config_for_ignores_generic_pg_urls_without_explicit_storage () =
   let url = "postgresql://sb.example/test_backend_config" in
   with_envs
     (pg_env_bindings ~sb_pg_url:url ())
+    (fun () ->
+      let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
+      check bool "backend type stays filesystem" true
+        (match cfg.backend_type with
+         | Backend_types.FileSystem -> true
+         | _ -> false);
+      check (option string) "postgres url ignored" None cfg.postgres_url)
+
+let test_backend_config_for_requires_explicit_pg_url () =
+  with_envs
+    (pg_env_bindings ~masc_storage_type:"postgres" ())
+    (fun () ->
+      check_raises "postgres mode requires explicit MASC_POSTGRES_URL"
+        (Invalid_argument "MASC_STORAGE_TYPE=postgres requires MASC_POSTGRES_URL")
+        (fun () -> ignore (Room_utils.backend_config_for "/tmp/test-room-utils")))
+
+let test_backend_config_for_uses_explicit_masc_pg_url () =
+  let url = "postgresql://masc.example/test_backend_config" in
+  with_envs
+    (pg_env_bindings ~masc_storage_type:"postgres" ~masc_postgres_url:url
+       ~database_url:"postgresql://ignored/db"
+       ~supabase_db_url:"postgresql://ignored/supabase"
+       ~sb_pg_url:"postgresql://ignored/sb" ())
     (fun () ->
       let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
       check bool "backend type is postgres native" true
         (match cfg.backend_type with
          | Backend_types.PostgresNative -> true
          | _ -> false);
-      check (option string) "postgres url" (Some url) cfg.postgres_url)
+      check (option string) "postgres url comes from MASC_POSTGRES_URL" (Some url)
+        cfg.postgres_url)
 
 let test_postgres_url_from_env_normalizes_supabase_pooler () =
   (* normalize_postgres_url rewrites Supabase Transaction Pooler port 6543
@@ -304,7 +327,7 @@ let test_postgres_url_from_env_normalizes_supabase_pooler () =
     "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
   in
   with_envs
-    (pg_env_bindings ~sb_pg_url:raw_url ())
+    (pg_env_bindings ~masc_postgres_url:raw_url ())
     (fun () ->
       check (option string) "transaction pooler url normalized"
         (Some normalized_url)
@@ -520,11 +543,18 @@ let () =
     "auto_detect_backend", [
       test_case "returns string" `Quick test_auto_detect_backend_returns_string;
       test_case "valid value" `Quick test_auto_detect_backend_valid_value;
-      test_case "supabase fallback url" `Quick test_auto_detect_backend_supabase_url;
-      test_case "sb pg fallback url" `Quick test_auto_detect_backend_sb_pg_url;
+      test_case "ignores supabase fallback url" `Quick
+        test_auto_detect_backend_ignores_supabase_url;
+      test_case "ignores sb pg fallback url" `Quick
+        test_auto_detect_backend_ignores_sb_pg_url;
     ];
     "backend_config_for", [
-      test_case "uses fallback pg url" `Quick test_backend_config_for_uses_fallback_pg_url;
+      test_case "ignores generic pg urls without explicit storage" `Quick
+        test_backend_config_for_ignores_generic_pg_urls_without_explicit_storage;
+      test_case "requires explicit pg url" `Quick
+        test_backend_config_for_requires_explicit_pg_url;
+      test_case "uses explicit masc pg url" `Quick
+        test_backend_config_for_uses_explicit_masc_pg_url;
       test_case "normalizes supabase pooler" `Quick
         test_postgres_url_from_env_normalizes_supabase_pooler;
     ];

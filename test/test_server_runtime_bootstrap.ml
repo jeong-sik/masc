@@ -171,11 +171,29 @@ let test_force_jsonl_fallback_env () =
       Server_runtime_bootstrap.force_jsonl_fallback_env ();
       Alcotest.(check string) "storage type forced to filesystem" "filesystem"
         (Sys.getenv "MASC_STORAGE_TYPE");
-      List.iter
-        (fun name ->
-          Alcotest.(check string)
-            (Printf.sprintf "%s cleared" name) "" (Sys.getenv name))
-        [ "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" ])
+      Alcotest.(check string) "MASC_POSTGRES_URL cleared" ""
+        (Sys.getenv "MASC_POSTGRES_URL");
+      Alcotest.(check string) "DATABASE_URL preserved" "postgresql://fallback/db"
+        (Sys.getenv "DATABASE_URL");
+      Alcotest.(check string) "SUPABASE_DB_URL preserved" "postgresql://supabase/db"
+        (Sys.getenv "SUPABASE_DB_URL");
+      Alcotest.(check string) "SB_PG_URL preserved" "postgresql://sb/db"
+        (Sys.getenv "SB_PG_URL"))
+
+let test_requested_backend_mode_ignores_generic_pg_urls () =
+  with_env "MASC_STORAGE_TYPE" None @@ fun () ->
+  with_env "MASC_POSTGRES_URL" None @@ fun () ->
+  with_env "DATABASE_URL" (Some "postgresql://fallback/db") @@ fun () ->
+  with_env "SUPABASE_DB_URL" (Some "postgresql://supabase/db") @@ fun () ->
+  with_env "SB_PG_URL" (Some "postgresql://sb/db") @@ fun () ->
+  Alcotest.(check string) "generic db envs do not select postgres" "filesystem"
+    (Server_runtime_bootstrap.requested_backend_mode ())
+
+let test_requested_backend_mode_requires_storage_selector_for_masc_pg_url () =
+  with_env "MASC_STORAGE_TYPE" None @@ fun () ->
+  with_env "MASC_POSTGRES_URL" (Some "postgresql://primary/db") @@ fun () ->
+  Alcotest.(check string) "MASC_POSTGRES_URL alone does not select postgres"
+    "filesystem" (Server_runtime_bootstrap.requested_backend_mode ())
 
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
@@ -276,6 +294,9 @@ let test_watchdog_timeout_env () =
 let test_startup_state_json_includes_watchdog () =
   Server_startup_state.reset ~backend_mode:"filesystem" ();
   let json = Server_startup_state.to_yojson () in
+  Alcotest.(check string) "authoritative_backend mirrors backend mode"
+    "filesystem"
+    Yojson.Safe.Util.(json |> member "authoritative_backend" |> to_string);
   let elapsed =
     match Yojson.Safe.Util.member "elapsed_sec" json with
     | `Float v -> v
@@ -366,8 +387,15 @@ let () =
     [
       ( "bootstrap",
         [
-          Alcotest.test_case "force_jsonl_fallback_env clears pg envs" `Quick
+          Alcotest.test_case "force_jsonl_fallback_env clears only masc pg env"
+            `Quick
             test_force_jsonl_fallback_env;
+          Alcotest.test_case "requested backend mode ignores generic pg urls"
+            `Quick test_requested_backend_mode_ignores_generic_pg_urls;
+          Alcotest.test_case
+            "requested backend mode requires explicit storage selector"
+            `Quick
+            test_requested_backend_mode_requires_storage_selector_for_masc_pg_url;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
           Alcotest.test_case "restore_persisted_sessions uses scoped agents dir"

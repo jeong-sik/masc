@@ -33,7 +33,7 @@ let init config ~agent_name =
     } in
     write_json_root config (root_state_path config) (room_state_to_yojson root_state)
   end else begin
-    (* Sync PG state to local file on startup so filesystem fallback has fresh data *)
+    (* Refresh local snapshot on startup for legacy read-only inspection paths. *)
     let root_json = read_json_root config (root_state_path config) in
     (try write_json_local (root_state_path config) root_json
      with _exn -> ())
@@ -48,7 +48,7 @@ let init config ~agent_name =
   end;
 
   if is_initialized config then begin
-    (* Sync PG scoped state to local file so filesystem fallback has fresh data *)
+    (* Refresh local scoped snapshot on startup for legacy read-only inspection paths. *)
     let scoped_json = read_json config (state_path config) in
     (try write_json_local (state_path config) scoped_json with _exn -> ());
     "MASC already initialized."

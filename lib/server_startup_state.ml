@@ -133,6 +133,7 @@ let to_yojson () =
       ("phase", `String (phase_to_string current.phase));
       ("state_ready", `Bool current.state_ready);
       ("backend_mode", `String current.backend_mode);
+      ("authoritative_backend", `String current.backend_mode);
       ( "pending_lazy_tasks",
         `List (List.map (fun task -> `String task) current.pending_lazy_tasks) );
       ( "last_error",

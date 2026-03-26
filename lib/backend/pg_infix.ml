@@ -32,13 +32,7 @@ let use_oneshot =
   let url =
     match env_url "MASC_POSTGRES_URL" with
     | Some _ as u -> u
-    | None -> (
-        match env_url "DATABASE_URL" with
-        | Some _ as u -> u
-        | None -> (
-            match env_url "SUPABASE_DB_URL" with
-            | Some _ as u -> u
-            | None -> env_url "SB_PG_URL"))
+    | None -> None
   in
   match url with
   | None -> false

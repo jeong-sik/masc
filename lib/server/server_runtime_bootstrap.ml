@@ -6,7 +6,7 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
 let pg_env_var_names =
-  [| "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" |]
+  [| "MASC_POSTGRES_URL" |]
 
 let force_jsonl_fallback_env () =
   Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
@@ -16,20 +16,12 @@ let requested_backend_mode () =
   match Sys.getenv_opt "MASC_STORAGE_TYPE" with
   | Some raw -> (
       match String.lowercase_ascii (String.trim raw) with
+      | "" -> "filesystem"
       | "postgres" | "postgresql" | "postgres-native" -> "postgres-native"
-      | "filesystem" | "file" | "jsonl" -> "filesystem"
+      | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
       | "memory" -> "memory"
       | other -> other)
-  | None ->
-      let has_pg =
-        Array.exists
-          (fun name ->
-            match Sys.getenv_opt name with
-            | Some value -> String.trim value <> ""
-            | None -> false)
-          pg_env_var_names
-      in
-      if has_pg then "postgres-native" else "filesystem"
+  | None -> "filesystem"
 
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in
@@ -375,15 +367,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
            with Eio.Time.Timeout ->
              let reason =
                Printf.sprintf
-                 "PG init timed out after %.0fs, retrying with JSONL fallback"
+                 "PG init timed out after %.0fs with MASC_STORAGE_TYPE=postgres"
                  pg_init_timeout
              in
-             Log.Server.error
-               "%s" reason;
-             Server_startup_state.note_fallback reason;
-             force_jsonl_fallback_env ();
-             Server_startup_state.mark_blocking ~backend_mode:"filesystem";
-             init_state_blocking ())
+             Log.Server.error "%s" reason;
+             raise (Failure reason))
         else
           init_state_blocking ()
       in
@@ -482,7 +470,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     | exn ->
       Server_startup_state.mark_degraded ~error:(Printexc.to_string exn);
       Log.Server.error "Background init failed (HTTP still serving): %s"
-        (Printexc.to_string exn));
+        (Printexc.to_string exn);
+      if String.equal initial_backend_mode "postgres-native" then
+        exit 1);
 
   (* 2b. Startup watchdog: if init does not reach state_ready within timeout,
      log and exit so external process managers can restart the server.

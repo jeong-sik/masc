@@ -47,7 +47,6 @@
    cp_lifecycle_intents
    cp_lifecycle_policy
    config
-   context_router
    dashboard
    dashboard_labels
    dashboard_agent_relations

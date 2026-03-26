@@ -90,6 +90,39 @@ let test_read_state_recovers_legacy_active_agent_entries () =
       check (list string) "canonical active_agents rewritten" state.active_agents
         repaired_agents)
 
+let test_read_state_filters_invalid_active_agent_entries () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:None);
+      let corrupted_json =
+        `Assoc
+          [
+            ("protocol_version", `String "0.1.0");
+            ("project", `String (Filename.basename base_dir));
+            ("started_at", `String "2026-03-26T00:00:00Z");
+            ( "active_agents",
+              `List
+                [
+                  `Assoc [];
+                  `Bool true;
+                  `Assoc [ ("name", `String "codex-swift-fox") ];
+                  `String "";
+                  `String "gemini-brave-bear";
+                ] );
+          ]
+      in
+      write_text_file (state_path base_dir) (Yojson.Safe.to_string corrupted_json);
+
+      let state = Room.read_state config in
+      check (list string) "invalid entries filtered"
+        [ "codex-swift-fox"; "gemini-brave-bear" ]
+        state.active_agents)
+
 let () =
   run "Room_state_recovery"
     [
@@ -99,5 +132,7 @@ let () =
             test_read_state_repairs_empty_object;
           test_case "recovers legacy active_agents entries" `Quick
             test_read_state_recovers_legacy_active_agent_entries;
+          test_case "filters invalid active_agents entries" `Quick
+            test_read_state_filters_invalid_active_agent_entries;
         ] );
     ]

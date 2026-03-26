@@ -14,80 +14,22 @@
 (** Error entry for failure tracking *)
 type error_entry = {
   timestamp: string;
-  error_type: string;     (* e.g., "build", "test", "runtime", "logic" *)
+  error_type: string;
   message: string;
-  context: string option; (* Optional context like file path, function name *)
+  context: string option; [@default None]
   resolved: bool;
-}
+} [@@deriving yojson]
 
 (** Planning context for a task *)
 type planning_context = {
   task_id: string;
-  task_plan: string;      (* Main plan content *)
-  notes: string list;     (* List of notes/observations *)
-  errors: error_entry list; (* List of errors/failures - PDCA Check phase *)
-  deliverable: string;    (* Final deliverable *)
+  task_plan: string;
+  notes: string list; [@default []]
+  errors: error_entry list; [@default []]
+  deliverable: string; [@default ""]
   created_at: string;
   updated_at: string;
-}
-
-(* ===== JSON Serialization ===== *)
-
-let error_entry_to_yojson e =
-  `Assoc [
-    ("timestamp", `String e.timestamp);
-    ("error_type", `String e.error_type);
-    ("message", `String e.message);
-    ("context", match e.context with Some c -> `String c | None -> `Null);
-    ("resolved", `Bool e.resolved);
-  ]
-
-let error_entry_of_yojson json =
-  let open Yojson.Safe.Util in
-  try
-    let timestamp = json |> member "timestamp" |> to_string in
-    let error_type = json |> member "error_type" |> to_string in
-    let message = json |> member "message" |> to_string in
-    let context = json |> member "context" |> to_string_option in
-    let resolved = json |> member "resolved" |> to_bool in
-    Ok { timestamp; error_type; message; context; resolved }
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Error (Printexc.to_string e)
-
-let planning_context_to_yojson ctx =
-  `Assoc [
-    ("task_id", `String ctx.task_id);
-    ("task_plan", `String ctx.task_plan);
-    ("notes", `List (List.map (fun n -> `String n) ctx.notes));
-    ("errors", `List (List.map error_entry_to_yojson ctx.errors));
-    ("deliverable", `String ctx.deliverable);
-    ("created_at", `String ctx.created_at);
-    ("updated_at", `String ctx.updated_at);
-  ]
-
-let planning_context_of_yojson json =
-  let open Yojson.Safe.Util in
-  try
-    let task_id = json |> member "task_id" |> to_string in
-    let task_plan = json |> member "task_plan" |> to_string in
-    let notes = json |> member "notes" |> to_list |> List.map to_string in
-    let errors_json = json |> member "errors" in
-    let errors =
-      if errors_json = `Null then []
-      else
-        errors_json |> to_list |> List.filter_map (fun j ->
-          match error_entry_of_yojson j with
-          | Ok e -> Some e
-          | Error _ -> None)
-    in
-    let deliverable = json |> member "deliverable" |> to_string in
-    let created_at = json |> member "created_at" |> to_string in
-    let updated_at = json |> member "updated_at" |> to_string in
-    Ok { task_id; task_plan; notes; errors; deliverable; created_at; updated_at }
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Error (Printexc.to_string e)
+} [@@deriving yojson]
 
 (* ===== Utility Functions ===== *)
 

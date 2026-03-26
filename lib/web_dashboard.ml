@@ -24,34 +24,29 @@ let assets_root () =
     | Some path -> Some (Filename.concat path "assets")
     | None -> None
   in
-  let explicit_assets =
-    match nonempty_env "MASC_ASSETS_ROOT" with
-    | Some path -> Some path
-    | None -> nonempty_env "MASC_ASSETS_DIR"
+  let exe_dir = Filename.dirname Sys.executable_name in
+  let inferred_repo_assets =
+    let root = Filename.dirname (Filename.dirname (Filename.dirname exe_dir)) in
+    Filename.concat root "assets"
   in
-  match explicit_assets with
-  | Some path when is_dir path -> path
+  let candidates =
+    List.fold_right
+      (fun path acc ->
+        match path with
+        | Some value -> value :: acc
+        | None -> acc)
+      [
+        base_path_assets "MASC_BASE_PATH_INPUT";
+        base_path_assets "MASC_BASE_PATH";
+        Some inferred_repo_assets;
+        Some (Filename.concat exe_dir "assets");
+        Some (Filename.concat (Sys.getcwd ()) "assets");
+      ]
+      []
+  in
+  match Env_config_core.assets_dir_opt () with
+  | Some d when is_dir d -> d
   | _ ->
-      let exe_dir = Filename.dirname Sys.executable_name in
-      let inferred_repo_assets =
-        let root = Filename.dirname (Filename.dirname (Filename.dirname exe_dir)) in
-        Filename.concat root "assets"
-      in
-      let candidates =
-        List.fold_right
-          (fun path acc ->
-            match path with
-            | Some value -> value :: acc
-            | None -> acc)
-          [
-            base_path_assets "MASC_BASE_PATH_INPUT";
-            base_path_assets "MASC_BASE_PATH";
-            Some inferred_repo_assets;
-            Some (Filename.concat exe_dir "assets");
-            Some (Filename.concat (Sys.getcwd ()) "assets");
-          ]
-          []
-      in
       match List.find_opt is_dir candidates with
       | Some path -> path
       | None ->

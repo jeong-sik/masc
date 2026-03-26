@@ -166,12 +166,8 @@ let assets_root () =
     | Some path -> Some (Filename.concat path "assets")
     | None -> None
   in
-  let explicit_assets =
-    match nonempty_env "MASC_ASSETS_ROOT" with
-    | Some path -> Some path
-    | None -> nonempty_env "MASC_ASSETS_DIR"
-  in
-  match explicit_assets with
+  let env_assets = Env_config_core.assets_dir_opt () in
+  match env_assets with
   | Some path when is_dir path -> path
   | _ ->
       let exe_dir = Filename.dirname Sys.executable_name in

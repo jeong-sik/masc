@@ -279,62 +279,84 @@ let with_file_lock config path f =
       (* Fix 2: Use cooperative Eio.Mutex instead of blocking Unix.lockf.
          Single-process assumption (MASC runs as one process). *)
       File_lock_eio.with_lock path f
-  | Some key ->
-      let owner = config.backend_config.node_id in
-      let ttl_seconds = config.lock_expiry_minutes * 60 in
-      let rec acquire attempts delay =
-        if attempts <= 0 then false
-        else
-          match backend_acquire_lock config ~key ~ttl_seconds ~owner with
-          | Ok true -> true
-          | _ ->
-              Eio_unix.sleep delay;
-              acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
-      in
-      if acquire 20 0.005 then
-        Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
-          ~finally:(fun () ->
-            match backend_release_lock config ~key ~owner with
-            | Ok _ -> ()
-            | Error e ->
-              let msg = match e with
-                | Backend_types.ConnectionFailed s | NotFound s
-                | IOError s | BackendNotSupported s | InvalidKey s
-                | AlreadyExists s -> s in
-              Log.Room.warn "lock release failed for %s: %s" key msg)
-          f
-      else
-        invalid_arg (Printf.sprintf "Failed to acquire distributed lock for key: %s (20 attempts exhausted)" key)
+  | Some key -> (
+      match config.backend with
+      | Memory _ ->
+          (* Memory backend is single-process but still multi-fiber.
+             Serialize same-path updates cooperatively to avoid read-modify-write
+             races in append/readback helpers. *)
+          File_lock_eio.with_mutex path f
+      | FileSystem _ | PostgresNative _ ->
+          let owner = config.backend_config.node_id in
+          let ttl_seconds = config.lock_expiry_minutes * 60 in
+          let rec acquire attempts delay =
+            if attempts <= 0 then false
+            else
+              match backend_acquire_lock config ~key ~ttl_seconds ~owner with
+              | Ok true -> true
+              | _ ->
+                  Eio_unix.sleep delay;
+                  acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
+          in
+          if acquire 20 0.005 then
+            Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
+              ~finally:(fun () ->
+                match backend_release_lock config ~key ~owner with
+                | Ok _ -> ()
+                | Error e ->
+                    let msg =
+                      match e with
+                      | Backend_types.ConnectionFailed s | NotFound s
+                      | IOError s | BackendNotSupported s | InvalidKey s
+                      | AlreadyExists s -> s
+                    in
+                    Log.Room.warn "lock release failed for %s: %s" key msg)
+              f
+          else
+            invalid_arg
+              (Printf.sprintf
+                 "Failed to acquire distributed lock for key: %s (20 attempts exhausted)"
+                 key))
 
 let with_file_lock_r config path f : ('a, masc_error) result =
   match key_of_path config path with
   | None ->
       (* Fix 2: Cooperative lock — same as with_file_lock *)
       File_lock_eio.with_lock path (fun () -> Ok (f ()))
-  | Some key ->
-      let owner = config.backend_config.node_id in
-      let ttl_seconds = config.lock_expiry_minutes * 60 in
-      let rec acquire attempts delay =
-        if attempts <= 0 then false
-        else
-          match backend_acquire_lock config ~key ~ttl_seconds ~owner with
-          | Ok true -> true
-          | _ -> Eio_unix.sleep delay; acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
-      in
-      if acquire 20 0.005 then
-        Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
-          ~finally:(fun () ->
-            match backend_release_lock config ~key ~owner with
-            | Ok _ -> ()
-            | Error e ->
-              let msg = match e with
-                | Backend_types.ConnectionFailed s | NotFound s
-                | IOError s | BackendNotSupported s | InvalidKey s
-                | AlreadyExists s -> s in
-              Log.Room.warn "lock release failed for %s: %s" key msg)
-          (fun () -> Ok (f ()))
-      else
-        Error (IoError (Printf.sprintf "Failed to acquire distributed lock for %s" path))
+  | Some key -> (
+      match config.backend with
+      | Memory _ -> File_lock_eio.with_mutex path (fun () -> Ok (f ()))
+      | FileSystem _ | PostgresNative _ ->
+          let owner = config.backend_config.node_id in
+          let ttl_seconds = config.lock_expiry_minutes * 60 in
+          let rec acquire attempts delay =
+            if attempts <= 0 then false
+            else
+              match backend_acquire_lock config ~key ~ttl_seconds ~owner with
+              | Ok true -> true
+              | _ ->
+                  Eio_unix.sleep delay;
+                  acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
+          in
+          if acquire 20 0.005 then
+            Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
+              ~finally:(fun () ->
+                match backend_release_lock config ~key ~owner with
+                | Ok _ -> ()
+                | Error e ->
+                    let msg =
+                      match e with
+                      | Backend_types.ConnectionFailed s | NotFound s
+                      | IOError s | BackendNotSupported s | InvalidKey s
+                      | AlreadyExists s -> s
+                    in
+                    Log.Room.warn "lock release failed for %s: %s" key msg)
+              (fun () -> Ok (f ()))
+          else
+            Error
+              (IoError
+                 (Printf.sprintf "Failed to acquire distributed lock for %s"
+                    path)))
 
 (* ============================================ *)
 (* Event logging                                *)

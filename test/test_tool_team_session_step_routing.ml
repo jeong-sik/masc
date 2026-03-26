@@ -311,7 +311,7 @@ let test_status_reports_worker_run_progress_summary () =
              ];
            updated_at_iso = Types.now_iso ();
          }));
-  Team_session_store.write_text_file
+  Team_session_store.write_artifact_text config
     (Team_session_store.worker_container_checkpoint_path config session_id
        "worker-a")
     "checkpoint";

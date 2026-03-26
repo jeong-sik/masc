@@ -69,41 +69,37 @@ let take_first n xs =
     in
     loop [] n xs
 
+let list_leaf_json_names config dir =
+  list_dir config dir
+  |> List.filter (fun name ->
+         name <> ""
+         && not (String.contains name '/')
+         && Filename.check_suffix name ".json")
+
+let load_agents_from_dir config dir ~include_inactive =
+  list_leaf_json_names config dir
+  |> List.filter_map (fun name ->
+         safe_yield ();
+         let path = Filename.concat dir name in
+         let json = read_json config path in
+         match agent_of_yojson json with
+         | Ok agent when include_inactive || agent.status <> Types.Inactive ->
+             Some agent
+         | Ok _ | Error _ -> None)
+
 (** Get raw agent list (for orchestrator) *)
 let get_agents_raw config =
   ensure_initialized config;
-  let agents_path = agents_dir (with_scope config (Named (current_room_id config))) in
-  if not (Sys.file_exists agents_path) then []
-  else
-    Sys.readdir agents_path
-    |> Array.to_list
-    |> List.filter (fun name -> Filename.check_suffix name ".json")
-    |> List.filter_map (fun name ->
-        safe_yield ();
-        let path = Filename.concat agents_path name in
-        let json = read_json config path in
-        match agent_of_yojson json with
-        | Ok agent -> Some agent
-        | Error _ -> None
-      )
+  let agents_path =
+    agents_dir (with_scope config (Named (current_room_id config)))
+  in
+  load_agents_from_dir config agents_path ~include_inactive:true
 
 let get_agents_raw_in_room config room_id =
   if not (root_is_initialized config) then []
   else
     let agents_path = agents_dir (with_scope config (Named room_id)) in
-    if not (Sys.file_exists agents_path) then []
-    else
-      Sys.readdir agents_path
-      |> Array.to_list
-      |> List.filter (fun name -> Filename.check_suffix name ".json")
-      |> List.filter_map (fun name ->
-          safe_yield ();
-          let path = Filename.concat agents_path name in
-          let json = read_json config path in
-          match agent_of_yojson json with
-          | Ok agent when agent.status <> Types.Inactive -> Some agent
-          | Ok _ | Error _ -> None
-        )
+    load_agents_from_dir config agents_path ~include_inactive:false
 
 (** Like [get_agents_raw_in_room] but includes Inactive agents.
     Useful for keeper backlog-triage enrollment where inactive agents
@@ -112,19 +108,7 @@ let get_all_agents_in_room config room_id =
   if not (root_is_initialized config) then []
   else
     let agents_path = agents_dir (with_scope config (Named room_id)) in
-    if not (Sys.file_exists agents_path) then []
-    else
-      Sys.readdir agents_path
-      |> Array.to_list
-      |> List.filter (fun name -> Filename.check_suffix name ".json")
-      |> List.filter_map (fun name ->
-          safe_yield ();
-          let path = Filename.concat agents_path name in
-          let json = read_json config path in
-          match agent_of_yojson json with
-          | Ok agent -> Some agent
-          | Error _ -> None
-        )
+    load_agents_from_dir config agents_path ~include_inactive:true
 
 (** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents.
     Matches assignees by exact name or agent-type prefix (e.g. "claude" matches "claude-xxx").
@@ -135,18 +119,8 @@ let audit_orphan_tasks config : (Types.task * string) list =
     (* Read agent files from the same path that cleanup_zombies and join use *)
     let agents_path = agents_dir config in
     let active_names =
-      if Sys.file_exists agents_path then
-        Sys.readdir agents_path
-        |> Array.to_list
-        |> List.filter (fun name -> Filename.check_suffix name ".json")
-        |> List.filter_map (fun name ->
-            safe_yield ();
-            let path = Filename.concat agents_path name in
-            let json = read_json config path in
-            match agent_of_yojson json with
-            | Ok agent when agent.status <> Types.Inactive -> Some agent.name
-            | Ok _ | Error _ -> None)
-      else []
+      load_agents_from_dir config agents_path ~include_inactive:false
+      |> List.map (fun (agent : Types.agent) -> agent.name)
     in
     let is_active_agent assignee =
       List.mem assignee active_names

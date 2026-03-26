@@ -334,23 +334,27 @@ let save_worker_run_meta_json config session_id worker_run_id json =
   let path = worker_run_meta_path config session_id worker_run_id in
   write_json config path json
 
+let immediate_dir_entries config dir =
+  Room_utils.list_dir config dir
+  |> List.filter_map (fun entry ->
+         match String.split_on_char '/' entry with
+         | segment :: _ when String.trim segment <> "" -> Some segment
+         | _ -> None)
+  |> Team_session_types.dedup_strings
+  |> List.sort String.compare
+
 let list_worker_run_ids config session_id =
   let dir = worker_runs_dir config session_id in
-  list_dir config dir
-  |> List.filter_map (fun entry ->
-       match String.split_on_char '/' entry with
-       | name :: _ when name <> "" -> Some name
-       | _ -> None)
-  |> List.sort_uniq String.compare
+  immediate_dir_entries config dir
 
 let list_checkpoint_paths config session_id =
   let dir = checkpoints_dir config session_id in
-  list_dir config dir
-  |> List.filter_map (fun entry ->
-       match String.split_on_char '/' entry with
-       | name :: _ when Filename.check_suffix name ".json" -> Some name
-       | _ -> None)
-  |> List.sort_uniq String.compare
+  Room_utils.list_dir config dir
+  |> List.filter (fun name ->
+         name <> ""
+         && not (String.contains name '/')
+         && Filename.check_suffix name ".json")
+  |> List.sort String.compare
   |> List.map (Filename.concat dir)
 
 let load_latest_checkpoint config session_id : Team_session_types.checkpoint option =

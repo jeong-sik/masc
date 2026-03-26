@@ -295,11 +295,27 @@ let live_agent_names agents =
   |> List.map (fun (agent : Types.agent) -> agent.name)
   |> List.sort_uniq String.compare
 
+let live_agent_name_matches expected live_name =
+  String.equal expected live_name
+  || String.starts_with ~prefix:(expected ^ "-") live_name
+
+let roster_name_is_live live_agents roster_name =
+  List.exists (live_agent_name_matches roster_name) live_agents
+
 let agent_status_map agents =
   List.map (fun (agent : Types.agent) -> (agent.name, Types.string_of_agent_status agent.status)) agents
 
 let agent_status_for agents agent_name =
-  List.assoc_opt agent_name agents |> Option.value ~default:"offline"
+  match List.assoc_opt agent_name agents with
+  | Some status -> status
+  | None ->
+      agents
+      |> List.find_map (fun (live_name, status) ->
+             if live_agent_name_matches agent_name live_name then
+               Some status
+             else
+               None)
+      |> Option.value ~default:"offline"
 
 let active_operation_status = function
   | Active | Planned -> true
@@ -346,7 +362,9 @@ let rec build_tree_json ~child_map ~unit_lookup ~agent_statuses ~live_agents ~op
         |> List.length
       in
       let live_roster =
-        unit.roster |> List.filter (fun name -> List.mem name live_agents) |> List.length
+        unit.roster
+        |> List.filter (roster_name_is_live live_agents)
+        |> List.length
       in
       let leader_status =
         match unit.leader_id with

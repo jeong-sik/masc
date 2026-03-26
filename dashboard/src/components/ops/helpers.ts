@@ -483,7 +483,7 @@ export async function submitBroadcast() {
     action_type: 'broadcast',
     target_type: 'room',
     payload: { message },
-    successMessage: '방송을 보냈습니다',
+    successMessage: '전체 공지를 보냈습니다',
   })
   if (result) broadcastMessage.value = ''
 }

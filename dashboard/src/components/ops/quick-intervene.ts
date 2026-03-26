@@ -10,7 +10,7 @@ import {
   operatorSnapshot,
 } from '../../operator-store'
 import { quickTarget, quickMessage } from './ops-state'
-import { executeAction, submitPause, submitResume } from './helpers'
+import { executeAction, normalizeStatus, submitPause, submitResume } from './helpers'
 
 function parseTarget(value: string): {
   action_type: 'broadcast' | 'team_note' | 'keeper_message'
@@ -50,8 +50,8 @@ export function QuickIntervene() {
   const room = snapshot?.room ?? {}
   const busy = operatorActionBusy.value
 
-  const runningSessions = sessions.filter(s => s.status === 'running' || s.status === 'active')
-  const onlineKeepers = keepers.filter(k => k.status !== 'offline')
+  const runningSessions = sessions.filter(s => { const st = normalizeStatus(s.status); return st === 'running' || st === 'active' })
+  const onlineKeepers = keepers.filter(k => normalizeStatus(k.status) !== 'offline')
 
   return html`
     <section class="${CARD_STANDARD} flex flex-col gap-3">

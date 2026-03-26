@@ -2053,6 +2053,8 @@ let test_handle_request_prompts_get_command_truth_filters_run_id () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Masc_mcp.Room.default_config base_path in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "fixture-root"));
       let append_event ~trace_id ~operation_id ~message ~ts =

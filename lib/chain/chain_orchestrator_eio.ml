@@ -74,19 +74,12 @@ let default_config = {
 (** Parse chain design from MODEL response *)
 let parse_chain_design (response: string) : (chain, string) result =
   (* Try to extract Mermaid graph or JSON from response anywhere in the text *)
-  (* NOTE: Must use regular string for \n to be interpreted as newline *)
-  let mermaid_pattern = Re.Str.regexp "```mermaid\n\\(graph[^`]+\\)```" in
-  let json_pattern = Re.Str.regexp "```json\n\\([^`]+\\)```" in
+  let mermaid_pattern = Re.Pcre.re {|```mermaid\n(graph[^`]+)```|} |> Re.compile in
+  let json_pattern = Re.Pcre.re {|```json\n([^`]+)```|} |> Re.compile in
   let extract_template_vars (s : string) =
-    let re = Re.Str.regexp "{{\\([^}]+\\)}}" in
-    let rec loop pos acc =
-      try
-        let _ = Re.Str.search_forward re s pos in
-        let var = Re.Str.matched_group 1 s |> String.trim in
-        loop (Re.Str.match_end ()) (var :: acc)
-      with Not_found -> List.rev acc
-    in
-    loop 0 []
+    let re = Re.Pcre.re {|\{\{([^}]+)\}\}|} |> Re.compile in
+    Re.all re s
+    |> List.map (fun group -> Re.Group.get group 1 |> String.trim)
   in
   let rec collect_template_vars_json acc (json : Yojson.Safe.t) =
     match json with
@@ -173,16 +166,16 @@ let parse_chain_design (response: string) : (chain, string) result =
     with Yojson.Json_error e -> Error (Printf.sprintf "Invalid JSON: %s" e)
   in
 
-  try
-    let _ = Re.Str.search_forward mermaid_pattern response 0 in
-    let mermaid_code = Re.Str.matched_group 1 response in
+  match Re.exec_opt mermaid_pattern response with
+  | Some group ->
+    let mermaid_code = Re.Group.get group 1 in
     try_parse_mermaid mermaid_code
-  with Not_found ->
-    try
-      let _ = Re.Str.search_forward json_pattern response 0 in
-      let json_str = Re.Str.matched_group 1 response in
+  | None ->
+    match Re.exec_opt json_pattern response with
+    | Some group ->
+      let json_str = Re.Group.get group 1 in
       try_parse_json json_str
-    with Not_found ->
+    | None ->
       let trimmed = String.trim response in
       match try_parse_json trimmed with
       | Ok chain -> Ok chain
@@ -197,9 +190,10 @@ let parse_chain_design (response: string) : (chain, string) result =
           | Some json_str -> (match try_parse_json json_str with
               | Ok chain -> Ok chain
               | Error _ ->
-                  let graph_idx =
-                    try Some (Re.Str.search_forward (Re.Str.regexp "graph") response 0)
-                    with Not_found -> None
+                  let graph_re = Re.compile (Re.str "graph") in
+                  let graph_idx = match Re.exec_opt graph_re response with
+                    | Some group -> Some (Re.Group.start group 0)
+                    | None -> None
                   in
                   (match graph_idx with
                   | Some idx ->

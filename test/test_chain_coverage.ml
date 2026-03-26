@@ -1310,6 +1310,9 @@ let test_parse_chain_bad () =
    ============================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "chain_coverage" [
     "normalize_label_content", [
       test_case "escaped quotes" `Quick test_normalize_escaped_quotes;

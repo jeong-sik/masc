@@ -81,7 +81,8 @@ let test_schema_optional_fields () =
    ============================================================ *)
 
 let test_dispatch_unknown_tool () =
-  Eio_main.run (fun _env ->
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
     Eio.Switch.run (fun sw ->
       with_temp_dir (fun dir ->
         let config = init_room dir in
@@ -94,7 +95,8 @@ let test_dispatch_unknown_tool () =
   )
 
 let test_dispatch_missing_goal () =
-  Eio_main.run (fun _env ->
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
     Eio.Switch.run (fun sw ->
       with_temp_dir (fun dir ->
         let config = init_room dir in

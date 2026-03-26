@@ -94,10 +94,13 @@ let empty_retry_suffix =
 
 (** Detect if a prompt is complex enough to benefit from thinking mode.
     Heuristics: length > 500 chars, contains code blocks, multi-step instructions *)
+let code_block_re = Re.Pcre.re {|```|} |> Re.compile
+let step_keywords_re = Re.Pcre.re {|step|1\.|2\.|3\.|first|then|finally|} |> Re.compile
+
 let is_complex_prompt prompt =
   let len = String.length prompt in
-  let has_code = String.contains prompt '`' || Re.Str.string_match (Re.Str.regexp ".*```.*") prompt 0 in
-  let has_steps = Re.Str.string_match (Re.Str.regexp ".*\\(step\\|1\\.\\|2\\.\\|3\\.\\|first\\|then\\|finally\\).*") (String.lowercase_ascii prompt) 0 in
+  let has_code = String.contains prompt '`' || Re.execp code_block_re prompt in
+  let has_steps = Re.execp step_keywords_re (String.lowercase_ascii prompt) in
   len > 500 || has_code || has_steps
 
 (** Check if model is GLM variant *)
@@ -105,9 +108,7 @@ let is_glm_model model =
   let m = String.lowercase_ascii model in
   m = "glm" || String.length m >= 3 && String.sub m 0 3 = "glm"
 
-(** Check if string contains substring - safe version using Str module *)
+(** Check if string contains substring - safe version *)
 let string_contains ~substring str =
-  try
-    let _ = Re.Str.search_forward (Re.Str.regexp_string substring) str 0 in
-    true
-  with Not_found -> false
+  let re = Re.compile (Re.str substring) in
+  Re.execp re str

@@ -151,16 +151,21 @@ let execute_mcts ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_no
                  | Error _ -> 0.5)
             | "exec_test" ->
                 (* Parse test results: look for pass rate or coverage *)
-                let regex = Re.Str.regexp "\\([0-9]+\\)/\\([0-9]+\\)\\|coverage[: ]+\\([0-9.]+\\)" in
-                (try
-                  let _ = Re.Str.search_forward regex sim_output 0 in
-                  try
-                    let passed = float_of_string (Re.Str.matched_group 1 sim_output) in
-                    let total = float_of_string (Re.Str.matched_group 2 sim_output) in
-                    passed /. total
-                  with Failure _ | Not_found | Invalid_argument _ ->
-                    float_of_string (Re.Str.matched_group 3 sim_output)
-                with Not_found -> 0.5)
+                let pass_rate_re = Re.Pcre.re {|(\d+)/(\d+)|} |> Re.compile in
+                let coverage_re = Re.Pcre.re {|coverage[: ]+([0-9.]+)|} |> Re.compile in
+                (match Re.exec_opt pass_rate_re sim_output with
+                 | Some group ->
+                     (try
+                       let passed = float_of_string (Re.Group.get group 1) in
+                       let total = float_of_string (Re.Group.get group 2) in
+                       passed /. total
+                      with Failure _ -> 0.5)
+                 | None ->
+                     match Re.exec_opt coverage_re sim_output with
+                     | Some group ->
+                         (try float_of_string (Re.Group.get group 1)
+                          with Failure _ -> 0.5)
+                     | None -> 0.5)
             | "anti_fake" ->
                 (* Hybrid heuristic + MODEL scoring for code quality *)
                 let heuristic_score =
@@ -332,12 +337,12 @@ let execute_evaluator ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execu
           min 1.0 (max 0.0 score)  (* Clamp to [0, 1] *)
         with Failure _ ->
           (* Try to find a number in the response *)
-          let regex = Re.Str.regexp "[0-9]+\\.[0-9]+" in
-          try
-            let _ = Re.Str.search_forward regex cleaned 0 in
-            let found = Re.Str.matched_string cleaned in
-            min 1.0 (max 0.0 (float_of_string found))
-          with Not_found | Failure _ -> 0.5)  (* Fallback *)
+          let regex = Re.Pcre.re {|[0-9]+\.[0-9]+|} |> Re.compile in
+          match Re.exec_opt regex cleaned with
+          | Some group ->
+              (try min 1.0 (max 0.0 (float_of_string (Re.Group.get group 0)))
+               with Failure _ -> 0.5)
+          | None -> 0.5)  (* Fallback *)
     | Error _ -> 0.5  (* Fallback on error *)
   in
 

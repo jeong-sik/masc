@@ -74,6 +74,7 @@ let test_briefing_cold_call_returns_pending () =
   let saved_storage = Sys.getenv_opt "MASC_STORAGE_TYPE" in
   Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -101,6 +102,7 @@ let test_briefing_cold_call_returns_pending () =
 
 let test_force_refresh_without_cache_returns_pending () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -124,6 +126,7 @@ let test_force_refresh_without_cache_returns_pending () =
 
 let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in

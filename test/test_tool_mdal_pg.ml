@@ -104,6 +104,7 @@ let with_pg_room f () =
       in
       with_envs bindings (fun () ->
           Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
           Eio.Switch.run @@ fun sw ->
           reset_loop_registry ();
           let base_dir = temp_dir () in

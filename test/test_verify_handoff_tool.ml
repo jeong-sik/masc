@@ -21,6 +21,7 @@ let cleanup_dir dir =
 
 let test_verify_handoff_tool_call () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in

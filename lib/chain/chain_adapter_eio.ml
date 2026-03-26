@@ -56,7 +56,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
 
   | Template tpl ->
       (* Simple {{value}} substitution *)
-      let result = Re.Str.global_replace (Re.Str.regexp "{{value}}") input tpl in
+      let value_re = Re.compile (Re.str "{{value}}") in
+      let result = Re.replace_string value_re ~by:input tpl in
       Ok result
 
   | Summarize max_tokens ->
@@ -97,9 +98,10 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
 
   | Regex (pattern, replacement) ->
       (try
-        let re = Re.Str.regexp pattern in
-        Ok (Re.Str.global_replace re replacement input)
-      with Failure _ -> Error (Printf.sprintf "Invalid regex pattern: %s" pattern))
+        let re = Re.Pcre.re pattern |> Re.compile in
+        Ok (Re.replace_string re ~by:replacement input)
+      with Failure _ | Re.Pcre.Parse_error | Re.Pcre.Not_supported ->
+        Error (Printf.sprintf "Invalid regex pattern: %s" pattern))
 
   | ValidateSchema schema_str ->
       (* JSON Schema validation (subset of draft-07) — offloaded to executor pool.
@@ -259,8 +261,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
         in
         if String.length cond >= 9 && String.sub cond 0 9 = "contains:" then
           let text = String.sub cond 9 (String.length cond - 9) in
-          try Re.Str.search_forward (Re.Str.regexp_string text) inp 0 >= 0
-          with Not_found -> false
+          let re = Re.compile (Re.str text) in
+          Re.execp re inp
         else if String.length cond >= 3 && String.sub cond 0 3 = "eq:" then
           let value = String.sub cond 3 (String.length cond - 3) in
           String.trim inp = value
@@ -307,10 +309,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
             (* Detect patterns that can cause exponential backtracking:
                - Nested quantifiers: (a+)+, (a[*])+, (a+)[*], (a[*])[*]
                - Overlapping alternations with quantifiers *)
-            try
-              let redos_re = Re.Str.regexp "\\([+*]\\)[+*]\\|[+*])\\+\\|[+*])\\*" in
-              Re.Str.search_forward redos_re p 0 >= 0
-            with Not_found -> false
+            let redos_re = Re.Pcre.re {|([+*])[+*]|[+*])\+|[+*])\*|} |> Re.compile in
+            Re.execp redos_re p
           in
           if String.length pattern > max_pattern_len then
             false  (* Pattern too long - reject for safety *)
@@ -318,14 +318,13 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
             false  (* Potentially catastrophic pattern - reject *)
           else
             (try
-              let re = Re.Str.regexp pattern in
-              (* Use search_forward for contains-like matching *)
-              Re.Str.search_forward re inp 0 >= 0
-            with Not_found | Failure _ -> false)
+              let re = Re.Pcre.re pattern |> Re.compile in
+              Re.execp re inp
+            with Failure _ | Re.Pcre.Parse_error | Re.Pcre.Not_supported -> false)
         else
           (* Legacy: plain text means "contains" *)
-          try Re.Str.search_forward (Re.Str.regexp_string cond) inp 0 >= 0
-          with Not_found -> false
+          let re = Re.compile (Re.str cond) in
+          Re.execp re inp
       in
       let result = evaluate_condition condition input in
       let transform = if result then on_true else on_false in
@@ -354,16 +353,16 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
         | "line" -> String.split_on_char '\n' text
         | "paragraph" ->
             (* Split by double newline, preserving structure *)
-            let re = Re.Str.regexp "\n\n+" in
-            Re.Str.split re text
+            let re = Re.Pcre.re {|\n\n+|} |> Re.compile in
+            Re.split re text
         | "sentence" ->
             (* Split by sentence endings: . ! ? followed by space or newline *)
-            let re = Re.Str.regexp "[.!?][ \n]+" in
-            Re.Str.split re text
+            let re = Re.Pcre.re {|[.!?][ \n]+|} |> Re.compile in
+            Re.split re text
         | custom ->
             (* Split by custom delimiter string *)
-            let re = Re.Str.regexp_string custom in
-            Re.Str.split re text
+            let re = Re.compile (Re.str custom) in
+            Re.split re text
       in
       let merge_chunks_by_size chunks max_chars overlap_chars =
         (* Merge small chunks until they reach max_chars, with overlap *)
@@ -479,8 +478,10 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
            *)
            let lower = String.lowercase_ascii input in
            let find_from start needle =
-             try Some (Re.Str.search_forward (Re.Str.regexp_string needle) lower start)
-             with Not_found -> None
+             let re = Re.compile (Re.str needle) in
+             match Re.exec_opt ~pos:start re lower with
+             | Some group -> Some (Re.Group.start group 0)
+             | None -> None
            in
            let start_candidates =
              [ "<!doctype html"; "<html" ]

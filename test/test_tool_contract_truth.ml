@@ -66,6 +66,7 @@ let tools_list_response ~clock ~sw ?(include_hidden = false) ?names state =
 
 let test_visible_tools_expose_only_truthful_statuses () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
@@ -82,6 +83,7 @@ let test_visible_tools_expose_only_truthful_statuses () =
 
 let test_hidden_tools_report_contract_status () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in

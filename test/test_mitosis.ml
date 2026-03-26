@@ -354,6 +354,9 @@ let state_tests = [
 ]
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "Mitosis" [
     "safe_sub", safe_sub_tests;
     "deduplicate", dedup_tests;

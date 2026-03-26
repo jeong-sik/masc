@@ -64,6 +64,9 @@ let test_default_config () =
   ()
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   Alcotest.run "Hat System" [
     "serialization", [
       Alcotest.test_case "of_string" `Quick test_of_string;

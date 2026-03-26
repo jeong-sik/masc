@@ -128,6 +128,17 @@ let take n xs =
 let mkdir_p path =
   Fs_compat.mkdir_p path
 
+(* Directory-creation cache: avoid repeated mkdir_p syscalls for the same path.
+   keeper_dir / session_base_dir are called on every snapshot poll. *)
+let _ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 8
+
+let ensure_dir d =
+  if not (Hashtbl.mem _ensured_dirs d) then begin
+    mkdir_p d;
+    Hashtbl.replace _ensured_dirs d ()
+  end;
+  d
+
 let dedupe_keep_order items =
   let seen = Hashtbl.create (List.length items) in
   List.filter
@@ -521,16 +532,14 @@ let list_persona_summaries () : persona_summary list =
 
 let keeper_dir (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "perpetual-keepers" in
-  mkdir_p d;
-  d
+  ensure_dir d
 
 let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
 let session_base_dir (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "perpetual" in
-  mkdir_p d;
-  d
+  ensure_dir d
 
 let keeper_agent_name name =
   Printf.sprintf "keeper-%s-agent" name

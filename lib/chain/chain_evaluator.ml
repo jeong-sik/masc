@@ -340,11 +340,10 @@ let parse_verification_response (response: string) : verification_result =
     String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
   in
   let try_parse_json_block s =
-    let json_pattern = Re.Str.regexp "```json\n\\([^`]+\\)```" in
-    try
-      let _ = Re.Str.search_forward json_pattern s 0 in
-      Some (Re.Str.matched_group 1 s)
-    with Not_found ->
+    let json_pattern = Re.Pcre.re {|```json\n([^`]+)```|} |> Re.compile in
+    match Re.exec_opt json_pattern s with
+    | Some group -> Some (Re.Group.get group 1)
+    | None ->
       (* Fallback: extract first JSON object-like block *)
       match (String.index_opt s '{', String.rindex_opt s '}') with
       | (Some l, Some r) when r > l -> Some (String.sub s l (r - l + 1))

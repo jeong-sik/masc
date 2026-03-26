@@ -104,7 +104,6 @@ let is_transport_error msg =
 let request ?(timeout_sec=10.0) ?(fallback=true) body : (string, string) result =
   let url = graphql_url () in
   let key = api_key () in
-  let max_response_bytes = 1_000_000 in
   let cohttp_result = match Eio_context.get_net_opt () with
     | None -> Error "Eio net not initialized"
     | Some net ->
@@ -120,26 +119,20 @@ let request ?(timeout_sec=10.0) ?(fallback=true) body : (string, string) result 
       let uri = Uri.of_string url in
       let is_https = Uri.scheme uri = Some "https" in
       let run () =
-        Eio.Switch.run (fun sw ->
-          let client =
-            if is_https then
-              Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net
-            else
-              Cohttp_eio.Client.make ~https:None net
-          in
-          let body_content = Eio.Flow.string_source body in
-          let resp, resp_body =
-            Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content
-          in
-          let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
-          let body_str =
-            Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_response_bytes
-          in
-          if not (Cohttp.Code.is_success status) then
-            Error (Printf.sprintf "HTTP %d" status)
-          else
-            ensure_json_response body_str
-        )
+        let https =
+          if is_https then Some (Eio_context.get_https_connector ()) else None
+        in
+        let header_list =
+          Cohttp.Header.to_list headers
+        in
+        let code, body_str =
+          Masc_http_client.post_sync ~net ~https ~url
+            ~headers:header_list ~body ()
+        in
+        if not (Cohttp.Code.is_success code) then
+          Error (Printf.sprintf "HTTP %d" code)
+        else
+          ensure_json_response body_str
       in
       match Eio_context.get_clock_opt () with
       | Some clock ->

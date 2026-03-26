@@ -233,6 +233,9 @@ let test_activity_item_defaults () =
    ============================================================ *)
 
 let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
   run "auto_recall_activity_coverage" [
     "estimate_tokens", [
       test_case "empty" `Quick test_estimate_tokens_empty;

@@ -1,0 +1,88 @@
+(** Masc_http_client — cohttp-eio wrapper with explicit socket close.
+
+    cohttp-eio 6.1.1 does not reliably close the underlying TCP socket fd
+    when the Eio.Switch exits (observed on macOS). This module intercepts
+    the connection factory via [make_generic] to capture the raw socket and
+    close it explicitly on switch release.
+
+    All MASC code that makes outbound HTTP requests should use this module
+    instead of [Cohttp_eio.Client.make] directly.
+
+    @see <https://github.com/jeong-sik/masc-mcp/issues/3221> *)
+
+let make_closing_client ~sw ~net ~https =
+  let net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t) in
+  let last_sock :
+    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t option ref =
+    ref None
+  in
+  let connect ~sw:conn_sw uri =
+    let service =
+      match Uri.port uri with
+      | Some port -> Int.to_string port
+      | _ -> Uri.scheme uri |> Option.value ~default:"http"
+    in
+    let addr =
+      match
+        Eio.Net.getaddrinfo_stream ~service net
+          (Uri.host_with_default ~default:"localhost" uri)
+      with
+      | ip :: _ -> ip
+      | [] -> failwith "failed to resolve hostname"
+    in
+    let sock = Eio.Net.connect ~sw:conn_sw net addr in
+    last_sock := Some sock;
+    match Uri.scheme uri with
+    | Some "https" -> (
+        match https with
+        | Some wrap ->
+            (wrap uri sock
+              :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
+        | None -> failwith "HTTPS requested but not enabled")
+    | _ -> (sock :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
+  in
+  let client = Cohttp_eio.Client.make_generic connect in
+  Eio.Switch.on_release sw (fun () ->
+    match !last_sock with
+    | None -> ()
+    | Some sock ->
+        last_sock := None;
+        (try Eio.Net.close sock with _ -> ()));
+  client
+
+let post_sync ~net ?(https = None) ~url ~headers ~body () =
+  Eio.Switch.run @@ fun sw ->
+  let client = make_closing_client ~sw ~net ~https in
+  let uri = Uri.of_string url in
+  let hdr =
+    Cohttp.Header.of_list (("connection", "close") :: headers)
+  in
+  let body_content = Eio.Flow.string_source body in
+  let resp, resp_body =
+    Cohttp_eio.Client.post client ~sw uri ~headers:hdr ~body:body_content
+  in
+  let code =
+    Cohttp.Response.status resp |> Cohttp.Code.code_of_status
+  in
+  let body_str =
+    Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024)
+  in
+  (code, body_str)
+
+let get_sync ~net ?(https = None) ~url ~headers () =
+  Eio.Switch.run @@ fun sw ->
+  let client = make_closing_client ~sw ~net ~https in
+  let uri = Uri.of_string url in
+  let hdr =
+    Cohttp.Header.of_list (("connection", "close") :: headers)
+  in
+  let resp, resp_body =
+    Cohttp_eio.Client.get client ~sw ~headers:hdr uri
+  in
+  let code =
+    Cohttp.Response.status resp |> Cohttp.Code.code_of_status
+  in
+  let body_str =
+    Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024)
+  in
+  (code, body_str)

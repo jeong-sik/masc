@@ -267,37 +267,26 @@ let init_memory_pg_schema () =
   | None ->
       Log.MemoryPg.info "No PG pool available; long_term_backend will use JSONL fallback"
 
-(** Run independent PG schema inits in parallel via Eio fibers.
-    Each init only needs the shared PG pool (created in create_server_state).
-    Parallel execution reduces worst-case 3x RTT to 1x RTT. *)
-let init_pg_schemas_parallel () =
-  let errors = Atomic.make [] in
-  let record_error label exn =
-    let msg = Printf.sprintf "%s: %s" label (Printexc.to_string exn) in
-    let rec loop () =
-      let old = Atomic.get errors in
-      if not (Atomic.compare_and_set errors old (msg :: old)) then loop ()
-    in
-    loop ()
+(** Run PG schema/bootstrap steps in a fixed order.
+    These steps share the same PG pool and some of them mutate startup state,
+    so deterministic sequencing is preferred over parallel fan-out. *)
+let init_pg_schemas_sequential () =
+  let errors = ref [] in
+  let run_step label f =
+    try f ()
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        errors := Printf.sprintf "%s: %s" label (Printexc.to_string exn) :: !errors
   in
-  Eio.Fiber.all [
-    (fun () ->
-      try init_task_backend ()
-      with Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> record_error "task_backend" exn);
-    (fun () ->
-      try inject_shared_pg_pool ()
-      with Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> record_error "shared_pg_pool" exn);
-    (fun () ->
-      try init_memory_pg_schema ()
-      with Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> record_error "memory_pg_schema" exn);
-  ];
-  let errs = Atomic.get errors in
-  if errs <> [] then
-    Log.Server.warn "PG schema init completed with errors: %s"
-      (String.concat "; " errs)
+  run_step "task_backend" init_task_backend;
+  run_step "shared_pg_pool" inject_shared_pg_pool;
+  run_step "memory_pg_schema" init_memory_pg_schema;
+  match List.rev !errors with
+  | [] -> ()
+  | errs ->
+      Log.Server.warn "PG schema init completed with errors: %s"
+        (String.concat "; " errs)
 
 let install_tooling ~governance_level (state : Mcp_server.server_state) =
   Governance_pipeline.install ~config:state.room_config ~governance_level;
@@ -903,7 +892,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let t2 = Eio.Time.now clock in
       Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
       install_tooling ~governance_level state;
-      init_pg_schemas_parallel ();
+      init_pg_schemas_sequential ();
       Log.Server.info "Tooling + schemas in %.1fs" (Eio.Time.now clock -. t2);
       state
     in

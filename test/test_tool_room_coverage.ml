@@ -124,6 +124,7 @@ let () = test "dispatch_removed_named_room_tools" (fun () ->
 )
 
 let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
@@ -153,6 +154,7 @@ let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
 )
 
 let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in

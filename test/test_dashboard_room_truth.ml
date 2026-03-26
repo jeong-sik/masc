@@ -24,6 +24,14 @@ let cleanup_dir dir =
 let request target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
 
+(** Warm the execution cache so room-truth skips the "initializing" early return.
+    Without this, proactive_first_cycle_pending is true and the handler returns
+    a minimal {"status":"initializing"} JSON without room/execution/command data. *)
+let warm_execution_cache () =
+  Lib.Server_dashboard_http_cache.mark_cached_surface_success
+    Lib.Server_dashboard_http._execution_cache
+    (`Assoc [("status", `String "ok")])
+
 let test_dashboard_room_truth_empty_room () =
   let dir = test_dir () in
   Fun.protect
@@ -32,6 +40,7 @@ let test_dashboard_room_truth_empty_room () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
@@ -61,6 +70,7 @@ let test_dashboard_room_truth_execution_fixture () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
@@ -85,6 +95,7 @@ let test_dashboard_room_truth_empty_room_focus_label () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
@@ -107,6 +118,7 @@ let test_operator_digest_shape_matches_room_truth () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json

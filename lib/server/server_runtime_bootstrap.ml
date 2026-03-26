@@ -79,6 +79,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
 
 let bootstrap_chain_state (state : Mcp_server.server_state) =
   Chain_native_eio.ensure_bootstrap state.room_config;
+  Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   (* Initialize prompt registry with defaults and restore saved overrides *)
   let prompt_markdown_dir =
     Prompt_defaults.bootstrap_runtime

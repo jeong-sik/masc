@@ -11,6 +11,7 @@ open Masc_mcp
 
 let () = Printf.printf "\n=== Dispatch Chain Evidence Tests ===\n"
 let () = Printf.printf "Testing that JSON tool calls route correctly through extracted modules\n\n"
+let () = Unix.putenv "MASC_STORAGE_TYPE" "memory"
 
 (* Create test context *)
 let test_counter = ref 0
@@ -20,6 +21,8 @@ let make_test_room () =
     (Printf.sprintf "masc-dispatch-test-%d-%d"
       (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:(Some "evidence-agent") in
   config

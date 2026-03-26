@@ -332,6 +332,7 @@ let acquire_pid_lock port =
 let run_cmd host port base_path =
   acquire_pid_lock port;
   Log.init_from_env ();
+  Unix.putenv "MASC_BASE_PATH" base_path;
   (* Persist logs to .masc/logs/ so they survive restarts *)
   let log_dir = Filename.concat base_path "logs" in
   Log.Ring.init_file_sink log_dir;

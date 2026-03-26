@@ -202,31 +202,22 @@ let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
   | None -> Error "Eio net not initialized"
   | Some net ->
       try
-        Eio.Switch.run @@ fun sw ->
-        let client = Cohttp_eio.Client.make ~https:None net in
         let headers =
-          Cohttp.Header.of_list
-            ([
+            [
                ("content-type", "application/json");
                ("accept", "application/json, text/event-stream");
                ("x-masc-force-json", "1");
                ("mcp-session-id", session_id);
              ]
             @
-            match auth_token with
+            (match auth_token with
             | Some token when String.trim token <> "" ->
                 [ ("authorization", "Bearer " ^ token) ]
             | _ -> [])
         in
-        let uri = Uri.of_string (mcp_endpoint_url ~auth_token) in
-        let body = Eio.Flow.string_source request_body in
-        let response, response_body =
-          Cohttp_eio.Client.post client ~sw uri ~headers ~body
-        in
-        let status = Cohttp.Response.status response |> Cohttp.Code.code_of_status in
-        let raw_body =
-          Eio.Buf_read.(parse_exn take_all) response_body
-            ~max_size:(8 * 1024 * 1024)
+        let url = mcp_endpoint_url ~auth_token in
+        let status, raw_body =
+          Masc_http_client.post_sync ~net ~url ~headers ~body:request_body ()
         in
         if Cohttp.Code.is_success status then Ok raw_body
         else Error (sprintf "MASC HTTP %d: %s" status raw_body)

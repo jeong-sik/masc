@@ -412,7 +412,7 @@ let call_voice_mcp ~sw:_ ~clock ~net ~tool_name ~arguments =
   ] in
   let operation () =
     Eio.Switch.run @@ fun inner_sw ->
-    match client_for_uri_result ~net uri with
+    match client_for_uri_result ~sw:inner_sw ~net uri with
     | Error error -> Error error
     | Ok client ->
         with_timeout ~clock (fun () ->
@@ -474,7 +474,7 @@ let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
     Cohttp.Header.of_list
       [ ("Content-Type", "application/json"); ("Accept", "application/json") ]
   in
-  match client_for_uri_result ~net uri with
+  match client_for_uri_result ~sw ~net uri with
   | Error error -> Error error
   | Ok client ->
       let operation () =
@@ -588,7 +588,7 @@ let is_voice_server_available ~sw:_ ~clock ~net =
               | Ok url -> Uri.of_string url
               | Error _ -> voice_health_uri ()
             in
-            match client_for_uri_result ~net uri with
+            match client_for_uri_result ~sw:inner_sw ~net uri with
             | Error error -> Error error
             | Ok client ->
                 let resp, _ = Cohttp_eio.Client.get ~sw:inner_sw client uri in
@@ -845,7 +845,7 @@ let health_check ~sw:_ ~clock:_ ~net () =
       in
       try
         Eio.Switch.run @@ fun inner_sw ->
-        let client = client_for_uri ~net uri in
+        let client = client_for_uri ~sw:inner_sw ~net uri in
         let resp, body = Cohttp_eio.Client.get ~sw:inner_sw client uri in
         let status = Cohttp.Response.status resp in
         let body_str = Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int in

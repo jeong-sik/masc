@@ -171,6 +171,8 @@ let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
 )
 
 let () = test "dispatch_room_strategy_get" (fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
   match Tool_room.dispatch ctx ~name:"masc_room_strategy_get" ~args:(`Assoc []) with
@@ -182,6 +184,8 @@ let () = test "dispatch_room_strategy_get" (fun () ->
 )
 
 let () = test "dispatch_room_strategy_set" (fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
   let args =

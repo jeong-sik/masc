@@ -117,40 +117,47 @@ let test_dispatch_missing_goal () =
    ============================================================ *)
 
 let test_task_creation_in_backlog () =
-  with_temp_dir (fun dir ->
-    let config = init_room dir in
-    let result = Room.add_task config
-      ~title:"Test fire task goal"
-      ~priority:2
-      ~description:"Fire-and-forget task" in
-    (* Verify task was created *)
-    check bool "result contains task-" true
-      (try ignore (Str.search_forward (Str.regexp_string "task-") result 0); true
-       with Not_found -> false);
-    (* Verify it shows in status *)
-    let status = Room.status config in
-    check bool "task visible in status" true
-      (try ignore (Str.search_forward (Str.regexp_string "Test fire task goal") status 0); true
-       with Not_found -> false)
-  )
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    with_temp_dir (fun dir ->
+      let config = init_room dir in
+      let result = Room.add_task config
+        ~title:"Test fire task goal"
+        ~priority:2
+        ~description:"Fire-and-forget task" in
+      (* Verify task was created *)
+      check bool "result contains task-" true
+        (try ignore (Str.search_forward (Str.regexp_string "task-") result 0); true
+         with Not_found -> false);
+      (* Verify it shows in status *)
+      let status = Room.status config in
+      check bool "task visible in status" true
+        (try ignore (Str.search_forward (Str.regexp_string "Test fire task goal") status 0); true
+         with Not_found -> false)
+    ))
 
 let test_task_priority_defaults () =
-  with_temp_dir (fun dir ->
-    let config = init_room dir in
-    let _result = Room.add_task config
-      ~title:"Default priority task"
-      ~priority:3
-      ~description:"Fire-and-forget task" in
-    (* Verify task exists in status output *)
-    let status = Room.status config in
-    check bool "task title in status" true
-      (try ignore (Str.search_forward (Str.regexp_string "Default priority task") status 0); true
-       with Not_found -> false);
-    (* Verify priority is persisted in backlog (status output does not include priority) *)
-    let backlog = Room.read_backlog config in
-    check bool "task has correct priority" true
-      (List.exists (fun (t : Types_core.task) -> t.title = "Default priority task" && t.priority = 3) backlog.tasks)
-  )
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    with_temp_dir (fun dir ->
+      let config = init_room dir in
+      let _result = Room.add_task config
+        ~title:"Default priority task"
+        ~priority:3
+        ~description:"Fire-and-forget task" in
+      (* Verify task exists in status output *)
+      let status = Room.status config in
+      check bool "task title in status" true
+        (try ignore (Str.search_forward (Str.regexp_string "Default priority task") status 0); true
+         with Not_found -> false);
+      (* Verify priority is persisted in backlog (status output does not include priority) *)
+      let backlog = Room.read_backlog config in
+      check bool "task has correct priority" true
+        (List.exists
+           (fun (t : Types_core.task) ->
+             t.title = "Default priority task" && t.priority = 3)
+           backlog.tasks)
+    ))
 
 (* ============================================================
    Argument Parsing Tests

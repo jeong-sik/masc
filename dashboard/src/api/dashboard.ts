@@ -457,7 +457,7 @@ export interface DashboardConfigResolutionItem {
 }
 
 export interface DashboardConfigResolution {
-  status: 'ready' | 'warn' | 'invalid_env' | 'missing' | string
+  status: 'ready' | 'warn' | 'invalid_env' | 'missing'
   warnings: string[]
   config_root: DashboardConfigResolutionItem
   cascade: DashboardConfigResolutionItem

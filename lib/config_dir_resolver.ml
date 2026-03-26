@@ -38,23 +38,15 @@ type inputs = {
   env_dune_sourceroot : string option;
 }
 
-let trim_opt = function
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
+let trim_opt = Env_config_core.trim_opt
+let existing_dir = Env_config_core.existing_dir
+let existing_file = Env_config_core.existing_file
 
 let absolute_path path =
   if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path
 
 let absolute_path_from ~cwd path =
   if Filename.is_relative path then Filename.concat cwd path else path
-
-let existing_dir path =
-  Sys.file_exists path && Sys.is_directory path
-
-let existing_file path =
-  Sys.file_exists path && not (Sys.is_directory path)
 
 let source_to_string = function
   | Env -> "env"
@@ -222,8 +214,18 @@ let resolve_with inputs =
   in
   { status; warnings; config_root; cascade; prompts; keepers; personas }
 
+let _cached_resolution : resolution option ref = ref None
+
 let resolve () =
-  resolve_with (inputs_from_env ())
+  match !_cached_resolution with
+  | Some r -> r
+  | None ->
+      let r = resolve_with (inputs_from_env ()) in
+      _cached_resolution := Some r;
+      r
+
+let reset () =
+  _cached_resolution := None
 
 let cascade_path_opt () =
   let resolution = resolve () in

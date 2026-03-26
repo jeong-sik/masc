@@ -165,7 +165,7 @@ Supervisor가 keeper fiber의 건강 상태를 추적하는 데 사용.
 | 값 | 별칭 | 의미 |
 |----|------|------|
 | `balanced` | `default` | 범용 (기본값) |
-| `safety` | `guardian` | 안전 우선, 리스크 보존 |
+| `safety` | `steward` | 안전 우선, 리스크 보존 |
 | `delivery` | `executor` | 실행/산출물 우선 |
 | `research` | `analyst` | 가설 검증 우선 |
 | `relationship` | `companion` | 관계/소통 우선 |

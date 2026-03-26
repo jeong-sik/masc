@@ -111,7 +111,7 @@ Correctness gate가 아닌 orchestration/benchmark/behavior 실험. Runbook과 �
 | Agent (`test_agent_*`) | 7 | `test_agent_identity.ml`, `test_agent_registry_eio.ml` |
 | SSE (`test_sse_*`) | 7 | `test_sse.ml`, `test_sse_storm_e2e.ml`, `test_sse_qw.ml` |
 | Keeper (`test_keeper_*`) | 6 | `test_keeper_memory.ml`, `test_keeper_unified.ml` |
-| Chain (`test_chain_*`) | 6 | `test_chain_coverage.ml`, `test_chain_native_eio_bootstrap.ml` |
+| Chain (`test_chain_*`) | 6 | `test_chain_coverage.ml`, `test_chain_orchestrator_eio.ml` |
 | Swarm (`test_swarm_*`) | 6 | `test_swarm.ml`, `test_swarm_checkpoint.ml` |
 | Board (`test_board_*`) | 4 | `test_board_api_e2e.ml`, `test_board_pg.ml` |
 | OAS (`test_oas_*`) | 3 | `test_oas_integration.ml`, `test_oas_worker.ml` |

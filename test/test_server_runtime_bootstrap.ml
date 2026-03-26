@@ -327,9 +327,6 @@ let test_main_eio_serves_health_before_lazy_startup () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_LODGE_ENABLED", "0");
             ("MASC_LODGE_DAEMON_ENABLED", "0");
-            ("MASC_SENTINEL_ENABLED", "0");
-            ("MASC_GUARDIAN_ENABLED", "0");
-            ("MASC_GARDENER_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_ALLOW_LEGACY_ACCEPT", "1");
             ("MASC_USE_H2", "0");

@@ -22,7 +22,6 @@ Simple prompt→response, compatible with OAS `Api.create_message_cascade`.
 | dashboard_operator_judge.ml | 296 | run_prompt_cascade | 0.2 | Same pattern as governance |
 | context_router.ml | 197 | Lodge_cascade "context_router" | 0.1 | Intent classification |
 | context_router.ml | 211 | Lodge_cascade "context_router" | 0.1 | Hybrid fallback |
-| gardener.ml | 973 | run_prompt_cascade | 0.3 | Spawn evaluation |
 | keeper_execution.ml | 1661 | run_prompt_cascade | 0.3 | Keeper decision |
 | keeper_autonomy.ml | 248 | Model_client.complete | varies | Autonomous decision |
 | capability_match.ml | 257 | Lodge_cascade "capability_match" | default | Agent matching |
@@ -33,7 +32,6 @@ MASC-specific parameters (accept predicate, cascade_name, custom timeout).
 
 | File | Line | Barrier | Migration Path |
 |------|------|---------|---------------|
-| sentinel.ml | 64 | JSON accept validator + dynamic cascade | Bridge: accept → post-parse validation |
 | lodge_heartbeat.ml | 522 | context_rewrite, 60s timeout | Bridge: timeout config |
 | lodge_heartbeat.ml | 1043 | trait gen | Standard conversion |
 | lodge_heartbeat.ml | 1775 | comment gen, system prompt | Standard conversion |
@@ -70,8 +68,8 @@ Deep integration, no OAS equivalent, or requires redesign.
 ## Migration Roadmap
 
 1. **Phase 1**: Lodge internal (heartbeat, broadcast, topic) — 10 sites
-2. **Phase 2**: Dashboard judges + gardener — 4 sites
-3. **Phase 3**: Sentinel + context_router — 3 sites
+2. **Phase 2**: Dashboard judges — 3 sites
+3. **Phase 3**: context_router — 2 sites
 4. **Phase 4**: Keeper (heaviest, last) — 6 sites
 5. **Retain**: perpetual_loop, autoresearch, verifier, trpg — 8 sites
 

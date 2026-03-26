@@ -29,7 +29,7 @@
       "type": "model",
       "model": {
         "model": "claude-cli",
-        "prompt": "You are the quality guardian. Analyze this code for:\n1. Code clarity and readability\n2. Maintainability concerns\n3. Best practices violations\n\nCode:\n```\n{{source_code}}\n```\n\nProvide structured findings as JSON: {\"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"clarity|maintainability|practice\", \"line\": N, \"description\": \"...\", \"suggestion\": \"...\"}]}"
+        "prompt": "You are the quality reviewer. Analyze this code for:\n1. Code clarity and readability\n2. Maintainability concerns\n3. Best practices violations\n\nCode:\n```\n{{source_code}}\n```\n\nProvide structured findings as JSON: {\"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"clarity|maintainability|practice\", \"line\": N, \"description\": \"...\", \"suggestion\": \"...\"}]}"
       },
       "depends_on": ["read-target"],
       "output_key": "claude_findings"

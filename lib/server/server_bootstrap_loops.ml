@@ -211,6 +211,13 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
       Log.Server.error "metrics_flush fiber crashed: %s"
         (Printexc.to_string exn));
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
+  (* Tool metrics JSONL persistence: flush buffered records to disk periodically.
+     Also registers a post-hook so every tool call is enqueued for persistence. *)
+  Tool_dispatch.register_post_hook (fun result ->
+    Tool_metrics_persist.enqueue result;
+    result);
+  Tool_metrics_persist.start_flush_fiber ~sw ~clock
+    ~base_path:state.room_config.base_path;
   (match Board_dispatch.get_pg_pool () with
   | Some pool ->
       let listener = Board_listener.create pool in

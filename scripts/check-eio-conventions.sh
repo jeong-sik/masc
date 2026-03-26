@@ -5,15 +5,29 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-if ! command -v rg >/dev/null 2>&1; then
-  echo "ERROR: ripgrep (rg) is required" >&2
-  exit 2
+has_rg=0
+if command -v rg >/dev/null 2>&1; then
+  has_rg=1
 fi
+
+search_lines() {
+  local pattern="$1"
+  shift
+  if [ "$has_rg" -eq 1 ]; then
+    rg -n "$pattern" "$@" 2>/dev/null || true
+  else
+    grep -RInE -- "$pattern" "$@" 2>/dev/null || true
+  fi
+}
 
 count_matches() {
   local pattern="$1"
   shift
-  rg -o "$pattern" "$@" 2>/dev/null || true
+  if [ "$has_rg" -eq 1 ]; then
+    rg -o "$pattern" "$@" 2>/dev/null || true
+  else
+    grep -RhoE -- "$pattern" "$@" 2>/dev/null || true
+  fi
 }
 
 count_total() {
@@ -24,18 +38,18 @@ count_total() {
 
 fail=0
 
-eio_sleep_hits="$(rg -n 'Eio_unix\.sleep\b' lib || true)"
+eio_sleep_hits="$(search_lines 'Eio_unix\.sleep\b' lib)"
 if [ -n "$eio_sleep_hits" ]; then
   echo "ERROR: forbidden Eio_unix.sleep usage under lib/" >&2
   printf '%s\n' "$eio_sleep_hits" >&2
   fail=1
 fi
 
-blocking_sleep_hits="$(rg -n 'Unix\.sleep(f)?\b' lib || true)"
+blocking_sleep_hits="$(search_lines 'Unix\.sleep(f)?\b' lib)"
 if [ -n "$blocking_sleep_hits" ]; then
   disallowed_blocking_sleep_hits="$(
     printf '%s\n' "$blocking_sleep_hits" \
-      | rg -v '^lib/(process/file_lock_eio\.ml|shutdown\.ml):' || true
+      | grep -Ev '^lib/(process/file_lock_eio\.ml|shutdown\.ml):' || true
   )"
   if [ -n "$disallowed_blocking_sleep_hits" ]; then
     echo "ERROR: raw Unix.sleep/Unix.sleepf usage is only allowed in lib/process/file_lock_eio.ml and lib/shutdown.ml" >&2

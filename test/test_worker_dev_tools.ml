@@ -12,6 +12,7 @@ let find_tool name tools =
 
 let test_tool_count () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -19,6 +20,7 @@ let test_tool_count () =
 
 let test_tool_names () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -28,6 +30,7 @@ let test_tool_names () =
 
 let test_readonly_tool_names () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_readonly_tools ~proc_mgr ~clock () in
@@ -39,6 +42,7 @@ let test_readonly_tool_names () =
 
 let test_file_read_existing () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -58,6 +62,7 @@ let test_file_read_existing () =
 
 let test_file_read_nonexistent () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -70,6 +75,7 @@ let test_file_read_nonexistent () =
 
 let test_file_read_blocked_path () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -86,6 +92,7 @@ let test_file_read_blocked_path () =
 
 let test_file_read_path_traversal () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -99,6 +106,7 @@ let test_file_read_path_traversal () =
 
 let test_file_read_rejects_prefix_sibling () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -112,6 +120,7 @@ let test_file_read_rejects_prefix_sibling () =
 
 let test_file_read_rejects_tmp_symlink_escape () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -129,6 +138,7 @@ let test_file_read_rejects_tmp_symlink_escape () =
 
 let test_file_read_truncation () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -158,6 +168,7 @@ let test_file_read_truncation () =
 
 let test_file_write_new () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -179,6 +190,7 @@ let test_file_write_new () =
 
 let test_file_write_blocked_path () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -192,6 +204,7 @@ let test_file_write_blocked_path () =
 
 let test_file_write_rejects_prefix_sibling () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -206,6 +219,7 @@ let test_file_write_rejects_prefix_sibling () =
 
 let test_file_write_rejects_tmp_symlink_escape () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -227,6 +241,7 @@ let test_file_write_rejects_tmp_symlink_escape () =
 
 let test_shell_exec_echo () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -241,6 +256,7 @@ let test_shell_exec_echo () =
 
 let test_shell_exec_blocked_command () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -255,6 +271,7 @@ let test_shell_exec_blocked_command () =
 
 let test_tool_exec_observer_bridges_to_telemetry () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let fs = Eio.Stdenv.fs env in
@@ -322,6 +339,7 @@ let test_tool_exec_observer_bridges_to_telemetry () =
 
 let test_shell_exec_rejects_shell_metacharacters () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -345,6 +363,7 @@ let test_shell_exec_rejects_shell_metacharacters () =
 
 let test_shell_exec_nonexistent_cmd () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -357,6 +376,7 @@ let test_shell_exec_nonexistent_cmd () =
 
 let test_shell_exec_missing_param () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
@@ -370,6 +390,7 @@ let test_shell_exec_missing_param () =
 
 let test_readonly_shell_exec_blocks_git () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_readonly_tools ~proc_mgr ~clock () in
@@ -382,6 +403,7 @@ let test_readonly_shell_exec_blocks_git () =
 
 let test_workdir_enforcement () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock

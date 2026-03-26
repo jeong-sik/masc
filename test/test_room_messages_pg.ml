@@ -41,6 +41,7 @@ let with_pg_test_env f =
           with_env "SUPABASE_DB_URL" "" @@ fun () ->
           with_env "SB_PG_URL" "" @@ fun () ->
           Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
           Eio.Switch.run @@ fun sw ->
           Eio_context.set_net (Eio.Stdenv.net env);
           Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);

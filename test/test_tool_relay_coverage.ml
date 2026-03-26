@@ -212,6 +212,7 @@ let run ~sw ~proc_mgr =
 
 let () =
   Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
   let proc_mgr = Some (Eio.Stdenv.process_mgr env) in
   run ~sw ~proc_mgr

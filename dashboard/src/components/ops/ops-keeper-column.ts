@@ -22,10 +22,7 @@ import {
   submitKeeperMessage,
   logEntryBorderClass,
 } from './helpers'
-
-function truncateGoal(goal: string, maxLen = 60): string {
-  return goal.length > maxLen ? goal.slice(0, maxLen) + '...' : goal
-}
+import { truncate } from '../../lib/truncate'
 
 function openOpsKeeperDetail(opsKeeper: OperatorKeeperSnapshot): void {
   const full = findKeeper(opsKeeper.name)
@@ -82,7 +79,7 @@ export function OpsKeeperColumn() {
                 <span>${relativeAge(keeper.last_turn_ago_s)}</span>
               </div>
               ${keeper.short_goal || keeper.goal ? html`
-                <div class="text-[11px] text-[var(--text-muted)] mt-1.5 p-1 px-1.5 bg-[var(--white-3)] rounded" title=${keeper.goal ?? ''}>${truncateGoal(keeper.short_goal ?? keeper.goal ?? '')}</div>
+                <div class="text-[11px] text-[var(--text-muted)] mt-1.5 p-1 px-1.5 bg-[var(--white-3)] rounded" title=${keeper.goal ?? ''}>${truncate(keeper.short_goal ?? keeper.goal ?? '', 60)}</div>
               ` : null}
               ${tone !== 'ok'
                 ? html`<div class="text-[12px] text-[var(--text-muted)] leading-[1.45] mt-1.5">점검 이유: ${prioritySummary}</div>`

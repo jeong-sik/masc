@@ -5,6 +5,7 @@
 import { html } from 'htm/preact'
 import { TimeAgo } from './common/time-ago'
 import { missionSnapshot } from '../mission-store'
+import { formatPct } from '../lib/format-number'
 import type { DashboardMissionKeeperBrief, Keeper } from '../types'
 import { serverStatus } from '../store'
 import { operatorSnapshot } from '../operator-store'
@@ -63,11 +64,6 @@ function missionKeeperBrief(keeper: Keeper): DashboardMissionKeeperBrief | null 
     brief.name === keeper.name
       || (brief.agent_name && keeper.agent_name && brief.agent_name === keeper.agent_name))
     ?? null
-}
-
-function formatPct(value: number | undefined): string {
-  if (value == null || Number.isNaN(value)) return '-'
-  return `${Math.round(value * 100)}%`
 }
 
 // ── Shared row component ─────────────────────────────────

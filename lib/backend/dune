@@ -19,6 +19,7 @@
   masc_eio_context
   time_compat
   fs_compat
+  base64
   yojson
   unix
   eio

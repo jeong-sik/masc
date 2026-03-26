@@ -150,6 +150,7 @@ for env_name in \
     DATABASE_URL \
     SUPABASE_DB_URL \
     SB_PG_URL \
+    MASC_PG_POOL_SIZE \
     MASC_MCP_PORT \
     MASC_HOST \
     MASC_BASE_PATH \
@@ -180,6 +181,7 @@ for env_name in \
     DATABASE_URL \
     SUPABASE_DB_URL \
     SB_PG_URL \
+    MASC_PG_POOL_SIZE \
     MASC_MCP_PORT \
     MASC_HOST \
     MASC_BASE_PATH \

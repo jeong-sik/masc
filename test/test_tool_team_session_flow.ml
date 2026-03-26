@@ -294,7 +294,8 @@ let test_turn_events_and_prove () =
   in
   Alcotest.(check bool) "proof json exists" true
     (Room_utils.path_exists config proof_json_path);
-  Alcotest.(check bool) "proof md exists" true (Sys.file_exists proof_md_path);
+  Alcotest.(check bool) "proof md exists" true
+    (Room_utils.path_exists config proof_md_path);
   Alcotest.(check string) "verdict proved" "proved" verdict;
   let proof_doc = Room_utils.read_json config proof_json_path in
   let proof_schema_version =

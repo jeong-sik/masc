@@ -188,6 +188,17 @@ let read_json config path =
     end
   | None -> read_json_local path
 
+let read_text config path =
+  match key_of_path config path with
+  | Some key -> begin
+      match backend_get config ~key with
+      | Ok (Some content) -> content
+      | Ok None | Error _ -> ""
+    end
+  | None ->
+      if Fs_compat.file_exists path then Fs_compat.load_file path
+      else ""
+
 let write_json config path json =
   match key_of_path config path with
   | Some key ->
@@ -196,6 +207,20 @@ let write_json config path json =
        | Ok () -> ()
        | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e))
   | None -> write_json_local path json
+
+let write_text config path content =
+  match key_of_path config path with
+  | Some key ->
+      (match backend_set config ~key ~value:content with
+       | Ok () -> ()
+       | Error e ->
+           Log.Misc.warn "write_text backend_set failed for %s: %s" key
+             (Backend_types.show_error e))
+  | None ->
+      mkdir_p (Filename.dirname path);
+      let tmp_path = path ^ ".tmp" in
+      Fs_compat.save_file tmp_path content;
+      Unix.rename tmp_path path
 
 let delete_path config path =
   match key_of_path config path with
@@ -209,6 +234,23 @@ let path_exists config path =
   match key_of_path config path with
   | Some key -> backend_exists config ~key
   | None -> Sys.file_exists path
+
+let append_text config path content =
+  match key_of_path config path with
+  | Some key ->
+      let existing =
+        match backend_get config ~key with
+        | Ok (Some value) -> value
+        | Ok None | Error _ -> ""
+      in
+      (match backend_set config ~key ~value:(existing ^ content) with
+       | Ok () -> ()
+       | Error e ->
+           Log.Misc.warn "append_text backend_set failed for %s: %s" key
+             (Backend_types.show_error e))
+  | None ->
+      mkdir_p (Filename.dirname path);
+      Fs_compat.append_file path content
 
 let read_json_opt config path =
   match key_of_path config path with

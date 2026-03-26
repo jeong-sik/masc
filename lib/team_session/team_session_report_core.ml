@@ -859,7 +859,6 @@ let generate config (session : Team_session_types.session) :
     let report_md_path =
       Team_session_store.report_md_path config session.session_id
     in
-    Team_session_store.write_text_file report_md_path markdown;
+    Team_session_store.write_artifact_text config report_md_path markdown;
     Ok (report_json, markdown)
   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
-

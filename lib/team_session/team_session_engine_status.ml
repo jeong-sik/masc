@@ -372,7 +372,8 @@ let prove_session ~(config : Room.config) ~(session_id : string)
                 Team_session_store.proof_md_path config session_id
               in
               Room_utils.write_json config proof_json_path proof_json;
-              Team_session_store.write_text_file proof_md_path proof_markdown;
+              Team_session_store.write_artifact_text config proof_md_path
+                proof_markdown;
               Team_session_store.append_event config session_id
                 ~event_type:"session_proof_generated"
                 ~detail:

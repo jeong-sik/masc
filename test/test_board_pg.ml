@@ -13,6 +13,21 @@ let pg_url () =
   | Some s when String.trim s <> "" -> Some s
   | _ -> None
 
+(** Delete all pg-test-* rows from board tables (votes -> comments -> posts).
+    Best-effort: errors are silently ignored (table may not exist yet). *)
+let cleanup_test_data pool =
+  let open Caqti_request.Infix in
+  let exec_del sql =
+    match Caqti_eio.Pool.use (fun (module C : Caqti_eio.CONNECTION) ->
+      C.exec ((Caqti_type.unit ->. Caqti_type.unit) sql) ()
+    ) pool with
+    | Ok () -> ()
+    | Error _ -> ()
+  in
+  exec_del "DELETE FROM masc_board_votes WHERE voter LIKE 'pg-test-%' OR voter LIKE 'pg-voter-%' OR voter LIKE 'pg-cv-%'";
+  exec_del "DELETE FROM masc_board_comments WHERE author LIKE 'pg-test-%'";
+  exec_del "DELETE FROM masc_board_posts WHERE author LIKE 'pg-test-%'"
+
 (** {1 Helper: run test inside Eio with PG pool} *)
 
 let with_pg_backend f () =
@@ -32,7 +47,10 @@ let with_pg_backend f () =
       | Error e ->
           Alcotest.fail (Printf.sprintf "Board_pg.create failed: %s" (Board.show_board_error e))
       | Ok t ->
-          f t
+          cleanup_test_data pool;
+          Fun.protect
+            (fun () -> f t)
+            ~finally:(fun () -> cleanup_test_data pool)
 
 (** {1 Post CRUD} *)
 

@@ -26,6 +26,14 @@ let write_text_file path content =
 let state_path base_dir =
   Filename.concat (Filename.concat base_dir ".masc") "state.json"
 
+let has_nul_byte s =
+  let rec loop idx =
+    if idx >= String.length s then false
+    else if s.[idx] = '\x00' then true
+    else loop (idx + 1)
+  in
+  loop 0
+
 let test_read_state_repairs_empty_object () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -123,6 +131,16 @@ let test_read_state_filters_invalid_active_agent_entries () =
         [ "codex-swift-fox"; "gemini-brave-bear" ]
         state.active_agents)
 
+let test_backend_compression_uses_text_safe_encoding () =
+  let original =
+    String.concat "" (List.init 128 (fun _ -> "{\"active_agents\":[],\"message_seq\":0}"))
+  in
+  let encoded = Backend_compression.compress_with_header original in
+  check bool "compressed representation stays text-safe" false (has_nul_byte encoded);
+  check bool "compressed representation differs from original" true (encoded <> original);
+  check string "decompression roundtrip" original
+    (Backend_compression.decompress_auto encoded)
+
 let () =
   run "Room_state_recovery"
     [
@@ -134,5 +152,7 @@ let () =
             test_read_state_recovers_legacy_active_agent_entries;
           test_case "filters invalid active_agents entries" `Quick
             test_read_state_filters_invalid_active_agent_entries;
+          test_case "backend compression uses text-safe encoding" `Quick
+            test_backend_compression_uses_text_safe_encoding;
         ] );
     ]

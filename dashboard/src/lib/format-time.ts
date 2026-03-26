@@ -29,6 +29,24 @@ export function formatDuration(seconds?: number | null): string {
   return `${Math.round(seconds / 86400)}일`
 }
 
+/** Format duration in milliseconds as Korean text — "5분", "2시간 30분", "1일 3시간". */
+export function formatDurationMs(ms: number): string {
+  if (ms < 0) ms = 0
+  const totalMinutes = Math.floor(ms / 60_000)
+  const totalHours = Math.floor(totalMinutes / 60)
+  const totalDays = Math.floor(totalHours / 24)
+
+  if (totalDays >= 1) {
+    const remainHours = totalHours % 24
+    return remainHours > 0 ? `${totalDays}일 ${remainHours}시간` : `${totalDays}일`
+  }
+  if (totalHours >= 1) {
+    const remainMinutes = totalMinutes % 60
+    return remainMinutes > 0 ? `${totalHours}시간 ${remainMinutes}분` : `${totalHours}시간`
+  }
+  return `${totalMinutes}분`
+}
+
 /** Format elapsed seconds in compact English — "3s", "5m", "2h 30m". */
 export function formatElapsedCompact(seconds?: number | null): string {
   if (seconds == null) return ''

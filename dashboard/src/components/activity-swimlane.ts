@@ -9,6 +9,7 @@ import { EmptyState, LoadingState } from './common/feedback-state'
 import { fetchSwimlane } from '../api'
 import type { SwimlaneResponse, AgentSpan } from '../types'
 import { selectedNodeId, highlightedAgentId } from './activity-graph-view'
+import { formatDurationMs } from '../lib/format-time'
 
 const swimlaneData = signal<SwimlaneResponse | null>(null)
 const swimlaneLoading = signal(false)
@@ -29,23 +30,6 @@ function spanColor(kind: string): string {
     case 'presence': return 'rgba(148, 163, 184, 0.25)'
     default: return '#94a3b8'
   }
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 0) ms = 0
-  const totalMinutes = Math.floor(ms / 60_000)
-  const totalHours = Math.floor(totalMinutes / 60)
-  const totalDays = Math.floor(totalHours / 24)
-
-  if (totalDays >= 1) {
-    const remainHours = totalHours % 24
-    return remainHours > 0 ? `${totalDays}일 ${remainHours}시간` : `${totalDays}일`
-  }
-  if (totalHours >= 1) {
-    const remainMinutes = totalMinutes % 60
-    return remainMinutes > 0 ? `${totalHours}시간 ${remainMinutes}분` : `${totalHours}시간`
-  }
-  return `${totalMinutes}분`
 }
 
 async function loadSwimlane() {
@@ -168,7 +152,7 @@ function drawSwimlane(
   // Tooltip
   if (tooltip) {
     const { x, y, span } = tooltip
-    const duration = formatDuration(span.end_ms - span.start_ms)
+    const duration = formatDurationMs(span.end_ms - span.start_ms)
     const lines = [
       span.label || span.kind,
       `종류: ${span.kind}`,

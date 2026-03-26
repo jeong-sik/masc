@@ -184,12 +184,6 @@ export async function submitMention(): Promise<void> {
 
 // --- Helpers ---
 
-export function compactCopy(value: string | null | undefined, max = 160): string | null {
-  const text = (value ?? '').replace(/\s+/g, ' ').trim()
-  if (!text) return null
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text
-}
-
 export function journalKindIcon(entry: JournalEntry): string {
   if (entry.kind === 'board') return 'B'
   if (entry.kind === 'tasks') return 'T'

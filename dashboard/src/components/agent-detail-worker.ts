@@ -4,7 +4,8 @@ import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
-import { compactCopy, workerBriefForAgent } from './agent-detail-state'
+import { workerBriefForAgent } from './agent-detail-state'
+import { trimText } from '../lib/truncate'
 
 export function AgentWorkerBrief({ agentName }: { agentName: string }) {
   const worker = workerBriefForAgent(agentName)
@@ -26,7 +27,7 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
         ${worker.recent_output_preview ? html`
           <div class="flex items-baseline gap-2 text-[13px]">
             <span class="text-[11px] text-[var(--text-muted)] min-w-[60px] shrink-0">출력</span>
-            <span class="agent-worker-brief__preview">${compactCopy(worker.recent_output_preview, 200)}</span>
+            <span class="agent-worker-brief__preview">${trimText(worker.recent_output_preview, 200)}</span>
           </div>
         ` : null}
         ${worker.related_session_id ? html`

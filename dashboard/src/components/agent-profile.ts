@@ -34,6 +34,7 @@ import {
 import { missionSnapshot } from '../mission-store'
 import { navigate } from '../router'
 import { formatDuration } from './mission-utils'
+import { trimText } from '../lib/truncate'
 import type {
   Agent,
   DashboardExecutionContinuityBrief,
@@ -93,12 +94,6 @@ function continuityBrief(name: string): DashboardExecutionContinuityBrief | null
 
 function workerBrief(name: string) {
   return executionWorkerSupportBriefs.value.find(w => w.name === name) ?? null
-}
-
-function compactCopy(value: string | null | undefined, max = 160): string | null {
-  const text = (value ?? '').replace(/\s+/g, ' ').trim()
-  if (!text) return null
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
 async function loadProfile(name: string): Promise<void> {
@@ -207,8 +202,8 @@ function CharacterPlate({ name }: { name: string }) {
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   const signalTruth = brief?.signal_truth
   const continuitySummary =
-    compactCopy(contBrief?.continuity_summary)
-    ?? compactCopy(contBrief?.skill_route_summary)
+    trimText(contBrief?.continuity_summary, 160)
+    ?? trimText(contBrief?.skill_route_summary, 160)
     ?? null
   const isKeeper = keeper != null
   const workerState = worker?.state
@@ -393,7 +388,7 @@ export function AgentProfile({ name }: { name: string }) {
                 return html`
                   <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-[13px] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
                     <span class="text-[11px] font-semibold text-[var(--ff-gold)] min-w-8">${timelineEventLabel(evt.type)}</span>
-                    ${title ? html`<span class="flex-1 text-[13px] text-[#c8daf7]">${compactCopy(title, 80)}</span>` : null}
+                    ${title ? html`<span class="flex-1 text-[13px] text-[#c8daf7]">${trimText(title, 80)}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
                   </div>
                 `

@@ -231,9 +231,15 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
           in
           Fun.protect
             ~finally:(fun () ->
-              ignore
+              (* Cancellation-safe: catch exceptions to prevent masking *)
+              (try ignore
                 (leave_worker ~sw ~auth_token
-                   ~session_id:meta.mcp_session_id ~worker_name))
+                   ~session_id:meta.mcp_session_id ~worker_name)
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn ->
+                   Log.LocalWorker.warn "leave_worker failed for %s: %s"
+                     worker_name (Printexc.to_string exn)))
             (fun () ->
               let _ =
                 match join_worker ~sw ~auth_token

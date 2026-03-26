@@ -317,9 +317,15 @@ let rec run_worker_via_oas
   in
   Fun.protect
     ~finally:(fun () ->
-      ignore
+      (* Cancellation-safe: catch exceptions to prevent masking *)
+      (try ignore
         (Worker_container_types.leave_worker ~sw ~auth_token
-           ~session_id ~worker_name))
+           ~session_id ~worker_name)
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+           Log.LocalWorker.warn "leave_worker failed for %s: %s" worker_name
+             (Printexc.to_string exn)))
     (fun () ->
       let _ =
         match

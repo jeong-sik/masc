@@ -340,7 +340,14 @@ module Reflection_bridge = struct
       let response_stream = Grpc_eio.Stream.create 16 in
       let process_loop () =
         Fun.protect
-          ~finally:(fun () -> Grpc_eio.Stream.close response_stream)
+          ~finally:(fun () ->
+            (* Cancellation-safe: catch exceptions to prevent masking *)
+            try Grpc_eio.Stream.close response_stream
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+                Log.Server.warn "gRPC reflection stream close failed: %s"
+                  (Printexc.to_string exn))
           (fun () ->
             let rec loop () =
               let request_bytes = Grpc_eio.Stream.take request_stream in

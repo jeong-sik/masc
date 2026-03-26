@@ -48,17 +48,26 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
         Eio.Promise.resolve reg.done_r `Stopped;
         publish_lifecycle "stopped" meta.name "normal exit")
       ~finally:(fun () ->
-        Keeper_registry.cleanup_tracking ~base_path:ctx.config.base_path meta.name;
+        (* Cancellation-safe: all operations catch their own exceptions
+           to prevent masking the original exception from Fun.protect. *)
+        (try Keeper_registry.cleanup_tracking ~base_path:ctx.config.base_path meta.name
+         with exn ->
+           Log.Keeper.warn "cleanup_tracking failed for %s: %s" meta.name
+             (Printexc.to_string exn));
         match Eio.Promise.peek reg.done_p with
         | Some _ -> ()  (* Already resolved in the normal path *)
         | None ->
             let msg = "fiber terminated without resolution" in
-            Keeper_registry.record_crash ~base_path:ctx.config.base_path
-              meta.name (Time_compat.now ()) msg;
-            Keeper_registry.record_error ~base_path:ctx.config.base_path
-              meta.name msg;
-            Keeper_registry.set_state ~base_path:ctx.config.base_path meta.name
-              Keeper_registry.Stopped;
+            (try
+              Keeper_registry.record_crash ~base_path:ctx.config.base_path
+                meta.name (Time_compat.now ()) msg;
+              Keeper_registry.record_error ~base_path:ctx.config.base_path
+                meta.name msg;
+              Keeper_registry.set_state ~base_path:ctx.config.base_path meta.name
+                Keeper_registry.Stopped
+             with exn ->
+               Log.Keeper.warn "crash recording failed for %s: %s" meta.name
+                 (Printexc.to_string exn));
             Eio.Promise.resolve reg.done_r (`Crashed msg);
             publish_lifecycle "crashed" meta.name msg))
 

@@ -266,12 +266,14 @@ let run ~sw t =
   match t.lifecycle with
   | Perpetual ->
     Eio.Fiber.fork_daemon ~sw (fun () ->
+      (* Fun.protect safe: finally is non-throwing field mutation *)
       Fun.protect
         (fun () -> loop t; `Stop_daemon)
         ~finally:(fun () -> t.alive <- false)
     )
   | Bounded _ ->
     Eio.Fiber.fork ~sw (fun () ->
+      (* Fun.protect safe: finally is non-throwing field mutation *)
       Fun.protect
         (fun () -> loop t)
         ~finally:(fun () -> t.alive <- false)

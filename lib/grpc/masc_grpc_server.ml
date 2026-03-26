@@ -339,9 +339,9 @@ module Reflection_bridge = struct
         string Grpc_eio.Stream.t =
       let response_stream = Grpc_eio.Stream.create 16 in
       let process_loop () =
-        Fun.protect
-          ~finally:(fun () -> Grpc_eio.Stream.close response_stream)
-          (fun () ->
+        Eio.Switch.run @@ fun loop_sw ->
+        Eio.Switch.on_release loop_sw (fun () ->
+            (try Grpc_eio.Stream.close response_stream with _ -> ()));
             let rec loop () =
               let request_bytes = Grpc_eio.Stream.take request_stream in
               let services = Grpc_eio.Server.list_services !server_ref in
@@ -391,7 +391,7 @@ module Reflection_bridge = struct
             Grpc_eio.Stream.add response_stream response;
               loop ()
             in
-            try loop () with End_of_file -> ())
+            try loop () with End_of_file -> ()
       in
       Eio.Fiber.fork ~sw process_loop;
       response_stream
@@ -477,6 +477,7 @@ let start
         Log.Server.info
           "  methods: Join, Leave, Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
         Transport_metrics.set_grpc_runtime_listening true;
+        (* Safe: finally is Atomic.set — no I/O, no exception risk *)
         Fun.protect
           ~finally:(fun () -> Transport_metrics.set_grpc_runtime_listening false)
           (fun () -> Grpc_eio.Server.serve ~sw ~env server)

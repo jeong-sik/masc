@@ -393,7 +393,7 @@ let content_matches_query content query =
     List.exists (fun hint ->
       String.length hint >= 3 &&
       try
-        let _ = Str.search_forward (Str.regexp_string (String.lowercase_ascii hint)) content_lower 0 in
+        let _ = Re.Str.search_forward (Re.Str.regexp_string (String.lowercase_ascii hint)) content_lower 0 in
         true
       with Not_found -> false
     ) hints

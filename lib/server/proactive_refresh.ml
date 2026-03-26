@@ -11,6 +11,7 @@ type config = {
   max_backoff_s : float;
   failure_threshold : int;
   timeout_s : float;
+  on_error : (exn -> unit) option;
 }
 
 let default_config ~label ~interval_s =
@@ -20,6 +21,7 @@ let default_config ~label ~interval_s =
     max_backoff_s = 120.0;
     failure_threshold = 5;
     timeout_s = 10.0;
+    on_error = None;
   }
 
 let is_internal_race_cancel exn =
@@ -45,6 +47,11 @@ let log_refresh_failure ~config ~consecutive_failures ~current_interval ~dt exn 
     config.label !consecutive_failures !current_interval dt
     (Printexc.to_string exn)
 
+let notify_error config exn =
+  match config.on_error with
+  | Some f -> (try f exn with _ -> ())
+  | None -> ()
+
 let start ~sw ~clock ~config ~compute ~on_result =
   Eio.Fiber.fork ~sw (fun () ->
     let t0 = Time_compat.now () in
@@ -57,15 +64,18 @@ let start ~sw ~clock ~config ~compute ~on_result =
          Log.Dashboard.info "%s warm cache done (%.1fs)" config.label
            (Time_compat.now () -. t0)
        | Error `Timeout ->
+         notify_error config (Failure "timeout");
          Log.Dashboard.warn "%s warm cache skipped (%.1fs timeout)" config.label
            (Time_compat.now () -. t0)
      with
      | exn ->
        if should_reraise_cancel exn then
          raise exn
-       else
+       else begin
+         notify_error config exn;
          Log.Dashboard.warn "%s warm cache failed (%.1fs): %s" config.label
-           (Time_compat.now () -. t0) (Printexc.to_string exn)));
+           (Time_compat.now () -. t0) (Printexc.to_string exn)
+       end));
   Eio.Fiber.fork ~sw (fun () ->
     Log.Dashboard.info "starting %s refresh loop" config.label;
     let consecutive_failures = ref 0 in
@@ -88,11 +98,14 @@ let start ~sw ~clock ~config ~compute ~on_result =
          Log.Dashboard.info "%s refreshed (%.1fs)" config.label dt
          | Error `Timeout ->
              let dt = Time_compat.now () -. t0 in
+             let timeout_exn = Failure "timeout" in
+             notify_error config timeout_exn;
              log_refresh_failure ~config ~consecutive_failures ~current_interval
-               ~dt (Failure "timeout")
+               ~dt timeout_exn
        with exn ->
          if should_reraise_cancel exn then raise exn;
          let dt = Time_compat.now () -. t0 in
+         notify_error config exn;
          log_refresh_failure ~config ~consecutive_failures ~current_interval
            ~dt exn);
       loop ()

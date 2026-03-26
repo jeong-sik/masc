@@ -10,19 +10,19 @@ open Keeper_memory_policy
 let strip_state_blocks_text (s : string) : string =
   let start_marker = "[STATE]" in
   let end_marker = "[/STATE]" in
-  let start_re = Str.regexp_string start_marker in
-  let end_re = Str.regexp_string end_marker in
+  let start_re = Re.Str.regexp_string start_marker in
+  let end_re = Re.Str.regexp_string end_marker in
   let len = String.length s in
   let rec loop from (buf : Buffer.t) =
     if from >= len then ()
     else
       try
-        let i = Str.search_forward start_re s from in
+        let i = Re.Str.search_forward start_re s from in
         if i > from then Buffer.add_substring buf s from (i - from);
         let block_start = i + String.length start_marker in
         let next_from =
           try
-            let j = Str.search_forward end_re s block_start in
+            let j = Re.Str.search_forward end_re s block_start in
             j + String.length end_marker
           with Not_found ->
             len
@@ -66,7 +66,7 @@ let user_visible_reply_text ?fallback (raw : string) : string =
 let normalize_proactive_text (raw : string) : string =
   raw
   |> strip_internal_reply_markup
-  |> Str.global_replace (Str.regexp "[ \t\r\n]+") " "
+  |> Re.Str.global_replace (Re.Str.regexp "[ \t\r\n]+") " "
   |> String.trim
 
 let extract_checkin_text (raw : string) : string option =
@@ -95,13 +95,13 @@ let extract_checkin_text (raw : string) : string option =
 
 let proactive_has_terminal_punct (s : string) : bool =
   let t = String.trim s in
-  t <> "" && Str.string_match (Str.regexp ".*[.!?。！？]$") t 0
+  t <> "" && Re.Str.string_match (Re.Str.regexp ".*[.!?。！？]$") t 0
 
 let proactive_has_terminal_korean_ending (s : string) : bool =
   let t = String.trim s in
   t <> ""
-  && Str.string_match
-       (Str.regexp ".*\\(다\\|요\\|니다\\|습니다\\|중입니다\\|함\\)$")
+  && Re.Str.string_match
+       (Re.Str.regexp ".*\\(다\\|요\\|니다\\|습니다\\|중입니다\\|함\\)$")
        t 0
 
 let proactive_has_terminal_ending (s : string) : bool =
@@ -110,8 +110,8 @@ let proactive_has_terminal_ending (s : string) : bool =
 let proactive_looks_fragmentary (s : string) : bool =
   let t = String.trim s in
   t = ""
-  || Str.string_match (Str.regexp ".*[\"'([{]$") t 0
-  || Str.string_match (Str.regexp ".*[:;,\\-]$") t 0
+  || Re.Str.string_match (Re.Str.regexp ".*[\"'([{]$") t 0
+  || Re.Str.string_match (Re.Str.regexp ".*[:;,\\-]$") t 0
 
 let proactive_fallback_reply ~(meta : keeper_meta) ~(idle_seconds : int) : string =
   let goal =
@@ -120,7 +120,7 @@ let proactive_fallback_reply ~(meta : keeper_meta) ~(idle_seconds : int) : strin
   in
   let goal_phrase =
     goal
-    |> Str.global_replace (Str.regexp "[.!?。！？]+$") ""
+    |> Re.Str.global_replace (Re.Str.regexp "[.!?。！？]+$") ""
     |> String.trim
     |> fun s -> if s = "" then goal else s
   in
@@ -168,8 +168,8 @@ let looks_fragmentary_history_text (raw : string) : bool =
     let hard_fragment = proactive_looks_fragmentary t in
     let has_terminal = proactive_has_terminal_ending t in
     let ends_korean_sentence =
-      Str.string_match
-        (Str.regexp ".*\\(다\\|요\\|니다\\|습니다\\|중입니다\\|함\\)$")
+      Re.Str.string_match
+        (Re.Str.regexp ".*\\(다\\|요\\|니다\\|습니다\\|중입니다\\|함\\)$")
         t 0
     in
     let short_unterminated =
@@ -177,8 +177,8 @@ let looks_fragmentary_history_text (raw : string) : bool =
     in
     let trailing_connector =
       (not has_terminal)
-      && Str.string_match
-           (Str.regexp
+      && Re.Str.string_match
+           (Re.Str.regexp
               ".*\\(and\\|or\\|with\\|to\\|for\\|그리고\\|또는\\|및\\)$")
            (String.lowercase_ascii t) 0
     in

@@ -33,7 +33,7 @@ let contains_casefold haystack needle =
   let haystack = String.lowercase_ascii haystack in
   let needle = String.lowercase_ascii needle in
   try
-    ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
+    ignore (Re.Str.search_forward (Re.Str.regexp_string needle) haystack 0);
     true
   with Not_found -> false
 

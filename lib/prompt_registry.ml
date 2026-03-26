@@ -86,12 +86,12 @@ type prompt_resolution = {
 (** Extract variable names from a template string.
     Matches {{variable_name}} patterns. *)
 let extract_variables template =
-  let regex = Str.regexp "{{\\([^}]+\\)}}" in
+  let regex = Re.Str.regexp "{{\\([^}]+\\)}}" in
   let rec find_all start acc =
     try
-      let _ = Str.search_forward regex template start in
-      let var = Str.matched_group 1 template in
-      let next = Str.match_end () in
+      let _ = Re.Str.search_forward regex template start in
+      let var = Re.Str.matched_group 1 template in
+      let next = Re.Str.match_end () in
       find_all next (var :: acc)
     with Not_found -> acc
   in
@@ -377,12 +377,12 @@ let render_template ~template ~vars () : (string, string) result =
     let result = ref template in
     List.iter (fun (name, value) ->
       let pattern = Printf.sprintf "{{%s}}" name in
-      result := Str.global_replace (Str.regexp_string pattern) value !result
+      result := Re.Str.global_replace (Re.Str.regexp_string pattern) value !result
     ) vars;
     (* Check for unresolved variables anywhere in the result *)
-    let regex = Str.regexp "{{[^}]+}}" in
+    let regex = Re.Str.regexp "{{[^}]+}}" in
     let has_unresolved =
-      try ignore (Str.search_forward regex !result 0); true
+      try ignore (Re.Str.search_forward regex !result 0); true
       with Not_found -> false
     in
     if has_unresolved then

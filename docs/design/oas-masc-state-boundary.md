@@ -30,7 +30,7 @@ State that describes an agent's runtime, cognitive context, and operational life
 | Checkpoint | `checkpoint_id`, `generation`, `serialized` | **MASC** (`keeper_working_context`) | OAS `Checkpoint` |
 | Memory (5-tier) | `long_term`, `episodic`, `procedural`, `working`, `scratchpad` | **Bridge** (`memory_oas_bridge`) | OAS `Memory.t` (already the target) |
 | Context reduction | `PruneToolOutputs`, `MergeContiguous`, `DropLowImportance`, `SummarizeOld` | **MASC** (`context_compact_oas`) | OAS `Context_reducer` |
-| Model selection | `active_model`, `last_model_used`, `allowed_models` | **MASC** (`keeper_meta`) | OAS `Cascade_config` |
+| Model selection | `last_model_used`, derived `active_model`, `cascade_name` | **MASC** (`keeper_meta`) | OAS `Cascade_config` |
 | System prompt | `system_prompt`, `build_turn_prompt` | **MASC** (`keeper_prompt`, `keeper_agent_run`) | OAS `Agent.config` |
 | Collaboration phase | `phase`, `participants`, `artifacts`, `contributions` | **OAS** (`Collaboration.t`) | OAS (correct) |
 | Session lifecycle | `session_id`, `created_at`, `updated_at` | **OAS** (`Session.t`) | OAS (correct) |
@@ -61,7 +61,7 @@ State that describes the coordination domain — not how an agent thinks, but wh
 - `total_turns`, `total_input_tokens`, `total_output_tokens`, `total_tokens`, `total_cost_usd` — cumulative usage stats
 - `last_turn_ts`, `last_model_used`, `last_input_tokens`, `last_output_tokens`, `last_total_tokens`, `last_latency_ms` — per-turn metrics
 - `compaction_count`, `last_compaction_ts`, `last_compaction_before_tokens`, `last_compaction_after_tokens` — context management stats
-- `active_model`, `allowed_models`, `models` — model selection state
+- `last_model_used`, `cascade_name`, derived `active_model` — model selection state
 - `trace_id`, `trace_history` — session tracing
 - `generation` — checkpoint generation counter
 - `context_budget` — context window budget ratio

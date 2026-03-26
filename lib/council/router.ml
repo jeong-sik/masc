@@ -123,7 +123,7 @@ module Features = struct
     List.exists (fun w -> 
       let pattern = String.lowercase_ascii w in
       try
-        let _ = Str.search_forward (Str.regexp_string pattern) lower 0 in
+        let _ = Re.Str.search_forward (Re.Str.regexp_string pattern) lower 0 in
         true
       with Not_found -> false
     ) words
@@ -132,7 +132,7 @@ module Features = struct
     let lower = String.lowercase_ascii text in
     List.fold_left (fun acc w ->
       let pattern = String.lowercase_ascii w in
-      if (try let _ = Str.search_forward (Str.regexp_string pattern) lower 0 in true
+      if (try let _ = Re.Str.search_forward (Re.Str.regexp_string pattern) lower 0 in true
           with Not_found -> false)
       then acc + 1
       else acc

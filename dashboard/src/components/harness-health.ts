@@ -22,6 +22,8 @@ interface CalibrationStats {
   false_positive_count: number
   false_negative_count: number
   agreement_rate: number
+  fallback_count?: number
+  recent_fallback_reasons?: string[]
 }
 
 interface HarnessHealthData {
@@ -139,6 +141,12 @@ export function HarnessHealth() {
     : '0'
   const agreementPct = cal ? (cal.agreement_rate * 100).toFixed(1) : '-'
 
+  // Detect evaluator degradation: fallback > 80% of total verdicts
+  const fallbackCount = cal?.fallback_count ?? 0
+  const isFallbackDominant = cal != null && cal.total_verdicts > 0
+    && (fallbackCount / cal.total_verdicts) > 0.8
+  const fallbackReasons = cal?.recent_fallback_reasons ?? []
+
   return html`
     <div class="space-y-4">
       <${Card} title="Evaluator 캘리브레이션" class="section">
@@ -149,6 +157,26 @@ export function HarnessHealth() {
         ` : !cal ? html`
           <div class="text-slate-500 text-sm">데이터 없음</div>
         ` : html`
+          ${isFallbackDominant ? html`
+            <div class="mb-4 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3">
+              <div class="text-yellow-400 text-sm font-medium mb-1">Evaluator 미연결</div>
+              <div class="text-yellow-400/80 text-xs">
+                전체 ${cal.total_verdicts}건 중 ${fallbackCount}건이 fallback으로 처리됨.
+                LLM evaluator cascade가 동작하지 않아 모든 verdict가 자동 승인 상태입니다.
+              </div>
+              ${fallbackReasons.length > 0 ? html`
+                <details class="mt-2">
+                  <summary class="text-yellow-400/60 text-xs cursor-pointer">최근 에러 (${fallbackReasons.length}건)</summary>
+                  <div class="mt-1 space-y-1">
+                    ${fallbackReasons.map(r => html`
+                      <div class="text-xs text-yellow-400/50 font-mono break-all">${r}</div>
+                    `)}
+                  </div>
+                </details>
+              ` : null}
+            </div>
+          ` : null}
+
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
             <${StatCard} label="총 Verdict" value=${cal.total_verdicts} />
             <${StatCard} label="Reject 비율" value="${rejectRate}%" />

@@ -9,6 +9,7 @@ type config = {
   max_backoff_s : float;    (** Cap for exponential backoff. *)
   failure_threshold : int;  (** Consecutive failures before backoff kicks in. *)
   timeout_s : float;        (** Warm-cache timeout. *)
+  on_error : (exn -> unit) option;  (** Called on timeout or exception. *)
 }
 
 val default_config : label:string -> interval_s:float -> config
@@ -26,4 +27,7 @@ val start :
 
     [compute] produces a value; [on_result] stores it (typically writing
     to a ref).  A warm-cache run executes synchronously before the async
-    loop, bounded by [config.timeout_s]. *)
+    loop, bounded by [config.timeout_s].
+
+    When [config.on_error] is set, it is called on timeout or exception,
+    allowing callers to record the failure (e.g. mark_cached_surface_error). *)

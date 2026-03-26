@@ -84,8 +84,9 @@ let generate_session_key () =
 let from_mcp_params params =
   let module U = Yojson.Safe.Util in
   let get_opt key =
-    try Some (params |> U.member key |> U.to_string)
-    with Yojson.Safe.Util.Type_error _ -> None
+    match U.member key params with
+    | `String s -> Some s
+    | _ -> None
   in
   let session_key_prefix session_key =
     let prefix_len = min 8 (String.length session_key) in
@@ -113,9 +114,10 @@ let from_mcp_params params =
   in
   let user_id = get_opt "_user_id" in
   let room_id = get_opt "room" in
-  let capabilities = try
-    params |> U.member "_capabilities" |> U.to_list |> List.map U.to_string
-  with Yojson.Safe.Util.Type_error _ -> []
+  let capabilities =
+    match U.member "_capabilities" params with
+    | `List l -> List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) l
+    | _ -> []
   in
   let now = Time_compat.now () in
   {

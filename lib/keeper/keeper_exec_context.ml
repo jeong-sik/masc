@@ -83,8 +83,8 @@ let context_of_legacy_checkpoint
 
 let checkpoint_model_of_meta (meta : keeper_meta) =
   let candidates =
-    [ meta.usage.last_model_used; meta.active_model; meta.cascade_name ]
-    @ meta.models
+    meta.usage.last_model_used
+    :: Oas_model_resolve.models_of_cascade_name meta.cascade_name
   in
   List.find_opt (fun value -> String.trim value <> "") candidates
   |> Option.value ~default:"keeper_unified"
@@ -369,18 +369,12 @@ let keeper_action_kind_of_tool_names tool_names =
   else "none"
 
 
-let effective_model_labels_for_turn
-    (m : keeper_meta)
-    ~(inline_models : string list) : string list =
-  if inline_models <> [] then
-    inline_models
-  else
-    match active_model_of_meta m with
-    | "" ->
-        let pool = dedupe_keep_order (m.allowed_models @ m.models) in
-        if pool = [] then Oas_model_resolve.models_of_cascade_name m.cascade_name
-        else pool
-    | model -> [ model ]
+let effective_model_labels_for_turn (m : keeper_meta) : string list =
+  match active_model_of_meta m with
+  | "" -> Oas_model_resolve.models_of_cascade_name m.cascade_name
+  | model ->
+      dedupe_keep_order
+        (model :: Oas_model_resolve.models_of_cascade_name m.cascade_name)
 
 let room_cursor_for meta room_id =
   meta.last_seen_seq_by_room

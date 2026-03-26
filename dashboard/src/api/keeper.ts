@@ -4,11 +4,9 @@ import { isRecord } from '../components/common/normalize'
 import {
   formatKeeperVisibleReply,
   normalizeKeeperConversationDetails,
-  normalizeKeeperToolResponse,
 } from '../keeper-message'
 import type { KeeperConversationDetails } from '../types'
 import { currentDashboardActor, runOperatorAction } from './core'
-import { callMcpTool } from './mcp'
 
 // --- Types ---
 
@@ -33,32 +31,15 @@ export interface KeeperChatStreamEvent {
 
 // --- Direct and operator-mediated messaging ---
 
-async function callKeeperMessageRaw(
-  name: string,
-  message: string,
-  models?: string[],
-): Promise<string> {
-  const args: Record<string, unknown> = {
-    name,
-    message,
-    direct_reply: true,
-    timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
-  }
-  if (models && models.length > 0) args.models = models
-  return callMcpTool('masc_keeper_msg', args)
-}
-
 async function callKeeperMessageViaOperator(
   name: string,
   message: string,
-  models?: string[],
 ): Promise<KeeperToolReply> {
   const payload: Record<string, unknown> = {
     message,
     direct_reply: true,
     timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
   }
-  if (models && models.length > 0) payload.models = models
   const response = await runOperatorAction({
     actor: currentDashboardActor(),
     action_type: 'keeper_message',
@@ -84,12 +65,7 @@ async function callKeeperMessageViaOperator(
 export async function sendKeeperMessageDetailed(
   name: string,
   message: string,
-  models?: string[],
 ): Promise<KeeperToolReply> {
-  if (models && models.length > 0) {
-    const raw = await callKeeperMessageRaw(name, message, models)
-    return normalizeKeeperToolResponse(raw)
-  }
   return callKeeperMessageViaOperator(name, message)
 }
 
@@ -150,7 +126,6 @@ function isTerminalKeeperStreamEvent(event: KeeperChatStreamEvent): boolean {
 export async function streamKeeperMessage(
   name: string,
   message: string,
-  models: string[] | undefined,
   {
     signal,
     onEvent,
@@ -170,7 +145,6 @@ export async function streamKeeperMessage(
       message,
       direct_reply: true,
       timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
-      ...(models && models.length > 0 ? { models } : {}),
     }),
     signal,
   })

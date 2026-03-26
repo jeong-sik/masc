@@ -33,7 +33,7 @@ let ensure_cache_dir config =
 (** Sanitize key for filename *)
 let sanitize_key key =
   (* Replace unsafe chars with underscore, limit length *)
-  let safe = Str.global_replace (Str.regexp "[^a-zA-Z0-9_-]") "_" key in
+  let safe = Re.Str.global_replace (Re.Str.regexp "[^a-zA-Z0-9_-]") "_" key in
   if String.length safe > 64 then
     String.sub safe 0 64
   else safe

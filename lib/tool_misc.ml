@@ -332,7 +332,6 @@ let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
        ("status", `String status);
        ("action_budget", `String "conversation");
        ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
-       ("allowed_models", `List (List.map (fun model -> `String model) meta.allowed_models));
        ("updated_at", `String meta.updated_at);
      ]
     @ policy_json)

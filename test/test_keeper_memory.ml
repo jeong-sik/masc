@@ -14,8 +14,6 @@ let keeper_meta ~name ~mention_targets =
         ("name", `String name);
         ("trace_id", `String "trace-1");
         ("goal", `String "keep continuity");
-        ("models", `List [ `String "custom:test-model" ]);
-        ("active_model", `String "custom:test-model");
         ("mention_targets", `List (List.map (fun target -> `String target) mention_targets));
       ]
   in

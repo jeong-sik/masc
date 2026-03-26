@@ -1,7 +1,6 @@
-(** Keeper_turn_lifecycle -- keeper model-set and shutdown handlers.
+(** Keeper_turn_lifecycle -- keeper shutdown handlers.
 
-    Extracted from keeper_turn.ml.  Provides [handle_keeper_model_set] and
-    [handle_keeper_down]. *)
+    Extracted from keeper_turn.ml. Provides [handle_keeper_down]. *)
 
 open Tool_args
 open Keeper_types
@@ -9,35 +8,6 @@ open Keeper_keepalive
 open Keeper_turn_session
 
 type tool_result = Keeper_types.tool_result
-
-(* Legacy model-set handler.  cascade_name is the execution authority;
-   this tool now only touches updated_at and restarts keepalive. *)
-let handle_keeper_model_set ctx args : tool_result =
-  let name = get_string args "name" "" in
-  let _model = get_string args "model" "" |> String.trim in
-  let _allowed_models_arg = get_string_list args "allowed_models" in
-  if not (validate_name name) then
-    (false, "❌ invalid keeper name")
-  else
-    match read_meta ctx.config name with
-    | Error e -> (false, "❌ " ^ e)
-    | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
-    | Ok (Some meta) ->
-        let updated = { meta with updated_at = now_iso () } in
-        (match write_meta ctx.config updated with
-         | Error e -> (false, "❌ " ^ e)
-         | Ok () ->
-             stop_keepalive updated.name;
-             start_keepalive ctx updated;
-             ( true,
-               Yojson.Safe.pretty_to_string
-                 (`Assoc
-                    [
-                      ("name", `String updated.name);
-                      ("cascade_name", `String updated.cascade_name);
-                      ("room_scope", `String updated.room_scope);
-                    ]) ))
-
 
 let handle_keeper_down ctx args : tool_result =
   let name = get_string args "name" "" in

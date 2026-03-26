@@ -324,9 +324,9 @@ let search ~query ~limit =
       (* Full-scan search: match query against content, author, hearth.
          Uses Board.search_posts to scan all posts (not limited by list_posts cap). *)
       let query_lower = String.lowercase_ascii query in
-      let pattern = Str.regexp_string query_lower in
+      let pattern = Re.Str.regexp_string query_lower in
       let matches_str s =
-        try ignore (Str.search_forward pattern (String.lowercase_ascii s) 0); true
+        try ignore (Re.Str.search_forward pattern (String.lowercase_ascii s) 0); true
         with Not_found -> false
       in
       let predicate (p : Board.post) =

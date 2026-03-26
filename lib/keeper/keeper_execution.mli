@@ -59,8 +59,7 @@ val compact_if_needed :
 val generate_trace_id : unit -> string
 
 (** Resolve effective model labels for a turn. *)
-val effective_model_labels_for_turn :
-  keeper_meta -> inline_models:string list -> string list
+val effective_model_labels_for_turn : keeper_meta -> string list
 
 (** {1 Room Cursor} *)
 

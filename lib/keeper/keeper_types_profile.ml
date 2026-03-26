@@ -47,7 +47,7 @@ let normalize_similarity_text (s : string) : string =
 let similarity_tokens (s : string) : string list =
   s
   |> normalize_similarity_text
-  |> Str.split (Str.regexp "[ \t\r\n]+")
+  |> Re.Str.split (Re.Str.regexp "[ \t\r\n]+")
   |> List.filter (fun t -> String.length t >= 2)
 
 let jaccard_similarity (a : string list) (b : string list) : float =
@@ -140,14 +140,6 @@ let dedupe_keep_order items =
     items
 
 let first_some = Dashboard_utils.first_some
-
-let resolve_allowed_models ~explicit_allowed_models ~seed_allowed_models ~models =
-  if explicit_allowed_models <> [] then
-    dedupe_keep_order explicit_allowed_models
-  else if seed_allowed_models <> [] then
-    dedupe_keep_order seed_allowed_models
-  else
-    dedupe_keep_order models
 
 let canonical_room_scope = function
   | "all" -> "all"

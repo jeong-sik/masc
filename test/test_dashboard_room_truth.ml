@@ -65,7 +65,7 @@ let test_dashboard_room_truth_empty_room () =
           0
           (json |> member "operator" |> member "pending_confirm_summary" |> member "total_count" |> to_int);
         check string "focus source"
-          "orchestra"
+          "room"
           (json |> member "focus" |> member "source" |> to_string);
       ))
 

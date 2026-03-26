@@ -153,6 +153,7 @@ for env_name in \
     MASC_MCP_PORT \
     MASC_HOST \
     MASC_BASE_PATH \
+    MASC_CONFIG_DIR \
     MASC_WS_ENABLED \
     MASC_WEBRTC_ENABLED
 do
@@ -182,6 +183,7 @@ for env_name in \
     MASC_MCP_PORT \
     MASC_HOST \
     MASC_BASE_PATH \
+    MASC_CONFIG_DIR \
     MASC_WS_ENABLED \
     MASC_WEBRTC_ENABLED
 do
@@ -442,6 +444,9 @@ resolve_base_path() {
 
 RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
 export MASC_BASE_PATH="$RESOLVED_BASE_PATH"
+if [ -z "${MASC_CONFIG_DIR:-}" ]; then
+    export MASC_CONFIG_DIR="$SCRIPT_DIR/config"
+fi
 
 # Wait for port to become available.
 # Default behavior is fail-fast on conflict to prevent duplicate server startup.

@@ -11,6 +11,8 @@ export const KEEPER_MESSAGE_TIMEOUT_MS = 90_000
 export const SOCIAL_SWEEP_TIMEOUT_MS = 45_000
 export const ACTIVITY_TIMEOUT_MS = 10_000
 export const MCP_INITIALIZE_TIMEOUT_MS = 10_000
+export const MCP_INITIALIZED_NOTIFY_TIMEOUT_MS = 5_000
+export const MCP_INIT_COOLDOWN_MS = 2_000
 
 // --- SSE reconnection ---
 export const RECONNECT_BASE_MS = 1_000
@@ -20,6 +22,25 @@ export const RECONNECT_MAX_MS = 15_000
 export const SHELL_TTL_MS = 5_000
 export const EXECUTION_TTL_MS = 30_000
 export const HEARTBEAT_STALE_MS = 120_000
+export const UI_REFRESH_TTL_MS = 1_000
+export const COMMAND_HELP_TTL_MS = 60_000
+export const MISSION_BRIEFING_POLL_DELAY_MS = 1_500
+export const SSE_DEFAULT_DEBOUNCE_MS = 500
+export const SSE_OPERATOR_DEBOUNCE_MS = 300
+export const SSE_MDAL_DEBOUNCE_MS = 350
+export const SSE_ACTIVITY_DEBOUNCE_MS = 2_000
+export const SSE_KEEPER_OPERATOR_DEBOUNCE_MS = 600
+export const SSE_KEEPER_THREAD_DEBOUNCE_MS = 800
+export const SSE_RECONNECT_RETRY_MS = 3_000
+export const PERIODIC_REFRESH_DEV_MS = 90_000
+export const PERIODIC_REFRESH_PROD_MS = 30_000
+
+// --- Keeper UI/runtime limits ---
+export const KEEPER_STATUS_TAIL_MESSAGES = 50
+export const KEEPER_HISTORY_TAIL_MESSAGES = 200
+export const KEEPER_STREAM_IDLE_TIMEOUT_MS = 120_000
+export const KEEPER_STREAM_IDLE_POLL_MS = 5_000
+export const KEEPER_REPLY_PREVIEW_MAX = 200
 
 // --- Buffer & cache sizes ---
 export const MAX_JOURNAL_ENTRIES = 200

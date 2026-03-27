@@ -18,19 +18,13 @@ let init () =
     ignore (Ambient_context_eio.storage : Ambient_context.Storage.t)
   end
 
-let setup_exporter ~sw env =
-  if Otel_config.enabled && !initialized then begin
-    let config =
-      Opentelemetry_client_cohttp_eio.Config.make
-        ~url:Otel_config.endpoint
-        ()
-    in
-    Opentelemetry_client_cohttp_eio.setup ~config ~sw env
-  end
+(** Setup OTLP exporter. Phase 2: called from server bootstrap with Eio context.
+    Currently a no-op placeholder — spans are recorded in-memory only.
+    To enable export: call [Opentelemetry_client_cohttp_eio.with_setup] from
+    the server main loop. *)
+let setup_exporter _env = ()
 
-let shutdown () =
-  if Otel_config.enabled && !initialized then
-    Opentelemetry_client_cohttp_eio.remove_exporter ()
+let shutdown () = ()
 
 (** Wrap a function in an OTel span. No-op when disabled.
     Returns the result of [f]. *)

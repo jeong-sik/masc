@@ -823,9 +823,8 @@
    masc_board
    ;; Room coordination (extracted sub-library)
    masc_room
-   ;; OpenTelemetry (spans + OTLP export)
+   ;; OpenTelemetry (spans + metrics; OTLP export deferred to Phase 2)
    opentelemetry
-   opentelemetry-client-cohttp-eio
    ambient-context
    ambient-context-eio
    )

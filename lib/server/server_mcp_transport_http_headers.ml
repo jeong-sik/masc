@@ -1,5 +1,5 @@
 module Http = Http_server_eio
-module Http_negotiation = Mcp_protocol.Http_negotiation
+module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 
 type deps = Server_mcp_transport_http_types.deps
 
@@ -162,4 +162,3 @@ let json_headers ~(deps : deps) session_id protocol_version origin =
   [ ("content-type", "application/json") ]
   @ mcp_headers session_id protocol_version
   @ deps.cors_headers origin
-

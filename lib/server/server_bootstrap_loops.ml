@@ -110,7 +110,7 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     let config = state.room_config in
     let agent_name = "operator-judge" in
     let ctx_room : Tool_room.context = { config; agent_name } in
-    let ctx_task : Tool_task.context = { config; agent_name } in
+    let ctx_task : Tool_task.context = { config; agent_name; sw = Some sw } in
     let ctx_agent : Tool_agent.context = { config; agent_name } in
     match name with
     | "masc_status" -> (

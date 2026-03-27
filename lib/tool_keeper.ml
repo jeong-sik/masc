@@ -62,11 +62,13 @@ let cached_text_by_key cache ~key ~ttl_s compute =
       cache.expires_at <- now +. ttl_s;
       value
 
-let annotate_keeper_json ~registered json =
+let annotate_keeper_json ~registered ~runtime_class json =
   match json with
   | `Assoc fields ->
       `Assoc
-        (("runtime_class", `String "keeper")
+        (("runtime_class", `String runtime_class)
+        :: ("desired", `Bool registered)
+        :: ("resident_registered", `Bool registered)
         :: ("registered", `Bool registered)
         :: fields)
   | other -> other
@@ -120,7 +122,7 @@ let keeper_list_skill_route_json config (meta : keeper_meta) =
   in
   find_latest (List.rev lines)
 
-let keeper_list_row_json ~registered config name =
+let keeper_list_row_json ~registered ~runtime_class config name =
   match read_meta config name with
   | Error _ | Ok None -> None
   | Ok (Some (meta : keeper_meta)) ->
@@ -146,7 +148,9 @@ let keeper_list_row_json ~registered config name =
       Some
         (`Assoc
           [
-            ("runtime_class", `String "keeper");
+            ("runtime_class", `String runtime_class);
+            ("desired", `Bool registered);
+            ("resident_registered", `Bool registered);
             ("registered", `Bool registered);
             ("name", `String meta.name);
             ("meta", keeper_brief_meta_json meta);
@@ -218,7 +222,10 @@ let handle_resident_keeper_create_from_persona ctx args : tool_result =
                     ("persona", Keeper_exec_persona.persona_summary_to_json persona);
                     ("created", `Bool true);
                     ("resident", `Bool true);
-                    ("result", annotate_keeper_json ~registered:true created_json);
+                    ( "result",
+                      annotate_keeper_json
+                        ~registered:true
+                        ~runtime_class:"resident_keeper" created_json );
                     ("resolved_args", resolved_args);
                   ]
               in
@@ -243,7 +250,9 @@ let handle_resident_keeper_up ctx args : tool_result =
             in
             (true,
              Yojson.Safe.pretty_to_string
-               (annotate_keeper_json ~registered:true json)))
+               (annotate_keeper_json
+                  ~registered:true
+                  ~runtime_class:"resident_keeper" json)))
 
 let handle_resident_keeper_status ctx args : tool_result =
   let name = get_string args "name" "" in
@@ -260,7 +269,9 @@ let handle_resident_keeper_status ctx args : tool_result =
         in
         (true,
          Yojson.Safe.pretty_to_string
-           (annotate_keeper_json ~registered:true json))
+           (annotate_keeper_json
+              ~registered:true
+              ~runtime_class:"resident_keeper" json))
 
 let inject_goal_from_message args =
   match Safe_ops.json_string_opt "goal" args with
@@ -303,7 +314,9 @@ let handle_resident_keeper_msg ctx args : tool_result =
         in
         (true,
          Yojson.Safe.pretty_to_string
-           (annotate_keeper_json ~registered:true json))
+           (annotate_keeper_json
+              ~registered:true
+              ~runtime_class:"resident_keeper" json))
       end
 
 let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
@@ -336,7 +349,9 @@ let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
         in
         (true,
          Yojson.Safe.pretty_to_string
-           (annotate_keeper_json ~registered:true json))
+           (annotate_keeper_json
+              ~registered:true
+              ~runtime_class:"resident_keeper" json))
       end
 
 let handle_resident_keeper_down ctx args : tool_result =
@@ -359,7 +374,9 @@ let handle_resident_keeper_list ctx args : tool_result =
         let rows =
           resident
           |> List.filter_map
-               (keeper_list_row_json ~registered:true ctx.config)
+               (keeper_list_row_json
+                  ~registered:true
+                  ~runtime_class:"resident_keeper" ctx.config)
         in
         let json =
           if not detailed then
@@ -413,7 +430,9 @@ let handle_persistent_agent_list ctx args : tool_result =
                try
                  let json = Yojson.Safe.from_string body in
                  Some
-                   (annotate_keeper_json ~registered:false json)
+                   (annotate_keeper_json
+                      ~registered:false
+                      ~runtime_class:"persistent_agent" json)
                with Yojson.Json_error _ -> None)
     in
     let json =
@@ -434,7 +453,9 @@ let handle_persistent_agent_up ctx args : tool_result =
     in
     (true,
      Yojson.Safe.pretty_to_string
-       (annotate_keeper_json ~registered:false json))
+       (annotate_keeper_json
+          ~registered:false
+          ~runtime_class:"persistent_agent" json))
 
 let handle_persistent_agent_status ctx args : tool_result =
   let ok, body = Status.handle_keeper_status ctx args in
@@ -448,6 +469,7 @@ let handle_persistent_agent_status ctx args : tool_result =
      Yojson.Safe.pretty_to_string
        (annotate_keeper_json
           ~registered:(validate_name name && is_resident_keeper ctx.config name)
+          ~runtime_class:"persistent_agent"
           json))
 
 let handle_persistent_agent_msg ctx args : tool_result =
@@ -459,7 +481,9 @@ let handle_persistent_agent_msg ctx args : tool_result =
     in
     (true,
      Yojson.Safe.pretty_to_string
-       (annotate_keeper_json ~registered:false json))
+       (annotate_keeper_json
+          ~registered:false
+          ~runtime_class:"persistent_agent" json))
 
 let handle_persistent_agent_down ctx args : tool_result =
   Turn.handle_keeper_down ctx args
@@ -532,6 +556,8 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_msg" -> Some (handle_resident_keeper_msg ctx args)
   | "masc_keeper_down" -> Some (handle_resident_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_resident_keeper_list ctx args)
+  | "masc_keeper_autonomy" | "masc_keeper_goals" ->
+      Some (false, Printf.sprintf "%s has been removed" name)
   | "masc_keeper_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
   | "masc_keeper_eval" -> Some (Status.handle_keeper_eval ctx args)
   | "masc_persistent_agent_create_from_persona" ->

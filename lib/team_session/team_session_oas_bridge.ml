@@ -127,8 +127,9 @@ let dispatch_supported_tool ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.conf
     | "masc_tasks" | "masc_claim_next" | "masc_transition" | "masc_add_task"
       ->
         result_of_option ~tool_name:name
-          (Tool_task.dispatch { Tool_task.config = config; agent_name } ~name
-             ~args)
+          (Tool_task.dispatch
+             { Tool_task.config = config; agent_name; sw = Some sw }
+             ~name ~args)
     | "masc_code_search" | "masc_code_symbols" | "masc_code_read" ->
         result_of_option ~tool_name:name
           (Tool_code.dispatch { Tool_code.config = config; agent_name } ~name

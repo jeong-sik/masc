@@ -224,6 +224,23 @@ let test_fallback_on_missing_asset () =
           check string "fallback etag is none" "none" etag))
     ~finally:(fun () -> Unix.rmdir missing_assets_root)
 
+let test_html_ignores_invalid_explicit_assets_root () =
+  let input_root = make_temp_dashboard_root "input-invalid-env" "dashboard-from-base-path-input" in
+  Fun.protect
+    (fun () ->
+      with_env
+        [
+          ("MASC_ASSETS_ROOT", "/tmp/nonexistent_masc_assets_67890");
+          ("MASC_ASSETS_DIR", "");
+          ("MASC_BASE_PATH_INPUT", input_root);
+          ("MASC_BASE_PATH", "");
+        ]
+        (fun () ->
+          let html = Web_dashboard.html () in
+          check bool "falls back to base_path_input assets" true
+            (contains_substr "dashboard-from-base-path-input" html)))
+    ~finally:(fun () -> cleanup_temp_dashboard_root input_root)
+
 let test_html_uses_base_path_input_assets () =
   let input_root = make_temp_dashboard_root "input" "dashboard-from-base-path-input" in
   let base_root = make_temp_dashboard_root "base" "dashboard-from-base-path" in
@@ -295,6 +312,7 @@ let () =
     ];
     "fallback", [
       test_case "missing asset dir" `Quick test_fallback_on_missing_asset;
+      test_case "invalid explicit assets root falls back" `Quick test_html_ignores_invalid_explicit_assets_root;
       test_case "base_path_input assets" `Quick test_html_uses_base_path_input_assets;
     ];
     "asset_path_safety", [

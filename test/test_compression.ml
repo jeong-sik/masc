@@ -36,21 +36,38 @@ let test_backend_roundtrip () =
 let test_backend_header_format () =
   let data = String.make 512 'Z' in
   let compressed = BackendCompression.compress_with_header data in
-  (* Check magic header (9-byte format: ZSTD\x00 or ZSTDD + 4-byte size) *)
+  (* Backend storage is TEXT-backed, so compression headers must stay ASCII-safe:
+     ZSTD:<orig_size>:<base64> or ZSTDD:<orig_size>:<base64>. *)
   let magic4 = String.sub compressed 0 4 in
   Alcotest.(check string) "ZSTD magic prefix" "ZSTD" magic4;
-  (* Fifth byte: \x00 for standard, 'D' for dictionary *)
-  let is_dict = compressed.[4] = 'D' in
-  let magic5 = if is_dict then "ZSTDD" else "ZSTD\x00" in
-  Alcotest.(check string) "5-byte magic" magic5 (String.sub compressed 0 5);
-  (* Check original size stored in bytes 5-8 (big endian) *)
-  let orig_size =
-    (Char.code compressed.[5] lsl 24) lor
-    (Char.code compressed.[6] lsl 16) lor
-    (Char.code compressed.[7] lsl 8) lor
-    Char.code compressed.[8]
+  let prefix_len, expected_prefix =
+    if String.length compressed >= 6 && String.sub compressed 0 6 = "ZSTDD:" then
+      (6, "ZSTDD:")
+    else
+      (5, "ZSTD:")
   in
-  Alcotest.(check int) "original size in header" 512 orig_size
+  Alcotest.(check string) "text-safe magic" expected_prefix
+    (String.sub compressed 0 prefix_len);
+  let rest =
+    String.sub compressed prefix_len (String.length compressed - prefix_len)
+  in
+  match String.index_opt rest ':' with
+  | None -> Alcotest.fail "missing size separator in text-safe header"
+  | Some idx ->
+      let size_str = String.sub rest 0 idx in
+      let payload_b64 =
+        String.sub rest (idx + 1) (String.length rest - idx - 1)
+      in
+      let orig_size =
+        match int_of_string_opt size_str with
+        | Some size -> size
+        | None -> Alcotest.fail "invalid original size in text-safe header"
+      in
+      Alcotest.(check int) "original size in header" 512 orig_size;
+      Alcotest.(check bool) "payload present" true (payload_b64 <> "");
+      match Base64.decode payload_b64 with
+      | Ok _ -> ()
+      | Error _ -> Alcotest.fail "payload must be valid base64"
 
 let test_backend_non_compressed_passthrough () =
   let plain = "This is plain text without ZSTD header" in

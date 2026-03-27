@@ -53,10 +53,55 @@ open Result_syntax
 
 let default_elevenlabs_base_url = "https://api.elevenlabs.io/v1"
 
+let trim_opt = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let dedupe_keep_order values =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | value :: rest ->
+        if List.mem value seen then loop seen acc rest
+        else loop (value :: seen) (value :: acc) rest
+  in
+  loop [] [] values
+
+let base_path_voice_config_path_opt () =
+  trim_opt (Sys.getenv_opt "MASC_BASE_PATH")
+  |> Option.map (fun root -> Filename.concat root ".masc/voice_config.json")
+
+let repo_voice_config_path_opt () =
+  let cwd = Sys.getcwd () in
+  let root =
+    match Room_utils_backend_setup.find_git_root cwd with
+    | Some path -> path
+    | None -> cwd
+  in
+  Some (Filename.concat root ".masc/voice_config.json")
+
+let me_root_voice_config_path_opt () =
+  trim_opt (Sys.getenv_opt "ME_ROOT")
+  |> Option.map (fun root -> Filename.concat root ".masc/voice_config.json")
+
+let cwd_voice_config_path () =
+  Filename.concat (Sys.getcwd ()) ".masc/voice_config.json"
+
+let config_path_candidates () =
+  [
+    base_path_voice_config_path_opt ();
+    repo_voice_config_path_opt ();
+    me_root_voice_config_path_opt ();
+    Some (cwd_voice_config_path ());
+  ]
+  |> List.filter_map Fun.id
+  |> dedupe_keep_order
+
 let config_path () =
-  match Sys.getenv_opt "ME_ROOT" with
-  | Some root -> Filename.concat root ".masc/voice_config.json"
-  | None -> ".masc/voice_config.json"
+  match List.find_opt Sys.file_exists (config_path_candidates ()) with
+  | Some path -> path
+  | None -> List.hd (config_path_candidates ())
 
 let trim_nonempty = function
   | `String value ->

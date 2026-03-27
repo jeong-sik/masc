@@ -41,6 +41,13 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let with_cwd path f =
+  let old = Sys.getcwd () in
+  Unix.chdir path;
+  Fun.protect
+    ~finally:(fun () -> Unix.chdir old)
+    f
+
 let with_temp_voice_config config_json f =
   let root = temp_dir () in
   let masc_dir = Filename.concat root ".masc" in
@@ -52,6 +59,14 @@ let with_temp_voice_config config_json f =
   Fun.protect
     ~finally:(fun () -> cleanup_dir root)
     (fun () -> with_env "ME_ROOT" root f)
+
+let write_voice_config root config_json =
+  let masc_dir = Filename.concat root ".masc" in
+  if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o755;
+  let config_path = Filename.concat masc_dir "voice_config.json" in
+  let oc = open_out config_path in
+  output_string oc config_json;
+  close_out oc
 
 let with_ctx_no_net f =
   Eio_main.run (fun env ->
@@ -612,6 +627,140 @@ let test_voice_tools_count () =
   (* Verify we have a known number of voice tools *)
   check bool "at least 6 voice tools" true (List.length voice_tools >= 6)
 
+let test_voice_config_prefers_repo_root_over_me_root () =
+  let repo_root = temp_dir () in
+  let me_root = temp_dir () in
+  let repo_json =
+    {|
+{
+  "tts": {
+    "default_model": "repo-model",
+    "default_voice": "RepoVoice",
+    "default_voice_settings": { "stability": 0.5, "similarity_boost": 0.75, "style": 0.0 },
+    "agent_voices": {},
+    "agent_voice_settings": {},
+    "endpoints": [
+      { "id": "repo-tts", "kind": "openai_compat", "base_url": "https://example.invalid/v1", "enabled": true }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      { "id": "repo-stt", "kind": "openai_compat", "base_url": "https://api.openai.com/v1", "enabled": true }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      { "id": "repo-session", "kind": "voice_mcp", "base_url": "http://127.0.0.1:8936", "enabled": true }
+    ]
+  },
+  "local_playback": { "enabled": false, "agents": [] }
+}
+|}
+  in
+  let global_json =
+    {|
+{
+  "tts": {
+    "default_model": "global-model",
+    "default_voice": "GlobalVoice",
+    "default_voice_settings": { "stability": 0.5, "similarity_boost": 0.75, "style": 0.0 },
+    "agent_voices": {},
+    "agent_voice_settings": {},
+    "endpoints": [
+      { "id": "global-tts", "kind": "openai_compat", "base_url": "https://example.invalid/v1", "enabled": true }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      { "id": "global-stt", "kind": "openai_compat", "base_url": "https://api.openai.com/v1", "enabled": true }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      { "id": "global-session", "kind": "voice_mcp", "base_url": "http://127.0.0.1:8936", "enabled": true }
+    ]
+  },
+  "local_playback": { "enabled": false, "agents": [] }
+}
+|}
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir repo_root;
+      cleanup_dir me_root)
+    (fun () ->
+      Unix.mkdir (Filename.concat repo_root ".git") 0o755;
+      write_voice_config repo_root repo_json;
+      write_voice_config me_root global_json;
+      let nested = Filename.concat repo_root "subdir" in
+      Unix.mkdir nested 0o755;
+      with_env "ME_ROOT" me_root (fun () ->
+        with_cwd nested (fun () ->
+          match Masc_mcp.Voice_config.load () with
+          | Ok config ->
+              check string "repo config wins" "RepoVoice"
+                config.tts.default_voice;
+              let expected_path = Filename.concat repo_root ".masc/voice_config.json" in
+              let actual_path = Masc_mcp.Voice_config.config_path () in
+              let expected_stat = Unix.stat expected_path in
+              let actual_stat = Unix.stat actual_path in
+              check int "resolved path inode matches repo config"
+                expected_stat.st_ino actual_stat.st_ino;
+              check int "resolved path device matches repo config"
+                expected_stat.st_dev actual_stat.st_dev
+          | Error e ->
+              failf "expected repo voice config to load: %s" e)))
+
+let test_voice_runtime_paths_prefer_masc_base_path () =
+  let base_root = temp_dir () in
+  let me_root = temp_dir () in
+  let config_json =
+    {|
+{
+  "tts": {
+    "default_model": "base-model",
+    "default_voice": "BaseVoice",
+    "default_voice_settings": { "stability": 0.5, "similarity_boost": 0.75, "style": 0.0 },
+    "agent_voices": {},
+    "agent_voice_settings": {},
+    "endpoints": [
+      { "id": "base-tts", "kind": "openai_compat", "base_url": "https://example.invalid/v1", "enabled": true }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      { "id": "base-stt", "kind": "openai_compat", "base_url": "https://api.openai.com/v1", "enabled": true }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      { "id": "base-session", "kind": "voice_mcp", "base_url": "http://127.0.0.1:8936", "enabled": true }
+    ]
+  },
+  "local_playback": { "enabled": false, "agents": [] }
+}
+|}
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir base_root;
+      cleanup_dir me_root)
+    (fun () ->
+      write_voice_config base_root config_json;
+      with_env "MASC_BASE_PATH" base_root (fun () ->
+        with_env "ME_ROOT" me_root (fun () ->
+          let expected = Filename.concat base_root ".masc" in
+          check string "voice bridge uses MASC_BASE_PATH" expected
+            (Masc_mcp.Voice_bridge.masc_base_dir ());
+          check string "keeper voice local uses MASC_BASE_PATH" expected
+            (Masc_mcp.Keeper_voice_local.masc_base_dir ());
+          check string "voice config path uses MASC_BASE_PATH"
+            (Filename.concat expected "voice_config.json")
+            (Masc_mcp.Voice_config.config_path ()))))
+
 let () =
   run "Tool_voice"
     [
@@ -653,6 +802,10 @@ let () =
             test_voice_conference_end_with_unavailable_server_errors;
           test_case "voice public config json" `Quick
             test_voice_public_config_json;
+          test_case "voice config prefers repo root over me root" `Quick
+            test_voice_config_prefers_repo_root_over_me_root;
+          test_case "voice runtime paths prefer MASC_BASE_PATH" `Quick
+            test_voice_runtime_paths_prefer_masc_base_path;
           test_case "local playback argv prefers ffplay" `Quick
             test_local_playback_argv_prefers_ffplay;
           test_case "local playback argv falls back to open" `Quick

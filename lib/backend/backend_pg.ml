@@ -289,13 +289,23 @@ let close _t = ()
 
 let get_pool t = t.pool
 
+let has_zstd_header content =
+  String.length content >= 4 && String.sub content 0 4 = "ZSTD"
+
+let decompress_with_context ~key content =
+  let had_header = has_zstd_header content in
+  let decompressed = _decompress content in
+  if had_header && String.equal decompressed content then
+    Log.Backend.warn "[EioPG] decompress fallback for %s" key;
+  decompressed
+
 let get t key =
   let nkey = namespaced_key t.namespace key in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     C.find_opt get_q nkey
   ) t.pool with
-  | Ok (Some v) -> Ok (_decompress v)
+  | Ok (Some v) -> Ok (decompress_with_context ~key:nkey v)
   | Ok None -> Error (NotFound key)
   | Error err -> Error (caqti_error_to_masc err)
 
@@ -351,7 +361,8 @@ let get_all t ~prefix =
   ) t.pool with
   | Ok pairs ->
       Ok (List.map (fun (k, v) ->
-        (strip_namespace t.namespace k, _decompress v)
+        let logical_key = strip_namespace t.namespace k in
+        (logical_key, decompress_with_context ~key:k v)
       ) pairs)
   | Error err -> Error (caqti_error_to_masc err)
 
@@ -367,7 +378,8 @@ let get_all_matching_recent t ~prefix ~suffix ~updated_since ~limit =
     ) t.pool with
     | Ok pairs ->
         Ok (List.map (fun (k, v) ->
-          (strip_namespace t.namespace k, _decompress v)
+          let logical_key = strip_namespace t.namespace k in
+          (logical_key, decompress_with_context ~key:k v)
         ) pairs)
     | Error err -> Error (caqti_error_to_masc err)
 

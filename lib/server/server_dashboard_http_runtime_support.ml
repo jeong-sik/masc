@@ -56,12 +56,7 @@ let pg_semaphore state () =
   match state.pg_semaphore with
   | Some s -> s
   | None ->
-      let pool_size =
-        match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-        | Some s -> (
-            try max 1 (min (int_of_string s) 50) with Failure _ -> 10)
-        | None -> 10
-      in
+      let pool_size = Env_config_core.pg_pool_size () in
       let limit = max 2 (pool_size - 2) in
       let s = Eio.Semaphore.make limit in
       state.pg_semaphore <- Some s;

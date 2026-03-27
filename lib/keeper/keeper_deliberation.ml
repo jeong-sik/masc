@@ -315,9 +315,7 @@ let default_daily_budget_usd = 0.10
 
 (** Read the daily budget from env, returning the default if absent or invalid. *)
 let daily_budget_usd_from_env () : float =
-  match Sys.getenv_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" with
-  | Some s -> (try float_of_string (String.trim s) with Failure _ -> default_daily_budget_usd)
-  | None -> default_daily_budget_usd
+  Env_config.KeeperRuntime.deliberation_daily_budget_usd ()
 
 (** Check whether the keeper has remaining budget for another deliberation call.
     Returns [true] if [cost_today_usd < daily_budget_usd]. *)

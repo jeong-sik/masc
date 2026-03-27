@@ -152,4 +152,32 @@ module KeeperResidentSupervisor = struct
     get_float ~default:30.0 "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
 end
 
+(** {1 Keeper Runtime Configuration} *)
+
+module KeeperRuntime = struct
+  (** Enable keeper debug logging. Default: false. *)
+  let debug = get_bool ~default:false "MASC_KEEPER_DEBUG"
+
+  (** Daily budget for keeper deliberation (USD). Default: 0.10.
+      Runtime-readable (tests change this via putenv). *)
+  let deliberation_daily_budget_usd () =
+    get_float ~default:0.10 "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD"
+
+  (** Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. *)
+  let snapshot_sec =
+    max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
+
+  (** Keeper skill selection mode raw string (e.g. "agent", "heuristic"). *)
+  let skill_selection_opt () =
+    Sys.getenv_opt "MASC_KEEPER_SKILL_SELECTION" |> trim_opt
+end
+
+(** {1 Alert Dedup Configuration} *)
+
+module AlertDedup = struct
+  (** Alert dedup window, clamped to >= 5s. Default: 60. *)
+  let window_sec =
+    Float.max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
+end
+
 (** Print configuration summary for debugging *)

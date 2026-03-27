@@ -19,9 +19,9 @@ let default_store_path () =
   Filename.concat home "logs/masc_chain_run_store.jsonl"
 
 let store_path () =
-  match Sys.getenv_opt "MASC_CHAIN_RUN_STORE_PATH" with
-  | Some path when String.trim path <> "" -> path
-  | _ -> default_store_path ()
+  match Env_config.Chain.run_store_path_opt () with
+  | Some path -> path
+  | None -> default_store_path ()
 
 let ensure_dir path =
   Fs_compat.mkdir_p path

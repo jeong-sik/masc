@@ -10,29 +10,10 @@ let default_port = 8936
 let health_service_name = "grpc.health.v1.Health"
 
 (** Read the configured gRPC port from environment or use default. *)
-let configured_port () =
-  match Sys.getenv_opt "MASC_GRPC_PORT" with
-  | Some s -> (
-    match int_of_string_opt s with
-    | Some p when p > 0 && p < 65536 -> p
-    | _ ->
-      Log.Server.warn "MASC_GRPC_PORT=%s is not a valid port, using %d" s default_port;
-      default_port)
-  | None -> default_port
+let configured_port () = Env_config.Transport.grpc_port
 
 (** Check whether gRPC is enabled (default: enabled, opt-out via env). *)
-let is_enabled () =
-  match Sys.getenv_opt "MASC_GRPC_ENABLED" with
-  | Some s -> (
-    match String.trim s |> String.lowercase_ascii with
-    | "1" | "true" -> true
-    | "" | "0" | "false" -> false
-    | other ->
-      Log.Server.warn
-        "MASC_GRPC_ENABLED=%s is not recognised, defaulting to enabled"
-        other;
-      true)
-  | None -> true
+let is_enabled () = Env_config.Transport.grpc_enabled ()
 
 module Reflection_bridge = struct
   let reflection_v1_service_name = "grpc.reflection.v1.ServerReflection"

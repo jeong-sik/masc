@@ -113,21 +113,9 @@ let set_grpc_listen_status status =
 let set_ws_listen_status status =
   Atomic.set ws_listen_status status
 
-let grpc_enabled () =
-  match Sys.getenv_opt "MASC_GRPC_ENABLED" with
-  | Some raw -> (
-      match String.trim raw |> String.lowercase_ascii with
-      | "0" | "false" | "" -> false
-      | _ -> true)
-  | None -> true
+let grpc_enabled () = Env_config.Transport.grpc_enabled ()
 
-let grpc_port () =
-  match Sys.getenv_opt "MASC_GRPC_PORT" with
-  | Some raw -> (
-      match int_of_string_opt raw with
-      | Some port when port > 0 && port < 65536 -> port
-      | _ -> 8936)
-  | None -> 8936
+let grpc_port () = Env_config.Transport.grpc_port
 
 let grpc_listening () =
   grpc_enabled () && Atomic.get grpc_runtime_listening
@@ -188,15 +176,7 @@ let int_option_json = function
   | Some value -> `Int value
   | None -> `Null
 
-let http_listener_mode () =
-  match Sys.getenv_opt "MASC_USE_H2" with
-  | Some raw -> (
-      match String.trim raw |> String.lowercase_ascii with
-      | "1" | "true" -> "h2_only"
-      | "0" | "false" -> "h1_only"
-      | "auto" | "" -> "auto"
-      | _ -> "auto")
-  | None -> "auto"
+let http_listener_mode () = Env_config.Transport.use_h2 ()
 
 let primary_path ~webrtc_channels ~grpc_subscribers ~ws_sessions ~sse_sessions =
   if webrtc_channels > 0 then "webrtc_datachannel"
@@ -210,21 +190,9 @@ let queue_pressure max_queue_depth =
   else if max_queue_depth >= 8 then "watch"
   else "steady"
 
-let ws_enabled () =
-  match Sys.getenv_opt "MASC_WS_ENABLED" with
-  | Some raw -> (
-      match String.trim raw |> String.lowercase_ascii with
-      | "0" | "false" -> false
-      | _ -> true)
-  | None -> true
+let ws_enabled () = Env_config.Transport.ws_enabled ()
 
-let ws_port () =
-  match Sys.getenv_opt "MASC_WS_PORT" with
-  | Some raw -> (
-      match int_of_string_opt raw with
-      | Some port when port > 0 && port < 65536 -> port
-      | _ -> 8937)
-  | None -> 8937
+let ws_port () = Env_config.Transport.ws_port
 
 let ws_listening () =
   ws_enabled () && Atomic.get ws_runtime_listening

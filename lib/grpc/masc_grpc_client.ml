@@ -20,7 +20,7 @@ let create ~sw ~env target =
 
 let create_from_env ~sw ~env =
   let target =
-    match Sys.getenv_opt "MASC_GRPC_TARGET" with
+    match Env_config.Transport.grpc_target_opt () with
     | Some t -> t
     | None ->
       let port = Masc_grpc_server.configured_port () in

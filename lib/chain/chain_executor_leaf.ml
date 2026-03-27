@@ -233,11 +233,11 @@ let execute_model_node ctx ~clock ~(exec_fn : exec_fn) ~(node : node) (model : n
 
 (** MASC MCP endpoint - configurable via MASC_MCP_URL env var *)
 let _masc_mcp_url () =
-  Option.value ~default:(Env_config.masc_http_base_url () ^ "/mcp") (Sys.getenv_opt "MASC_MCP_URL")
+  Env_config.Chain.mcp_url ()
 
 (** Get MASC agent name from env or default *)
 let masc_agent_name () =
-  Option.value ~default:"local-worker" (Sys.getenv_opt "MASC_AGENT_NAME")
+  Env_config.Chain.agent_name
 
 (** Execute MASC broadcast node - calls masc.masc_broadcast via tool_exec *)
 let execute_masc_broadcast ctx ~tool_exec (node : node) ~message ~room ~mention : (string, string) result =

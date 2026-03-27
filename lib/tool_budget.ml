@@ -45,9 +45,4 @@ let filter_by_budget ~budget_tokens ~usage_counts
     List.rev accepted
 
 let default_budget () : int option =
-  match Sys.getenv_opt "MASC_TOOL_DESCRIPTION_BUDGET" with
-  | Some raw -> (
-      match int_of_string_opt (String.trim raw) with
-      | Some v when v > 0 -> Some v
-      | _ -> None)
-  | None -> None
+  Env_config.Tools.description_budget_opt ()

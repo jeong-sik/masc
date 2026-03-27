@@ -396,8 +396,8 @@ let test_transport_health_contracts () =
     (file_contains_pattern "lib/server/server_ws_standalone.ml"
        {|Transport_metrics.set_ws_sessions|});
   check bool "transport metrics ws env parse matches runtime server" true
-    (file_contains_pattern "lib/transport_metrics.ml"
-       {| | "0" | "false" -> false|});
+    (file_contains_pattern "lib/env_config_core.ml"
+       {| | "false" | "0" | "no" -> false|});
   check bool "standalone ws reuses transport metrics env parser" true
     (file_contains_pattern "lib/server/server_ws_standalone.ml"
        {|Transport_metrics.ws_enabled ()|});

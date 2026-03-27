@@ -54,30 +54,16 @@ let get_state base_path =
         st)
 
 let enabled () =
-  match Sys.getenv_opt "MASC_OPERATOR_JUDGE_ENABLED" with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "0" | "false" | "no" | "off" -> false
-      | _ -> true)
-  | None -> true
+  Env_config.Dashboard.OperatorJudge.enabled
 
 let interval_sec () =
-  match Sys.getenv_opt "MASC_OPERATOR_JUDGE_INTERVAL_SEC" with
-  | Some raw -> (
-      try max 15 (int_of_string (String.trim raw)) with Failure _ -> 60)
-  | None -> 60
+  Env_config.Dashboard.OperatorJudge.interval_sec
 
 let room_ttl_sec () =
-  match Sys.getenv_opt "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC" with
-  | Some raw -> (
-      try max 15 (int_of_string (String.trim raw)) with Failure _ -> 60)
-  | None -> 60
+  Env_config.Dashboard.OperatorJudge.room_ttl_sec
 
 let session_ttl_sec () =
-  match Sys.getenv_opt "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC" with
-  | Some raw -> (
-      try max 30 (int_of_string (String.trim raw)) with Failure _ -> 300)
-  | None -> 300
+  Env_config.Dashboard.OperatorJudge.session_ttl_sec
 
 let iso_of_unix unix_ts =
   let tm = Unix.gmtime unix_ts in

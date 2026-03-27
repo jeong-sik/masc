@@ -22,7 +22,7 @@ module GovernanceJudge = struct
     get_bool ~default:true "MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED"
 
   let interval_sec =
-    get_float ~default:300.0 "MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC"
+    max 15 (get_int ~default:60 "MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC")
 end
 
 (** {1 Operator Judge} *)
@@ -32,13 +32,13 @@ module OperatorJudge = struct
     get_bool ~default:true "MASC_OPERATOR_JUDGE_ENABLED"
 
   let interval_sec =
-    get_float ~default:120.0 "MASC_OPERATOR_JUDGE_INTERVAL_SEC"
+    max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_INTERVAL_SEC")
 
   let session_ttl_sec =
-    get_float ~default:3600.0 "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC"
+    max 30 (get_int ~default:300 "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC")
 
   let room_ttl_sec =
-    get_float ~default:7200.0 "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC"
+    max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC")
 end
 
 (** {1 Operator Cache} *)

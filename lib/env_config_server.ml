@@ -31,8 +31,15 @@ end
 (** {1 HTTP/2 Transport} *)
 
 module H2 = struct
-  let enabled =
-    get_bool ~default:false "MASC_USE_H2"
+  (** "true"/"1" → h2_only, "false"/"0" → h1_only, "auto"/unset → auto *)
+  let mode =
+    match Sys.getenv_opt "MASC_USE_H2" |> trim_opt with
+    | Some raw -> (
+        match String.lowercase_ascii raw with
+        | "1" | "true" -> "h2_only"
+        | "0" | "false" -> "h1_only"
+        | _ -> "auto")
+    | None -> "auto"
 end
 
 (** {1 WebRTC Transport} *)

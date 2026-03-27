@@ -115,7 +115,7 @@ let to_json () : Yojson.Safe.t =
       "grpc_port", int_val Server.Grpc.port;
       "ws_enabled", bool_val Server.Ws.enabled;
       "ws_port", int_val Server.Ws.port;
-      "h2_enabled", bool_val Server.H2.enabled;
+      "h2_mode", str Server.H2.mode;
       "webrtc_enabled", bool_val Server.Webrtc.enabled;
       "storage_type", str Server.Storage.storage_type;
       "pg_pool_size", int_val Server.Storage.pg_pool_size;
@@ -139,9 +139,9 @@ let to_json () : Yojson.Safe.t =
     "dashboard", `Assoc [
       "fixtures_enabled", bool_val Dashboard.Fixtures.enabled;
       "governance_judge_enabled", bool_val Dashboard.GovernanceJudge.enabled;
-      "governance_judge_interval_sec", float_val Dashboard.GovernanceJudge.interval_sec;
+      "governance_judge_interval_sec", int_val Dashboard.GovernanceJudge.interval_sec;
       "operator_judge_enabled", bool_val Dashboard.OperatorJudge.enabled;
-      "operator_judge_interval_sec", float_val Dashboard.OperatorJudge.interval_sec;
+      "operator_judge_interval_sec", int_val Dashboard.OperatorJudge.interval_sec;
       "relay_calibration_enabled", bool_val Dashboard.Relay.calibration_enabled;
     ];
     "external", `Assoc [

@@ -237,19 +237,11 @@ let tone_rank = function
   | _ -> 0
 
 let dashboard_fixture_name ?fixture () =
-  let fixtures_enabled =
-    match Sys.getenv_opt "MASC_DASHBOARD_FIXTURES_ENABLED" with
-    | Some v when String.lowercase_ascii (String.trim v) = "true" -> true
-    | _ -> false
-  in
-  if not fixtures_enabled then None
+  if not Env_config.Dashboard.Fixtures.enabled then None
   else
     match fixture with
     | Some value when String.trim value <> "" -> Some (String.trim value)
-    | _ -> (
-        match Sys.getenv_opt "MASC_DASHBOARD_FIXTURE" with
-        | Some value when String.trim value <> "" -> Some (String.trim value)
-        | _ -> None)
+    | _ -> Env_config.Dashboard.Fixtures.fixture_name_opt ()
 
 (** Agent profile enriched from persona profile.json or Neo4j cache. *)
 type agent_profile = {

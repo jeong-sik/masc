@@ -64,20 +64,12 @@ let now_iso () = Types.now_iso ()
 let option_to_yojson f = function Some value -> f value | None -> `Null
 
 let interval_sec () =
-  match Sys.getenv_opt "MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC" with
-  | Some raw -> (
-      try max 15 (int_of_string (String.trim raw)) with Failure _ -> 60)
-  | None -> 60
+  Env_config.Dashboard.GovernanceJudge.interval_sec
 
 let cache_ttl_sec () = float_of_int (interval_sec () * 2)
 
 let enabled () =
-  match Sys.getenv_opt "MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED" with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "0" | "false" | "no" | "off" -> false
-      | _ -> true)
-  | None -> true
+  Env_config.Dashboard.GovernanceJudge.enabled
 
 let keeper_name = "operator-judge"
 

@@ -233,7 +233,16 @@ let test_verify_skips_readonly () =
 (* ================================================================ *)
 
 let test_default_gate_roundtrip () =
-  let gate = Tool_misc.keeper_default_gate_config () in
+  let gate : Masc_mcp.Eval_gate.gate_config =
+    { max_cost_usd = 0.10;
+      max_tool_calls_per_turn = 5;
+      entropy_threshold = 2;
+      destructive_check_enabled = true;
+      allowlist_enabled = false;
+      allowed_tools = [];
+      denied_tools = [ "keeper_bash"; "keeper_edit"; "keeper_fs_edit"; "keeper_github" ];
+    }
+  in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
   (* Mode removal: allowlist_enabled=false. Safety via denied_tools list.
      eval_gate_to_oas_guardrails produces DenyList when denied_tools is non-empty. *)

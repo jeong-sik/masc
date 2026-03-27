@@ -464,10 +464,10 @@ module Tools = struct
       Runtime-readable (tests change this via putenv). *)
   let full_surface_enabled () = get_bool ~default:false "MASC_FULL_SURFACE"
 
-  (** Tool list page size, clamped to [10, 1024]. Default: 64.
+  (** Tool list page size, clamped to [10, 1024]. Default: 512.
       Runtime-readable (tests change this via putenv). *)
   let list_page_size () =
-    let v = get_int ~default:64 "MASC_LIST_PAGE_SIZE" in
+    let v = get_int ~default:512 "MASC_LIST_PAGE_SIZE" in
     max 10 (min 1024 v)
 
   (** Tool description budget (max chars). None = unlimited. *)

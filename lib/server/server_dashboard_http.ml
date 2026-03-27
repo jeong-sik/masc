@@ -252,19 +252,32 @@ let warm_shell_cache (state : Mcp_server.server_state) =
      Log.Dashboard.warn "shell cache pre-warm failed: %s"
        (Printexc.to_string exn))
 
+(** Hash guard: skip SSE broadcast when payload is unchanged since
+    the last push for the same event_type.  Keyed on event_type string.
+    Uses MD5 over the JSON string — fast and sufficient for equality. *)
+let _last_broadcast_hash : (string, Digest.t) Hashtbl.t = Hashtbl.create 8
+
 (** Broadcast a single cached surface to all Observer SSE sessions.
     [event_type] becomes the SSE event "type" field.
+    Skips broadcast when the payload hash matches the previous push.
     Safe to call from any fiber — reads only from a cached ref. *)
 let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
-  let sse_json =
-    `Assoc
-      [
-        ("type", `String event_type);
-        ("payload", json);
-        ("ts_unix", `Float (Time_compat.now ()));
-      ]
-  in
-  Sse.broadcast_to Observers sse_json
+  let payload_str = Yojson.Safe.to_string json in
+  let hash = Digest.string payload_str in
+  match Hashtbl.find_opt _last_broadcast_hash event_type with
+  | Some prev when Digest.equal prev hash ->
+      Log.Dashboard.debug "%s SSE push skipped (unchanged)" event_type
+  | _ ->
+      Hashtbl.replace _last_broadcast_hash event_type hash;
+      let sse_json =
+        `Assoc
+          [
+            ("type", `String event_type);
+            ("payload", json);
+            ("ts_unix", `Float (Time_compat.now ()));
+          ]
+      in
+      Sse.broadcast_to Observers sse_json
 
 (* Wire operator broadcast refs now that Sse is in scope. *)
 let () = _operator_snapshot_broadcast_ref :=
@@ -1151,16 +1164,24 @@ let broadcast_room_truth_snapshot (state : Mcp_server.server_state) : unit =
   match room_truth_snapshot_from_caches state with
   | None -> ()
   | Some snapshot ->
-      let sse_json =
-        `Assoc
-          [
-            ("type", `String "room_truth_snapshot");
-            ("payload", snapshot);
-            ("ts_unix", `Float (Time_compat.now ()));
-          ]
-      in
-      Sse.broadcast_to Observers sse_json;
-      Log.Dashboard.info "room-truth snapshot pushed via SSE"
+      let payload_str = Yojson.Safe.to_string snapshot in
+      let hash = Digest.string payload_str in
+      let event_type = "room_truth_snapshot" in
+      (match Hashtbl.find_opt _last_broadcast_hash event_type with
+       | Some prev when Digest.equal prev hash ->
+           Log.Dashboard.debug "room-truth SSE push skipped (unchanged)"
+       | _ ->
+           Hashtbl.replace _last_broadcast_hash event_type hash;
+           let sse_json =
+             `Assoc
+               [
+                 ("type", `String event_type);
+                 ("payload", snapshot);
+                 ("ts_unix", `Float (Time_compat.now ()));
+               ]
+           in
+           Sse.broadcast_to Observers sse_json;
+           Log.Dashboard.info "room-truth snapshot pushed via SSE")
 
 (* Wire up the late-bound broadcast ref now that both
    [dashboard_room_truth_focus_json] and [broadcast_room_truth_snapshot]

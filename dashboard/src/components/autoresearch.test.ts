@@ -79,9 +79,15 @@ async function flushUi(): Promise<void> {
 async function loadComponentWithApi(api: {
   fetchAutoresearchLoops: () => Promise<AutoresearchLoopsResponse>
   fetchAutoresearchLoopDetail: (loopId: string) => Promise<AutoresearchLoopDetail>
+  retryAutoresearchLoop?: (loopId: string) => Promise<unknown>
+  deleteAutoresearchLoop?: (loopId: string) => Promise<unknown>
 }) {
   vi.resetModules()
-  vi.doMock('../api', () => api)
+  vi.doMock('../api', () => ({
+    ...api,
+    retryAutoresearchLoop: api.retryAutoresearchLoop ?? vi.fn().mockResolvedValue({ ok: true, action: 'retry' }),
+    deleteAutoresearchLoop: api.deleteAutoresearchLoop ?? vi.fn().mockResolvedValue({ ok: true, action: 'delete' }),
+  }))
   return import('./autoresearch')
 }
 
@@ -203,5 +209,88 @@ describe('Autoresearch surface refresh', () => {
 
     expect(fetchDetail).toHaveBeenLastCalledWith('loop-a111')
     expect(container.textContent).toContain('target-a.ml')
+  })
+
+  it('offers a retry action for persisted error loops', async () => {
+    const erroredLoop = loopSummary('loop-err0', {
+      status: 'error',
+      live: false,
+      error: 'managed worktree missing',
+      current_cycle: 0,
+      max_cycles: 1,
+    })
+    const recoveredLoop = {
+      ...erroredLoop,
+      status: 'running' as const,
+      live: true,
+      error: null,
+    }
+    const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
+      .mockResolvedValueOnce({ loops: [recoveredLoop], total: 1 })
+    const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
+      .mockResolvedValueOnce(loopDetail(erroredLoop))
+      .mockResolvedValueOnce(loopDetail(recoveredLoop))
+    const retryLoop = vi.fn<(loopId: string) => Promise<unknown>>()
+      .mockResolvedValue({ ok: true, action: 'retry' })
+
+    const { Autoresearch, refreshAutoresearchSurface } = await loadComponentWithApi({
+      fetchAutoresearchLoops: fetchLoops,
+      fetchAutoresearchLoopDetail: fetchDetail,
+      retryAutoresearchLoop: retryLoop,
+    })
+
+    render(html`<${Autoresearch} />`, container)
+    await refreshAutoresearchSurface()
+    await flushUi()
+
+    const retryButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('재시도'))
+    const deleteButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('삭제'))
+
+    expect(retryButton).toBeTruthy()
+    expect(deleteButton).toBeTruthy()
+
+    retryButton?.click()
+    await flushUi()
+
+    expect(retryLoop).toHaveBeenCalledWith('loop-err0')
+    expect(container.textContent).toContain('실행 중')
+  })
+
+  it('offers a delete action for persisted error loops', async () => {
+    const erroredLoop = loopSummary('loop-del0', {
+      status: 'error',
+      live: false,
+      error: 'managed worktree missing',
+      current_cycle: 0,
+      max_cycles: 1,
+    })
+    const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
+      .mockResolvedValueOnce({ loops: [], total: 0 })
+    const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
+      .mockResolvedValueOnce(loopDetail(erroredLoop))
+    const deleteLoop = vi.fn<(loopId: string) => Promise<unknown>>()
+      .mockResolvedValue({ ok: true, action: 'delete' })
+
+    const { Autoresearch, refreshAutoresearchSurface } = await loadComponentWithApi({
+      fetchAutoresearchLoops: fetchLoops,
+      fetchAutoresearchLoopDetail: fetchDetail,
+      deleteAutoresearchLoop: deleteLoop,
+    })
+
+    render(html`<${Autoresearch} />`, container)
+    await refreshAutoresearchSurface()
+    await flushUi()
+
+    const deleteButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('삭제'))
+    deleteButton?.click()
+    await flushUi()
+
+    expect(deleteLoop).toHaveBeenCalledWith('loop-del0')
+    expect(container.textContent).toContain('실행된 오토리서치 루프가 없습니다.')
   })
 })

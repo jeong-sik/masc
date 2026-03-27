@@ -85,13 +85,6 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
          meta = Some new_meta;
        } in
        write_json config agent_file_dedup (agent_to_yojson updated);
-       if is_pg_backend config then begin
-         let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
-         (match backend_set config ~key:agent_key
-                   ~value:(Yojson.Safe.to_string (agent_to_yojson updated)) with
-          | Ok () -> ()
-          | Error e -> Log.Room.warn "rejoin backend_set failed for %s: %s" agent_key (Backend_types.show_error e))
-       end;
        if is_inactive then begin
          (* Restore to active_agents on rejoin *)
          let _ = update_state config (fun s ->
@@ -141,15 +134,8 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     meta = Some meta;
   } in
   let agent_json = agent_to_yojson agent in
-  (* Write to filesystem (for backward compatibility) *)
+  (* Write to filesystem — agent state is short-term coordination data. *)
   write_json config agent_file agent_json;
-  (* Also persist to PostgreSQL backend for HTTP state persistence (stateless requests) *)
-  if is_pg_backend config then begin
-    let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
-    (match backend_set config ~key:agent_key ~value:(Yojson.Safe.to_string agent_json) with
-     | Ok () -> ()
-     | Error e -> Log.Room.warn "join backend_set failed for %s: %s" agent_key (Backend_types.show_error e))
-  end;
 
   (* Update state *)
   let _ = update_state config (fun s ->

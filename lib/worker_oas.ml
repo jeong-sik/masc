@@ -256,6 +256,27 @@ let make_heartbeat_callbacks
       };
     ]
 
+let make_tool_tracking_hooks () =
+  let tool_names_ref = ref [] in
+  let hooks =
+    {
+      Oas.Hooks.empty with
+      pre_tool_use =
+        Some
+          (function
+            | Oas.Hooks.PreToolUse { tool_name; _ } ->
+                tool_names_ref := tool_name :: !tool_names_ref;
+                Oas.Hooks.Continue
+            | _ -> Oas.Hooks.Continue);
+    }
+  in
+  (tool_names_ref, hooks)
+
+let resume_model_id_of_checkpoint
+    (meta : Worker_container_types.worker_container_meta)
+    (checkpoint : Oas.Checkpoint.t) =
+  if checkpoint.model <> "" then checkpoint.model else meta.effective_model
+
 (* ================================================================ *)
 (* Run Worker via OAS                                                *)
 (* ================================================================ *)
@@ -294,19 +315,7 @@ let rec run_worker_via_oas
   let heartbeat_cbs =
     make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name
   in
-  let tool_names_ref = ref [] in
-  let hooks =
-    {
-      Oas.Hooks.empty with
-      pre_tool_use =
-        Some
-          (function
-            | Oas.Hooks.PreToolUse { tool_name; _ } ->
-              tool_names_ref := tool_name :: !tool_names_ref;
-              Oas.Hooks.Continue
-            | _ -> Oas.Hooks.Continue);
-    }
-  in
+  let tool_names_ref, hooks = make_tool_tracking_hooks () in
   let* agent =
     build_agent ~net ~meta ~provider ~system_prompt ~tools ~hooks
       ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ?gate_config ()
@@ -328,6 +337,77 @@ let rec run_worker_via_oas
         with
         | Ok _ -> ()
         | Error e -> raise (Failure ("worker join failed: " ^ e))
+      in
+      let workspace_path =
+        if String.trim meta.workspace_path <> "" then meta.workspace_path
+        else base_path
+      in
+      run_existing_worker_agent ~sw ~base_path ~meta ~prompt ~workspace_path
+        ~raw_trace ?worker_run_id ~tool_names_ref agent)
+
+and resume_worker_via_oas
+    ~(sw : Eio.Switch.t)
+    ~(base_path : string)
+    ~(meta : Worker_container_types.worker_container_meta)
+    ~(checkpoint : Oas.Checkpoint.t)
+    ~(prompt : string)
+    ~(tools : Oas.Tool.t list)
+    ~(raw_trace : Oas.Raw_trace.t)
+    ?worker_run_id
+    () : (Worker_container_types.run_result, string) result =
+  let worker_name = meta.worker_name in
+  let session_id = meta.mcp_session_id in
+  let* auth_token =
+    Worker_container_types.worker_auth_token ~base_path ~worker_name
+  in
+  let* net =
+    match Eio_context.get_net_opt () with
+    | Some net -> Ok net
+    | None -> Error "Eio net not initialized"
+  in
+  let heartbeat_cbs =
+    make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name
+  in
+  let tool_names_ref, hooks = make_tool_tracking_hooks () in
+  let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
+  let resume_provider =
+    oas_provider_of_label (Printf.sprintf "llama:%s" resume_model_id)
+  in
+  let system_prompt =
+    Worker_container_types.default_system_prompt ~worker_name
+      ~model_id:resume_model_id ?session_id:meta.team_session_id ?role:meta.role
+      ?selection_note:meta.selection_note ()
+  in
+  let max_turns = effective_max_turns meta in
+  let thinking_enabled =
+    Option.value ~default:false meta.thinking_enabled
+  in
+  let guardrails =
+    gate_config_of_execution_scope meta.execution_scope
+    |> Verifier_oas.eval_gate_to_oas_guardrails
+  in
+  let config, options =
+    Worker_container.build_resume_config ~worker_name
+      ~provider:resume_provider ~model_id:resume_model_id ~system_prompt ~tools
+      ~max_turns ~thinking_enabled ~hooks ~raw_trace
+      ~periodic_callbacks:heartbeat_cbs ~guardrails ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Worker_container_types.leave_worker ~sw ~auth_token ~session_id
+           ~worker_name))
+    (fun () ->
+      let _ =
+        match
+          Worker_container_types.join_worker ~sw ~auth_token ~session_id
+            ~worker_name
+        with
+        | Ok _ -> ()
+        | Error e -> raise (Failure ("worker join failed: " ^ e))
+      in
+      let agent =
+        Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config ()
       in
       let workspace_path =
         if String.trim meta.workspace_path <> "" then meta.workspace_path

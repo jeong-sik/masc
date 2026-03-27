@@ -342,7 +342,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_startup_state.mark_state_ready
         ~backend_mode:(Room.backend_name state.room_config);
       let resolved_base, masc_dir =
-        Server_bootstrap_loops.start_background_maintenance ~sw ~clock state
+        Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
       (* Create Executor_pool for CPU-heavy dashboard compute.

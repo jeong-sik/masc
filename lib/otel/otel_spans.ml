@@ -18,13 +18,29 @@ let init () =
     ignore (Ambient_context_eio.storage : Ambient_context.Storage.t)
   end
 
-(** Setup OTLP exporter. Phase 2: called from server bootstrap with Eio context.
-    Currently a no-op placeholder — spans are recorded in-memory only.
-    To enable export: call [Opentelemetry_client_cohttp_eio.with_setup] from
-    the server main loop. *)
-let setup_exporter _env = ()
+(** Setup OTLP exporter — registers the cohttp-eio backend that ships spans,
+    metrics, and logs to the configured OTLP collector via HTTP/protobuf.
+    Internally forks a 500ms tick fiber under [sw] for periodic batch flush.
+    No-op when [MASC_OTEL_ENABLED] is not set. *)
+let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
+  if Otel_config.enabled then begin
+    init ();
+    let config =
+      Opentelemetry_client_cohttp_eio.Config.make
+        ~url:Otel_config.endpoint ()
+    in
+    Opentelemetry_client_cohttp_eio.setup ~sw ~config env;
+    Log.info ~ctx:"otel" "OTLP exporter started → %s" Otel_config.endpoint
+  end
 
-let shutdown () = ()
+(** Flush pending spans and remove the OTLP backend.
+    Safe to call when disabled (no-op). *)
+let shutdown () =
+  if Otel_config.enabled && !initialized then begin
+    Opentelemetry_client_cohttp_eio.remove_backend ();
+    initialized := false;
+    Log.info ~ctx:"otel" "OTLP exporter stopped"
+  end
 
 (** Wrap a function in an OTel span. No-op when disabled.
     Returns the result of [f]. *)

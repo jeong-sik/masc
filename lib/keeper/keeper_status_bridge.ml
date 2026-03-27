@@ -142,7 +142,6 @@ let runtime_surface_json config (meta : keeper_meta) =
     | Ok spec_opt -> spec_opt
     | Error _ -> None
   in
-  let registered = Option.is_some resident_spec in
   let keepalive_running = runtime_keepalive_running config meta in
   let fiber_health =
     match
@@ -159,7 +158,8 @@ let runtime_surface_json config (meta : keeper_meta) =
   `Assoc
     [
       ("paused", `Bool meta.paused);
-      ("registered", `Bool registered);
+      ("registered", `Bool (Option.is_some resident_spec));
+      ("resident_registered", `Bool (Option.is_some resident_spec));
       ("keepalive_running", `Bool keepalive_running);
       ("registry_state",
        match registry_state with

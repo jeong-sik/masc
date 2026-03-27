@@ -8,6 +8,8 @@
 
 open Masc_mcp
 
+module Oas = Agent_sdk
+
 (* ================================================================ *)
 (* Shared test infrastructure                                       *)
 (* ================================================================ *)
@@ -179,6 +181,73 @@ let test_cascade_names_produce_models () =
     let models = Oas_worker.default_model_strings ~cascade_name:name in
     Alcotest.(check bool) (name ^ " has models") true (models <> [])
   ) cascades
+
+let make_worker_meta ?(effective_model = "local-qwen") () :
+    Worker_container_types.worker_container_meta =
+  {
+    Worker_container_types.version =
+      Worker_container_types.worker_container_version;
+    worker_name = "resume-worker";
+    mcp_session_id = "session-1";
+    team_session_id = Some "team-session-1";
+    workspace_path = "/tmp/workspace";
+    role = Some "executor";
+    selection_note = Some "resume";
+    execution_scope = Team_session_types.Limited_code_change;
+    thinking_enabled = Some true;
+    max_turns_override = None;
+    timeout_seconds = Some 240;
+    tool_profile = Worker_container_types.Profile_session_min;
+    shell_profile = Worker_container_types.Shell_readonly;
+    worker_class = Some Team_session_types.Worker_executor;
+    worker_size = None;
+    effective_model;
+    effective_tier = None;
+    checkpoint_path = "/tmp/checkpoint.json";
+    turn_log_path = "/tmp/turns.jsonl";
+    last_run_at = None;
+  }
+
+let make_checkpoint ?(model = "") () : Oas.Checkpoint.t =
+  {
+    Oas.Checkpoint.version = Oas.Checkpoint.checkpoint_version;
+    session_id = "session-1";
+    agent_name = "resume-worker";
+    model;
+    system_prompt = None;
+    messages = [];
+    usage = Oas.Types.empty_usage;
+    turn_count = 0;
+    created_at = 0.0;
+    tools = [];
+    tool_choice = None;
+    disable_parallel_tool_use = false;
+    temperature = None;
+    top_p = None;
+    top_k = None;
+    min_p = None;
+    enable_thinking = None;
+    response_format_json = false;
+    thinking_budget = None;
+    cache_system_prompt = false;
+    max_input_tokens = None;
+    max_total_tokens = None;
+    context = Oas.Context.create ();
+    mcp_sessions = [];
+    working_context = None;
+  }
+
+let test_resume_model_id_prefers_checkpoint_model () =
+  let meta = make_worker_meta ~effective_model:"meta-model" () in
+  let checkpoint = make_checkpoint ~model:"checkpoint-model" () in
+  Alcotest.(check string) "checkpoint model wins" "checkpoint-model"
+    (Worker_oas.resume_model_id_of_checkpoint meta checkpoint)
+
+let test_resume_model_id_falls_back_to_meta_model () =
+  let meta = make_worker_meta ~effective_model:"meta-model" () in
+  let checkpoint = make_checkpoint () in
+  Alcotest.(check string) "meta model fallback" "meta-model"
+    (Worker_oas.resume_model_id_of_checkpoint meta checkpoint)
 
 (* ================================================================ *)
 (* Module 2: Tool_council_oas tests                                 *)
@@ -704,6 +773,12 @@ let () =
         test_default_config_path;
       Alcotest.test_case "all cascade names produce models" `Quick
         test_cascade_names_produce_models;
+    ];
+    "resume_config", [
+      Alcotest.test_case "checkpoint model wins" `Quick
+        test_resume_model_id_prefers_checkpoint_model;
+      Alcotest.test_case "meta model fallback" `Quick
+        test_resume_model_id_falls_back_to_meta_model;
     ];
     "tool_council_oas", [
       Alcotest.test_case "petition creates case without decorative collaboration" `Quick

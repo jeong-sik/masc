@@ -1,8 +1,6 @@
 (** MASC Web Dashboard - Real-time Agent Coordination Visualization *)
 
-(** Resolve the assets root directory.
-    Probes MASC_ASSETS_DIR, MASC_BASE_PATH_INPUT/assets, MASC_BASE_PATH/assets,
-    exe-relative, and cwd-relative candidates. *)
+(** Resolve the static assets root used by both dashboard serving paths. *)
 val assets_root : unit -> string
 
 (** Generate the dashboard HTML page *)

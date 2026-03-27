@@ -112,18 +112,12 @@ let keeper_masc_tool_schemas (_meta : keeper_meta) : Types.tool_schema list =
 let dedupe_tool_names names =
   dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)
 
-let keeper_default_tool_names (meta : keeper_meta) : string list =
+let keeper_default_tool_names (_meta : keeper_meta) : string list =
   let base_names = keeper_model_tools |> List.map (fun tool -> tool.Types.name) in
-  if meta.policy_voice_enabled then
-    dedupe_tool_names (keeper_voice_tool_names @ base_names)
-  else
-    base_names
+  dedupe_tool_names (keeper_voice_tool_names @ base_names)
 
-let keeper_default_model_tools (meta : keeper_meta) : Types.tool_schema list =
-  if meta.policy_voice_enabled then
-    keeper_model_tools @ keeper_voice_tool_schemas
-  else
-    keeper_model_tools
+let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
+  keeper_model_tools @ keeper_voice_tool_schemas
 
 (** Return all keeper tool names unconditionally.
     Mode-based categorization removed: every keeper gets the full tool set.
@@ -146,11 +140,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
       @ (keeper_masc_tool_names meta)
       @ (keeper_default_tool_names meta)
     in
-    let with_voice =
-      if meta.policy_voice_enabled then keeper_voice_tool_names @ all_names
-      else all_names
-    in
-    dedupe_tool_names with_voice
+    dedupe_tool_names all_names
 
 (** Return all keeper model tool schemas unconditionally.
     Mode-based categorization removed: every keeper gets the full tool set.

@@ -46,13 +46,18 @@ let with_eio_env f =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let clock = Eio.Stdenv.clock env in
-  (* Ensure clock is available for atomic lock-retry sleep on Linux *)
-  Eio_context.set_clock clock;
   let tmp_dir = make_test_dir () in
   let config = Room_eio.test_config ~fs tmp_dir in
   Fun.protect
     ~finally:(fun () -> try rm_rf tmp_dir with _ -> ())
-    (fun () -> f config)
+    (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        (fun () -> f config))
 
 (** {1 E2E Tests} *)
 

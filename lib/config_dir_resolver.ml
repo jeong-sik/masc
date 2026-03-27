@@ -138,11 +138,11 @@ let config_root_resolution (inputs : inputs) =
               "MASC_CONFIG_DIR is set but does not point to a directory: %s"
               path ] )
   | None -> (
-      match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
-      | Some path -> ({ path; exists = true; source = Exe_relative }, [])
+      match path_from_cwd inputs.cwd with
+      | Some path -> ({ path; exists = true; source = Cwd }, [])
       | None -> (
-          match path_from_cwd inputs.cwd with
-          | Some path -> ({ path; exists = true; source = Cwd }, [])
+          match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
+          | Some path -> ({ path; exists = true; source = Exe_relative }, [])
           | None -> (
               match path_from_legacy_me_root inputs with
               | Some path ->

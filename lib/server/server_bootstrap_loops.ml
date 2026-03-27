@@ -197,7 +197,7 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   (* Phase 5: unified startup subsystem summary *)
   Log.info ~ctx:"startup" "subsystems: keeper loops started"
 
-let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
+let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
      Replaces the old mutex + synchronous file I/O pattern. *)
   Eio.Fiber.fork ~sw (fun () ->
@@ -216,6 +216,8 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
   Tool_metrics_persist.start_flush_fiber ~sw ~clock
     ~base_path:state.room_config.base_path;
   Otel_dispatch_hook.install ();
+  Otel_spans.setup_exporter ~sw env;
+  Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
   (match Board_dispatch.get_pg_pool () with
   | Some pool ->
       let listener = Board_listener.create pool in

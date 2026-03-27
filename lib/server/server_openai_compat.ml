@@ -63,17 +63,14 @@ let completion_response ~model ~content : string =
     Returns the concatenation of all user messages if multiple exist,
     or the last user message content. *)
 let extract_user_message (messages : Yojson.Safe.t) : string option =
-  let open Yojson.Safe.Util in
-  try
-    let msgs = to_list messages in
-    let user_msgs = List.filter (fun m ->
-      let role = m |> member "role" |> to_string in
-      String.equal role "user"
-    ) msgs in
-    match List.rev user_msgs with
-    | last :: _ -> Some (last |> member "content" |> to_string)
-    | [] -> None
-  with Type_error _ -> None
+  let msgs = match messages with `List items -> items | _ -> [] in
+  let user_msgs = List.filter (fun m ->
+    String.equal (Safe_ops.json_string ~default:"" "role" m) "user"
+  ) msgs in
+  match List.rev user_msgs with
+  | last :: _ ->
+    Safe_ops.json_string_opt "content" last
+  | [] -> None
 
 (** Route to a keeper via Keeper_turn.handle_keeper_msg.
     Constructs the args JSON and context, then extracts the reply. *)
@@ -94,9 +91,10 @@ let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) res
     (* body is JSON with "reply" field *)
     (try
       let json = Yojson.Safe.from_string body in
-      let reply = Yojson.Safe.Util.(json |> member "reply" |> to_string) in
-      Ok reply
-    with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+      match Safe_ops.json_string_opt "reply" json with
+      | Some reply -> Ok reply
+      | None -> Ok body
+    with Yojson.Json_error _ ->
       (* If not JSON, use the body as-is *)
       Ok body)
   else
@@ -125,15 +123,21 @@ let route_cascade ~message ~system_prompt ~max_tokens ~temperature
     and returns an OpenAI-format response. *)
 let handle_chat_completions ~config ~sw ~clock (body : string)
   : Httpun.Status.t * string =
-  let open Yojson.Safe.Util in
   try
     let json = Yojson.Safe.from_string body in
-    let model = json |> member "model" |> to_string in
-    let messages = json |> member "messages" in
-    let max_tokens = json |> member "max_tokens"
-      |> to_int_option |> Option.value ~default:4096 in
-    let temperature = json |> member "temperature"
-      |> to_float_option |> Option.value ~default:0.7 in
+    let model = Safe_ops.json_string ~default:"" "model" json in
+    let messages =
+      match Safe_ops.json_member_opt "messages" json with
+      | Some v -> v
+      | None -> `List []
+    in
+    let max_tokens = Safe_ops.json_int ~default:4096 "max_tokens" json in
+    let temperature = Safe_ops.json_float ~default:0.7 "temperature" json in
+    if model = "" then
+      (`Bad_request,
+       error_response ~status:"invalid_request_error"
+         ~message:"Missing or invalid 'model' field")
+    else
     match extract_user_message messages with
     | None ->
       (`Bad_request,
@@ -159,15 +163,14 @@ let handle_chat_completions ~config ~sw ~clock (body : string)
         (* Build system prompt from system messages *)
         let system_prompt =
           try
-            let msgs = to_list messages in
+            let msgs = match messages with `List items -> items | _ -> [] in
             let sys_msgs = List.filter_map (fun m ->
-              let role = m |> member "role" |> to_string in
-              if String.equal role "system" then
-                Some (m |> member "content" |> to_string)
+              if String.equal (Safe_ops.json_string ~default:"" "role" m) "system" then
+                Safe_ops.json_string_opt "content" m
               else None
             ) msgs in
             String.concat "\n" sys_msgs
-          with Yojson.Safe.Util.Type_error _ | Failure _ -> ""
+          with Failure _ -> ""
         in
         match route_cascade ~message:user_message ~system_prompt
                 ~max_tokens ~temperature with
@@ -183,7 +186,3 @@ let handle_chat_completions ~config ~sw ~clock (body : string)
     (`Bad_request,
      error_response ~status:"invalid_request_error"
        ~message:(Printf.sprintf "Invalid JSON: %s" e))
-  | Type_error (e, _) ->
-    (`Bad_request,
-     error_response ~status:"invalid_request_error"
-       ~message:(Printf.sprintf "Invalid request format: %s" e))

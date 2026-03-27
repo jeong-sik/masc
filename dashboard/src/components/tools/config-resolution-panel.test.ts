@@ -17,7 +17,7 @@ describe('ConfigResolutionPanel', () => {
     container.remove()
   })
 
-  it('renders resolved paths and warnings', () => {
+  it('renders resolved paths, root-relative config paths, and runtime diagnostics', () => {
     render(
       html`<${ConfigResolutionPanel}
         resolution=${{
@@ -28,6 +28,32 @@ describe('ConfigResolutionPanel', () => {
           prompts: { path: '/tmp/legacy/config/prompts', exists: true, source: 'legacy_me_root' },
           keepers: { path: '/tmp/legacy/config/keepers', exists: false, source: 'legacy_me_root' },
           personas: { path: '/tmp/custom-personas', exists: false, source: 'invalid_env' },
+        }}
+        runtimeResolution=${{
+          status: 'warn',
+          warnings: ['Runtime build commit (deadbee) differs from workspace HEAD (cafef00d).'],
+          base_path_input: { path: '/tmp/runtime-input', exists: true, source: 'input' },
+          workspace_path: { path: '/tmp/workspace', exists: true, source: 'workspace' },
+          resolved_base_path: { path: '/tmp/workspace', exists: true, source: 'resolved_base' },
+          data_root: { path: '/tmp/workspace/.masc', exists: true, source: 'runtime_data' },
+          prompt_markdown_dir: { path: '/tmp/shared/prompts', exists: true, source: 'prompt_registry' },
+          workspace_git_commit: 'cafef00d',
+          resolved_base_git_commit: 'cafef00d',
+          source_mismatch: true,
+          diagnostics: [
+            {
+              ts: '2026-03-27T00:00:00Z',
+              kind: 'external_signal',
+              signal: 'SIGTERM',
+              message: 'Received SIGTERM, shutting down server.',
+            },
+          ],
+          build: {
+            release_version: 'dev',
+            commit: 'deadbee',
+            started_at: '2026-03-27T00:00:00Z',
+            uptime_seconds: 42,
+          },
         }}
       />`,
       container,
@@ -43,7 +69,11 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).not.toContain('/tmp/legacy/config/cascade.json')
     expect(container.textContent).toContain('/tmp/custom-personas')
     expect(container.textContent).toContain('invalid env')
-    expect(container.textContent).toContain('outside config root')
+    expect(container.textContent).toContain('/tmp/workspace/.masc')
+    expect(container.textContent).toContain('/tmp/shared/prompts')
+    expect(container.textContent).toContain('source mismatch')
+    expect(container.textContent).toContain('SIGTERM')
+    expect(container.textContent).toContain('Runtime build commit (deadbee) differs from workspace HEAD (cafef00d).')
   })
 
   it('keeps the full path on hover title and hides duplicate source badges', () => {

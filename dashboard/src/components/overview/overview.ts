@@ -161,7 +161,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
     <div
       class="rounded-xl border bg-card/55 p-4 cursor-pointer transition-all duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/45' : 'border-card-border hover:border-accent/32'}"
       key=${s.session_id}
-      onClick=${() => navigate('status', { section: 'sessions', session_id: s.session_id })}
+      onClick=${() => navigate('monitoring', { section: 'sessions', session_id: s.session_id })}
     >
       <div class="mb-2.5 flex items-start gap-3">
         <span class="w-2.5 h-2.5 rounded-full shrink-0 mt-1 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${statusDotColor(s.status)}"></span>
@@ -205,7 +205,7 @@ function HotSessions() {
         label="세션"
         count=${userSessions.length}
         linkLabel="전체 보기 ->"
-        onLink=${() => navigate('status', { section: 'sessions' })}
+        onLink=${() => navigate('monitoring', { section: 'sessions' })}
       />
       ${userSessions.length > 0
         ? html`<div class="grid grid-cols-2 gap-3 max-[960px]:grid-cols-1">${userSessions.map(renderSessionCard)}</div>`
@@ -233,14 +233,14 @@ function AgentPulse() {
         label="에이전트"
         count=${agents.length}
         linkLabel="전체 보기 ->"
-        onLink=${() => navigate('status', { section: 'agents' })}
+        onLink=${() => navigate('monitoring', { section: 'agents' })}
       />
       <div class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
             class="flex items-start gap-3 p-4 rounded-xl border border-card-border bg-card/55 cursor-pointer transition-all duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 hover:border-accent/32 group"
             key=${a.name}
-            onClick=${() => navigate('status', { section: 'agents', agent: a.name })}
+            onClick=${() => navigate('monitoring', { section: 'agents', agent: a.name })}
           >
             <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${40} />
             <div class="flex flex-col min-w-0 flex-1 gap-1.5">

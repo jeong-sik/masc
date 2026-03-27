@@ -1,6 +1,6 @@
 # Contributing to MASC MCP
 
-MASC (Multi-Agent Streaming Coordination) — OCaml 5.x MCP server for AI agent coordination.
+MASC (Multi-Agent Streaming Coordination) is an OCaml 5.x MCP server for coordinating multiple coding agents inside one repository.
 
 ## Quick Start
 
@@ -23,7 +23,7 @@ dune build --root .
 make test
 
 # 6. Start server (HTTP mode)
-./start-masc-mcp.sh --http --port 8935
+./start-masc-mcp.sh --http
 ```
 
 ## Development Guidelines
@@ -120,8 +120,55 @@ chore: bump version to 0.9.0
 2. **Write tests** for new functionality
 3. **Run tests**: `make test` must pass
 4. **Build**: `dune build` must succeed cleanly
-5. **Create PR** with description
-6. **Wait for review**
+5. **Open a draft PR** linked to at least one issue
+6. **Include review evidence** from a non-self model
+7. **Wait for review**
+
+## GitHub Planning Rules
+
+`masc-mcp` uses GitHub as an operating system for product planning.
+
+Every new issue should end with:
+
+- exactly one `type:*`
+- exactly one `area:*`
+- exactly one `target:*`
+- optional `release-blocker`
+- optional `product-gap`
+- temporary automation label `triage-required` while one of the required planning labels is missing
+
+Current label groups:
+
+- `type:bug`, `type:friction`, `type:feature`, `type:architecture`, `type:docs`
+- `area:coordination`, `area:team-session`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental`
+- `target:now`, `target:next`, `target:later`
+
+Triage defaults:
+
+- `target:now` for current product-promise blockers
+- `target:next` for advanced workflow improvements
+- `target:later` for extraction, speculative platform work, or deep architecture cleanup
+
+See [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) for the full operating model.
+
+## PR Description Expectations
+
+PRs should include these sections:
+
+- `## Summary`
+- `## Product impact`
+- `## Evidence`
+- `## Review evidence`
+- `## Linked issue`
+
+State which promise the PR affects:
+
+- `repo coordination`
+- `delivery swarm`
+- `ops visibility`
+- `none/internal`
+
+Cross-model review evidence should use direct `sb glm-text` when available. If a fallback reviewer is used, record the reason in the PR body or comment.
 
 ## Architecture Decisions
 

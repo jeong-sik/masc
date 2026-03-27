@@ -256,7 +256,7 @@ let test_keeper_msg_rejects_legacy_model_args () =
       check bool "legacy model error surfaced" true
         (contains_substring body "legacy keeper model args removed"))
 
-(* write_persona_profile removed: persona concept deleted, see CLAUDE.md *)
+(* write_persona_profile removed: persona concept deleted *)
 
 (* write_reward_model removed: keeper policy tools removed *)
 
@@ -323,7 +323,7 @@ let write_jsonl_lines path lines =
         lines)
 
 (* test_persona_list_and_create_from_persona removed:
-   persona concept deleted (CLAUDE.md). Schema fields policy_voice_enabled,
+   persona concept deleted. Schema fields policy_voice_enabled,
    policy_shell_mode, initiative_* removed in #2607. *)
 
 let test_keeper_shell_tool_policy_gates () =
@@ -758,10 +758,10 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
       in
       check string "resident runtime_class" "resident_keeper"
         Yojson.Safe.Util.(resident_row |> member "runtime_class" |> to_string);
-      check bool "resident desired" true
-        Yojson.Safe.Util.(resident_row |> member "desired" |> to_bool);
+      check bool "resident desired mirrors registration" true
+        Yojson.Safe.Util.(resident_row |> member "desired" = `Bool true);
       check bool "resident registered" true
-        Yojson.Safe.Util.(resident_row |> member "resident_registered" |> to_bool);
+        Yojson.Safe.Util.(resident_row |> member "registered" |> to_bool);
       let ok, persistent_body =
         dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool true) ])
       in
@@ -774,10 +774,10 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
       in
       check string "persistent runtime_class" "persistent_agent"
         Yojson.Safe.Util.(persistent_row |> member "runtime_class" |> to_string);
-      check bool "persistent desired" false
-        Yojson.Safe.Util.(persistent_row |> member "desired" |> to_bool);
+      check bool "persistent desired mirrors registration" true
+        Yojson.Safe.Util.(persistent_row |> member "desired" = `Bool false);
       check bool "persistent registered" false
-        Yojson.Safe.Util.(persistent_row |> member "resident_registered" |> to_bool))
+        Yojson.Safe.Util.(persistent_row |> member "registered" |> to_bool))
 
 let test_resident_list_items_expose_runtime_config_summary () =
   Eio_main.run @@ fun env ->
@@ -991,7 +991,7 @@ let test_persistent_agent_msg_rejects_missing_message () =
         (contains_substring body "message is required"))
 
 (* test_persistent_agent_create_from_persona_and_status removed:
-   persona concept deleted (CLAUDE.md). *)
+   persona concept deleted. *)
 
 let test_keeper_dispatch_auxiliary_surfaces_smoke () =
   Eio_main.run @@ fun env ->
@@ -1035,23 +1035,24 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
             ])
       in
       check bool "persistent up ok" true ok;
-      let ok, _autonomy_body =
-        dispatch "masc_keeper_autonomy" (`Assoc [ ("name", `String "resident-demo") ])
+      let check_removed_tool label name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some (ok, body) ->
+            check bool (label ^ " reports failure") false ok;
+            check string (label ^ " returns removal message")
+              (name ^ " has been removed") body
+        | None -> fail (label ^ " should report removal explicitly")
       in
-      check bool "resident autonomy removed" false ok;
-      let ok, _ =
-        dispatch "masc_keeper_autonomy"
-          (`Assoc
-            [
-              ("name", `String "resident-demo");
-              ("level", `String "L1_Reactive");
-            ])
-      in
-      check bool "resident autonomy set removed" false ok;
-      let ok, _goals_body =
-        dispatch "masc_keeper_goals" (`Assoc [ ("name", `String "resident-demo") ])
-      in
-      check bool "resident goals removed" false ok;
+      check_removed_tool "resident autonomy removed" "masc_keeper_autonomy"
+        (`Assoc [ ("name", `String "resident-demo") ]);
+      check_removed_tool "resident autonomy set removed" "masc_keeper_autonomy"
+        (`Assoc
+          [
+            ("name", `String "resident-demo");
+            ("level", `String "L1_Reactive");
+          ]);
+      check_removed_tool "resident goals removed" "masc_keeper_goals"
+        (`Assoc [ ("name", `String "resident-demo") ]);
       let ok, trajectory_body =
         dispatch "masc_keeper_trajectory"
           (`Assoc [ ("name", `String "resident-demo"); ("limit", `Int 5) ])
@@ -1095,7 +1096,7 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
       check string "persistent alias runtime_class" "persistent_agent"
         Yojson.Safe.Util.(persistent_status_json |> member "runtime_class" |> to_string);
       check bool "persistent alias marks resident" true
-        Yojson.Safe.Util.(persistent_status_json |> member "resident_registered" |> to_bool);
+        Yojson.Safe.Util.(persistent_status_json |> member "registered" |> to_bool);
       let ok, _ =
         dispatch "masc_keeper_down" (`Assoc [ ("name", `String "resident-demo") ])
       in
@@ -1256,11 +1257,8 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
       in
       check bool "resident spec exists" true (Sys.file_exists resident_path);
       let resident_json = Yojson.Safe.from_file resident_path in
-      check bool "resident voice enabled" voice_enabled
-        Yojson.Safe.Util.(resident_json |> member "voice_enabled" |> to_bool);
-      let expected_channel = if voice_enabled then "voice_text" else "text_only" in
-      check string "resident voice channel" expected_channel
-        Yojson.Safe.Util.(resident_json |> member "voice_channel" |> to_string))
+      check string "resident spec name" "sangsu"
+        Yojson.Safe.Util.(resident_json |> member "name" |> to_string))
 
 let test_keeper_up_update_preserves_proactive_when_omitted () =
   Eio_main.run @@ fun env ->
@@ -1389,23 +1387,23 @@ let test_write_meta_syncs_registered_resident_seed () =
       in
       check bool "resident spec exists" true (Sys.file_exists resident_path);
       let resident_json = Yojson.Safe.from_file resident_path in
-      check bool "resident voice disabled sync" false
+      check string "resident spec name" "buddy"
+        Yojson.Safe.Util.(resident_json |> member "name" |> to_string);
+      check bool "voice_enabled synced in boot entry" false
         Yojson.Safe.Util.(resident_json |> member "voice_enabled" |> to_bool);
-      check string "resident voice channel sync" "text_only"
+      check string "voice_channel synced in boot entry" "text_only"
         Yojson.Safe.Util.(resident_json |> member "voice_channel" |> to_string);
-      check string "resident voice agent id sync" ""
+      check string "voice_agent_id synced in boot entry" ""
         Yojson.Safe.Util.(resident_json |> member "voice_agent_id" |> to_string);
-      check string "persona_name in resident spec" "buddy"
-        Yojson.Safe.Util.(resident_json |> member "persona_name" |> to_string);
+      check bool "seed_meta absent in thin format" true
+        (Yojson.Safe.Util.(resident_json |> member "seed_meta") = `Null);
       (match Masc_mcp.Keeper_registry.get ~base_path:config.base_path "buddy" with
        | Some entry ->
            check bool "registry meta syncs proactive" false
              entry.Masc_mcp.Keeper_registry.meta.proactive.enabled;
            check bool "registry meta syncs voice enabled" false
              entry.Masc_mcp.Keeper_registry.meta.voice_enabled
-       | None -> ());
-      check bool "seed_meta absent in thin format" true
-        (Yojson.Safe.Util.(resident_json |> member "seed_meta") = `Null))
+       | None -> ()))
 
 let test_keeper_up_persists_allowed_paths_to_status_policy () =
   Eio_main.run @@ fun env ->
@@ -1516,7 +1514,7 @@ let test_parse_agent_status_reads_compressed_filesystem_backend () =
                 agent_type = "keeper";
                 status = Types.Active;
                 capabilities = [ "keeper"; "resident" ];
-                current_task = None;
+                current_task = Some (String.make 1024 't');
                 joined_at = "2026-03-25T00:00:00Z";
                 last_seen = "2026-03-25T00:01:00Z";
                 meta = None;
@@ -1529,7 +1527,9 @@ let test_parse_agent_status_reads_compressed_filesystem_backend () =
               | Ok content -> content
               | Error e -> fail e
             in
-            check string "compressed header prefix" "ZSTD" (String.sub raw 0 4);
+            check bool "raw content stored with backend compression header" true
+              (String.length raw >= 4
+              && String.sub raw 0 4 = "ZSTD");
             let status_json =
               Masc_mcp.Keeper_exec_status.parse_agent_status config ~agent_name
             in

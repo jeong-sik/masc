@@ -117,7 +117,7 @@ export function openHandoff(handoff: DashboardExecutionHandoff | null | undefine
   })
   persistWorkflowContext(context)
   navigate(
-    handoff.surface,
+    'command',
     handoff.surface === 'intervene'
       ? workflowInterveneParams(context)
       : workflowCommandParams(context),

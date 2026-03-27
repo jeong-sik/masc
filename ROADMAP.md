@@ -1,76 +1,104 @@
 # masc-mcp Roadmap
 
-> Current: v2.102.1 | Updated: 2026-03-17
+> Current package version: v2.153.0 (unreleased)
+> Latest release: v2.150.0 (2026-03-26)
+> Updated: 2026-03-27
 
-This is the single source of truth for masc-mcp planning.
-For versioning rules and intake/triage, see `docs/VERSIONED-ROADMAP.md`.
+This roadmap is the 6-8 week operating view for `masc-mcp`.
+For the product promise and GitHub operating model, see [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md).
+For historical feature-train rules and release intake background, see [docs/VERSIONED-ROADMAP.md](docs/VERSIONED-ROADMAP.md).
 
-## Short-term (v2.103-v2.104, next 2-4 weeks)
+## Product Promise
 
-Source: `docs/ARCHITECTURE-COMPLEXITY-ANALYSIS.md` (Phase 2-3)
+`masc-mcp` is a repo-local MCP server for coordinating multiple coding agents inside one repository.
 
-| Item | Module | Est. lines affected | Status |
-|------|--------|---------------------|--------|
-| TRPG + protocol_game_view extraction to `masc-games` | tool_trpg, tool_protocol_game_view | 3600+ | Not started |
-| risc + autoresearch + council + experiment extraction | tool_risc, tool_autoresearch, tool_council, tool_experiment | 3800+ | Not started |
-| dune optional library separation | dune, lib/ | - | Not started |
-| tool_team_session split (4412 -> 5 modules) | tool_team_session | 4412 | Design done |
-| TRPG dm-keeper -> on-demand conversion | keeper_autonomy | - | Not started |
-| Test noise cleanup: merge 32 duplicate coverage files | test/ | ~12K lines | Audit done |
+Promise levels:
 
-## Mid-term (v2.105-v2.108, 1-3 months)
+- Front door: repo coordination
+- Advanced: supervised delivery swarm
+- Supporting: dashboard and operator visibility
+- Deferred or experimental: broad research surfaces, extraction work, and deep architecture cleanup
 
-| Item | Source | Notes |
-|------|--------|-------|
-| Mode/profile system (core 5 / standard 17 / full 72) | ARCHITECTURE-COMPLEXITY Phase 3 | Reduces default tool exposure |
-| Environment variables -> config file consolidation | ARCHITECTURE-COMPLEXITY Phase 3 | 50+ env vars currently |
-| Binary distribution (brew/npm install) | IDEAS #6 | No owner |
-| Worktree diff broadcast | IDEAS #7 | No owner |
-| Lodge identity v2 Tier 1 (confidence, decay, thresholds) | docs/lodge-identity-v2/ROADMAP.md | Design exists, no implementation |
+## Active 6-8 Week Tracks
 
-## Long-term (v2.109+, 3+ months, directional)
+| Track | Goal | Why now | Primary references |
+|------|------|---------|--------------------|
+| Product truth and onboarding | Make the product easy to describe and start correctly | front-door docs and product posture are still fragmented | `README.md`, `docs/PRODUCT-OPERATING-PLAN.md`, `docs/PRODUCT-REVIEW.md` |
+| GitHub as operating system | Make issues, PRs, and releases reflect product reality instead of drifting | `type:*` exists, but `target:*` and release blockers are not consistently enforced | `.github/ISSUE_TEMPLATE/*`, `.github/workflows/*`, `CONTRIBUTING.md` |
+| Promise hardening | Tighten the parts of the product users actually depend on first | CI truth, transport truth, config visibility, and release truth are blocking trust | `CHANGELOG.md`, `docs/spec/C-implementation-status.md`, open issues below |
 
-These are directions, not commitments. Each needs a trigger condition or owner to activate.
+## target:now
 
-| Direction | Source | Trigger |
-|-----------|--------|---------|
-| Lodge identity v2 Tier 2-3 (ToM, archetypes) | docs/lodge-identity-v2/ROADMAP.md | Tier 1 proves value |
-| Figma-MCP integration (visual heartbeat) | docs/archive/EVOLUTION-PLAN-FIGMA-MCP.md | figma-mcp stabilizes |
-| Cluster mode / multi-node HA | docs/IMMORTAL-SERVER-ROADMAP.md Phase 3 | Single-node limits hit |
-| Chaos engineering framework | docs/IMMORTAL-SERVER-ROADMAP.md Phase 3 | Production incident pattern |
-| Adaptive orchestration (dynamic org) | docs/archive/IMPROVEMENT-PLAN-2026-01.md P3 | Agent count > 30 |
+Items that directly affect the current product promise:
 
-## Completed milestones
+- CI truth and merge gates
+  - `#3418` quick-suite Eio regression
+  - `#3404` missing `ripgrep` in lint
+  - `#3396` shared quick-suite regression tracker
+- Transport and health truth
+  - `#3408` gRPC / WS discovery says `listening=false` while the transport is reachable
+- Config visibility foundation
+  - `#3364` centralize env config
+  - `#3365` dashboard config introspection
+  - `#3363` deduplicate env vars
+- Product and release truth
+  - README / roadmap / changelog alignment
+  - issue / PR / release hygiene automation
 
-See `CHANGELOG.md` for release-by-release details.
+## target:next
 
-| Version range | Theme | Key deliverables |
-|---------------|-------|------------------|
-| v2.87.0 | Release closeout | CI green, CHANGELOG honest |
-| v2.88.0 | Reliable Swarm | Provider fallback, dispatch serialization |
-| v2.89.0 | Visible Swarm | Heartbeat tracking, zombie detection |
-| v2.90.0 | Recoverable Swarm | Checkpointing, schema validation |
-| v2.91.0 | Immortal Base | Supervision, health, graceful shutdown |
-| v2.92.0 | Product Portfolio Trim | TRPG/Voice/Autoresearch review |
-| v2.93.0-v2.102.1 | Incremental | See CHANGELOG.md |
+Items that improve advanced workflows after the front-door promise is cleaner:
 
-## Archived plans
+- auth and API contract hardening for non-local operation
+- delivery-swarm ergonomics
+  - ready-to-delegate contract
+  - verifier turn-budget reliability
+  - clearer runtime / model visibility in proof
+- richer operator diagnosis bundles and deeper read confidence
 
-Previous planning documents moved to `docs/archive/`:
+## target:later
 
-| File | Why archived |
-|------|-------------|
-| `IDEAS-2026-01.md` | 9/11 items done, 2 stale |
-| `IMPROVEMENT-BACKLOG-MITOSIS.md` | 25/25 items complete |
-| `EVOLUTION-PLAN-FIGMA-MCP.md` | Targets different repo, never started |
-| `RELEASE-ROADMAP-v287.md` | v2.87.0 long past |
-| `IMPROVEMENT-PLAN-2026-01.md` | Superseded by VERSIONED-ROADMAP |
+Important work that stays visible but does not drive the next 6-8 weeks:
 
-## Design references (active, not archived)
+- wide extraction and package separation
+  - `masc-games`
+  - kitchen-sink breakup
+  - large module decomposition
+- deep Eio and architecture cleanup
+  - global mutable state reduction
+  - actor/message-passing conversions
+  - broad interface and error-pipeline refactors
+- speculative distribution and platform work
+  - binary distribution
+  - cluster mode
+  - chaos framework
 
-| File | Value |
-|------|-------|
-| `docs/ARCHITECTURE-COMPLEXITY-ANALYSIS.md` | Tier classification, split plans, reduction phases |
-| `docs/IMMORTAL-SERVER-ROADMAP.md` | OCaml type signatures for supervision tree |
-| `docs/lodge-identity-v2/ROADMAP.md` | Lodge identity system design |
-| `docs/VERSIONED-ROADMAP.md` | Versioning rules, intake/triage process |
+## Release Lane Rules
+
+- Each minor release must close one user-visible promise.
+- Patch releases stabilize the active promise; they do not open a new one.
+- Do not tag a release while `release-blocker` issues remain open.
+- Do not tag a release while version truth is broken across `dune-project`, `masc_mcp.opam`, `ROADMAP.md`, and `CHANGELOG.md`.
+- Prefer `target:now`, `target:next`, and `target:later` over vague backlog buckets.
+
+## Completed Reference Points
+
+See [CHANGELOG.md](CHANGELOG.md) for release-by-release details.
+
+| Version | Theme | Key deliverables |
+|--------|-------|------------------|
+| v2.87.0 | Release closeout | CI green, changelog honesty, worktree cleanup |
+| v2.88.0 | Reliable Swarm | provider fallback, dispatch serialization |
+| v2.89.0 | Visible Swarm | heartbeat tracking, zombie detection |
+| v2.90.0 | Recoverable Swarm | checkpointing, schema validation |
+| v2.91.0 | Immortal Base | supervision, health, graceful shutdown |
+| v2.92.0 | Product Portfolio Trim | explicit keep / archive decisions for experimental surfaces |
+| v2.93.0-v2.150.0 | Incremental | see changelog and product operating plan |
+
+## Design References
+
+- [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md)
+- [docs/PRODUCT-REVIEW.md](docs/PRODUCT-REVIEW.md)
+- [docs/ARCHITECTURE-COMPLEXITY-ANALYSIS.md](docs/ARCHITECTURE-COMPLEXITY-ANALYSIS.md)
+- [docs/IMMORTAL-SERVER-ROADMAP.md](docs/IMMORTAL-SERVER-ROADMAP.md)
+- [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md)

@@ -14,7 +14,7 @@ type config = {
 
 val default_config : label:string -> interval_s:float -> config
 (** [default_config ~label ~interval_s] returns a config with
-    [max_backoff_s = 600.0], [failure_threshold = 3], [timeout_s = 10.0]. *)
+    [max_backoff_s = 120.0], [failure_threshold = 5], [timeout_s = 10.0]. *)
 
 val start :
   sw:Eio.Switch.t ->

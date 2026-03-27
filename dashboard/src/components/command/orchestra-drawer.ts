@@ -61,17 +61,17 @@ function jumpTo(tab: string, surface: CommandPlaneSurface | string | null | unde
   if (tab === 'command') {
     if (surface) {
       setCommandPlaneSurface(surface as CommandPlaneSurface)
-      navigate('operations', { ...surfaceRouteParams(surface as CommandPlaneSurface), ...nextParams })
+      navigate('command', { ...surfaceRouteParams(surface as CommandPlaneSurface), ...nextParams })
       return
     }
-    navigate('operations', { section: 'command', ...nextParams })
+    navigate('command', { section: 'warroom', ...nextParams })
     return
   }
   if (tab === 'intervene') {
-    navigate('operations', { section: 'intervene', ...nextParams })
+    navigate('command', { section: 'intervene', ...nextParams })
     return
   }
-  navigate('operations', { section: 'command', ...nextParams })
+  navigate('command', { section: 'warroom', ...nextParams })
 }
 
 // ── Node rendering helpers ──────────────────────────────

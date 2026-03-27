@@ -205,7 +205,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
           variant="ghost"
           onClick=${() => {
             setCommandPlaneSurface('swarm')
-            navigate('operations', {
+            navigate('command', {
               ...surfaceRouteParams('swarm'),
               operation_id: op.operation_id,
               ...(runId ? { run_id: runId } : {}),
@@ -221,7 +221,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
                 onClick=${() => {
                   focusCommandPlaneChainOperation(op.operation_id)
                   setCommandPlaneSurface('chains')
-                  navigate('operations', { ...surfaceRouteParams('chains'), operation: op.operation_id })
+                  navigate('command', { ...surfaceRouteParams('chains'), operation: op.operation_id })
                 }}
               >
                 체인 열기

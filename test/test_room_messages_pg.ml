@@ -43,18 +43,22 @@ let with_pg_test_env f =
           Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
           Eio.Switch.run @@ fun sw ->
-          Eio_context.set_net (Eio.Stdenv.net env);
-          Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-          let config =
-            Room_utils.default_config_eio ~sw ~env:(env :> Caqti_eio.stdenv) dir
-          in
-          match config.Room_utils.backend with
-          | Room_utils.PostgresNative _ ->
-              let _ = Room.init config ~agent_name:(Some "claude") in
-              Fun.protect
-                ~finally:(fun () -> ignore (Room.reset config))
-                (fun () -> f ~env ~sw ~config)
-          | Room_utils.Memory _ | Room_utils.FileSystem _ -> ())
+          Eio_context.with_test_env
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~mono_clock:(Eio.Stdenv.mono_clock env)
+            ~sw
+            (fun () ->
+              let config =
+                Room_utils.default_config_eio ~sw ~env:(env :> Caqti_eio.stdenv) dir
+              in
+              match config.Room_utils.backend with
+              | Room_utils.PostgresNative _ ->
+                  let _ = Room.init config ~agent_name:(Some "claude") in
+                  Fun.protect
+                    ~finally:(fun () -> ignore (Room.reset config))
+                    (fun () -> f ~env ~sw ~config)
+              | Room_utils.Memory _ | Room_utils.FileSystem _ -> ()))
 
 let test_get_messages_raw_uses_postgres_backend () =
   with_pg_test_env @@ fun ~env:_ ~sw:_ ~config ->

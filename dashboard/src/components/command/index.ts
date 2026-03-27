@@ -55,7 +55,7 @@ function SurfaceTabs() {
                   class="border border-[var(--white-12)] bg-[var(--white-4)] text-[var(--white-72)] p-[8px_14px] capitalize rounded-full cmd-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
                   onClick=${() => {
                     setCommandPlaneSurface(surface.id)
-                    navigate('operations', surfaceRouteParams(surface.id))
+                    navigate('command', surfaceRouteParams(surface.id))
                   }}
                 >
                   ${surface.label}

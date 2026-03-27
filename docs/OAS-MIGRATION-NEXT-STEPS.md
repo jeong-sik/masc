@@ -33,8 +33,11 @@ They do. The gap is that the bridge is still lossy.
 - preserve more `planned_worker` metadata in swarm entries
 - preserve richer telemetry semantics beyond the current `trace_ref`/usage/turn_count baseline when the swarm runner needs more operator-facing detail
 - decide whether the current single-pass success-ratio convergence policy should become a richer multi-iteration strategy driven by delivery verdicts
-- replace the current room-init `resource_check` with a broader runtime-health probe, then upstream the generic callback shape to OAS
-- decide whether session-level budget needs token/cost enforcement beyond the current `duration_seconds` wall-clock budget
+- decide whether the current event-level telemetry detail is enough, or whether dashboard consumers need first-class swarm telemetry views
+- replace the current room-init `resource_check` with a broader runtime-health probe, then upstream the generic callback shape to OAS if a concrete failure mode appears
+- decide whether the current single-pass success-ratio convergence policy should become a richer multi-iteration strategy
+- broaden the runtime-health probe beyond room/session readiness only if a concrete failure mode appears
+ - decide whether session-level budget needs token/cost enforcement beyond the current `duration_seconds` wall-clock budget
 
 ### Success criteria
 
@@ -50,10 +53,14 @@ This pass reduced duplication, but one important path still remains outside the 
 
 - dashboard provider single-run now routes through `Oas_worker.run_model`
 - initial local worker run now routes through `Worker_oas.run_worker_via_oas`
+- local worker resume/continue now routes through `Worker_oas.resume_worker_via_oas`
+- team-session collaboration metadata now preserves richer worker/session semantics
+- swarm lifecycle events now include per-agent telemetry detail
+- `resource_check` now validates persisted running-session state, not just room initialization
 
 ### Still remaining
 
-- local worker resume/continue path still constructs resume-specific config locally before entering the shared execution tail
+- no known local worker resume-path config duplication remains in the current OAS path
 
 ### Success criteria
 

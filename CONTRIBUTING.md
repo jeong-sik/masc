@@ -23,7 +23,7 @@ dune build --root .
 make test
 
 # 6. Start server (HTTP mode)
-./start-masc-mcp.sh --http --port 8935
+./start-masc-mcp.sh --http
 ```
 
 ## Development Guidelines

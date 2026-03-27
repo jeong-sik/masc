@@ -671,7 +671,7 @@ let test_masc_team_session_step_spawn_batch_schema () =
       | None -> Alcotest.fail "masc_team_session_step missing properties"
 
 (* test_masc_persona_list_schema and test_masc_keeper_create_from_persona_schema
-   removed: persona concept deleted (CLAUDE.md), schema fields
+   removed: persona concept deleted, schema fields
    policy_voice_enabled/policy_shell_mode/initiative_* removed in #2607. *)
 
 let test_masc_keeper_up_schema () =

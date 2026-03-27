@@ -12,6 +12,9 @@ const refreshRoomTruth = vi.fn().mockResolvedValue(undefined)
 
 const topActiveAgents = { value: [] as unknown[] }
 const navigate = vi.fn()
+const connected = { value: true }
+const eventCount = { value: 0 }
+const lastEvent = { value: null as { ts_unix?: number } | null }
 
 async function flushUi(): Promise<void> {
   await Promise.resolve()
@@ -35,6 +38,9 @@ async function loadOverview() {
   }))
   vi.doMock('../../sse', () => ({
     journal: [],
+    connected,
+    eventCount,
+    lastEvent,
   }))
   vi.doMock('../../router', () => ({
     navigate,
@@ -68,6 +74,9 @@ describe('Overview freshness strip', () => {
     missionLoading.value = false
     roomTruthLoading.value = false
     topActiveAgents.value = []
+    connected.value = true
+    eventCount.value = 0
+    lastEvent.value = null
     missionSnapshot.value = {
       generated_at: '2026-03-26T12:09:00Z',
       summary: {},

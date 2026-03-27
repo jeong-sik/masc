@@ -563,7 +563,7 @@ function PostDetail({ post }: { post: BoardPost }) {
     <div>
       <button type="button"
         class="mb-4 px-3 py-1.5 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
-        onClick=${() => navigate('work', { section: 'board' })}
+        onClick=${() => navigate('workspace', { section: 'board' })}
       >← 게시판으로 돌아가기</button>
 
       <${Card} title=${post.title}>
@@ -656,7 +656,7 @@ export function Memory() {
             <${MemorySummary} />
             <button type="button"
               class="mb-4 px-3 py-1.5 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
-              onClick=${() => navigate('work', { section: 'board' })}
+              onClick=${() => navigate('workspace', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
               ? html`<div class="loading-state loading-pulse">글 불러오는 중...</div>`

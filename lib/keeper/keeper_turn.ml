@@ -156,12 +156,18 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     (fun (active, line) -> if active then Some line else None)
                     policy_guards
                 in
-                match policy_lines with
+                let tool_use_lines = [
+                  "Tool-use guidance:";
+                  "- If the user asks you to speak, use voice, make sound, or output TTS, prefer keeper_voice_session_start and keeper_voice_speak.";
+                  "- Do not simulate spoken audio with plain text roleplay when a voice tool can handle the request.";
+                  "- If voice execution fails, say that voice output is unavailable and continue in text.";
+                ] in
+                match policy_lines @ tool_use_lines with
                 | [] -> prompt
                 | _ ->
                     Printf.sprintf "%s\n\n%s"
                       prompt
-                      (String.concat "\n" policy_lines)
+                      (String.concat "\n" (policy_lines @ tool_use_lines))
               in
               let prompt =
                 match live_worktree_change with

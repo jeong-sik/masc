@@ -6,8 +6,6 @@ const apiMocks = vi.hoisted(() => ({
   fetchDashboardExecution: vi.fn(),
   fetchDashboardMemory: vi.fn(),
   fetchDashboardPlanning: vi.fn(),
-  fetchMessagesList: vi.fn(),
-  fetchAgentActivity: vi.fn(),
 }))
 
 vi.mock('./api', () => apiMocks)

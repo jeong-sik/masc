@@ -95,6 +95,61 @@ let test_callbacks_all_some () =
   Alcotest.(check bool) "on_error present"
     true (Option.is_some cbs.on_error)
 
+let test_agent_done_event_includes_telemetry () =
+  let tmp = Filename.temp_dir "masc-test" "" in
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Room.default_config tmp in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let session_id = "test-telemetry" in
+  Team_session_store.ensure_session_dirs config session_id;
+  let cbs = Team_session_swarm_callbacks.make_callbacks ~config ~session_id in
+  let trace_ref =
+    {
+      Agent_sdk.Raw_trace.worker_run_id = "run-telemetry";
+      path = "/tmp/run-telemetry.jsonl";
+      start_seq = 2;
+      end_seq = 9;
+      agent_name = "agent-a";
+      session_id = Some session_id;
+    }
+  in
+  let usage =
+    {
+      Agent_sdk.Types.total_input_tokens = 11;
+      total_output_tokens = 7;
+      total_cache_creation_input_tokens = 0;
+      total_cache_read_input_tokens = 0;
+      api_calls = 2;
+      estimated_cost_usd = 0.13;
+    }
+  in
+  let telemetry =
+    {
+      Swarm.Swarm_types.trace_ref = Some trace_ref;
+      usage = Some usage;
+      turn_count = 3;
+    }
+  in
+  Option.get cbs.on_agent_done "agent-a"
+    (Swarm.Swarm_types.Done_ok
+       { elapsed = 1.25; text = "completed"; telemetry });
+  let events = Team_session_store.read_events ~max_events:1 config session_id in
+  let event = List.hd events in
+  let open Yojson.Safe.Util in
+  let detail = event |> member "detail" in
+  Alcotest.(check string) "event type" "swarm_agent_done"
+    (event |> member "event_type" |> to_string);
+  Alcotest.(check int) "telemetry turn_count" 3
+    (detail |> member "telemetry" |> member "turn_count" |> to_int);
+  Alcotest.(check string) "trace ref worker_run_id" "run-telemetry"
+    (detail |> member "telemetry" |> member "trace_ref"
+     |> member "worker_run_id" |> to_string);
+  Alcotest.(check int) "usage api_calls" 2
+    (detail |> member "telemetry" |> member "usage" |> member "api_calls"
+     |> to_int)
+
 (* ================================================================ *)
 (* apply_swarm_result tests                                         *)
 (* ================================================================ *)
@@ -335,6 +390,8 @@ let () =
     "callbacks", [
       Alcotest.test_case "all callbacks present" `Quick
         test_callbacks_all_some;
+      Alcotest.test_case "agent done event includes telemetry" `Quick
+        test_agent_done_event_includes_telemetry;
     ];
     "apply_swarm_result", [
       Alcotest.test_case "converged result" `Quick

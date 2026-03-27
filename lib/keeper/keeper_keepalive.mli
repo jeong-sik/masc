@@ -25,8 +25,8 @@ val wakeup_relevant_keeper_for_board_signal :
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :
-  proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool ref ->
-  wakeup:bool ref -> unit
+  proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
+  wakeup:bool Atomic.t -> unit
 
 val start_keepalive :
   ?proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit

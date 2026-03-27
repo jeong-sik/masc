@@ -153,13 +153,13 @@ let test_grpc_close () =
   R.set_grpc_close ~base_path:bp "g1" (Some (fun () -> called := true));
   (match R.get ~base_path:bp "g1" with
    | Some e ->
-       (match !(e.grpc_close) with
+       (match Atomic.get e.grpc_close with
         | Some f -> f (); check bool "grpc_close called" true !called
         | None -> fail "expected grpc_close")
    | None -> fail "expected g1");
   R.set_grpc_close ~base_path:bp "g1" None;
   match R.get ~base_path:bp "g1" with
-  | Some e -> check bool "grpc_close cleared" true (Option.is_none !(e.grpc_close))
+  | Some e -> check bool "grpc_close cleared" true (Option.is_none (Atomic.get e.grpc_close))
   | None -> fail "expected g1"
 
 let test_crash_log () =
@@ -186,9 +186,9 @@ let test_started_at () =
 let test_wakeup () =
   R.clear ();
   let entry = R.register ~base_path:bp "w1" (make_meta "w1") in
-  check bool "wakeup initially false" false !(entry.fiber_wakeup);
+  check bool "wakeup initially false" false (Atomic.get entry.fiber_wakeup);
   R.wakeup ~base_path:bp "w1";
-  check bool "wakeup set" true !(entry.fiber_wakeup)
+  check bool "wakeup set" true (Atomic.get entry.fiber_wakeup)
 
 let test_wakeup_all () =
   R.clear ();
@@ -199,10 +199,10 @@ let test_wakeup_all () =
   R.set_state ~base_path:bp "wa3" R.Stopped;
   R.set_state ~base_path:bp "wa4" R.Paused;
   R.wakeup_all ();
-  check bool "wa1 woken" true !(e1.fiber_wakeup);
-  check bool "wa2 woken" true !(e2.fiber_wakeup);
-  check bool "wa3 not woken (stopped)" false !(e3.fiber_wakeup);
-  check bool "wa4 not woken (paused)" false !(e4.fiber_wakeup)
+  check bool "wa1 woken" true (Atomic.get e1.fiber_wakeup);
+  check bool "wa2 woken" true (Atomic.get e2.fiber_wakeup);
+  check bool "wa3 not woken (stopped)" false (Atomic.get e3.fiber_wakeup);
+  check bool "wa4 not woken (paused)" false (Atomic.get e4.fiber_wakeup)
 
 let test_fiber_health_alive () =
   R.clear ();
@@ -237,10 +237,10 @@ let test_shared_refs () =
   R.clear ();
   let entry = R.register ~base_path:bp "ref1" (make_meta "ref1") in
   let entry_via_get = R.get_exn ~base_path:bp "ref1" in
-  entry.fiber_wakeup := true;
-  check bool "shared wakeup ref" true !(entry_via_get.fiber_wakeup);
-  entry_via_get.fiber_stop := true;
-  check bool "shared stop ref" true !(entry.fiber_stop)
+  Atomic.set entry.fiber_wakeup true;
+  check bool "shared wakeup atomic" true (Atomic.get entry_via_get.fiber_wakeup);
+  Atomic.set entry_via_get.fiber_stop true;
+  check bool "shared stop atomic" true (Atomic.get entry.fiber_stop)
 
 let test_spawn_slots () =
   R.clear ();

@@ -29,8 +29,8 @@ let set_grpc_client c = grpc_client_ref := Some c
     effect within ~2 s instead of waiting for the full 30-300 s interval. *)
 let interruptible_sleep ~clock ~stop ~wakeup duration =
   let rec wait remaining =
-    if !stop then ()
-    else if !wakeup then (wakeup := false)
+    if Atomic.get stop then ()
+    else if Atomic.compare_and_set wakeup true false then ()
     else if remaining <= 0.0 then ()
     else begin
       let chunk = Float.min 2.0 remaining in
@@ -120,7 +120,7 @@ let wakeup_relevant_keeper_for_board_signal
        | [] -> ())
 
 let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
-    (m : keeper_meta) (stop : bool ref) ~(wakeup : bool ref) : unit =
+    (m : keeper_meta) (stop : bool Atomic.t) ~(wakeup : bool Atomic.t) : unit =
   let keepalive_started_ts = Time_compat.now () in
   let snapshot_interval_sec =
     match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_SEC" with
@@ -132,7 +132,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
   in
   let last_snapshot_ts = ref 0.0 in
   let rec loop () =
-    if !stop then ()
+    if Atomic.get stop then ()
     else (
             let meta_current =
               match read_meta ctx.config m.name with
@@ -503,7 +503,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  (Printexc.to_string exn));
             let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
             interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
-            if !stop then ()
+            if Atomic.get stop then ()
             else loop ())
   in
   loop ()
@@ -532,19 +532,19 @@ let run_grpc_heartbeat_fiber ~sw ~stop
   let close_ref = ref false in
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
-      if !stop || !close_ref then ()
+      if Atomic.get stop || !close_ref then ()
       else (
         (try
           Log.Keeper.info "grpc heartbeat tick: agent=%s session=%s"
             agent_name session_id;
-          let no_wakeup = ref false in
+          let no_wakeup = Atomic.make false in
           interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
           Log.Keeper.error "grpc heartbeat tick failed: %s"
             (Printexc.to_string exn));
-        if not !stop then loop ())
+        if not (Atomic.get stop) then loop ())
     in
     loop ());
   Some (fun () -> close_ref := true)
@@ -621,8 +621,8 @@ let stop_keepalive name =
            String.equal e.name name)
   in
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
-      entry.fiber_stop := true;
-      (match !(entry.grpc_close) with
+      Atomic.set entry.fiber_stop true;
+      (match Atomic.get entry.grpc_close with
        | Some close_fn ->
          (try close_fn ()
           with Eio.Cancel.Cancelled _ as e -> raise e | _exn -> ())

@@ -52,13 +52,13 @@ curl "http://127.0.0.1:${PORT}/health"
   "mcpServers": {
     "masc": {
       "type": "http",
-      "url": "http://127.0.0.1:<PORT>/mcp"
+      "url": "http://127.0.0.1:8935/mcp"
     }
   }
 }
 ```
 
-`<PORT>`에는 `./start-masc-mcp.sh --print-port` 출력값을 넣는다.
+worktree에서는 `8935` 대신 `./start-masc-mcp.sh --print-port` 출력값으로 바꾼다.
 
 메모:
 

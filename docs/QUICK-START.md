@@ -51,13 +51,13 @@ HTTP가 canonical public path다. 템플릿 전체는 `docs/MCP-TEMPLATE.md`를 
   "mcpServers": {
     "masc": {
       "type": "http",
-      "url": "http://127.0.0.1:<PORT>/mcp"
+      "url": "http://127.0.0.1:8935/mcp"
     }
   }
 }
 ```
 
-`<PORT>`에는 `./start-masc-mcp.sh --print-port` 출력값을 넣는다.
+worktree에서는 `8935` 대신 `./start-masc-mcp.sh --print-port` 출력값으로 바꾼다.
 
 ## 4. 첫 Workflow
 

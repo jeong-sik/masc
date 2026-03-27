@@ -18,10 +18,11 @@ let str_contains s sub =
     in
     loop 0
 
-(* Test helper *)
+(* Test helper — wraps in Eio context so dispatch paths that use
+   Eio.Mutex, Fs_compat, or structured concurrency work correctly. *)
 let test name f =
   try
-    f ();
+    Eio_main.run @@ (fun env -> Fs_compat.set_fs (Eio.Stdenv.fs env); f ());
     Printf.printf "✓ %s passed\n" name
   with e ->
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);

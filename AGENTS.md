@@ -27,7 +27,8 @@ dune runtest --root .
 make test
 
 # Run (dev)
-./start-masc-mcp.sh --http --port 8935
+PORT="$(./start-masc-mcp.sh --print-port)"
+./start-masc-mcp.sh --http --port "$PORT"
 
 # Type check only
 dune build --root . @check
@@ -146,7 +147,7 @@ dune build --root . @check
 
 | Service | Endpoint |
 |---------|----------|
-| MASC Dev | `localhost:8935` |
+| MASC Dev | `localhost:8935` (repo root) / `./start-masc-mcp.sh --print-port` (worktree) |
 | MASC Prod | `localhost:8945` (Cloudflare tunnel: `masc.crying.pictures`) |
 | GraphQL | `second-brain-graphql-production.up.railway.app` |
 | Neo4j | `turntable.proxy.rlwy.net:11490` |

@@ -1,6 +1,6 @@
 #!/bin/bash
 # MASC MCP Server (OCaml) - Start Script (HTTP/SSE default)
-# Usage: ./start-masc-mcp.sh [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]
+# Usage: ./start-masc-mcp.sh [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]
 # Note: Eio is the default runtime; --lwt exits with an error.
 
 set -e
@@ -113,6 +113,52 @@ resolve_repo_env_root() {
     echo "$SCRIPT_DIR"
 }
 
+detect_worktree_name() {
+    local path="$1"
+    local git_dir common_dir
+
+    if ! command -v git >/dev/null 2>&1; then
+        return 1
+    fi
+
+    git_dir="$(git -C "$path" rev-parse --git-dir 2>/dev/null || true)"
+    common_dir="$(git -C "$path" rev-parse --git-common-dir 2>/dev/null || true)"
+    if [ -z "$git_dir" ] || [ -z "$common_dir" ]; then
+        return 1
+    fi
+
+    case "$git_dir" in
+        */worktrees/*)
+            echo "${git_dir##*/}"
+            return 0
+            ;;
+    esac
+
+    if [ "$git_dir" != "$common_dir" ]; then
+        echo "${git_dir##*/}"
+        return 0
+    fi
+
+    return 1
+}
+
+default_port_for_path() {
+    local path="$1"
+    local worktree_name checksum port_range_start port_range_size
+
+    if worktree_name="$(detect_worktree_name "$path")"; then
+        read -r checksum _ <<EOF
+$(printf '%s' "$path" | cksum)
+EOF
+        port_range_start=9100
+        port_range_size=900
+        echo $((port_range_start + (checksum % port_range_size)))
+        return 0
+    fi
+
+    echo 8935
+}
+
 load_env_file() {
     local path="$1"
     if [ -f "$path" ]; then
@@ -221,8 +267,6 @@ raise_open_file_limit() {
     fi
 }
 
-raise_open_file_limit
-
 # Default: enable realtime transports unless explicitly disabled.
 if [ -z "${MASC_WS_ENABLED+x}" ]; then
     export MASC_WS_ENABLED=1
@@ -234,15 +278,26 @@ fi
 
 # Default arguments
 PORT="${MASC_MCP_PORT:-8935}"
+PORT_EXPLICIT=0
+PRINT_PORT_ONLY=0
+WORKTREE_PORT_HINT=""
 HTTP_MODE="${MASC_MCP_HTTP:-true}"
 BASE_PATH="${MASC_BASE_PATH:-$SCRIPT_DIR}"
 HOST="${MASC_HOST:-127.0.0.1}"
 # NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
 EIO_MODE="true"
 
+if [ -n "${MASC_MCP_PORT:-}" ]; then
+    PORT_EXPLICIT=1
+fi
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --print-port)
+            PRINT_PORT_ONLY=1
+            shift
+            ;;
         --http)
             HTTP_MODE="true"
             shift
@@ -262,6 +317,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --port)
             PORT="$2"
+            PORT_EXPLICIT=1
             shift 2
             ;;
         --host)
@@ -274,12 +330,30 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]" >&2
+            echo "Usage: $0 [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]" >&2
             echo "Note: Eio is the default runtime; --lwt exits with an error." >&2
             exit 1
             ;;
     esac
 done
+
+if [ "$PORT_EXPLICIT" != "1" ]; then
+    PORT="$(default_port_for_path "$SCRIPT_DIR")"
+    if [ "$PORT" != "8935" ]; then
+        WORKTREE_PORT_HINT="Using worktree-derived default port $PORT for $(basename "$SCRIPT_DIR") (override with MASC_MCP_PORT or --port)."
+    fi
+fi
+
+if [ "$PRINT_PORT_ONLY" = "1" ]; then
+    echo "$PORT"
+    exit 0
+fi
+
+if [ -n "$WORKTREE_PORT_HINT" ]; then
+    echo "$WORKTREE_PORT_HINT" >&2
+fi
+
+raise_open_file_limit
 
 # Fast preflight: fail before build/init if requested port is already occupied.
 if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1 && [ "${MASC_ALLOW_PORT_REUSE:-0}" != "1" ]; then

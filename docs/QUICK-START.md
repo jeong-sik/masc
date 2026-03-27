@@ -15,20 +15,27 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 dune build --root .
 
-./start-masc-mcp.sh --http --port 8935
+PORT="$(./start-masc-mcp.sh --print-port)"
+./start-masc-mcp.sh --http --port "$PORT"
 ```
 
 기본 포트:
 
-- HTTP / MCP: `8935`
+- repo root checkout: `8935`
+- git worktree checkout: `9100-9999` 범위에서 checkout path 기준 자동 파생
 - 기본 bind host: `127.0.0.1`
+
+메모:
+
+- 현재 checkout의 기본 포트 확인: `./start-masc-mcp.sh --print-port`
+- worktree에서 `--port`를 생략하면 script가 worktree별 기본 포트를 자동 선택한다.
 
 ## 2. Health Check
 
 ```bash
-curl http://127.0.0.1:8935/health
+curl "http://127.0.0.1:${PORT}/health"
 
-curl -sS http://127.0.0.1:8935/mcp \
+curl -sS "http://127.0.0.1:${PORT}/mcp" \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
@@ -43,11 +50,13 @@ HTTP가 canonical public path다. 템플릿 전체는 `docs/MCP-TEMPLATE.md`를 
   "mcpServers": {
     "masc": {
       "type": "http",
-      "url": "http://127.0.0.1:8935/mcp"
+      "url": "http://127.0.0.1:<PORT>/mcp"
     }
   }
 }
 ```
+
+`<PORT>`에는 `./start-masc-mcp.sh --print-port` 출력값을 넣는다.
 
 ## 4. 첫 Workflow
 

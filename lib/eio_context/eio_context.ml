@@ -8,11 +8,35 @@
 
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
+type state_snapshot = {
+  net : eio_net option;
+  clock : float Eio.Time.clock_ty Eio.Resource.t option;
+  mono_clock : Eio.Time.Mono.ty Eio.Resource.t option;
+  sw : Eio.Switch.t option;
+  net_initialized : bool;
+}
+
 let current_net : eio_net option Atomic.t = Atomic.make None
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option Atomic.t = Atomic.make None
 let current_mono_clock : Eio.Time.Mono.ty Eio.Resource.t option Atomic.t = Atomic.make None
 let current_sw : Eio.Switch.t option Atomic.t = Atomic.make None
 let net_initialized : bool Atomic.t = Atomic.make false
+
+let snapshot_state () =
+  {
+    net = Atomic.get current_net;
+    clock = Atomic.get current_clock;
+    mono_clock = Atomic.get current_mono_clock;
+    sw = Atomic.get current_sw;
+    net_initialized = Atomic.get net_initialized;
+  }
+
+let restore_state snapshot =
+  Atomic.set current_net snapshot.net;
+  Atomic.set current_clock snapshot.clock;
+  Atomic.set current_mono_clock snapshot.mono_clock;
+  Atomic.set current_sw snapshot.sw;
+  Atomic.set net_initialized snapshot.net_initialized
 
 let set_net net =
   Atomic.set current_net (Some (net :> eio_net));
@@ -31,6 +55,14 @@ let get_mono_clock () =
 
 let set_switch sw =
   Atomic.set current_sw (Some sw)
+
+let with_test_env ~net ~clock ~mono_clock ~sw f =
+  let snapshot = snapshot_state () in
+  set_net net;
+  set_clock clock;
+  set_mono_clock mono_clock;
+  set_switch sw;
+  Fun.protect ~finally:(fun () -> restore_state snapshot) f
 
 let get_net_opt () : eio_net option =
   Atomic.get current_net

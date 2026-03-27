@@ -54,6 +54,11 @@ Release labeling rules:
 - `release-blocker` means the issue must be closed before the tagged release.
 - Legacy labels such as `bug` or `enhancement` may remain, but `type:*` and `target:*` are the planning SSOT going forward.
 - Agent-filed reports should include reproducible evidence, a concrete symptom, and the smallest plausible target train.
+- Blank issues stay disabled so intake goes through a typed issue form by default.
+- New issue forms require a target-train choice, and automation adds `triage-required`
+  until the issue has exactly one `type:*` and one `target:*` label.
+- `triage-required` means the issue is not in the execution queue yet. Ownership,
+  duplicate handling, and exact release placement must be resolved before work starts.
 
 ## Source Documents
 

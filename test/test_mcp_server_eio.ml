@@ -346,6 +346,36 @@ let test_eio_context_delegation () =
   Alcotest.(check bool) "clock delegated to shared Eio_context" true
     (Eio_context.get_clock () == alias_clock)
 
+let option_ref_equal left right =
+  match left, right with
+  | None, None -> true
+  | Some l, Some r -> l == r
+  | None, Some _ | Some _, None -> false
+
+let test_eio_context_with_test_env_restores () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  let before_net = Eio_context.get_net_opt () in
+  let before_clock = Eio_context.get_clock_opt () in
+  let before_switch = Eio_context.get_switch_opt () in
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    Alcotest.(check bool) "scoped net set" true
+      (Option.is_some (Eio_context.get_net_opt ()));
+    Alcotest.(check bool) "scoped clock set" true
+      (Option.is_some (Eio_context.get_clock_opt ()));
+    Alcotest.(check bool) "scoped switch set" true
+      (Option.is_some (Eio_context.get_switch_opt ())));
+  Alcotest.(check bool) "net restored" true
+    (option_ref_equal before_net (Eio_context.get_net_opt ()));
+  Alcotest.(check bool) "clock restored" true
+    (option_ref_equal before_clock (Eio_context.get_clock_opt ()));
+  Alcotest.(check bool) "switch restored" true
+    (option_ref_equal before_switch (Eio_context.get_switch_opt ()))
+
 (* ===== Unit Tests for Protocol Helpers ===== *)
 
 let test_is_jsonrpc_v2 () =
@@ -2524,6 +2554,7 @@ let state_tests = [
   "create_state", `Quick, test_create_state;
   "type compatibility", `Quick, test_type_compatibility;
   "eio context delegation", `Quick, test_eio_context_delegation;
+  "eio context scoped restore", `Quick, test_eio_context_with_test_env_restores;
   "resolve_join_state skips read-only lookup", `Quick,
     test_resolve_join_state_skips_read_only_lookup;
   "resolve_join_state checks join-required tools", `Quick,

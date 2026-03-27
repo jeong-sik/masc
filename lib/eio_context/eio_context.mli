@@ -20,6 +20,15 @@ val get_mono_clock : unit -> Eio.Time.Mono.ty Eio.Resource.t
 val set_switch : Eio.Switch.t -> unit
 (** Set the global Eio switch. *)
 
+val with_test_env :
+  net:[> `Network | `Platform of [> `Generic | `Unix ]] Eio.Resource.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
+  sw:Eio.Switch.t ->
+  (unit -> 'a) -> 'a
+(** Temporarily override the global Eio context for a test scope and restore the
+    previous values afterwards. *)
+
 val get_net_opt : unit -> eio_net option
 (** Get the Eio network handle if available. *)
 

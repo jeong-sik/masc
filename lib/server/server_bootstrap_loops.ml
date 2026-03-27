@@ -215,6 +215,7 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
     result);
   Tool_metrics_persist.start_flush_fiber ~sw ~clock
     ~base_path:state.room_config.base_path;
+  Otel_dispatch_hook.install ();
   (match Board_dispatch.get_pg_pool () with
   | Some pool ->
       let listener = Board_listener.create pool in

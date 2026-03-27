@@ -167,7 +167,9 @@ let init () =
   add "masc_inference_cache_misses_total" "Total inference cache misses" Counter;
   add "masc_inference_cache_writes_total" "Total inference cache writes" Counter;
   add "masc_inference_cache_bypass_total" "Total inference cache bypass decisions" Counter;
-  add "masc_inference_cache_errors_total" "Total inference cache errors" Counter
+  add "masc_inference_cache_errors_total" "Total inference cache errors" Counter;
+  register_histogram ~name:"masc_tool_call_duration_seconds"
+    ~help:"Tool call latency in seconds" ()
 
 let start_time = Time_compat.now ()
 

@@ -69,6 +69,12 @@ let cached_isolated_readonly_config ~sw ~clock ~config =
     incoming HTTP requests.  Created lazily on first use. *)
 let _pg_semaphore : Eio.Semaphore.t option ref = ref None
 
+let clear_runtime_state () =
+  _runtime_caps := None;
+  _cached_readonly_pg_config := None;
+  _pg_semaphore := None;
+  Executor_pool_ref.clear ()
+
 let pg_semaphore () =
   match !_pg_semaphore with
   | Some s -> s

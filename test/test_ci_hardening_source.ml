@@ -339,6 +339,9 @@ let test_dashboard_executor_pool_contracts () =
   check bool "dashboard core defines executor pool helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "let run_dashboard_compute");
+  check bool "dashboard core can clear runtime state" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "let clear_runtime_state () =");
   check bool "dashboard core submits compute to executor pool" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "Eio.Executor_pool.submit_exn");
@@ -356,7 +359,10 @@ let test_dashboard_executor_pool_contracts () =
        "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock");
   check bool "server bootstrap wires executor pool into dashboard" true
     (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
-       "Server_dashboard_http.set_executor_pool exec_pool")
+       "Server_dashboard_http.set_executor_pool exec_pool");
+  check bool "server bootstrap clears dashboard runtime state before reuse" true
+    (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
+       "Server_dashboard_http.clear_runtime_state ()")
 
 let test_chain_adapter_executor_pool_contracts () =
   check bool "executor pool ref exposes explicit domain-safe helper" true

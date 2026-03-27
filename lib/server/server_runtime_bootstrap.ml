@@ -42,6 +42,7 @@ let init_runtime_context env =
 
 let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     : Mcp_server.server_state =
+  Server_dashboard_http.clear_runtime_state ();
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;

@@ -22,6 +22,8 @@ type dashboard_compute_mode =
 
 val set_runtime_caps : Runtime_caps.t -> unit
 
+val clear_runtime_state : unit -> unit
+
 val set_executor_pool : Eio.Executor_pool.t -> unit
 
 val run_dashboard_compute :

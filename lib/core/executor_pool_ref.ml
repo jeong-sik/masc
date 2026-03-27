@@ -15,6 +15,8 @@ let get () = !pool
 
 let set p = pool := Some p
 
+let clear () = pool := None
+
 (** Submit domain-safe pure work to the executor pool if available,
     or run inline otherwise.  The explicit [label] keeps callsites
     auditable when reviewing executor-pool usage. *)
@@ -31,6 +33,3 @@ let submit_domain_safe_or_inline ?(weight = 1.0) ~label f =
              label (Printexc.to_string exn);
            f ())
   | None -> f ()
-
-let submit_or_inline ?(weight = 1.0) f =
-  submit_domain_safe_or_inline ~weight ~label:"unspecified" f

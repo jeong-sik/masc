@@ -456,22 +456,17 @@ let handle_request
                        | Ok { names; include_hidden; include_deprecated; include_usage; tier; cursor } ->
                            let list_profile =
                              match profile with
-                             | Managed_agent | Operator_remote ->
-                               profile
+                             | Managed_agent | Operator_remote -> profile
                              | Full -> Full
                            in
-                           handle_list_tools_eio ~profile:list_profile ?names ~include_hidden
-                             ~include_deprecated ~include_usage ?tier ?cursor
-                             state id)
+                           handle_list_tools_eio ~profile:list_profile ?names
+                             ~include_hidden ~include_deprecated ~include_usage
+                             ?tier ?cursor state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->
                            (try
                              let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
-                             (* tools/call: respect each profile's allowed toolset.
-                                Managed_agent keeps its SDK alias tools.
-                                Operator_remote keeps its restricted tools.
-                                Full uses the full catalog for direct calls. *)
                              let call_profile = match profile with
                                | Operator_remote | Managed_agent -> profile
                                | _ -> Full
@@ -494,6 +489,17 @@ let handle_request
                            with Yojson.Safe.Util.Type_error (_, _) ->
                              make_error ~id (-32602) "Invalid params: name must be a string")
                        | None -> make_error ~id (-32602) "Missing params")
+                   | method_ when Mcp_sdk_adapter_masc.handles_method method_ ->
+                       Mcp_sdk_adapter_masc.dispatch_request
+                         ~handle_call_tool_eio
+                         ~state
+                         ~profile
+                         ~sw
+                         ~clock
+                         ?mcp_session_id
+                         ?auth_token
+                         json
+                       |> Option.value ~default:`Null
                    | method_ -> make_error ~id (-32601) ("Method not found: " ^ method_))
                  with
                  | Invalid_argument msg

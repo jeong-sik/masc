@@ -4,7 +4,7 @@
     This module includes it and adds HTTP-specific utilities. *)
 
 module Http = Http_server_eio
-module Http_negotiation = Mcp_protocol.Http_negotiation
+module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 
 (* Session management: single source of truth with Eio.Mutex protection.
    Brings in Mcp_eio alias, Hashtbl tables, mutex, and all session functions. *)

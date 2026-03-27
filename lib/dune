@@ -234,8 +234,9 @@
    mdal
    mdal_swarm
    mdal_worker
-   mcp_protocol
+   mcp_transport_protocol
    mcp_prompt_surface
+   mcp_sdk_adapter_masc
    mcp_server
    mcp_server_eio
    mcp_server_eio_types
@@ -727,6 +728,8 @@
   tool_improve_loop_planner
   tool_improve_loop_executor)
  (libraries
+   mcp_protocol
+   mcp_protocol.eio
    yojson
    base64
    graphql

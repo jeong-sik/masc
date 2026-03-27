@@ -230,16 +230,11 @@ let pre_check
                 let cmd_str =
                   try
                     let json = Yojson.Safe.from_string args_json in
-                    let open Yojson.Safe.Util in
                     (* keeper_bash uses "command", keeper_fs_edit/edit uses "content" *)
-                    let cmd = json |> member "command" in
-                    (match cmd with
-                     | `String s -> s
-                     | `Null ->
-                         let c = json |> member "content" in
-                         (match c with `String s -> s | _ -> "")
-                     | _ -> "")
-                  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error (_, _) -> ""
+                    match Safe_ops.json_string_opt "command" json with
+                    | Some s -> s
+                    | None -> Safe_ops.json_string ~default:"" "content" json
+                  with Yojson.Json_error _ -> ""
                 in
                 begin match detect_destructive cmd_str with
                 | Some (pattern, desc) ->
@@ -259,15 +254,10 @@ let pre_check
           let cmd_str =
             try
               let json = Yojson.Safe.from_string args_json in
-              let open Yojson.Safe.Util in
-              let cmd = json |> member "command" in
-              (match cmd with
-               | `String s -> s
-               | `Null ->
-                   let c = json |> member "content" in
-                   (match c with `String s -> s | _ -> "")
-               | _ -> "")
-            with Yojson.Json_error _ | Yojson.Safe.Util.Type_error (_, _) -> ""
+              match Safe_ops.json_string_opt "command" json with
+              | Some s -> s
+              | None -> Safe_ops.json_string ~default:"" "content" json
+            with Yojson.Json_error _ -> ""
           in
           begin match detect_destructive cmd_str with
           | Some (pattern, desc) ->
@@ -320,9 +310,10 @@ let post_eval
     if has_error then
       try
         let json = Yojson.Safe.from_string result in
-        let open Yojson.Safe.Util in
-        Some (json |> member "error" |> to_string)
-      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error (_, _) -> Some "unknown error in result"
+        match Safe_ops.json_string_opt "error" json with
+        | Some s -> Some s
+        | None -> Some "unknown error in result"
+      with Yojson.Json_error _ -> Some "unknown error in result"
     else None
   in
 

@@ -180,7 +180,7 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
 
     let protocol_versions =
       match json |> member "protocolVersions" with
-      | `List vs -> List.filter_map (fun v -> try Some (to_string v) with Yojson.Safe.Util.Type_error _ -> None) vs
+      | `List vs -> List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) vs
       | _ -> ["0.3"]
     in
 
@@ -223,13 +223,13 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
     let default_input_modes =
       (match json |> member "defaultInputModes" with
       | `List vs -> vs | _ -> [])
-      |> List.filter_map (fun v -> try Some (to_string v) with Yojson.Safe.Util.Type_error _ -> None)
+      |> List.filter_map (fun v -> match v with `String s -> Some s | _ -> None)
     in
 
     let default_output_modes =
       (match json |> member "defaultOutputModes" with
       | `List vs -> vs | _ -> [])
-      |> List.filter_map (fun v -> try Some (to_string v) with Yojson.Safe.Util.Type_error _ -> None)
+      |> List.filter_map (fun v -> match v with `String s -> Some s | _ -> None)
     in
 
     let extensions =

@@ -216,10 +216,11 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
-             let post_id =
-               json |> Yojson.Safe.Util.member "post_id"
-               |> Yojson.Safe.Util.to_string
-             in
+             match Safe_ops.json_string_opt "post_id" json with
+             | None ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   {|{"ok":false,"error":"invalid request: requires {\"post_id\":\"...\"}"}|} reqd
+             | Some post_id ->
              match Board_dispatch.delete_post ~post_id with
              | Ok () ->
                  Http.Response.json ~compress:true ~request:req
@@ -227,7 +228,7 @@ let add_routes ~sw ~clock router =
              | Error _ ->
                  Http.Response.json ~status:`Not_found ~request:req
                    {|{"ok":false,"error":"post not found or delete failed"}|} reqd
-           with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
+           with Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req
                {|{"ok":false,"error":"invalid request: requires {\"post_id\":\"...\"}"}|} reqd
          )
@@ -238,10 +239,11 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
-             let task_id =
-               json |> Yojson.Safe.Util.member "task_id"
-               |> Yojson.Safe.Util.to_string
-             in
+             match Safe_ops.json_string_opt "task_id" json with
+             | None ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   {|{"ok":false,"error":"invalid request: requires {\"task_id\":\"...\"}"}|} reqd
+             | Some task_id ->
              let config = state.Mcp_server.room_config in
              match Task_dispatch.delete_task config ~task_id with
              | Ok () ->
@@ -250,7 +252,7 @@ let add_routes ~sw ~clock router =
              | Error _ ->
                  Http.Response.json ~status:`Not_found ~request:req
                    {|{"ok":false,"error":"task not found or delete failed"}|} reqd
-           with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
+           with Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req
                {|{"ok":false,"error":"invalid request: requires {\"task_id\":\"...\"}"}|} reqd
          )
@@ -261,10 +263,11 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
-             let goal_id =
-               json |> Yojson.Safe.Util.member "goal_id"
-               |> Yojson.Safe.Util.to_string
-             in
+             match Safe_ops.json_string_opt "goal_id" json with
+             | None ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   {|{"ok":false,"error":"invalid request: requires {\"goal_id\":\"...\"}"}|} reqd
+             | Some goal_id ->
              let config = state.Mcp_server.room_config in
              match Goal_store.delete_goal config ~goal_id with
              | Ok () ->
@@ -274,7 +277,7 @@ let add_routes ~sw ~clock router =
                  Http.Response.json ~status:`Not_found ~request:req
                    (Printf.sprintf {|{"ok":false,"error":"%s"}|} (String.escaped msg))
                    reqd
-           with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
+           with Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req
                {|{"ok":false,"error":"invalid request: requires {\"goal_id\":\"...\"}"}|} reqd
          )
@@ -557,10 +560,12 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
-             let loop_id =
-               json |> Yojson.Safe.Util.member "loop_id"
-               |> Yojson.Safe.Util.to_string
-             in
+             match Safe_ops.json_string_opt "loop_id" json with
+             | None ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}
+                   reqd
+             | Some loop_id ->
              let base_path = state.Mcp_server.room_config.base_path in
              (match Dashboard_http_autoresearch.validate_loop_id loop_id with
              | Error message ->
@@ -580,7 +585,7 @@ let add_routes ~sw ~clock router =
                        (Printf.sprintf {|{"ok":false,"error":"%s"}|}
                           (String.escaped message))
                        reqd))
-           with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
+           with Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req
                {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}
                reqd
@@ -592,10 +597,12 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
-             let loop_id =
-               json |> Yojson.Safe.Util.member "loop_id"
-               |> Yojson.Safe.Util.to_string
-             in
+             match Safe_ops.json_string_opt "loop_id" json with
+             | None ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}
+                   reqd
+             | Some loop_id ->
              let base_path = state.Mcp_server.room_config.base_path in
              (match Dashboard_http_autoresearch.validate_loop_id loop_id with
              | Error message ->
@@ -615,7 +622,7 @@ let add_routes ~sw ~clock router =
                        (Printf.sprintf {|{"ok":false,"error":"%s"}|}
                           (String.escaped message))
                        reqd))
-           with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
+           with Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req
                {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}
                reqd

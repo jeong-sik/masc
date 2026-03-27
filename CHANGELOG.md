@@ -3,6 +3,14 @@
 
 ## [Unreleased]
 
+### Added
+- **OpenTelemetry foundation** — spans, histogram, trace_id linkage (#3487).
+
+### Fixed
+- **API usage cost_usd regressions** — restore cost tracking after OAS update (#3493).
+- **Resident terminology removal** — replace remaining resident keeper references (#3491).
+- **Mission cache timeout** — extract to env var `MASC_DASHBOARD_MISSION_CACHE_TIMEOUT_S` (#3484).
+
 ## [2.158.0] - 2026-03-28
 
 ### Changed

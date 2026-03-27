@@ -93,7 +93,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release-by-release details.
 | v2.90.0 | Recoverable Swarm | checkpointing, schema validation |
 | v2.91.0 | Immortal Base | supervision, health, graceful shutdown |
 | v2.92.0 | Product Portfolio Trim | explicit keep / archive decisions for experimental surfaces |
-| v2.93.0-v2.150.0 | Incremental | see changelog and product operating plan |
+| v2.93.0-v2.158.0 | Incremental | see changelog and product operating plan |
 
 ## Design References
 

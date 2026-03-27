@@ -25,6 +25,44 @@ let write_file path content =
     ~finally:(fun () -> close_out oc)
     (fun () -> output_string oc content)
 
+let prompt_metadata key =
+  match key with
+  | "keeper.proactive_turn" ->
+      ("test prompt for " ^ key,
+       [ "idle_seconds"; "profile"; "goal"; "last_preview";
+         "continuity_snapshot"; "seed" ])
+  | "keeper.proactive_retry" ->
+      ("test prompt for " ^ key, [ "attempt_phrase"; "reason"; "directive" ])
+  | "keeper.unified.system" ->
+      ("test prompt for " ^ key,
+       [ "identity_header"; "trait_lines"; "instructions_block"; "goal_lines" ])
+  | "keeper.deliberation" ->
+      ("test prompt for " ^ key,
+       [ "keeper_name"; "soul_profile"; "goal"; "triggers"; "world_state" ])
+  | "dashboard.operator_judge" | "dashboard.governance_judge" ->
+      ("test prompt for " ^ key, [ "facts_json" ])
+  | _ -> ("test prompt for " ^ key, [])
+
+let markdown_fixture key body =
+  let description, template_variables = prompt_metadata key in
+  let meta_lines =
+    [
+      "---";
+      "description: " ^ description;
+      "category: test";
+    ]
+    @
+    (if template_variables = [] then []
+     else
+       [
+         "template_variables: ["
+         ^ String.concat ", " template_variables
+         ^ "]";
+       ])
+    @ [ "---" ]
+  in
+  String.concat "\n" (meta_lines @ [ body ])
+
 let fixtures =
   [
     ("keeper.constitution", "Continuity rules from file");
@@ -47,7 +85,9 @@ let with_registry f =
   Unix.mkdir prompts_dir 0o755;
   List.iter
     (fun (key, content) ->
-      write_file (Filename.concat prompts_dir (key ^ ".md")) content)
+      write_file
+        (Filename.concat prompts_dir (key ^ ".md"))
+        (markdown_fixture key content))
     fixtures;
   Fun.protect
     ~finally:(fun () ->

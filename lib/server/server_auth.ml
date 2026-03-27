@@ -27,11 +27,7 @@ let env_flag_enabled name =
       v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
 
 let configured_bind_host () =
-  trim_opt (Sys.getenv_opt "MASC_HTTP_BIND_HOST")
-  |> Option.value
-       ~default:
-         (trim_opt (Sys.getenv_opt "MASC_HOST")
-         |> Option.value ~default:"127.0.0.1")
+  Env_config_core.masc_host ()
 
 let ipaddr_is_loopback = function
   | Ipaddr.V4 addr ->

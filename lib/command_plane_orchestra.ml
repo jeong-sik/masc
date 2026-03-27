@@ -125,7 +125,7 @@ let room_json config =
       [
         ("room_id", `String "default");
         ("project", `String (Filename.basename config.base_path));
-        ("cluster", `String (Option.value ~default:"default" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+        ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool false);
         ("pause_reason", `Null);
         ("agent_count", `Int 0);
@@ -140,7 +140,7 @@ let room_json config =
       [
         ("room_id", `String (Option.value ~default:"default" (Room.read_current_room config)));
         ("project", `String state.project);
-        ("cluster", `String (Option.value ~default:"default" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+        ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool state.paused);
         ("pause_reason", json_string_option state.pause_reason);
         ("agent_count", `Int (List.length agents));

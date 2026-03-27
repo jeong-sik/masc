@@ -152,22 +152,9 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
 
 (* ── Cascade model resolution ──────────────────────────── *)
 
-(* Locate config/cascade.json via CWD or ME_ROOT.
-   Inlined from Oas_worker.default_config_path to avoid circular dependency. *)
 let cascade_config_path () : string option =
-  let base dir name = Filename.concat (Filename.concat dir "config") name in
-  let cwd = Sys.getcwd () in
-  let me_root =
-    Sys.getenv_opt "ME_ROOT"
-    |> Option.value
-         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
-  in
-  let masc_root = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
-  let candidates =
-    [ base cwd "cascade.json";
-      base masc_root "cascade.json" ]
-  in
-  List.find_opt Sys.file_exists candidates
+  Config_dir_resolver.log_warnings ~context:"OasModelResolve" ();
+  Config_dir_resolver.cascade_path_opt ()
 
 (* JSON loading and profile resolution delegated to OAS Cascade_config.
    OAS maintains an Eio.Mutex-protected, mtime-based cache. *)

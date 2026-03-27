@@ -6,43 +6,13 @@
 let existing_dir path =
   Sys.file_exists path && Sys.is_directory path
 
-let dedupe_keep_order values =
-  let rec loop acc = function
-    | [] -> List.rev acc
-    | value :: rest ->
-        if List.mem value acc then loop acc rest
-        else loop (value :: acc) rest
-  in
-  loop [] values
-
-let prompt_markdown_dir_candidates ~workspace_path ~base_path =
-  let workspace_candidate = Filename.concat workspace_path "config/prompts" in
-  let base_candidate = Filename.concat base_path "config/prompts" in
-  let cwd_candidate = Filename.concat (Sys.getcwd ()) "config/prompts" in
-  let exe_candidate =
-    let exe_dir = Filename.dirname Sys.executable_name in
-    let root = Filename.dirname (Filename.dirname (Filename.dirname exe_dir)) in
-    Filename.concat root "config/prompts"
-  in
-  let dune_candidate =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root when String.trim root <> "" ->
-        Some (Filename.concat root "config/prompts")
-    | _ -> None
-  in
-  let candidates =
-    workspace_candidate
-    :: base_candidate
-    :: (match dune_candidate with Some dir -> [ dir ] | None -> [])
-    @ [ exe_candidate; cwd_candidate ]
-  in
-  dedupe_keep_order candidates
+let prompt_markdown_dir_candidates ~workspace_path:_ ~base_path:_ =
+  [ Config_dir_resolver.prompts_dir () ]
 
 let resolve_prompt_markdown_dir ~workspace_path ~base_path =
-  let candidates = prompt_markdown_dir_candidates ~workspace_path ~base_path in
-  match List.find_opt existing_dir candidates with
-  | Some dir -> dir
-  | None -> Filename.concat base_path "config/prompts"
+  ignore workspace_path;
+  ignore base_path;
+  Config_dir_resolver.prompts_dir ()
 
 let bootstrapped_signature : (string * string) option ref = ref None
 
@@ -54,6 +24,7 @@ let init () =
   | None -> ()
 
 let bootstrap_runtime ~workspace_path ~base_path =
+  Config_dir_resolver.log_warnings ~context:"PromptDefaults" ();
   let prompt_markdown_dir =
     resolve_prompt_markdown_dir ~workspace_path ~base_path
   in

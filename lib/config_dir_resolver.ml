@@ -1,0 +1,262 @@
+type source =
+  | Env
+  | Invalid_env
+  | Exe_relative
+  | Cwd
+  | Legacy_me_root
+  | Missing
+
+type status =
+  | Ready
+  | Warn
+  | Invalid_env_status
+  | Missing_status
+
+type path_item = {
+  path : string;
+  exists : bool;
+  source : source;
+}
+
+type resolution = {
+  status : status;
+  warnings : string list;
+  config_root : path_item;
+  cascade : path_item;
+  prompts : path_item;
+  keepers : path_item;
+  personas : path_item;
+}
+
+type inputs = {
+  cwd : string;
+  executable_name : string;
+  env_config_dir : string option;
+  env_personas_dir : string option;
+  env_me_root : string option;
+  env_workspace_root : string option;
+  env_dune_sourceroot : string option;
+}
+
+let trim_opt = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let absolute_path path =
+  if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path
+
+let absolute_path_from ~cwd path =
+  if Filename.is_relative path then Filename.concat cwd path else path
+
+let existing_dir path =
+  Sys.file_exists path && Sys.is_directory path
+
+let existing_file path =
+  Sys.file_exists path && not (Sys.is_directory path)
+
+let source_to_string = function
+  | Env -> "env"
+  | Invalid_env -> "invalid_env"
+  | Exe_relative -> "exe_relative"
+  | Cwd -> "cwd"
+  | Legacy_me_root -> "legacy_me_root"
+  | Missing -> "missing"
+
+let status_to_string = function
+  | Ready -> "ready"
+  | Warn -> "warn"
+  | Invalid_env_status -> "invalid_env"
+  | Missing_status -> "missing"
+
+let item_to_json (item : path_item) =
+  `Assoc
+    [
+      ("path", `String item.path);
+      ("exists", `Bool item.exists);
+      ("source", `String (source_to_string item.source));
+    ]
+
+let to_json (resolution : resolution) =
+  `Assoc
+    [
+      ("status", `String (status_to_string resolution.status));
+      ( "warnings",
+        `List (List.map (fun warning -> `String warning) resolution.warnings) );
+      ("config_root", item_to_json resolution.config_root);
+      ("cascade", item_to_json resolution.cascade);
+      ("prompts", item_to_json resolution.prompts);
+      ("keepers", item_to_json resolution.keepers);
+      ("personas", item_to_json resolution.personas);
+    ]
+
+let config_signature_exists config_dir =
+  let cascade = Filename.concat config_dir "cascade.json" in
+  let prompts = Filename.concat config_dir "prompts" in
+  let keepers = Filename.concat config_dir "keepers" in
+  let personas = Filename.concat config_dir "personas" in
+  existing_dir config_dir
+  && (existing_file cascade || existing_dir prompts || existing_dir keepers
+     || existing_dir personas)
+
+let rec ancestor_dirs path =
+  let dir = absolute_path path in
+  let parent = Filename.dirname dir in
+  if parent = dir then [ dir ] else dir :: ancestor_dirs parent
+
+let path_from_executable ~cwd executable_name =
+  let exe = absolute_path_from ~cwd executable_name in
+  if not (Sys.file_exists exe) then None
+  else
+    ancestor_dirs (Filename.dirname exe)
+    |> List.find_map (fun dir ->
+           let candidate = Filename.concat dir "config" in
+           if config_signature_exists candidate then Some candidate else None)
+
+let path_from_cwd cwd =
+  let candidate = Filename.concat cwd "config" |> absolute_path_from ~cwd in
+  if config_signature_exists candidate then Some candidate else None
+
+let legacy_me_root_candidates (inputs : inputs) =
+  [ inputs.env_me_root; inputs.env_workspace_root; inputs.env_dune_sourceroot ]
+  |> List.filter_map trim_opt
+  |> List.map (fun root ->
+         Filename.concat
+           (Filename.concat root "workspace/yousleepwhen/masc-mcp")
+           "config")
+
+let path_from_legacy_me_root inputs =
+  legacy_me_root_candidates inputs
+  |> List.find_opt config_signature_exists
+
+let default_missing_root cwd =
+  Filename.concat cwd "config" |> absolute_path_from ~cwd
+
+let config_root_resolution (inputs : inputs) =
+  match trim_opt inputs.env_config_dir with
+  | Some raw ->
+      let path = absolute_path_from ~cwd:inputs.cwd raw in
+      if existing_dir path then
+        ( { path; exists = true; source = Env },
+          [] )
+      else
+        ( { path; exists = false; source = Invalid_env },
+          [ Printf.sprintf
+              "MASC_CONFIG_DIR is set but does not point to a directory: %s"
+              path ] )
+  | None -> (
+      match path_from_cwd inputs.cwd with
+      | Some path -> ({ path; exists = true; source = Cwd }, [])
+      | None -> (
+          match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
+          | Some path -> ({ path; exists = true; source = Exe_relative }, [])
+          | None -> (
+              match path_from_legacy_me_root inputs with
+              | Some path ->
+                  ( { path; exists = true; source = Legacy_me_root },
+                    [ Printf.sprintf
+                        "Using legacy config fallback from ME_ROOT-style path: %s"
+                        path ] )
+              | None ->
+                  let path = default_missing_root inputs.cwd in
+                  ( { path; exists = false; source = Missing },
+                    [ Printf.sprintf
+                        "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
+                        path ] ) ) ) )
+
+let child_item (root : path_item) name =
+  let path = Filename.concat root.path name in
+  let exists =
+    match name with
+    | "cascade.json" -> existing_file path
+    | _ -> existing_dir path
+  in
+  { path; exists; source = root.source }
+
+let personas_item (inputs : inputs) root =
+  match trim_opt inputs.env_personas_dir with
+  | Some raw ->
+      let path = absolute_path_from ~cwd:inputs.cwd raw in
+      if existing_dir path then
+        ({ path; exists = true; source = Env }, [])
+      else
+        ( { path; exists = false; source = Invalid_env },
+          [ Printf.sprintf
+              "MASC_PERSONAS_DIR is set but does not point to a directory: %s"
+              path ] )
+  | None -> (child_item root "personas", [])
+
+let inputs_from_env () =
+  {
+    cwd = Sys.getcwd ();
+    executable_name = Sys.executable_name;
+    env_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR";
+    env_personas_dir = Sys.getenv_opt "MASC_PERSONAS_DIR";
+    env_me_root = Sys.getenv_opt "ME_ROOT";
+    env_workspace_root = Sys.getenv_opt "MASC_WORKSPACE_ROOT";
+    env_dune_sourceroot = Sys.getenv_opt "DUNE_SOURCEROOT";
+  }
+
+let resolve_with inputs =
+  let config_root, root_warnings = config_root_resolution inputs in
+  let cascade = child_item config_root "cascade.json" in
+  let prompts = child_item config_root "prompts" in
+  let keepers = child_item config_root "keepers" in
+  let personas, persona_warnings = personas_item inputs config_root in
+  let missing_child_warnings =
+    [ ("cascade.json", cascade.exists); ("prompts", prompts.exists); ("keepers", keepers.exists); ("personas", personas.exists) ]
+    |> List.filter_map (fun (label, exists) ->
+           if exists then None
+           else
+             Some
+               (Printf.sprintf "Resolved config child is missing: %s" label))
+  in
+  let warnings = root_warnings @ persona_warnings @ missing_child_warnings in
+  let status =
+    match config_root.source with
+    | Invalid_env -> Invalid_env_status
+    | Missing -> Missing_status
+    | Env | Exe_relative | Cwd | Legacy_me_root ->
+        if warnings = [] then Ready else Warn
+  in
+  { status; warnings; config_root; cascade; prompts; keepers; personas }
+
+let resolve () =
+  resolve_with (inputs_from_env ())
+
+let cascade_path_opt () =
+  let resolution = resolve () in
+  if resolution.cascade.exists then Some resolution.cascade.path else None
+
+let prompts_dir () =
+  (resolve ()).prompts.path
+
+let keepers_dir () =
+  (resolve ()).keepers.path
+
+let personas_dir_opt () =
+  let resolution = resolve () in
+  if resolution.personas.exists then Some resolution.personas.path else None
+
+let keeper_toml_path_opt name =
+  let path = Filename.concat (keepers_dir ()) (name ^ ".toml") in
+  if existing_file path then Some path else None
+
+let warnings () =
+  (resolve ()).warnings
+
+let last_logged_signature : string option ref = ref None
+
+let log_warnings ?(context = "ConfigDir") () =
+  let resolution = resolve () in
+  let signature =
+    String.concat "\n"
+      ((status_to_string resolution.status) :: resolution.warnings)
+  in
+  if resolution.warnings <> [] && !last_logged_signature <> Some signature then begin
+    List.iter (fun warning ->
+        Log.warn ~ctx:context "%s" warning)
+      resolution.warnings;
+    last_logged_signature := Some signature
+  end

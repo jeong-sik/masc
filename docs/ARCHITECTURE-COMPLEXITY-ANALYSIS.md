@@ -64,7 +64,6 @@ Useful but not core to coordination.
 | tool_team_session | **4412** | Team session spawning | Active, too large |
 | tool_mdal | 1092 | Metric-Driven Agent Loop | Active |
 | tool_mitosis | 1722 | Context split/succession | OFF by default |
-| tool_gardener | ~200 | Ecosystem management | OFF by default |
 | tool_llama | 1052 | llama.cpp runtime mgmt | Active |
 | tool_voice | ~200 | TTS/voice | OFF by default |
 | tool_portal | ~200 | 1:1 secret messaging | Active |
@@ -99,18 +98,10 @@ Not related to core coordination. Candidates for separation or removal.
 | tool_suspend | ~200 | Suspend | Utility |
 | tool_verification | ~200 | Verification | Utility |
 
-## Guardian / Sentinel / Gardener Distinction
+## Legacy Loop Cleanup
 
-These three systems operate at different layers and must not be merged.
-
-| System | Role | Decision method | Default |
-|--------|------|-----------------|---------|
-| **Guardian** | Zombie cleanup + GC (infra loop) | Deterministic (60s/7d threshold) | OFF |
-| **Sentinel** | Standing guard (board patrol, task hygiene) | MODEL + deterministic hybrid | ON |
-| **Gardener** | Agent population management (spawn/retire) | MODEL + budget/circuit | OFF |
-
-Guardian is embedded in Sentinel (guardian.ml:278, sentinel.ml:512).
-`masc_loops_owner` ref prevents concurrent execution.
+Older cleanup, patrol, and ecosystem-control loops should not shape current architecture decisions.
+They have been retired from the active runtime surface, so the current complexity discussion should stay centered on room, keeper, command-plane, and operator layers.
 
 ## Perpetual Keepers Problem
 

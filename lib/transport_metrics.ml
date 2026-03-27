@@ -263,10 +263,10 @@ let transport_health_json ~config =
   let webrtc_channels = Server_webrtc_transport.connected_channel_count () in
   let listener_mode = http_listener_mode () in
   let topology_summary = cluster_summary_json config in
-  let room_id = room_id_from_config config in
-  let cluster_name =
-    Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")
+  let room_id =
+    room_id_from_config config
   in
+  let cluster_name = Env_config_core.cluster_name () in
   (* Keep transport-health free of Room/PG reads so proactive refresh does not
      contend with dashboard and MCP writes on the shared backend. *)
   let recent_messages = None in

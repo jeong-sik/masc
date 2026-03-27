@@ -127,6 +127,7 @@ val register_default :
   unit ->
   unit
 
+val resolve_prompt : string -> prompt_resolution
 val get_prompt : string -> string
 val set_override : string -> string -> (unit, string) result
 val clear_prompt_override : string -> unit

@@ -250,11 +250,7 @@ let port =
   Arg.(value & opt int 8935 & info ["p"; "port"] ~docv:"PORT" ~doc)
 
 let host =
-  let default =
-    match trim_opt (Sys.getenv_opt "MASC_HOST") with
-    | Some value -> value
-    | None -> "127.0.0.1"
-  in
+  let default = Masc_mcp.Env_config.masc_host () in
   let doc =
     "Host/IP to bind. Defaults to loopback (`127.0.0.1`). Use `0.0.0.0` or `::` only when you also enable room auth with `require_token=true`."
   in
@@ -336,8 +332,11 @@ let acquire_pid_lock port =
 let run_cmd host port base_path =
   acquire_pid_lock port;
   Log.init_from_env ();
+  Unix.putenv "MASC_BASE_PATH" base_path;
   (* Persist logs to .masc/logs/ so they survive restarts *)
   let log_dir = Filename.concat base_path "logs" in
+  Fs_compat.mkdir_p base_path;
+  Fs_compat.mkdir_p log_dir;
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
   Eio_main.run @@ fun env ->

@@ -12,6 +12,8 @@ type dashboard_compute_mode =
 
 let _runtime_caps : Runtime_caps.t option ref = ref None
 
+(* Updated during single-threaded server bootstrap before background fibers
+   start.  After bootstrap, reads are effectively immutable for process life. *)
 let set_runtime_caps caps = _runtime_caps := Some caps
 
 let current_runtime_caps () =

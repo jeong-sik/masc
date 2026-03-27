@@ -19,7 +19,11 @@ let clear () = pool := None
 
 (** Submit domain-safe pure work to the executor pool if available,
     or run inline otherwise.  The explicit [label] keeps callsites
-    auditable when reviewing executor-pool usage. *)
+    auditable when reviewing executor-pool usage.
+
+    We intentionally log [label] only on pool submission failure.
+    The [None] pool path is an expected configuration in tests and
+    early bootstrap, so it stays silent to avoid fallback log noise. *)
 let submit_domain_safe_or_inline ?(weight = 1.0) ~label f =
   match !pool with
   | Some p ->

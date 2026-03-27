@@ -310,6 +310,37 @@ let test_postgres_url_from_env_normalizes_supabase_pooler () =
         (Some normalized_url)
         (Room_utils.postgres_url_from_env ()))
 
+let make_temp_dir prefix =
+  let base = Filename.temp_file prefix "" in
+  Sys.remove base;
+  Unix.mkdir base 0o755;
+  base
+
+let test_default_config_auto_pg_without_eio_uses_memory () =
+  let dir = make_temp_dir "room-utils-auto-pg-" in
+  Fun.protect
+    ~finally:(fun () -> try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () ->
+      let url = "postgresql://sb.example/test_default_config" in
+      with_envs
+        (pg_env_bindings ~sb_pg_url:url ())
+        (fun () ->
+          let config = Room_utils.default_config dir in
+          check string "backend falls back to memory" "memory"
+            (Room_utils.backend_name config)))
+
+let test_default_config_auto_filesystem_without_eio_uses_memory () =
+  let dir = make_temp_dir "room-utils-auto-fs-" in
+  Fun.protect
+    ~finally:(fun () -> try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () ->
+      with_envs
+        (pg_env_bindings ())
+        (fun () ->
+          let config = Room_utils.default_config dir in
+          check string "backend falls back to memory" "memory"
+            (Room_utils.backend_name config)))
+
 (* ============================================================
    safe_filename Tests
    ============================================================ *)
@@ -527,6 +558,12 @@ let () =
       test_case "uses fallback pg url" `Quick test_backend_config_for_uses_fallback_pg_url;
       test_case "normalizes supabase pooler" `Quick
         test_postgres_url_from_env_normalizes_supabase_pooler;
+    ];
+    "default_config", [
+      test_case "auto postgres without eio uses memory" `Quick
+        test_default_config_auto_pg_without_eio_uses_memory;
+      test_case "auto filesystem without eio uses memory" `Quick
+        test_default_config_auto_filesystem_without_eio_uses_memory;
     ];
     "safe_filename", [
       test_case "normal" `Quick test_safe_filename_normal;

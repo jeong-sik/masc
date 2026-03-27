@@ -15,6 +15,7 @@
 
 (** Global fs reference - set at Eio_main.run startup *)
 let global_fs : Eio.Fs.dir_ty Eio.Path.t option ref = ref None
+let eio_fs_active = Atomic.make false
 
 (** Set the global Eio filesystem. Call once at server startup.
     @param fs The Eio fs from [Eio.Stdenv.fs env] *)
@@ -23,14 +24,18 @@ let set_fs fs =
 
 (** Clear the global fs (for testing or shutdown) *)
 let clear_fs () =
-  global_fs := None
+  global_fs := None;
+  Atomic.set eio_fs_active false
+
+let set_eio_active active =
+  Atomic.set eio_fs_active active
 
 let get_fs_opt () =
   !global_fs
 
 (** Check if Eio fs is available *)
 let has_fs () =
-  Option.is_some !global_fs
+  Option.is_some !global_fs && Atomic.get eio_fs_active
 
 (** Normalize [Eio.Io] to [Sys_error] so callers only need one catch.
     Eio operations raise [Eio.Io _] on permission errors, missing files, etc.
@@ -43,10 +48,9 @@ let with_io ~path f =
 
 let with_fs_or_fallback ~path ~fallback f =
   match !global_fs with
-  | Some fs -> (
-      try with_io ~path (fun () -> f fs)
-      with Stdlib.Effect.Unhandled _ -> fallback ())
-  | None -> fallback ()
+  | Some fs when Atomic.get eio_fs_active ->
+      with_io ~path (fun () -> f fs)
+  | Some _ | None -> fallback ()
 
 let load_file_unix (path : string) : string =
   let ic = open_in path in

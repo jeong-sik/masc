@@ -168,12 +168,12 @@ let canonical_voice_channel = function
 let default_voice_enabled_for _name =
   (* Pure tests may parse keeper metadata without an Eio context. In that
      case, treat voice as disabled rather than failing metadata decoding. *)
-  try
+  if not (Eio_guard.is_ready ()) then
+    false
+  else
     match Voice_config.load () with
     | Ok _ -> true
     | Error _ -> false
-  with
-  | Effect.Unhandled _ -> false
 
 let default_voice_channel_for name =
   if default_voice_enabled_for name then "voice_text" else "text_only"

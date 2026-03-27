@@ -26,7 +26,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
   | Extract path ->
       (* JSON path extraction — offloaded to executor pool when available.
          Domain-safe: only Yojson + stdlib string ops, no Str or global state. *)
-      Executor_pool_ref.submit_or_inline (fun () ->
+      Executor_pool_ref.submit_domain_safe_or_inline
+        ~label:"adapter.extract" (fun () ->
         try
           let json = Yojson.Safe.from_string input in
           let parts = String.split_on_char '.' path in
@@ -110,7 +111,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
          schema_str can be:
          - Inline JSON Schema: {"type":"object","required":["name"]}
          - Simple type name: "object", "string", "number", "array" *)
-      Executor_pool_ref.submit_or_inline (fun () ->
+      Executor_pool_ref.submit_domain_safe_or_inline
+        ~label:"adapter.validate_schema" (fun () ->
         let validate_type expected json =
           match expected, json with
           | "string", `String _ -> true
@@ -203,7 +205,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
   | ParseJson ->
       (* JSON validation — offloaded to executor pool when available.
          Domain-safe: single Yojson.Safe.from_string call. *)
-      Executor_pool_ref.submit_or_inline (fun () ->
+      Executor_pool_ref.submit_domain_safe_or_inline
+        ~label:"adapter.parse_json" (fun () ->
         try
           let _ = Yojson.Safe.from_string input in
           Ok input

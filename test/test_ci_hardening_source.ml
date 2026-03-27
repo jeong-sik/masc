@@ -358,6 +358,27 @@ let test_dashboard_executor_pool_contracts () =
     (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
        "Server_dashboard_http.set_executor_pool exec_pool")
 
+let test_chain_adapter_executor_pool_contracts () =
+  check bool "executor pool ref exposes explicit domain-safe helper" true
+    (file_contains_pattern "lib/core/executor_pool_ref.ml"
+       "let submit_domain_safe_or_inline");
+  check bool "chain adapter extract uses explicit domain-safe helper" true
+    (file_contains_pattern "lib/chain/chain_adapter_eio.ml"
+       {|submit_domain_safe_or_inline
+        ~label:"adapter.extract"|});
+  check bool "chain adapter schema validate uses explicit domain-safe helper" true
+    (file_contains_pattern "lib/chain/chain_adapter_eio.ml"
+       {|submit_domain_safe_or_inline
+        ~label:"adapter.validate_schema"|});
+  check bool "chain adapter parse json uses explicit domain-safe helper" true
+    (file_contains_pattern "lib/chain/chain_adapter_eio.ml"
+       {|submit_domain_safe_or_inline
+        ~label:"adapter.parse_json"|});
+  check bool "chain adapter no longer uses generic pool helper" true
+    (not
+       (file_contains_pattern "lib/chain/chain_adapter_eio.ml"
+          "submit_or_inline"))
+
 (* pg schema init contracts removed: init_pg_schemas_sequential was deleted in #3218 *)
 
 let test_transport_route_contracts () =
@@ -461,6 +482,8 @@ let () =
            test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;
            test_case "dashboard executor pool contracts" `Quick
              test_dashboard_executor_pool_contracts;
+           test_case "chain adapter executor pool contracts" `Quick
+             test_chain_adapter_executor_pool_contracts;
            test_case "transport route contracts" `Quick
              test_transport_route_contracts;
            test_case "transport health contracts" `Quick

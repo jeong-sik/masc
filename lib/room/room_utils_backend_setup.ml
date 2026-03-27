@@ -279,13 +279,19 @@ let create_backend cfg =
          get_or_create shares state across configs for the same path. *)
       Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name))
   | Backend_types.FileSystem ->
-      (match Fs_compat.get_fs_opt () with
-       | Some fs -> Ok (FileSystem (Backend.FileSystem.create ~fs cfg))
-       | None ->
-           (* No Eio fs context available (e.g., test without Fs_compat.set_fs).
-              Fall back to shared Memory backend for the same base path. *)
-           Log.Backend.warn "No Eio fs context for FileSystem backend, falling back to Memory";
-           Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name)))
+      if Fs_compat.has_fs () then
+        match Fs_compat.get_fs_opt () with
+        | Some fs -> Ok (FileSystem (Backend.FileSystem.create ~fs cfg))
+        | None ->
+            Log.Backend.warn
+              "FileSystem backend expected an active Eio fs but none was present; falling back to Memory";
+            Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name))
+      else
+        (* No active Eio fs context available (e.g., tests running outside
+           Eio_main.run, or a prior Eio test left a stale fs handle behind).
+           Fall back to shared Memory backend for the same base path. *)
+        (Log.Backend.warn "No active Eio fs context for FileSystem backend, falling back to Memory";
+         Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name)))
   | Backend_types.PostgresNative ->
       (* PostgresNative requires Eio context - use create_backend_eio instead *)
       Error (Backend_types.BackendNotSupported "PostgresNative requires Eio context (use create_backend_eio)")
@@ -305,6 +311,32 @@ let create_backend_eio ~sw ~env cfg =
       (* Non-Eio backends can use the regular create_backend *)
       create_backend cfg
 
+let backend_kind = function
+  | Memory _ -> "Memory"
+  | FileSystem _ -> "FileSystem"
+  | PostgresNative _ -> "PostgresNative"
+
+let auto_storage_requested () =
+  match env_opt "MASC_STORAGE_TYPE" with
+  | None -> true
+  | Some value -> String.lowercase_ascii value = "auto"
+
+let auto_local_backend ~reason cfg =
+  match Fs_compat.get_fs_opt () with
+  | Some fs when Fs_compat.has_fs () ->
+      let fs_cfg =
+        { cfg with Backend_types.backend_type = Backend_types.FileSystem }
+      in
+      let backend = FileSystem (Backend.FileSystem.create ~fs fs_cfg) in
+      Log.Backend.info "Auto-detect: %s → FileSystem backend" reason;
+      Log.Backend.info "Backend initialized: %s" (backend_kind backend);
+      backend
+  | _ ->
+      let backend = Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name) in
+      Log.Backend.info "Auto-detect: %s → Memory backend" reason;
+      Log.Backend.info "Backend initialized: %s" (backend_kind backend);
+      backend
+
 let default_config base_path =
   (* Resolve to git root for worktree support - all worktrees share same .masc/ *)
   let resolved_path = resolve_masc_base_path base_path in
@@ -313,25 +345,52 @@ let default_config base_path =
     (Backend_types.show_backend_type backend_config.backend_type)
     (match backend_config.postgres_url with Some _ -> "<configured>" | None -> "none");
   let backend =
-    match create_backend backend_config with
-    | Ok backend ->
-        Log.Backend.info "Backend initialized: %s"
-          (match backend with
-           | Memory _ -> "Memory"
-           | FileSystem _ -> "FileSystem"
-           | PostgresNative _ -> "PostgresNative");
-        backend
-    | Error e ->
-        Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
-          (Backend_types.show_error e);
-        let fallback_cfg =
-          { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
-        in
-        (match create_backend fallback_cfg with
-         | Ok fb -> fb
-         | Error _ ->
-             (* Final fallback: shared in-memory to keep server alive *)
-             Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
+    if auto_storage_requested ()
+       && Option.is_none (Eio_context.get_net_opt ())
+    then
+      match backend_config.Backend_types.backend_type with
+      | Backend_types.PostgresNative ->
+          auto_local_backend
+            ~reason:"PostgreSQL URL found but no active Eio net"
+            backend_config
+      | Backend_types.FileSystem when not (Fs_compat.has_fs ()) ->
+          auto_local_backend
+            ~reason:"No active Eio fs context"
+            backend_config
+      | _ ->
+          match create_backend backend_config with
+          | Ok backend ->
+              Log.Backend.info "Backend initialized: %s"
+                (backend_kind backend);
+              backend
+          | Error e ->
+              Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
+                (Backend_types.show_error e);
+              let fallback_cfg =
+                { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
+              in
+              (match create_backend fallback_cfg with
+               | Ok fb -> fb
+               | Error _ ->
+                   (* Final fallback: shared in-memory to keep server alive *)
+                   Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
+    else
+      match create_backend backend_config with
+      | Ok backend ->
+          Log.Backend.info "Backend initialized: %s"
+            (backend_kind backend);
+          backend
+      | Error e ->
+          Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
+            (Backend_types.show_error e);
+          let fallback_cfg =
+            { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
+          in
+          (match create_backend fallback_cfg with
+           | Ok fb -> fb
+           | Error _ ->
+               (* Final fallback: shared in-memory to keep server alive *)
+               Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
   in
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)

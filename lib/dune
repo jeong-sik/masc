@@ -528,6 +528,7 @@
    env_config_runtime
    env_config_governance
    env_config_keeper
+   runtime_caps
    runtime_params
    governance_registry
    governance_pipeline

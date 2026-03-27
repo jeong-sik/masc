@@ -20,6 +20,8 @@ type dashboard_compute_mode =
   | Inline_shared
   | Offloaded_readonly
 
+val set_runtime_caps : Runtime_caps.t -> unit
+
 val set_executor_pool : Eio.Executor_pool.t -> unit
 
 val run_dashboard_compute :

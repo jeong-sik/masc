@@ -45,6 +45,9 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
+  Server_dashboard_http.set_runtime_caps
+    (Runtime_caps.create ~net:(net :> Runtime_caps.eio_net)
+       ~clock ~mono_clock ~switch:sw);
   Eio_context.set_switch sw;
   Eio_context.set_net net;
   Eio_context.set_clock clock;

@@ -10,6 +10,15 @@ type dashboard_compute_mode =
   | Inline_shared
   | Offloaded_readonly
 
+let _runtime_caps : Runtime_caps.t option ref = ref None
+
+let set_runtime_caps caps = _runtime_caps := Some caps
+
+let current_runtime_caps () =
+  match !_runtime_caps with
+  | Some caps -> caps
+  | None -> Runtime_caps.of_eio_context ()
+
 (** Executor pool for CPU-heavy dashboard compute.
     Pool reference is shared via [Executor_pool_ref] in masc_core. *)
 let set_executor_pool pool = Executor_pool_ref.set pool
@@ -27,10 +36,10 @@ let _readonly_config_mu = Eio.Mutex.create ()
 let isolated_readonly_dashboard_config ~sw ~clock ~(config : Room.config) =
   match config.backend_config.Backend.backend_type with
   | Backend.PostgresNative ->
-      let net = Eio_context.get_net () in
-      let mono_clock = Eio_context.get_mono_clock () in
+      let caps = current_runtime_caps () in
       Room_utils_backend_setup.with_domain_local_pg_backend
-        ~sw ~net ~clock ~mono_clock config
+        ~sw ~net:(Runtime_caps.net caps) ~clock
+        ~mono_clock:(Runtime_caps.mono_clock caps) config
   | Backend.Memory | Backend.FileSystem -> Some config
 
 (** Return a cached readonly config for the main domain.
@@ -92,11 +101,11 @@ let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
   let run_in_pool pool_sw =
     match config.backend_config.Backend_types.backend_type with
     | Backend_types.PostgresNative ->
-        let net = Eio_context.get_net () in
-        let mono_clock = Eio_context.get_mono_clock () in
+        let caps = current_runtime_caps () in
         (match
            Room_utils_backend_setup.with_domain_local_pg_backend
-             ~sw:pool_sw ~net ~clock ~mono_clock config
+             ~sw:pool_sw ~net:(Runtime_caps.net caps) ~clock
+             ~mono_clock:(Runtime_caps.mono_clock caps) config
          with
          | Some domain_config -> `Done (compute ~config:domain_config ~sw:pool_sw)
          | None -> `Fallback)

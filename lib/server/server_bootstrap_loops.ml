@@ -7,25 +7,28 @@ let install_tooling ~governance_level (state : Mcp_server.server_state) =
   Governance_pipeline.install ~config:state.room_config ~governance_level;
   Tool_permissions.install ~get_agent_name:(fun () -> None)
 
+let fork_monitored ~sw ~name ~on_crash f =
+  Subsystem_health.register name;
+  Eio.Fiber.fork ~sw (fun () ->
+    try f ()
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Subsystem_health.mark_dead name;
+        on_crash name exn)
+
 let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
   Sse.set_clock clock;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
   let event_bus = Agent_sdk.Event_bus.create () in
-  (* Eio fiber isolation: each subsystem runs in its own fiber.
-     If one crashes, others keep running — Eio's structured concurrency.
-     Subsystem_health tracks liveness at module level (no init timing dependency). *)
   let fork_subsystem name f =
-    Subsystem_health.register name;
-    Eio.Fiber.fork ~sw (fun () ->
-      try f ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Subsystem_health.mark_dead name;
+    fork_monitored ~sw ~name
+      ~on_crash:(fun name exn ->
         Log.Server.error "subsystem %s crashed: %s" name
           (Printexc.to_string exn))
+      f
   in
   (* Event_bus → SSE bridge: relay masc:* events to dashboard *)
   Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
@@ -35,7 +38,7 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
         | Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", _) -> true
         | _ -> false)
   in
-  Eio.Fiber.fork ~sw (fun () ->
+  fork_subsystem "keeper_lifecycle_listener" (fun () ->
     let rec loop () =
       (try
         let events = Agent_sdk.Event_bus.drain keeper_lifecycle_sub in
@@ -197,15 +200,21 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   Log.info ~ctx:"startup" "subsystems: resident loops started"
 
 let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
+  let fork_maintenance name log f =
+    fork_monitored ~sw ~name
+      ~on_crash:(fun name exn -> log name exn)
+      f
+  in
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
      Replaces the old mutex + synchronous file I/O pattern. *)
-  Eio.Fiber.fork ~sw (fun () ->
+  fork_maintenance "metrics_flush"
+    (fun name exn ->
+      Log.Server.error "%s fiber crashed: %s" name (Printexc.to_string exn))
+    (fun () ->
     try Metrics_store_eio.start_flush_fiber ~clock
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Server.error "metrics_flush fiber crashed: %s"
-        (Printexc.to_string exn));
+    | exn -> raise exn);
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
   (* Tool metrics JSONL persistence: flush buffered records to disk periodically.
      Also registers a post-hook so every tool call is enqueued for persistence. *)
@@ -217,17 +226,22 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
   (match Board_dispatch.get_pg_pool () with
   | Some pool ->
       let listener = Board_listener.create pool in
-      Eio.Fiber.fork ~sw (fun () ->
+      fork_maintenance "board_listener"
+        (fun _name exn ->
+          Log.BoardListener.error "board listener fiber crashed: %s"
+            (Printexc.to_string exn))
+        (fun () ->
         try Board_listener.start ~clock listener
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.BoardListener.error "board listener fiber crashed: %s"
-            (Printexc.to_string exn));
+        | exn -> raise exn);
       Log.BoardListener.info "Fiber started for real-time Board events"
   | None ->
       Log.BoardListener.info "Skipped (not using PostgreSQL backend)");
-  Eio.Fiber.fork ~sw (fun () ->
+  fork_maintenance "maintenance_cleanup"
+    (fun _name exn ->
+      Log.Server.error "cleanup loop crashed: %s" (Printexc.to_string exn))
+    (fun () ->
       let rec loop () =
         Eio.Time.sleep clock 60.0;
         (try

@@ -18,10 +18,10 @@ let runtime_snapshots_for_pool runtime_pool =
       if filtered = [] then snapshots else filtered
 
 let safe_discovery_endpoints () =
-  try Some (Discovery_cache.get_cached_or_refresh ())
-  with
-  | Stdlib.Effect.Unhandled _ -> None
-  | _ -> None
+  if not (Eio_guard.is_ready ()) then
+    None
+  else
+    try Some (Discovery_cache.get_cached_or_refresh ()) with _ -> None
 
 let discovery_endpoints_for_pool runtime_pool =
   match safe_discovery_endpoints () with

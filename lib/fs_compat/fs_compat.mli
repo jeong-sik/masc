@@ -9,6 +9,10 @@ val set_fs : Eio.Fs.dir_ty Eio.Path.t -> unit
 val clear_fs : unit -> unit
 (** Clear global fs (testing/shutdown). *)
 
+val set_eio_active : bool -> unit
+(** Mark whether Eio-backed filesystem operations are currently safe to use.
+    Runtime entrypoints should toggle this together with Eio_guard enable/disable. *)
+
 val get_fs_opt : unit -> Eio.Fs.dir_ty Eio.Path.t option
 (** Get the global Eio filesystem if available. *)
 

@@ -14,9 +14,13 @@
 
 let ready = Atomic.make false
 
-let enable () = Atomic.set ready true
+let enable () =
+  Atomic.set ready true;
+  Fs_compat.set_eio_active true
 
-let disable () = Atomic.set ready false
+let disable () =
+  Atomic.set ready false;
+  Fs_compat.set_eio_active false
 
 let is_ready () = Atomic.get ready
 

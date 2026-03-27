@@ -180,10 +180,11 @@ let runtime_of_endpoint_url base_url =
   }
 
 let safe_discovery_statuses () =
-  try Discovery_cache.get_cached_or_refresh ()
-  with
-  | Stdlib.Effect.Unhandled _ -> []
-  | exn ->
+  if not (Eio_guard.is_ready ()) then
+    []
+  else
+    try Discovery_cache.get_cached_or_refresh ()
+    with exn ->
       debug_log "discovery_cache unavailable: %s" (Printexc.to_string exn);
       []
 

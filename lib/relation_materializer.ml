@@ -13,6 +13,9 @@
 let log_err tag msg =
   Log.Misc.error "relation-materializer %s failed: %s" tag msg
 
+let has_graphql_runtime () =
+  Option.is_some (Eio_context.get_net_opt ())
+
 (** Build a single batched GraphQL mutation using aliases.
     20 peers → 1 HTTP request with 20 aliased fields.
 
@@ -40,22 +43,23 @@ let build_batch_mutation ~agent ~peers ~context =
 (** Send all collaboration pairs in one batched HTTP request.
     Detaches to an Eio fiber when runtime is available. *)
 let record_collaborations_async ~tag ~context ~agent ~peers =
-  let do_batch () =
-    let mutation = build_batch_mutation ~agent ~peers ~context in
-    match Graphql_client.mutate ~timeout_sec:10.0 ~mutation () with
-    | Ok _ -> ()
-    | Error msg -> log_err tag msg
-  in
-  match Eio_context.get_switch_opt () with
-  | None ->
-    (* No Eio runtime — synchronous best-effort *)
-    do_batch ()
-  | Some sw ->
-    (* Detach into an Eio fiber — returns immediately *)
-    Eio.Fiber.fork_daemon ~sw (fun () ->
-      do_batch ();
-      `Stop_daemon
-    )
+  if has_graphql_runtime () then
+    let do_batch () =
+      let mutation = build_batch_mutation ~agent ~peers ~context in
+      match Graphql_client.mutate ~timeout_sec:10.0 ~mutation () with
+      | Ok _ -> ()
+      | Error msg -> log_err tag msg
+    in
+    match Eio_context.get_switch_opt () with
+    | None ->
+      (* No Eio scheduler available — synchronous best-effort. *)
+      do_batch ()
+    | Some sw ->
+      (* Detach into an Eio fiber — returns immediately. *)
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        do_batch ();
+        `Stop_daemon
+      )
 
 (** {1 Collaboration — agent leave} *)
 

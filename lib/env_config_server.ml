@@ -111,7 +111,7 @@ module Runtime = struct
     get_bool ~default:false "MASC_PARSE_WARN"
 
   let governance_level =
-    get_string ~default:"standard" "MASC_GOVERNANCE_LEVEL"
+    String.lowercase_ascii (get_string ~default:"production" "MASC_GOVERNANCE_LEVEL")
 end
 
 (** {1 Rate Limiting} *)

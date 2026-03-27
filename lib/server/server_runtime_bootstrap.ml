@@ -253,14 +253,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   in
   let h2_error_handler = make_h2_error_handler () in
   let http_mode =
-    match Sys.getenv_opt "MASC_USE_H2" with
-    | Some "1" | Some "true" -> `H2_only
-    | Some "0" | Some "false" -> `H1_only
-    | Some "auto" -> `Auto
-    | None -> `Auto
-    | Some other ->
-      Log.Server.warn "MASC_USE_H2=%s unrecognised, falling back to auto" other;
-      `Auto
+    match Env_config.Server.H2.mode with
+    | "h2_only" -> `H2_only
+    | "h1_only" -> `H1_only
+    | _ -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   let initial_backend_mode = requested_backend_mode () in
@@ -271,9 +267,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   Eio.Fiber.fork ~sw (fun () ->
     refresh_llama_endpoints ();
     let governance_level =
-      Sys.getenv_opt "MASC_GOVERNANCE_LEVEL"
-      |> Option.value ~default:"production"
-      |> String.lowercase_ascii
+      Env_config.Server.Runtime.governance_level
     in
     let init_state_blocking () =
       let t0 = Eio.Time.now clock in

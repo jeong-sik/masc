@@ -118,11 +118,11 @@ let chain_source_roots (config : Room.config) =
   in
   let roots = add [] config.base_path in
   let roots =
-    match option_trim (Sys.getenv_opt "MASC_BASE_PATH_INPUT") with
+    match Env_config.Server.Storage.base_path_input_opt () with
     | Some path -> add roots path
     | None -> roots
   in
-  match option_trim (Sys.getenv_opt "MASC_CHAIN_SOURCE_BASE_PATH") with
+  match Env_config.Chain.Paths.source_base_path_opt () with
   | Some path -> add roots path
   | None -> roots
 
@@ -491,7 +491,7 @@ let run_chain (runtime : runtime) ?chain_id ?mermaid ?input_json ~checkpoint_ena
     }
 
 let default_orchestrator_model () =
-  option_trim (Sys.getenv_opt "MASC_CHAIN_ORCHESTRATOR_MODEL")
+  Env_config.Chain.Model.orchestrator_model_opt ()
   |> Option.value ~default:"gemini:pro"
 
 let orchestrate_goal (runtime : runtime) ~(on_chain_designed : Chain_types.chain -> unit) ~goal :
@@ -606,7 +606,7 @@ let running_chains_json () =
 
 let read_history_events ~limit =
   let history_file =
-    option_trim (Sys.getenv_opt "MASC_CHAIN_HISTORY_FILE")
+    Env_config.Chain.Paths.history_file_opt ()
     |> Option.value ~default:"data/chain_history.jsonl"
   in
   if not (Sys.file_exists history_file) then []

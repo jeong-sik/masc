@@ -93,7 +93,7 @@ module Llama = struct
     get_bool ~default:false "MASC_LLAMA_RUNTIME_DEBUG"
 
   let runtime_cooldown_sec =
-    get_float ~default:5.0 "MASC_LLAMA_RUNTIME_COOLDOWN_SEC"
+    get_float ~default:30.0 "MASC_LLAMA_RUNTIME_COOLDOWN_SEC"
 
   let swarm_live_script_opt () =
     Sys.getenv_opt "MASC_SWARM_LIVE_SCRIPT" |> trim_opt

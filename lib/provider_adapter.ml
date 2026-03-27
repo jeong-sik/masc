@@ -469,7 +469,7 @@ let gemini_direct_available () =
   env_present google_cloud_project_env || env_present "GEMINI_API_KEY"
 
 let configured_default_model_label_result () =
-  match Sys.getenv_opt "MASC_DEFAULT_CASCADE" with
+  match Env_config.Chain.Model.default_cascade_opt () with
   | Some raw ->
       let labels = split_csv_nonempty raw in
       (match labels with
@@ -477,8 +477,8 @@ let configured_default_model_label_result () =
        | [] -> Error "MASC_DEFAULT_CASCADE is set but empty")
   | None -> (
       match
-        ( nonempty_env "MASC_DEFAULT_PROVIDER",
-          nonempty_env "MASC_DEFAULT_MODEL" )
+        ( Env_config.Chain.Model.default_provider_opt (),
+          Env_config.Chain.Model.default_model_opt () )
       with
       | Some provider, Some model_id -> Ok (provider ^ ":" ^ model_id)
       | Some _, None ->
@@ -628,17 +628,17 @@ let vertex_location () =
   | None -> "global"
 
 let resolve_gemini_direct_auth () =
-  match Sys.getenv_opt google_cloud_project_env with
-  | Some raw when String.trim raw <> "" ->
+  match nonempty_env google_cloud_project_env with
+  | Some project ->
       Gemini_vertex_adc
         {
-          project = String.trim raw;
+          project;
           location = vertex_location ();
         }
-  | _ -> (
-      match Sys.getenv_opt "GEMINI_API_KEY" with
-      | Some raw when String.trim raw <> "" -> Gemini_api_key
-      | _ ->
+  | None -> (
+      match Env_config.Server.External.gemini_api_key_opt () with
+      | Some _ -> Gemini_api_key
+      | None ->
           Gemini_auth_missing
             "Gemini auth unavailable; set GOOGLE_CLOUD_PROJECT for Vertex ADC or GEMINI_API_KEY")
 

@@ -134,7 +134,7 @@ let state_of_json (json : Yojson.Safe.t) : adaptive_state option =
 
 (** Path to persistence file for a given room *)
 let state_file_path ~(room : string) : string =
-  let home = match Sys.getenv_opt "HOME" with
+  let home = match Env_config_core.home_dir_opt () with
     | Some h -> h
     | None -> "/tmp"
   in
@@ -178,8 +178,8 @@ let get_effective_thresholds ~(enabled : bool) ~(room : string) : thresholds =
     | Some state -> state.thresholds
     | None -> (* Fall through to env vars *)
       (* 2. Environment variables *)
-      let env_prepare = Sys.getenv_opt "MASC_MITOSIS_PREPARE_THRESHOLD" in
-      let env_handoff = Sys.getenv_opt "MASC_MITOSIS_HANDOFF_THRESHOLD" in
+      let env_prepare = Env_config.Chain.Mitosis.prepare_threshold_opt () in
+      let env_handoff = Env_config.Chain.Mitosis.handoff_threshold_opt () in
       (match env_prepare, env_handoff with
        | Some p, Some h ->
          (try clamp_thresholds { prepare = float_of_string p; handoff = float_of_string h }

@@ -70,7 +70,7 @@ let float_of_env_default name ~default =
       with Failure _ -> default)
 
 let cooldown_seconds () =
-  float_of_env_default "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" ~default:30.0
+  Env_config.Chain.Llama.runtime_cooldown_sec
 
 let trim_opt = function
   | None -> None
@@ -79,9 +79,7 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
 
 let debug_enabled () =
-  match trim_opt (Sys.getenv_opt "MASC_LLAMA_RUNTIME_DEBUG") with
-  | Some ("1" | "true" | "yes" | "on") -> true
-  | _ -> false
+  Env_config.Chain.Llama.runtime_debug
 
 let debug_log fmt =
   if debug_enabled () then Printf.ksprintf (fun msg -> Log.LocalWorker.debug "%s" msg) fmt

@@ -1,21 +1,16 @@
 (** Streamable HTTP Transport for MCP
 
     Implements MCP spec 2025-03-26 Streamable HTTP transport.
-    Replaces SSE as primary transport while maintaining backward compatibility.
-
     Key features:
     - POST /mcp: JSON-RPC request/response (stateless or session-bound)
     - GET /mcp: Optional SSE stream for server-initiated notifications
     - Session management via mcp-session-id header
-    - Graceful upgrade path from SSE-only clients
 
     @see <https://modelcontextprotocol.io/specification/2025-03-26/basic/transports>
 *)
 
-(** Transport type selection *)
-type transport =
-  | SSE_legacy      (** Legacy SSE-only transport *)
-  | Streamable_HTTP (** New Streamable HTTP transport *)
+(** Transport type *)
+type transport = Streamable_HTTP
 
 (** Session state *)
 type session = {

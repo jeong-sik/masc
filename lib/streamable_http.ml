@@ -8,9 +8,7 @@
     - Thread-safe session storage using Mutex
 *)
 
-type transport =
-  | SSE_legacy
-  | Streamable_HTTP
+type transport = Streamable_HTTP
 
 type session = {
   id: string;

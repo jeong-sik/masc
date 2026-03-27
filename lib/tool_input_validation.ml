@@ -61,29 +61,18 @@ let type_name_of (value : Yojson.Safe.t) : string =
     @param args The actual arguments passed to the tool call *)
 let validate ~(tool_name : string) ~(schema : Yojson.Safe.t)
     ~(args : Yojson.Safe.t) : (unit, string) result =
-  let open Yojson.Safe.Util in
   (* Only validate object-type schemas *)
   let schema_type =
-    try schema |> member "type" |> to_string
-    with Type_error _ -> "object"
+    Safe_ops.json_string ~default:"object" "type" schema
   in
   if schema_type <> "object" then Ok ()
   else
     (* Extract properties and required list from schema *)
     let properties =
-      try
-        match schema |> member "properties" with
-        | `Assoc props -> props
-        | _ -> []
-      with Type_error _ -> []
+      Safe_ops.json_assoc "properties" schema
     in
     let required =
-      try
-        match schema |> member "required" with
-        | `List items ->
-          List.filter_map (function `String s -> Some s | _ -> None) items
-        | _ -> []
-      with Type_error _ -> []
+      Safe_ops.json_string_list "required" schema
     in
     let arg_fields =
       match args with
@@ -108,11 +97,7 @@ let validate ~(tool_name : string) ~(schema : Yojson.Safe.t)
           | None -> None  (* Extra fields allowed — open schema *)
           | Some prop_schema ->
             let expected_type =
-              try
-                match prop_schema |> member "type" with
-                | `String t -> Some t
-                | _ -> None
-              with Type_error _ -> None
+              Safe_ops.json_string_opt "type" prop_schema
             in
             (match expected_type with
              | None -> None  (* No type declared — skip *)

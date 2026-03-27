@@ -1,5 +1,6 @@
 type source =
   | Env
+  | Home_masc
   | Invalid_env
   | Exe_relative
   | Cwd
@@ -33,6 +34,7 @@ type inputs = {
   executable_name : string;
   env_config_dir : string option;
   env_personas_dir : string option;
+  env_home : string option;
   env_me_root : string option;
   env_workspace_root : string option;
   env_dune_sourceroot : string option;
@@ -58,6 +60,7 @@ let existing_file path =
 
 let source_to_string = function
   | Env -> "env"
+  | Home_masc -> "home_masc"
   | Invalid_env -> "invalid_env"
   | Exe_relative -> "exe_relative"
   | Cwd -> "cwd"
@@ -118,6 +121,13 @@ let path_from_cwd cwd =
   let candidate = Filename.concat cwd "config" |> absolute_path_from ~cwd in
   if config_signature_exists candidate then Some candidate else None
 
+let path_from_home_masc (inputs : inputs) =
+  match trim_opt inputs.env_home with
+  | None -> None
+  | Some home ->
+      let candidate = Filename.concat home ".masc/config" in
+      if config_signature_exists candidate then Some candidate else None
+
 let legacy_me_root_candidates (inputs : inputs) =
   [ inputs.env_me_root; inputs.env_workspace_root; inputs.env_dune_sourceroot ]
   |> List.filter_map trim_opt
@@ -130,8 +140,10 @@ let path_from_legacy_me_root inputs =
   legacy_me_root_candidates inputs
   |> List.find_opt config_signature_exists
 
-let default_missing_root cwd =
-  Filename.concat cwd "config" |> absolute_path_from ~cwd
+let default_missing_root (inputs : inputs) =
+  match trim_opt inputs.env_home with
+  | Some home -> Filename.concat home ".masc/config"
+  | None -> Filename.concat inputs.cwd "config" |> absolute_path_from ~cwd:inputs.cwd
 
 let config_root_resolution (inputs : inputs) =
   match trim_opt inputs.env_config_dir with
@@ -146,6 +158,9 @@ let config_root_resolution (inputs : inputs) =
               "MASC_CONFIG_DIR is set but does not point to a directory: %s"
               path ] )
   | None -> (
+      match path_from_home_masc inputs with
+      | Some path -> ({ path; exists = true; source = Home_masc }, [])
+      | None -> (
       match path_from_cwd inputs.cwd with
       | Some path -> ({ path; exists = true; source = Cwd }, [])
       | None -> (
@@ -159,11 +174,11 @@ let config_root_resolution (inputs : inputs) =
                         "Using legacy config fallback from ME_ROOT-style path: %s"
                         path ] )
               | None ->
-                  let path = default_missing_root inputs.cwd in
+                  let path = default_missing_root inputs in
                   ( { path; exists = false; source = Missing },
                     [ Printf.sprintf
                         "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
-                        path ] ) ) ) )
+                        path ] ) ) ) ))
 
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
@@ -193,6 +208,7 @@ let inputs_from_env () =
     executable_name = Sys.executable_name;
     env_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR";
     env_personas_dir = Sys.getenv_opt "MASC_PERSONAS_DIR";
+    env_home = Sys.getenv_opt "HOME";
     env_me_root = Sys.getenv_opt "ME_ROOT";
     env_workspace_root = Sys.getenv_opt "MASC_WORKSPACE_ROOT";
     env_dune_sourceroot = Sys.getenv_opt "DUNE_SOURCEROOT";
@@ -217,7 +233,7 @@ let resolve_with inputs =
     match config_root.source with
     | Invalid_env -> Invalid_env_status
     | Missing -> Missing_status
-    | Env | Exe_relative | Cwd | Legacy_me_root ->
+    | Env | Home_masc | Exe_relative | Cwd | Legacy_me_root ->
         if warnings = [] then Ready else Warn
   in
   { status; warnings; config_root; cascade; prompts; keepers; personas }

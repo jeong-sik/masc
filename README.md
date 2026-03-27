@@ -30,7 +30,7 @@ curl http://127.0.0.1:8935/health
 
 - HTTP / MCP port: `8935`
 - 기본 bind host: `127.0.0.1`
-- repo-managed config root: `MASC_CONFIG_DIR` 우선, 없으면 실행 파일 기준 `config/` 자동 탐색
+- repo-managed config root: `MASC_CONFIG_DIR` 우선, 없으면 `~/.masc/config` 우선, 그 다음 repo `config/` 자동 탐색
 
 `0.0.0.0` 같은 non-loopback 주소에 바인드할 때는 auth 설정을 먼저 맞춘 뒤 원격 노출 경로로 취급하세요. 자세한 내용은 `docs/REMOTE-MCP-OPERATOR.md`, `docs/spec/09-server-transport.md`를 봅니다.
 

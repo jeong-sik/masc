@@ -440,7 +440,14 @@ resolve_base_path() {
 RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
 export MASC_BASE_PATH="$RESOLVED_BASE_PATH"
 if [ -z "${MASC_CONFIG_DIR:-}" ]; then
-    export MASC_CONFIG_DIR="$SCRIPT_DIR/config"
+    home_config_root="${HOME:-}/.masc/config"
+    if [ -n "${HOME:-}" ] && [ -d "$home_config_root" ] && {
+        [ -f "$home_config_root/cascade.json" ] || [ -d "$home_config_root/prompts" ] || [ -d "$home_config_root/keepers" ] || [ -d "$home_config_root/personas" ];
+    }; then
+        export MASC_CONFIG_DIR="$home_config_root"
+    else
+        export MASC_CONFIG_DIR="$SCRIPT_DIR/config"
+    fi
 fi
 
 # Wait for port to become available.

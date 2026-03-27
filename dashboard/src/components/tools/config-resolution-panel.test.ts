@@ -39,4 +39,24 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('/tmp/custom-personas')
     expect(container.textContent).toContain('INVALID ENV')
   })
+
+  it('renders home config source label', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/home/test/.masc/config', exists: true, source: 'home_masc' },
+          cascade: { path: '/home/test/.masc/config/cascade.json', exists: true, source: 'home_masc' },
+          prompts: { path: '/home/test/.masc/config/prompts', exists: true, source: 'home_masc' },
+          keepers: { path: '/home/test/.masc/config/keepers', exists: true, source: 'home_masc' },
+          personas: { path: '/home/test/.masc/config/personas', exists: true, source: 'home_masc' },
+        }}
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('HOME')
+    expect(container.textContent).toContain('/home/test/.masc/config')
+  })
 })

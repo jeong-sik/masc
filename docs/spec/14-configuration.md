@@ -52,7 +52,7 @@
 | `LIBDATACHANNEL_PATH` | string | 자동 탐색 | WebRTC 라이브러리 경로 |
 
 작업공간 루트 해석 체인: `MASC_WORKSPACE_ROOT` -> `ME_ROOT` -> `DUNE_SOURCEROOT`. 세 곳 모두 미설정 시 `failwith`.
-repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> executable-relative `config/` -> `cwd/config` -> legacy `ME_ROOT/workspace/yousleepwhen/masc-mcp/config`.
+repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc/config` -> `cwd/config` -> executable-relative `config/` -> legacy `ME_ROOT/workspace/yousleepwhen/masc-mcp/config`.
 
 ### 3.2 Runtime (Env_config_runtime)
 

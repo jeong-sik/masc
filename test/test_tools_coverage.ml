@@ -673,6 +673,12 @@ let test_masc_keeper_up_schema () =
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
+          Alcotest.(check bool) "has short_goal" true
+            (List.mem_assoc "short_goal" props);
+          Alcotest.(check bool) "has mid_goal" true
+            (List.mem_assoc "mid_goal" props);
+          Alcotest.(check bool) "has long_goal" true
+            (List.mem_assoc "long_goal" props);
           Alcotest.(check bool) "has scope_kind" true
             (List.mem_assoc "scope_kind" props);
           Alcotest.(check bool) "omits models" false
@@ -684,6 +690,22 @@ let test_masc_keeper_up_schema () =
           Alcotest.(check bool) "has presence_keepalive" true
             (List.mem_assoc "presence_keepalive" props)
       | None -> Alcotest.fail "masc_keeper_up missing properties"
+
+let test_masc_keeper_msg_schema () =
+  match find_tool "masc_keeper_msg" with
+  | None -> Alcotest.fail "masc_keeper_msg not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has new_goal" true
+            (List.mem_assoc "new_goal" props);
+          Alcotest.(check bool) "has new_short_goal" true
+            (List.mem_assoc "new_short_goal" props);
+          Alcotest.(check bool) "has new_mid_goal" true
+            (List.mem_assoc "new_mid_goal" props);
+          Alcotest.(check bool) "has new_long_goal" true
+            (List.mem_assoc "new_long_goal" props)
+      | None -> Alcotest.fail "masc_keeper_msg missing properties"
 
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)
 
@@ -1131,6 +1153,8 @@ let () =
     "keeper_runtime_tools", [
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
+      Alcotest.test_case "keeper-msg" `Quick
+        test_masc_keeper_msg_schema;
     ];
     "runtime_admin_tools", [
       Alcotest.test_case "tool-admin-snapshot" `Quick

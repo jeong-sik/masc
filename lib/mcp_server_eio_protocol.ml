@@ -174,6 +174,16 @@ let handle_initialize_eio ?(profile = Full) id params =
                  | Full -> TP.default_instructions
                  | Managed_agent -> TP.managed_agent_instructions
                  | Operator_remote -> TP.operator_remote_instructions) );
+             ( "_meta",
+               `Assoc [
+                 ("serverStartedAt", `String (Types.now_iso ()));
+                 ("serverVersion", `String Version.version);
+                 ("profile", `String
+                   (match profile with
+                    | Full -> "full"
+                    | Managed_agent -> "managed_agent"
+                    | Operator_remote -> "operator_remote"));
+               ] );
            ]))
 
 let public_tool_help_schemas () =

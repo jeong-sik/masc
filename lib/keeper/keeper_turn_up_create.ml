@@ -10,6 +10,9 @@ open Keeper_execution
 open Keeper_turn_up_args
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
+  let task_id = Printf.sprintf "keeper_create_%s" p.name in
+  let tracker = Progress.start_tracking ~task_id ~total_steps:6 () in
+  Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
   let now_ts = Time_compat.now () in
   let goal =
     match p.goal_opt with
@@ -142,10 +145,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~fallback_message:env_message_gate
         ~fallback_token:env_token_gate
     in
+    Progress.Tracker.step tracker ~message:"Validating API keys for cascade" ();
     let cascade_models = Oas_model_resolve.models_of_cascade_name "keeper_unified" in
     (match ensure_api_keys_for_labels cascade_models with
-     | Error e -> (false, e)
+     | Error e ->
+       Progress.stop_tracking task_id;
+       (false, e)
      | Ok () ->
+       Progress.Tracker.step tracker ~message:"Initializing session directory" ();
        let primary_max_context = Oas_model_resolve.resolve_primary_max_context cascade_models in
        let trace_id = generate_trace_id () in
          let base_dir = session_base_dir ctx.config in
@@ -259,6 +266,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             paused = false;
             current_task_id = None;
          } in
+         Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
          (try
             ignore
               (Keeper_exec_context.save_oas_checkpoint
@@ -271,10 +279,15 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
               log_keeper_exn ~label:"save_oas_checkpoint (init) failed" exn);
+         Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
          match write_meta ctx.config meta with
-         | Error e -> (false, e)
+         | Error e ->
+           Progress.stop_tracking task_id;
+           (false, e)
          | Ok () ->
+           Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
            start_keepalive ctx meta;
+           Progress.Tracker.complete tracker ~message:"Keeper created" ();
            let json = `Assoc [
              ("name", `String meta.name);
              ("agent_name", `String meta.agent_name);

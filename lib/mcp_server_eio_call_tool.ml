@@ -346,11 +346,23 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ]
   in
   let structured_content = Tool_result.structured_payload_of_message message in
+  let meta_fields =
+    [
+      ("trace_id", `String trace_id);
+      ("agent_id", `String agent_name);
+      ("tool", `String name);
+      ("duration_ms", `Int duration_ms);
+      ("attempts", `Int attempts);
+      ("timestamp", `String (Types.now_iso ()));
+    ]
+    @ (if !timeout_hit then [ ("timeout_hit", `Bool true) ] else [])
+  in
   let result_fields =
     [
       ("resultEnvelope", envelope);
       ("content", `List content_items);
       ("isError", `Bool (not success));
+      ("_meta", `Assoc meta_fields);
     ]
     @
     match structured_content with

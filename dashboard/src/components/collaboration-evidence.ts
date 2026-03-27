@@ -11,6 +11,23 @@ const collaborationEvidenceError = signal<string | null>(null)
 const collaborationEvidenceLoading = signal(false)
 const collaborationEvidenceKey = signal('')
 
+type CollaborationCountKey = keyof DashboardCollaborationEvidenceResponse['counts']
+type CollaborationEvidencePanelRow = { key: string, content: ReturnType<typeof html> }
+type CollaborationEvidencePanelView = {
+  key: string
+  title: string
+  rows: CollaborationEvidencePanelRow[]
+}
+
+const COLLABORATION_COUNT_METRICS: Array<{ key: CollaborationCountKey, label: string }> = [
+  { key: 'team_turn_count', label: 'team turns' },
+  { key: 'session_broadcast_count', label: 'broadcast' },
+  { key: 'portal_count', label: 'portal' },
+  { key: 'mention_count', label: 'mentions' },
+  { key: 'board_interaction_count', label: 'board' },
+  { key: 'unique_actor_count', label: 'actors' },
+]
+
 async function loadCollaborationEvidence(sessionId?: string | null, roomId?: string | null) {
   const key = `${sessionId ?? ''}:${roomId ?? ''}`
   if (collaborationEvidenceLoading.value && collaborationEvidenceKey.value === key) return
@@ -37,6 +54,36 @@ function evidenceTone(value: string): string {
   }
 }
 
+export function visibleCollaborationCountMetrics(
+  counts: DashboardCollaborationEvidenceResponse['counts'],
+): Array<{ key: CollaborationCountKey, label: string, value: number }> {
+  return COLLABORATION_COUNT_METRICS
+    .map(metric => ({
+      ...metric,
+      value: counts[metric.key],
+    }))
+    .filter(metric => metric.value > 0)
+}
+
+export function collaborationEvidenceSupportRows(
+  data: DashboardCollaborationEvidenceResponse,
+): string[] {
+  const rows: string[] = []
+  if (data.proof.available || data.proof.verdict) {
+    rows.push(`proof verdict · ${data.proof.verdict ?? 'none'} · ${data.proof.available ? 'available' : 'missing'}`)
+  }
+  if (
+    data.relation_backend.source !== 'graphql_proxy'
+    || data.relation_backend.status !== 'configured'
+  ) {
+    rows.push(`relation backend · ${data.relation_backend.source} · ${data.relation_backend.status}`)
+  }
+  if (data.counts.message_broadcast_count > 0) {
+    rows.push(`message broadcast count · ${data.counts.message_broadcast_count}`)
+  }
+  return rows
+}
+
 export function CollaborationEvidencePanel({
   sessionId,
   roomId,
@@ -50,6 +97,35 @@ export function CollaborationEvidencePanel({
 
   const data = collaborationEvidence.value
   const counts = data?.counts
+  const metrics = counts ? visibleCollaborationCountMetrics(counts) : []
+  const evidenceRows = data ? collaborationEvidenceSupportRows(data) : []
+  const evidencePanels: CollaborationEvidencePanelView[] = []
+
+  if (evidenceRows.length > 0) {
+    evidencePanels.push({
+      key: 'support',
+      title: 'proof / relation backend',
+      rows: evidenceRows.map((row, index) => ({
+        key: `support:${index}`,
+        content: html`${row}`,
+      })),
+    })
+  }
+
+  if (data && data.recent_events.length > 0) {
+    evidencePanels.push({
+      key: 'recent-events',
+      title: '최근 세션 이벤트',
+      rows: data.recent_events.map(item => ({
+        key: `${item.ts_iso ?? 'na'}:${item.event_type}:${item.actor ?? 'na'}`,
+        content: html`
+          <span class="text-[var(--text-strong)]">${item.event_type}</span>
+          ${item.actor ? html` · ${item.actor}` : null}
+          ${item.summary ? html` · ${item.summary}` : null}
+        `,
+      })),
+    })
+  }
 
   return html`
     <section class="rounded-lg border border-[var(--card-border)] bg-[var(--white-2)] p-4 grid gap-4">
@@ -79,54 +155,35 @@ export function CollaborationEvidencePanel({
 
       ${data && counts
         ? html`
-            <div class="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
-              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
-                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">team turns</div>
-                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.team_turn_count}</strong>
-              </div>
-              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
-                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">broadcast</div>
-                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.session_broadcast_count}</strong>
-              </div>
-              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
-                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">portal</div>
-                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.portal_count}</strong>
-              </div>
-              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
-                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">mentions</div>
-                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.mention_count}</strong>
-              </div>
-              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
-                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">board</div>
-                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.board_interaction_count}</strong>
-              </div>
-              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
-                <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">actors</div>
-                <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${counts.unique_actor_count}</strong>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-3 max-[980px]:grid-cols-1">
-              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3 grid gap-2">
-                <strong class="text-[13px] text-[var(--text-strong)]">proof / relation backend</strong>
-                <div class="text-[12px] text-[var(--text-muted)]">proof verdict · ${data.proof.verdict ?? 'none'} · ${data.proof.available ? 'available' : 'missing'}</div>
-                <div class="text-[12px] text-[var(--text-muted)]">relation backend · ${data.relation_backend.source} · ${data.relation_backend.status}</div>
-                <div class="text-[12px] text-[var(--text-muted)]">message broadcast count · ${counts.message_broadcast_count}</div>
-              </div>
-
-              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3 grid gap-2">
-                <strong class="text-[13px] text-[var(--text-strong)]">최근 세션 이벤트</strong>
-                ${data.recent_events.length > 0
-                  ? data.recent_events.map(item => html`
-                      <div key=${`${item.ts_iso ?? 'na'}:${item.event_type}:${item.actor ?? 'na'}`} class="text-[12px] text-[var(--text-muted)]">
-                        <span class="text-[var(--text-strong)]">${item.event_type}</span>
-                        ${item.actor ? html` · ${item.actor}` : null}
-                        ${item.summary ? html` · ${item.summary}` : null}
+            ${metrics.length > 0
+              ? html`
+                  <div class="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
+                    ${metrics.map(metric => html`
+                      <div key=${metric.key} class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3">
+                        <div class="text-[10px] uppercase tracking-[0.06em] text-[var(--text-muted)]">${metric.label}</div>
+                        <strong class="text-[20px] text-[var(--text-strong)] tabular-nums">${metric.value}</strong>
                       </div>
-                    `)
-                  : html`<div class="text-[12px] text-[var(--text-muted)]">최근 세션 이벤트가 없습니다.</div>`}
-              </div>
-            </div>
+                    `)}
+                  </div>
+                `
+              : null}
+
+            ${evidencePanels.length > 0
+              ? html`
+                  <div class="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
+                    ${evidencePanels.map(panel => html`
+                      <div key=${panel.key} class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] p-3 grid gap-2">
+                        <strong class="text-[13px] text-[var(--text-strong)]">${panel.title}</strong>
+                        ${panel.rows.map(row => html`<div key=${row.key} class="text-[12px] text-[var(--text-muted)]">${row.content}</div>`)}
+                      </div>
+                    `)}
+                  </div>
+                `
+              : null}
+
+            ${metrics.length === 0 && evidencePanels.length === 0
+              ? html`<div class="text-[12px] text-[var(--text-muted)]">추가로 펼칠 근거가 아직 없어 핵심 요약만 표시합니다.</div>`
+              : null}
           `
         : null}
     </section>

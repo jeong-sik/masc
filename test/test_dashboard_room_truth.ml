@@ -195,7 +195,7 @@ let test_dashboard_room_truth_mixed_runtime_counts () =
            ());
       ignore
         (Lib.Keeper_types.write_resident_keeper config
-           { name = "sangsu"; created_at = "2026-03-25T08:05:54Z"; updated_at = "2026-03-25T08:05:54Z" });
+           (keeper_boot_entry "sangsu"));
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =

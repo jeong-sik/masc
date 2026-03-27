@@ -266,7 +266,7 @@ let test_storage_type_defaults_to_filesystem () =
 
 let test_storage_type_explicit_postgres () =
   with_envs
-    (("MASC_STORAGE_TYPE", Some "postgres") :: pg_env_bindings ())
+    (pg_env_bindings ~masc_storage_type:"postgres" ())
     (fun () ->
       check string "explicit postgres" "postgres"
         (Room_utils.storage_type_from_env ()))
@@ -281,7 +281,7 @@ let test_storage_type_legacy_url_does_not_auto_select () =
 
 let test_storage_type_auto_is_deprecated () =
   with_envs
-    (("MASC_STORAGE_TYPE", Some "auto") :: pg_env_bindings ())
+    (pg_env_bindings ~masc_storage_type:"auto" ())
     (fun () ->
       check string "auto falls back to filesystem" "filesystem"
         (Room_utils.storage_type_from_env ()))
@@ -299,7 +299,7 @@ let test_backend_config_for_requires_explicit_postgres () =
          | _ -> false));
   (* Explicit MASC_STORAGE_TYPE=postgres + MASC_POSTGRES_URL should select postgres *)
   with_envs
-    (("MASC_STORAGE_TYPE", Some "postgres") :: pg_env_bindings ~masc_postgres_url:url ())
+    (pg_env_bindings ~masc_storage_type:"postgres" ~masc_postgres_url:url ())
     (fun () ->
       let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
       check bool "explicit postgres selects postgres native" true
@@ -308,15 +308,15 @@ let test_backend_config_for_requires_explicit_postgres () =
          | _ -> false);
       check (option string) "postgres url" (Some url) cfg.postgres_url)
 
-let test_postgres_url_from_env_keeps_supabase_transaction_pooler () =
+let test_postgres_url_from_env_ignores_legacy_without_masc_url () =
   let raw_url =
     "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
   in
   with_envs
     (pg_env_bindings ~sb_pg_url:raw_url ())
     (fun () ->
-      check (option string) "transaction pooler url preserved"
-        (Some raw_url)
+      check (option string) "returns None without MASC_POSTGRES_URL"
+        None
         (Room_utils.postgres_url_from_env ()))
 
 let test_postgres_url_from_env_uses_masc_postgres_url () =
@@ -545,8 +545,8 @@ let () =
     ];
     "backend_config_for", [
       test_case "requires explicit postgres" `Quick test_backend_config_for_requires_explicit_postgres;
-      test_case "keeps supabase transaction pooler" `Quick
-        test_postgres_url_from_env_keeps_supabase_transaction_pooler;
+      test_case "ignores legacy without MASC_POSTGRES_URL" `Quick
+        test_postgres_url_from_env_ignores_legacy_without_masc_url;
       test_case "uses MASC_POSTGRES_URL" `Quick
         test_postgres_url_from_env_uses_masc_postgres_url;
     ];

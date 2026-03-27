@@ -31,7 +31,8 @@ let run_cmd base_path =
   in
   Server_runtime_bootstrap.bootstrap_server_state_blocking state;
   Server_runtime_bootstrap.bootstrap_chain_state state;
-  Server_runtime_bootstrap.bootstrap_keepers ~sw ~clock state;
+  (* keeper bootstrap delegated to keeper_autoboot subsystem or
+     Keeper_runtime.start_existing_keepalives if needed *)
   Server_bootstrap_pg.init_task_backend ();
   Server_bootstrap_pg.inject_shared_pg_pool ();
   Server_bootstrap_pg.init_memory_pg_schema ();

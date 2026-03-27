@@ -29,6 +29,7 @@ let parse_args () =
 let producer () =
   Printf.printf "=== PRODUCER PROCESS ===\n%!";
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   let fs = Eio.Stdenv.fs env in
   let config = Room_eio.create_config ~fs !shared_dir in
 
@@ -58,6 +59,7 @@ let producer () =
 let consumer () =
   Printf.printf "=== CONSUMER PROCESS ===\n%!";
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   let fs = Eio.Stdenv.fs env in
   let config = Room_eio.create_config ~fs !shared_dir in
 

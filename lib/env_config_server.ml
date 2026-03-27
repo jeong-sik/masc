@@ -56,12 +56,12 @@ module Auth = struct
     Sys.getenv_opt "MASC_ADMIN_TOKEN" |> trim_opt
 
   let tool_auth_strict =
-    get_bool ~default:false "MASC_TOOL_AUTH_STRICT"
+    get_bool ~default:true "MASC_TOOL_AUTH_STRICT"
 end
 
 module Tools = struct
   let readonly_retry_limit =
-    get_int ~default:3 "MASC_TOOL_READONLY_RETRY_LIMIT"
+    min 5 (max 1 (get_int ~default:2 "MASC_TOOL_READONLY_RETRY_LIMIT"))
 
   let description_budget =
     get_int ~default:200 "MASC_TOOL_DESCRIPTION_BUDGET"
@@ -96,7 +96,7 @@ module Runtime = struct
     get_float ~default:30.0 "MASC_STARTUP_WATCHDOG_SEC"
 
   let telemetry_enabled =
-    get_bool ~default:false "MASC_TELEMETRY_ENABLED"
+    get_bool ~default:true "MASC_TELEMETRY_ENABLED"
 
   let openai_compat =
     get_bool ~default:false "MASC_OPENAI_COMPAT"

@@ -13,7 +13,7 @@
 let graphql_url () = Graphql_endpoint.graphql_url ()
 
 let api_key () =
-  Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:""
+  Env_config.Server.External.graphql_api_key_opt () |> Option.value ~default:""
 
 (** {1 HTTP Transport} *)
 

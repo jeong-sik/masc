@@ -131,10 +131,8 @@ let rec find_repo_root_with_script dir depth =
       else find_repo_root_with_script parent (depth - 1)
 
 let resolve_swarm_live_script () =
-  match Sys.getenv_opt "MASC_SWARM_LIVE_SCRIPT" with
-  | Some value when String.trim value <> "" ->
-      let path = String.trim value in
-      if Sys.file_exists path then Some path else None
+  match Env_config.Chain.Llama.swarm_live_script_opt () with
+  | Some path when Sys.file_exists path -> Some path
   | _ ->
       let seeds =
         [ Sys.getcwd (); Filename.dirname Sys.executable_name ]

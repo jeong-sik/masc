@@ -35,10 +35,10 @@ let handle_start (ctx : context) : result option =
     end else begin
       let expanded =
         if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
-          let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp" in
+          let home = match Env_config_core.home_dir_opt () with Some h -> h | None -> "/tmp" in
           Filename.concat home (String.sub path 2 (String.length path - 2))
         else if String.length path = 1 && path.[0] = '~' then
-          (match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp")
+          (match Env_config_core.home_dir_opt () with Some h -> h | None -> "/tmp")
         else if Filename.is_relative path then
           Filename.concat (Sys.getcwd ()) path
         else
@@ -112,7 +112,7 @@ let handle_lock (ctx : context) : result option =
   else begin
     let expanded =
       if String.length file > 0 && file.[0] = '~' then
-        match Sys.getenv_opt "HOME" with
+        match Env_config_core.home_dir_opt () with
         | Some home -> Filename.concat home (String.sub file 1 (String.length file - 1))
         | None -> file
       else if Filename.is_relative file then
@@ -154,7 +154,7 @@ let handle_unlock (ctx : context) : result option =
   else begin
     let expanded =
       if String.length file > 0 && file.[0] = '~' then
-        match Sys.getenv_opt "HOME" with
+        match Env_config_core.home_dir_opt () with
         | Some home -> Filename.concat home (String.sub file 1 (String.length file - 1))
         | None -> file
       else if Filename.is_relative file then
@@ -193,10 +193,10 @@ let handle_set_room (ctx : context) : result option =
   else
   let expanded =
     if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
-      let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp" in
+      let home = match Env_config_core.home_dir_opt () with Some h -> h | None -> "/tmp" in
       Filename.concat home (String.sub path 2 (String.length path - 2))
     else if String.length path = 1 && path.[0] = '~' then
-      (match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp")
+      (match Env_config_core.home_dir_opt () with Some h -> h | None -> "/tmp")
     else if Filename.is_relative path then
       Filename.concat (Sys.getcwd ()) path
     else

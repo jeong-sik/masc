@@ -147,7 +147,7 @@ module Transport : sig
   val grpc_target_opt : unit -> string option
   val ws_port : int
   val ws_enabled : unit -> bool
-  val webrtc_enabled : bool
+  val webrtc_enabled : unit -> bool
   val use_h2 : unit -> string
   val agent_transport_opt : unit -> string option
   val openai_compat_enabled : bool

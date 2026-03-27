@@ -17,7 +17,7 @@
     Enabled by default. Opt-out via MASC_WEBRTC_ENABLED=0. *)
 
 (** Whether WebRTC transport is enabled (default: true). *)
-let is_enabled () = Env_config.Transport.webrtc_enabled
+let is_enabled () = Env_config.Transport.webrtc_enabled ()
 
 let trim_nonempty value =
   let trimmed = String.trim value in

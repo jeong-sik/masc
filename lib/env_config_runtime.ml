@@ -385,8 +385,9 @@ module Transport = struct
       Runtime-readable (tests change this via putenv). *)
   let ws_enabled () = get_bool ~default:true "MASC_WS_ENABLED"
 
-  (** Whether WebRTC transport is enabled. Default: true. *)
-  let webrtc_enabled = get_bool ~default:true "MASC_WEBRTC_ENABLED"
+  (** Whether WebRTC transport is enabled. Default: true.
+      Runtime-readable (tests change this via putenv). *)
+  let webrtc_enabled () = get_bool ~default:true "MASC_WEBRTC_ENABLED"
 
   (** HTTP mode: "auto", "h2_only", "h1_only". Default: "auto". *)
   let use_h2 () =

@@ -161,7 +161,7 @@ type room_snapshot = { room_id; is_current; agents; tasks; messages; locks }
 | `planning` | Planning | 4 |
 | `lab` | Lab | 3 |
 
-`/api/v1/dashboard/semantics` endpoint로 JSON을 제공한다. 프론트엔드가 metric tooltip과 panel 설명을 이 데이터에서 읽는다.
+Dashboard semantics registry는 내부 문서화/테스트용으로 유지되며, 프론트엔드는 더 이상 `/api/v1/dashboard/semantics`를 읽지 않는다.
 
 ### 3.4. Attention Detection (`dashboard_attention.ml`)
 
@@ -446,19 +446,19 @@ dashboard/
 
 ### 4.3. Routing
 
-Hash-based routing (`#home`, `#mission`, `#operations`, ...).
+Hash-based routing (`#overview`, `#monitoring?section=sessions`, `#command?section=intervene`, ...).
 
 ```typescript
-const DEFAULT_ROUTE: RouteState = { tab: 'home', params: {}, postId: null }
+const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
 ```
 
 라우팅 흐름:
 1. `location.hash`에서 path + query params 파싱
 2. segment 정규화 (`/dashboard/` prefix 제거)
-3. tab ID 해석 (`VALID_TABS` 확인 -> `LEGACY_TAB_REDIRECTS` 적용)
-4. Command surface 하위 경로: `warroom`, `summary`, `orchestra`, `swarm`, `operations`, `topology`, `alerts`, `trace`, `chains`, `control`
-5. Lab section: `overview`, `trpg`, `avatars`
-6. Deep link: `/chains/operation/:id` -> operations command surface
+3. canonical tab ID 해석 (`VALID_TABS` 확인)
+4. Command surface 하위 경로: `intervene`, `warroom`, `governance`, `orchestra`, `swarm`, `operations`, `chains`, `control`
+5. Lab section: `overview`, `autoresearch`, `tools`, `harness`
+6. Deep link: `/chains/operation/:id` -> `command` tab의 `warroom` surface
 
 ### 4.4. SSE Integration
 
@@ -524,7 +524,6 @@ Vite 설정:
 | `/api/v1/dashboard/governance` | GET | Governance surface |
 | `/api/v1/dashboard/board` | GET | Board monitoring |
 | `/api/v1/dashboard/room-truth` | GET | Room truth focus |
-| `/api/v1/dashboard/semantics` | GET | Semantics registry (surface/panel/metric definitions) |
 | `/api/v1/dashboard/tools` | GET | Tool inventory + usage |
 | `/api/v1/dashboard/logs` | GET | System logs |
 
@@ -560,7 +559,6 @@ Vite 설정:
 | Endpoint | Method | 용도 |
 |----------|--------|------|
 | `/api/v1/governance/params` | GET | Governance runtime parameters |
-| `/api/v1/governance/feed` | GET | Governance feed |
 
 ### Keeper
 

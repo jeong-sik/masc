@@ -316,7 +316,7 @@ export function AgentProfile({ name }: { name: string }) {
   return html`
     <div class="px-1 ${isKeeper ? 'ff-profile--keeper' : ''}">
       <div class="flex gap-2 mb-3">
-        <${ActionButton} variant="ghost" onClick=${() => navigate('status', { section: 'agents' })}>← 목록<//>
+        <${ActionButton} variant="ghost" onClick=${() => navigate('monitoring', { section: 'agents' })}>← 목록<//>
         <${ActionButton} variant="ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
           ${loading.value ? '...' : '새로고침'}
         <//>
@@ -356,7 +356,7 @@ export function AgentProfile({ name }: { name: string }) {
                 <div class="flex flex-col gap-1">
                   ${collabs.map(c => html`
                     <div class="flex items-center gap-2 px-2 py-1.5 transition-colors duration-150 hover:bg-[rgba(255,215,0,0.08)] rounded" key=${c.name}
-                      onClick=${() => navigate('status', { section: 'agents', agent: c.name })}
+                      onClick=${() => navigate('monitoring', { section: 'agents', agent: c.name })}
                       style="cursor:pointer;"
                     >
                       <span class="text-[var(--ff-gold)] font-semibold text-base flex-1">${c.name}</span>

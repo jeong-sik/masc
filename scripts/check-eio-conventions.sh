@@ -39,7 +39,6 @@ filter_out_lines() {
     grep -E -v -- "$pattern" || true
   fi
 }
-
 count_matches() {
   local pattern="$1"
   shift

@@ -152,15 +152,16 @@ let parse_worktrees (json : Yojson.Safe.t) : (string * string) list =
   | `List items ->
       List.filter_map
         (fun item ->
-          try
-            let worktree = item |> U.member "worktree" |> U.to_string in
-            let branch = item |> U.member "branch" |> U.to_string in
-            if String.length branch > 0 && not (String.equal branch "HEAD") then
-              Some (branch, worktree)
-            else
-              None
-          with
-          | Yojson.Safe.Util.Type_error _ -> None
+          match item with
+          | `Assoc _ ->
+              (try
+                 let worktree = item |> U.member "worktree" |> U.to_string in
+                 let branch = item |> U.member "branch" |> U.to_string in
+                 if String.length branch > 0 && not (String.equal branch "HEAD") then
+                   Some (branch, worktree)
+                 else
+                   None
+               with Yojson.Safe.Util.Type_error _ -> None)
           | _ -> None)
         items
   | `Null -> []

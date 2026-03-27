@@ -133,7 +133,9 @@ let () =
 let () =
   with_fs_test @@ fun _env ->
   let config = make_test_room () in
-  let ctx : Tool_task.context = { config; agent_name = "evidence-agent" } in
+  let ctx : Tool_task.context =
+    { config; agent_name = "evidence-agent"; sw = None }
+  in
   let tool_name = "masc_tasks" in
   let json_input = `Assoc [] in
   match Tool_task.dispatch ctx ~name:tool_name ~args:json_input with

@@ -213,10 +213,6 @@ let handle_done ctx args =
   (* Get task info BEFORE completion to extract actual start time *)
   let tasks = Room.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
-  if not (can_review_completion ~task_opt ~agent_name:ctx.agent_name) then
-    result_to_response
-      (Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes)
-  else
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
@@ -231,20 +227,25 @@ let handle_done ctx args =
         | _ -> (default_time, []))
     | None -> (default_time, [])
   in
-  let gate_rejection =
-    review_completion_notes
-      ~completion_contract:None
-      ~evaluator_cascade:None
-      ~ctx
-      ~task_opt
-      ~task_id
-      ~notes
+  let result =
+    if not (can_review_completion ~task_opt ~agent_name:ctx.agent_name) then
+      Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes
+    else
+      let gate_rejection =
+        review_completion_notes
+          ~completion_contract:None
+          ~evaluator_cascade:None
+          ~ctx
+          ~task_opt
+          ~task_id
+          ~notes
+      in
+      match gate_rejection with
+      | Some reason ->
+          Error (Types.TaskInvalidState (completion_rejection_message reason))
+      | None ->
+          Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes
   in
-  match gate_rejection with
-  | Some reason ->
-      (false, completion_rejection_message reason)
-  | None ->
-  let result = Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes in
   (* Notify A2A subscribers on successful completion *)
   (match result with
    | Ok _ ->

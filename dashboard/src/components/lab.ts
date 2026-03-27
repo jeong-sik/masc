@@ -11,7 +11,11 @@ export function Lab() {
   return html`
     <div>
       ${section === 'tools' ? html`
-        <${Tools} />
+        <${Tools} mode="tools" />
+      ` : null}
+
+      ${section === 'experiments' ? html`
+        <${Tools} mode="experiments" />
       ` : null}
 
       ${section === 'autoresearch' ? html`

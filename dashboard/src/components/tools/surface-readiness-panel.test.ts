@@ -112,7 +112,8 @@ describe('SurfaceReadinessPanel', () => {
     expect(groups[0]?.textContent).toContain('세션 & 룸')
     expect(groups[0]?.textContent).not.toContain('관제면')
     expect(groups[1]?.textContent).toContain('관제면')
-    expect(groups[1]?.textContent).toContain('도구 & 실험')
+    expect(groups[1]?.textContent).toContain('도구')
+    expect(groups[1]?.textContent).not.toContain('도구 & 실험')
 
     const text = container.textContent ?? ''
     expect(text).toContain('검증 기준')

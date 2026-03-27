@@ -17,7 +17,10 @@ import { PromptRegistryPanel } from './prompt-registry-panel'
 import { SurfaceReadinessPanel } from './surface-readiness-panel'
 import { ConfigResolutionPanel } from './config-resolution-panel'
 
-export function Tools() {
+export type ToolsMode = 'tools' | 'experiments'
+
+export function Tools({ mode = 'tools' }: { mode?: ToolsMode }) {
+  const isToolsMode = mode === 'tools'
   const data = toolsData.value
   const loading = toolsLoading.value
   const error = toolsError.value
@@ -25,10 +28,22 @@ export function Tools() {
   const usage = data?.tool_usage ?? null
 
   useEffect(() => {
-    if (!toolsData.value && !toolsLoading.value) {
+    if (isToolsMode && !toolsData.value && !toolsLoading.value) {
       void loadTools()
     }
-  }, [])
+  }, [isToolsMode])
+
+  if (!isToolsMode) {
+    return html`
+      <div>
+        <${Card} title="운영 화면 안내" class="section mb-4">
+          <${SurfaceReadinessPanel} />
+        <//>
+
+        <${PromptRegistryPanel} />
+      </div>
+    `
+  }
 
   return html`
     <div>
@@ -36,10 +51,6 @@ export function Tools() {
         resolution=${data?.config_resolution}
         runtimeResolution=${data?.runtime_resolution}
       />
-
-      <${Card} title="운영 화면 안내" class="section mb-4">
-        <${SurfaceReadinessPanel} />
-      <//>
 
       <${Card} title="시스템 도구 목록" class="section mb-4">
         <div class="mb-4">
@@ -76,7 +87,6 @@ export function Tools() {
           : null}
         <${ToolMetrics} />
       <//>
-      <${PromptRegistryPanel} />
       ${data?.generated_at
         ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[12px]">
             <span>생성 시각: ${data.generated_at}</span>

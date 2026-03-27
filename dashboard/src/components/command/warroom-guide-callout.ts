@@ -18,16 +18,16 @@ export function WarroomGuideCallout() {
           </div>
           <span class="text-[12px] text-[var(--text-muted)] leading-[1.5]">
             오케스트라, 스웜, 체인 제어는 아직 실험 단계입니다. 기본 운영은 실시간 개입 화면에서 하고,
-            검증 기준과 진입 경로는 실험실의 운영 화면 안내에서 확인합니다.
+            검증 기준과 진입 경로는 실험실의 실험 섹션에서 확인합니다.
           </span>
         </div>
         <div class="flex gap-2 flex-wrap">
           <button
             type="button"
             class=${ACTION_BUTTON}
-            onClick=${() => navigate('lab', { section: 'tools' })}
+            onClick=${() => navigate('lab', { section: 'experiments' })}
           >
-            운영 화면 안내
+            실험 안내
           </button>
           <button
             type="button"

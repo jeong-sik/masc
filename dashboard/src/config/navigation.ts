@@ -13,6 +13,7 @@ export type SurfaceSectionId =
   | 'intervene'
   | 'warroom'
   | 'tools'
+  | 'experiments'
   | 'autoresearch'
   | 'harness'
 
@@ -91,7 +92,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'lab',
     label: '실험실',
     icon: '🧪',
-    description: '시스템 도구 테스트',
+    description: '도구 진단과 실험 제어',
     defaultTab: 'lab',
     defaultParams: { section: 'tools' },
     tabs: ['lab'],
@@ -185,9 +186,15 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   lab: [
     {
       id: 'tools',
-      label: '도구 & 실험',
-      description: '도구 인벤토리와 기타 실험을 진행합니다.',
+      label: '도구',
+      description: '도구 인벤토리, 사용량, 경로 진단을 봅니다.',
       params: { section: 'tools' },
+    },
+    {
+      id: 'experiments',
+      label: '실험',
+      description: '운영 화면 readiness와 runtime override를 다룹니다.',
+      params: { section: 'experiments' },
     },
     {
       id: 'autoresearch',

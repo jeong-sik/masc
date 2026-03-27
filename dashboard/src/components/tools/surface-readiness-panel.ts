@@ -20,7 +20,11 @@ const SURFACE_SUMMARY_BY_ID: Record<string, string> = {
   'command.warroom': '오케스트라, 스웜, 체인 제어를 시험하는 실험 화면입니다.',
   'command.governance': '판단과 판결 흐름을 확인하는 운영 화면입니다.',
   'workspace.evidence': '증빙과 작업 이력을 확인하는 기본 운영 화면입니다.',
-  'lab.tools': '도구 현황과 준비 상태를 점검하는 실험 화면입니다.',
+  'lab.tools': '도구 인벤토리와 경로/사용량 진단을 확인하는 실험실 화면입니다.',
+}
+
+const SURFACE_LABEL_BY_ID: Record<string, string> = {
+  'lab.tools': '도구',
 }
 
 const VERIFICATION_LABELS: Record<string, string> = {
@@ -65,6 +69,10 @@ function formatProofBar(value: string): string {
 
 function surfaceSummary(item: DashboardSurfaceReadinessItem): string {
   return SURFACE_SUMMARY_BY_ID[item.id] ?? item.rationale
+}
+
+function surfaceLabel(item: DashboardSurfaceReadinessItem): string {
+  return SURFACE_LABEL_BY_ID[item.id] ?? item.label
 }
 
 function surfaceStatusLabel(item: DashboardSurfaceReadinessItem): string {
@@ -126,7 +134,7 @@ function SurfaceReadinessRow({ item }: { item: DashboardSurfaceReadinessItem }) 
       <div class="flex items-start justify-between gap-3">
         <div class="grid gap-2">
           <div class="flex items-center gap-2 flex-wrap">
-            <strong class="text-[14px] text-[var(--text-strong)]">${item.label}</strong>
+            <strong class="text-[14px] text-[var(--text-strong)]">${surfaceLabel(item)}</strong>
             <span class="px-2 py-0.5 rounded-full border text-[10px] tracking-[0.04em] ${surfaceStatusTone(item)}">
               ${surfaceStatusLabel(item)}
             </span>

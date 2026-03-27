@@ -14,7 +14,7 @@ let add_routes ~sw router =
        ) request reqd)
   |> Http.Router.post "/api/v1/agent-runs" (fun request reqd ->
        with_token_permission_auth ~permission:Types.CanAdmin
-         (fun _state _agent_name _req reqd ->
+         (fun state _agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
              try
                let json = Yojson.Safe.from_string body_str in
@@ -23,7 +23,8 @@ let add_routes ~sw router =
                let model_opt = json |> member "model" |> to_string_option in
                let prompt = json |> member "prompt" |> to_string in
                match
-                 Dashboard_provider_runs.start_run ~sw ~provider ~model_opt
+                 Dashboard_provider_runs.start_run ~sw
+                   ~net:state.Mcp_server.net ~provider ~model_opt
                    ~prompt
                with
                | Ok payload ->

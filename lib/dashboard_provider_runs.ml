@@ -481,7 +481,7 @@ let run_system_prompt provider =
     "You are a single MASC dashboard run using provider %s. Answer directly, keep tool use disabled, and return only the final answer."
     provider
 
-let execute_single_agent_run ~sw ~provider ~model ~prompt =
+let execute_single_agent_run ~sw ~net ~provider ~model ~prompt =
   let label_result = provider_label_for_model provider model in
   match label_result with
   | Error _ as error -> error
@@ -504,14 +504,14 @@ let execute_single_agent_run ~sw ~provider ~model ~prompt =
                 ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 2048))
               ~temperature:(Cascade_inference.resolve_temperature
                 ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 0.2))
-              ~sw
+              ~sw ?net
               ()
           with
           | Ok result ->
               Ok (response_text_of_api_response result.response)
           | Error error -> Error error))
 
-let start_run ~sw ~provider ~model_opt ~prompt =
+let start_run ~sw ~net ~provider ~model_opt ~prompt =
   match resolve_provider_run_request ~provider ~model_opt ~prompt with
   | Error _ as error -> error
   | Ok (_snapshot, model) ->
@@ -547,7 +547,8 @@ let start_run ~sw ~provider ~model_opt ~prompt =
                 current.status <- Running;
                 current.started_at <- Some (Types.now_iso ()));
             match
-              execute_single_agent_run ~sw ~provider:run.provider ~model:run.model
+              execute_single_agent_run ~sw ~net ~provider:run.provider
+                ~model:run.model
                 ~prompt:run.prompt
             with
             | Ok output ->

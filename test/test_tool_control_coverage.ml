@@ -16,84 +16,82 @@ let test name f =
 
 let test_counter = ref 0
 
-let with_ctx f =
-  Fun.protect
-    ~finally:Fs_compat.clear_fs
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      incr test_counter;
-      let tmp =
-        Filename.concat (Filename.get_temp_dir_name ())
-          (Printf.sprintf "masc-control-test-%d-%d"
-             (int_of_float (Unix.gettimeofday () *. 1000.0))
-             !test_counter)
-      in
-      Unix.mkdir tmp 0o755;
-      let config = Room.default_config tmp in
-      let _ = Room.init config ~agent_name:(Some "test-agent") in
-      f { Tool_control.config; agent_name = "test-agent" })
+let with_test_ctx f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  incr test_counter;
+  let tmp =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-control-test-%d-%d"
+         (int_of_float (Unix.gettimeofday () *. 1000.0))
+         !test_counter)
+  in
+  Unix.mkdir tmp 0o755;
+  let config = Room.default_config tmp in
+  let _ = Room.init config ~agent_name:(Some "test-agent") in
+  let ctx = { Tool_control.config; agent_name = "test-agent" } in
+  f ctx
 
 let () =
   test "dispatch_unknown_tool" (fun () ->
-      with_ctx @@ fun ctx ->
-      assert (Tool_control.dispatch ctx ~name:"unknown_tool" ~args:(`Assoc []) = None))
+      with_test_ctx (fun ctx ->
+          assert (Tool_control.dispatch ctx ~name:"unknown_tool" ~args:(`Assoc []) = None)))
 
 let () =
   test "dispatch_pause" (fun () ->
-      with_ctx @@ fun ctx ->
-      match
-        Tool_control.dispatch ctx ~name:"masc_pause"
-          ~args:(`Assoc [ ("reason", `String "Test pause") ])
-      with
-      | Some (success, result) ->
-          assert success;
-          assert (String.length result > 0)
-      | None -> failwith "dispatch returned None")
+      with_test_ctx (fun ctx ->
+          match
+            Tool_control.dispatch ctx ~name:"masc_pause"
+              ~args:(`Assoc [ ("reason", `String "Test pause") ])
+          with
+          | Some (success, result) ->
+              assert success;
+              assert (String.length result > 0)
+          | None -> failwith "dispatch returned None"))
 
 let () =
   test "dispatch_pause_status_paused" (fun () ->
-      with_ctx @@ fun ctx ->
-      let _ =
-        Tool_control.handle_pause ctx
-          (`Assoc [ ("reason", `String "For status test") ])
-      in
-      match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
-      | Some (success, result) ->
-          assert success;
-          assert (String.length result > 0)
-      | None -> failwith "dispatch returned None")
+      with_test_ctx (fun ctx ->
+          let _ =
+            Tool_control.handle_pause ctx
+              (`Assoc [ ("reason", `String "For status test") ])
+          in
+          match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
+          | Some (success, result) ->
+              assert success;
+              assert (String.length result > 0)
+          | None -> failwith "dispatch returned None"))
 
 let () =
   test "dispatch_resume" (fun () ->
-      with_ctx @@ fun ctx ->
-      let _ =
-        Tool_control.handle_pause ctx
-          (`Assoc [ ("reason", `String "For resume test") ])
-      in
-      match Tool_control.dispatch ctx ~name:"masc_resume" ~args:(`Assoc []) with
-      | Some (success, result) ->
-          assert success;
-          assert (String.length result > 0)
-      | None -> failwith "dispatch returned None")
+      with_test_ctx (fun ctx ->
+          let _ =
+            Tool_control.handle_pause ctx
+              (`Assoc [ ("reason", `String "For resume test") ])
+          in
+          match Tool_control.dispatch ctx ~name:"masc_resume" ~args:(`Assoc []) with
+          | Some (success, result) ->
+              assert success;
+              assert (String.length result > 0)
+          | None -> failwith "dispatch returned None"))
 
 let () =
   test "dispatch_pause_status_running" (fun () ->
-      with_ctx @@ fun ctx ->
-      match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
-      | Some (success, result) ->
-          assert success;
-          assert (String.length result > 0)
-      | None -> failwith "dispatch returned None")
+      with_test_ctx (fun ctx ->
+          match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
+          | Some (success, result) ->
+              assert success;
+              assert (String.length result > 0)
+          | None -> failwith "dispatch returned None"))
 
 let () =
   test "removed_mode_tools_do_not_dispatch" (fun () ->
-      with_ctx @@ fun ctx ->
-      let args = `Assoc [] in
-      assert (Tool_control.dispatch ctx ~name:"masc_switch_mode" ~args = None);
-      assert (Tool_control.dispatch ctx ~name:"masc_get_config" ~args = None);
-      assert (Tool_control.dispatch ctx ~name:"masc_tool_enable" ~args = None);
-      assert (Tool_control.dispatch ctx ~name:"masc_tool_disable" ~args = None))
+      with_test_ctx (fun ctx ->
+          let args = `Assoc [] in
+          assert (Tool_control.dispatch ctx ~name:"masc_switch_mode" ~args = None);
+          assert (Tool_control.dispatch ctx ~name:"masc_get_config" ~args = None);
+          assert (Tool_control.dispatch ctx ~name:"masc_tool_enable" ~args = None);
+          assert (Tool_control.dispatch ctx ~name:"masc_tool_disable" ~args = None)))
 
 let () =
   test "get_string_present" (fun () ->

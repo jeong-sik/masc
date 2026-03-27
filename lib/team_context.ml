@@ -146,6 +146,154 @@ let execution_scope_to_participant_state
   | Some Limited_code_change -> Working
   | Some Autonomous -> Working
 
+let add_json_string_if_present key value acc =
+  match value with
+  | Some text when String.trim text <> "" -> (key, `String (String.trim text)) :: acc
+  | _ -> acc
+
+let add_json_bool_if_present key value acc =
+  match value with
+  | Some flag -> (key, `Bool flag) :: acc
+  | None -> acc
+
+let add_json_int_if_present key value acc =
+  match value with
+  | Some n -> (key, `Int n) :: acc
+  | None -> acc
+
+let add_json_float_if_present key value acc =
+  match value with
+  | Some n -> (key, `Float n) :: acc
+  | None -> acc
+
+let count_assoc_to_json counts =
+  `Assoc
+    (counts
+    |> List.map (fun (label, count) -> (label, `Int count))
+    |> List.sort (fun (a, _) (b, _) -> compare a b))
+
+let planned_worker_summary (pw : Team_session_types.planned_worker) : string option =
+  let parts = ref [] in
+  let add label value =
+    if String.trim value <> "" then
+      parts := (label ^ "=" ^ value) :: !parts
+  in
+  add "role" (Option.value ~default:"" pw.spawn_role);
+  add "actor" (Option.value ~default:"" pw.runtime_actor);
+  add "model" (Option.value ~default:"" pw.spawn_model);
+  add "scope"
+    (match pw.execution_scope with
+    | Some scope -> Team_session_types.execution_scope_to_string scope
+    | None -> "");
+  add "max_turns"
+    (match pw.max_turns with
+    | Some turns -> string_of_int turns
+    | None -> "");
+  add "class"
+    (match pw.worker_class with
+     | Some worker_class -> Team_session_types.worker_class_to_string worker_class
+     | None -> "");
+  add "tier"
+    (match pw.model_tier with
+     | Some tier -> Team_session_types.model_tier_to_string tier
+     | None -> "");
+  add "pool" (Option.value ~default:"" pw.runtime_pool);
+  add "lane" (Option.value ~default:"" pw.lane_id);
+  add "domain"
+    (match pw.control_domain with
+     | Some domain -> Team_session_types.control_domain_to_string domain
+     | None -> "");
+  add "risk"
+    (match pw.risk_level with
+     | Some risk -> Team_session_types.risk_level_to_string risk
+     | None -> "");
+  add "routing"
+    (match pw.routing_confidence with
+     | Some confidence -> Printf.sprintf "%.2f" confidence
+     | None -> "");
+  match List.rev !parts with
+  | [] -> None
+  | parts -> Some (String.concat "; " parts)
+
+let planned_worker_metadata_json (pw : Team_session_types.planned_worker) :
+    Yojson.Safe.t =
+  let fields =
+    []
+    |> add_json_string_if_present "runtime_actor" pw.runtime_actor
+    |> add_json_string_if_present "spawn_role" pw.spawn_role
+    |> add_json_string_if_present "spawn_model" pw.spawn_model
+    |> add_json_string_if_present "parent_actor" pw.parent_actor
+    |> add_json_string_if_present "runtime_pool" pw.runtime_pool
+    |> add_json_string_if_present "lane_id" pw.lane_id
+    |> add_json_string_if_present "supervisor_actor" pw.supervisor_actor
+    |> add_json_string_if_present "routing_reason" pw.routing_reason
+    |> add_json_bool_if_present "thinking_enabled" pw.thinking_enabled
+    |> add_json_int_if_present "thinking_budget" pw.thinking_budget
+    |> add_json_int_if_present "max_turns" pw.max_turns
+    |> add_json_int_if_present "timeout_seconds" pw.timeout_seconds
+    |> add_json_float_if_present "routing_confidence" pw.routing_confidence
+  in
+  let fields =
+    ("spawn_agent", `String pw.spawn_agent) :: ("routing_escalated", `Bool pw.routing_escalated) :: fields
+  in
+  let fields =
+    match pw.execution_scope with
+    | Some scope ->
+        ("execution_scope", `String (Team_session_types.execution_scope_to_string scope))
+        :: fields
+    | None -> fields
+  in
+  let fields =
+    match pw.worker_class with
+    | Some worker_class ->
+        ("worker_class", `String (Team_session_types.worker_class_to_string worker_class))
+        :: fields
+    | None -> fields
+  in
+  let fields =
+    match pw.capsule_mode with
+    | Some mode ->
+        ("capsule_mode", `String (Team_session_types.capsule_mode_to_string mode))
+        :: fields
+    | None -> fields
+  in
+  let fields =
+    match pw.controller_level with
+    | Some level ->
+        ("controller_level", `String (Team_session_types.controller_level_to_string level))
+        :: fields
+    | None -> fields
+  in
+  let fields =
+    match pw.control_domain with
+    | Some domain ->
+        ("control_domain", `String (Team_session_types.control_domain_to_string domain))
+        :: fields
+    | None -> fields
+  in
+  let fields =
+    match pw.model_tier with
+    | Some tier ->
+        ("model_tier", `String (Team_session_types.model_tier_to_string tier))
+        :: fields
+    | None -> fields
+  in
+  let fields =
+    match pw.task_profile with
+    | Some profile ->
+        ("task_profile", `String (Team_session_types.task_profile_to_string profile))
+        :: fields
+    | None -> fields
+  in
+  let fields =
+    match pw.risk_level with
+    | Some risk ->
+        ("risk_level", `String (Team_session_types.risk_level_to_string risk))
+        :: fields
+    | None -> fields
+  in
+  `Assoc (List.rev fields)
+
 let planned_worker_to_participant
     (pw : Team_session_types.planned_worker)
     : Agent_sdk.Collaboration.participant =
@@ -155,7 +303,7 @@ let planned_worker_to_participant
     state = execution_scope_to_participant_state pw.execution_scope;
     joined_at = None;
     finished_at = None;
-    summary = None;
+    summary = planned_worker_summary pw;
   }
 
 (** Project a MASC team session into an OAS {!Agent_sdk.Collaboration.t}.
@@ -195,10 +343,66 @@ let collaboration_of_session
     outcome = session.stop_reason;
     max_participants = None;
     metadata =
-      [("room_id", `String session.room_id);
-       ("orchestration_mode",
-        `String (Team_session_types.orchestration_mode_to_string
-                   session.orchestration_mode))];
+      [
+        ("room_id", `String session.room_id);
+        ("created_by", `String session.created_by);
+        ("origin_kind",
+         `String (Team_session_types.session_origin_kind_to_string
+                    session.origin_kind));
+        ("execution_scope",
+         `String
+           (Team_session_types.execution_scope_to_string session.execution_scope));
+        ("orchestration_mode",
+         `String
+           (Team_session_types.orchestration_mode_to_string
+              session.orchestration_mode));
+        ("control_profile",
+         `String
+           (Team_session_types.control_profile_to_string
+              session.control_profile));
+        ("scale_profile",
+         `String
+           (Team_session_types.scale_profile_to_string session.scale_profile));
+        ("instruction_profile",
+         `String
+           (Team_session_types.instruction_profile_to_string
+              session.instruction_profile));
+        ("fallback_policy",
+         `String
+           (Team_session_types.fallback_policy_to_string session.fallback_policy));
+        ("communication_mode",
+         `String
+           (Team_session_types.communication_mode_to_string
+              session.communication_mode));
+        ("alert_channel",
+         `String
+           (Team_session_types.alert_channel_to_string session.alert_channel));
+        ("duration_seconds", `Int session.duration_seconds);
+        ("checkpoint_interval_sec", `Int session.checkpoint_interval_sec);
+        ("min_agents", `Int session.min_agents);
+        ("auto_resume", `Bool session.auto_resume);
+        ("planned_worker_count", `Int (List.length session.planned_workers));
+        ("model_cascade", `List (List.map (fun model -> `String model) session.model_cascade));
+        ("worker_class_counts",
+         count_assoc_to_json
+           (Team_session_types.worker_class_counts session.planned_workers));
+        ("runtime_pool_counts",
+         count_assoc_to_json
+           (Team_session_types.runtime_pool_counts session.planned_workers));
+        ("lane_counts",
+         count_assoc_to_json (Team_session_types.lane_counts session.planned_workers));
+        ("controller_level_counts",
+         count_assoc_to_json
+           (Team_session_types.controller_level_counts session.planned_workers));
+        ("control_domain_counts",
+         count_assoc_to_json
+           (Team_session_types.control_domain_counts session.planned_workers));
+        ("model_tier_counts",
+         count_assoc_to_json
+           (Team_session_types.model_tier_counts session.planned_workers));
+        ("worker_specs",
+         `List (List.map planned_worker_metadata_json session.planned_workers));
+      ];
   }
 
 let truncate_list n lst =

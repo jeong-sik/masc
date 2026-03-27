@@ -1,7 +1,7 @@
 (** Keeper Tool Exposure Tests
 
     Verifies that keeper_allowed_tool_names returns the full tool set
-    unconditionally (mode removal), with voice gated by policy_voice_enabled
+    unconditionally, with voice tools available by default,
     and write_done producing empty list. *)
 
 open Alcotest
@@ -60,10 +60,10 @@ let test_default_has_base_tools () =
   check bool "has keeper_time_now" true (has_tool "keeper_time_now" tools);
   check bool "has keeper_context_status" true (has_tool "keeper_context_status" tools)
 
-let test_default_has_no_voice () =
+let test_default_has_voice () =
   let meta = make_meta ~policy_voice_enabled:false () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no voice tools when voice disabled" false
+  check bool "voice tools available by default" true
     (has_tool "keeper_voice_speak" tools)
 
 let test_default_has_governance_tools () =
@@ -81,7 +81,7 @@ let test_default_has_research_tools () =
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
 
 (* ============================================================
-   3. Voice profile (still gated by policy_voice_enabled)
+   3. Voice tools are always available
    ============================================================ *)
 
 let test_voice_enabled_adds_voice_tools () =
@@ -94,8 +94,8 @@ let test_voice_enabled_adds_voice_tools () =
 let test_voice_disabled_no_voice_tools () =
   let meta = make_meta ~policy_voice_enabled:false () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no voice_speak" false (has_tool "keeper_voice_speak" tools);
-  check bool "no voice_agent" false (has_tool "keeper_voice_agent" tools)
+  check bool "voice_speak still available" true (has_tool "keeper_voice_speak" tools);
+  check bool "voice_agent still available" true (has_tool "keeper_voice_agent" tools)
 
 (* ============================================================
    4. All keepers get shell tools (mode removed)
@@ -343,7 +343,7 @@ let () =
     ]);
     ("default_profile", [
       test_case "has base tools" `Quick test_default_has_base_tools;
-      test_case "no voice tools" `Quick test_default_has_no_voice;
+      test_case "has voice tools" `Quick test_default_has_voice;
       test_case "has governance tools" `Quick test_default_has_governance_tools;
       test_case "has research tools" `Quick test_default_has_research_tools;
     ]);

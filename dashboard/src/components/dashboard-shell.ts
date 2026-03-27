@@ -55,7 +55,7 @@ export function ConnectionStatus() {
       ${attentionCount > 0 ? html`
         <span
           class="inline-flex items-center justify-center py-0.5 px-2 min-w-[80px] border border-solid border-[var(--card-border)] bg-[var(--white-4)] tabular-nums rounded-full attention-badge cursor-pointer"
-          onClick=${() => navigate('home')}
+          onClick=${() => navigate('overview')}
         >주의 ${attentionCount}건</span>
       ` : null}
     </div>

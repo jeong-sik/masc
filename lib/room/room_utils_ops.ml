@@ -202,6 +202,11 @@ let read_text config path =
       if Fs_compat.file_exists path then Fs_compat.load_file path
       else ""
 
+let should_dual_write_local (config : config) =
+  match config.backend with
+  | FileSystem _ -> false
+  | Memory _ | PostgresNative _ -> true
+
 let write_json config path json =
   match key_of_path config path with
   | Some key ->
@@ -209,9 +214,10 @@ let write_json config path json =
       (match backend_set config ~key ~value:content with
        | Ok () -> ()
        | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e));
-      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
-      (try write_json_local path json
-       with _exn -> ())
+      if should_dual_write_local config then
+        (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
+        (try write_json_local path json
+         with _exn -> ())
   | None -> write_json_local path json
 
 let write_text_local path content =
@@ -228,9 +234,10 @@ let write_text config path content =
        | Error e ->
            Log.Misc.warn "write_text backend_set failed for %s: %s" key
              (Backend_types.show_error e));
-      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
-      (try write_text_local path content
-       with _exn -> ())
+      if should_dual_write_local config then
+        (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
+        (try write_text_local path content
+         with _exn -> ())
   | None -> write_text_local path content
 
 let delete_path config path =
@@ -279,6 +286,25 @@ let read_json_opt config path =
   | None ->
       if Sys.file_exists path then Some (read_json_local path)
       else None
+
+let agent_json_needs_repair = function
+  | `Assoc fields -> (
+      match List.assoc_opt "last_seen" fields with
+      | Some (`Int _ | `Float _) -> true
+      | _ -> false)
+  | _ -> false
+
+let read_agent_with_repair config path =
+  let json = read_json config path in
+  match Types.agent_of_yojson json with
+  | Ok agent as ok ->
+      if agent_json_needs_repair json then (
+        Log.Room.warn
+          "agent state repair: repaired agent JSON and rewrote canonical state for %s"
+          path;
+        write_json config path (Types.agent_to_yojson agent));
+      ok
+  | Error _ as error -> error
 
 (* ============================================ *)
 (* File locking                                 *)

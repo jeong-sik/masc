@@ -5,6 +5,7 @@
  (wrapped false)
  (modules
   pg_infix
+  backend_pg_url
   backend_types
   backend_compression
   backend_pg

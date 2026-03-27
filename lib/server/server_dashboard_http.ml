@@ -252,19 +252,35 @@ let warm_shell_cache (state : Mcp_server.server_state) =
      Log.Dashboard.warn "shell cache pre-warm failed: %s"
        (Printexc.to_string exn))
 
+(* Delta-push: track last broadcast hash per event_type to skip unchanged payloads. *)
+let _last_broadcast_hash : (string, Digestif.SHA256.t) Hashtbl.t =
+  Hashtbl.create 8
+
 (** Broadcast a single cached surface to all Observer SSE sessions.
     [event_type] becomes the SSE event "type" field.
+    Skips broadcast when payload hash matches the previous one (delta push).
     Safe to call from any fiber — reads only from a cached ref. *)
 let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
-  let sse_json =
-    `Assoc
-      [
-        ("type", `String event_type);
-        ("payload", json);
-        ("ts_unix", `Float (Time_compat.now ()));
-      ]
+  let serialized = Yojson.Safe.to_string json in
+  let hash = Digestif.SHA256.digest_string serialized in
+  let changed =
+    match Hashtbl.find_opt _last_broadcast_hash event_type with
+    | Some prev -> not (Digestif.SHA256.equal prev hash)
+    | None -> true
   in
-  Sse.broadcast_to Observers sse_json
+  if changed then begin
+    Hashtbl.replace _last_broadcast_hash event_type hash;
+    let sse_json =
+      `Assoc
+        [
+          ("type", `String event_type);
+          ("payload", json);
+          ("ts_unix", `Float (Time_compat.now ()));
+        ]
+    in
+    Sse.broadcast_to Observers sse_json
+  end else
+    Log.Dashboard.debug "%s: payload unchanged, skipping broadcast" event_type
 
 (* Wire operator broadcast refs now that Sse is in scope. *)
 let () = _operator_snapshot_broadcast_ref :=

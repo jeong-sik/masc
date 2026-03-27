@@ -347,13 +347,13 @@ let test_dashboard_executor_pool_contracts () =
        "Eio.Executor_pool.submit_exn");
   check bool "mission refresh loop uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config");
+       "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock\n           ~config:state.Mcp_server.room_config");
   check bool "mission actor path uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "run_dashboard_compute ~mode ~sw ~clock");
   check bool "execution refresh loop uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http.ml"
-       "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config");
+       "run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config:room_config");
   check bool "execution parameterized path uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http.ml"
        "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock");

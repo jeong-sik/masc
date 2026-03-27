@@ -519,5 +519,11 @@ async function retrySelectedLoop() {
 async function deleteSelectedLoop() {
   const loop = selectedLoop.value
   if (!loop?.loop_id) return
+  if (typeof globalThis.confirm === 'function') {
+    const confirmed = globalThis.confirm(
+      `루프 ${loop.loop_id}와 연결된 worktree/branch/results를 삭제합니다. 계속할까요?`,
+    )
+    if (!confirmed) return
+  }
   await runLoopAction(() => deleteAutoresearchLoop(loop.loop_id))
 }

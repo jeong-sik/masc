@@ -568,7 +568,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/autoresearch/loops/retry" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_autoresearch_stop" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -577,17 +577,24 @@ let add_routes ~sw ~clock router =
                |> Yojson.Safe.Util.to_string
              in
              let base_path = state.Mcp_server.room_config.base_path in
-             match
-               Dashboard_http_autoresearch.retry_loop_json ~base_path ~loop_id
-             with
-             | Ok result ->
-                 Http.Response.json ~compress:true ~request:req
-                   (Yojson.Safe.to_string result) reqd
+             (match Dashboard_http_autoresearch.validate_loop_id loop_id with
              | Error message ->
                  Http.Response.json ~status:`Bad_request ~request:req
                    (Printf.sprintf {|{"ok":false,"error":"%s"}|}
                       (String.escaped message))
                    reqd
+             | Ok () -> (
+                 match
+                   Dashboard_http_autoresearch.retry_loop_json ~base_path ~loop_id
+                 with
+                 | Ok result ->
+                     Http.Response.json ~compress:true ~request:req
+                       (Yojson.Safe.to_string result) reqd
+                 | Error message ->
+                     Http.Response.json ~status:`Bad_request ~request:req
+                       (Printf.sprintf {|{"ok":false,"error":"%s"}|}
+                          (String.escaped message))
+                       reqd))
            with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req
                {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}
@@ -596,7 +603,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/autoresearch/loops/delete" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_autoresearch_stop" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -605,17 +612,24 @@ let add_routes ~sw ~clock router =
                |> Yojson.Safe.Util.to_string
              in
              let base_path = state.Mcp_server.room_config.base_path in
-             match
-               Dashboard_http_autoresearch.delete_loop_json ~base_path ~loop_id
-             with
-             | Ok result ->
-                 Http.Response.json ~compress:true ~request:req
-                   (Yojson.Safe.to_string result) reqd
+             (match Dashboard_http_autoresearch.validate_loop_id loop_id with
              | Error message ->
-                 Http.Response.json ~status:`Not_found ~request:req
+                 Http.Response.json ~status:`Bad_request ~request:req
                    (Printf.sprintf {|{"ok":false,"error":"%s"}|}
                       (String.escaped message))
                    reqd
+             | Ok () -> (
+                 match
+                   Dashboard_http_autoresearch.delete_loop_json ~base_path ~loop_id
+                 with
+                 | Ok result ->
+                     Http.Response.json ~compress:true ~request:req
+                       (Yojson.Safe.to_string result) reqd
+                 | Error message ->
+                     Http.Response.json ~status:`Not_found ~request:req
+                       (Printf.sprintf {|{"ok":false,"error":"%s"}|}
+                          (String.escaped message))
+                       reqd))
            with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req
                {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}

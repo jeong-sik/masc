@@ -336,11 +336,26 @@ let load_loop_state ~base_path loop_id =
           Ok state
       | None -> Error (Printf.sprintf "Loop %s not found" loop_id))
 
+let validate_loop_id loop_id =
+  let len = String.length loop_id in
+  let rec all_safe idx =
+    if idx >= len then
+      true
+    else
+      match loop_id.[idx] with
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' -> all_safe (idx + 1)
+      | _ -> false
+  in
+  if len > 0 && all_safe 0 then
+    Ok ()
+  else
+    Error "invalid loop_id"
+
 let git_branch_exists ~repo_root branch =
   let cmd =
-    Printf.sprintf "cd %s && git show-ref --verify --quiet refs/heads/%s"
+    Printf.sprintf "cd %s && git show-ref --verify --quiet %s"
       (Filename.quote repo_root)
-      (Filename.quote branch)
+      (Filename.quote ("refs/heads/" ^ branch))
   in
   match Autoresearch.run_capture_lines cmd with
   | Unix.WEXITED 0, _ -> true
@@ -411,87 +426,93 @@ let delete_session_link ~base_path loop_id =
 let retry_loop_json ~(base_path : string) ~(loop_id : string) :
     (Yojson.Safe.t, string) result =
   Autoresearch.with_loops_rw (fun () ->
-    match load_loop_state ~base_path loop_id with
+    match validate_loop_id loop_id with
     | Error _ as error -> error
-    | Ok state -> (
-        match
-          ensure_managed_worktree ~base_path
-            ~source_workdir:state.source_workdir ~loop_id
-        with
-        | Error message ->
-            state.status <- Autoresearch.Error;
-            state.error_message <- Some message;
-            state.updated_at <- Time_compat.now ();
-            Autoresearch.save_state ~base_path state;
-            Error message
-        | Ok (workdir, _repo_root, warnings) ->
-            state.workdir <- workdir;
-            state.status <- Autoresearch.Running;
-            state.error_message <- None;
-            state.warnings <- warnings;
-            state.updated_at <- Time_compat.now ();
-            Hashtbl.replace Autoresearch.active_loops loop_id state;
-            Autoresearch.latest_loop_id := Some loop_id;
-            Autoresearch.save_state ~base_path state;
-            Ok
-              (`Assoc
-                [
-                  ("ok", `Bool true);
-                  ("action", `String "retry");
-                  ("loop", loop_summary_json base_path state);
-                ])))
+    | Ok () -> (
+        match load_loop_state ~base_path loop_id with
+        | Error _ as error -> error
+        | Ok state -> (
+            match
+              ensure_managed_worktree ~base_path
+                ~source_workdir:state.source_workdir ~loop_id
+            with
+            | Error message ->
+                state.status <- Autoresearch.Error;
+                state.error_message <- Some message;
+                state.updated_at <- Time_compat.now ();
+                Autoresearch.save_state ~base_path state;
+                Error message
+            | Ok (workdir, _repo_root, warnings) ->
+                state.workdir <- workdir;
+                state.status <- Autoresearch.Running;
+                state.error_message <- None;
+                state.warnings <- warnings;
+                state.updated_at <- Time_compat.now ();
+                Hashtbl.replace Autoresearch.active_loops loop_id state;
+                Autoresearch.latest_loop_id := Some loop_id;
+                Autoresearch.save_state ~base_path state;
+                Ok
+                  (`Assoc
+                    [
+                      ("ok", `Bool true);
+                      ("action", `String "retry");
+                      ("loop", loop_summary_json base_path state);
+                    ]))))
 
 let delete_loop_json ~(base_path : string) ~(loop_id : string) :
     (Yojson.Safe.t, string) result =
-  let state_or_persisted =
-    Autoresearch.with_loops_rw (fun () ->
-      let active = Hashtbl.find_opt Autoresearch.active_loops loop_id in
-      Hashtbl.remove Autoresearch.active_loops loop_id;
-      if !(Autoresearch.latest_loop_id) = Some loop_id then
-        Autoresearch.latest_loop_id := None;
-      match active with
-      | Some state -> Ok state
-      | None -> (
-          match Autoresearch.load_state ~base_path loop_id with
-          | Some persisted -> Ok (rehydrate_persisted_loop persisted)
-          | None -> Error (Printf.sprintf "Loop %s not found" loop_id)))
-  in
-  match state_or_persisted with
+  match validate_loop_id loop_id with
   | Error _ as error -> error
-  | Ok state ->
-      Tool_autoresearch_registry.with_hypotheses_rw (fun () ->
-        Hashtbl.remove Tool_autoresearch_registry.pending_hypotheses loop_id;
-        Hashtbl.remove Tool_autoresearch_registry.custom_generators loop_id);
-      delete_session_link ~base_path loop_id;
-      (match
-         Autoresearch.git_top_level ~workdir:state.source_workdir
-       with
-      | Ok repo_root ->
-          let workdir =
-            Autoresearch.managed_worktree_dir ~base_path loop_id
-          in
-          if Sys.file_exists workdir then
-            let remove_cmd =
-              Printf.sprintf "cd %s && git worktree remove --force %s 2>&1"
-                (Filename.quote repo_root)
-                (Filename.quote workdir)
-            in
-            ignore (Autoresearch.run_capture_lines remove_cmd);
-          let branch = Autoresearch.managed_branch_name loop_id in
-          if git_branch_exists ~repo_root branch then
-            let branch_cmd =
-              Printf.sprintf "cd %s && git branch -D %s 2>&1"
-                (Filename.quote repo_root)
-                (Filename.quote branch)
-            in
-            ignore (Autoresearch.run_capture_lines branch_cmd)
-      | Error _ -> ());
-      let bundle_dir = Autoresearch.results_dir ~base_path loop_id in
-      if Sys.file_exists bundle_dir then rm_rf bundle_dir;
-      Ok
-        (`Assoc
-          [
-            ("ok", `Bool true);
-            ("action", `String "delete");
-            ("loop_id", `String loop_id);
-          ])
+  | Ok () ->
+      let state_or_persisted =
+        Autoresearch.with_loops_rw (fun () ->
+          let active = Hashtbl.find_opt Autoresearch.active_loops loop_id in
+          Hashtbl.remove Autoresearch.active_loops loop_id;
+          if !(Autoresearch.latest_loop_id) = Some loop_id then
+            Autoresearch.latest_loop_id := None;
+          match active with
+          | Some state -> Ok state
+          | None -> (
+              match Autoresearch.load_state ~base_path loop_id with
+              | Some persisted -> Ok (rehydrate_persisted_loop persisted)
+              | None -> Error (Printf.sprintf "Loop %s not found" loop_id)))
+      in
+      match state_or_persisted with
+      | Error _ as error -> error
+      | Ok state ->
+          Tool_autoresearch_registry.with_hypotheses_rw (fun () ->
+            Hashtbl.remove Tool_autoresearch_registry.pending_hypotheses loop_id;
+            Hashtbl.remove Tool_autoresearch_registry.custom_generators loop_id);
+          delete_session_link ~base_path loop_id;
+          (match
+             Autoresearch.git_top_level ~workdir:state.source_workdir
+           with
+          | Ok repo_root ->
+              let workdir =
+                Autoresearch.managed_worktree_dir ~base_path loop_id
+              in
+              if Sys.file_exists workdir then
+                let remove_cmd =
+                  Printf.sprintf "cd %s && git worktree remove --force %s 2>&1"
+                    (Filename.quote repo_root)
+                    (Filename.quote workdir)
+                in
+                ignore (Autoresearch.run_capture_lines remove_cmd);
+              let branch = Autoresearch.managed_branch_name loop_id in
+              if git_branch_exists ~repo_root branch then
+                let branch_cmd =
+                  Printf.sprintf "cd %s && git branch -D %s 2>&1"
+                    (Filename.quote repo_root)
+                    (Filename.quote branch)
+                in
+                ignore (Autoresearch.run_capture_lines branch_cmd)
+          | Error _ -> ());
+          let bundle_dir = Autoresearch.results_dir ~base_path loop_id in
+          if Sys.file_exists bundle_dir then rm_rf bundle_dir;
+          Ok
+            (`Assoc
+              [
+                ("ok", `Bool true);
+                ("action", `String "delete");
+                ("loop_id", `String loop_id);
+              ])

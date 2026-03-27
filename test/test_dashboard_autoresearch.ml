@@ -377,6 +377,30 @@ let test_delete_loop_json_removes_bundle_and_branch () =
         (Sys.file_exists
            (Lib.Autoresearch.session_link_file ~base_path "session-delete"))
 
+let test_retry_loop_json_rejects_unsafe_loop_id () =
+  with_eio_test @@ fun () ->
+  with_clean_loops @@ fun () ->
+  with_temp_base @@ fun base_path ->
+  match
+    Lib.Dashboard_http_autoresearch.retry_loop_json
+      ~base_path ~loop_id:"../escape"
+  with
+  | Ok _ -> failwith "expected invalid loop_id to fail"
+  | Error message ->
+      check string "invalid retry loop_id" "invalid loop_id" message
+
+let test_delete_loop_json_rejects_unsafe_loop_id () =
+  with_eio_test @@ fun () ->
+  with_clean_loops @@ fun () ->
+  with_temp_base @@ fun base_path ->
+  match
+    Lib.Dashboard_http_autoresearch.delete_loop_json
+      ~base_path ~loop_id:"../escape"
+  with
+  | Ok _ -> failwith "expected invalid loop_id to fail"
+  | Error message ->
+      check string "invalid delete loop_id" "invalid loop_id" message
+
 let () =
   run "dashboard_autoresearch"
     [
@@ -396,5 +420,9 @@ let () =
             test_retry_loop_json_restores_missing_worktree;
           test_case "delete removes bundle and branch" `Quick
             test_delete_loop_json_removes_bundle_and_branch;
+          test_case "retry rejects unsafe loop id" `Quick
+            test_retry_loop_json_rejects_unsafe_loop_id;
+          test_case "delete rejects unsafe loop id" `Quick
+            test_delete_loop_json_rejects_unsafe_loop_id;
         ] );
     ]

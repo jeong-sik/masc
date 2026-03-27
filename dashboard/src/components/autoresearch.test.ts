@@ -93,10 +93,13 @@ async function loadComponentWithApi(api: {
 
 describe('Autoresearch surface refresh', () => {
   let container: HTMLDivElement
+  let confirmMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    confirmMock = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirmMock)
   })
 
   afterEach(() => {
@@ -105,6 +108,7 @@ describe('Autoresearch surface refresh', () => {
     vi.resetModules()
     vi.clearAllMocks()
     vi.doUnmock('../api')
+    vi.unstubAllGlobals()
   })
 
   it('reloads selected detail when the surface refreshes', async () => {
@@ -290,7 +294,136 @@ describe('Autoresearch surface refresh', () => {
     deleteButton?.click()
     await flushUi()
 
+    expect(confirmMock).toHaveBeenCalledTimes(1)
     expect(deleteLoop).toHaveBeenCalledWith('loop-del0')
     expect(container.textContent).toContain('실행된 오토리서치 루프가 없습니다.')
+  })
+
+  it('does not delete when the confirmation is cancelled', async () => {
+    confirmMock.mockReturnValueOnce(false)
+    const erroredLoop = loopSummary('loop-del1', {
+      status: 'error',
+      live: false,
+      error: 'managed worktree missing',
+      current_cycle: 0,
+      max_cycles: 1,
+    })
+    const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
+    const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
+      .mockResolvedValueOnce(loopDetail(erroredLoop))
+    const deleteLoop = vi.fn<(loopId: string) => Promise<unknown>>()
+      .mockResolvedValue({ ok: true, action: 'delete' })
+
+    const { Autoresearch, refreshAutoresearchSurface } = await loadComponentWithApi({
+      fetchAutoresearchLoops: fetchLoops,
+      fetchAutoresearchLoopDetail: fetchDetail,
+      deleteAutoresearchLoop: deleteLoop,
+    })
+
+    render(html`<${Autoresearch} />`, container)
+    await refreshAutoresearchSurface()
+    await flushUi()
+
+    const deleteButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('삭제'))
+    deleteButton?.click()
+    await flushUi()
+
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+    expect(deleteLoop).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('managed worktree missing')
+  })
+
+  it('shows loop action errors and re-enables buttons after a failed retry', async () => {
+    const erroredLoop = loopSummary('loop-err1', {
+      status: 'error',
+      live: false,
+      error: 'managed worktree missing',
+      current_cycle: 0,
+      max_cycles: 1,
+    })
+    const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
+    const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
+      .mockResolvedValueOnce(loopDetail(erroredLoop))
+    const retryLoop = vi.fn<(loopId: string) => Promise<unknown>>()
+      .mockRejectedValue(new Error('retry failed'))
+
+    const { Autoresearch, refreshAutoresearchSurface } = await loadComponentWithApi({
+      fetchAutoresearchLoops: fetchLoops,
+      fetchAutoresearchLoopDetail: fetchDetail,
+      retryAutoresearchLoop: retryLoop,
+    })
+
+    render(html`<${Autoresearch} />`, container)
+    await refreshAutoresearchSurface()
+    await flushUi()
+
+    const retryButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('재시도')) as HTMLButtonElement | undefined
+    const deleteButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('삭제')) as HTMLButtonElement | undefined
+    retryButton?.click()
+    await flushUi()
+
+    expect(retryLoop).toHaveBeenCalledWith('loop-err1')
+    expect(container.textContent).toContain('retry failed')
+    expect(retryButton?.disabled).toBe(false)
+    expect(deleteButton?.disabled).toBe(false)
+  })
+
+  it('disables loop action buttons while a retry is in flight', async () => {
+    const erroredLoop = loopSummary('loop-err2', {
+      status: 'error',
+      live: false,
+      error: 'managed worktree missing',
+      current_cycle: 0,
+      max_cycles: 1,
+    })
+    const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
+    const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
+      .mockResolvedValueOnce(loopDetail(erroredLoop))
+      .mockResolvedValueOnce(loopDetail(erroredLoop))
+    let resolveRetry!: () => void
+    const retryLoop = vi.fn<(loopId: string) => Promise<unknown>>()
+      .mockImplementation(
+        () =>
+          new Promise<void>(resolve => {
+            resolveRetry = () => resolve()
+          }),
+      )
+
+    const { Autoresearch, refreshAutoresearchSurface } = await loadComponentWithApi({
+      fetchAutoresearchLoops: fetchLoops,
+      fetchAutoresearchLoopDetail: fetchDetail,
+      retryAutoresearchLoop: retryLoop,
+    })
+
+    render(html`<${Autoresearch} />`, container)
+    await refreshAutoresearchSurface()
+    await flushUi()
+
+    const retryButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('재시도')) as HTMLButtonElement | undefined
+    retryButton?.click()
+    await flushUi()
+
+    const busyRetryButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('복구 중...')) as HTMLButtonElement | undefined
+    const busyDeleteButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('삭제')) as HTMLButtonElement | undefined
+
+    expect(busyRetryButton?.disabled).toBe(true)
+    expect(busyDeleteButton?.disabled).toBe(true)
+
+    resolveRetry()
+    await flushUi()
+
+    const settledRetryButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('재시도')) as HTMLButtonElement | undefined
+    expect(settledRetryButton?.disabled).toBe(false)
   })
 })

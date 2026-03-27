@@ -56,9 +56,10 @@ export interface AutoresearchLoopDetail extends AutoresearchLoopSummary {
 
 export interface AutoresearchLoopActionResponse {
   ok: boolean
-  action: 'retry' | 'delete'
+  action?: 'retry' | 'delete'
   loop_id?: string
   loop?: AutoresearchLoopSummary
+  error?: string
 }
 
 export function fetchAutoresearchLoops(): Promise<AutoresearchLoopsResponse> {

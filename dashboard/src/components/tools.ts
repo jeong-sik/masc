@@ -2,4 +2,3 @@
 // See tools/tools-main.ts for the main component
 
 export { Tools } from './tools/tools-main'
-export { loadTools as refreshTools } from './tools/tool-state'

@@ -63,8 +63,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
       Sys.file_exists agent_file_dedup
   in
   if already_joined then begin
-    let existing_json = read_json config agent_file_dedup in
-    (match agent_of_yojson existing_json with
+    (match read_agent_with_repair config agent_file_dedup with
      | Ok existing_agent ->
        let is_inactive = existing_agent.status = Inactive in
        let new_session_id = if is_inactive then generate_session_id () else
@@ -216,8 +215,7 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
        heartbeat can update current_task/status between our read and write,
        and the rejoin write would silently discard those changes. *)
     let was_inactive = with_file_lock scoped agent_file_dedup (fun () ->
-      let existing_json = read_json scoped agent_file_dedup in
-      match agent_of_yojson existing_json with
+      match read_agent_with_repair scoped agent_file_dedup with
       | Ok existing_agent ->
           let is_inactive = existing_agent.status = Inactive in
           let updated = { existing_agent with
@@ -324,8 +322,7 @@ let leave config ~agent_name =
     (* Mark agent as Inactive instead of deleting, so re-join can restore identity.
        This prevents orphan state when the same agent_type re-joins later. *)
     (if in_fs then
-      let existing_json = read_json config agent_file in
-      match agent_of_yojson existing_json with
+      match read_agent_with_repair config agent_file with
       | Ok existing_agent ->
         let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
         write_json config agent_file (agent_to_yojson updated)

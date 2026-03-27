@@ -212,8 +212,8 @@ export function Mission() {
               : html`<div class="text-xs text-[var(--text-muted)] py-4 text-center">키퍼 없음.</div>`}
           </div>
           <div class="flex gap-2 flex-wrap mt-3">
-            <button type="button" class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('status', { section: 'sessions' })}>세션 상세 보기</button>
-            <button type="button" class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('operations', { section: 'intervene' })}>운영 개입 열기</button>
+            <button type="button" class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('monitoring', { section: 'sessions' })}>세션 상세 보기</button>
+            <button type="button" class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('command', { section: 'intervene' })}>운영 개입 열기</button>
           </div>
         </div>
       </details>

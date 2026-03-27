@@ -32,7 +32,10 @@ export function Tools() {
 
   return html`
     <div>
-      <${ConfigResolutionPanel} resolution=${data?.config_resolution} />
+      <${ConfigResolutionPanel}
+        resolution=${data?.config_resolution}
+        runtimeResolution=${data?.runtime_resolution}
+      />
 
       <${Card} title="운영 화면 안내" class="section mb-4">
         <${SurfaceReadinessPanel} />

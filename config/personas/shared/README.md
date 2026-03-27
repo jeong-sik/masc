@@ -44,8 +44,8 @@ personas/
    - `.claude/skills/` 또는 `.claude/agents/`
    - Trigger keywords 설정
 
-4. **CLAUDE.md 업데이트**
-   - personas/ 참조 추가
+4. **Agent guidance 업데이트**
+   - `AGENTS.md` 기준으로 공통 지침 반영
 
 ## Active Personas
 
@@ -69,10 +69,8 @@ personas/
 - sangsu/
 - miseon-agent/
 
-### CLAUDE.md
-- Persona definitions
-- Trigger keywords
-- Usage instructions
+### Agent guidance files
+- `AGENTS.md` — primary shared guidance
 
 ## Git Management
 

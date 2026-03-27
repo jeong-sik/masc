@@ -312,9 +312,27 @@ let init ~base_path =
   _base_path := Some base_path;
   load_sessions base_path
 
+(** {1 Cleanup} *)
+
+(** Remove closed/cancelled sessions older than [max_age_s] seconds.
+    Returns the count of removed sessions. *)
+let cleanup_closed ?(max_age_s = 3600.0) () =
+  let now = Time_compat.now () in
+  let stale = Hashtbl.fold (fun id session acc ->
+    match session.state with
+    | Closed | Cancelled ->
+      (match session.closed_at with
+       | Some t when now -. t > max_age_s -> id :: acc
+       | _ -> acc)
+    | Open -> acc
+  ) sessions [] in
+  List.iter (Hashtbl.remove sessions) stale;
+  List.length stale
+
 (** Generate unique session ID *)
+let consensus_rng = Random.State.make_self_init ()
 let generate_id () =
-  let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
+  let uuid = Uuidm.v4_gen consensus_rng () in
   Uuidm.to_string uuid
 
 (** Start a new voting session *)

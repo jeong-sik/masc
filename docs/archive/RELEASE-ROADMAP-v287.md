@@ -86,7 +86,7 @@ git push origin v2.87.0
 - `#967` legacy task alias task-op 분류 복구
 - `#968` observability truth on main
 - `#970` team-session / auth baseline compatibility 복구
-- `#971` sentinel board patrol noise 억제
+- `#971` board patrol noise 억제
 - `#974` lodge truth compatibility follow-up
 - `#976` dead hidden tool surface prune
 

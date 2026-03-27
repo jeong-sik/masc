@@ -55,25 +55,10 @@ let rec trim_trailing_slashes value =
     value
 
 let configured_http_port () =
-  let parse name =
-    match Sys.getenv_opt name with
-    | Some value -> int_of_string_opt (String.trim value)
-    | None -> None
-  in
-  match parse "MASC_HTTP_PORT" with
-  | Some port when port > 0 && port < 65536 -> port
-  | _ -> (
-      match parse "MASC_PORT" with
-      | Some port when port > 0 && port < 65536 -> port
-      | _ -> 8935)
+  Env_config_core.masc_http_port_int ()
 
 let configured_http_host () =
-  match Sys.getenv_opt "MASC_HOST" with
-  | Some value -> (
-      match trim_nonempty value with
-      | Some host -> host
-      | None -> "127.0.0.1")
-  | None -> "127.0.0.1"
+  Env_config_core.masc_host ()
 
 let ipaddr_is_unspecified = function
   | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
@@ -341,14 +326,16 @@ let keeper_policies_json ctx =
     Keeper_types.resident_keeper_names ctx.config
     |> List.filter_map (fun name ->
            match Keeper_types.read_meta ctx.config name with
-           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"keeper" meta)
+           | Ok (Some meta) ->
+               Some (keeper_policy_row ctx ~runtime_class:"resident_keeper" meta)
            | Ok None | Error _ -> None)
   in
   let unregistered_rows =
     Keeper_types.persistent_agent_names ctx.config
     |> List.filter_map (fun name ->
            match Keeper_types.read_meta ctx.config name with
-           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"keeper" meta)
+           | Ok (Some meta) ->
+               Some (keeper_policy_row ctx ~runtime_class:"persistent_agent" meta)
            | Ok None | Error _ -> None)
   in
   `Assoc

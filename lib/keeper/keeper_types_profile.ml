@@ -250,30 +250,9 @@ let empty_keeper_profile_defaults = {
 }
 
 let personas_root_opt () =
-  let try_dir path =
-    try Sys.file_exists path && Sys.is_directory path with Sys_error _ -> false
-  in
   try
-    (* 1. Explicit env override *)
-    match Sys.getenv_opt "MASC_PERSONAS_DIR" with
-    | Some d when try_dir d -> Some d
-    | _ ->
-        (* 2. Relative to MASC repo: config/personas/ (canonical) *)
-        let base =
-          match Sys.getenv_opt "MASC_BASE_PATH" with
-          | Some b -> b
-          | None -> Sys.getcwd ()
-        in
-        let local = Filename.concat (Filename.concat base "config") "personas" in
-        if try_dir local then Some local
-        else
-          (* 3. Legacy fallback: $ME_ROOT/personas/ *)
-          let me_root = Env_config.me_root () in
-          let legacy = Filename.concat me_root "personas" in
-          if try_dir legacy then (
-            Log.Keeper.info "personas loaded from legacy path %s — migrate to config/personas/" legacy;
-            Some legacy)
-          else None
+    Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
+    Config_dir_resolver.personas_dir_opt ()
   with
   | Sys_error _ -> None
   | exn ->
@@ -382,22 +361,8 @@ let discover_keepers_toml (dir : string)
            None)
 
 let keeper_toml_path_opt name =
-  (* Check config/keepers/<name>.toml relative to repo root *)
-  let candidates =
-    let cwd_path = Filename.concat (Filename.concat "config" "keepers") (name ^ ".toml") in
-    match
-      try Some (Env_config.me_root ()) with Not_found -> None
-    with
-    | Some me_root ->
-      let me_path =
-        Filename.concat
-          (Filename.concat (Filename.concat me_root "workspace/yousleepwhen/masc-mcp") "config")
-          (Filename.concat "keepers" (name ^ ".toml"))
-      in
-      [cwd_path; me_path]
-    | None -> [cwd_path]
-  in
-  List.find_opt Sys.file_exists candidates
+  Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
+  Config_dir_resolver.keeper_toml_path_opt name
 
 let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
   match persona_profile_path_opt name with

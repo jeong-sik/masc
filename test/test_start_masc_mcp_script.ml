@@ -94,6 +94,7 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_STORAGE_TYPE=%%s\n' "${MASC_STORAGE_TYPE:-}"
   printf 'SUPABASE_DB_URL=%%s\n' "${SUPABASE_DB_URL:-}"
   printf 'MASC_BASE_PATH=%%s\n' "${MASC_BASE_PATH:-}"
+  printf 'MASC_CONFIG_DIR=%%s\n' "${MASC_CONFIG_DIR:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
   printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
   printf 'ARGS=%%s\n' "$*"
@@ -124,6 +125,7 @@ let test_explicit_env_overrides_repo_env_files () =
               ("MASC_STORAGE_TYPE", "postgres");
               ("SUPABASE_DB_URL", "postgresql://caller-override/db");
               ("MASC_BASE_PATH", dir);
+              ("MASC_CONFIG_DIR", Filename.concat dir "config");
             ]
           (Printf.sprintf "%s --http --port 9955 --base-path %s"
              (quote script) (quote dir))
@@ -138,7 +140,9 @@ let test_explicit_env_overrides_repo_env_files () =
         (contains_substring captured
            "SUPABASE_DB_URL=postgresql://caller-override/db");
       check bool "base path passed through" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ dir)))
+        (contains_substring captured ("MASC_BASE_PATH=" ^ dir));
+      check bool "explicit config dir preserved" true
+        (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
 
 let test_realtime_transports_default_enabled_and_preserve_override () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -164,6 +168,9 @@ let test_realtime_transports_default_enabled_and_preserve_override () =
         (contains_substring captured_default "MASC_WS_ENABLED=1");
       check bool "webrtc enabled by default" true
         (contains_substring captured_default "MASC_WEBRTC_ENABLED=1");
+      check bool "config dir defaults to local config" true
+        (contains_substring captured_default
+           ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config"));
       let capture_override = Filename.concat dir "captured-override.txt" in
       let code_override, stdout_override, stderr_override =
         run_shell ~cwd:dir
@@ -171,6 +178,7 @@ let test_realtime_transports_default_enabled_and_preserve_override () =
             [
               ("FAKE_CAPTURE_FILE", capture_override);
               ("MASC_BASE_PATH", dir);
+              ("MASC_CONFIG_DIR", Filename.concat dir "custom-config");
               ("MASC_WS_ENABLED", "0");
               ("MASC_WEBRTC_ENABLED", "0");
             ]
@@ -181,6 +189,9 @@ let test_realtime_transports_default_enabled_and_preserve_override () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code_override stdout_override stderr_override;
       let captured_override = read_file capture_override in
+      check bool "config dir override preserved" true
+        (contains_substring captured_override
+           ("MASC_CONFIG_DIR=" ^ Filename.concat dir "custom-config"));
       check bool "ws override preserved" true
         (contains_substring captured_override "MASC_WS_ENABLED=0");
       check bool "webrtc override preserved" true

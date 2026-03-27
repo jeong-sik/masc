@@ -264,7 +264,7 @@ val usage_or_zero : api_response -> Agent_sdk.Types.api_usage
 
 ### 7.3 Type Compatibility
 
-MASC와 OAS는 `Agent_sdk.Types.message` 타입을 공유한다. 4개 역할(System, User, Assistant, Tool)과 ToolUse/ToolResult content block이 동일하므로, message 변환이 불필요하다. `context_compact_oas.ml` 주석에서 명시: "No role conversion or sentinel tagging is needed."
+MASC와 OAS는 `Agent_sdk.Types.message` 타입을 공유한다. 4개 역할(System, User, Assistant, Tool)과 ToolUse/ToolResult content block이 동일하므로, message 변환이 불필요하다. `context_compact_oas.ml` 주석에서 명시하듯 별도 role conversion이나 extra tagging은 필요하지 않다.
 
 ---
 

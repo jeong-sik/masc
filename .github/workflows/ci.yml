@@ -362,6 +362,9 @@ jobs:
       - name: Refresh system package index
         run: sudo apt-get update -qq
 
+      - name: Install OS dependencies
+        run: sudo apt-get install -y ripgrep
+
       - name: Install dependencies
         run: |
           for attempt in 1 2 3; do
@@ -373,6 +376,11 @@ jobs:
             echo "opam install failed (attempt ${attempt}); retrying in 15s..."
             sleep 15
           done
+
+      - name: Check Eio conventions
+        run: |
+          chmod +x scripts/check-eio-conventions.sh
+          scripts/check-eio-conventions.sh
 
       - name: Build with warnings as errors
         run: |

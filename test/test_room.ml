@@ -1165,7 +1165,7 @@ let test_xss_in_agent_name () =
 
 (* Use 3-part nicknames so join() preserves them as-is
    (Nickname.is_generated_nickname requires 3+ dash-separated parts) *)
-let gardener_agent = "admin-board-keeper"
+let admin_keeper_agent = "admin-board-keeper"
 let test_agent_a = "agent-test-alpha"
 let test_agent_z = "agent-test-zombie"
 
@@ -1175,12 +1175,12 @@ let test_force_release_bypasses_assignee () =
     let _ = Room.join config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Room.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Different agent cannot release without force *)
-    let normal = Room.transition_task_r config ~agent_name:gardener_agent ~task_id:"task-001"
+    let normal = Room.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
         ~action:"release" () in
     Alcotest.(check bool) "normal release blocked" true
       (match normal with Error _ -> true | Ok _ -> false);
     (* Force release succeeds *)
-    let forced = Room.force_release_task_r config ~agent_name:gardener_agent ~task_id:"task-001" () in
+    let forced = Room.force_release_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001" () in
     Alcotest.(check bool) "force release ok" true
       (match forced with Ok _ -> true | Error _ -> false);
     (* Task should be back to Todo *)
@@ -1194,12 +1194,12 @@ let test_force_done_bypasses_assignee () =
     let _ = Room.join config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Room.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Normal done by different agent fails *)
-    let normal = Room.transition_task_r config ~agent_name:gardener_agent ~task_id:"task-001"
+    let normal = Room.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
         ~action:"done" ~notes:"forced" () in
     Alcotest.(check bool) "normal done blocked" true
       (match normal with Error _ -> true | Ok _ -> false);
     (* Force done succeeds *)
-    let forced = Room.force_done_task_r config ~agent_name:gardener_agent ~task_id:"task-001"
+    let forced = Room.force_done_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
         ~notes:"auto-closed by admin" () in
     Alcotest.(check bool) "force done ok" true
       (match forced with Ok _ -> true | Error _ -> false);

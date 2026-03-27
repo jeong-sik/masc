@@ -27,7 +27,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
 (** Compute total tokens from OAS api_usage. *)
 let total_tokens (u : Agent_sdk.Types.api_usage) = u.input_tokens + u.output_tokens
 
-(** Zero usage sentinel — delegates to OAS Types.zero_api_usage.
+(** Zero usage marker — delegates to OAS Types.zero_api_usage.
     @since 2.123.0 — delegated to OAS *)
 let zero_usage : Agent_sdk.Types.api_usage =
   { input_tokens = 0; output_tokens = 0; cache_read_input_tokens = 0; cache_creation_input_tokens = 0 }

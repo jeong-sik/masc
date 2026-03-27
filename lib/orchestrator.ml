@@ -44,7 +44,7 @@ let load_config () =
     orchestrator_agent = (match Sys.getenv_opt "MASC_ORCHESTRATOR_AGENT" with
       | Some a -> a | None -> "claude");
     enabled = get_env_bool "MASC_ORCHESTRATOR_ENABLED" false;
-    port = get_env_int "MASC_PORT" 8935;
+    port = Env_config_core.masc_http_port_int ();
   }
 
 (** Check if orchestration is needed *)

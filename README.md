@@ -121,9 +121,10 @@ Common entrypoints:
 
 The dashboard is a read / operate UI. Canonical write and control paths remain MCP tools.
 
-- `start-masc-mcp.sh`는 `npm`이 있을 때 dashboard SPA를 자동으로 빌드합니다.
-- dev server를 따로 띄울 때는 `PORT="$(./start-masc-mcp.sh --print-port)"` 후 `cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" npm run dev`를 사용하세요.
-- 수동 재빌드가 필요하면 `cd dashboard && npm run build`를 실행하세요.
+- 대시보드는 read/operate UI이고, canonical write/control path는 MCP입니다.
+- `start-masc-mcp.sh`는 `pnpm` 또는 `corepack pnpm`이 있을 때 dashboard SPA를 자동으로 빌드합니다.
+- dev server를 따로 띄울 때는 `PORT="$(./start-masc-mcp.sh --print-port)"` 후 `cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" pnpm run dev`를 사용하세요.
+- 수동 재빌드가 필요하면 `cd dashboard && pnpm run build`를 실행하세요.
 
 ## Verification
 

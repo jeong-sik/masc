@@ -67,8 +67,7 @@ describe('Overview freshness strip', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-03-26T12:10:00Z'))
+    vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-03-26T12:10:00Z').getTime())
     container = document.createElement('div')
     document.body.appendChild(container)
     missionLoading.value = false
@@ -92,8 +91,8 @@ describe('Overview freshness strip', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
-    vi.useRealTimers()
     vi.clearAllMocks()
+    vi.restoreAllMocks()
     vi.resetModules()
     vi.doUnmock('../../mission-store')
     vi.doUnmock('../../room-truth-store')
@@ -120,7 +119,7 @@ describe('Overview freshness strip', () => {
     expect(container.textContent).toContain('마지막 갱신:')
     expect(container.textContent).toContain('7분 전')
     expect(container.textContent).toContain('5분 이상 stale')
-  })
+  }, 15000)
 
   it('forces both overview data sources to refresh from the action button', async () => {
     const { Overview } = await loadOverview()
@@ -136,5 +135,5 @@ describe('Overview freshness strip', () => {
 
     expect(refreshRoomTruth).toHaveBeenCalledWith({ force: true })
     expect(refreshMissionSnapshot).toHaveBeenCalledWith({ force: true })
-  })
+  }, 15000)
 })

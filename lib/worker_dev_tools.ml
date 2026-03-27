@@ -144,8 +144,8 @@ let is_write_operation cmd =
     List.mem sub ["clean"; "promote"]
   | "make" :: sub :: _ ->
     List.mem sub ["clean"; "deploy"; "install"; "publish"]
-  | "npm" :: sub :: _ ->
-    List.mem sub ["publish"]
+  | ("npm" | "pnpm" | "yarn") :: sub :: _ ->
+    List.mem sub ["add"; "install"; "link"; "prune"; "publish"; "remove"; "unlink"; "update"; "up"]
   | cmd_name :: _ ->
     List.mem cmd_name ["mv"; "cp"; "mkdir"; "touch"; "chmod"]
   | [] -> false

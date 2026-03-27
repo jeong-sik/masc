@@ -61,7 +61,7 @@ let html () =
   try
     Fs_compat.load_file (index_path ())
   with Sys_error _ ->
-    "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>"
+    "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; pnpm run build</body></html>"
 
 let etag () =
   try

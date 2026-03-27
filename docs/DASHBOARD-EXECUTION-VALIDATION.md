@@ -7,7 +7,7 @@
 ```bash
 dune build
 dune exec ./test/test_dashboard_execution.exe
-cd dashboard && npm ci && npm run build
+cd dashboard && pnpm install --frozen-lockfile && pnpm run build
 PLAYWRIGHT_MODULE_PATH=/abs/path/to/playwright \
   ./scripts/harness_dashboard_execution_smoke.sh
 ```

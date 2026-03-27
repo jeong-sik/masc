@@ -136,7 +136,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                let extra = [("etag", etag_value); ("cache-control", dashboard_index_cache_control); ("vary", "Accept-Encoding")] @ cors in
                h2_respond_html h2_reqd body ~extra_headers:extra)
       | Error _ ->
-          h2_respond_html h2_reqd "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>" ~extra_headers:cors
+          h2_respond_html h2_reqd "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; pnpm run build</body></html>" ~extra_headers:cors
     in
 
     let _h2_authorize_tool state ~tool_name =

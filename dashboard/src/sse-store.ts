@@ -9,7 +9,6 @@ import { lastEvent, connected, reconnectCount, lastDisconnectedAt } from './sse'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
-  isDashboardRefreshEvent,
   refreshExecution,
   refreshBoard,
   refreshMdal,
@@ -68,7 +67,6 @@ export function registerActivityRefresh(fn: () => void): void {
 // --- Debounced scheduling ---
 
 const _debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
-let _fetchDebounce: ReturnType<typeof setTimeout> | null = null
 
 function scheduleRefresh(key: string, fn: () => void, delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
   if (_debounceTimers[key]) clearTimeout(_debounceTimers[key])
@@ -189,17 +187,6 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
   }
 }
 
-function handleDashboardRefresh(): void {
-  invalidateDashboardCache()
-  if (!_fetchDebounce) {
-    _fetchDebounce = setTimeout(() => {
-      requestRoomTruthNow()
-      void refreshActiveRoute()
-      _fetchDebounce = null
-    }, SSE_DEFAULT_DEBOUNCE_MS)
-  }
-}
-
 async function handleGovernance(): Promise<void> {
   _refreshGovernanceFn?.()
   const { loadRuntimeParams } = await import('./components/governance')
@@ -281,12 +268,7 @@ export function setupSSEReaction(): () => void {
       return
     }
 
-    // 2. Dashboard-wide data events — debounced full refresh
-    if (isDashboardRefreshEvent(event.type)) {
-      handleDashboardRefresh()
-    }
-
-    // 3. Simple route: exact match
+    // 2. Simple route: exact match
     const simpleRoute = SIMPLE_ROUTES[event.type]
     if (simpleRoute) {
       scheduleRefresh(
@@ -368,9 +350,5 @@ export function cancelPendingSSERefreshes(): void {
   for (const key of Object.keys(_debounceTimers)) {
     clearTimeout(_debounceTimers[key])
     delete _debounceTimers[key]
-  }
-  if (_fetchDebounce) {
-    clearTimeout(_fetchDebounce)
-    _fetchDebounce = null
   }
 }

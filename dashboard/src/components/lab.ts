@@ -4,6 +4,7 @@ import { Card } from './common/card'
 import { Tools } from './tools'
 import { Autoresearch } from './autoresearch'
 import { HarnessHealth } from './harness-health'
+import { ServerConfig } from './server-config'
 
 export function Lab() {
   const section = route.value.params.section ?? 'tools'
@@ -26,6 +27,10 @@ export function Lab() {
 
       ${section === 'harness' ? html`
         <${HarnessHealth} />
+      ` : null}
+
+      ${section === 'config' ? html`
+        <${ServerConfig} />
       ` : null}
     </div>
   `

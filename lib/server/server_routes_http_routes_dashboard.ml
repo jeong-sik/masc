@@ -122,6 +122,11 @@ let add_routes ~sw ~clock router =
                     (`Assoc [ ("ok", `Bool false); ("error", `String message) ]))
                  reqd)
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/config" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = Env_config_introspect.to_json () in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/room-truth" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_room_truth_http_json ~state ~sw ~clock req in

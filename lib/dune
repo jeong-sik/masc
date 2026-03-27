@@ -535,6 +535,7 @@
    env_config_runtime
    env_config_governance
    env_config_keeper
+   env_config_introspect
    runtime_params
    governance_registry
    governance_pipeline

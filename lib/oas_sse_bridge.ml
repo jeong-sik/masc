@@ -9,14 +9,7 @@
 (** Drain interval: how often we poll the Event_bus subscription.
     Lower default keeps the dashboard close to real-time, while staying
     runtime-tunable for quieter deployments. *)
-let drain_interval_s () =
-  match Sys.getenv_opt "MASC_OAS_SSE_DRAIN_INTERVAL_SEC" with
-  | Some raw -> (
-      try
-        let parsed = float_of_string raw in
-        Float.min 5.0 (Float.max 0.05 parsed)
-      with Failure _ -> 0.25)
-  | None -> 0.25
+let drain_interval_s () = Env_config.Oas_sse.drain_interval_sec
 
 (** Prefix for events we relay. *)
 let masc_prefix = "masc:"

@@ -296,11 +296,232 @@ end
 (** {1 Chain Executor Configuration} *)
 
 module Chain = struct
-  (** Model used for evaluator/judge calls in chain execution.
-      Applies to MCTS scoring, anti-fake detection, goal metric evaluation,
-      and feedback loop quality assessment. *)
+  (** Model used for evaluator/judge calls in chain execution. *)
   let judge_model =
     get_string ~default:"gemini" "MASC_CHAIN_JUDGE_MODEL"
+
+  (** Security limits for chain execution. *)
+  let max_depth = max 1 (get_int ~default:20 "MASC_CHAIN_MAX_DEPTH")
+  let max_concurrency = max 1 (get_int ~default:10 "MASC_CHAIN_MAX_CONCURRENCY")
+  let max_nodes = max 1 (get_int ~default:100 "MASC_CHAIN_MAX_NODES")
+  let max_fanout = max 1 (get_int ~default:20 "MASC_CHAIN_MAX_FANOUT")
+
+  (** Chain log level (e.g. "debug", "info"). *)
+  let log_level_opt () =
+    Sys.getenv_opt "MASC_CHAIN_LOG_LEVEL" |> trim_opt
+
+  (** Chain log format: "text" or "json". Default: "text". *)
+  let log_format () =
+    match Sys.getenv_opt "MASC_CHAIN_LOG_FORMAT" |> trim_opt with
+    | Some "json" -> "json"
+    | _ -> "text"
+
+  (** Source base path for chain file resolution. *)
+  let source_base_path_opt () =
+    Sys.getenv_opt "MASC_CHAIN_SOURCE_BASE_PATH" |> trim_opt
+
+  (** Orchestrator model for chain design. Default: "gemini:pro". *)
+  let orchestrator_model () =
+    Sys.getenv_opt "MASC_CHAIN_ORCHESTRATOR_MODEL" |> trim_opt
+    |> Option.value ~default:"gemini:pro"
+
+  (** History file path. Canonical env var; CHAIN_HISTORY_FILE as fallback. *)
+  let history_file_opt () =
+    match Sys.getenv_opt "MASC_CHAIN_HISTORY_FILE" |> trim_opt with
+    | Some _ as v -> v
+    | None -> Sys.getenv_opt "CHAIN_HISTORY_FILE" |> trim_opt
+
+  (** Run store path for chain execution logs. *)
+  let run_store_path_opt () =
+    Sys.getenv_opt "MASC_CHAIN_RUN_STORE_PATH" |> trim_opt
+
+  (** Whether chain run logging is enabled. Default: true. *)
+  let run_log_enabled () =
+    match Sys.getenv_opt "MASC_CHAIN_RUN_LOG" |> trim_opt with
+    | Some "0" | Some "false" | Some "no" -> false
+    | _ -> true
+
+  (** Whether chain run log streaming is enabled. Default: false. *)
+  let run_log_stream () =
+    get_bool ~default:false "MASC_CHAIN_RUN_LOG_STREAM"
+
+  (** Chain run log file path override. *)
+  let run_log_path_opt () =
+    Sys.getenv_opt "MASC_CHAIN_RUN_LOG_PATH" |> trim_opt
+
+  (** Checkpoint directory for chain execution. *)
+  let checkpoint_dir_opt () =
+    Sys.getenv_opt "MASC_CHAIN_CHECKPOINT_DIR" |> trim_opt
+
+  (** MASC MCP endpoint URL. Defaults to {base_url}/mcp. *)
+  let mcp_url () =
+    match Sys.getenv_opt "MASC_MCP_URL" |> trim_opt with
+    | Some url -> url
+    | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
+
+  (** Agent name for chain execution. Default: "local-worker". *)
+  let agent_name =
+    get_string ~default:"local-worker" "MASC_AGENT_NAME"
+end
+
+(** {1 Transport Configuration} *)
+
+module Transport = struct
+  (** gRPC server port. Default: 8936. *)
+  let grpc_port = get_port ~default:8936 "MASC_GRPC_PORT"
+
+  (** Whether gRPC transport is enabled. Default: true. *)
+  let grpc_enabled = get_bool ~default:true "MASC_GRPC_ENABLED"
+
+  (** gRPC client target address. Derived from grpc_port when unset. *)
+  let grpc_target_opt () =
+    Sys.getenv_opt "MASC_GRPC_TARGET" |> trim_opt
+
+  (** WebSocket server port. Default: 8937. *)
+  let ws_port = get_port ~default:8937 "MASC_WS_PORT"
+
+  (** Whether WebSocket transport is enabled. Default: true. *)
+  let ws_enabled = get_bool ~default:true "MASC_WS_ENABLED"
+
+  (** Whether WebRTC transport is enabled. Default: true. *)
+  let webrtc_enabled = get_bool ~default:true "MASC_WEBRTC_ENABLED"
+
+  (** HTTP mode: "auto", "h2_only", "h1_only". Default: "auto". *)
+  let use_h2 () =
+    match Sys.getenv_opt "MASC_USE_H2" |> trim_opt with
+    | Some raw -> (
+        match String.lowercase_ascii raw with
+        | "1" | "true" -> "h2_only"
+        | "0" | "false" -> "h1_only"
+        | "auto" -> "auto"
+        | other -> other)
+    | None -> "auto"
+
+  (** Agent transport type raw string (e.g. "grpc", "http", "ws"). *)
+  let agent_transport_opt () =
+    Sys.getenv_opt "MASC_AGENT_TRANSPORT" |> trim_opt
+
+  (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
+  let openai_compat_enabled = get_bool ~default:false "MASC_OPENAI_COMPAT"
+
+  (** Startup watchdog timeout, clamped to [30, 600]. Default: 240. *)
+  let startup_watchdog_sec =
+    let v = get_float ~default:240.0 "MASC_STARTUP_WATCHDOG_SEC" in
+    Float.max 30.0 (Float.min 600.0 v)
+end
+
+(** {1 Board Configuration} *)
+
+module Board = struct
+  (** Flush interval for board persistence (seconds). Default: 30. *)
+  let flush_interval_sec =
+    get_float ~default:30.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"
+
+  (** Board backend type (e.g. "jsonl", "pg"). *)
+  let backend_opt () =
+    Sys.getenv_opt "MASC_BOARD_BACKEND" |> trim_opt
+end
+
+(** {1 Procedural Memory Configuration} *)
+
+module ProcMemory = struct
+  (** Minimum evidence count for crystallization. Default: 3. *)
+  let min_evidence = max 1 (get_int ~default:3 "MASC_PROC_MIN_EVIDENCE")
+
+  (** Minimum confidence for crystallization, clamped to [0, 1]. Default: 0.7. *)
+  let min_confidence =
+    Float.max 0.0 (Float.min 1.0 (get_float ~default:0.7 "MASC_PROC_MIN_CONFIDENCE"))
+end
+
+(** {1 Pulse Configuration} *)
+
+module Pulse_config = struct
+  (** Max consecutive consumer failures before recovery. Default: 3. *)
+  let max_consumer_failures = max 1 (get_int ~default:3 "MASC_PULSE_MAX_CONSUMER_FAILURES")
+end
+
+(** {1 Circuit Breaker Configuration} *)
+
+module Circuit = struct
+  (** Failure count threshold before opening circuit. Default: 5. *)
+  let failure_threshold = get_int ~default:5 "MASC_CIRCUIT_THRESHOLD"
+
+  (** Cooldown period after circuit opens (seconds). Default: 300. *)
+  let cooldown_sec = get_float ~default:300.0 "MASC_CIRCUIT_COOLDOWN"
+end
+
+(** {1 Tool Surface Configuration} *)
+
+module Tools = struct
+  (** Dispatch v2 feature flag. Default: true (since v2.102). *)
+  let dispatch_v2_enabled = get_bool ~default:true "MASC_DISPATCH_V2"
+
+  (** Full tool surface override. Default: false. *)
+  let full_surface_enabled = get_bool ~default:false "MASC_FULL_SURFACE"
+
+  (** Tool list page size, clamped to [10, 1024]. Default: 64. *)
+  let list_page_size =
+    let v = get_int ~default:64 "MASC_LIST_PAGE_SIZE" in
+    max 10 (min 1024 v)
+
+  (** Tool description budget (max chars). None = unlimited. *)
+  let description_budget_opt () =
+    match Sys.getenv_opt "MASC_TOOL_DESCRIPTION_BUDGET" |> trim_opt with
+    | Some raw -> (
+        match int_of_string_opt raw with
+        | Some v when v > 0 -> Some v
+        | _ -> None)
+    | None -> None
+
+  (** Read-only tool retry limit. Default: 2. *)
+  let readonly_retry_limit = get_int ~default:2 "MASC_TOOL_READONLY_RETRY_LIMIT"
+
+  (** Extra public tools (comma-separated names). *)
+  let public_tools_extra_opt () =
+    Sys.getenv_opt "MASC_PUBLIC_TOOLS_EXTRA" |> trim_opt
+end
+
+(** {1 Rate Limit Bucket Configuration} *)
+
+module Rate_bucket = struct
+  (** Requests per second. Default: 100. *)
+  let rate = get_float ~default:100.0 "MASC_RATE_LIMIT"
+
+  (** Burst capacity. Default: 150. *)
+  let burst = get_int ~default:150 "MASC_RATE_BURST"
+end
+
+(** {1 Worker / Local Runtime Configuration} *)
+
+module Worker = struct
+  (** Enable llama runtime debug logging. Default: false. *)
+  let llama_runtime_debug = get_bool ~default:false "MASC_LLAMA_RUNTIME_DEBUG"
+
+  (** Llama runtime cooldown (seconds). *)
+  let llama_runtime_cooldown_sec_opt () =
+    Sys.getenv_opt "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" |> trim_opt
+
+  (** Local worker max tokens per request. Default: 1024. *)
+  let local_worker_max_tokens = max 1 (get_int ~default:1024 "MASC_LOCAL_WORKER_MAX_TOKENS")
+
+  (** Local worker heartbeat interval (seconds). Default: 60. *)
+  let local_worker_heartbeat_sec = max 1 (get_int ~default:60 "MASC_LOCAL_WORKER_HEARTBEAT_SEC")
+end
+
+(** {1 OAS SSE Bridge Configuration} *)
+
+module Oas_sse = struct
+  (** SSE drain interval (seconds). Default: 2.0. *)
+  let drain_interval_sec =
+    let v = get_float ~default:2.0 "MASC_OAS_SSE_DRAIN_INTERVAL_SEC" in
+    if v < 0.1 then 2.0 else v
+end
+
+(** {1 Memory OAS Bridge Configuration} *)
+
+module Memory_oas = struct
+  (** Default importance for OAS-stored memories, clamped to [1, 10]. Default: 5. *)
+  let default_importance = max 1 (min 10 (get_int ~default:5 "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE"))
 end
 
 (** {1 Internal Safety Configuration} *)

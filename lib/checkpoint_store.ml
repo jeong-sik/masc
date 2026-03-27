@@ -37,9 +37,9 @@ type checkpoint_store = {
 
 (** Default checkpoint directory *)
 let default_base_dir () =
-  match Sys.getenv_opt "MASC_CHAIN_CHECKPOINT_DIR" with
-  | Some path when String.trim path <> "" -> path
-  | _ ->
+  match Env_config.Chain.checkpoint_dir_opt () with
+  | Some path -> path
+  | None ->
       let home =
         match Sys.getenv_opt "HOME" with
         | Some h -> h

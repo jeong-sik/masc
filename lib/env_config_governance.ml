@@ -248,4 +248,71 @@ module Timeouts = struct
     get_int ~default:100 "MASC_EVENT_BUFFER_SIZE"
 end
 
+(** {1 Operator Judge Configuration} *)
+
+module Operator = struct
+  (** Whether operator judge background loop is enabled. Default: true. *)
+  let judge_enabled = get_bool ~default:true "MASC_OPERATOR_JUDGE_ENABLED"
+
+  (** Operator judge interval, clamped to >= 15s. Default: 60. *)
+  let judge_interval_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_INTERVAL_SEC")
+
+  (** Room TTL for operator judge cleanup, clamped to >= 15s. Default: 60. *)
+  let room_ttl_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC")
+
+  (** Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. *)
+  let session_ttl_sec = max 30 (get_int ~default:300 "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC")
+
+  (** Operator snapshot cache TTL (seconds). Default: 30. *)
+  let cache_ttl_sec = get_float ~default:30.0 "MASC_OPERATOR_CACHE_TTL"
+end
+
+(** {1 Dashboard Configuration} *)
+
+module Dashboard_config = struct
+  (** Whether dashboard fixtures are enabled. Default: false. *)
+  let fixtures_enabled = get_bool ~default:false "MASC_DASHBOARD_FIXTURES_ENABLED"
+
+  (** Dashboard fixture name override. *)
+  let fixture_opt () =
+    Sys.getenv_opt "MASC_DASHBOARD_FIXTURE" |> trim_opt
+
+  (** Governance judge interval, clamped to >= 15s. Default: 60. *)
+  let governance_judge_interval_sec =
+    max 15 (get_int ~default:60 "MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC")
+
+  (** Whether governance judge is enabled. Default: true. *)
+  let governance_judge_enabled = get_bool ~default:true "MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED"
+end
+
+(** {1 Model Routing Defaults} *)
+
+module Model_defaults = struct
+  (** Default cascade label (e.g. "gemini:pro,claude:sonnet"). *)
+  let default_cascade_opt () =
+    Sys.getenv_opt "MASC_DEFAULT_CASCADE" |> trim_opt
+
+  (** Default provider name. *)
+  let default_provider_opt () =
+    Sys.getenv_opt "MASC_DEFAULT_PROVIDER" |> trim_opt
+
+  (** Default model id. *)
+  let default_model_opt () =
+    Sys.getenv_opt "MASC_DEFAULT_MODEL" |> trim_opt
+
+  (** Routing cascade for team session routing. Default: "routing_judge". *)
+  let routing_cascade () =
+    match Sys.getenv_opt "MASC_ROUTING_CASCADE" |> trim_opt with
+    | Some s -> s
+    | None -> "routing_judge"
+
+  (** Goal models (comma-separated). *)
+  let goal_models_opt () =
+    Sys.getenv_opt "MASC_GOAL_MODELS" |> trim_opt
+
+  (** Goal dispatch runtime. Default: "task". *)
+  let goal_dispatch_runtime () =
+    get_string ~default:"task" "MASC_GOAL_DISPATCH_RUNTIME"
+end
+
 (** {1 Endpoint Configuration} *)

@@ -122,14 +122,7 @@ let wakeup_relevant_keeper_for_board_signal
 let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
     (m : keeper_meta) (stop : bool Atomic.t) ~(wakeup : bool Atomic.t) : unit =
   let keepalive_started_ts = Time_compat.now () in
-  let snapshot_interval_sec =
-    match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_SEC" with
-    | Some s ->
-        (try
-           max 15 (min 3600 (int_of_string (String.trim s)))
-         with Failure _ -> 60)
-    | None -> 60
-  in
+  let snapshot_interval_sec = Env_config.KeeperRuntime.snapshot_sec in
   let last_snapshot_ts = ref 0.0 in
   let rec loop () =
     if Atomic.get stop then ()

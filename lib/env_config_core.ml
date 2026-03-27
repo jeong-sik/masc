@@ -221,4 +221,128 @@ let libdatachannel_path_opt () =
   libdatachannel_path_candidates ()
   |> List.find_opt existing_file
 
+(** {1 Additional Helpers} *)
+
+(** Read a TCP port from env, validated to [1, 65535]. Returns default on
+    missing, empty, out-of-range, or non-integer values. *)
+let get_port ~default name =
+  match Sys.getenv_opt name |> trim_opt with
+  | Some s -> (
+      match int_of_string_opt s with
+      | Some p when p > 0 && p < 65536 -> p
+      | _ -> default)
+  | None -> default
+
+(** {1 Core Path / Storage} *)
+
+(** Project base path for .masc data directory.
+    Used by board, checkpoint, thompson_sampling, voice, keeper.
+    Set at startup; may be overridden via Unix.putenv before use.
+    Returns None when MASC_BASE_PATH is unset or empty. *)
+let base_path_opt () =
+  Sys.getenv_opt "MASC_BASE_PATH" |> trim_opt
+
+(** Project base path with "." fallback when unset. *)
+let base_path () =
+  match base_path_opt () with
+  | Some path -> path
+  | None -> "."
+
+(** Deprecated input path alias. Reads MASC_BASE_PATH_INPUT with deprecation
+    warning. Call sites should migrate to [base_path]. *)
+let base_path_input_opt () =
+  deprecated_opt ~old_name:"MASC_BASE_PATH_INPUT" ~new_name:"MASC_BASE_PATH"
+
+(** Storage backend type. Set at runtime by server_runtime_bootstrap.
+    Valid: "filesystem", "postgres-native". *)
+let storage_type () =
+  match Sys.getenv_opt "MASC_STORAGE_TYPE" |> trim_opt with
+  | Some raw -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "postgres" | "postgresql" | "postgres-native" -> "postgres-native"
+      | "filesystem" | "file" | "jsonl" -> "filesystem"
+      | other -> other)
+  | None -> "filesystem"
+
+(** Config directory override. *)
+let config_dir_opt () =
+  Sys.getenv_opt "MASC_CONFIG_DIR" |> trim_opt
+
+(** Personas directory override. *)
+let personas_dir_opt () =
+  Sys.getenv_opt "MASC_PERSONAS_DIR" |> trim_opt
+
+(** {1 Relay Calibration} *)
+
+(** Whether relay token calibration is enabled. Default: true. *)
+let relay_calibration_enabled () =
+  get_bool ~default:true "MASC_RELAY_CALIBRATION_ENABLED"
+
+(** {1 Mitosis Threshold Overrides} *)
+
+(** Raw MASC_MITOSIS_PREPARE_THRESHOLD value. *)
+let mitosis_prepare_threshold_opt () =
+  Sys.getenv_opt "MASC_MITOSIS_PREPARE_THRESHOLD" |> trim_opt
+
+(** Raw MASC_MITOSIS_HANDOFF_THRESHOLD value. *)
+let mitosis_handoff_threshold_opt () =
+  Sys.getenv_opt "MASC_MITOSIS_HANDOFF_THRESHOLD" |> trim_opt
+
+(** {1 Auth} *)
+
+(** Admin token for privileged endpoints. None = admin auth disabled. *)
+let admin_token_opt () =
+  Sys.getenv_opt "MASC_ADMIN_TOKEN" |> trim_opt
+
+(** Strict tool auth mode. Default: true.
+    true = unknown masc_* tools require worker-level permission. *)
+let tool_auth_strict () =
+  get_bool ~default:true "MASC_TOOL_AUTH_STRICT"
+
+(** {1 Logging / Telemetry} *)
+
+(** Log level string (e.g. "debug", "info", "warn", "error"). *)
+let log_level_opt () =
+  Sys.getenv_opt "MASC_LOG_LEVEL" |> trim_opt
+
+(** Whether telemetry tracking is enabled. Default: true. *)
+let telemetry_enabled () =
+  get_bool ~default:true "MASC_TELEMETRY_ENABLED"
+
+(** Whether to log parse warnings. Default: false. *)
+let parse_warn_enabled () =
+  get_bool ~default:false "MASC_PARSE_WARN"
+
+(** Governance level. Set at runtime by server_runtime_bootstrap.
+    Valid: "production", "development", etc. Default: "production". *)
+let governance_level () =
+  get_string ~default:"production" "MASC_GOVERNANCE_LEVEL"
+  |> String.lowercase_ascii
+
+(** {1 Build Identity} *)
+
+(** Git commit hash override for build identity. *)
+let build_git_commit_opt () =
+  Sys.getenv_opt "MASC_BUILD_GIT_COMMIT" |> trim_opt
+
+(** {1 Auto Respond} *)
+
+(** Raw MASC_AUTO_RESPOND value for mode parsing. *)
+let auto_respond_opt () =
+  Sys.getenv_opt "MASC_AUTO_RESPOND" |> trim_opt
+
+(** {1 PostgreSQL} *)
+
+(** PostgreSQL connection URL. *)
+let postgres_url_opt () =
+  Sys.getenv_opt "MASC_POSTGRES_URL" |> trim_opt
+
+(** PG connection pool size, clamped to [1, 50]. Default: 10. *)
+let pg_pool_size () =
+  max 1 (min 50 (get_int ~default:10 "MASC_PG_POOL_SIZE"))
+
+(** PubSub max messages per read. Default: 1000. *)
+let pubsub_max_messages () =
+  get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"
+
 (** {1 Zombie Detection / Cleanup Configuration} *)

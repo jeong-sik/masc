@@ -136,7 +136,7 @@ let runtime_resolution_json (config : Room.config) =
   let workspace_commit = git_rev_parse_short config.workspace_path in
   let resolved_base_commit = git_rev_parse_short config.base_path in
   let base_path_input =
-    Sys.getenv_opt "MASC_BASE_PATH_INPUT"
+    Env_config_core.base_path_input_opt ()
     |> Option.value ~default:config.workspace_path
   in
   let prompt_markdown_dir =

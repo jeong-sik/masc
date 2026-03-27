@@ -70,7 +70,13 @@ let float_of_env_default name ~default =
       with Failure _ -> default)
 
 let cooldown_seconds () =
-  float_of_env_default "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" ~default:30.0
+  match Env_config.Worker.llama_runtime_cooldown_sec_opt () with
+  | Some raw -> (
+      try
+        let value = float_of_string (String.trim raw) in
+        if value > 0.0 then value else 30.0
+      with Failure _ -> 30.0)
+  | None -> 30.0
 
 let trim_opt = function
   | None -> None
@@ -78,10 +84,7 @@ let trim_opt = function
       let trimmed = String.trim raw in
       if trimmed = "" then None else Some trimmed
 
-let debug_enabled () =
-  match trim_opt (Sys.getenv_opt "MASC_LLAMA_RUNTIME_DEBUG") with
-  | Some ("1" | "true" | "yes" | "on") -> true
-  | _ -> false
+let debug_enabled () = Env_config.Worker.llama_runtime_debug
 
 let debug_log fmt =
   if debug_enabled () then Printf.ksprintf (fun msg -> Log.LocalWorker.debug "%s" msg) fmt
@@ -299,7 +302,7 @@ let current_fingerprint () =
       Env_config.Llama.server_url;
       Option.value ~default:"" (Sys.getenv_opt "LLAMA_SWARM_MODEL");
       Option.value ~default:""
-        (Sys.getenv_opt "MASC_LLAMA_RUNTIME_COOLDOWN_SEC");
+        (Env_config.Worker.llama_runtime_cooldown_sec_opt ());
       string_of_int
         (int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
            ~default:default_parallel_hint);

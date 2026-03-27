@@ -338,11 +338,7 @@ let permission_for_tool = function
     - 0/false: legacy fail-open for unknown tools
     - 1/true: unknown masc_* tools require at least worker-level permission *)
 let is_tool_auth_strict_enabled () =
-  match Sys.getenv_opt "MASC_TOOL_AUTH_STRICT" with
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
-  | None -> true
+  Env_config_core.tool_auth_strict ()
 
 let is_masc_tool_name tool_name =
   String.starts_with ~prefix:"masc_" tool_name

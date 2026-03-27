@@ -32,7 +32,7 @@ let contains_ci (haystack : string) (needle : string) : bool =
   else Re.execp (Re.str n |> Re.compile) h
 
 let keeper_skill_selection_mode () : keeper_skill_selection_mode =
-  match Sys.getenv_opt "MASC_KEEPER_SKILL_SELECTION" with
+  match Env_config.KeeperRuntime.skill_selection_opt () with
   | None -> SkillSelectAgent
   | Some raw ->
       let v = String.lowercase_ascii (String.trim raw) in

@@ -13,23 +13,7 @@ let force_jsonl_fallback_env () =
   Array.iter (fun name -> Unix.putenv name "") pg_env_var_names
 
 let requested_backend_mode () =
-  match Sys.getenv_opt "MASC_STORAGE_TYPE" with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "postgres" | "postgresql" | "postgres-native" -> "postgres-native"
-      | "filesystem" | "file" | "jsonl" -> "filesystem"
-      | "memory" -> "memory"
-      | other -> other)
-  | None ->
-      let has_pg =
-        Array.exists
-          (fun name ->
-            match Sys.getenv_opt name with
-            | Some value -> String.trim value <> ""
-            | None -> false)
-          pg_env_var_names
-      in
-      if has_pg then "postgres-native" else "filesystem"
+  Env_config_core.storage_type ()
 
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in
@@ -253,14 +237,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   in
   let h2_error_handler = make_h2_error_handler () in
   let http_mode =
-    match Sys.getenv_opt "MASC_USE_H2" with
-    | Some "1" | Some "true" -> `H2_only
-    | Some "0" | Some "false" -> `H1_only
-    | Some "auto" -> `Auto
-    | None -> `Auto
-    | Some other ->
-      Log.Server.warn "MASC_USE_H2=%s unrecognised, falling back to auto" other;
-      `Auto
+    match Env_config.Transport.use_h2 () with
+    | "h2_only" -> `H2_only
+    | "h1_only" -> `H1_only
+    | _ -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   let initial_backend_mode = requested_backend_mode () in
@@ -270,11 +250,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   (* 2. All init in background fiber — protected so failures don't kill HTTP *)
   Eio.Fiber.fork ~sw (fun () ->
     refresh_llama_endpoints ();
-    let governance_level =
-      Sys.getenv_opt "MASC_GOVERNANCE_LEVEL"
-      |> Option.value ~default:"production"
-      |> String.lowercase_ascii
-    in
+    let governance_level = Env_config_core.governance_level () in
     let init_state_blocking () =
       let t0 = Eio.Time.now clock in
       let state =

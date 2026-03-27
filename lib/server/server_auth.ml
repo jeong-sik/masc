@@ -250,7 +250,7 @@ let with_admin_auth handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let admin_token = Sys.getenv_opt "MASC_ADMIN_TOKEN" in
+      let admin_token = Env_config_core.admin_token_opt () in
       let provided = auth_token_from_request request in
       match admin_token, provided with
       | None, _ ->

@@ -70,7 +70,7 @@ let stats_path () =
     | Some p -> p
     | None ->
         (* Fallback: try to get from environment or use current dir *)
-        Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"."
+        Env_config_core.base_path ()
   in
   let masc_dir = Filename.concat base ".masc" in
   Fs_compat.mkdir_p masc_dir;

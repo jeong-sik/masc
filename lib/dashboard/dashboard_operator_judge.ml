@@ -53,31 +53,13 @@ let get_state base_path =
         Hashtbl.add states base_path st;
         st)
 
-let enabled () =
-  match Sys.getenv_opt "MASC_OPERATOR_JUDGE_ENABLED" with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "0" | "false" | "no" | "off" -> false
-      | _ -> true)
-  | None -> true
+let enabled () = Env_config.Operator.judge_enabled
 
-let interval_sec () =
-  match Sys.getenv_opt "MASC_OPERATOR_JUDGE_INTERVAL_SEC" with
-  | Some raw -> (
-      try max 15 (int_of_string (String.trim raw)) with Failure _ -> 60)
-  | None -> 60
+let interval_sec () = Env_config.Operator.judge_interval_sec
 
-let room_ttl_sec () =
-  match Sys.getenv_opt "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC" with
-  | Some raw -> (
-      try max 15 (int_of_string (String.trim raw)) with Failure _ -> 60)
-  | None -> 60
+let room_ttl_sec () = Env_config.Operator.room_ttl_sec
 
-let session_ttl_sec () =
-  match Sys.getenv_opt "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC" with
-  | Some raw -> (
-      try max 30 (int_of_string (String.trim raw)) with Failure _ -> 300)
-  | None -> 300
+let session_ttl_sec () = Env_config.Operator.session_ttl_sec
 
 let iso_of_unix unix_ts =
   let tm = Unix.gmtime unix_ts in

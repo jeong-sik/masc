@@ -123,4 +123,81 @@ end
 
 module Chain : sig
   val judge_model : string
+  val max_depth : int
+  val max_concurrency : int
+  val max_nodes : int
+  val max_fanout : int
+  val log_level_opt : unit -> string option
+  val log_format : unit -> string
+  val source_base_path_opt : unit -> string option
+  val orchestrator_model : unit -> string
+  val history_file_opt : unit -> string option
+  val run_store_path_opt : unit -> string option
+  val run_log_enabled : unit -> bool
+  val run_log_stream : unit -> bool
+  val run_log_path_opt : unit -> string option
+  val checkpoint_dir_opt : unit -> string option
+  val mcp_url : unit -> string
+  val agent_name : string
+end
+
+module Transport : sig
+  val grpc_port : int
+  val grpc_enabled : bool
+  val grpc_target_opt : unit -> string option
+  val ws_port : int
+  val ws_enabled : bool
+  val webrtc_enabled : bool
+  val use_h2 : unit -> string
+  val agent_transport_opt : unit -> string option
+  val openai_compat_enabled : bool
+  val startup_watchdog_sec : float
+end
+
+module Board : sig
+  val flush_interval_sec : float
+  val backend_opt : unit -> string option
+end
+
+module ProcMemory : sig
+  val min_evidence : int
+  val min_confidence : float
+end
+
+module Pulse_config : sig
+  val max_consumer_failures : int
+end
+
+module Circuit : sig
+  val failure_threshold : int
+  val cooldown_sec : float
+end
+
+module Tools : sig
+  val dispatch_v2_enabled : bool
+  val full_surface_enabled : bool
+  val list_page_size : int
+  val description_budget_opt : unit -> int option
+  val readonly_retry_limit : int
+  val public_tools_extra_opt : unit -> string option
+end
+
+module Rate_bucket : sig
+  val rate : float
+  val burst : int
+end
+
+module Worker : sig
+  val llama_runtime_debug : bool
+  val llama_runtime_cooldown_sec_opt : unit -> string option
+  val local_worker_max_tokens : int
+  val local_worker_heartbeat_sec : int
+end
+
+module Oas_sse : sig
+  val drain_interval_sec : float
+end
+
+module Memory_oas : sig
+  val default_importance : int
 end

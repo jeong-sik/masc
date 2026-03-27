@@ -4,9 +4,7 @@
 include Board_types
 
 (** Flush interval in seconds - configurable via MASC_BOARD_FLUSH_INTERVAL_SEC env var *)
-let flush_interval_sec =
-  try float_of_string (Sys.getenv_opt "MASC_BOARD_FLUSH_INTERVAL_SEC" |> Option.value ~default:"30")
-  with Failure _ -> 30.0
+let flush_interval_sec = Env_config.Board.flush_interval_sec
 
 let create_store () = {
   posts = Hashtbl.create 1024;
@@ -111,12 +109,7 @@ let maybe_sweep store =
 (** {1 Persistence Paths} *)
 
 let board_base_path () =
-  match Sys.getenv_opt "MASC_BASE_PATH" with
-  | Some p when String.trim p <> "" -> p
-  | _ ->
-      (match Sys.getenv_opt "ME_ROOT" with
-       | Some p -> p
-       | None -> Sys.getcwd ())
+  Env_config_core.base_path ()
 
 let persist_path () =
   let base = board_base_path () in

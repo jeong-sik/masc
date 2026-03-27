@@ -51,10 +51,7 @@ include Room_gc
 (* Wire Room_hooks callbacks                    *)
 (* ============================================ *)
 
-let telemetry_enabled () =
-  match Sys.getenv_opt "MASC_TELEMETRY_ENABLED" with
-  | Some "false" | Some "0" -> false
-  | _ -> true
+let telemetry_enabled () = Env_config_core.telemetry_enabled ()
 
 let merge_detail_fields fields details =
   match details with

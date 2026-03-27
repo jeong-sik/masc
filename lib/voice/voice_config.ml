@@ -69,7 +69,7 @@ let dedupe_keep_order values =
   loop [] [] values
 
 let base_path_voice_config_path_opt () =
-  trim_opt (Sys.getenv_opt "MASC_BASE_PATH")
+  Env_config_core.base_path_opt ()
   |> Option.map (fun root -> Filename.concat root ".masc/voice_config.json")
 
 let repo_voice_config_path_opt () =

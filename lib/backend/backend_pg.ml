@@ -284,6 +284,30 @@ let close _t = ()
 
 let get_pool t = t.pool
 
+(* Retry wrapper for read-only Pool.use calls.
+   On first connection-level failure, drain the pool to purge stale
+   connections (Supabase PgBouncer drops them after idle periods),
+   then retry once with a fresh connection. *)
+let _drain_mutex = Eio.Mutex.create ()
+
+let is_connection_error err =
+  let msg = Caqti_error.show err in
+  let has s = try ignore (Str.search_forward (Str.regexp_string s) msg 0); true
+    with Not_found -> false in
+  has "connection" || has "socket" || has "broken pipe" ||
+  has "Connection reset" || has "server closed" || has "Operation timed out"
+
+let use_with_retry pool f =
+  match Caqti_eio.Pool.use f pool with
+  | Ok _ as ok -> ok
+  | Error err when is_connection_error err ->
+    Log.Backend.warn "[EioPG] stale connection detected, draining pool and retrying: %s"
+      (Caqti_error.show err);
+    Eio.Mutex.use_rw ~protect:false _drain_mutex (fun () ->
+      try Caqti_eio.Pool.drain pool with _ -> ());
+    Caqti_eio.Pool.use f pool
+  | Error _ as err -> err
+
 let decompress_with_context ~key content =
   let had_header = String.length content >= 4 && String.sub content 0 4 = "ZSTD" in
   let decompressed = _decompress content in
@@ -293,10 +317,10 @@ let decompress_with_context ~key content =
 
 let get t key =
   let nkey = namespaced_key t.namespace key in
-  match Caqti_eio.Pool.use (fun conn ->
+  match use_with_retry t.pool (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     C.find_opt get_q nkey
-  ) t.pool with
+  ) with
   | Ok (Some v) -> Ok (decompress_with_context ~key:nkey v)
   | Ok None -> Error (NotFound key)
   | Error err -> Error (caqti_error_to_masc err)
@@ -347,10 +371,10 @@ let list_keys t ~prefix =
 
 let get_all t ~prefix =
   let nprefix = namespaced_key t.namespace prefix in
-  match Caqti_eio.Pool.use (fun conn ->
+  match use_with_retry t.pool (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     C.collect_list get_all_q (nprefix ^ "%")
-  ) t.pool with
+  ) with
   | Ok pairs ->
       Ok (List.map (fun (k, v) ->
         (strip_namespace t.namespace k, decompress_with_context ~key:k v)
@@ -362,11 +386,11 @@ let get_all_matching_recent t ~prefix ~suffix ~updated_since ~limit =
     Ok []
   else
     let nprefix = namespaced_key t.namespace prefix in
-    match Caqti_eio.Pool.use (fun conn ->
+    match use_with_retry t.pool (fun conn ->
       let module C = (val conn : Caqti_eio.CONNECTION) in
       C.collect_list get_all_matching_recent_q
         (nprefix ^ "%", "%" ^ suffix, updated_since, limit)
-    ) t.pool with
+    ) with
     | Ok pairs ->
         Ok (List.map (fun (k, v) ->
           (strip_namespace t.namespace k, decompress_with_context ~key:k v)
@@ -465,10 +489,10 @@ let subscribe t ~channel ~callback =
   | Error err -> Error (caqti_error_to_masc err)
 
 let health_check t =
-  match Caqti_eio.Pool.use (fun conn ->
+  match use_with_retry t.pool (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     C.find health_check_q ()
-  ) t.pool with
+  ) with
   | Ok 1 -> Ok { latency_ms = 0.0; is_healthy = true }
   | _ -> Ok { latency_ms = 0.0; is_healthy = false }
 

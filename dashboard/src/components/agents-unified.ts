@@ -87,7 +87,7 @@ export function AgentsUnified() {
         chips=${viewChips}
         active=${activeView}
         onChange=${(key: AgentsView) => {
-          navigate('status', key === 'all' ? { section: 'agents' } : { section: 'agents', view: key })
+          navigate('monitoring', key === 'all' ? { section: 'agents' } : { section: 'agents', view: key })
         }}
         size="md"
         tone="accent"

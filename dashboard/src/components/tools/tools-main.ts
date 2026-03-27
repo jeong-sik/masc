@@ -15,6 +15,7 @@ import { ToolSummaryView } from './tool-summary-view'
 import { FullInventoryView } from './tool-full-inventory'
 import { PromptRegistryPanel } from './prompt-registry-panel'
 import { SurfaceReadinessPanel } from './surface-readiness-panel'
+import { ConfigResolutionPanel } from './config-resolution-panel'
 
 export function Tools() {
   const data = toolsData.value
@@ -31,6 +32,11 @@ export function Tools() {
 
   return html`
     <div>
+      <${ConfigResolutionPanel}
+        resolution=${data?.config_resolution}
+        runtimeResolution=${data?.runtime_resolution}
+      />
+
       <${Card} title="운영 화면 안내" class="section mb-4">
         <${SurfaceReadinessPanel} />
       <//>

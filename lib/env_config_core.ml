@@ -76,8 +76,28 @@ let me_root () =
   | Ok path -> path
   | Error msg -> failwith msg
 
+(** Log a deprecation warning when a legacy env var is set.
+    Called once per legacy var at startup/first-read. *)
+let deprecation_warned = Hashtbl.create 8
+
+let warn_deprecated ~old_name ~new_name =
+  if not (Hashtbl.mem deprecation_warned old_name) then begin
+    Hashtbl.replace deprecation_warned old_name true;
+    Printf.eprintf
+      "[WARN] env %s is deprecated; use %s instead. Support will be removed in a future release.\n%!"
+      old_name new_name
+  end
+
+let deprecated_opt ~old_name ~new_name =
+  match Sys.getenv_opt old_name |> trim_opt with
+  | Some value ->
+      warn_deprecated ~old_name ~new_name;
+      Some value
+  | None -> None
+
 let sb_path_opt () =
-  match Sys.getenv_opt "MASC_SB_PATH" |> trim_opt with
+  match deprecated_opt ~old_name:"MASC_SB_PATH"
+          ~new_name:"MASC_WORKSPACE_ROOT or ME_ROOT" with
   | Some path -> Some path
   | None -> (
       match me_root_opt () with
@@ -91,7 +111,7 @@ let sb_path_result () =
   | Some path -> Ok path
   | None ->
       Error
-        "Unable to resolve scripts/sb. Set MASC_SB_PATH or MASC_WORKSPACE_ROOT."
+        "Unable to resolve scripts/sb. Set MASC_WORKSPACE_ROOT or ME_ROOT."
 
 let sb_path () =
   match sb_path_result () with
@@ -103,8 +123,46 @@ let masc_http_port () =
   | Some port -> port
   | None -> (
       match Sys.getenv_opt "MASC_PORT" |> trim_opt with
-      | Some port -> port
+      | Some port ->
+          warn_deprecated ~old_name:"MASC_PORT" ~new_name:"MASC_HTTP_PORT";
+          port
       | None -> "8935")
+
+let masc_http_port_int () =
+  Safe_ops.int_of_string_with_default ~default:8935 (masc_http_port ())
+
+let masc_host_opt () =
+  match Sys.getenv_opt "MASC_HOST" |> trim_opt with
+  | Some host -> Some host
+  | None -> deprecated_opt ~old_name:"MASC_HTTP_BIND_HOST" ~new_name:"MASC_HOST"
+
+(** Centralized MASC_HOST reader.
+    Reads MASC_HOST (primary) with MASC_HTTP_BIND_HOST (deprecated) fallback.
+    Default: "127.0.0.1". *)
+let masc_host () =
+  match masc_host_opt () with
+  | Some host -> host
+  | None -> "127.0.0.1"
+
+(** Centralized MASC_ASSETS_DIR reader.
+    Reads MASC_ASSETS_DIR (primary) with MASC_ASSETS_ROOT (deprecated) fallback.
+    Returns None when neither is set. *)
+let assets_dir_opt () =
+  match Sys.getenv_opt "MASC_ASSETS_DIR" |> trim_opt with
+  | Some dir -> Some dir
+  | None ->
+      deprecated_opt ~old_name:"MASC_ASSETS_ROOT" ~new_name:"MASC_ASSETS_DIR"
+
+let cluster_name_opt () =
+  Sys.getenv_opt "MASC_CLUSTER_NAME" |> trim_opt
+
+(** Centralized MASC_CLUSTER_NAME reader.
+    Default: "default". All call sites should use this instead of
+    reading Sys.getenv_opt "MASC_CLUSTER_NAME" directly. *)
+let cluster_name () =
+  match cluster_name_opt () with
+  | Some name -> name
+  | None -> "default"
 
 let rec masc_http_base_url () =
   match masc_http_base_url_result () with
@@ -116,11 +174,11 @@ and masc_http_base_url_result () =
   | Some base -> Ok (strip_trailing_slashes base)
   | None ->
       let host =
-        match Sys.getenv_opt "MASC_HOST" |> trim_opt with
+        match masc_host_opt () with
         | Some value -> Ok value
         | None ->
             Error
-              "MASC_HTTP_BASE_URL is required (or set MASC_HOST with MASC_HTTP_PORT/MASC_PORT)"
+              "MASC_HTTP_BASE_URL is required (or set MASC_HOST with MASC_HTTP_PORT)"
       in
       Result.map
         (fun host -> Printf.sprintf "http://%s:%s" host (masc_http_port ()))
@@ -151,4 +209,3 @@ let libdatachannel_path_opt () =
   |> List.find_opt existing_file
 
 (** {1 Zombie Detection / Cleanup Configuration} *)
-

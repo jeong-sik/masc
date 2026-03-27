@@ -15,20 +15,28 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 dune build --root .
 
-./start-masc-mcp.sh --http --port 8935
+./start-masc-mcp.sh --http
+PORT="$(./start-masc-mcp.sh --print-port)"  # query the effective port for this checkout
 ```
 
 기본 포트:
 
-- HTTP / MCP: `8935`
+- repo root checkout: `8935`
+- git worktree checkout: `9100-9999` 범위에서 checkout path 기준 자동 파생
 - 기본 bind host: `127.0.0.1`
+
+메모:
+
+- 현재 checkout의 기본 포트 확인: `./start-masc-mcp.sh --print-port`
+- worktree에서 `--port`를 생략하면 script가 worktree별 기본 포트를 자동 선택한다.
+- `--print-port`는 현재 checkout의 기본 포트 조회용이다. 서버 시작은 보통 `./start-masc-mcp.sh --http`로 충분하다.
 
 ## 2. Health Check
 
 ```bash
-curl http://127.0.0.1:8935/health
+curl "http://127.0.0.1:${PORT}/health"
 
-curl -sS http://127.0.0.1:8935/mcp \
+curl -sS "http://127.0.0.1:${PORT}/mcp" \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
@@ -48,6 +56,8 @@ HTTP가 canonical public path다. 템플릿 전체는 `docs/MCP-TEMPLATE.md`를 
   }
 }
 ```
+
+worktree에서는 `8935` 대신 `./start-masc-mcp.sh --print-port` 출력값으로 바꾼다.
 
 ## 4. 첫 Workflow
 
@@ -109,6 +119,7 @@ masc_keeper_up(name: "sangsu")
 전제조건:
 - `config/personas/<name>/profile.json`이 존재해야 한다 (또는 `config/keepers/<name>.toml`)
 - 서버가 **repo root**에서 실행되어야 `.masc/` 디렉토리에 접근 가능. worktree에서 실행하면 keeper 상태를 찾지 못한다. 필요 시 `--base-path`를 repo root로 지정.
+- repo-managed config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 실행 파일 기준 `config/` 자동 탐색을 사용한다.
 - `MASC_PERSONAS_DIR` 환경변수로 커스텀 persona 경로 지정 가능.
 
 상세: `docs/KEEPER-USER-MANUAL.md`

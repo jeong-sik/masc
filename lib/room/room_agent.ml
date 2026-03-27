@@ -19,8 +19,7 @@ let get_agents_status config =
         Room_query.safe_yield ();
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat agents_path name in
-        let json = read_json config path in
-        match agent_of_yojson json with
+        match read_agent_with_repair config path with
         | Ok agent ->
             let is_zombie = is_zombie_agent ~agent_name:agent.name agent.last_seen in
             let status = if is_zombie then "zombie" else agent_status_to_string agent.status in
@@ -55,8 +54,7 @@ let register_capabilities config ~agent_name ~capabilities =
   let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
   if Sys.file_exists agent_file then begin
     with_file_lock config agent_file (fun () ->
-      let json = read_json config agent_file in
-      match agent_of_yojson json with
+      match read_agent_with_repair config agent_file with
       | Ok agent ->
           let updated = { agent with capabilities; last_seen = now_iso () } in
           write_json config agent_file (agent_to_yojson updated);
@@ -99,8 +97,7 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Types.ma
         else
           let locked =
             with_file_lock_r config agent_file (fun () ->
-              let json = read_json config agent_file in
-              match agent_of_yojson json with
+              match read_agent_with_repair config agent_file with
               | Error _ -> Error (Types.InvalidJson "Invalid agent file")
               | Ok agent ->
                   let status_opt =
@@ -170,8 +167,7 @@ let find_agents_by_capability config ~capability =
         Room_query.safe_yield ();
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat agents_path name in
-        let json = read_json config path in
-        match agent_of_yojson json with
+        match read_agent_with_repair config path with
         | Ok agent when List.mem capability agent.capabilities && not (is_zombie_agent ~agent_name:agent.name agent.last_seen) ->
             matching := `Assoc [
               ("name", `String agent.name);

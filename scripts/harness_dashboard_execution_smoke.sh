@@ -111,7 +111,6 @@ wait_for_http() {
 log "starting server"
 if [ -x "$SERVER_EXE" ]; then
   nohup env \
-    MASC_GUARDIAN_ENABLED=false \
     MASC_ORCHESTRATOR_ENABLED=false \
     MASC_LODGE_ENABLED=false \
     MASC_DASHBOARD_BRIEFING_MODELS=disabled \
@@ -119,7 +118,6 @@ if [ -x "$SERVER_EXE" ]; then
     "$SERVER_EXE" --port "$PORT" --base-path "$BASE_PATH" >"$SERVER_LOG" 2>&1 &
 else
   nohup env \
-    MASC_GUARDIAN_ENABLED=false \
     MASC_ORCHESTRATOR_ENABLED=false \
     MASC_LODGE_ENABLED=false \
     MASC_DASHBOARD_BRIEFING_MODELS=disabled \

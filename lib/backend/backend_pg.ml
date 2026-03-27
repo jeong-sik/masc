@@ -1,23 +1,15 @@
 (** Backend_pg - Eio-native PostgreSQL backend implementation.
-
-    Extracted from Backend.Postgres for separation of concerns.
-    Uses Caqti-eio for non-blocking PostgreSQL access with zstd compression.
-
-    Types come from Backend_types (shared with Backend).
-    Backend.Postgres delegates to this module.
-*)
+    Extracted from Backend.Postgres for separation of concerns and uses
+    Caqti-eio for non-blocking PostgreSQL access with zstd compression.
+    Types come from Backend_types (shared with Backend). *)
 
 module Compression = Backend_compression
 
 let _compress = Compression.compress_with_header
 let _decompress = Compression.decompress_auto
-
 (** {1 Types} *)
-
 include Backend_types
-
 (** {1 PostgreSQL Backend} *)
-
 type t = {
   pool: (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t;
   namespace: string;
@@ -276,8 +268,8 @@ let create_readonly ~sw ~env ~url ~cluster_name ~node_id =
   let uri = Uri.of_string url in
   (* Readonly pools need >1 connection to avoid "Invalid concurrent
      usage" when multiple Eio fibers within the same executor domain
-     call Pool.use concurrently. Use half the main pool size, minimum 3. *)
-  let max_pool = max 3 (configured_pool_size () / 2) in
+     call Pool.use concurrently. Use 2/3 of the main pool size, minimum 4. *)
+  let max_pool = max 4 (configured_pool_size () * 2 / 3) in
   let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
   let uri = uri_with_keepalive uri in
   match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
@@ -289,13 +281,20 @@ let close _t = ()
 
 let get_pool t = t.pool
 
+let decompress_with_context ~key content =
+  let had_header = String.length content >= 4 && String.sub content 0 4 = "ZSTD" in
+  let decompressed = _decompress content in
+  if had_header && String.equal decompressed content then
+    Log.Backend.warn "[EioPG] decompress fallback for %s" key;
+  decompressed
+
 let get t key =
   let nkey = namespaced_key t.namespace key in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     C.find_opt get_q nkey
   ) t.pool with
-  | Ok (Some v) -> Ok (_decompress v)
+  | Ok (Some v) -> Ok (decompress_with_context ~key:nkey v)
   | Ok None -> Error (NotFound key)
   | Error err -> Error (caqti_error_to_masc err)
 
@@ -351,7 +350,7 @@ let get_all t ~prefix =
   ) t.pool with
   | Ok pairs ->
       Ok (List.map (fun (k, v) ->
-        (strip_namespace t.namespace k, _decompress v)
+        (strip_namespace t.namespace k, decompress_with_context ~key:k v)
       ) pairs)
   | Error err -> Error (caqti_error_to_masc err)
 
@@ -367,7 +366,7 @@ let get_all_matching_recent t ~prefix ~suffix ~updated_since ~limit =
     ) t.pool with
     | Ok pairs ->
         Ok (List.map (fun (k, v) ->
-          (strip_namespace t.namespace k, _decompress v)
+          (strip_namespace t.namespace k, decompress_with_context ~key:k v)
         ) pairs)
     | Error err -> Error (caqti_error_to_masc err)
 

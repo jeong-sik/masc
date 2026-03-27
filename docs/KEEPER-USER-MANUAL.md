@@ -616,6 +616,8 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는 `docs/
 
 Resident-keeper (`.masc/resident-keepers/<name>.json`)는 등록 메타데이터(persona_name, desired, timestamps)만 저장한다.
 
+repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 실행 파일 기준 `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다.
+
 ### 8.2 Template 변경 반영
 
 Persona template을 수정해도 실행 중인 keeper에 자동 반영되지 않는다. 반영 방법:
@@ -634,6 +636,8 @@ masc_keeper_up(name: "sangsu")
 worktree에서 서버를 실행하면 `.masc/`가 worktree 내부를 가리키므로 **main repo의 keeper 상태에 접근할 수 없다**. keeper가 보이지 않을 때 가장 흔한 원인이다.
 
 해결: repo root에서 서버를 실행하거나, `--base-path`를 main repo root로 명시 지정.
+
+이 값은 `.masc/` data root만 바꾼다. `config/cascade.json`, `config/prompts`, `config/keepers`, `config/personas` 같은 repo-managed config는 `MASC_CONFIG_DIR` 계약으로 별도 해석된다.
 
 ### 8.4 모델 실행
 

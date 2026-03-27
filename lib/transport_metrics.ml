@@ -157,10 +157,22 @@ let int_field key json =
   | Some (`Intlit raw) -> Safe_ops.int_of_string_with_default ~default:0 raw
   | _ -> 0
 
-let cluster_summary_json config =
-  match Command_plane_v2.topology_summary_json config with
-  | `Assoc _ as json -> json
-  | _ -> `Assoc []
+let room_id_from_config (config : Room.config) =
+  match config.scope with
+  | Room_utils_backend_setup.Named room_id -> room_id
+  | _ -> "default"
+
+let cluster_summary_json (_config : Room.config) =
+  (* Transport health should stay metrics-only and avoid command-plane/Room I/O. *)
+  None
+
+let int_field_opt key = function
+  | Some json -> Some (int_field key json)
+  | None -> None
+
+let int_option_json = function
+  | Some value -> `Int value
+  | None -> `Null
 
 let http_listener_mode () =
   match Sys.getenv_opt "MASC_USE_H2" with
@@ -252,30 +264,27 @@ let transport_health_json ~config =
   let listener_mode = http_listener_mode () in
   let topology_summary = cluster_summary_json config in
   let room_id =
-    try Room.current_room_id config
-    with exn ->
-      Log.Transport.debug "current_room_id failed: %s" (Printexc.to_string exn);
-      "default"
+    room_id_from_config config
   in
-  let cluster_name =
-    Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")
-  in
-  let recent_messages =
-    try Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit:20 |> List.length
-    with exn ->
-      Log.Transport.debug "recent_messages count failed: %s" (Printexc.to_string exn);
-      0
-  in
+  let cluster_name = Env_config_core.cluster_name () in
+  (* Keep transport-health free of Room/PG reads so proactive refresh does not
+     contend with dashboard and MCP writes on the shared backend. *)
+  let recent_messages = None in
+  let recent_messages_available = Option.is_some recent_messages in
   let grpc_subscribers_i = int_of_float grpc_subscribers in
   let primary_path =
     primary_path ~webrtc_channels ~grpc_subscribers:grpc_subscribers_i
       ~ws_sessions ~sse_sessions:sse_total
   in
+  let topology_available = Option.is_some topology_summary in
+  let degraded_source = "metrics_only" in
   `Assoc [
     ("summary", `Assoc [
       ("primary_path", `String primary_path);
       ("queue_pressure", `String (queue_pressure sse_queue_max));
-      ("recent_messages", `Int recent_messages);
+      ("recent_messages", int_option_json recent_messages);
+      ("recent_messages_available", `Bool recent_messages_available);
+      ("recent_messages_source", `String degraded_source);
       ("external_fanout_targets", `Int sse_external_subscribers);
     ]);
     ("sse", `Assoc [
@@ -338,11 +347,13 @@ let transport_health_json ~config =
     ("cluster", `Assoc [
       ("cluster", `String cluster_name);
       ("room_id", `String room_id);
-      ("total_units", `Int (int_field "total_units" topology_summary));
-      ("managed_units", `Int (int_field "managed_unit_count" topology_summary));
-      ("live_agents", `Int (int_field "live_agent_count" topology_summary));
-      ("active_operations", `Int (int_field "active_operation_count" topology_summary));
-      ("stale_units", `Int (int_field "stale_unit_count" topology_summary));
+      ("topology_available", `Bool topology_available);
+      ("topology_source", `String degraded_source);
+      ("total_units", int_option_json (int_field_opt "total_units" topology_summary));
+      ("managed_units", int_option_json (int_field_opt "managed_unit_count" topology_summary));
+      ("live_agents", int_option_json (int_field_opt "live_agent_count" topology_summary));
+      ("active_operations", int_option_json (int_field_opt "active_operation_count" topology_summary));
+      ("stale_units", int_option_json (int_field_opt "stale_unit_count" topology_summary));
     ]);
     ("agent_health", `Assoc [
       ("stale_total", `Int (int_of_float stale_agents));

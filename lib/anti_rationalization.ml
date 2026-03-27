@@ -202,6 +202,7 @@ let review
     ?(completion_contract : string list option)
     ?(on_verdict : (review_result -> unit) option)
     ?(few_shot_block = "")
+    ?sw
     (req : review_request) : review_result =
   let emit result =
     (match on_verdict with Some f -> f result | None -> ());
@@ -256,6 +257,7 @@ let review
          ~max_turns:1
          ~temperature:0.0
          ~max_tokens:200
+         ?sw
          ()
      with
      | Ok result ->
@@ -276,8 +278,8 @@ let review
 
 (** Backward-compatible wrapper that returns only the verdict.
     Use [review] directly for structured results with audit metadata. *)
-let review_verdict ?evaluator_cascade ?generator_cascade ?completion_contract ?on_verdict ?few_shot_block req =
-  (review ?evaluator_cascade ?generator_cascade ?completion_contract ?on_verdict ?few_shot_block req).verdict
+let review_verdict ?evaluator_cascade ?generator_cascade ?completion_contract ?on_verdict ?few_shot_block ?sw req =
+  (review ?evaluator_cascade ?generator_cascade ?completion_contract ?on_verdict ?few_shot_block ?sw req).verdict
 
 let review_result_to_json (r : review_result) : Yojson.Safe.t =
   let base = [

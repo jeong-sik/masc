@@ -84,7 +84,7 @@ let poll_and_broadcast t =
       Error (Caqti_error.show err)
 
 (** Start the listener loop (call from Eio fiber) *)
-let start t =
+let start ~clock t =
   t.running <- true;
   Log.BoardListener.info "Started (poll_interval=%.1fs, channel=%s)"
     poll_interval_s channel;
@@ -94,7 +94,7 @@ let start t =
          t.consecutive_errors <- 0;
          if count > 0 then
            Log.BoardListener.info "Processed %d events" count;
-         Eio_unix.sleep poll_interval_s
+         Eio.Time.sleep clock poll_interval_s
      | Error msg ->
          t.consecutive_errors <- t.consecutive_errors + 1;
          if t.consecutive_errors mod 5 = 0 then
@@ -103,7 +103,7 @@ let start t =
          let backoff =
            Float.min (0.5 *. Float.pow 2.0 (Float.of_int t.consecutive_errors)) 30.0
          in
-         Eio_unix.sleep backoff)
+         Eio.Time.sleep clock backoff)
   done;
   Log.BoardListener.info "Stopped"
 

@@ -161,4 +161,4 @@ Eric Evans 책 추천드려요. (진지)"
 
 **Created**: 2025-11-12
 **Source**: User request + Conservative backend engineer archetype
-**Status**: Active (Security & Quality guardian)
+**Status**: Active (Security & Quality reviewer)

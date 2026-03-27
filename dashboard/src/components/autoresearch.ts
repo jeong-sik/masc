@@ -8,8 +8,10 @@ import { SurfaceCard } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { formatElapsedCompact } from '../lib/format-time'
 import {
+  deleteAutoresearchLoop,
   fetchAutoresearchLoops,
   fetchAutoresearchLoopDetail,
+  retryAutoresearchLoop,
   type AutoresearchLoopsResponse,
   type AutoresearchLoopDetail,
   type AutoresearchLoopSummary,
@@ -26,6 +28,8 @@ const selectedLoopId = signal<string | null>(null)
 const loopDetail = signal<AutoresearchLoopDetail | null>(null)
 const detailLoading = signal(false)
 const detailError = signal<string | null>(null)
+const loopActionBusy = signal(false)
+const loopActionError = signal<string | null>(null)
 
 let loopsRequest: Promise<void> | null = null
 let pendingRefreshDetail = false
@@ -380,12 +384,40 @@ function LoopDetailView() {
   const cycles = detail?.history ?? loop.recent_cycles ?? []
   const insights = detail?.insights ?? loop.insights ?? []
   const warnings = loop.warnings ?? []
+  const canRepairErrorLoop = loop.status === 'error'
 
   return html`
     <div class="flex flex-col gap-5">
       <${SurfaceCard} variant="compact">
-        <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-3 font-medium">루프 개요</div>
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium">루프 개요</div>
+          ${canRepairErrorLoop ? html`
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="px-2.5 py-1 rounded text-[11px] text-[var(--text-body)] border border-card-border hover:border-accent/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled=${loopActionBusy.value}
+                onClick=${() => { void retrySelectedLoop() }}
+              >
+                ${loopActionBusy.value ? '복구 중...' : '재시도'}
+              </button>
+              <button
+                type="button"
+                class="px-2.5 py-1 rounded text-[11px] text-red-400 border border-red-500/30 hover:border-red-400/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled=${loopActionBusy.value}
+                onClick=${() => { void deleteSelectedLoop() }}
+              >
+                삭제
+              </button>
+            </div>
+          ` : null}
+        </div>
         <${LoopOverview} loop=${loop} />
+        ${loopActionError.value ? html`
+          <div class="mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+            ${loopActionError.value}
+          </div>
+        ` : null}
       <//>
 
       ${warnings.length > 0 ? html`
@@ -463,4 +495,35 @@ export function Autoresearch() {
       <${LoopDetailView} />
     </div>
   `
+}
+
+async function runLoopAction(action: () => Promise<unknown>) {
+  loopActionBusy.value = true
+  loopActionError.value = null
+  try {
+    await action()
+    await refreshAutoresearchSurface()
+  } catch (err) {
+    loopActionError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    loopActionBusy.value = false
+  }
+}
+
+async function retrySelectedLoop() {
+  const loop = selectedLoop.value
+  if (!loop?.loop_id) return
+  await runLoopAction(() => retryAutoresearchLoop(loop.loop_id))
+}
+
+async function deleteSelectedLoop() {
+  const loop = selectedLoop.value
+  if (!loop?.loop_id) return
+  if (typeof globalThis.confirm === 'function') {
+    const confirmed = globalThis.confirm(
+      `루프 ${loop.loop_id}와 연결된 worktree/branch/results를 삭제합니다. 계속할까요?`,
+    )
+    if (!confirmed) return
+  }
+  await runLoopAction(() => deleteAutoresearchLoop(loop.loop_id))
 }

@@ -26,6 +26,9 @@ let write_text_file path content =
 let state_path base_dir =
   Filename.concat (Filename.concat base_dir ".masc") "state.json"
 
+let agent_path config agent_name =
+  Filename.concat (Room.agents_dir config) (Room.safe_filename agent_name ^ ".json")
+
 let test_read_state_repairs_empty_object () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -42,7 +45,7 @@ let test_read_state_repairs_empty_object () =
       check int "message_seq default" 0 state.message_seq;
       check (list string) "active_agents default" [] state.active_agents;
 
-      let repaired_json = Yojson.Safe.from_file (state_path base_dir) in
+      let repaired_json = Room.read_json config (state_path base_dir) in
       check string "repaired protocol" "0.1.0"
         (Safe_ops.json_string ~default:"" "protocol_version" repaired_json);
       check int "repaired message_seq" 0
@@ -83,7 +86,7 @@ let test_read_state_recovers_legacy_active_agent_entries () =
         state.active_agents;
 
       let open Yojson.Safe.Util in
-      let repaired_json = Yojson.Safe.from_file (state_path base_dir) in
+      let repaired_json = Room.read_json config (state_path base_dir) in
       let repaired_agents =
         repaired_json |> member "active_agents" |> to_list |> List.map to_string
       in
@@ -123,6 +126,65 @@ let test_read_state_filters_invalid_active_agent_entries () =
         [ "codex-swift-fox"; "gemini-brave-bear" ]
         state.active_agents)
 
+let test_agent_of_yojson_accepts_numeric_last_seen () =
+  let json =
+    `Assoc
+      [
+        ("name", `String "keeper-sangsu-agent");
+        ("agent_type", `String "keeper");
+        ("status", `String "active");
+        ("capabilities", `List []);
+        ("current_task", `Null);
+        ("joined_at", `String "2026-03-26T00:00:00Z");
+        ("last_seen", `Float 1711411200.0);
+      ]
+  in
+  match Types.agent_of_yojson json with
+  | Ok agent ->
+      check string "agent parsed" "keeper-sangsu-agent" agent.name;
+      check bool "last_seen normalized to ISO" true
+        (String.length agent.last_seen > 0 && String.contains agent.last_seen 'T')
+  | Error msg -> fail ("expected numeric last_seen compatibility: " ^ msg)
+
+let test_heartbeat_repairs_legacy_agent_last_seen () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:None);
+      let legacy_agent_json =
+        `Assoc
+          [
+            ("name", `String "keeper-sangsu-agent");
+            ("agent_type", `String "keeper");
+            ("status", `String "active");
+            ("capabilities", `List [ `String "heartbeat" ]);
+            ("current_task", `Null);
+            ("joined_at", `String "2026-03-26T00:00:00Z");
+            ("last_seen", `Int 1711411200);
+          ]
+      in
+      write_text_file (agent_path config "keeper-sangsu-agent")
+        (Yojson.Safe.to_string legacy_agent_json);
+
+      ignore (Room.heartbeat config ~agent_name:"keeper-sangsu-agent");
+
+      let repaired_json =
+        match Safe_ops.read_file_safe (agent_path config "keeper-sangsu-agent") with
+        | Error error -> fail error
+        | Ok raw ->
+            raw
+            |> Backend.Compression.decompress_auto
+            |> Yojson.Safe.from_string
+      in
+      check bool "last_seen rewritten as string" true
+        (match Yojson.Safe.Util.member "last_seen" repaired_json with
+         | `String value -> String.length value > 0
+         | _ -> false))
+
 let () =
   run "Room_state_recovery"
     [
@@ -134,5 +196,9 @@ let () =
             test_read_state_recovers_legacy_active_agent_entries;
           test_case "filters invalid active_agents entries" `Quick
             test_read_state_filters_invalid_active_agent_entries;
+          test_case "agent parser accepts numeric last_seen" `Quick
+            test_agent_of_yojson_accepts_numeric_last_seen;
+          test_case "heartbeat repairs legacy agent last_seen" `Quick
+            test_heartbeat_repairs_legacy_agent_last_seen;
         ] );
     ]

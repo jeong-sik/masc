@@ -1,6 +1,6 @@
 # MASC → OAS Migration Next Steps
 
-Updated: 2026-03-21
+Updated: 2026-03-27
 Scope: `masc-mcp` only
 
 ## Current Baseline
@@ -23,10 +23,10 @@ They do. The gap is that the bridge is still lossy.
 
 ### What remains
 
-- preserve more `planned_worker` metadata in swarm entries
-- preserve richer telemetry semantics beyond the current `trace_ref`/usage/turn_count baseline when the swarm runner needs more operator-facing detail
+- preserve more `planned_worker` metadata if the upstream swarm entry model grows beyond the current closure shape
+- decide whether the current event-level telemetry detail is enough, or whether dashboard consumers need first-class swarm telemetry views
 - decide whether the current single-pass success-ratio convergence policy should become a richer multi-iteration strategy
-- replace the current room-init `resource_check` with a broader runtime-health probe if needed
+- broaden the runtime-health probe beyond room/session readiness only if a concrete failure mode appears
 - decide whether session-level budget needs token/cost enforcement beyond the current `duration_seconds` wall-clock budget
 
 ### Success criteria
@@ -43,10 +43,14 @@ This pass reduced duplication, but one important path still remains outside the 
 
 - dashboard provider single-run now routes through `Oas_worker.run_model`
 - initial local worker run now routes through `Worker_oas.run_worker_via_oas`
+- local worker resume/continue now routes through `Worker_oas.resume_worker_via_oas`
+- team-session collaboration metadata now preserves richer worker/session semantics
+- swarm lifecycle events now include per-agent telemetry detail
+- `resource_check` now validates persisted running-session state, not just room initialization
 
 ### Still remaining
 
-- local worker resume/continue path still constructs resume-specific config locally before entering the shared execution tail
+- no known local worker resume-path config duplication remains in the current OAS path
 
 ### Success criteria
 
@@ -84,7 +88,7 @@ That is now fixed for institution episodes.
 
 The following are now stale and should not reappear in migration docs:
 
-- Gardener as an active migration target
+- legacy ecosystem-loop migration targets
 - “Event_bus bridge planned”
 - “team_session still pending OAS migration”
 

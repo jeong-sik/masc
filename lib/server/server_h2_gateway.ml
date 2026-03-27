@@ -500,11 +500,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let json = dashboard_memory_http_json httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
-      (* Legacy alias — kept for backward compatibility *)
-      | `GET, "/api/v1/dashboard/memory" ->
-          let json = dashboard_memory_http_json httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
       | `GET, "/api/v1/dashboard/governance" ->
           let state = get_server_state () in
           let json =
@@ -519,10 +514,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             dashboard_planning_http_json httpun_request
               ~config:state.Mcp_server.room_config
           in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/dashboard/semantics" ->
-          let json = dashboard_semantics_http_json () in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/mission" ->
@@ -783,7 +774,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let room_state = Room.read_state config in
           let tempo = Tempo.get_tempo config in
           let json = `Assoc [
-            ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+            ("cluster", `String (Env_config_core.cluster_name ()));
             ("project", `String room_state.project);
             ("tempo_interval_s", `Float tempo.current_interval_s);
             ("paused", `Bool room_state.paused);

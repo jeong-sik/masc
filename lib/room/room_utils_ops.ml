@@ -202,6 +202,11 @@ let read_text config path =
       if Fs_compat.file_exists path then Fs_compat.load_file path
       else ""
 
+let should_dual_write_local (config : config) =
+  match config.backend with
+  | FileSystem _ -> false
+  | Memory _ | PostgresNative _ -> true
+
 let write_json config path json =
   match key_of_path config path with
   | Some key ->
@@ -209,9 +214,10 @@ let write_json config path json =
       (match backend_set config ~key ~value:content with
        | Ok () -> ()
        | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e));
-      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
-      (try write_json_local path json
-       with _exn -> ())
+      if should_dual_write_local config then
+        (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
+        (try write_json_local path json
+         with _exn -> ())
   | None -> write_json_local path json
 
 let write_text_local path content =
@@ -228,9 +234,10 @@ let write_text config path content =
        | Error e ->
            Log.Misc.warn "write_text backend_set failed for %s: %s" key
              (Backend_types.show_error e));
-      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
-      (try write_text_local path content
-       with _exn -> ())
+      if should_dual_write_local config then
+        (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
+        (try write_text_local path content
+         with _exn -> ())
   | None -> write_text_local path content
 
 let delete_path config path =
@@ -280,11 +287,99 @@ let read_json_opt config path =
       if Sys.file_exists path then Some (read_json_local path)
       else None
 
+let agent_json_needs_repair = function
+  | `Assoc fields -> (
+      match List.assoc_opt "last_seen" fields with
+      | Some (`Int _ | `Float _) -> true
+      | _ -> false)
+  | _ -> false
+
+let read_agent_with_repair config path =
+  let json = read_json config path in
+  match Types.agent_of_yojson json with
+  | Ok agent as ok ->
+      if agent_json_needs_repair json then (
+        Log.Room.warn
+          "agent state repair: repaired agent JSON and rewrote canonical state for %s"
+          path;
+        write_json config path (Types.agent_to_yojson agent));
+      ok
+  | Error _ as error -> error
+
 (* ============================================ *)
 (* File locking                                 *)
 (* ============================================ *)
 
-let with_file_lock config path f =
+let sleep_lock_retry ?clock delay =
+  match clock with
+  | Some clock -> Eio.Time.sleep clock delay
+  | None -> Time_compat.sleep delay
+
+let with_distributed_lock ?clock config _path key f =
+  let owner = config.backend_config.node_id in
+  let ttl_seconds = config.lock_expiry_minutes * 60 in
+  let rec acquire attempts delay =
+    if attempts <= 0 then false
+    else
+      match backend_acquire_lock config ~key ~ttl_seconds ~owner with
+      | Ok true -> true
+      | _ ->
+          sleep_lock_retry ?clock delay;
+          acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
+  in
+  if acquire 20 0.005 then
+    Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
+      ~finally:(fun () ->
+        match backend_release_lock config ~key ~owner with
+        | Ok _ -> ()
+        | Error e ->
+            let msg =
+              match e with
+              | Backend_types.ConnectionFailed s | NotFound s
+              | IOError s | BackendNotSupported s | InvalidKey s
+              | AlreadyExists s -> s
+            in
+            Log.Room.warn "lock release failed for %s: %s" key msg)
+      f
+  else
+    invalid_arg
+      (Printf.sprintf
+         "Failed to acquire distributed lock for key: %s (20 attempts exhausted)"
+         key)
+
+let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
+  let owner = config.backend_config.node_id in
+  let ttl_seconds = config.lock_expiry_minutes * 60 in
+  let rec acquire attempts delay =
+    if attempts <= 0 then false
+    else
+      match backend_acquire_lock config ~key ~ttl_seconds ~owner with
+      | Ok true -> true
+      | _ ->
+          sleep_lock_retry ?clock delay;
+          acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
+  in
+  if acquire 20 0.005 then
+    Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
+      ~finally:(fun () ->
+        match backend_release_lock config ~key ~owner with
+        | Ok _ -> ()
+        | Error e ->
+            let msg =
+              match e with
+              | Backend_types.ConnectionFailed s | NotFound s
+              | IOError s | BackendNotSupported s | InvalidKey s
+              | AlreadyExists s -> s
+            in
+            Log.Room.warn "lock release failed for %s: %s" key msg)
+      (fun () -> Ok (f ()))
+  else
+    Error
+      (IoError
+         (Printf.sprintf "Failed to acquire distributed lock for %s"
+            path))
+
+let with_file_lock_impl ?clock config path f =
   match key_of_path config path with
   | None ->
       (* Fix 2: Use cooperative Eio.Mutex instead of blocking Unix.lockf.
@@ -298,38 +393,15 @@ let with_file_lock config path f =
              races in append/readback helpers. *)
           File_lock_eio.with_mutex path f
       | FileSystem _ | PostgresNative _ ->
-          let owner = config.backend_config.node_id in
-          let ttl_seconds = config.lock_expiry_minutes * 60 in
-          let rec acquire attempts delay =
-            if attempts <= 0 then false
-            else
-              match backend_acquire_lock config ~key ~ttl_seconds ~owner with
-              | Ok true -> true
-              | _ ->
-                  Eio_unix.sleep delay;
-                  acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
-          in
-          if acquire 20 0.005 then
-            Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
-              ~finally:(fun () ->
-                match backend_release_lock config ~key ~owner with
-                | Ok _ -> ()
-                | Error e ->
-                    let msg =
-                      match e with
-                      | Backend_types.ConnectionFailed s | NotFound s
-                      | IOError s | BackendNotSupported s | InvalidKey s
-                      | AlreadyExists s -> s
-                    in
-                    Log.Room.warn "lock release failed for %s: %s" key msg)
-              f
-          else
-            invalid_arg
-              (Printf.sprintf
-                 "Failed to acquire distributed lock for key: %s (20 attempts exhausted)"
-                 key))
+          with_distributed_lock ?clock config path key f)
 
-let with_file_lock_r config path f : ('a, masc_error) result =
+let with_file_lock_eio ~clock config path f =
+  with_file_lock_impl ~clock config path f
+
+let with_file_lock config path f =
+  with_file_lock_impl ?clock:(Eio_context.get_clock_opt ()) config path f
+
+let with_file_lock_r_impl ?clock config path f : ('a, masc_error) result =
   match key_of_path config path with
   | None ->
       (* Fix 2: Cooperative lock — same as with_file_lock *)
@@ -338,36 +410,13 @@ let with_file_lock_r config path f : ('a, masc_error) result =
       match config.backend with
       | Memory _ -> File_lock_eio.with_mutex path (fun () -> Ok (f ()))
       | FileSystem _ | PostgresNative _ ->
-          let owner = config.backend_config.node_id in
-          let ttl_seconds = config.lock_expiry_minutes * 60 in
-          let rec acquire attempts delay =
-            if attempts <= 0 then false
-            else
-              match backend_acquire_lock config ~key ~ttl_seconds ~owner with
-              | Ok true -> true
-              | _ ->
-                  Eio_unix.sleep delay;
-                  acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
-          in
-          if acquire 20 0.005 then
-            Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
-              ~finally:(fun () ->
-                match backend_release_lock config ~key ~owner with
-                | Ok _ -> ()
-                | Error e ->
-                    let msg =
-                      match e with
-                      | Backend_types.ConnectionFailed s | NotFound s
-                      | IOError s | BackendNotSupported s | InvalidKey s
-                      | AlreadyExists s -> s
-                    in
-                    Log.Room.warn "lock release failed for %s: %s" key msg)
-              (fun () -> Ok (f ()))
-          else
-            Error
-              (IoError
-                 (Printf.sprintf "Failed to acquire distributed lock for %s"
-                    path)))
+          with_distributed_lock_r ?clock config path key f)
+
+let with_file_lock_r_eio ~clock config path f : ('a, masc_error) result =
+  with_file_lock_r_impl ~clock config path f
+
+let with_file_lock_r config path f : ('a, masc_error) result =
+  with_file_lock_r_impl ?clock:(Eio_context.get_clock_opt ()) config path f
 
 (* ============================================ *)
 (* Event logging                                *)

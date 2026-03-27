@@ -45,14 +45,12 @@ Experimental features such as TRPG live under `lab`.
   - `summary`, `execution_queue`, `session_briefs`, `operation_briefs`, `worker_support_briefs`, `continuity_briefs`, `offline_worker_briefs`
   - compatibility payloads remain: `agents`, `tasks`, `messages`, `keepers`
   - test fixture mode: `?fixture=execution_smoke` or `MASC_DASHBOARD_FIXTURE=execution_smoke`
-- `GET /api/v1/dashboard/memory`
+- `GET /api/v1/dashboard/board`
   - `posts` plus memory-feed summary
 - `GET /api/v1/dashboard/governance`
   - `debates`, `sessions`, governance summary
 - `GET /api/v1/dashboard/planning`
   - `goals`, `rollup`, `mdal`, `task_backlog`
-- `GET /api/v1/dashboard/semantics`
-  - surface and panel semantics registry
 
 ## Raw Domain Endpoints
 - `/api/v1/board*`, `/api/v1/governance*`, `/api/v1/operator*`, `/api/v1/command-plane*`

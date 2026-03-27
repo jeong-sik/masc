@@ -36,7 +36,6 @@ let has_nul_byte s =
 
 let agent_path config agent_name =
   Filename.concat (Room.agents_dir config) (Room.safe_filename agent_name ^ ".json")
-
 let test_read_state_repairs_empty_object () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -203,6 +202,16 @@ let test_heartbeat_repairs_legacy_agent_last_seen () =
          | `String value -> String.length value > 0
          | _ -> false))
 
+let test_backend_compression_uses_text_safe_encoding () =
+  let original =
+    String.concat "" (List.init 128 (fun _ -> "{\"active_agents\":[],\"message_seq\":0}"))
+  in
+  let encoded = Backend_compression.compress_with_header original in
+  check bool "compressed representation stays text-safe" false (has_nul_byte encoded);
+  check bool "compressed representation differs from original" true (encoded <> original);
+  check string "decompression roundtrip" original
+    (Backend_compression.decompress_auto encoded)
+
 let () =
   run "Room_state_recovery"
     [
@@ -220,5 +229,7 @@ let () =
             test_agent_of_yojson_accepts_numeric_last_seen;
           test_case "heartbeat repairs legacy agent last_seen" `Quick
             test_heartbeat_repairs_legacy_agent_last_seen;
+          test_case "backend compression uses text-safe encoding" `Quick
+            test_backend_compression_uses_text_safe_encoding;
         ] );
     ]

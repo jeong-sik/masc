@@ -39,6 +39,19 @@ module Paths = struct
     Sys.getenv_opt "MASC_CHAIN_RUN_STORE_PATH" |> trim_opt
 end
 
+(** {1 Run Store} *)
+
+module RunStore = struct
+  let max_history =
+    get_int ~default:50 "MASC_CHAIN_RUN_HISTORY"
+
+  let max_output_chars =
+    get_int ~default:4000 "MASC_CHAIN_OUTPUT_MAX_CHARS"
+
+  let max_preview_chars =
+    get_int ~default:240 "MASC_CHAIN_OUTPUT_PREVIEW_CHARS"
+end
+
 (** {1 Chain Logging} *)
 
 module Log = struct
@@ -113,15 +126,16 @@ end
 
 module Procedural = struct
   let min_evidence =
-    get_int ~default:2 "MASC_PROC_MIN_EVIDENCE"
+    max 1 (get_int ~default:3 "MASC_PROC_MIN_EVIDENCE")
 
   let min_confidence =
-    get_float ~default:0.7 "MASC_PROC_MIN_CONFIDENCE"
+    max 0.0 (min 1.0 (get_float ~default:0.7 "MASC_PROC_MIN_CONFIDENCE"))
 end
 
 (** {1 Memory OAS Bridge} *)
 
 module Memory = struct
+  (** Importance scale 1-10 (integer). *)
   let oas_default_importance =
-    get_float ~default:0.5 "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE"
+    max 1 (min 10 (get_int ~default:5 "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE"))
 end

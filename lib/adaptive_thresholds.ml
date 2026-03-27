@@ -187,8 +187,8 @@ let get_effective_thresholds ~(enabled : bool) ~(room : string) : thresholds =
        | _ -> default_thresholds)
   else
     (* Not enabled: check env vars, then defaults *)
-    let env_prepare = Sys.getenv_opt "MASC_MITOSIS_PREPARE_THRESHOLD" in
-    let env_handoff = Sys.getenv_opt "MASC_MITOSIS_HANDOFF_THRESHOLD" in
+    let env_prepare = Env_config.Chain.Mitosis.prepare_threshold_opt () in
+    let env_handoff = Env_config.Chain.Mitosis.handoff_threshold_opt () in
     match env_prepare, env_handoff with
     | Some p, Some h ->
       (try clamp_thresholds { prepare = float_of_string p; handoff = float_of_string h }

@@ -45,14 +45,14 @@ end
 
 module OperatorCache = struct
   let ttl_sec =
-    get_float ~default:60.0 "MASC_OPERATOR_CACHE_TTL"
+    get_float ~default:30.0 "MASC_OPERATOR_CACHE_TTL"
 end
 
 (** {1 Alert Configuration} *)
 
 module Alert = struct
   let dedup_window_sec =
-    get_float ~default:300.0 "MASC_ALERT_DEDUP_WINDOW_SEC"
+    max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
 end
 
 (** {1 Relay Calibration} *)

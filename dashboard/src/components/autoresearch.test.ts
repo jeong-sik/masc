@@ -116,18 +116,14 @@ describe('Autoresearch surface refresh', () => {
   it('reloads selected detail when the surface refreshes', async () => {
     const loopA1 = loopSummary('loop-a111', { current_cycle: 1 })
     const loopA2 = loopSummary('loop-a111', { current_cycle: 2, best_score: 0.8 })
-    let loopFetchCount = 0
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>(async () => {
-      loopFetchCount += 1
-      return loopFetchCount >= 2
-        ? { loops: [loopA2], total: 1 }
-        : { loops: [loopA1], total: 1 }
+      return { loops: [loopA2], total: 1 }
     })
+      .mockResolvedValueOnce({ loops: [loopA1], total: 1 })
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>(async () =>
-      loopFetchCount >= 2
-        ? loopDetail(loopA2, { history: [cycleRecord(0), cycleRecord(1)], history_count: 2 })
-        : loopDetail(loopA1, { history: [cycleRecord(0)], history_count: 1 }),
+      loopDetail(loopA2, { history: [cycleRecord(0), cycleRecord(1)], history_count: 2 }),
     )
+      .mockResolvedValueOnce(loopDetail(loopA1, { history: [cycleRecord(0)], history_count: 1 }))
 
     const { Autoresearch, refreshAutoresearchSurface } = await loadComponentWithApi({
       fetchAutoresearchLoops: fetchLoops,
@@ -161,16 +157,15 @@ describe('Autoresearch surface refresh', () => {
     const loopA = loopSummary('loop-a111', { target_file: 'target-a.ml' })
     const loopB = loopSummary('loop-b222', { target_file: 'target-b.ml', current_cycle: 3 })
     const refreshedLoopB = { ...loopB, best_score: 0.9 }
-    let loopFetchCount = 0
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>(async () => {
-      loopFetchCount += 1
-      return loopFetchCount >= 2
-        ? { loops: [loopA, refreshedLoopB], total: 2 }
-        : { loops: [loopA, loopB], total: 2 }
+      return { loops: [loopA, refreshedLoopB], total: 2 }
     })
+      .mockResolvedValueOnce({ loops: [loopA, loopB], total: 2 })
+    let loopBDetailCalls = 0
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>(async loopId => {
       if (loopId === 'loop-a111') return loopDetail(loopA)
-      return loopFetchCount >= 2 ? loopDetail(refreshedLoopB) : loopDetail(loopB)
+      loopBDetailCalls += 1
+      return loopBDetailCalls >= 2 ? loopDetail(refreshedLoopB) : loopDetail(loopB)
     })
 
     const { Autoresearch, refreshAutoresearchSurface } = await loadComponentWithApi({
@@ -201,16 +196,15 @@ describe('Autoresearch surface refresh', () => {
     const loopA = loopSummary('loop-a111', { target_file: 'target-a.ml' })
     const loopB = loopSummary('loop-b222', { target_file: 'target-b.ml' })
     const refreshedLoopA = loopDetail(loopA, { best_score: 0.95 })
-    let loopFetchCount = 0
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>(async () => {
-      loopFetchCount += 1
-      return loopFetchCount >= 2
-        ? { loops: [loopA], total: 1 }
-        : { loops: [loopA, loopB], total: 2 }
+      return { loops: [loopA], total: 1 }
     })
+      .mockResolvedValueOnce({ loops: [loopA, loopB], total: 2 })
+    let loopADetailCalls = 0
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>(async loopId => {
       if (loopId === 'loop-b222') return loopDetail(loopB)
-      return loopFetchCount >= 2 ? refreshedLoopA : loopDetail(loopA)
+      loopADetailCalls += 1
+      return loopADetailCalls >= 2 ? refreshedLoopA : loopDetail(loopA)
     })
 
     const { Autoresearch, refreshAutoresearchSurface } = await loadComponentWithApi({

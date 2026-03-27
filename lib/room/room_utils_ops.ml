@@ -287,6 +287,25 @@ let read_json_opt config path =
       if Sys.file_exists path then Some (read_json_local path)
       else None
 
+let agent_json_needs_repair = function
+  | `Assoc fields -> (
+      match List.assoc_opt "last_seen" fields with
+      | Some (`Int _ | `Float _) -> true
+      | _ -> false)
+  | _ -> false
+
+let read_agent_with_repair config path =
+  let json = read_json config path in
+  match Types.agent_of_yojson json with
+  | Ok agent as ok ->
+      if agent_json_needs_repair json then (
+        Log.Room.warn
+          "agent state repair: repaired agent JSON and rewrote canonical state for %s"
+          path;
+        write_json config path (Types.agent_to_yojson agent));
+      ok
+  | Error _ as error -> error
+
 (* ============================================ *)
 (* File locking                                 *)
 (* ============================================ *)

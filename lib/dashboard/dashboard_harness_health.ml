@@ -70,7 +70,7 @@ let me_root () =
   | None -> (
       match trimmed_env_opt "HOME" with
       | Some home -> Filename.concat home "me"
-      | None -> Sys.getcwd ())
+      | None -> Env_config.me_root ())
 
 let pre_compact_store_base_dir () =
   Filename.concat (me_root ()) "data/harness-pre-compact"

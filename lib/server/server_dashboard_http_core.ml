@@ -396,6 +396,22 @@ let operator_actor_hint request =
       if sanitized = "" then None else Some sanitized
   | None -> None
 
+let remember_dashboard_request_context ~surface ~cache_key request extra =
+  let extras =
+    extra
+    |> List.filter_map (fun (key, value) ->
+         let trimmed = String.trim value in
+         if String.equal trimmed "" then None
+         else Some (Printf.sprintf "%s=%s" key trimmed))
+  in
+  let context =
+    String.concat " | "
+      ([ Printf.sprintf "surface=%s" surface;
+         Printf.sprintf "target=%s" request.Httpun.Request.target ]
+       @ extras)
+  in
+  Dashboard_cache.remember_context cache_key context
+
 (* --- Operator proactive refresh ---
    Default (no-param) requests are served from a background-refreshed ref.
    Parameterized requests fall back to on-demand compute with SWR cache.

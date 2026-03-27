@@ -24,6 +24,10 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
     : (Yojson.Safe.t, string) result =
   try
     Room_utils.ensure_initialized config;
+    let session_task_id = Printf.sprintf "team_session_start_%s"
+      (string_of_int (int_of_float (Time_compat.now () *. 1000.0))) in
+    let session_tracker = Progress.start_tracking ~task_id:session_task_id ~total_steps:5 () in
+    Progress.Tracker.step session_tracker ~message:"Validating session parameters" ();
     let duration_seconds = clamp_int ~min_v:60 ~max_v:28800 duration_seconds in
     let checkpoint_interval_sec =
       clamp_int ~min_v:10 ~max_v:600 checkpoint_interval_sec
@@ -109,6 +113,7 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
     in
     (* Create dirs only after validation succeeds — prevents orphaned
        directories when validate_operation_attachment returns Error. *)
+    Progress.Tracker.step session_tracker ~message:"Creating session directories" ();
     Team_session_store.ensure_session_dirs config session_id;
     Team_session_store.save_session config session;
     let* () =
@@ -136,6 +141,7 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
           | Error err -> Error err)
       | None -> Ok ()
     in
+    Progress.Tracker.step session_tracker ~message:"Recording session start event" ();
     Team_session_store.append_event config session_id ~event_type:"session_started"
       ~detail:
         (`Assoc
@@ -179,6 +185,7 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
               ("ts_iso", `String (now_iso ()));
             ]);
     write_checkpoint config session;
+    Progress.Tracker.step session_tracker ~message:"Registering runtime state" ();
     with_runtimes_lock (fun () ->
         Hashtbl.replace runtimes session_id
           {
@@ -214,6 +221,8 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
             ~final_status:Team_session_types.Failed ~reason
             ~generate_report:true);
           with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id));
+    Progress.Tracker.complete session_tracker
+      ~message:(Printf.sprintf "Team session %s started" session_id) ();
     Ok
       (`Assoc
         [

@@ -81,6 +81,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     with
     | Error e -> (false, "❌ " ^ e)
     | Ok meta0 ->
+      let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
+        name (int_of_float (Time_compat.now () *. 1000.0)) in
+      let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
+      Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
       let meta =
         apply_settings_update
           ~args ~meta0 ~new_short_goal ~new_mid_goal ~new_long_goal
@@ -101,9 +105,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           ~generation:meta.generation
       in
       let effective_models = effective_model_labels_for_turn meta in
+      Progress.Tracker.step turn_tracker ~message:"Validating API keys" ();
       (match ensure_api_keys_for_labels effective_models with
-       | Error e -> (false, "❌ " ^ e)
+       | Error e ->
+         Progress.stop_tracking turn_task_id;
+         (false, "❌ " ^ e)
        | Ok () ->
+         Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
          let primary_max_context =
            Oas_model_resolve.resolve_primary_max_context effective_models
          in
@@ -184,6 +192,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   Printf.sprintf "%s\n\n--- Turn-specific instructions ---\n%s"
                     prompt ti
             in
+            Progress.Tracker.step turn_tracker
+              ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
             match
               Keeper_agent_run.run_turn
                 ~config:ctx.config ~meta ~base_dir
@@ -202,6 +212,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
               start_keepalive ctx meta;
+              Progress.stop_tracking turn_task_id;
               (false, Printf.sprintf "❌ Agent.run failed: %s" e)
             | Ok result ->
               (try ignore (Trajectory.finalize trajectory_acc
@@ -209,6 +220,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
               start_keepalive ctx meta;
+              Progress.Tracker.complete turn_tracker
+                ~message:(Printf.sprintf "Turn completed: %d tool calls" result.tool_calls_made) ();
               let reply_json = `Assoc [
                 ("reply", `String result.response_text);
                 ("model", `String result.model_used);

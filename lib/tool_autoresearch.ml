@@ -234,9 +234,15 @@ let handle_swarm_start (ctx : context) args =
       match prepare_start_params ctx args with
       | Error message -> `Assoc [ ("error", `String message) ]
       | Ok params ->
+          let swarm_task_id = Printf.sprintf "swarm_start_%s"
+            (string_of_int (int_of_float (Time_compat.now () *. 1000.0))) in
+          let swarm_tracker = Progress.start_tracking ~task_id:swarm_task_id ~total_steps:4 () in
+          Progress.Tracker.step swarm_tracker ~message:"Initializing autoresearch loop" ();
           let program_note = normalize_string_opt (get_string_opt args "program_note") in
           (match setup_running_loop ctx params with
-          | Error message -> `Assoc [ ("error", `String message) ]
+          | Error message ->
+            Progress.stop_tracking swarm_task_id;
+            `Assoc [ ("error", `String message) ]
           | Ok state ->
           state.program_note <- program_note;
           broadcast_loop_lifecycle "autoresearch_started" state;
@@ -255,6 +261,7 @@ let handle_swarm_start (ctx : context) args =
           in
           state.warnings <- List.rev !warnings;
           Autoresearch.save_state ~base_path:ctx.base_path state;
+          Progress.Tracker.step swarm_tracker ~message:"Launching team session" ();
           let session_goal =
             build_swarm_goal ~goal:params.goal ~target_file:params.target_file
               ~program_note
@@ -267,6 +274,7 @@ let handle_swarm_start (ctx : context) args =
               state.status <- Autoresearch.Error;
               state.error_message <- Some message;
               Autoresearch.save_state ~base_path:ctx.base_path state;
+              Progress.stop_tracking swarm_task_id;
               `Assoc
                 [
                   ("error", `String message);
@@ -278,12 +286,15 @@ let handle_swarm_start (ctx : context) args =
                   state.status <- Autoresearch.Error;
                   state.error_message <- Some message;
                   Autoresearch.save_state ~base_path:ctx.base_path state;
+                  Progress.stop_tracking swarm_task_id;
                   `Assoc
                     [
                       ("error", `String message);
                       ("loop_id", `String state.loop_id);
                     ]
               | Ok (session_id, artifacts_dir) ->
+                  Progress.Tracker.complete swarm_tracker
+                    ~message:(Printf.sprintf "Swarm launched: session %s" session_id) ();
                   let link : Autoresearch.swarm_link =
                     {
                       loop_id = state.loop_id;

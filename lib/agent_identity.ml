@@ -77,7 +77,7 @@ let string_of_channel = function
 
 (** Generate a unique session key *)
 let generate_session_key () =
-  let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
+  let uuid = Uuidm.v4_gen identity_rng () in
   Uuidm.to_string uuid
 
 (** Create identity from MCP request params *)

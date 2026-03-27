@@ -262,7 +262,32 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
             let webrtc_expired = Server_webrtc_transport.cleanup_expired_offers () in
             if webrtc_expired > 0 then
               Log.Server.info "WebRTC: cleaned %d expired offers" webrtc_expired
-          end
+          end;
+          (* Rate-limit buckets: evict keys unused for 5 minutes *)
+          let rl = Eio.Lazy.force Rate_limit.global in
+          let rl_reaped = Rate_limit.cleanup rl ~older_than_seconds:300 in
+          if rl_reaped > 0 then
+            Log.Server.info "Reaped %d stale rate-limit buckets" rl_reaped;
+          (* Agent registry: remove resolved-name cache for dead sessions *)
+          let ar_reaped = Agent_registry_eio.cleanup_stale_sessions () in
+          if ar_reaped > 0 then
+            Log.Server.info "Reaped %d stale agent registry sessions" ar_reaped;
+          (* Consensus: remove closed/cancelled voting sessions older than 1h *)
+          let cs_reaped = Council.Consensus.cleanup_closed () in
+          if cs_reaped > 0 then
+            Log.Server.info "Reaped %d closed consensus sessions" cs_reaped;
+          (* A2A: remove heartbeat snapshots for offline agents *)
+          let active_agents =
+            List.map (fun (id : Agent_identity.t) -> id.agent_name)
+              (Agent_registry_eio.list_active ~within_seconds:600.0 ())
+          in
+          let hb_reaped = A2a_tools.cleanup_stale_heartbeats ~active_agents () in
+          if hb_reaped > 0 then
+            Log.Server.info "Reaped %d stale heartbeat entries" hb_reaped;
+          (* A2A: remove event buffers for dead subscriptions *)
+          let buf_reaped = A2a_tools.cleanup_orphan_buffers () in
+          if buf_reaped > 0 then
+            Log.Server.info "Reaped %d orphan event buffers" buf_reaped
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

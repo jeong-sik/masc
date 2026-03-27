@@ -111,8 +111,9 @@ let event_buffers_mutex = Eio.Mutex.create ()
 let max_buffered_events = Env_config_governance.Timeouts.event_buffer_size
 
 (** Generate stable UUIDv4 identifiers for subscriptions and delegated tasks. *)
+let a2a_rng = Random.State.make_self_init ()
 let generate_uuid () =
-  let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
+  let uuid = Uuidm.v4_gen a2a_rng () in
   Uuidm.to_string uuid
 
 (** Get current ISO8601 timestamp *)
@@ -739,3 +740,31 @@ let submit_heartbeat_result
        Log.Misc.info "heartbeat result rejected: %s" msg);
 
   result
+
+(** {1 Cleanup} *)
+
+(** Remove heartbeat snapshots for agents not in [active_agents].
+    Returns count of removed entries. Safe to call: entries are re-created
+    on next heartbeat emission. *)
+let cleanup_stale_heartbeats ~active_agents () =
+  Eio_guard.with_mutex heartbeat_mutex (fun () ->
+    let stale = Hashtbl.fold (fun agent _ acc ->
+      if not (List.mem agent active_agents) then agent :: acc else acc
+    ) latest_heartbeat_tasks [] in
+    List.iter (fun agent ->
+      Hashtbl.remove latest_heartbeat_tasks agent;
+      Hashtbl.remove latest_heartbeat_results agent
+    ) stale;
+    List.length stale)
+
+(** Remove event buffer entries whose subscription no longer exists.
+    Returns count of removed entries. *)
+let cleanup_orphan_buffers () =
+  Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
+    let orphans = Hashtbl.fold (fun sub_id _ acc ->
+      let exists = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
+        Hashtbl.mem subscriptions sub_id) in
+      if not exists then sub_id :: acc else acc
+    ) event_buffers [] in
+    List.iter (Hashtbl.remove event_buffers) orphans;
+    List.length orphans)

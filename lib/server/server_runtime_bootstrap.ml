@@ -49,8 +49,16 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_net net;
   Eio_context.set_clock clock;
   Eio_context.set_mono_clock mono_clock;
-  Council.Thread_persist.set_eio_context ~clock
-    ~https_connector:(Eio_context.get_https_connector ()) net;
+  let https_connector =
+    match Eio_context.get_https_connector_result () with
+    | Ok connector -> Some connector
+    | Error message ->
+        Log.Server.warn
+          "HTTPS connector unavailable during bootstrap; HTTPS persistence calls will be disabled: %s"
+          message;
+        None
+  in
+  Council.Thread_persist.set_eio_context ?https_connector ~clock net;
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   let caqti_env : Caqti_eio.stdenv =
     object
@@ -302,12 +310,17 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ("reconcile_active_agents", fun () -> reconcile_active_agents_gauge state);
           ( "recover_running_team_sessions",
             fun () ->
-              let env = object
-                method clock = clock
-                method process_mgr = match state.Mcp_server.proc_mgr with Some pm -> pm | None -> failwith "process_mgr not available"
-              end in
-              Team_session_engine_eio.recover_running_sessions ~sw ~env
-                ~config:state.Mcp_server.room_config );
+              match state.Mcp_server.proc_mgr with
+              | None ->
+                  Log.Server.warn
+                    "skipping team session recovery: process_mgr not available"
+              | Some process_mgr ->
+                  let env = object
+                    method clock = clock
+                    method process_mgr = process_mgr
+                  end in
+                  Team_session_engine_eio.recover_running_sessions ~sw ~env
+                    ~config:state.Mcp_server.room_config );
           ("chain_bootstrap", fun () -> bootstrap_chain_state state);
           ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);
           ("tool_metrics_restore", fun () -> restore_tool_metrics_from_disk state);

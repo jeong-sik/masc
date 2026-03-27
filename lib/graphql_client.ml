@@ -119,20 +119,24 @@ let request ?(timeout_sec=10.0) ?(fallback=true) body : (string, string) result 
       let uri = Uri.of_string url in
       let is_https = Uri.scheme uri = Some "https" in
       let run () =
-        let https =
-          if is_https then Some (Eio_context.get_https_connector ()) else None
+        let https_result =
+          if not is_https then Ok None
+          else
+            match Eio_context.get_https_connector_result () with
+            | Ok connector -> Ok (Some connector)
+            | Error message -> Error message
         in
-        let header_list =
-          Cohttp.Header.to_list headers
-        in
-        let code, body_str =
-          Masc_http_client.post_sync ~net ~https ~url
-            ~headers:header_list ~body ()
-        in
-        if not (Cohttp.Code.is_success code) then
-          Error (Printf.sprintf "HTTP %d" code)
-        else
-          ensure_json_response body_str
+        match https_result with
+        | Error _ as error -> error
+        | Ok https ->
+            let header_list = Cohttp.Header.to_list headers in
+            let code, body_str =
+              Masc_http_client.post_sync ~net ~https ~url ~headers:header_list
+                ~body ()
+            in
+            if not (Cohttp.Code.is_success code) then
+              Error (Printf.sprintf "HTTP %d" code)
+            else ensure_json_response body_str
       in
       match Eio_context.get_clock_opt () with
       | Some clock ->

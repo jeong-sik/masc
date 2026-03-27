@@ -39,6 +39,7 @@
    cp_unit
    cp_unit_projection
    cp_snapshot
+   cp_snapshot_section_cache
    cp_snapshot_core
    cp_snapshot_summaries
    cp_cleanup
@@ -94,6 +95,7 @@
    dashboard_http_repo_synthesis
    dashboard_provider_runs
    proactive_refresh
+   server_dashboard_http_runtime_support
    server_dashboard_http
    server_dashboard_http_cache
    server_dashboard_http_core
@@ -175,6 +177,8 @@
    worker_tool_input
    worker_verification
    safe_parse
+   prompt_registry_types
+   prompt_registry_store
    prompt_registry
    prompt_defaults
    prompt_composer

@@ -7,133 +7,20 @@ open Server_auth
 include Server_dashboard_http_cache
 
 type dashboard_compute_mode =
+  Server_dashboard_http_runtime_support.dashboard_compute_mode =
   | Inline_shared
   | Offloaded_readonly
 
+let runtime_support = Server_dashboard_http_runtime_support.default ()
+
 (** Executor pool for CPU-heavy dashboard compute.
     Pool reference is shared via [Executor_pool_ref] in masc_core. *)
-let set_executor_pool pool = Executor_pool_ref.set pool
-
-(** Cached readonly PG config for the main domain.
-    Created once on first use and reused by all proactive refresh loops
-    instead of creating a new Caqti pool per call.  Tied to the server's
-    root switch, which lives for the entire process.
-
-    Protected by [_readonly_config_mu] to prevent two fibers from
-    creating duplicate pools when the first creation yields on I/O. *)
-let _cached_readonly_pg_config : Room.config option ref = ref None
-let _readonly_config_mu = Eio.Mutex.create ()
-
-let isolated_readonly_dashboard_config ~sw ~clock ~(config : Room.config) =
-  match config.backend_config.Backend.backend_type with
-  | Backend.PostgresNative ->
-      let net = Eio_context.get_net () in
-      let mono_clock = Eio_context.get_mono_clock () in
-      Room_utils_backend_setup.with_domain_local_pg_backend
-        ~sw ~net ~clock ~mono_clock config
-  | Backend.Memory | Backend.FileSystem -> Some config
-
-(** Return a cached readonly config for the main domain.
-    Avoids creating a new PG pool on every proactive refresh cycle.
-    Mutex-protected: pool creation involves network I/O that yields,
-    so without the lock two fibers could both see [None] and create
-    duplicate pools (one would be orphaned, leaking connections). *)
-let cached_isolated_readonly_config ~sw ~clock ~config =
-  match !_cached_readonly_pg_config with
-  | Some c -> Some c
-  | None ->
-      Eio.Mutex.use_rw ~protect:true _readonly_config_mu (fun () ->
-        match !_cached_readonly_pg_config with
-        | Some c -> Some c
-        | None ->
-            let result = isolated_readonly_dashboard_config ~sw ~clock ~config in
-            (match result with
-             | Some _ as r ->
-                 _cached_readonly_pg_config := r;
-                 Log.Dashboard.info "cached main-domain readonly PG config"
-             | None -> ());
-            result)
-
-(** Semaphore limiting concurrent PG-heavy dashboard operations.
-    Prevents pool exhaustion when multiple proactive refresh loops
-    overlap.  Sized to [pool_size - 2] to leave headroom for
-    incoming HTTP requests.  Created lazily on first use. *)
-let _pg_semaphore : Eio.Semaphore.t option ref = ref None
-
-let pg_semaphore () =
-  match !_pg_semaphore with
-  | Some s -> s
-  | None ->
-      let pool_size =
-        match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-        | Some s -> (try max 1 (min (int_of_string s) 50) with Failure _ -> 10)
-        | None -> 10
-      in
-      let limit = max 2 (pool_size - 2) in
-      let s = Eio.Semaphore.make limit in
-      _pg_semaphore := Some s;
-      Log.Dashboard.info "PG dashboard semaphore created (limit=%d)" limit;
-      s
-
-let with_pg_guard f =
-  let sem = pg_semaphore () in
-  Eio.Semaphore.acquire sem;
-  Fun.protect f ~finally:(fun () -> Eio.Semaphore.release sem)
+let set_executor_pool = Server_dashboard_http_runtime_support.set_executor_pool
 
 let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
     ~(config : Room.config) compute =
-  let fallback () = compute ~config ~sw in
-  let fallback_isolated_pg () =
-    match cached_isolated_readonly_config ~sw ~clock ~config with
-    | Some isolated -> compute ~config:isolated ~sw
-    | None ->
-        failwith "dashboard readonly backend unavailable"
-  in
-  let run_in_pool pool_sw =
-    match config.backend_config.Backend_types.backend_type with
-    | Backend_types.PostgresNative ->
-        let net = Eio_context.get_net () in
-        let mono_clock = Eio_context.get_mono_clock () in
-        (match
-           Room_utils_backend_setup.with_domain_local_pg_backend
-             ~sw:pool_sw ~net ~clock ~mono_clock config
-         with
-         | Some domain_config -> `Done (compute ~config:domain_config ~sw:pool_sw)
-         | None -> `Fallback)
-    | Backend_types.Memory | Backend_types.FileSystem ->
-        `Done (compute ~config ~sw:pool_sw)
-  in
-  let is_pg =
-    config.backend_config.Backend.backend_type = Backend.PostgresNative
-  in
-  let offloaded () =
-    match Executor_pool_ref.get () with
-    | Some pool ->
-        (try
-           match
-             Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
-               Eio.Switch.run run_in_pool)
-           with
-           | `Done value -> value
-           | `Fallback ->
-               Log.Dashboard.warn
-                 "dashboard offload fallback: domain-local backend unavailable";
-               if is_pg then with_pg_guard fallback_isolated_pg
-               else fallback ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             Log.Dashboard.warn "dashboard offload failed, using inline compute: %s"
-               (Printexc.to_string exn);
-             if is_pg then with_pg_guard fallback_isolated_pg
-             else fallback ())
-    | None ->
-        if is_pg then with_pg_guard fallback_isolated_pg
-        else fallback ()
-  in
-  match mode with
-  | Inline_shared -> fallback ()
-  | Offloaded_readonly -> offloaded ()
+  Server_dashboard_http_runtime_support.run_dashboard_compute runtime_support
+    ~mode ~sw ~clock ~config compute
 
 (* ================================================================ *)
 (* Dashboard Data (Batch API)                                       *)
@@ -422,23 +309,10 @@ let _operator_refresh_interval_s =
     ~min_v:2.0
     ~max_v:600.0
 
-(* Shared session list cache between snapshot and digest refresh loops.
-   Both loops run as fibers in the same Eio domain (cooperative scheduling),
-   so no mutex needed for the mutable ref. TTL = 80% of refresh interval
-   to avoid serving stale data across interval boundaries. *)
-let _shared_sessions : Team_session_types.session list option ref = ref None
-let _shared_sessions_at : float ref = ref 0.0
-
 let dashboard_active_or_recent_sessions_cached ~clock config =
-  let now = Time_compat.now () in
-  match !_shared_sessions with
-  | Some cached when now -. !_shared_sessions_at < _operator_refresh_interval_s *. 0.8 ->
-      cached
-  | _ ->
-    let sessions = dashboard_active_or_recent_sessions ~clock config in
-    _shared_sessions := Some sessions;
-    _shared_sessions_at := now;
-    sessions
+  Server_dashboard_http_runtime_support.dashboard_active_or_recent_sessions_cached
+    runtime_support ~clock ~refresh_interval_s:_operator_refresh_interval_s
+    config dashboard_active_or_recent_sessions
 
 let operator_snapshot_extra sessions =
   [

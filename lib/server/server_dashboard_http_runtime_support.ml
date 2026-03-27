@@ -1,0 +1,141 @@
+type dashboard_compute_mode =
+  | Inline_shared
+  | Offloaded_readonly
+
+type t = {
+  mutable cached_readonly_pg_config : Room.config option;
+  readonly_config_mu : Eio.Mutex.t;
+  mutable pg_semaphore : Eio.Semaphore.t option;
+  mutable shared_sessions : Team_session_types.session list option;
+  mutable shared_sessions_at : float;
+}
+
+let create () =
+  {
+    cached_readonly_pg_config = None;
+    readonly_config_mu = Eio.Mutex.create ();
+    pg_semaphore = None;
+    shared_sessions = None;
+    shared_sessions_at = 0.0;
+  }
+
+let default_state : t Lazy.t = lazy (create ())
+
+let default () = Lazy.force default_state
+
+let set_executor_pool pool = Executor_pool_ref.set pool
+
+let isolated_readonly_dashboard_config ~sw ~clock ~(config : Room.config) =
+  match config.backend_config.Backend.backend_type with
+  | Backend.PostgresNative ->
+      let net = Eio_context.get_net () in
+      let mono_clock = Eio_context.get_mono_clock () in
+      Room_utils_backend_setup.with_domain_local_pg_backend
+        ~sw ~net ~clock ~mono_clock config
+  | Backend.Memory | Backend.FileSystem -> Some config
+
+let cached_isolated_readonly_config state ~sw ~clock ~config =
+  match state.cached_readonly_pg_config with
+  | Some c -> Some c
+  | None ->
+      Eio.Mutex.use_rw ~protect:true state.readonly_config_mu (fun () ->
+          match state.cached_readonly_pg_config with
+          | Some c -> Some c
+          | None ->
+              let result =
+                isolated_readonly_dashboard_config ~sw ~clock ~config
+              in
+              (match result with
+              | Some config ->
+                  state.cached_readonly_pg_config <- Some config;
+                  Log.Dashboard.info "cached main-domain readonly PG config"
+              | None -> ());
+              result)
+
+let pg_semaphore state () =
+  match state.pg_semaphore with
+  | Some s -> s
+  | None ->
+      let pool_size =
+        match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
+        | Some s -> (
+            try max 1 (min (int_of_string s) 50) with Failure _ -> 10)
+        | None -> 10
+      in
+      let limit = max 2 (pool_size - 2) in
+      let s = Eio.Semaphore.make limit in
+      state.pg_semaphore <- Some s;
+      Log.Dashboard.info "PG dashboard semaphore created (limit=%d)" limit;
+      s
+
+let with_pg_guard state f =
+  let sem = pg_semaphore state () in
+  Eio.Semaphore.acquire sem;
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release sem) f
+
+let run_dashboard_compute state ?(mode = Offloaded_readonly) ~sw ~clock
+    ~(config : Room.config) compute =
+  let fallback () = compute ~config ~sw in
+  let fallback_isolated_pg () =
+    match cached_isolated_readonly_config state ~sw ~clock ~config with
+    | Some isolated -> compute ~config:isolated ~sw
+    | None ->
+        Log.Dashboard.warn
+          "dashboard readonly backend unavailable; using shared backend";
+        fallback ()
+  in
+  let run_in_pool pool_sw =
+    match config.backend_config.Backend_types.backend_type with
+    | Backend_types.PostgresNative ->
+        let net = Eio_context.get_net () in
+        let mono_clock = Eio_context.get_mono_clock () in
+        (match
+           Room_utils_backend_setup.with_domain_local_pg_backend
+             ~sw:pool_sw ~net ~clock ~mono_clock config
+         with
+        | Some domain_config -> `Done (compute ~config:domain_config ~sw:pool_sw)
+        | None -> `Fallback)
+    | Backend_types.Memory | Backend_types.FileSystem ->
+        `Done (compute ~config ~sw:pool_sw)
+  in
+  let is_pg =
+    config.backend_config.Backend.backend_type = Backend.PostgresNative
+  in
+  let offloaded () =
+    match Executor_pool_ref.get () with
+    | Some pool -> (
+        try
+          match
+            Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
+                Eio.Switch.run run_in_pool)
+          with
+          | `Done value -> value
+          | `Fallback ->
+              Log.Dashboard.warn
+                "dashboard offload fallback: domain-local backend unavailable";
+              if is_pg then with_pg_guard state fallback_isolated_pg else fallback ()
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Dashboard.warn
+              "dashboard offload failed, using inline compute: %s"
+              (Printexc.to_string exn);
+            if is_pg then with_pg_guard state fallback_isolated_pg else fallback ())
+    | None ->
+        if is_pg then with_pg_guard state fallback_isolated_pg else fallback ()
+  in
+  match mode with
+  | Inline_shared -> fallback ()
+  | Offloaded_readonly -> offloaded ()
+
+let dashboard_active_or_recent_sessions_cached state ~clock
+    ~refresh_interval_s config load_sessions =
+  let now = Time_compat.now () in
+  match state.shared_sessions with
+  | Some cached when now -. state.shared_sessions_at < refresh_interval_s *. 0.8 ->
+      cached
+  | _ ->
+      let sessions = load_sessions ~clock config in
+      state.shared_sessions <- Some sessions;
+      state.shared_sessions_at <- now;
+      sessions

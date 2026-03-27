@@ -730,19 +730,23 @@ let health_check ~sw:_ ~clock:_ ~net () =
       in
       try
         Eio.Switch.run @@ fun inner_sw ->
-        let client = client_for_uri ~sw:inner_sw ~net uri in
-        let resp, body = Cohttp_eio.Client.get ~sw:inner_sw client uri in
-        let status = Cohttp.Response.status resp in
-        let body_str = Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int in
-        if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then
-          Ok
-            (append_provider_metadata
-               (`Assoc
-                 [
-                   ("status", `String "healthy");
-                   ("server", `String (Uri.to_string uri));
-                   ( "response",
-                     try Yojson.Safe.from_string body_str
+        match client_for_uri_result ~sw:inner_sw ~net uri with
+        | Error error -> Error error
+        | Ok client ->
+            let resp, body = Cohttp_eio.Client.get ~sw:inner_sw client uri in
+            let status = Cohttp.Response.status resp in
+            let body_str =
+              Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int
+            in
+            if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then
+              Ok
+                (append_provider_metadata
+                   (`Assoc
+                     [
+                       ("status", `String "healthy");
+                       ("server", `String (Uri.to_string uri));
+                       ( "response",
+                         try Yojson.Safe.from_string body_str
                      with Yojson.Json_error _ -> `String body_str );
                  ])
                endpoint)

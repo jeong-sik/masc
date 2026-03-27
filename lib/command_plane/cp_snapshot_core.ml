@@ -90,69 +90,13 @@ let _file_mtime path =
   try (Unix.stat path).Unix.st_mtime
   with Unix.Unix_error _ -> 0.0
 
-type section_cache = {
-  (* topology — tracks units.json + agents dir mtime *)
-  mutable topo_units_mtime : float;
-  mutable topo_agents_mtime : float;
-  mutable agents : Types.agent list;
-  mutable managed_units : unit_record list;
-  mutable units : unit_record list;
-  mutable source : string;
-  (* sessions *)
-  mutable sessions_mtime : float;
-  mutable sessions : Team_session_types.session list;
-  (* intents *)
-  mutable intents_mtime : float;
-  mutable intents : intent_record list;
-  (* operations — depends on sessions + units, so track both *)
-  mutable ops_topo_units_mtime : float;
-  mutable ops_topo_agents_mtime : float;
-  mutable ops_sessions_mtime : float;
-  mutable ops_mtime : float;
-  mutable operations : operation_record list;
-  (* detachments *)
-  mutable det_mtime : float;
-  mutable det_ops_mtime : float;
-  mutable detachments : detachment_record list;
-  (* decisions *)
-  mutable decisions_mtime : float;
-  mutable decisions_operator_mtime : float;
-  mutable decisions : policy_decision_record list;
-  (* full snapshot *)
-  mutable last_built : float;
-  mutable last_state : snapshot_state option;
-}
+type section_cache = Cp_snapshot_section_cache.section_cache
 
-let _section_cache : section_cache option ref = ref None
+let _section_cache = Cp_snapshot_section_cache.shared_cache
 
 let _session_limit = 50
 
-let _make_section_cache () =
-  {
-    topo_units_mtime = 0.0;
-    topo_agents_mtime = 0.0;
-    agents = [];
-    managed_units = [];
-    units = [];
-    source = "auto";
-    sessions_mtime = 0.0;
-    sessions = [];
-    intents_mtime = 0.0;
-    intents = [];
-    ops_topo_units_mtime = 0.0;
-    ops_topo_agents_mtime = 0.0;
-    ops_sessions_mtime = 0.0;
-    ops_mtime = 0.0;
-    operations = [];
-    det_mtime = 0.0;
-    det_ops_mtime = 0.0;
-    detachments = [];
-    decisions_mtime = 0.0;
-    decisions_operator_mtime = 0.0;
-    decisions = [];
-    last_built = 0.0;
-    last_state = None;
-  }
+let _make_section_cache = Cp_snapshot_section_cache.create
 
 let snapshot_state_of_sections ~config ~agents ~managed_units ~units ~source
     ~sessions ~intents ~operations ~detachments ~decisions =
@@ -261,8 +205,6 @@ let build_snapshot_state ?sessions config =
               ~sessions:sc.sessions ~intents:sc.intents ~operations:sc.operations
               ~detachments:sc.detachments ~decisions:sc.decisions
           in
-          sc.last_built <- Time_compat.now ();
-          sc.last_state <- Some state;
           state
       | Memory _ | PostgresNative _ ->
           let agents, managed_units, units, source = topology_units config in

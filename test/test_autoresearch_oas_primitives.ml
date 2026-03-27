@@ -197,7 +197,11 @@ let test_cycle_reinjects_diff_guard_lesson () =
   check bool "lesson context injected" true
     (contains injected_goal "Relevant prior failure lessons:"
      || contains injected_goal "Diff guard rejected patch");
-  check int "cycle advanced twice" 2 state.current_cycle
+  let final_cycle = Lib.Autoresearch.with_loops_ro (fun () ->
+    match Hashtbl.find_opt Lib.Autoresearch.active_loops state.loop_id with
+    | Some s -> s.current_cycle
+    | None -> -1) in
+  check int "cycle advanced twice" 2 final_cycle
 
 let () =
   run "autoresearch_oas_primitives"

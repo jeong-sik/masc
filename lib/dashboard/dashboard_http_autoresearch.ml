@@ -452,17 +452,20 @@ let retry_loop_json ~(base_path : string) ~(loop_id : string) :
                 ~source_workdir:state.source_workdir ~loop_id
             with
             | Error message ->
-                state.status <- Autoresearch.Error;
-                state.error_message <- Some message;
-                state.updated_at <- Time_compat.now ();
+                let state = { state with
+                  status = Autoresearch.Error;
+                  error_message = Some message;
+                  updated_at = Time_compat.now () } in
+                Hashtbl.replace Autoresearch.active_loops loop_id state;
                 Autoresearch.save_state ~base_path state;
                 Error message
             | Ok (workdir, _repo_root, warnings) ->
-                state.workdir <- workdir;
-                state.status <- Autoresearch.Running;
-                state.error_message <- None;
-                state.warnings <- warnings;
-                state.updated_at <- Time_compat.now ();
+                let state = { state with
+                  workdir;
+                  status = Autoresearch.Running;
+                  error_message = None;
+                  warnings;
+                  updated_at = Time_compat.now () } in
                 Hashtbl.replace Autoresearch.active_loops loop_id state;
                 Autoresearch.latest_loop_id := Some loop_id;
                 Autoresearch.save_state ~base_path state;

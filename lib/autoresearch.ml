@@ -174,20 +174,27 @@ let create_state ~goal ~metric_fn ?(model_model = "glm") ~target_file ~cycle_tim
     build_verify_fn;
   }
 
-(** Append an insight, maintaining FIFO max 10 entries. *)
+(** Append an insight, maintaining FIFO max 10 entries.
+    Returns updated state. *)
 let add_insight (state : loop_state) msg =
   let max_insights = 10 in
-  state.insights <- msg :: state.insights;
-  if List.length state.insights > max_insights then
-    state.insights <- List.filteri (fun i _ -> i < max_insights) state.insights
+  let insights = msg :: state.insights in
+  let insights =
+    if List.length insights > max_insights then
+      List.filteri (fun i _ -> i < max_insights) insights
+    else insights
+  in
+  { state with insights }
 
-(** Record one completed experiment cycle. *)
+(** Record one completed experiment cycle.
+    Returns [(state, record)] with the updated state. *)
 let record_cycle (state : loop_state) ~hypothesis ~score_before ~score_after
     ~commit_hash ~elapsed_ms ~model_used =
   let delta = score_after -. score_before in
   (* Compare against the maintained baseline, not score_before which can dip
      below baseline due to metric noise -- preventing ratchet-down regressions *)
   let decision = if score_after > state.baseline then Keep else Discard in
+  let now = Time_compat.now () in
   let record = {
     cycle = state.current_cycle;
     hypothesis;
@@ -198,25 +205,28 @@ let record_cycle (state : loop_state) ~hypothesis ~score_before ~score_after
     commit_hash;
     elapsed_ms;
     model_used;
-    timestamp = Time_compat.now ();
+    timestamp = now;
   } in
-  state.history <- record :: state.history;
-  state.updated_at <- Time_compat.now ();
-  (match decision with
-   | Keep ->
-     state.total_keeps <- state.total_keeps + 1;
-     state.baseline <- score_after;
-     if score_after > state.best_score then begin
-       state.best_score <- score_after;
-       state.best_cycle <- state.current_cycle
-     end;
-     add_insight state
-       (Printf.sprintf "Cycle %d: %s improved +%.4f" state.current_cycle hypothesis delta)
-   | Discard ->
-     state.total_discards <- state.total_discards + 1;
-     add_insight state
-       (Printf.sprintf "Cycle %d: %s no improvement (%.4f)" state.current_cycle hypothesis delta));
-  record
+  let state = { state with history = record :: state.history; updated_at = now } in
+  let state =
+    match decision with
+    | Keep ->
+      let state = { state with
+        total_keeps = state.total_keeps + 1;
+        baseline = score_after } in
+      let state =
+        if score_after > state.best_score then
+          { state with best_score = score_after; best_cycle = state.current_cycle }
+        else state
+      in
+      add_insight state
+        (Printf.sprintf "Cycle %d: %s improved +%.4f" state.current_cycle hypothesis delta)
+    | Discard ->
+      let state = { state with total_discards = state.total_discards + 1 } in
+      add_insight state
+        (Printf.sprintf "Cycle %d: %s no improvement (%.4f)" state.current_cycle hypothesis delta)
+  in
+  (state, record)
 
 (** Check if the loop should continue. *)
 let should_continue (state : loop_state) =
@@ -226,10 +236,12 @@ let should_continue (state : loop_state) =
     Acquires [loops_mu] write lock internally. *)
 let stop_loop ~base_path ?reason loop_id =
   let stop_state (state : loop_state) =
-    state.status <- Stopped;
-    state.error_message <- reason;
-    state.updated_at <- Time_compat.now ();
+    let state = { state with
+      status = Stopped;
+      error_message = reason;
+      updated_at = Time_compat.now () } in
     save_state ~base_path state;
+    Hashtbl.replace active_loops loop_id state;
     state
   in
   with_loops_rw (fun () ->

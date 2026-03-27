@@ -212,10 +212,7 @@ let postgres_url_from_env () =
              preferred_supabase_transaction_companion = true;
              preferred_host = Some host;
            } ->
-           Log.Backend.info
-             "Supabase Session Pooler configured on %s:5432; preferring \
-              available Transaction Pooler companion on %s:6543"
-             host host;
+           Log.Backend.info "Supabase Session Pooler configured on %s:5432; preferring available Transaction Pooler companion on %s:6543" host host;
            Some url
        | Some { url; _ } -> Some url
        | None -> None)

@@ -266,6 +266,22 @@ let budget_of_session_timeout timeout_sec =
       }
   | None -> Swarm.Swarm_types.no_budget
 
+let session_runtime_health_check ~(config : Room.config)
+    ~(session : Team_session_types.session) () =
+  let base_path_ok =
+    String.trim config.base_path <> "" && Sys.file_exists config.base_path
+  in
+  let room_ready = Room.is_initialized config in
+  let session_ready =
+    match Team_session_store.load_session config session.session_id with
+    | Some current ->
+        current.status = Team_session_types.Running
+        && String.equal current.session_id session.session_id
+        && String.equal current.room_id session.room_id
+    | None -> false
+  in
+  base_path_ok && room_ready && session_ready
+
 (* ── planned_worker -> agent_entry ─────────────────────────────── *)
 
 let planned_worker_to_entry_with_state
@@ -369,7 +385,7 @@ let session_to_swarm_config
     budget = budget_of_session_timeout timeout_sec;
     max_agent_retries = 1;
     collaboration = Some collaboration;
-    resource_check = Some (fun () -> Room.is_initialized config);
+    resource_check = Some (session_runtime_health_check ~config ~session);
     max_concurrent_agents = Some (max 1 (List.length entries));
     enable_streaming = false }
 

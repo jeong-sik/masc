@@ -121,7 +121,7 @@ function inheritedWorkflowRouteParams(): Record<string, string> {
 
 export function surfaceRouteParams(surface: CommandPlaneSurface): Record<string, string> {
   const inherited = inheritedWorkflowRouteParams()
-  const base = { ...inherited, section: 'command' }
+  const base = { ...inherited, section: 'warroom' }
   const swarmRunId = dashboardSwarmRunId()
   const swarmOperationId = dashboardSwarmOperationId()
   if (surface === 'operations') return base

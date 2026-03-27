@@ -23,8 +23,7 @@ let heartbeat_in_room config ~room_id ~agent_name =
   let agent_file = Filename.concat (agents_dir scoped) filename in
   if path_exists scoped agent_file then begin
     with_file_lock scoped agent_file (fun () ->
-      let json = read_json scoped agent_file in
-      match agent_of_yojson json with
+      match read_agent_with_repair scoped agent_file with
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
           write_json scoped agent_file (agent_to_yojson updated);
@@ -44,8 +43,7 @@ let heartbeat config ~agent_name =
   let agent_file = Filename.concat (agents_dir config) filename in
   if path_exists config agent_file then begin
     with_file_lock config agent_file (fun () ->
-      let json = read_json config agent_file in
-      match agent_of_yojson json with
+      match read_agent_with_repair config agent_file with
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
           write_json config agent_file (agent_to_yojson updated);
@@ -81,8 +79,7 @@ let cleanup_zombies
         Room_query.safe_yield ();
         if Filename.check_suffix name ".json" then begin
           let path = Filename.concat agents_path name in
-          let json = read_json config path in
-          match agent_of_yojson json with
+          match read_agent_with_repair config path with
           | Ok agent
             when (not (List.exists (fun (n, _) -> n = agent.name) !zombie_entries)) &&
                  (let threshold =
@@ -108,8 +105,7 @@ let cleanup_zombies
          Active+dead (the old behavior) is invisible to monitoring. *)
       List.iter (fun (name, path) ->
         (try
-          let json = read_json config path in
-          match agent_of_yojson json with
+          match read_agent_with_repair config path with
           | Ok agent ->
               let updated = { agent with status = Inactive; last_seen = now_iso () } in
               write_json config path (agent_to_yojson updated)

@@ -60,11 +60,14 @@ let now () = Time_compat.now ()
     runs. *)
 let stale_factor = 10.0
 
+exception Compute_timeout of string * bool
+
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
     it and recomputing.  Must exceed the longest endpoint timeout (currently
     120s for /execution) to avoid evicting slots mid-compute.  Bounds
     worst-case latency to [max_wait_sec + compute_time]. *)
 let max_wait_sec = 130.0
+let wait_poll_interval_sec = 0.1
 
 (** Eio path: per-key locking with stampede protection + stale-while-revalidate.
 
@@ -82,7 +85,7 @@ let max_wait_sec = 130.0
     Waiter budget is reset when the watched [Computing] slot is replaced
     (detected via [cond] physical identity change), preventing cascading
     eviction of fresh slots. *)
-let get_or_compute_eio key ~ttl compute =
+let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
   let stale_grace = ttl *. stale_factor in
   let rec try_get ~waited ~watching_cond =
     let action =
@@ -110,7 +113,14 @@ let get_or_compute_eio key ~ttl compute =
             | _ -> waited
           in
           let elapsed = now () -. started_at in
-          if elapsed > max_wait_sec || waited > max_wait_sec then begin
+          let timed_out_waiter =
+            match wait_timeout_sec with
+            | Some timeout_sec -> waited >= timeout_sec
+            | None -> false
+          in
+          if timed_out_waiter then
+            `Timed_out
+          else if elapsed > max_wait_sec || waited > max_wait_sec then begin
             Log.Dashboard.warn "cache: evicting stale Computing slot for %s (%.1fs elapsed)"
               key elapsed;
             Hashtbl.remove table key;
@@ -144,13 +154,15 @@ let get_or_compute_eio key ~ttl compute =
     in
     match action with
     | `Hit v -> v
+    | `Timed_out -> raise (Compute_timeout (key, true))
     | `Wait slot_cond ->
       (* Sleep briefly outside the mutex — this IS cancellable since
          Eio.Time.sleep is a cooperative suspension point. *)
       (match !clock_ref with
-       | Some (Clock clk) -> Eio.Time.sleep clk 0.5
+       | Some (Clock clk) -> Eio.Time.sleep clk wait_poll_interval_sec
        | None -> Eio.Fiber.yield ());
-      try_get ~waited:(waited +. 0.5) ~watching_cond:(Some slot_cond)
+      try_get ~waited:(waited +. wait_poll_interval_sec)
+        ~watching_cond:(Some slot_cond)
     | `Stale (stale_value, cond) ->
       let do_bg_compute () =
         match compute () with
@@ -257,12 +269,22 @@ let get_or_compute_simple key ~ttl compute =
                stale_until = ts +. ttl +. stale_grace });
     value
 
-let timeout_error_json key timeout_sec =
-  `Assoc [
-    ("error", `String "computation_timeout");
-    ("message", `String (Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec));
-    ("generated_at", `String (Types.now_iso ()));
-  ]
+let timeout_error_json ?(waiting = false) key timeout_sec =
+  let message =
+    if waiting then
+      Printf.sprintf
+        "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
+        key timeout_sec
+    else
+      Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
+  in
+  `Assoc
+    [
+      ("error", `String "computation_timeout");
+      ("message", `String message);
+      ("generated_at", `String (Types.now_iso ()));
+      ("timeout_kind", `String (if waiting then "waiter" else "owner"));
+    ]
 
 let get_or_compute key ~ttl compute =
   if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute
@@ -279,21 +301,31 @@ let get_or_compute key ~ttl compute =
     path and returns [timeout_error_json] to the caller without caching
     it. *)
 
-exception Compute_timeout of string
-
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   try
-    get_or_compute key ~ttl (fun () ->
-      match
-        Eio.Time.with_timeout clock timeout_sec (fun () ->
-          Ok (compute ()))
-      with
-      | Ok value -> value
-      | Error `Timeout ->
-        Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
-        raise (Compute_timeout key))
-  with Compute_timeout k ->
-    timeout_error_json k timeout_sec
+    if Eio_guard.is_ready () then
+      get_or_compute_eio ~wait_timeout_sec:timeout_sec key ~ttl (fun () ->
+        match
+          Eio.Time.with_timeout clock timeout_sec (fun () ->
+            Ok (compute ()))
+        with
+        | Ok value -> value
+        | Error `Timeout ->
+          Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
+          raise (Compute_timeout (key, false)))
+    else
+      get_or_compute_simple key ~ttl (fun () ->
+        match
+          Eio.Time.with_timeout clock timeout_sec (fun () ->
+            Ok (compute ()))
+        with
+        | Ok value -> value
+        | Error `Timeout ->
+          Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
+          raise (Compute_timeout (key, false)))
+  with
+  | Compute_timeout (k, waiting) ->
+      timeout_error_json ~waiting k timeout_sec
 
 let invalidate key =
   if Eio_guard.is_ready () then

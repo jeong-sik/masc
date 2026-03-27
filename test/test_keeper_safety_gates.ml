@@ -174,7 +174,7 @@ let test_safe_empty () =
 (* ================================================================ *)
 
 (* Mode removal: all keepers get all tools unconditionally.
-   Only voice (policy_voice_enabled) and write_done remain as gates.
+   write_done remains the only exposure gate.
    Safety is enforced through eval_gate deny lists. *)
 
 let test_write_done_kills_all () =
@@ -192,8 +192,7 @@ let test_all_keepers_get_full_toolset () =
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
   check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools);
-  (* Voice still gated by policy_voice_enabled *)
-  check bool "no keeper_voice_speak (voice disabled)" false
+  check bool "keeper_voice_speak available" true
     (List.mem "keeper_voice_speak" tools)
 
 let test_voice_enabled () =
@@ -205,8 +204,8 @@ let test_voice_enabled () =
 let test_voice_disabled () =
   let meta = make_meta ~policy_voice_enabled:false () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no keeper_voice_speak" false (List.mem "keeper_voice_speak" tools);
-  check bool "no keeper_voice_agent" false (List.mem "keeper_voice_agent" tools)
+  check bool "keeper_voice_speak still available" true (List.mem "keeper_voice_speak" tools);
+  check bool "keeper_voice_agent still available" true (List.mem "keeper_voice_agent" tools)
 
 let test_all_keepers_have_research_tools () =
   (* Mode removal: research tools available to all keepers *)

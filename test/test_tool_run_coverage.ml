@@ -36,8 +36,6 @@ let test_get_string_opt_empty () =
    ============================================================ *)
 
 let test_context_creation () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test" in
   let ctx : Tool_run.context = { config } in
   check bool "context created" true (ctx.config.Masc_mcp.Room.base_path = "/tmp/test")
@@ -46,55 +44,56 @@ let test_context_creation () =
    Dispatch Tests
    ============================================================ *)
 
-let make_ctx () : Tool_run.context =
+let with_ctx f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Room.default_config "/tmp/test-run" in
-  ({ config } : Tool_run.context)
+  let ctx : Tool_run.context = { config } in
+  f ctx
 
 let test_dispatch_run_init () =
-  let ctx = make_ctx () in
+  with_ctx @@ fun ctx ->
   let args = `Assoc [("task_id", `String "task-001")] in
   match Tool_run.dispatch ctx ~name:"masc_run_init" ~args with
   | Some (_, msg) -> check bool "has message" true (String.length msg > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_run_plan () =
-  let ctx = make_ctx () in
+  with_ctx @@ fun ctx ->
   let args = `Assoc [("task_id", `String "task-001"); ("plan", `String "test plan")] in
   match Tool_run.dispatch ctx ~name:"masc_run_plan" ~args with
   | Some (_, msg) -> check bool "has message" true (String.length msg > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_run_log () =
-  let ctx = make_ctx () in
+  with_ctx @@ fun ctx ->
   let args = `Assoc [("task_id", `String "task-001"); ("note", `String "log entry")] in
   match Tool_run.dispatch ctx ~name:"masc_run_log" ~args with
   | Some (_, msg) -> check bool "has message" true (String.length msg > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_run_deliverable () =
-  let ctx = make_ctx () in
+  with_ctx @@ fun ctx ->
   let args = `Assoc [("task_id", `String "task-001"); ("deliverable", `String "output")] in
   match Tool_run.dispatch ctx ~name:"masc_run_deliverable" ~args with
   | Some (_, msg) -> check bool "has message" true (String.length msg > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_run_get () =
-  let ctx = make_ctx () in
+  with_ctx @@ fun ctx ->
   let args = `Assoc [("task_id", `String "task-001")] in
   match Tool_run.dispatch ctx ~name:"masc_run_get" ~args with
   | Some (_, msg) -> check bool "has message" true (String.length msg > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_run_list () =
-  let ctx = make_ctx () in
+  with_ctx @@ fun ctx ->
   match Tool_run.dispatch ctx ~name:"masc_run_list" ~args:(`Assoc []) with
   | Some (success, _) -> check bool "succeeds" true success
   | None -> fail "expected Some"
 
 let test_dispatch_unknown_tool () =
-  let ctx = make_ctx () in
+  with_ctx @@ fun ctx ->
   match Tool_run.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
   | None -> ()
   | Some _ -> fail "expected None for unknown tool"

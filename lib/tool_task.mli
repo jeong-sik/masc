@@ -5,6 +5,7 @@ type result = bool * string
 type context = {
   config: Room.config;
   agent_name: string;
+  sw: Eio.Switch.t option;
 }
 
 val handle_add_task : context -> Yojson.Safe.t -> result

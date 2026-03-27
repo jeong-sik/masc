@@ -218,6 +218,40 @@ let test_timeout_no_stale_returns_error ~clock () =
   in
   check_json "recompute after timeout" (`String "recovered") v2
 
+(* -- 11. Waiter timeout returns fast error without poisoning cache --------- *)
+
+(** When another fiber already owns the compute slot, waiters should honor the
+    caller's timeout budget instead of waiting for the global 130s eviction.
+    The timeout response must not poison the cache; once the owner finishes,
+    subsequent reads should observe the completed value. *)
+let test_waiter_timeout_returns_error_not_cached ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let owner_finished, resolve_owner_finished = Eio.Promise.create () in
+  let waiter_result = ref `Null in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw (fun () ->
+    ignore
+      (Dashboard_cache.get_or_compute_with_timeout "waiter_timeout" ~ttl:1.0
+         ~clock ~timeout_sec:1.0 (fun () ->
+           Eio.Time.sleep clock 0.4;
+           `String "owner_done"));
+    Eio.Promise.resolve resolve_owner_finished ());
+  Eio.Time.sleep clock 0.05;
+  waiter_result :=
+    Dashboard_cache.get_or_compute_with_timeout "waiter_timeout" ~ttl:1.0
+      ~clock ~timeout_sec:0.15 (fun () ->
+        `String "waiter_should_not_compute");
+  Eio.Promise.await owner_finished;
+  let timeout_kind =
+    Yojson.Safe.Util.(member "timeout_kind" !waiter_result |> to_string)
+  in
+  Alcotest.(check string) "waiter timeout is classified" "waiter" timeout_kind;
+  let final =
+    Dashboard_cache.get_or_compute "waiter_timeout" ~ttl:1.0 (fun () ->
+      `String "unexpected_recompute")
+  in
+  check_json "owner result survives waiter timeout" (`String "owner_done") final
+
 (* -- Harness ---------------------------------------------------------------- *)
 
 let () =
@@ -254,5 +288,7 @@ let () =
                test_stale_preserved_on_timeout ~clock ~sw ());
           test_case "no-stale timeout returns error, not cached" `Quick
             (test_timeout_no_stale_returns_error ~clock);
+          test_case "waiter timeout returns error, not cached" `Quick
+            (test_waiter_timeout_returns_error_not_cached ~clock);
         ] );
     ]

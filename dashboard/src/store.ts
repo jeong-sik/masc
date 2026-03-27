@@ -271,19 +271,6 @@ let inflightShellRefresh: Promise<void> | null = null
 let inflightExecutionRefresh: Promise<void> | null = null
 let lastShellRefreshAt = 0
 
-export function isDashboardRefreshEvent(eventType: string): boolean {
-  return (
-    eventType === 'dashboard_refresh'
-    || eventType === 'masc/dashboard_refresh'
-    || eventType.startsWith('goal_')
-    || eventType.startsWith('masc/goal_')
-    || eventType.startsWith('operator_')
-    || eventType.startsWith('masc/operator_')
-    || eventType.startsWith('command_plane_')
-    || eventType.startsWith('masc/command_plane_')
-  )
-}
-
 export function invalidateDashboardCache(): void {
   // Projection endpoints are intentionally fresh-first after the operator-console rewrite.
 }

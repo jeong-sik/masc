@@ -210,11 +210,7 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
   fork_maintenance "metrics_flush"
     (fun name exn ->
       Log.Server.error "%s fiber crashed: %s" name (Printexc.to_string exn))
-    (fun () ->
-    try Metrics_store_eio.start_flush_fiber ~clock
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> raise exn);
+    (fun () -> Metrics_store_eio.start_flush_fiber ~clock);
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
   (* Tool metrics JSONL persistence: flush buffered records to disk periodically.
      Also registers a post-hook so every tool call is enqueued for persistence. *)
@@ -230,11 +226,7 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
         (fun _name exn ->
           Log.BoardListener.error "board listener fiber crashed: %s"
             (Printexc.to_string exn))
-        (fun () ->
-        try Board_listener.start ~clock listener
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn -> raise exn);
+        (fun () -> Board_listener.start ~clock listener);
       Log.BoardListener.info "Fiber started for real-time Board events"
   | None ->
       Log.BoardListener.info "Skipped (not using PostgreSQL backend)");

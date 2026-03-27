@@ -10,14 +10,14 @@ type dashboard_compute_mode =
   | Inline_shared
   | Offloaded_readonly
 
-let _runtime_caps : Runtime_caps.t option ref = ref None
+let _runtime_caps : Runtime_caps.t option Atomic.t = Atomic.make None
 
 (* Updated during single-threaded server bootstrap before background fibers
    start.  After bootstrap, reads are effectively immutable for process life. *)
-let set_runtime_caps caps = _runtime_caps := Some caps
+let set_runtime_caps caps = Atomic.set _runtime_caps (Some caps)
 
 let current_runtime_caps () =
-  match !_runtime_caps with
+  match Atomic.get _runtime_caps with
   | Some caps -> caps
   | None -> (
       match Runtime_caps.of_eio_context_opt () with
@@ -77,7 +77,7 @@ let cached_isolated_readonly_config ~sw ~clock ~config =
 let _pg_semaphore : Eio.Semaphore.t option ref = ref None
 
 let clear_runtime_state () =
-  _runtime_caps := None;
+  Atomic.set _runtime_caps None;
   _cached_readonly_pg_config := None;
   _pg_semaphore := None;
   (* Preserve [_readonly_config_mu]: it is a process-local synchronization

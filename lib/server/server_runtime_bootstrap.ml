@@ -361,24 +361,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in
       Server_dashboard_http.set_executor_pool exec_pool;
       Log.Server.info "Executor_pool created (2 domains) for dashboard";
-      (* Stagger PG-heavy refresh loop warm-cache runs at startup.
-         Each Proactive_refresh.start forks a fiber that immediately calls
-         compute(), so starting all 7 loops at once creates 7+ concurrent PG
-         queries — exceeding pool capacity on Supabase session pooler.
-         A short sleep between PG-heavy launches spreads the initial burst. *)
-      Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 2.0;
-      Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 2.0;
-      Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
-      (* transport_health is light (no PG), start immediately. *)
-      Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 2.0;
-      Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 2.0;
-      Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 2.0;
-      Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
       (* Start auxiliary transports before optional warmups and resident loops.
          Otherwise HTTP can report ready while gRPC/WS startup is still stuck
          behind heavier startup work. *)
@@ -434,6 +416,24 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         Server_webrtc_transport.set_connection_starter
           (fun peer_id ->
             Server_webrtc_transport.start_webrtc_connection ~sw ~env peer_id));
+      (* Stagger PG-heavy refresh loop warm-cache runs at startup.
+         Each Proactive_refresh.start forks a fiber that immediately calls
+         compute(), so starting all 7 loops at once creates 7+ concurrent PG
+         queries — exceeding pool capacity on Supabase session pooler.
+         A short sleep between PG-heavy launches spreads the initial burst. *)
+      Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
+      Eio.Time.sleep clock 2.0;
+      Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
+      Eio.Time.sleep clock 2.0;
+      Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
+      (* transport_health is light (no PG), start immediately. *)
+      Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
+      Eio.Time.sleep clock 2.0;
+      Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
+      Eio.Time.sleep clock 2.0;
+      Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
+      Eio.Time.sleep clock 2.0;
+      Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
       (* Pre-warm shell cache in a separate fiber so it cannot block
          resident loop startup or lazy tasks (#keeper-bootstrap-stuck). *)
       Eio.Fiber.fork ~sw (fun () ->

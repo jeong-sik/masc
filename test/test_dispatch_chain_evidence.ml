@@ -27,6 +27,12 @@ let make_test_room () =
   let _ = Room.init config ~agent_name:(Some "evidence-agent") in
   config
 
+let with_fs_test f =
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  f env
+
 (* Evidence printer *)
 let print_evidence ~tool_name ~json_input ~result ~routed_to =
   Printf.printf "┌─────────────────────────────────────────────────────\n";
@@ -41,6 +47,7 @@ let print_evidence ~tool_name ~json_input ~result ~routed_to =
 
 (* Test Tool_agent dispatch *)
 let () =
+  with_fs_test @@ fun _env ->
   let config = make_test_room () in
   let ctx : Tool_agent.context = { config; agent_name = "evidence-agent" } in
   let tool_name = "masc_agents" in
@@ -53,6 +60,7 @@ let () =
 
 (* Test Tool_agent select_agent dispatch *)
 let () =
+  with_fs_test @@ fun _env ->
   let config = make_test_room () in
   let ctx : Tool_agent.context = { config; agent_name = "evidence-agent" } in
   let tool_name = "masc_select_agent" in
@@ -68,6 +76,7 @@ let () =
 
 (* Test Tool_audit dispatch *)
 let () =
+  with_fs_test @@ fun _env ->
   let config = make_test_room () in
   let ctx : Tool_audit.context = { config } in
   let tool_name = "masc_audit_query" in
@@ -80,8 +89,7 @@ let () =
 
 (* Test Tool_rate_limit dispatch *)
 let () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_fs_test @@ fun _env ->
   let config = make_test_room () in
   let registry = Session.create () in
   let ctx : Tool_rate_limit.context = { config; agent_name = "evidence-agent"; registry } in
@@ -111,7 +119,7 @@ let () =
 
 (* Test Tool_walph dispatch *)
 let () =
-  Eio_main.run @@ fun env ->
+  with_fs_test @@ fun env ->
   let config = make_test_room () in
   let _ = Room.init config ~agent_name:(Some "evidence-agent") in
   let clock = Eio.Stdenv.clock env in
@@ -126,6 +134,7 @@ let () =
 
 (* Test Tool_task dispatch *)
 let () =
+  with_fs_test @@ fun _env ->
   let config = make_test_room () in
   let ctx : Tool_task.context =
     { config; agent_name = "evidence-agent"; sw = None }
@@ -140,6 +149,7 @@ let () =
 
 (* Test Tool_room dispatch *)
 let () =
+  with_fs_test @@ fun _env ->
   let config = make_test_room () in
   let ctx : Tool_room.context = { config; agent_name = "evidence-agent" } in
   let tool_name = "masc_status" in
@@ -152,6 +162,7 @@ let () =
 
 (* Test Tool_control dispatch *)
 let () =
+  with_fs_test @@ fun _env ->
   let config = make_test_room () in
   let ctx : Tool_control.context = { config; agent_name = "evidence-agent" } in
   let tool_name = "masc_pause_status" in
@@ -164,6 +175,7 @@ let () =
 
 (* Test Tool_misc dispatch *)
 let () =
+  with_fs_test @@ fun _env ->
   let config = make_test_room () in
   let ctx : Tool_misc.context = { config; agent_name = "evidence-agent" } in
   let tool_name = "masc_dashboard" in
@@ -176,6 +188,7 @@ let () =
 
 (* Test dispatch chain fallthrough - unknown tool returns None *)
 let () =
+  with_fs_test @@ fun _env ->
   Printf.printf "┌─────────────────────────────────────────────────────\n";
   Printf.printf "│ Testing Dispatch Chain Fallthrough\n";
   Printf.printf "│ Unknown tools should return None to continue chain\n";

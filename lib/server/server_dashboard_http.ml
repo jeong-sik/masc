@@ -252,6 +252,26 @@ let warm_shell_cache (state : Mcp_server.server_state) =
      Log.Dashboard.warn "shell cache pre-warm failed: %s"
        (Printexc.to_string exn))
 
+(** Broadcast a single cached surface to all Observer SSE sessions.
+    [event_type] becomes the SSE event "type" field.
+    Safe to call from any fiber — reads only from a cached ref. *)
+let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
+  let sse_json =
+    `Assoc
+      [
+        ("type", `String event_type);
+        ("payload", json);
+        ("ts_unix", `Float (Time_compat.now ()));
+      ]
+  in
+  Sse.broadcast_to Observers sse_json
+
+(* Wire operator broadcast refs now that Sse is in scope. *)
+let () = _operator_snapshot_broadcast_ref :=
+  broadcast_cached_surface ~event_type:"operator_snapshot"
+let () = _operator_digest_broadcast_ref :=
+  broadcast_cached_surface ~event_type:"operator_digest"
+
 let _execution_cache =
   create_cached_surface
     (`Assoc
@@ -1117,20 +1137,6 @@ let room_truth_snapshot_from_caches (state : Mcp_server.server_state) :
           ("focus", focus_json);
         ])
 
-(** Broadcast a single cached surface to all Observer SSE sessions.
-    [event_type] becomes the SSE event "type" field.
-    Safe to call from any fiber — reads only from a cached ref. *)
-let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
-  let sse_json =
-    `Assoc
-      [
-        ("type", `String event_type);
-        ("payload", json);
-        ("ts_unix", `Float (Time_compat.now ()));
-      ]
-  in
-  Sse.broadcast_to Observers sse_json
-
 (** Broadcast current room-truth snapshot to all Observer SSE sessions.
     Called after proactive cache refreshes and keeper lifecycle events.
     Safe to call from any fiber — reads only from cached refs. *)
@@ -1153,17 +1159,6 @@ let broadcast_room_truth_snapshot (state : Mcp_server.server_state) : unit =
    [dashboard_room_truth_focus_json] and [broadcast_room_truth_snapshot]
    are defined. *)
 let () = _broadcast_room_truth_ref := broadcast_room_truth_snapshot
-
-(* Shadow the _core versions to wire in SSE broadcast. *)
-let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
-  Server_dashboard_http_core.start_operator_snapshot_refresh_loop
-    ~on_broadcast:(broadcast_cached_surface ~event_type:"operator_snapshot")
-    ~state ~sw ~clock
-
-let start_operator_digest_refresh_loop ~state ~sw ~clock =
-  Server_dashboard_http_core.start_operator_digest_refresh_loop
-    ~on_broadcast:(broadcast_cached_surface ~event_type:"operator_digest")
-    ~state ~sw ~clock
 
 let dashboard_memory_http_json request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in

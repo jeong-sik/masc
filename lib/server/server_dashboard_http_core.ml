@@ -294,6 +294,14 @@ let operator_actor_hint request =
    Interval: 10s (was 120s). Even if compute takes ~8s, the ref is updated
    every ~18s worst-case, which is acceptable for dashboard SSE polling. *)
 
+(* Late-bound broadcast refs — set by server_dashboard_http.ml after
+   Sse module is in scope.  Same pattern as _broadcast_room_truth_ref. *)
+let _operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref =
+  ref (fun (_json : Yojson.Safe.t) -> ())
+
+let _operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
+  ref (fun (_json : Yojson.Safe.t) -> ())
+
 let _operator_snapshot_cache =
   create_cached_surface
     (`Assoc [ ("status", `String "initializing"); ("generated_at", `String (Types.now_iso ())) ])
@@ -321,7 +329,7 @@ let operator_snapshot_extra sessions =
     ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
   ]
 
-let start_operator_snapshot_refresh_loop ?(on_broadcast = fun (_json : Yojson.Safe.t) -> ()) ~state ~sw ~clock =
+let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let compute () =
@@ -370,9 +378,9 @@ let start_operator_snapshot_refresh_loop ?(on_broadcast = fun (_json : Yojson.Sa
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _operator_snapshot_cache json;
-      on_broadcast json)
+      !_operator_snapshot_broadcast_ref json)
 
-let start_operator_digest_refresh_loop ?(on_broadcast = fun (_json : Yojson.Safe.t) -> ()) ~state ~sw ~clock =
+let start_operator_digest_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let compute () =
@@ -425,7 +433,7 @@ let start_operator_digest_refresh_loop ?(on_broadcast = fun (_json : Yojson.Safe
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _operator_digest_cache json;
-      on_broadcast json)
+      !_operator_digest_broadcast_ref json)
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in

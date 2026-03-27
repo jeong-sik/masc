@@ -34,6 +34,11 @@ val run_dashboard_compute :
     Exposed for the facade module [Server_dashboard_http]. *)
 val _operator_snapshot_cache : cached_surface
 val _operator_digest_cache : cached_surface
+
+(** Late-bound broadcast callbacks — set by [Server_dashboard_http]
+    after [Sse] module is in scope. *)
+val _operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref
+val _operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref
 val _mission_cache : cached_surface
 
 (** {1 Dashboard Timeout} *)
@@ -82,14 +87,12 @@ val dashboard_batch_json :
 (** {1 Operator Snapshot/Digest} *)
 
 val start_operator_snapshot_refresh_loop :
-  ?on_broadcast:(Yojson.Safe.t -> unit) ->
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit
 
 val start_operator_digest_refresh_loop :
-  ?on_broadcast:(Yojson.Safe.t -> unit) ->
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

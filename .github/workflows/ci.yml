@@ -50,7 +50,7 @@ jobs:
         with:
           ocaml-compiler: 5.4.x
           dune-cache: true
-          cache-prefix: oas-47bef58
+          cache-prefix: oas-otel-01
 
       - name: Pin external dependencies
         run: |
@@ -166,7 +166,7 @@ jobs:
         with:
           ocaml-compiler: 5.4.x
           dune-cache: true
-          cache-prefix: oas-47bef58
+          cache-prefix: oas-otel-01
 
       - name: Pin external dependencies
         run: |
@@ -282,7 +282,7 @@ jobs:
         with:
           ocaml-compiler: 5.4.x
           dune-cache: true
-          cache-prefix: oas-47bef58
+          cache-prefix: oas-otel-01
 
       - name: Pin external dependencies
         run: |
@@ -352,7 +352,7 @@ jobs:
         with:
           ocaml-compiler: 5.4.x
           dune-cache: true
-          cache-prefix: oas-47bef58
+          cache-prefix: oas-otel-01
 
       - name: Pin external dependencies
         run: |
@@ -409,7 +409,7 @@ jobs:
         with:
           ocaml-compiler: 5.4.x
           dune-cache: true
-          cache-prefix: oas-47bef58
+          cache-prefix: oas-otel-01
 
       - name: Pin external dependencies
         run: |

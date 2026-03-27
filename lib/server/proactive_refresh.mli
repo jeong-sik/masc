@@ -11,6 +11,7 @@ type config = {
   timeout_s : float;        (** Warm-cache timeout. *)
   on_error : (exn -> unit) option;  (** Called on timeout or exception. *)
   health_check : (unit -> bool) option;  (** Pre-compute gate. If [Some f] and [f ()] returns [false], the cycle is skipped and backoff applied. *)
+  warm_delay_s : float;    (** Delay before cold-start warm-cache compute (0.0 = immediate). *)
 }
 
 val default_config : label:string -> interval_s:float -> config

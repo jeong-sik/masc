@@ -390,7 +390,11 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
               with timeout_s =
                      float_of_env_default
                        "MASC_DASHBOARD_OPERATOR_SNAPSHOT_TIMEOUT_S"
-                       ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
+                       ~default:45.0 ~min_v:10.0 ~max_v:120.0;
+                   warm_delay_s =
+                     float_of_env_default
+                       "MASC_WARM_DELAY_OPERATOR_SNAPSHOT_S"
+                       ~default:120.0 ~min_v:0.0 ~max_v:300.0 }
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _operator_snapshot_cache json;
@@ -445,7 +449,11 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
               with timeout_s =
                      float_of_env_default
                        "MASC_DASHBOARD_OPERATOR_DIGEST_TIMEOUT_S"
-                       ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
+                       ~default:45.0 ~min_v:10.0 ~max_v:120.0;
+                   warm_delay_s =
+                     float_of_env_default
+                       "MASC_WARM_DELAY_OPERATOR_DIGEST_S"
+                       ~default:150.0 ~min_v:0.0 ~max_v:300.0 }
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _operator_digest_cache json;
@@ -678,7 +686,11 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   in
   Proactive_refresh.start ~sw ~clock
     ~config:{ (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0)
-              with timeout_s = mission_refresh_timeout_s }
+              with timeout_s = mission_refresh_timeout_s;
+                   warm_delay_s =
+                     float_of_env_default
+                       "MASC_WARM_DELAY_MISSION_S"
+                       ~default:90.0 ~min_v:0.0 ~max_v:300.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _mission_cache)
 

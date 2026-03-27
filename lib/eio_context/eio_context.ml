@@ -38,6 +38,9 @@ let get_net_opt () : eio_net option =
 let get_clock_opt () =
   Atomic.get current_clock
 
+let get_mono_clock_opt () =
+  Atomic.get current_mono_clock
+
 let get_switch_opt () =
   Atomic.get current_sw
 

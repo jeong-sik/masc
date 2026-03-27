@@ -9,6 +9,8 @@ val create :
   switch:Eio.Switch.t ->
   t
 
+val of_eio_context_opt : unit -> t option
+
 val of_eio_context : unit -> t
 
 val net : t -> eio_net

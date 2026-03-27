@@ -10,12 +10,23 @@ type t = {
 let create ~net ~clock ~mono_clock ~switch =
   { net; clock; mono_clock; switch }
 
+let of_eio_context_opt () =
+  match
+    ( Eio_context.get_net_opt (),
+      Eio_context.get_clock_opt (),
+      Eio_context.get_mono_clock_opt (),
+      Eio_context.get_switch_opt () )
+  with
+  | Some net, Some clock, Some mono_clock, Some switch ->
+      Some (create ~net ~clock ~mono_clock ~switch)
+  | _ -> None
+
 let of_eio_context () =
-  create
-    ~net:(Eio_context.get_net ())
-    ~clock:(Eio_context.get_clock ())
-    ~mono_clock:(Eio_context.get_mono_clock ())
-    ~switch:(Eio_context.get_switch ())
+  match of_eio_context_opt () with
+  | Some caps -> caps
+  | None ->
+      invalid_arg
+        "Runtime_caps unavailable - ensure Eio context is fully initialized"
 
 let net t = t.net
 let clock t = t.clock

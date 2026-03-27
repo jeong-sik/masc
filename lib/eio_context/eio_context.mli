@@ -26,6 +26,9 @@ val get_net_opt : unit -> eio_net option
 val get_clock_opt : unit -> float Eio.Time.clock_ty Eio.Resource.t option
 (** Get the Eio clock if available. *)
 
+val get_mono_clock_opt : unit -> Eio.Time.Mono.ty Eio.Resource.t option
+(** Get the Eio monotonic clock if available. *)
+
 val get_switch_opt : unit -> Eio.Switch.t option
 (** Get the Eio switch if available. *)
 

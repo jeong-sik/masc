@@ -17,7 +17,12 @@ let set_runtime_caps caps = _runtime_caps := Some caps
 let current_runtime_caps () =
   match !_runtime_caps with
   | Some caps -> caps
-  | None -> Runtime_caps.of_eio_context ()
+  | None -> (
+      match Runtime_caps.of_eio_context_opt () with
+      | Some caps -> caps
+      | None ->
+          invalid_arg
+            "dashboard runtime caps unavailable - initialize server runtime context first")
 
 (** Executor pool for CPU-heavy dashboard compute.
     Pool reference is shared via [Executor_pool_ref] in masc_core. *)
@@ -73,6 +78,8 @@ let clear_runtime_state () =
   _runtime_caps := None;
   _cached_readonly_pg_config := None;
   _pg_semaphore := None;
+  (* Preserve [_readonly_config_mu]: it is a process-local synchronization
+     primitive and does not capture switch/domain-bound Eio capabilities. *)
   Executor_pool_ref.clear ()
 
 let pg_semaphore () =

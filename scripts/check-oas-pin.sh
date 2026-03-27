@@ -10,19 +10,25 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 
 min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"
+default_pin_source="${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
+pin_source="${AGENT_SDK_PIN_URL:-${default_pin_source}}"
 
-latest_main_sha="$(
-  git ls-remote "${OAS_AGENT_SDK_URL}" "refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
-    | awk '{print $1}'
-)"
+if [[ "${pin_source}" == "${default_pin_source}" ]]; then
+  latest_main_sha="$(
+    git ls-remote "${OAS_AGENT_SDK_URL}" "refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
+      | awk '{print $1}'
+  )"
 
-if [[ -z "${latest_main_sha}" ]]; then
-  echo "failed to resolve upstream ${OAS_AGENT_SDK_TRACK_REF} SHA" >&2
-  exit 1
-fi
+  if [[ -z "${latest_main_sha}" ]]; then
+    echo "failed to resolve upstream ${OAS_AGENT_SDK_TRACK_REF} SHA" >&2
+    exit 1
+  fi
 
-if [[ "${OAS_AGENT_SDK_SHA}" != "${latest_main_sha}" ]]; then
-  echo "::warning::OAS main drift: pinned ${OAS_AGENT_SDK_SHA}, upstream ${latest_main_sha} — update pin when API-compatible"
+  if [[ "${OAS_AGENT_SDK_SHA}" != "${latest_main_sha}" ]]; then
+    echo "::warning::OAS main drift: pinned ${OAS_AGENT_SDK_SHA}, upstream ${latest_main_sha} — update pin when API-compatible"
+  fi
+else
+  echo "OAS pin override in use: ${pin_source}"
 fi
 
 if ! grep -Eq "\\(agent_sdk \\(>= ${min_version_re}\\)\\)" "${REPO_ROOT}/dune-project"; then
@@ -42,4 +48,8 @@ if grep -Eq '0\.81\.0' \
   exit 1
 fi
 
-echo "OAS pin verified: ${OAS_AGENT_SDK_TRACK_REF}@${OAS_AGENT_SDK_SHA} (base tag ${OAS_AGENT_SDK_BASE_TAG})"
+if [[ "${pin_source}" == "${default_pin_source}" ]]; then
+  echo "OAS pin verified: ${OAS_AGENT_SDK_TRACK_REF}@${OAS_AGENT_SDK_SHA} (base tag ${OAS_AGENT_SDK_BASE_TAG})"
+else
+  echo "OAS pin verified via override: ${pin_source}"
+fi

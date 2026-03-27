@@ -1,4 +1,5 @@
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
+import { MISSION_BRIEFING_POLL_DELAY_MS } from './config/constants'
 import type {
   DashboardMissionBriefingResponse,
   DashboardMissionResponse,
@@ -35,7 +36,10 @@ export function clearMissionBriefingPoll(): void {
   }
 }
 
-export function scheduleMissionBriefingPoll(refreshFn: (force: boolean) => Promise<void>, delayMs = 1500): void {
+export function scheduleMissionBriefingPoll(
+  refreshFn: (force: boolean) => Promise<void>,
+  delayMs = MISSION_BRIEFING_POLL_DELAY_MS,
+): void {
   if (missionBriefingPollTimer !== null) return
   missionBriefingPollTimer = window.setTimeout(() => {
     missionBriefingPollTimer = null

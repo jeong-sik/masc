@@ -5,6 +5,7 @@ import type {
   OperatorActionResult,
 } from './types'
 import { registerOperatorRefresh } from './sse-store'
+import { UI_REFRESH_TTL_MS } from './config/constants'
 import {
   operatorSnapshot,
   operatorRoomDigest,
@@ -23,8 +24,6 @@ let nextLogId = 1
 interface RefreshOptions {
   force?: boolean
 }
-
-const OPERATOR_REFRESH_TTL_MS = 1_000
 
 let snapshotRefreshInflight: Promise<void> | null = null
 let roomDigestRefreshInflight: Promise<void> | null = null
@@ -70,7 +69,7 @@ function logMessageFromResult(result: OperatorActionResult): string {
 }
 
 function isFresh(lastAt: number, opts?: RefreshOptions): boolean {
-  return !opts?.force && Date.now() - lastAt < OPERATOR_REFRESH_TTL_MS
+  return !opts?.force && Date.now() - lastAt < UI_REFRESH_TTL_MS
 }
 
 export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<void> {

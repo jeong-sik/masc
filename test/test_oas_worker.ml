@@ -444,7 +444,8 @@ let make_keeper_meta ?(name = "keeper-checkpoint-test")
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("active_model", `String "llama:auto");
+          ("cascade_name", `String "keeper_unified");
+          ("last_model_used", `String "llama:auto");
         ])
   with
   | Ok meta -> meta

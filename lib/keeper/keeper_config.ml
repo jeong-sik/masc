@@ -45,6 +45,42 @@ let canonical_soul_profile raw =
   | "minimal" | "lean" -> Some "minimal"
   | _ -> None
 
+let removed_keeper_input_key_names =
+  [
+    "models";
+    "allowed_models";
+    "active_model";
+    "trigger_mode";
+    "policy_action_budget";
+    "initiative_scope";
+    "initiative_enabled";
+    "initiative_idle_sec";
+    "initiative_cooldown_sec";
+    "policy_mode";
+    "policy_shell_mode";
+  ]
+
+let removed_keeper_meta_key_names =
+  "persona_profile_path" :: removed_keeper_input_key_names
+
+let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list =
+  match json with
+  | `Assoc fields ->
+      keys
+      |> List.filter (fun key -> List.mem_assoc key fields)
+  | _ -> []
+
+let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
+  let present = present_json_keys removed_keeper_input_key_names args in
+  match present with
+  | [] -> Ok ()
+  | fields ->
+      Error
+        (Printf.sprintf
+           "removed keeper args for %s: %s"
+           tool_name
+           (String.concat ", " fields))
+
 let parse_soul_profile_opt args key : (string option, string) result =
   match get_string_opt args key with
   | None -> Ok None

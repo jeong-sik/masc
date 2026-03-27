@@ -33,7 +33,6 @@
   - `room_scope`
   - `presence_keepalive`
   - `proactive_enabled`
-  - `initiative_enabled`
 - `keepalive_running=false` 이고 `presence_keepalive=true` 이고 `proactive_enabled=true` 인 keeper는 `diagnostic.quiet_reason="disabled"`로 분류되지 않는다.
 
 ## Output

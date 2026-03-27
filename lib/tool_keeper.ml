@@ -165,9 +165,6 @@ let keeper_list_row_json ~registered ~runtime_class config name =
             ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-            ("initiative_enabled", `Bool meta.initiative_enabled);
-            ("initiative_idle_sec", `Int meta.initiative_idle_sec);
-            ("initiative_cooldown_sec", `Int meta.initiative_cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
             ("cascade_name", `String meta.cascade_name);
             ("created_at", `String meta.created_at);
@@ -573,6 +570,9 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_add_loop" -> Some (handle_keeper_add_loop ctx args)
   | "masc_keeper_list_loops" -> Some (handle_keeper_list_loops ctx args)
   | "masc_keeper_remove_loop" -> Some (handle_keeper_remove_loop ctx args)
+  | "masc_persistent_agent_add_loop" -> Some (handle_keeper_add_loop ctx args)
+  | "masc_persistent_agent_list_loops" -> Some (handle_keeper_list_loops ctx args)
+  | "masc_persistent_agent_remove_loop" -> Some (handle_keeper_remove_loop ctx args)
   (* Housekeeping: keepers maintain their own world *)
   | "masc_housekeep_scan" | "masc_housekeep_delete" | "masc_housekeep_prune" ->
       Tool_housekeep.dispatch ctx.config ~name ~args

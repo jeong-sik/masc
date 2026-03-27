@@ -18,6 +18,17 @@ import { refreshRoomTruth } from './room-truth-store'
 import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 import { showToast } from './components/common/toast'
 import { route } from './router'
+import {
+  PERIODIC_REFRESH_DEV_MS,
+  PERIODIC_REFRESH_PROD_MS,
+  SSE_ACTIVITY_DEBOUNCE_MS,
+  SSE_DEFAULT_DEBOUNCE_MS,
+  SSE_KEEPER_OPERATOR_DEBOUNCE_MS,
+  SSE_KEEPER_THREAD_DEBOUNCE_MS,
+  SSE_MDAL_DEBOUNCE_MS,
+  SSE_OPERATOR_DEBOUNCE_MS,
+  SSE_RECONNECT_RETRY_MS,
+} from './config/constants'
 
 // --- Refresh function registration (avoids circular imports) ---
 
@@ -51,7 +62,7 @@ export function registerActivityRefresh(fn: () => void): void {
 const _debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 let _fetchDebounce: ReturnType<typeof setTimeout> | null = null
 
-function scheduleRefresh(key: string, fn: () => void, delayMs = 500): void {
+function scheduleRefresh(key: string, fn: () => void, delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
   if (_debounceTimers[key]) clearTimeout(_debounceTimers[key])
   _debounceTimers[key] = setTimeout(() => {
     fn()
@@ -84,22 +95,22 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   keeper_compaction:     { target: 'execution' },
   keeper_guardrail:      { target: 'execution' },
   // Client input
-  client_input_approved:  { target: 'operator', debounceMs: 300 },
-  client_input_rejected:  { target: 'operator', debounceMs: 300 },
-  client_input_updated:   { target: 'operator', debounceMs: 300 },
+  client_input_approved:  { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
+  client_input_rejected:  { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
+  client_input_updated:   { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
   // Board
   board_post:           { target: 'board' },
   'masc/board_post':    { target: 'board' },
   board_comment:        { target: 'board' },
   'masc/board_comment': { target: 'board' },
   // MDAL
-  mdal_started:    { target: 'mdal', debounceMs: 350 },
-  mdal_iteration:  { target: 'mdal', debounceMs: 350 },
-  mdal_completed:  { target: 'mdal', debounceMs: 350 },
-  mdal_stopped:    { target: 'mdal', debounceMs: 350 },
+  mdal_started:    { target: 'mdal', debounceMs: SSE_MDAL_DEBOUNCE_MS },
+  mdal_iteration:  { target: 'mdal', debounceMs: SSE_MDAL_DEBOUNCE_MS },
+  mdal_completed:  { target: 'mdal', debounceMs: SSE_MDAL_DEBOUNCE_MS },
+  mdal_stopped:    { target: 'mdal', debounceMs: SSE_MDAL_DEBOUNCE_MS },
   // Activity graph
-  'activity':                { target: 'activity', debounceMs: 2000 },
-  'masc/activity':           { target: 'activity', debounceMs: 2000 },
+  'activity':                { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
+  'masc/activity':           { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
 }
 
 // Prefix patterns for events that use startsWith matching
@@ -142,7 +153,7 @@ function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void
 
 function handleKeeperLifecycle(event: { type: string; name?: string }): void {
   // All keeper lifecycle events trigger operator refresh
-  scheduleRefresh('operator', () => _refreshOperatorFn?.(), 600)
+  scheduleRefresh('operator', () => _refreshOperatorFn?.(), SSE_KEEPER_OPERATOR_DEBOUNCE_MS)
 
   // keeper_turn_complete: re-hydrate active keeper's conversation thread
   if (event.type === 'keeper_turn_complete') {
@@ -151,7 +162,7 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
     if (keeperName && keeperName === viewing) {
       scheduleRefresh(`keeper_thread_${keeperName}`, () => {
         void hydrateKeeperStatus(keeperName, true)
-      }, 800)
+      }, SSE_KEEPER_THREAD_DEBOUNCE_MS)
     }
   }
 }
@@ -163,7 +174,7 @@ function handleDashboardRefresh(): void {
       void refreshRoomTruth({ force: true })
       void refreshActiveRoute()
       _fetchDebounce = null
-    }, 500)
+    }, SSE_DEFAULT_DEBOUNCE_MS)
   }
 }
 
@@ -219,7 +230,7 @@ async function hydrateAfterReconnect(): Promise<void> {
       void refreshActiveRoute().catch(retryErr =>
         console.warn('[SSE] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
       )
-    }, 3000)
+    }, SSE_RECONNECT_RETRY_MS)
   }
 }
 
@@ -273,7 +284,7 @@ export function setupSSEReaction(): () => void {
     if (AUTORESEARCH_EVENTS.has(event.type) && activeAutoresearchRoute()) {
       scheduleRefresh('autoresearch_route', () => {
         void refreshActiveRoute()
-      }, 350)
+      }, SSE_MDAL_DEBOUNCE_MS)
     }
 
     // 6. Governance events
@@ -297,8 +308,8 @@ export function setupSSEReaction(): () => void {
 const PERIODIC_REFRESH_MS =
   typeof import.meta !== 'undefined'
     && Boolean((import.meta as unknown as { env?: { DEV?: unknown } }).env?.DEV)
-    ? 90_000
-    : 30_000
+    ? PERIODIC_REFRESH_DEV_MS
+    : PERIODIC_REFRESH_PROD_MS
 
 let _periodicId: ReturnType<typeof setInterval> | null = null
 

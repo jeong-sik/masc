@@ -12,7 +12,7 @@ jobs:
   enforce-triage:
     runs-on: ubuntu-latest
     steps:
-      - name: Enforce type/target planning labels
+      - name: Enforce type/area/target planning labels
         uses: actions/github-script@v8
         env:
           TRIAGE_LABEL: triage-required
@@ -22,17 +22,40 @@ jobs:
             const repo = context.repo.repo;
             const issue = context.payload.issue;
             const issueNumber = issue.number;
-            const targetLabels = [
-              "target:v2.86.1",
-              "target:v2.87.0",
-              "target:v2.88.0",
-              "target:v2.89.0",
-              "target:v2.90.0",
-              "target:v2.91.0",
-              "target:v2.92.0",
-              "target:v2.93+",
-              "target:v2.148+"
-            ];
+            const body = issue.body || "";
+            const areaMap = {
+              "Repo coordination": "area:coordination",
+              "Team session delivery": "area:team-session",
+              "Dashboard and read models": "area:dashboard",
+              "Operator and intervention": "area:operator",
+              "Transport, auth, and health": "area:transport",
+              "Config and installation": "area:config",
+              "CI and release automation": "area:ci",
+              "Docs and onboarding": "area:docs",
+              "Experimental surfaces": "area:experimental"
+            };
+            const targetMap = {
+              "now": "target:now",
+              "next": "target:next",
+              "later": "target:later"
+            };
+            const extraLabels = {
+              "type:architecture": { color: "5319e7", description: "Architecture or structural change" },
+              "type:docs": { color: "0052cc", description: "Documentation or product explanation work" },
+              "area:coordination": { color: "1d76db", description: "Repo coordination and room/task flows" },
+              "area:team-session": { color: "0052cc", description: "Team Session and supervised delivery" },
+              "area:dashboard": { color: "0e8a16", description: "Dashboard and read-model surfaces" },
+              "area:operator": { color: "5319e7", description: "Operator and intervention surfaces" },
+              "area:transport": { color: "d93f0b", description: "Transport, auth, health, and protocol truth" },
+              "area:config": { color: "fbca04", description: "Config, install, and runtime shape" },
+              "area:ci": { color: "b60205", description: "CI, release, and automation flows" },
+              "area:docs": { color: "006b75", description: "Docs, onboarding, and product framing" },
+              "area:experimental": { color: "c5def5", description: "Experimental or research surfaces" },
+              "target:now": { color: "b60205", description: "Current product-promise blocker" },
+              "target:next": { color: "d4c5f9", description: "Next advanced workflow slice" },
+              "target:later": { color: "ededed", description: "Visible, but deferred" },
+              "product-gap": { color: "f9d0c4", description: "Code exists, but the product promise is still weak" }
+            };
 
             async function ensureLabel(name, color, description) {
               try {
@@ -53,53 +76,62 @@ jobs:
               return labels.map((label) => (typeof label === "string" ? label : label.name));
             }
 
-            function findTargetInBody(body) {
-              if (!body) return null;
-              return targetLabels.find((label) => body.includes(label)) || null;
+            function extractHeadingValue(markdown, heading) {
+              const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              const match = markdown.match(new RegExp(`### ${escaped}\\r?\\n\\r?\\n([\\s\\S]*?)(?=\\r?\\n### |$)`, "i"));
+              if (!match) return "";
+              return match[1]
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .find(Boolean) || "";
+            }
+
+            function headingHasCheckedBox(markdown, heading) {
+              const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              const match = markdown.match(new RegExp(`### ${escaped}\\r?\\n\\r?\\n([\\s\\S]*?)(?=\\r?\\n### |$)`, "i"));
+              if (!match) return false;
+              return /- \[x\]/i.test(match[1]);
             }
 
             await ensureLabel(
               process.env.TRIAGE_LABEL,
               "BFDADC",
-              "Issue is missing exactly one planning type/target label."
+              "Issue is missing exactly one planning type/area/target label."
             );
+            for (const [name, meta] of Object.entries(extraLabels)) {
+              await ensureLabel(name, meta.color, meta.description);
+            }
 
             const labelNames = new Set(getLabelNames(issue.labels));
-            let typeMatches = [...labelNames].filter((name) => name.startsWith("type:"));
-            let targetMatches = [...labelNames].filter((name) => name.startsWith("target:"));
+            const selectedArea = areaMap[extractHeadingValue(body, "Product area")];
+            const selectedTarget = targetMap[extractHeadingValue(body, "Target lane").toLowerCase()];
+            const hasProductGap = headingHasCheckedBox(body, "Product gap");
 
-            if (targetMatches.length === 0) {
-              const inferredTarget = findTargetInBody(issue.body || "");
-              if (inferredTarget) {
-                await github.rest.issues.addLabels({
-                  owner,
-                  repo,
-                  issue_number: issueNumber,
-                  labels: [inferredTarget]
-                });
-                labelNames.add(inferredTarget);
-                targetMatches = [inferredTarget];
-              }
+            const nextLabels = new Set(
+              [...labelNames].filter((name) =>
+                !name.startsWith("area:") &&
+                !name.startsWith("target:") &&
+                name !== "product-gap" &&
+                name !== process.env.TRIAGE_LABEL
+              )
+            );
+
+            if (selectedArea) nextLabels.add(selectedArea);
+            if (selectedTarget) nextLabels.add(selectedTarget);
+            if (hasProductGap) nextLabels.add("product-gap");
+
+            const typeMatches = [...nextLabels].filter((name) => name.startsWith("type:"));
+            const areaMatches = [...nextLabels].filter((name) => name.startsWith("area:"));
+            const targetMatches = [...nextLabels].filter((name) => name.startsWith("target:"));
+            const needsTriage = typeMatches.length !== 1 || areaMatches.length !== 1 || targetMatches.length !== 1;
+
+            if (needsTriage) {
+              nextLabels.add(process.env.TRIAGE_LABEL);
             }
 
-            typeMatches = [...labelNames].filter((name) => name.startsWith("type:"));
-            targetMatches = [...labelNames].filter((name) => name.startsWith("target:"));
-
-            const needsTriage = typeMatches.length !== 1 || targetMatches.length !== 1;
-            const hasTriageLabel = labelNames.has(process.env.TRIAGE_LABEL);
-
-            if (needsTriage && !hasTriageLabel) {
-              await github.rest.issues.addLabels({
-                owner,
-                repo,
-                issue_number: issueNumber,
-                labels: [process.env.TRIAGE_LABEL]
-              });
-            } else if (!needsTriage && hasTriageLabel) {
-              await github.rest.issues.removeLabel({
-                owner,
-                repo,
-                issue_number: issueNumber,
-                name: process.env.TRIAGE_LABEL
-              });
-            }
+            await github.rest.issues.setLabels({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              labels: [...nextLabels]
+            });

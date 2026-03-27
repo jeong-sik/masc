@@ -99,9 +99,22 @@ let execute_delegate_pipeline
                         | Some s -> s.Team_session_types.goal
                         | None -> "unknown"
                       in
-                      Worker_verification.verify_worker_result ~goal run_result
+                      Worker_verification.verify_worker_result
+                        ?delivery_contract:
+                          (Tool_team_session_step_exec
+                           .delivery_contract_for_session
+                             ctx.config session_id)
+                        ~goal run_result
                     in
-                    let _is_verified = Worker_verification.is_verified verification_outcome in
+                    Tool_team_session_step_exec
+                    .record_delivery_verdict_for_worker_run
+                      ~config:ctx.config ~session_id ~worker_run_id
+                      verification_outcome;
+                    let delivery_verdict_json =
+                      Tool_team_session_step_exec
+                      .latest_delivery_verdict_json_for_session ctx.config
+                        session_id
+                    in
                     let output_preview =
                       deps.truncate_for_event run_result.output
                     in
@@ -194,6 +207,9 @@ let execute_delegate_pipeline
                           deps.int_opt_to_json run_result.output_tokens );
                         ( "cost_usd",
                           deps.float_opt_to_json run_result.cost_usd );
+                        ( "delivery_verdict",
+                          Option.value ~default:`Null
+                            delivery_verdict_json );
                       ]
                 | Error err ->
                     persist_worker_run_snapshot
@@ -253,6 +269,133 @@ let execute_delegate_pipeline
                         ("wait_mode", `String "background");
                       ])))))
 
+let non_empty_string_list_of_json = function
+  | `List xs ->
+      xs
+      |> List.filter_map (function
+             | `String value ->
+                 let trimmed = String.trim value in
+                 if trimmed = "" then None else Some trimmed
+             | _ -> None)
+      |> Team_session_types.dedup_strings
+  | _ -> []
+
+let parse_delivery_contract_update args ~actor
+    ~(existing : Team_session_types.delivery_contract option)
+    ~(session_goal : string) :
+    (Team_session_types.delivery_contract option, string) Result.t =
+  match Yojson.Safe.Util.member "delivery_contract" args with
+  | `Null -> Ok None
+  | `Assoc fields ->
+      let pick_string key fallback =
+        match List.assoc_opt key fields with
+        | Some (`String value) ->
+            let trimmed = String.trim value in
+            if trimmed = "" then fallback else trimmed
+        | _ -> fallback
+      in
+      let pick_string_list key fallback =
+        match List.assoc_opt key fields with
+        | Some value -> non_empty_string_list_of_json value
+        | None -> fallback
+      in
+      let pick_int key fallback =
+        match List.assoc_opt key fields with
+        | Some (`Int value) -> max 0 value
+        | Some (`Intlit raw) -> (
+            try max 0 (int_of_string raw) with Failure _ -> fallback)
+        | _ -> fallback
+      in
+      let pick_opt_string key fallback =
+        match List.assoc_opt key fields with
+        | Some (`String value) ->
+            let trimmed = String.trim value in
+            if trimmed = "" then None else Some trimmed
+        | Some `Null -> None
+        | _ -> fallback
+      in
+      let contract =
+        {
+          Team_session_types.contract_id =
+            pick_string "contract_id"
+              (match existing with
+              | Some current -> current.contract_id
+              | None -> "contract-" ^ Team_session_store.make_session_id ());
+          summary =
+            pick_string "summary"
+              (match existing with
+              | Some current when String.trim current.summary <> "" ->
+                  current.summary
+              | _ -> session_goal);
+          acceptance_checks =
+            pick_string_list "acceptance_checks"
+              (match existing with
+              | Some current -> current.acceptance_checks
+              | None -> []);
+          required_artifacts =
+            pick_string_list "required_artifacts"
+              (match existing with
+              | Some current -> current.required_artifacts
+              | None -> []);
+          repair_budget =
+            pick_int "repair_budget"
+              (match existing with
+              | Some current -> current.repair_budget
+              | None -> 0);
+          generator_roles =
+            pick_string_list "generator_roles"
+              (match existing with
+              | Some current -> current.generator_roles
+              | None -> []);
+          evaluator_role =
+            pick_opt_string "evaluator_role"
+              (match existing with
+              | Some current -> current.evaluator_role
+              | None -> None);
+          evaluator_cascade =
+            pick_string "evaluator_cascade"
+              (match existing with
+              | Some current when String.trim current.evaluator_cascade <> "" ->
+                  current.evaluator_cascade
+              | _ -> "cross_verifier");
+          evidence_refs =
+            pick_string_list "evidence_refs"
+              (match existing with
+              | Some current -> current.evidence_refs
+              | None -> []);
+          updated_by = actor;
+          updated_at_iso = Types.now_iso ();
+        }
+      in
+      if
+        String.trim contract.summary = ""
+        && contract.acceptance_checks = []
+        && contract.required_artifacts = []
+      then
+        Error
+          "delivery_contract requires summary, acceptance_checks, or required_artifacts"
+      else Ok (Some contract)
+  | _ -> Error "delivery_contract must be an object when provided"
+
+let apply_delivery_contract_update ~(config : Room.config) ~(session_id : string)
+    (contract : Team_session_types.delivery_contract) : unit =
+  ignore
+    (Team_session_store.update_session config session_id (fun session ->
+         {
+           session with
+           delivery_contract = Some contract;
+           updated_at_iso = Types.now_iso ();
+         }));
+  Team_session_store.append_event config session_id
+    ~event_type:"delivery_contract_updated"
+    ~detail:
+      (`Assoc
+        [
+          ("contract", Team_session_types.delivery_contract_to_yojson contract);
+          ("actor", `String contract.updated_by);
+          ("ts_iso", `String contract.updated_at_iso);
+        ])
+
 let handle_step (deps : step_deps) (ctx : _ context) args : result =
   match deps.get_valid_session_id args with
   | Error e -> (false, deps.json_error e)
@@ -296,6 +439,26 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
               match actor_result with
               | Error e -> (false, deps.json_error e)
               | Ok actor ->
+              let delivery_contract_result =
+                parse_delivery_contract_update args ~actor
+                  ~existing:
+                    (Option.bind session_opt (fun session ->
+                         session.Team_session_types.delivery_contract))
+                  ~session_goal:
+                    (match session_opt with
+                    | Some session -> session.goal
+                    | None -> "")
+              in
+              match delivery_contract_result with
+              | Error e -> (false, deps.json_error e)
+              | Ok delivery_contract_update ->
+              Option.iter
+                (apply_delivery_contract_update ~config:ctx.config
+                   ~session_id)
+                delivery_contract_update;
+              let session_opt =
+                Team_session_store.load_session ctx.config session_id
+              in
               let wait_mode = deps.parse_wait_mode args in
               let base_message = get_string_opt args "message" in
               let target_agent = get_string_opt args "target_agent" in
@@ -520,6 +683,10 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                                       ("deliverable", deliverable_json);
                                     ])
                           in
+                          let refreshed_session =
+                            Team_session_store.load_session ctx.config
+                              session_id
+                          in
                           let response =
                             `Assoc
                               [
@@ -529,6 +696,22 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                                 ("delegate", Option.fold ~none:`Null ~some:(fun j -> j) delegate_result_json);
                                 ("vote", Option.fold ~none:`Null ~some:(fun j -> j) vote_result_json);
                                 ("run", Option.fold ~none:`Null ~some:(fun j -> j) run_json);
+                                ( "delivery_contract",
+                                  Option.fold ~none:`Null
+                                    ~some:Team_session_types
+                                      .delivery_contract_to_yojson
+                                    (Option.bind refreshed_session
+                                       (fun session ->
+                                         session.Team_session_types
+                                         .delivery_contract)) );
+                                ( "latest_delivery_verdict",
+                                  Option.fold ~none:`Null
+                                    ~some:Team_session_types
+                                      .delivery_verdict_to_yojson
+                                    (Option.bind refreshed_session
+                                       (fun session ->
+                                         session.Team_session_types
+                                         .latest_delivery_verdict)) );
                               ]
                           in
                           (true, deps.json_ok [ ("result", response) ]))

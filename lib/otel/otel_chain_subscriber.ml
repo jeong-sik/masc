@@ -142,9 +142,9 @@ let on_event (event : Chain_telemetry.chain_event) =
          ("chain.error.retries", `Int p.error_retries);
          ("otel.status_code", `String "ERROR");
        ] in
-       let status = OT.Proto.Status.default_status
-         ~code:OT.Proto.Status.Status_code_error
-         ~message:(Bytes.of_string p.error_message) () in
+       let status = OT.Proto.Trace.default_status
+         ~code:OT.Proto.Trace.Status_code_error
+         ~message:p.error_message () in
        let span, _id = OT.Span.create
          ~trace_id:nf.chain_trace_id
          ~parent:nf.chain_span_id

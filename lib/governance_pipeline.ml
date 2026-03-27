@@ -108,7 +108,9 @@ let assess_risk ~tool_name ~input =
 (* ── Trace ID generation ────────────────────────────────────── *)
 
 let generate_trace_id () =
-  Operator_pending_confirm.trace_id "gov"
+  match Otel_spans.current_trace_id () with
+  | Some otel_tid -> otel_tid
+  | None -> Operator_pending_confirm.trace_id "gov"
 
 (* ── Policy Decision ────────────────────────────────────────── *)
 

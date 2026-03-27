@@ -270,9 +270,9 @@ let log_suspend config ~agent_id ~target_agent ~reason ~rooms_affected ?cost_est
     ])
     ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_tool_call config ~agent_id ~tool_name ~success ~error_msg ?cost_estimate ?token_count () =
+let log_tool_call config ~agent_id ~tool_name ~success ~error_msg ?cost_estimate ?token_count ?trace_id () =
   let outcome = if success then Success else Failure (Option.value error_msg ~default:"unknown") in
-  log_action config ~agent_id ~action:(ToolCall tool_name) ?cost_estimate ?token_count ~outcome ()
+  log_action config ~agent_id ~action:(ToolCall tool_name) ?cost_estimate ?token_count ?trace_id ~outcome ()
 
 let log_client_tool_host_failure config ~agent_id ~client_name ~tool_name
     ~transport ~message ?phase ?request_id ?session_id ?trace_id ?timeout_ms () =

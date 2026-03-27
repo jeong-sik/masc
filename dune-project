@@ -76,4 +76,8 @@
   (mtime (>= 2.0))
   (uuidm (>= 0.9))
   ; Neo4j Bolt native driver
-  (neo4j_bolt_eio (>= 0.4))))
+  (neo4j_bolt_eio (>= 0.4))
+  ; OpenTelemetry observability
+  (opentelemetry (>= 0.13))
+  (opentelemetry-client-cohttp-eio (>= 0.13))
+  (ambient-context-eio (>= 0.2))))

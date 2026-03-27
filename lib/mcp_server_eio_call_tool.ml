@@ -260,8 +260,10 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       if resolved <> "" then resolved else "unknown"
   in
   let error_msg = if success then None else Some (Printf.sprintf "timeout=%d|duration_ms=%d" (if !timeout_hit then 1 else 0) duration_ms) in
+  let otel_trace_id = Otel_spans.current_trace_id () in
   Audit_log.log_tool_call state.Mcp_server.room_config
-    ~agent_id:agent_name ~tool_name:name ~success ~error_msg ();
+    ~agent_id:agent_name ~tool_name:name ~success ~error_msg
+    ?trace_id:otel_trace_id ();
   if not success then
     Log.emit Log.Error ~module_name:"MCP"
       ~details:
@@ -298,13 +300,18 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   (* Track in-memory call counter only for declared tool names. *)
   Tool_registry.record_call_if_known ~tool_name:name ~success ~duration_ms;
 
-  let trace_id =
+  let jsonrpc_id_str =
     match id with
     | `String s -> s
     | `Int i -> string_of_int i
     | `Intlit s -> s
     | `Float f -> Printf.sprintf "%0.0f" f
     | _ -> "unknown"
+  in
+  let trace_id =
+    match otel_trace_id with
+    | Some tid -> tid
+    | None -> jsonrpc_id_str
   in
   (* Append recovery hint on failure *)
   let message =

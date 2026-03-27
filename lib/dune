@@ -820,6 +820,10 @@
    masc_board
    ;; Room coordination (extracted sub-library)
    masc_room
+   ;; OpenTelemetry (spans + OTLP export)
+   opentelemetry
+   opentelemetry-client-cohttp-eio
+   ambient-context-eio
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

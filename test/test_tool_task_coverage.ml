@@ -120,6 +120,41 @@ let () = test "masc_done_records_calibration_verdict" (fun () ->
   Eval_calibration.reset_store_for_testing ()
 )
 
+let () = test "masc_done_respects_completion_contract_and_records_custom_evaluator" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx
+    (`Assoc [("title", `String "Contract calibration task")]) in
+  let _ = Tool_task.handle_claim ctx
+    (`Assoc [("task_id", `String "task-001")]) in
+  incr test_counter;
+  let verdict_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc-verdict-contract-test-%d-%d"
+       (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
+  (try Unix.mkdir verdict_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
+  let success, result = Tool_task.handle_transition ctx
+    (`Assoc [
+      ("task_id", `String "task-001");
+      ("action", `String "done");
+      ("notes", `String "Applied the fix to the login path.");
+      ("completion_contract", `List [ `String "test coverage"; `String "migration" ]);
+      ("evaluator_cascade", `String "glm:auto");
+    ]) in
+  assert (not success);
+  assert (str_contains result "completion contract not satisfied");
+  let store = Eval_calibration.get_store () in
+  let records = Dated_jsonl.read_recent store 10 in
+  assert (List.length records >= 1);
+  let first = List.hd records in
+  let gate = Yojson.Safe.Util.(first |> member "gate" |> to_string) in
+  let evaluator_cascade =
+    Yojson.Safe.Util.(first |> member "evaluator_cascade" |> to_string)
+  in
+  assert (gate = "contract");
+  assert (evaluator_cascade = "glm:auto");
+  Eval_calibration.reset_store_for_testing ()
+)
+
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim direct")]) in

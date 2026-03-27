@@ -272,6 +272,153 @@ let test_report_and_proof_expose_spawn_tool_usage () =
     (List.mem "shell_exec" proof_tool_names);
   cleanup_dir base_dir
 
+let test_report_and_proof_expose_delivery_contract_and_verdict () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"prove contract and verdict visibility"
+    |> get_session_id
+  in
+  let step_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+            ("message", `String "planner recorded the delivery contract");
+            ( "delivery_contract",
+              `Assoc
+                [
+                  ("contract_id", `String "contract-proof");
+                  ("summary", `String "Expose contract + verdict in artifacts");
+                  ( "acceptance_checks",
+                    `List
+                      [
+                        `String "report includes delivery contract";
+                        `String "proof includes evaluator verdict";
+                      ] );
+                  ( "required_artifacts",
+                    `List [ `String "report.json"; `String "proof.json" ] );
+                  ("repair_budget", `Int 1);
+                  ( "generator_roles",
+                    `List [ `String "planner"; `String "implementer-a" ] );
+                  ("evaluator_role", `String "reviewer");
+                  ("evaluator_cascade", `String "cross_verifier");
+                  ("evidence_refs", `List [ `String "session:contract-proof" ]);
+                ] );
+          ])
+  in
+  Alcotest.(check bool) "step ok" true step_ok;
+  ignore
+    (Team_session_store.update_session config session_id (fun session ->
+         {
+           session with
+           latest_delivery_verdict =
+             Some
+               {
+                 Team_session_types.contract_id = "contract-proof";
+                 status = Team_session_types.Delivery_repair;
+                 summary = "Worker output needs a stronger proof section.";
+                 evaluator = "verifier_oas";
+                 evaluator_role = Some "reviewer";
+                 evaluator_cascade = "cross_verifier";
+                 repair_directive =
+                   Some "Add explicit proof references before finalize.";
+                 evidence_refs =
+                   [ "session:contract-proof"; "worker-run:wr-demo-1" ];
+                 generated_at_iso = Types.now_iso ();
+               };
+           updated_at_iso = Types.now_iso ();
+         }));
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "contract-proof-done");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_id);
+  let report_ok, report_body =
+    dispatch_exn ctx ~name:"masc_team_session_report"
+      ~args:(`Assoc [ ("session_id", `String session_id); ("force_regenerate", `Bool true) ])
+  in
+  Alcotest.(check bool) "report ok" true report_ok;
+  let report_result = parse_json_exn report_body |> result_field in
+  Alcotest.(check string) "report response contract id" "contract-proof"
+    Yojson.Safe.Util.(report_result |> member "delivery_contract" |> member "contract_id" |> to_string);
+  let report_json_path =
+    report_result |> Yojson.Safe.Util.member "json_path" |> Yojson.Safe.Util.to_string
+  in
+  let report_json = Room_utils.read_json config report_json_path in
+  Alcotest.(check string) "report json contract id" "contract-proof"
+    Yojson.Safe.Util.(report_json |> member "delivery_contract" |> member "contract_id" |> to_string);
+  Alcotest.(check string) "report json verdict status" "repair"
+    Yojson.Safe.Util.(report_json |> member "latest_delivery_verdict" |> member "status" |> to_string);
+  let report_md_path =
+    report_result |> Yojson.Safe.Util.member "markdown_path" |> Yojson.Safe.Util.to_string
+  in
+  let report_md = Team_session_store.read_artifact_text config report_md_path in
+  Alcotest.(check bool) "report markdown includes contract id" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string "contract-proof") report_md 0 in
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "report markdown includes repair directive" true
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "Add explicit proof references before finalize.")
+           report_md 0
+       in
+       true
+     with Not_found -> false);
+  let prove_ok, prove_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("generate_report_if_missing", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "prove ok" true prove_ok;
+  let prove_result = parse_json_exn prove_body |> result_field in
+  Alcotest.(check string) "prove response contract id" "contract-proof"
+    Yojson.Safe.Util.(prove_result |> member "delivery_contract" |> member "contract_id" |> to_string);
+  Alcotest.(check string) "prove response verdict status" "repair"
+    Yojson.Safe.Util.(prove_result |> member "latest_delivery_verdict" |> member "status" |> to_string);
+  let proof_json = prove_result |> Yojson.Safe.Util.member "proof" in
+  Alcotest.(check string) "proof json contract id" "contract-proof"
+    Yojson.Safe.Util.(proof_json |> member "delivery_contract" |> member "contract_id" |> to_string);
+  Alcotest.(check string) "proof json verdict status" "repair"
+    Yojson.Safe.Util.(proof_json |> member "latest_delivery_verdict" |> member "status" |> to_string);
+  let proof_md_path =
+    prove_result |> Yojson.Safe.Util.member "proof_md_path"
+    |> Yojson.Safe.Util.to_string
+  in
+  let proof_md = Team_session_store.read_artifact_text config proof_md_path in
+  Alcotest.(check bool) "proof markdown includes contract id" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string "contract-proof") proof_md 0 in
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "proof markdown includes verdict status" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string "Status: repair") proof_md 0 in
+       true
+     with Not_found -> false);
+  cleanup_dir base_dir
+
 let test_bootstrap_grace_suppresses_min_agents_violation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

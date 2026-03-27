@@ -130,6 +130,60 @@ let proof_markdown ~(session : Team_session_types.session)
   let empty_note_turn_lines =
     empty_note_turn_actors |> List.map (fun actor -> Printf.sprintf "- %s" actor)
   in
+  let delivery_contract_lines =
+    match session.delivery_contract with
+    | None -> [ "- Delivery contract: (not recorded)" ]
+    | Some contract ->
+        let acceptance =
+          if contract.acceptance_checks = [] then
+            [ "- Acceptance checks: (not recorded)" ]
+          else
+            List.map
+              (fun item -> Printf.sprintf "- Acceptance: %s" item)
+              contract.acceptance_checks
+        in
+        let artifacts =
+          if contract.required_artifacts = [] then
+            [ "- Required artifacts: (not recorded)" ]
+          else
+            List.map
+              (fun item -> Printf.sprintf "- Artifact: %s" item)
+              contract.required_artifacts
+        in
+        [
+          Printf.sprintf "- Contract ID: %s" contract.contract_id;
+          Printf.sprintf "- Summary: %s"
+            (if String.trim contract.summary = "" then "(not recorded)"
+             else contract.summary);
+          Printf.sprintf "- Repair budget: %d" contract.repair_budget;
+          Printf.sprintf "- Evaluator cascade: %s" contract.evaluator_cascade;
+          Printf.sprintf "- Generator roles: %s"
+            (match contract.generator_roles with
+            | [] -> "(not recorded)"
+            | xs -> String.concat ", " xs);
+        ]
+        @ acceptance @ artifacts
+  in
+  let latest_delivery_verdict_lines =
+    match session.latest_delivery_verdict with
+    | None -> [ "- Latest evaluator verdict: (not recorded)" ]
+    | Some verdict ->
+        [
+          Printf.sprintf "- Status: %s"
+            (Team_session_types.delivery_verdict_status_to_string
+               verdict.status);
+          Printf.sprintf "- Evaluator: %s" verdict.evaluator;
+          Printf.sprintf "- Evaluator cascade: %s"
+            verdict.evaluator_cascade;
+          Printf.sprintf "- Summary: %s"
+            (if String.trim verdict.summary = "" then "(not recorded)"
+             else verdict.summary);
+          Printf.sprintf "- Repair directive: %s"
+            (match verdict.repair_directive with
+            | Some value -> value
+            | None -> "(none)");
+        ]
+  in
   String.concat "\n"
     [
       "# Team Session Proof";
@@ -197,6 +251,12 @@ let proof_markdown ~(session : Team_session_types.session)
       "## Low-Signal Note Turns";
       (if empty_note_turn_lines = [] then "- (none)"
        else String.concat "\n" empty_note_turn_lines);
+      "";
+      "## Delivery Contract";
+      String.concat "\n" delivery_contract_lines;
+      "";
+      "## Evaluator Verdict";
+      String.concat "\n" latest_delivery_verdict_lines;
       "";
       "## Criteria";
       (if criteria_lines = [] then "- (no criteria)"
@@ -329,6 +389,14 @@ let generate_proof ?(proof_level = default_proof_level) config
           ("session_id", `String session.session_id);
           ("goal", `String session.goal);
           ("status", `String (Team_session_types.status_to_string session.status));
+          ( "delivery_contract",
+            Option.fold ~none:`Null
+              ~some:Team_session_types.delivery_contract_to_yojson
+              session.delivery_contract );
+          ( "latest_delivery_verdict",
+            Option.fold ~none:`Null
+              ~some:Team_session_types.delivery_verdict_to_yojson
+              session.latest_delivery_verdict );
           ("proof_level", `String (Team_session_types.proof_level_to_string proof_level));
           ("verdict", `String verdict);
           ("score_pct", `Float score_pct);

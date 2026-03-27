@@ -197,6 +197,13 @@ let test_masc_transition_schema () =
   match find_tool "masc_transition" with
   | None -> Alcotest.fail "masc_transition not found"
   | Some schema ->
+      (match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has completion_contract" true
+            (List.mem_assoc "completion_contract" props);
+          Alcotest.(check bool) "has evaluator_cascade" true
+            (List.mem_assoc "evaluator_cascade" props)
+      | None -> Alcotest.fail "masc_transition missing properties");
       match get_json_list "required" schema.input_schema with
       | Some reqs ->
           Alcotest.(check bool) "agent_name required" true (List.mem (`String "agent_name") reqs);

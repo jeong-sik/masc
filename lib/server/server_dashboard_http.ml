@@ -14,6 +14,7 @@ let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
+      ("config_resolution", Config_dir_resolver.(resolve () |> to_json));
       ("tool_inventory", Tool_misc.tool_inventory_json ctx ~include_hidden:true ~include_deprecated:true);
       ("tool_usage", Tool_unified.summary_report ());
     ]
@@ -43,6 +44,13 @@ let _execution_cache =
         ("generated_at", `String (Types.now_iso ()));
         ("message", `String "Execution data is being computed. Refresh in a few seconds.");
       ])
+
+(** Bypass the proactive warm-up guard so tests that call
+    [dashboard_room_truth_http_json] get the full response instead of
+    the "initializing" short-circuit. *)
+let seed_execution_cache_for_test () =
+  mark_cached_surface_success _execution_cache
+    (`Assoc [("status", `String "seeded_for_test")])
 
 let _transport_health_cache =
   create_cached_surface
@@ -297,7 +305,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
 let dashboard_transport_health_http_json ~state:_ =
   cached_surface_json _transport_health_cache
 
-let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
+let dashboard_room_truth_focus_json ~initialized ~runtime_count ~operator_digest_json ~top_queue =
   let recommendation_summary =
     json_assoc_field "recommendation_summary" operator_digest_json
   in
@@ -435,9 +443,9 @@ let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_j
                     "방이 아직 초기화되지 않았습니다. 기본 room 상태부터 확인하세요.",
                     "orchestra",
                     "derived" )
-                else if agent_count = 0 then
-                  ( "에이전트가 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.",
-                    "No agents joined yet; room is idle.",
+                else if runtime_count = 0 then
+                  ( "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.",
+                    "No agents or keepers joined yet; room is idle.",
                     "room",
                     "fallback" )
                 else
@@ -687,11 +695,15 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
         ("provenance", `String "truth");
       ]
   in
-  let agent_count = json_int_field "agents" (json_assoc_field "counts" shell_json) ~default:0 in
+  let shell_counts = json_assoc_field "counts" shell_json in
+  let runtime_count =
+    json_int_field "agents" shell_counts ~default:0
+    + json_int_field "keepers" shell_counts ~default:0
+  in
   let focus_json =
     dashboard_room_truth_focus_json
       ~initialized:(Room.is_initialized config)
-      ~agent_count
+      ~runtime_count
       ~operator_digest_json ~top_queue
   in
   `Assoc

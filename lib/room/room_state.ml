@@ -13,6 +13,86 @@ open Room_utils
 (* State Read / Write / Update                  *)
 (* ============================================ *)
 
+let default_room_state config = {
+  protocol_version = "0.1.0";
+  project = Filename.basename config.base_path;
+  started_at = now_iso ();
+  message_seq = 0;
+  active_agents = [];
+  paused = false;
+  pause_reason = None;
+  paused_by = None;
+  paused_at = None;
+  search_strategy_default = Some "best_first_v1";
+  speculation_enabled = false;
+  speculation_budget = None;
+}
+
+let non_empty_string_opt = function
+  | Some value ->
+      let value = String.trim value in
+      if value = "" then None else Some value
+  | None -> None
+
+let recover_active_agent_name = function
+  | `String name -> non_empty_string_opt (Some name)
+  | `Assoc _ as json ->
+      (match non_empty_string_opt (Safe_ops.json_string_opt "name" json) with
+       | Some name -> Some name
+       | None ->
+           non_empty_string_opt (Safe_ops.json_string_opt "agent_name" json))
+  | _ -> None
+
+let recover_room_state config json =
+  let defaults = default_room_state config in
+  let active_agents =
+    match Safe_ops.json_list_opt "active_agents" json with
+    | Some agents -> List.filter_map recover_active_agent_name agents
+    | None -> defaults.active_agents
+  in
+  {
+    protocol_version =
+      non_empty_string_opt (Safe_ops.json_string_opt "protocol_version" json)
+      |> Option.value ~default:defaults.protocol_version;
+    project =
+      non_empty_string_opt (Safe_ops.json_string_opt "project" json)
+      |> Option.value ~default:defaults.project;
+    started_at =
+      non_empty_string_opt (Safe_ops.json_string_opt "started_at" json)
+      |> Option.value ~default:defaults.started_at;
+    message_seq = Safe_ops.json_int ~default:defaults.message_seq "message_seq" json;
+    active_agents;
+    paused = Safe_ops.json_bool ~default:defaults.paused "paused" json;
+    pause_reason =
+      non_empty_string_opt (Safe_ops.json_string_opt "pause_reason" json);
+    paused_by =
+      non_empty_string_opt (Safe_ops.json_string_opt "paused_by" json);
+    paused_at =
+      non_empty_string_opt (Safe_ops.json_string_opt "paused_at" json);
+    search_strategy_default =
+      (match
+         non_empty_string_opt
+           (Safe_ops.json_string_opt "search_strategy_default" json)
+       with
+       | Some value -> Some value
+       | None -> defaults.search_strategy_default);
+    speculation_enabled =
+      Safe_ops.json_bool ~default:defaults.speculation_enabled
+        "speculation_enabled" json;
+    speculation_budget =
+      Safe_ops.json_int_opt "speculation_budget" json;
+  }
+
+(** Write room state — persists to both filesystem and PostgreSQL *)
+let write_state config state =
+  write_json config (state_path config) (room_state_to_yojson state);
+  if is_pg_backend config then begin
+    let json_str = Yojson.Safe.to_string (room_state_to_yojson state) in
+    (match backend_set config ~key:"room:state" ~value:json_str with
+     | Ok () -> ()
+     | Error e -> Log.Misc.error "room_state write_state backend_set failed: %s" (Backend_types.show_error e))
+  end
+
 (** Read room state — checks PostgreSQL first for HTTP state persistence *)
 let read_state config =
   let pg_state =
@@ -30,31 +110,17 @@ let read_state config =
   match room_state_of_yojson json with
   | Ok state -> state
   | Error msg ->
-      Log.Misc.warn "read_state: deserialization failed (%s), returning empty default — dashboard will show stale data" msg;
-      {
-        protocol_version = "0.1.0";
-        project = Filename.basename config.base_path;
-        started_at = now_iso ();
-        message_seq = 0;
-        active_agents = [];
-        paused = false;
-        pause_reason = None;
-        paused_by = None;
-        paused_at = None;
-        search_strategy_default = Some "best_first_v1";
-        speculation_enabled = false;
-        speculation_budget = None;
-      }
-
-(** Write room state — persists to both filesystem and PostgreSQL *)
-let write_state config state =
-  write_json config (state_path config) (room_state_to_yojson state);
-  if is_pg_backend config then begin
-    let json_str = Yojson.Safe.to_string (room_state_to_yojson state) in
-    (match backend_set config ~key:"room:state" ~value:json_str with
-     | Ok () -> ()
-     | Error e -> Log.Misc.error "room_state write_state backend_set failed: %s" (Backend_types.show_error e))
-  end
+      let repaired = recover_room_state config json in
+      Log.Misc.warn
+        "read_state: deserialization failed (%s), repairing state and rewriting canonical JSON"
+        msg;
+      (try write_state config repaired
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Misc.warn "read_state: failed to persist repaired state: %s"
+             (Printexc.to_string exn));
+      repaired
 
 (** Update state with function - uses file lock for atomic read-modify-write *)
 let update_state config f =
@@ -301,22 +367,6 @@ let resolve_agent_name config agent_name =
 (* ============================================ *)
 (* Room Bootstrap                               *)
 (* ============================================ *)
-
-(** Default empty state for bootstrap. *)
-let default_room_state config = {
-  protocol_version = "0.1.0";
-  project = Filename.basename config.base_path;
-  started_at = now_iso ();
-  message_seq = 0;
-  active_agents = [];
-  paused = false;
-  pause_reason = None;
-  paused_by = None;
-  paused_at = None;
-  search_strategy_default = Some "best_first_v1";
-  speculation_enabled = false;
-  speculation_budget = None;
-}
 
 let ensure_room_bootstrap config room_id =
   let room_id =

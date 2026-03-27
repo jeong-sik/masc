@@ -27,4 +27,4 @@
  (modules masc_tui)
  (public_name masc-tui)
  (package masc_mcp)
- (libraries unix yojson))
+ (libraries masc_mcp unix yojson))

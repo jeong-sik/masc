@@ -97,7 +97,7 @@ for ml_file in "$LIB_DIR"/*.ml; do
     a2a_*) category="a2a" ;;
     agent_swarm*) category="agent_swarm" ;;
     perpetual*) category="perpetual" ;;
-    sentinel*|mitosis*) category="lifecycle" ;;
+    mitosis*) category="lifecycle" ;;
     oas_*) category="oas_bridge" ;;
     context_*) category="context" ;;
     config*|env_config*) category="config" ;;

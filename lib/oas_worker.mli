@@ -57,6 +57,8 @@ val run_named :
   ?transport:Masc_grpc_transport.t ->
   ?allowed_paths:string list ->
   ?working_context:Yojson.Safe.t ->
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
   (run_result, string) result
 

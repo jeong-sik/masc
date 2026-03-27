@@ -84,7 +84,7 @@ That is now fixed for institution episodes.
 
 The following are now stale and should not reappear in migration docs:
 
-- Gardener as an active migration target
+- legacy ecosystem-loop migration targets
 - “Event_bus bridge planned”
 - “team_session still pending OAS migration”
 

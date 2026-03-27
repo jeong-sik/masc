@@ -124,11 +124,14 @@ let () = test "dispatch_removed_named_room_tools" (fun () ->
 )
 
 let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
-  let task_ctx = { Tool_task.config = ctx.config; agent_name = ctx.agent_name } in
+  let task_ctx =
+    { Tool_task.config = ctx.config; agent_name = ctx.agent_name; sw = None }
+  in
   let _ =
     Tool_task.handle_add_task task_ctx
       (`Assoc [("title", `String "Check transition claim")])
@@ -151,11 +154,14 @@ let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
 )
 
 let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
-  let task_ctx = { Tool_task.config = ctx.config; agent_name = ctx.agent_name } in
+  let task_ctx =
+    { Tool_task.config = ctx.config; agent_name = ctx.agent_name; sw = None }
+  in
   let _ =
     Tool_task.handle_add_task task_ctx
       (`Assoc [("title", `String "Check claim next")])
@@ -171,6 +177,8 @@ let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
 )
 
 let () = test "dispatch_room_strategy_get" (fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
   match Tool_room.dispatch ctx ~name:"masc_room_strategy_get" ~args:(`Assoc []) with
@@ -182,6 +190,8 @@ let () = test "dispatch_room_strategy_get" (fun () ->
 )
 
 let () = test "dispatch_room_strategy_set" (fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
   let args =

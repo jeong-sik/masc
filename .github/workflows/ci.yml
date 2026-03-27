@@ -377,6 +377,11 @@ jobs:
             sleep 15
           done
 
+      - name: Check Eio conventions
+        run: |
+          chmod +x scripts/check-eio-conventions.sh
+          scripts/check-eio-conventions.sh
+
       - name: Build with warnings as errors
         run: |
           opam exec -- dune build @install --force

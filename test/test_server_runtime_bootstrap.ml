@@ -148,7 +148,13 @@ let wait_for_health ~pid ~port ~timeout_s =
 let stop_process pid =
   (try Unix.kill pid Sys.sigterm with _ -> ());
   ignore
-    (try Unix.waitpid [] pid with Unix.Unix_error (Unix.ECHILD, _, _) -> (0, Unix.WEXITED 0))
+    (let rec wait () =
+       try Unix.waitpid [] pid
+       with
+       | Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+       | Unix.Unix_error (Unix.ECHILD, _, _) -> (0, Unix.WEXITED 0)
+     in
+     wait ())
 
 let json_assoc = function
   | `Assoc fields -> fields
@@ -327,9 +333,6 @@ let test_main_eio_serves_health_before_lazy_startup () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_LODGE_ENABLED", "0");
             ("MASC_LODGE_DAEMON_ENABLED", "0");
-            ("MASC_SENTINEL_ENABLED", "0");
-            ("MASC_GUARDIAN_ENABLED", "0");
-            ("MASC_GARDENER_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_ALLOW_LEGACY_ACCEPT", "1");
             ("MASC_USE_H2", "0");

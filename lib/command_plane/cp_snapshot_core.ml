@@ -74,6 +74,11 @@ let topology_summary_to_json (s : topology_summary) =
       ("operation_status_counts", operation_status_counts_to_json s.operation_status_counts);
     ]
 
+let topology_summary_json_from_state (state : snapshot_state) =
+  build_topology_summary ~units:state.units ~managed_units:state.managed_units
+    ~agents:state.agents ~operations:state.operations
+  |> topology_summary_to_json
+
 (* Per-section mtime-based cache for build_snapshot_state.
    Instead of invalidating the entire cache when ANY .masc/ file changes,
    each section tracks the mtime of its specific file(s) and only re-reads
@@ -271,7 +276,6 @@ let build_snapshot_state ?sessions config =
 
 let topology_json_from_state (state : snapshot_state) =
   let agents = state.agents in
-  let managed_units = state.managed_units in
   let units = state.units in
   let source = state.source in
   let operations = state.operations in
@@ -293,18 +297,21 @@ let topology_json_from_state (state : snapshot_state) =
              ~agent_statuses:(agent_status_map agents)
              ~live_agents:(live_agent_names agents) ~operations unit.unit_id)
   in
-  let summary = build_topology_summary ~units ~managed_units ~agents ~operations in
+  let summary = topology_summary_json_from_state state in
   `Assoc
     [
       ("version", `String "cp-v2");
       ("generated_at", `String (Types.now_iso ()));
       ("source", `String source);
-      ("summary", topology_summary_to_json summary);
+      ("summary", summary);
       ("units", `List trees);
     ]
 
 let topology_json config =
   topology_json_from_state (build_snapshot_state config)
+
+let topology_summary_json config =
+  topology_summary_json_from_state (build_snapshot_state config)
 
 let list_units_json config =
   let _, managed_units, normalized_units, source = topology_units config in

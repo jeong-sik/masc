@@ -105,7 +105,7 @@ let with_test_room f =
     the notification path fires the [task] eprintf. *)
 let test_tool_task_done_nonexistent_logs () =
   with_test_room @@ fun config ->
-  let ctx : Tool_task.context = { config; agent_name = "test-agent" } in
+  let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
   let args = `Assoc [
     ("task_id", `String "task-does-not-exist-xyz");
     ("notes", `String "");
@@ -119,7 +119,7 @@ let test_tool_task_done_nonexistent_logs () =
 (** handle_cancel with a task_id that does not exist → "[task]" eprintf. *)
 let test_tool_task_cancel_nonexistent_logs () =
   with_test_room @@ fun config ->
-  let ctx : Tool_task.context = { config; agent_name = "test-agent" } in
+  let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
   let args = `Assoc [
     ("task_id", `String "task-phantom-abc");
     ("reason", `String "test cancel");

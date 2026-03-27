@@ -88,9 +88,9 @@ let npc_bestiary : npc_template array =
         ];
     };
     {
-      npc_name = "Petrified Guardian";
+      npc_name = "Petrified Warden";
       archetype = "defender-construct";
-      persona = "A stone sentinel awakened from ancient slumber.";
+      persona = "A stone watcher awakened from ancient slumber.";
       traits = [ "stoic"; "immovable" ];
       skills = [ "stone_slam"; "petrifying_gaze" ];
       base_hp = 35;

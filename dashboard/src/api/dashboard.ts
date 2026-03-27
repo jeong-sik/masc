@@ -445,8 +445,25 @@ export interface ToolMetricsResponse {
 
 export interface DashboardToolsResponse {
   generated_at?: string
+  config_resolution?: DashboardConfigResolution
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
+}
+
+export interface DashboardConfigResolutionItem {
+  path: string
+  exists: boolean
+  source: string
+}
+
+export interface DashboardConfigResolution {
+  status: 'ready' | 'warn' | 'invalid_env' | 'missing' | string
+  warnings: string[]
+  config_root: DashboardConfigResolutionItem
+  cascade: DashboardConfigResolutionItem
+  prompts: DashboardConfigResolutionItem
+  keepers: DashboardConfigResolutionItem
+  personas: DashboardConfigResolutionItem
 }
 
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {

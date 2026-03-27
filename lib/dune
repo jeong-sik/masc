@@ -47,6 +47,7 @@
    cp_lifecycle_intents
    cp_lifecycle_policy
    config
+   config_dir_resolver
    dashboard
    dashboard_labels
    dashboard_agent_relations
@@ -513,7 +514,6 @@
    keeper_persona
    ;; Context management (used by keeper agents)
    masc_eio_env
-   masc_http_client
    discovery_cache
    oas_model_resolve
    context_compact_oas
@@ -783,6 +783,8 @@
    fs_compat
    ;; Date-split JSONL storage (YYYY-MM/DD.jsonl)
    dated_jsonl
+   ;; HTTP client with fd-leak prevention (extracted sub-library)
+   masc_http_client
    ;; Council - multi-agent governance
    council
    ;; Neo4j Bolt native driver (OCaml 5.x Eio)

@@ -186,38 +186,42 @@ let visibility_of_string = function
   | _ -> None
 
 let post_of_yojson (json : Yojson.Safe.t) : post option =
-  try
-    let open Yojson.Safe.Util in
-    let id_str = json |> member "id" |> to_string in
-    let author_str = json |> member "author" |> to_string in
-    let content = json |> member "content" |> to_string in
-    let title_opt = json |> member "title" |> to_string_option in
-    let body_opt = json |> member "body" |> to_string_option in
-    let vis_str = json |> member "visibility" |> to_string in
-    let created_at = json |> member "created_at" |> to_float in
+  match
+    Safe_ops.json_string_opt "id" json,
+    Safe_ops.json_string_opt "author" json,
+    Safe_ops.json_string_opt "content" json,
+    Safe_ops.json_string_opt "visibility" json,
+    Safe_ops.json_float_opt "created_at" json,
+    Safe_ops.json_float_opt "expires_at" json
+  with
+  | Some id_str, Some author_str, Some content, Some vis_str,
+    Some created_at, Some expires_at ->
+    let title_opt = Safe_ops.json_string_opt "title" json in
+    let body_opt = Safe_ops.json_string_opt "body" json in
     (* Backward compat: default updated_at to created_at if missing *)
-    let updated_at = json |> member "updated_at" |> to_float_option |> Option.value ~default:created_at in
-    let expires_at = json |> member "expires_at" |> to_float in
-    let votes_up = json |> member "votes_up" |> to_int in
-    let votes_down = json |> member "votes_down" |> to_int in
-    let reply_count = json |> member "reply_count" |> to_int_option |> Option.value ~default:0 in
-    let hearth = json |> member "hearth" |> to_string_option in
-    let thread_id = json |> member "thread_id" |> to_string_option in
+    let updated_at =
+      Safe_ops.json_float_opt "updated_at" json
+      |> Option.value ~default:created_at
+    in
+    let votes_up = Safe_ops.json_int ~default:0 "votes_up" json in
+    let votes_down = Safe_ops.json_int ~default:0 "votes_down" json in
+    let reply_count = Safe_ops.json_int ~default:0 "reply_count" json in
+    let hearth = Safe_ops.json_string_opt "hearth" json in
+    let thread_id = Safe_ops.json_string_opt "thread_id" json in
     let post_kind_opt =
-      match json |> member "post_kind" |> to_string_option with
+      match Safe_ops.json_string_opt "post_kind" json with
       | Some raw -> post_kind_of_string raw
       | None -> None
     in
     let meta_json =
-      match json |> member "meta" with
-      | `Assoc _ as meta -> Some meta
-      | `Null -> None
-      | _ -> (
-          match json |> member "meta_json" |> to_string_option with
-          | Some raw -> (try Some (Yojson.Safe.from_string raw) with Yojson.Json_error _ -> None)
-          | None -> None)
+      match Safe_ops.json_member_opt "meta" json with
+      | Some (`Assoc _ as meta) -> Some meta
+      | Some _ | None ->
+        (match Safe_ops.json_string_opt "meta_json" json with
+         | Some raw -> (try Some (Yojson.Safe.from_string raw) with Yojson.Json_error _ -> None)
+         | None -> None)
     in
-    match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with
+    (match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with
     | Ok id, Ok author, Some visibility ->
         let title, body, post_kind, meta_json =
           normalize_post_payload ~author:author_str ~content ?title:title_opt
@@ -242,30 +246,32 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
           hearth;
           thread_id;
         }
-    | _ -> None
-  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+    | _ -> None)
+  | _ -> None
 
 let comment_of_yojson (json : Yojson.Safe.t) : comment option =
-  try
-    let open Yojson.Safe.Util in
-    let id_str = json |> member "id" |> to_string in
-    let post_id_str = json |> member "post_id" |> to_string in
-    let parent_id_opt = json |> member "parent_id" |> to_string_option in
-    let author_str = json |> member "author" |> to_string in
-    let content = json |> member "content" |> to_string in
-    let created_at = json |> member "created_at" |> to_float in
-    let expires_at = json |> member "expires_at" |> to_float in
-    let votes_up = json |> member "votes_up" |> to_int in
-    let votes_down = json |> member "votes_down" |> to_int in
-    match Comment_id.of_string id_str, Post_id.of_string post_id_str, Agent_id.of_string author_str with
+  match
+    Safe_ops.json_string_opt "id" json,
+    Safe_ops.json_string_opt "post_id" json,
+    Safe_ops.json_string_opt "author" json,
+    Safe_ops.json_string_opt "content" json,
+    Safe_ops.json_float_opt "created_at" json,
+    Safe_ops.json_float_opt "expires_at" json
+  with
+  | Some id_str, Some post_id_str, Some author_str, Some content,
+    Some created_at, Some expires_at ->
+    let parent_id_opt = Safe_ops.json_string_opt "parent_id" json in
+    let votes_up = Safe_ops.json_int ~default:0 "votes_up" json in
+    let votes_down = Safe_ops.json_int ~default:0 "votes_down" json in
+    (match Comment_id.of_string id_str, Post_id.of_string post_id_str, Agent_id.of_string author_str with
     | Ok id, Ok post_id, Ok author ->
         let parent_id = match parent_id_opt with
           | Some s -> (match Comment_id.of_string s with Ok cid -> Some cid | _ -> None)
           | None -> None
         in
         Some { id; post_id; parent_id; author; content; created_at; expires_at; votes_up; votes_down }
-    | _ -> None
-  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+    | _ -> None)
+  | _ -> None
 
 let load_persisted_posts store =
   let path = persist_path () in
@@ -346,14 +352,13 @@ let load_persisted_votes store =
       let loaded = ref 0 in
       let lines = Fs_compat.load_jsonl path in
       List.iter (fun json ->
-        try
-          let open Yojson.Safe.Util in
-          let target = json |> member "target" |> to_string in
-          let dir_str = json |> member "direction" |> to_string in
+        match Safe_ops.json_string_opt "target" json,
+              Safe_ops.json_string_opt "direction" json with
+        | Some target, Some dir_str ->
           let direction = if dir_str = "down" then Down else Up in
           Hashtbl.replace store.vote_log target direction;
           incr loaded
-        with Yojson.Safe.Util.Type_error _ -> ()
+        | _ -> ()
       ) lines;
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d vote entries from %s" !loaded path

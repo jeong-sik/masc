@@ -132,36 +132,21 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
     let action = json |> U.member "action" |> U.to_string |> string_to_action in
     let room_id = json |> U.member "room_id" |> U.to_string_option in
     let details =
-      try json |> U.member "details"
-      with Yojson.Safe.Util.Type_error _ -> `Null
+      match Safe_ops.json_member_opt "details" json with
+      | Some v -> v
+      | None -> `Null
     in
     let outcome =
       let o = json |> U.member "outcome" in
       let status = o |> U.member "status" |> U.to_string in
       if status = "success" then Success
       else
-        let reason = try o |> U.member "reason" |> U.to_string with Yojson.Safe.Util.Type_error _ -> "unknown" in
+        let reason = Safe_ops.json_string ~default:"unknown" "reason" o in
         Failure reason
     in
-    let cost_estimate =
-      try
-        match json |> U.member "cost_estimate" with
-        | `Float f -> Some f
-        | `Int i -> Some (float_of_int i)
-        | _ -> None
-      with Yojson.Safe.Util.Type_error _ -> None
-    in
-    let token_count =
-      try
-        match json |> U.member "token_count" with
-        | `Int i -> Some i
-        | _ -> None
-      with Yojson.Safe.Util.Type_error _ -> None
-    in
-    let trace_id =
-      try json |> U.member "trace_id" |> U.to_string_option
-      with Yojson.Safe.Util.Type_error _ -> None
-    in
+    let cost_estimate = Safe_ops.json_float_opt "cost_estimate" json in
+    let token_count = Safe_ops.json_int_opt "token_count" json in
+    let trace_id = Safe_ops.json_string_opt "trace_id" json in
     Some { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count; trace_id }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.warn "audit_log: entry parse failed: %s" (Printexc.to_string exn);
@@ -358,11 +343,11 @@ let get_stats (config : config) =
   let oldest = ref None in
   let newest = ref None in
   List.iter (fun json ->
-    (try
-       let ts = Yojson.Safe.Util.(json |> member "timestamp" |> to_float) in
+    (match Safe_ops.json_float_opt "timestamp" json with
+     | Some ts ->
        if !oldest = None then oldest := Some ts;
        newest := Some ts
-     with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
+     | None -> ())
   ) entries;
   {
     total_entries = count;

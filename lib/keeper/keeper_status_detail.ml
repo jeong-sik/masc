@@ -183,7 +183,7 @@ let handle_keeper_status ctx args : tool_result =
                                | None -> `Null );
                            ])
                     | _ -> find_latest tl
-                  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> find_latest tl)
+                  with Yojson.Json_error _ -> find_latest tl)
              in
              find_latest (List.rev metrics_window_lines)
          in
@@ -217,24 +217,14 @@ let handle_keeper_status ctx args : tool_result =
                  ~max_bytes:tail_bytes
                  ~max_lines:tail_messages
              in
-             let open Yojson.Safe.Util in
              let (items_rev, raw_count, fragment_count, filtered_count) =
                List.fold_left
                  (fun (acc, raw_count, fragment_count, filtered_count) line ->
                    try
                      let j = Yojson.Safe.from_string line in
-                     let role =
-                       j |> member "role" |> to_string_option
-                       |> Option.value ~default:"unknown"
-                     in
-                     let content =
-                       j |> member "content" |> to_string_option
-                       |> Option.value ~default:""
-                     in
-                     let source =
-                       j |> member "source" |> to_string_option
-                       |> Option.value ~default:"unknown"
-                     in
+                     let role = Safe_ops.json_string ~default:"unknown" "role" j in
+                     let content = Safe_ops.json_string ~default:"" "content" j in
+                     let source = Safe_ops.json_string ~default:"unknown" "source" j in
                      let ts_unix =
                        let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
                        if ts0 > 0.0 then ts0
@@ -288,7 +278,7 @@ let handle_keeper_status ctx args : tool_result =
                        raw_count + 1,
                        fragment_count + (if is_fragment then 1 else 0),
                        filtered_count )
-                   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> (acc, raw_count, fragment_count, filtered_count))
+                   with Yojson.Json_error _ -> (acc, raw_count, fragment_count, filtered_count))
                  ([], 0, 0, 0) lines
              in
              (`List (List.rev items_rev), raw_count, fragment_count, filtered_count)
@@ -386,7 +376,7 @@ let handle_keeper_status ctx args : tool_result =
                          ]
                        in
                        item :: acc
-                   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> acc)
+                   with Yojson.Json_error _ -> acc)
                  [] lines
              in
              let events = List.rev events_rev in

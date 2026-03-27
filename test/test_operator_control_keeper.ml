@@ -175,8 +175,13 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let cwd = Sys.getcwd () in
+  let original_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
+      (match original_config_dir with
+      | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+      | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Masc_mcp.Config_dir_resolver.reset ();
       Keeper_keepalive.stop_keepalive "config-provenance";
       Keeper_registry.clear ();
       Keeper_runtime.reset_test_state base_dir;
@@ -184,7 +189,10 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
       cleanup_dir base_dir)
     (fun () ->
       Unix.chdir base_dir;
-      let keepers_dir = Filename.concat (Filename.concat base_dir "config") "keepers" in
+      let config_dir = Filename.concat base_dir "config" in
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Masc_mcp.Config_dir_resolver.reset ();
+      let keepers_dir = Filename.concat config_dir "keepers" in
       Fs_compat.mkdir_p keepers_dir;
       Fs_compat.save_file
         (Filename.concat keepers_dir "config-provenance.toml")

@@ -173,6 +173,56 @@ let execute_spawn_pipeline
                      let output_preview =
                        deps.truncate_for_event spawn_result.output
                      in
+                     let verification_outcome =
+                       match oas_result with
+                       | Ok result ->
+                           let model_used =
+                             if String.trim result.response.model <> "" then
+                               result.response.model
+                             else prepared.runtime_model_label
+                           in
+                           let run_result : Worker_container_types.run_result =
+                             {
+                               output = spawn_result.output;
+                               model_used;
+                               input_tokens = spawn_result.input_tokens;
+                               output_tokens = spawn_result.output_tokens;
+                               cost_usd = spawn_result.cost_usd;
+                               tool_call_count = oas_tool_call_count;
+                               tool_names = oas_tool_names;
+                               session_id = result.session_id;
+                               raw_trace_run = oas_trace_ref;
+                               api_response = Some result.response;
+                             }
+                           in
+                           let goal =
+                             match
+                               Team_session_store.load_session ctx.config
+                                 session_id
+                             with
+                             | Some session -> session.goal
+                             | None -> prepared.spec.spawn_prompt
+                           in
+                           Some
+                             (Worker_verification.verify_worker_result
+                                ?delivery_contract:
+                                  (Tool_team_session_step_exec
+                                   .delivery_contract_for_session
+                                     ctx.config session_id)
+                                ~goal run_result)
+                       | Error _ -> None
+                     in
+                     Option.iter
+                       (Tool_team_session_step_exec
+                        .record_delivery_verdict_for_worker_run
+                          ~config:ctx.config ~session_id
+                          ~worker_run_id:prepared.worker_run_id)
+                       verification_outcome;
+                     let delivery_verdict_json =
+                       Tool_team_session_step_exec
+                       .latest_delivery_verdict_json_for_session ctx.config
+                         session_id
+                     in
                      (match spawn_result.success with
                      | true ->
                          release_prepared_runtime prepared
@@ -311,15 +361,16 @@ let execute_spawn_pipeline
                          ("worker_backend", if deps.is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
                          ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
                          ("status", `String "completed");
-                         ("trace_capability", `String (if false (* raw_trace_run unavailable *) then "raw" else "summary_only"));
+                         ("trace_capability", `String (if Option.is_some oas_trace_ref then "raw" else "summary_only"));
                          ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
                          ("resolved_model", `String prepared.runtime_model_label);
                          ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
-                         ("tool_call_count", `Int 0);
-                         ("tool_names", `List (List.map (fun name -> `String name) ([] : string list)));
+                         ("tool_call_count", `Int oas_tool_call_count);
+                         ("tool_names", `List (List.map (fun name -> `String name) oas_tool_names));
                          ("success", `Bool spawn_result.success);
                          ("elapsed_ms", `Int spawn_result.elapsed_ms);
                          ("output_preview", `String output_preview);
+                         ("delivery_verdict", Option.value ~default:`Null delivery_verdict_json);
                        ]
                    in
                    (match wait_mode with

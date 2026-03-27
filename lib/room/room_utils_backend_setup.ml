@@ -161,7 +161,7 @@ let is_unresolved_template value =
 let env_opt name =
   match Sys.getenv_opt name with
   | Some value when String.trim value <> "" ->
-      if is_unresolved_template value then begin
+      if Backend_pg_url.is_unresolved_template value then begin
         Log.Backend.warn
           "%s contains unresolved 1Password template; skipping" name;
         None
@@ -204,18 +204,31 @@ let explicit_storage_type_from_env () =
          | other -> other)
   | None -> None
 
-let normalize_postgres_url url =
-  let uri = Uri.of_string url in
-  match Uri.host uri, Uri.port uri with
-  | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
-      Log.Backend.info
-        "Supabase Transaction Pooler detected (port 6543 on %s); rewriting to Session Pooler port 5432"
-        host;
-      Uri.with_port uri (Some 5432) |> Uri.to_string
-  | _ -> url
-
 let postgres_url_from_env () =
-  Option.map normalize_postgres_url (env_opt "MASC_POSTGRES_URL")
+  match env_opt "MASC_POSTGRES_URL" with
+  | None -> None
+  | Some _ ->
+      let candidates : string option list =
+        [
+          env_opt "MASC_POSTGRES_URL";
+          env_opt "DATABASE_URL";
+          env_opt "SUPABASE_DB_URL";
+          env_opt "SB_PG_URL";
+        ]
+      in
+      match Backend_pg_url.choose_preferred_url candidates with
+      | Some
+          {
+            url;
+            preferred_supabase_transaction_companion = true;
+            preferred_host = Some host;
+          } ->
+          Log.Backend.info
+            "Supabase Session Pooler configured on %s:5432; preferring available Transaction Pooler companion on %s:6543"
+            host host;
+          Some url
+      | Some { url; _ } -> Some url
+      | None -> None
 
 (** Auto-detect best backend based on environment variables
     Stage-1 SSOT policy: no implicit PG auto-detect.
@@ -299,6 +312,17 @@ let backend_config_for base_path =
   }
 
 let create_backend cfg =
+  let filesystem_fallback reason =
+    Log.Backend.warn "%s Falling back to Memory backend." reason;
+    Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.Backend_types.cluster_name))
+  in
+  let fs_usable fs =
+    try
+      ignore (Eio.Path.kind ~follow:true fs);
+      true
+    with
+    | Stdlib.Effect.Unhandled _ -> false
+  in
   match cfg.Backend_types.backend_type with
   | Backend_types.Memory ->
       (* Backend.Memory now has Effect.Unhandled/Poisoned fallback
@@ -307,12 +331,19 @@ let create_backend cfg =
       Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name))
   | Backend_types.FileSystem ->
       (match Fs_compat.get_fs_opt () with
-       | Some fs -> Ok (FileSystem (Backend.FileSystem.create ~fs cfg))
+       | Some fs when fs_usable fs ->
+           Ok (FileSystem (Backend.FileSystem.create ~fs cfg))
+       | Some _fs ->
+           (* Tests sometimes inherit a stale Fs_compat handle from a previous
+              Eio_main.run. Using it outside an active Eio scheduler explodes
+              with Effect.Unhandled, so prefer the shared Memory fallback. *)
+           filesystem_fallback
+             "Stale Eio fs context for FileSystem backend;"
        | None ->
            (* No Eio fs context available (e.g., test without Fs_compat.set_fs).
               Fall back to shared Memory backend for the same base path. *)
-           Log.Backend.warn "No Eio fs context for FileSystem backend, falling back to Memory";
-           Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name)))
+           filesystem_fallback
+             "No Eio fs context for FileSystem backend;")
   | Backend_types.PostgresNative ->
       (* PostgresNative requires Eio context - use create_backend_eio instead *)
       Error (Backend_types.BackendNotSupported "PostgresNative requires Eio context (use create_backend_eio)")

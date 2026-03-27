@@ -43,7 +43,12 @@ let with_test_env f =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       Eio.Switch.run @@ fun sw ->
-      f ~env ~sw ~config)
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        (fun () -> f ~env ~sw ~config))
 
 let with_pg_test_env f =
   match Sys.getenv_opt "MASC_POSTGRES_URL" with
@@ -59,24 +64,27 @@ let with_pg_test_env f =
           with_env "SUPABASE_DB_URL" "" @@ fun () ->
           with_env "SB_PG_URL" "" @@ fun () ->
           Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+          Fs_compat.set_fs (Eio.Stdenv.fs env);
           Eio.Switch.run @@ fun sw ->
-          Eio_context.set_net (Eio.Stdenv.net env);
-          Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-          match
-            try
-              Ok
-                (Room_utils.default_config_eio ~sw ~env:(env :> Caqti_eio.stdenv)
-                   dir)
-            with
-            | Invalid_argument _ ->
-                Error `Backend_unavailable
-          with
-          | Error `Backend_unavailable -> ()
-          | Ok config ->
-              match config.Room_utils.backend with
-              | Room_utils.PostgresNative _ -> f ~env ~sw ~config
-              | Room_utils.Memory _ | Room_utils.FileSystem _ -> ())
+          Eio_context.with_test_env
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~mono_clock:(Eio.Stdenv.mono_clock env)
+            ~sw
+            (fun () ->
+              match
+                try
+                  Ok
+                    (Room_utils.default_config_eio ~sw
+                       ~env:(env :> Caqti_eio.stdenv) dir)
+                with
+                | Invalid_argument _ -> Error `Backend_unavailable
+              with
+              | Error `Backend_unavailable -> ()
+              | Ok config ->
+                  match config.Room_utils.backend with
+                  | Room_utils.PostgresNative _ -> f ~env ~sw ~config
+                  | Room_utils.Memory _ | Room_utils.FileSystem _ -> ()))
 
 let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
   with_test_env @@ fun ~env ~sw ~config ->

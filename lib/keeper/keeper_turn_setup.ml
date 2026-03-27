@@ -102,7 +102,6 @@ let ensure_keeper_exists
     let meta = {
       name;
       agent_name = keeper_agent_name name;
-      persona_profile_path = Option.value ~default:"" profile_defaults.manifest_path;
       trace_id;
       trace_history = [];
       goal;
@@ -185,9 +184,6 @@ let ensure_keeper_exists
       mention_reactive_turn_count = 0;
       noop_turn_count = 0;
       last_triage_triggers = "";
-      initiative_enabled = true;
-      initiative_idle_sec = 0;
-      initiative_cooldown_sec = 0;
       active_team_session_id = None;
       last_team_session_started_at = "";
       team_session_start_count_total = 0;

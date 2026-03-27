@@ -148,7 +148,13 @@ let wait_for_health ~pid ~port ~timeout_s =
 let stop_process pid =
   (try Unix.kill pid Sys.sigterm with _ -> ());
   ignore
-    (try Unix.waitpid [] pid with Unix.Unix_error (Unix.ECHILD, _, _) -> (0, Unix.WEXITED 0))
+    (let rec wait () =
+       try Unix.waitpid [] pid
+       with
+       | Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+       | Unix.Unix_error (Unix.ECHILD, _, _) -> (0, Unix.WEXITED 0)
+     in
+     wait ())
 
 let json_assoc = function
   | `Assoc fields -> fields

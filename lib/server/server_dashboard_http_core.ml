@@ -236,8 +236,6 @@ let command_plane_summary_cache_parts ~allow_initializing ~state =
       in
       (Some (`Assoc (List.remove_assoc "swarm_status" fields)), swarm_status)
   | _ -> (None, None)
-let dashboard_semantics_http_json () =
-  Dashboard_semantics.json ()
 
 let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
@@ -944,6 +942,15 @@ let dashboard_agents_safe config =
 let dashboard_messages_safe config ~since_seq ~limit =
   Room.get_messages_raw_in_room config ~room_id:(dashboard_current_room_id config) ~since_seq ~limit
 
+let is_keeper_agent (agent : Types.agent) =
+  String.equal (String.lowercase_ascii (String.trim agent.agent_type)) "keeper"
+
+let dashboard_general_agent_count agents =
+  agents
+  |> List.fold_left
+       (fun count agent -> if is_keeper_agent agent then count else count + 1)
+       0
+
 let provider_capacity_json () : Yojson.Safe.t =
   `Assoc []
 
@@ -966,6 +973,7 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
     in
     let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
     let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
+    let general_agents = dashboard_general_agent_count agents in
     let tasks, tasks_ms = measure_ms (fun () -> dashboard_tasks_safe config) in
     let keepers_total, keepers_ms =
       measure_ms (fun () -> resident_keeper_count config)
@@ -977,7 +985,7 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
         ( "counts",
           `Assoc
             [
-              ("agents", `Int (List.length agents));
+              ("agents", `Int general_agents);
               ("tasks", `Int (List.length tasks));
               ("keepers", `Int keepers_total);
             ] );

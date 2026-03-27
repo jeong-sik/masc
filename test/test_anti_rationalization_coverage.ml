@@ -154,7 +154,7 @@ let () = test "review_result_gate_field_excuse" (fun () ->
 
 let () = test "review_result_evaluator_cascade_default" (fun () ->
   let r = Anti_rationalization.review (make_request "") in
-  assert (r.evaluator_cascade = "verifier"))
+  assert (r.evaluator_cascade = "cross_verifier"))
 
 let () = test "review_result_custom_evaluator_cascade" (fun () ->
   let r = Anti_rationalization.review ~evaluator_cascade:"cross_verifier" (make_request "") in

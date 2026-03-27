@@ -39,6 +39,25 @@ let warm_execution_cache () =
     Lib.Server_dashboard_http._execution_cache
     (`Assoc [("status", `String "ok")])
 
+let expire_execution_warmup () =
+  let surface = Lib.Server_dashboard_http._execution_cache in
+  Lib.Server_dashboard_http_cache.invalidate_cached_surface surface;
+  let stale_attempt_ts = Unix.gettimeofday () -. 120.0 in
+  surface.last_attempt_unix <- Some stale_attempt_ts;
+  surface.last_attempt_at <- Some "stale_attempt_for_test"
+
+let keeper_boot_entry name : Lib.Keeper_types.keeper_boot_entry =
+  let now = "2026-03-25T08:05:54Z" in
+  {
+    name;
+    persona_name = name;
+    voice_enabled = false;
+    voice_channel = "text_only";
+    voice_agent_id = "";
+    created_at = now;
+    updated_at = now;
+  }
+
 let test_dashboard_room_truth_empty_room () =
   let dir = test_dir () in
   Fun.protect
@@ -117,6 +136,94 @@ let test_dashboard_room_truth_empty_room_focus_label () =
            && focus_label <> "지금은 방 전체가 비교적 안정적입니다");
       ))
 
+let test_dashboard_room_truth_keeper_only_room_not_reported_empty () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let module Mcp_server = Lib.Mcp_server in
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let config = state.Mcp_server.room_config in
+      ignore (Lib.Room.init config ~agent_name:None);
+      ignore
+        (Lib.Room.join config
+           ~agent_name:"keeper-sangsu-agent"
+           ~agent_type_override:(Some "keeper")
+           ~capabilities:["keeper"]
+           ());
+      ignore
+        (Lib.Keeper_types.write_resident_keeper config
+           (keeper_boot_entry "sangsu"));
+      warm_execution_cache ();
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_room_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/room-truth")
+        in
+        let open Yojson.Safe.Util in
+        let focus_label = json |> member "focus" |> member "label" |> to_string in
+        check int "keeper-only room counts general agents as zero"
+          0
+          (json |> member "room" |> member "counts" |> member "agents" |> to_int);
+        check int "keeper-only room still counts resident keeper"
+          1
+          (json |> member "room" |> member "counts" |> member "keepers" |> to_int);
+        check bool "keeper-only room does not report empty room focus"
+          false
+          (String.equal focus_label
+             "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.");
+      ))
+
+let test_dashboard_room_truth_mixed_runtime_counts () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let module Mcp_server = Lib.Mcp_server in
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let config = state.Mcp_server.room_config in
+      ignore (Lib.Room.init config ~agent_name:None);
+      ignore
+        (Lib.Room.join config
+           ~agent_name:"codex-test-agent"
+           ~agent_type_override:(Some "codex")
+           ~capabilities:["typescript"]
+           ());
+      ignore
+        (Lib.Room.join config
+           ~agent_name:"keeper-sangsu-agent"
+           ~agent_type_override:(Some "keeper")
+           ~capabilities:["keeper"]
+           ());
+      ignore
+        (Lib.Keeper_types.write_resident_keeper config
+           (keeper_boot_entry "sangsu"));
+      warm_execution_cache ();
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_room_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/room-truth")
+        in
+        let open Yojson.Safe.Util in
+        let focus_label = json |> member "focus" |> member "label" |> to_string in
+        check int "mixed room counts one general agent"
+          1
+          (json |> member "room" |> member "counts" |> member "agents" |> to_int);
+        check int "mixed room counts one resident keeper"
+          1
+          (json |> member "room" |> member "counts" |> member "keepers" |> to_int);
+        check bool "mixed room avoids empty runtime fallback"
+          false
+          (String.equal focus_label
+             "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.");
+      ))
+
 let test_operator_digest_shape_matches_room_truth () =
   let dir = test_dir () in
   Fun.protect
@@ -143,6 +250,38 @@ let test_operator_digest_shape_matches_room_truth () =
         ) expected_keys;
       ))
 
+let test_dashboard_room_truth_cold_cache_falls_back_to_partial_truth () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      warm_execution_cache ();
+      cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      expire_execution_warmup ();
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_room_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/room-truth")
+        in
+        let open Yojson.Safe.Util in
+        check bool "expired warmup skips top-level initializing payload"
+          true
+          (json |> member "status" = `Null);
+        check bool "room block still present"
+          true
+          (json |> member "room" <> `Null);
+        check int "execution summary falls back to zero sessions"
+          0
+          (json |> member "execution" |> member "summary" |> member "active_sessions" |> to_int);
+        check string "room truth diagnostics keep execution cache state"
+          "initializing"
+          (json |> member "projection_diagnostics" |> member "execution_cache_state" |> to_string);
+      ))
+
 let () =
   Alcotest.run "Dashboard Room Truth"
     [
@@ -151,6 +290,12 @@ let () =
           test_case "empty room shape" `Quick test_dashboard_room_truth_empty_room;
           test_case "execution fixture surfaces top queue" `Quick test_dashboard_room_truth_execution_fixture;
           test_case "empty room focus label reflects no agents" `Quick test_dashboard_room_truth_empty_room_focus_label;
+          test_case "keeper-only room does not look empty" `Quick
+            test_dashboard_room_truth_keeper_only_room_not_reported_empty;
+          test_case "mixed runtimes keep counts aligned" `Quick
+            test_dashboard_room_truth_mixed_runtime_counts;
           test_case "operator digest shape matches room-truth" `Quick test_operator_digest_shape_matches_room_truth;
+          test_case "expired execution warmup falls back to partial truth" `Quick
+            test_dashboard_room_truth_cold_cache_falls_back_to_partial_truth;
         ] );
     ]

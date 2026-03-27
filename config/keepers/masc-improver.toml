@@ -29,20 +29,10 @@ Focus order:
 Never work outside masc-mcp. Use worktrees. One active lane at a time.
 """
 
-models = ["llama:qwen3.5-35b-a3b-ud-q4-xl"]
-allowed_models = ["llama:qwen3.5-35b-a3b-ud-q4-xl", "glm-5"]
-active_model = "llama:qwen3.5-35b-a3b-ud-q4-xl"
-
 room_scope = "current"
 scope_kind = "local"
-trigger_mode = "explicit_only"
 mention_targets = ["masc-improver", "improver"]
 
 proactive_enabled = true
 presence_keepalive = true
 presence_keepalive_sec = 30
-
-initiative_enabled = true
-initiative_scope = "board_only"
-initiative_idle_sec = 300
-initiative_cooldown_sec = 300

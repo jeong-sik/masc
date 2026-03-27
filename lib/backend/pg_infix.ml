@@ -8,39 +8,33 @@
     Session Pooler (port 5432) and direct connections work normally with
     the default Static prepared statement policy.
 
-    NOTE: [Room_utils.normalize_postgres_url] rewrites Supabase `:6543` to
-    `:5432` at connection time. This module mirrors that normalization so
-    the oneshot policy matches the actual port the driver connects to. *)
+    When a legacy Session Pooler URL is configured via [MASC_POSTGRES_URL]
+    but a companion Supabase Transaction Pooler URL is still available in
+    lower-priority env vars, this module mirrors the runtime selector and
+    enables oneshot mode for the companion `:6543` target. *)
 
-(* Apply the same port normalization as Room_utils.normalize_postgres_url.
-   Supabase Transaction Pooler URLs on pooler.supabase.com:6543 are rewritten
-   to Session Pooler port 5432 at connection time, so the driver never actually
-   talks to port 6543. *)
-let normalize_pg_port url =
-  let uri = Uri.of_string url in
-  match Uri.host uri, Uri.port uri with
-  | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
-      Uri.with_port uri (Some 5432) |> Uri.to_string
-  | _ -> url
+let preferred_url_from_env () =
+  match Backend_pg_url.env_url_opt "MASC_POSTGRES_URL" with
+  | None -> None
+  | Some _ ->
+      let candidates : string option list =
+        [
+          Backend_pg_url.env_url_opt "MASC_POSTGRES_URL";
+          Backend_pg_url.env_url_opt "DATABASE_URL";
+          Backend_pg_url.env_url_opt "SUPABASE_DB_URL";
+          Backend_pg_url.env_url_opt "SB_PG_URL";
+        ]
+      in
+      Option.map (fun selection -> selection.Backend_pg_url.url)
+        (Backend_pg_url.choose_preferred_url candidates)
 
 let use_oneshot =
-  let env_url name =
-    match Sys.getenv_opt name with
-    | Some v when String.trim v <> "" -> Some (String.trim v)
-    | _ -> None
-  in
-  let url =
-    match env_url "MASC_POSTGRES_URL" with
-    | Some _ as u -> u
-    | None -> None
-  in
-  match url with
+  match preferred_url_from_env () with
   | None -> false
-  | Some raw_url ->
-      let url = normalize_pg_port raw_url in
+  | Some url ->
       (match Uri.port (Uri.of_string url) with
-      | Some 6543 -> true
-      | _ -> false)
+       | Some 6543 -> true
+       | _ -> false)
 
 let oneshot () = use_oneshot
 

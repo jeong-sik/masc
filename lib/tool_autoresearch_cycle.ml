@@ -4,45 +4,262 @@ open Tool_args
 open Tool_autoresearch_registry
 open Tool_autoresearch_broadcast
 
-(** Run one experiment cycle: the real Karpathy loop turn.
-    Steps: read file -> generate code change -> fresh metric before ->
-    apply change -> git commit -> metric after -> keep/discard -> persist.
+let autoresearch_lesson_agent_name = "autoresearch-reviewer"
 
-    Acquires [loops_mu] for short critical sections around Hashtbl access.
-    Long-running operations (metric measurement, code generation, git) run
-    outside the lock. *)
+let clip text max_len =
+  if String.length text <= max_len then text
+  else String.sub text 0 max_len ^ "..."
+
 let resolve_loop_id args =
   match get_string_opt args "loop_id" with
   | Some id -> Some id
   | None -> Autoresearch.with_loops_ro (fun () -> !latest_loop_id)
 
+let lesson_pattern (state : Autoresearch.loop_state) =
+  Printf.sprintf "autoresearch %s %s" state.target_file state.goal
+
+let make_loop_memory (ctx : Tool_autoresearch_repo_synthesis.context)
+    (state : Autoresearch.loop_state) =
+  let memory =
+    Memory_oas_bridge.create_memory
+    ~agent_name:autoresearch_lesson_agent_name
+    ~base_dir:(Filename.concat ctx.base_path ".masc")
+    ~session_id:("autoresearch-" ^ state.loop_id)
+    ()
+  in
+  ignore
+    (Memory_oas_bridge.seed_episodes
+       ~memory
+       ~agent_name:autoresearch_lesson_agent_name
+       ~limit:20);
+  Procedural_memory.load_procedures
+    ~agent_name:autoresearch_lesson_agent_name
+  |> List.iter (fun proc ->
+         Agent_sdk.Memory.store_procedure memory
+           (Memory_oas_bridge.oas_procedure_of_masc proc));
+  memory
+
+let flush_loop_memory memory =
+  ignore
+    (Memory_oas_bridge.flush_all
+       ~memory
+       ~agent_name:autoresearch_lesson_agent_name)
+
+let render_recent_findings findings =
+  match findings with
+  | [] -> None
+  | _ ->
+    let lines =
+      findings
+      |> List.mapi (fun idx (finding : Autoresearch_knowledge.finding) ->
+           Printf.sprintf "%d. %s => %s"
+             (idx + 1)
+             (clip finding.hypothesis 120)
+             (clip finding.conclusion 180))
+    in
+    Some ("Recent autoresearch findings:\n" ^ String.concat "\n" lines)
+
+let build_goal_with_feedback
+    (ctx : Tool_autoresearch_repo_synthesis.context)
+    (state : Autoresearch.loop_state) =
+  let pattern = lesson_pattern state in
+  let memory = make_loop_memory ctx state in
+  let lesson_text =
+    Agent_sdk.Lesson_memory.retrieve_lessons memory ~pattern ~limit:3 ()
+    |> Agent_sdk.Lesson_memory.render_prompt_context
+  in
+  let finding_text =
+    Autoresearch_knowledge.search_findings ~query:pattern ~limit:3 ()
+    |> render_recent_findings
+  in
+  [
+    Some state.goal;
+    lesson_text;
+    finding_text;
+  ]
+  |> List.filter_map (fun section -> section)
+  |> String.concat "\n\n"
+
+let persist_failure_feedback
+    (ctx : Tool_autoresearch_repo_synthesis.context)
+    (state : Autoresearch.loop_state)
+    ~hypothesis ~summary ?action ?stdout ?stderr ?diff_summary ?trace_summary
+    ?metric_error ?(tags = []) ?conclusion () =
+  let memory = make_loop_memory ctx state in
+  let evidence =
+    [ Some summary;
+      diff_summary;
+      metric_error;
+      Option.map (fun text -> "stderr: " ^ clip text 240) stderr;
+      Option.map (fun text -> "stdout: " ^ clip text 240) stdout; ]
+    |> List.filter_map (fun value -> value)
+    |> String.concat " | "
+  in
+  let metadata =
+    [
+      ("loop_id", `String state.loop_id);
+      ("target_file", `String state.target_file);
+      ("cycle", `Int state.current_cycle);
+      ("goal", `String state.goal);
+    ]
+  in
+  ignore
+    (Agent_sdk.Lesson_memory.record_failure memory
+       {
+         pattern = lesson_pattern state;
+         summary;
+         action;
+         stdout;
+         stderr;
+         diff_summary;
+         trace_summary;
+         metric_name =
+           Option.map
+             (fun _ -> Agent_sdk.Metric_contract.default_metric_name)
+             metric_error;
+         metric_error;
+         participants = [ autoresearch_lesson_agent_name; "autoresearch_cycle" ];
+         metadata;
+       });
+  flush_loop_memory memory;
+  let finding : Autoresearch_knowledge.finding =
+    {
+      id = Autoresearch_knowledge.generate_finding_id ();
+      loop_id = state.loop_id;
+      keeper_name = autoresearch_lesson_agent_name;
+      goal = state.goal;
+      hypothesis;
+      evidence = if evidence = "" then summary else evidence;
+      conclusion =
+        Option.value ~default:(clip summary 240) conclusion;
+      confidence = Autoresearch_knowledge.Medium;
+      tags = "autoresearch" :: state.target_file :: tags;
+      related_findings = [];
+      cycle_range = Some (state.current_cycle, state.current_cycle);
+      timestamp = Unix.gettimeofday ();
+    }
+  in
+  ignore (Autoresearch_knowledge.record_finding ~finding)
+
+let forced_discard_record
+    (state : Autoresearch.loop_state)
+    ~hypothesis ~score_before ?score_after ?commit_hash
+    ~elapsed_ms ~reason () =
+  let score_after = Option.value ~default:score_before score_after in
+  let record : Autoresearch.cycle_record =
+    {
+      cycle = state.current_cycle;
+      hypothesis;
+      score_before;
+      score_after;
+      delta = score_after -. score_before;
+      decision = Autoresearch.Discard;
+      commit_hash;
+      elapsed_ms;
+      model_used = state.model_model;
+      timestamp = Time_compat.now ();
+    }
+  in
+  state.history <- record :: state.history;
+  state.total_discards <- state.total_discards + 1;
+  state.updated_at <- Time_compat.now ();
+  Autoresearch.add_insight state
+    (Printf.sprintf "Cycle %d: %s discarded (%s)"
+       state.current_cycle hypothesis reason);
+  record
+
+let persist_discard_record
+    (ctx : Tool_autoresearch_repo_synthesis.context)
+    (state : Autoresearch.loop_state)
+    ~loop_id ~hypothesis ~reason record =
+  Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
+  state.current_cycle <- state.current_cycle + 1;
+  Autoresearch.save_state ~base_path:ctx.base_path state;
+  broadcast_cycle_result state record;
+  `Assoc
+    [
+      ("loop_id", `String loop_id);
+      ("cycle", `Int record.cycle);
+      ("hypothesis", `String hypothesis);
+      ("decision", `String "discard");
+      ("reason", `String reason);
+      ("baseline", `Float state.baseline);
+    ]
+
+let git_diff_patch ~workdir =
+  let status, output =
+    Process_eio.run_argv_with_status ~timeout_sec:30.0
+      [ "git"; "-C"; workdir; "diff"; "--no-ext-diff"; "--binary"; "--relative" ]
+  in
+  match status with
+  | Unix.WEXITED 0 -> Ok output
+  | Unix.WEXITED code ->
+    Error (Printf.sprintf "git diff exited with code %d" code)
+  | Unix.WSIGNALED signal
+  | Unix.WSTOPPED signal ->
+    Error (Printf.sprintf "git diff terminated with signal %d" signal)
+
+let sync_target_file_to_index ~workdir ~target_file =
+  let status, output =
+    Process_eio.run_argv_with_status ~timeout_sec:10.0
+      [ "git"; "-C"; workdir; "add"; "--"; target_file ]
+  in
+  match status with
+  | Unix.WEXITED 0 -> ()
+  | _ ->
+    Log.Autoresearch.warn "failed to sync %s back into git index: %s"
+      target_file (clip (String.trim output) 200)
+
+let restore_original_content ~workdir ~target_file ~original_content ~sync_index =
+  match
+    Autoresearch.apply_code_change
+      ~workdir ~target_file ~new_content:original_content
+  with
+  | Ok _ when sync_index -> sync_target_file_to_index ~workdir ~target_file
+  | Ok _ -> ()
+  | Error err ->
+    Log.Autoresearch.warn "failed to restore %s: %s" target_file err
+
+let diff_guard_summary report =
+  report.Agent_sdk.Autonomy_diff_guard.issues
+  |> List.map Agent_sdk.Autonomy_diff_guard.show_issue
+  |> String.concat "; "
+
+(** Run one experiment cycle: the real Karpathy loop turn.
+    Steps: read file -> generate code change -> fresh metric before ->
+    apply change -> diff guard -> git commit -> metric after -> keep/discard -> persist.
+
+    Acquires [loops_mu] for short critical sections around Hashtbl access.
+    Long-running operations (metric measurement, code generation, git) run
+    outside the lock. *)
 let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
   | Some id ->
-    (* Short critical section: look up state and check preconditions *)
-    let state_or_error = Autoresearch.with_loops_rw (fun () ->
-      match Hashtbl.find_opt active_loops id with
-      | None -> Error (Printf.sprintf "Loop %s not found" id)
-      | Some state ->
-        if state.status <> Autoresearch.Running then
-          Error "Loop is not running"
-        else if not (Autoresearch.should_continue state) then begin
-          state.status <- Autoresearch.Completed;
-          Autoresearch.save_state ~base_path:ctx.base_path state;
-          Error "completed"
-        end else
-          Ok state)
-    in
-    (match state_or_error with
-    | Error "completed" ->
-        (* Reconstruct completion JSON: re-read state under lock *)
-        let best_score, best_cycle = Autoresearch.with_loops_ro (fun () ->
+    let state_or_error =
+      Autoresearch.with_loops_rw (fun () ->
           match Hashtbl.find_opt active_loops id with
-          | Some s -> (s.best_score, s.best_cycle)
-          | None -> (0.0, 0))
-        in
-        `Assoc [
+          | None -> Error (Printf.sprintf "Loop %s not found" id)
+          | Some state ->
+            if state.status <> Autoresearch.Running then
+              Error "Loop is not running"
+            else if not (Autoresearch.should_continue state) then begin
+              state.status <- Autoresearch.Completed;
+              Autoresearch.save_state ~base_path:ctx.base_path state;
+              Error "completed"
+            end else
+              Ok state)
+    in
+    match state_or_error with
+    | Error "completed" ->
+      let best_score, best_cycle =
+        Autoresearch.with_loops_ro (fun () ->
+            match Hashtbl.find_opt active_loops id with
+            | Some s -> (s.best_score, s.best_cycle)
+            | None -> (0.0, 0))
+      in
+      `Assoc
+        [
           ("loop_id", `String id);
           ("status", `String "completed");
           ("reason", `String "max_cycles reached");
@@ -54,181 +271,287 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
       let workdir = state.workdir in
       let timeout_s = state.cycle_timeout_s in
       let target_file = state.target_file in
-      (* 1. Read target file *)
       match Autoresearch.validate_target_file ~workdir target_file with
       | Error e ->
-        `Assoc [
-          ("error", `String (Printf.sprintf "target_file invalid: %s" e));
-          ("loop_id", `String id);
-        ]
+        `Assoc
+          [
+            ("error", `String (Printf.sprintf "target_file invalid: %s" e));
+            ("loop_id", `String id);
+          ]
       | Ok abs_path ->
-      let file_content = Autoresearch.read_file abs_path in
-      (* 2. Generate code change: injected hypothesis > arg > MODEL *)
-      let code_result =
-        let forced_hypothesis =
-          Autoresearch.with_loops_rw (fun () ->
-            with_hypotheses_rw (fun () ->
-              match Hashtbl.find_opt pending_hypotheses id with
-              | Some h ->
-                  Hashtbl.remove pending_hypotheses id;
-                  state.queued_hypothesis <- None;
-                  Autoresearch.save_state ~base_path:ctx.base_path state;
-                  Some h
-              | None -> get_string_opt args "hypothesis"))
-        in
+        let file_content = Autoresearch.read_file abs_path in
+        let goal_with_feedback = build_goal_with_feedback ctx state in
+        let code_result =
+          let forced_hypothesis =
+            Autoresearch.with_loops_rw (fun () ->
+                with_hypotheses_rw (fun () ->
+                    match Hashtbl.find_opt pending_hypotheses id with
+                    | Some h ->
+                      Hashtbl.remove pending_hypotheses id;
+                      state.queued_hypothesis <- None;
+                      Autoresearch.save_state ~base_path:ctx.base_path state;
+                      Some h
+                    | None -> get_string_opt args "hypothesis"))
+          in
           let generate = get_generator id in
-          (match forced_hypothesis with
-           | Some h ->
-             (* Injected/explicit hypothesis: pass it to generator
-                so MODEL produces actual code changes for this hypothesis *)
-             generate ~goal:(Printf.sprintf "%s\n\nApply this hypothesis: %s" state.goal h)
-               ~baseline:state.baseline
-               ~history:state.history ~insights:state.insights
-               ~target_file ~file_content
-             |> Result.map (fun (_generated_hyp, code) -> (h, code))
-           | None ->
-             generate ~goal:state.goal ~baseline:state.baseline
-               ~history:state.history ~insights:state.insights
-               ~target_file ~file_content)
+          match forced_hypothesis with
+          | Some h ->
+            generate
+              ~goal:(Printf.sprintf "%s\n\nApply this hypothesis: %s" goal_with_feedback h)
+              ~baseline:state.baseline
+              ~history:state.history
+              ~insights:state.insights
+              ~target_file
+              ~file_content
+            |> Result.map (fun (_generated_hyp, code) -> (h, code))
+          | None ->
+            generate
+              ~goal:goal_with_feedback
+              ~baseline:state.baseline
+              ~history:state.history
+              ~insights:state.insights
+              ~target_file
+              ~file_content
         in
         match code_result with
         | Error e ->
-          `Assoc [
-            ("error", `String (Printf.sprintf "Code generation failed: %s" e));
-            ("loop_id", `String id);
-            ("cycle", `Int state.current_cycle);
-          ]
-        | Ok (hypothesis, new_code) ->
-          (* 3. Measure FRESH score_before *)
-          let before_result = Autoresearch.measure_metric_with_retry
-            ~workdir ~timeout_s state.metric_fn in
-          match before_result with
-          | Error e ->
-            `Assoc [
-              ("error", `String (Printf.sprintf "Pre-metric failed: %s" e));
+          persist_failure_feedback ctx state
+            ~hypothesis:"<generation_failed>"
+            ~summary:(Printf.sprintf "Code generation failed: %s" e)
+            ~action:"Use prior lessons, keep the patch small, and regenerate only the target file."
+            ~stderr:e
+            ~tags:["codegen-failure"]
+            ();
+          `Assoc
+            [
+              ("error", `String (Printf.sprintf "Code generation failed: %s" e));
               ("loop_id", `String id);
               ("cycle", `Int state.current_cycle);
             ]
+        | Ok (hypothesis, new_code) ->
+          let before_result =
+            Autoresearch.measure_metric_with_retry ~workdir ~timeout_s state.metric_fn
+          in
+          match before_result with
+          | Error e ->
+            persist_failure_feedback ctx state
+              ~hypothesis
+              ~summary:(Printf.sprintf "Pre-metric failed: %s" e)
+              ~action:
+                ("Ensure the metric command exits 0 and emits either a final metric tag or "
+               ^ "a last-line float.")
+              ~metric_error:e
+              ~stderr:e
+              ~tags:["pre-metric-failure"]
+              ();
+            `Assoc
+              [
+                ("error", `String (Printf.sprintf "Pre-metric failed: %s" e));
+                ("loop_id", `String id);
+                ("cycle", `Int state.current_cycle);
+              ]
           | Ok (score_before, _) ->
-            (* 4. Apply code change to disk *)
-            (match Autoresearch.apply_code_change ~workdir ~target_file ~new_content:new_code with
-             | Error e ->
-               `Assoc [
-                 ("error", `String (Printf.sprintf "apply_code_change failed: %s" e));
-                 ("loop_id", `String id);
-                 ("cycle", `Int state.current_cycle);
-               ]
-             | Ok _original ->
-               (* 5. Git commit (real changes, no --allow-empty) *)
-               let commit_result = Autoresearch.git_commit_cycle
-                 ~workdir ~cycle:state.current_cycle ~hypothesis ~baseline:score_before in
-               (match commit_result with
-               | Error git_err ->
-                  (* Git commit failed (e.g. missing identity, hooks).
-                     Revert file change to keep working tree clean. *)
-                  Autoresearch.git_restore_head ~workdir;
-                  `Assoc [
-                    ("error", `String (Printf.sprintf "git commit failed: %s" git_err));
-                    ("loop_id", `String id);
-                    ("cycle", `Int state.current_cycle);
-                  ]
-                | Ok None ->
-                  (* No diff: MODEL produced identical code. Discard. *)
-                  let record = Autoresearch.record_cycle state
-                    ~hypothesis ~score_before ~score_after:score_before
-                    ~commit_hash:None ~elapsed_ms:0 ~model_used:state.model_model in
-                  Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
-                  state.current_cycle <- state.current_cycle + 1;
-                  Autoresearch.save_state ~base_path:ctx.base_path state;
-                  broadcast_cycle_result state record;
-                  `Assoc [
-                    ("loop_id", `String id);
-                    ("cycle", `Int record.cycle);
-                    ("hypothesis", `String hypothesis);
-                    ("decision", `String "discard");
-                    ("reason", `String "no diff produced");
-                    ("baseline", `Float state.baseline);
-                  ]
-                | Ok (Some _) ->
-                  let commit_hash = (match commit_result with Ok h -> h | _ -> None) in
-                  (* 6. Measure score_after *)
-                  let after_result = Autoresearch.measure_metric_with_retry
-                    ~workdir ~timeout_s state.metric_fn in
-                  match after_result with
-                  | Error e ->
-                    (* Metric failed: git reset to undo *)
-                    Autoresearch.git_reset_last ~workdir;
-                    let record = Autoresearch.record_cycle state
-                      ~hypothesis ~score_before ~score_after:score_before
-                      ~commit_hash ~elapsed_ms:0 ~model_used:state.model_model in
-                    Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
-                    state.current_cycle <- state.current_cycle + 1;
-                    Autoresearch.save_state ~base_path:ctx.base_path state;
-                    broadcast_cycle_result state record;
-                    `Assoc [
-                      ("loop_id", `String id);
-                      ("cycle", `Int record.cycle);
-                      ("hypothesis", `String hypothesis);
-                      ("decision", `String "discard");
-                      ("reason", `String (Printf.sprintf "metric_fn failed: %s" e));
-                      ("baseline", `Float state.baseline);
-                    ]
-                  | Ok (score_after, elapsed_ms) ->
-                    (* 7. Compare and decide *)
-                    let record = Autoresearch.record_cycle state
-                      ~hypothesis ~score_before ~score_after
-                      ~commit_hash ~elapsed_ms ~model_used:state.model_model in
-                    (* 8. Keep or discard *)
-                    (match record.decision with
-                     | Autoresearch.Discard ->
-                       (* Karpathy ratchet: git reset --hard HEAD~1 reverts commit + files *)
-                       Autoresearch.git_reset_last ~workdir
-                     | Autoresearch.Keep ->
-                       if score_after >= state.best_score then
-                         Autoresearch.git_tag_best ~workdir
-                           ~cycle:state.current_cycle ~score:score_after);
-                    (* 9. Persist cycle record first, then update in-memory state.
-                       Baseline mutation after append_cycle ensures disk has the
-                       decision record even if save_state fails. *)
-                    Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
-                    (if record.decision = Autoresearch.Keep then
-                       state.baseline <- score_after);
-                    state.current_cycle <- state.current_cycle + 1;
-                    Autoresearch.save_state ~base_path:ctx.base_path state;
-                    let config = Room.default_config ctx.base_path |> Room.config_with_resolved_scope in
-                    (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
-                    | Some link ->
-                        (try
-                           Team_session_store.append_event config link.session_id
-                             ~event_type:"linked_autoresearch_cycle"
-                             ~detail:
-                               (`Assoc
-                                 [
-                                   ("loop_id", `String id);
-                                   ("cycle", `Int record.cycle);
-                                   ("hypothesis", `String hypothesis);
-                                   ("decision", `String (Autoresearch.decision_to_string record.decision));
-                                   ("delta", `Float record.delta);
-                                   ("baseline", `Float state.baseline);
-                                   ("best_score", `Float state.best_score);
-                                 ])
-                         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                           Log.Autoresearch.warn "cycle event append failed: %s" (Printexc.to_string exn))
-                    | None -> ());
-                    (* 10. SSE broadcast *)
-                    broadcast_cycle_result state record;
-                    (* 11. Return result *)
-                    `Assoc [
-                      ("loop_id", `String id);
-                      ("cycle", `Int record.cycle);
-                      ("hypothesis", `String hypothesis);
-                      ("score_before", `Float score_before);
-                      ("score_after", `Float score_after);
-                      ("delta", `Float record.delta);
-                      ("decision", `String (Autoresearch.decision_to_string record.decision));
-                      ("commit_hash", match record.commit_hash with
-                        | Some h -> `String h | None -> `Null);
-                      ("baseline", `Float state.baseline);
-                      ("best_score", `Float state.best_score);
-                      ("cycles_remaining", `Int (state.max_cycles - state.current_cycle));
-                    ])))
+            match
+              Autoresearch.apply_code_change ~workdir ~target_file ~new_content:new_code
+            with
+            | Error e ->
+              `Assoc
+                [
+                  ( "error",
+                    `String (Printf.sprintf "apply_code_change failed: %s" e) );
+                  ("loop_id", `String id);
+                  ("cycle", `Int state.current_cycle);
+                ]
+            | Ok original_content ->
+              (match git_diff_patch ~workdir with
+               | Error diff_err ->
+                 restore_original_content
+                   ~workdir ~target_file ~original_content ~sync_index:false;
+                 persist_failure_feedback ctx state
+                   ~hypothesis
+                   ~summary:(Printf.sprintf "Unable to inspect git diff: %s" diff_err)
+                   ~action:"Keep the working tree inspectable and retry the cycle."
+                   ~stderr:diff_err
+                   ~tags:["diff-inspection-failure"]
+                   ();
+                 `Assoc
+                   [
+                     ("error", `String (Printf.sprintf "git diff failed: %s" diff_err));
+                     ("loop_id", `String id);
+                     ("cycle", `Int state.current_cycle);
+                   ]
+               | Ok patch ->
+                 let report =
+                   Agent_sdk.Autonomy_diff_guard.validate_patch
+                     ~allowed_paths:[ target_file ]
+                     patch
+                 in
+                 if List.exists
+                      (function
+                        | Agent_sdk.Autonomy_diff_guard.Empty_patch -> true
+                        | _ -> false)
+                      report.issues
+                 then
+                   let record =
+                     forced_discard_record state
+                       ~hypothesis ~score_before ~elapsed_ms:0
+                       ~reason:"no diff produced"
+                       ()
+                   in
+                   persist_discard_record ctx state
+                     ~loop_id:id ~hypothesis ~reason:"no diff produced" record
+                 else if not report.accepted then
+                   let summary = diff_guard_summary report in
+                   restore_original_content
+                     ~workdir ~target_file ~original_content ~sync_index:false;
+                   persist_failure_feedback ctx state
+                     ~hypothesis
+                     ~summary:(Printf.sprintf "Diff guard rejected patch: %s" summary)
+                     ~action:
+                       "Restrict edits to the declared target_file and avoid risky system-level additions."
+                     ~diff_summary:summary
+                     ~tags:["diff-guard"]
+                     ();
+                   let record =
+                     forced_discard_record state
+                       ~hypothesis ~score_before ~elapsed_ms:0
+                       ~reason:("diff guard rejected patch: " ^ summary)
+                       ()
+                   in
+                   persist_discard_record ctx state
+                     ~loop_id:id ~hypothesis
+                     ~reason:("diff guard rejected patch: " ^ summary)
+                     record
+                 else
+                   let commit_result =
+                     Autoresearch.git_commit_cycle
+                       ~workdir
+                       ~cycle:state.current_cycle
+                       ~hypothesis
+                       ~baseline:score_before
+                   in
+                   match commit_result with
+                   | Error git_err ->
+                     restore_original_content
+                       ~workdir ~target_file ~original_content ~sync_index:true;
+                     persist_failure_feedback ctx state
+                       ~hypothesis
+                       ~summary:(Printf.sprintf "git commit failed: %s" git_err)
+                       ~action:
+                         "Keep git identity/hooks valid and retry after the target file is restored."
+                       ~stderr:git_err
+                       ~tags:["git-commit-failure"]
+                       ();
+                     `Assoc
+                       [
+                         ("error", `String (Printf.sprintf "git commit failed: %s" git_err));
+                         ("loop_id", `String id);
+                         ("cycle", `Int state.current_cycle);
+                       ]
+                   | Ok None ->
+                     let record =
+                       forced_discard_record state
+                         ~hypothesis ~score_before ~elapsed_ms:0
+                         ~reason:"no diff produced"
+                         ()
+                     in
+                     persist_discard_record ctx state
+                       ~loop_id:id ~hypothesis ~reason:"no diff produced" record
+                   | Ok (Some commit_hash) ->
+                     let after_result =
+                       Autoresearch.measure_metric_with_retry
+                         ~workdir ~timeout_s state.metric_fn
+                     in
+                     match after_result with
+                     | Error e ->
+                       Autoresearch.git_reset_last ~workdir;
+                       persist_failure_feedback ctx state
+                         ~hypothesis
+                         ~summary:(Printf.sprintf "Post-metric failed: %s" e)
+                         ~action:
+                           ("Make the metric harness deterministic and emit "
+                          ^ Agent_sdk.Metric_contract.prompt_snippet ())
+                         ~metric_error:e
+                         ~stderr:e
+                         ~tags:["post-metric-failure"]
+                         ();
+                       let record =
+                         forced_discard_record state
+                           ~hypothesis ~score_before ~commit_hash:commit_hash
+                           ~elapsed_ms:0
+                           ~reason:("metric_fn failed: " ^ e)
+                           ()
+                       in
+                       persist_discard_record ctx state
+                         ~loop_id:id ~hypothesis
+                         ~reason:(Printf.sprintf "metric_fn failed: %s" e)
+                         record
+                     | Ok (score_after, elapsed_ms) ->
+                       let record =
+                         Autoresearch.record_cycle state
+                           ~hypothesis ~score_before ~score_after
+                           ~commit_hash:(Some commit_hash)
+                           ~elapsed_ms ~model_used:state.model_model
+                       in
+                       (match record.decision with
+                        | Autoresearch.Discard ->
+                          Autoresearch.git_reset_last ~workdir
+                        | Autoresearch.Keep ->
+                          if score_after >= state.best_score then
+                            Autoresearch.git_tag_best ~workdir
+                              ~cycle:state.current_cycle ~score:score_after);
+                       Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
+                       if record.decision = Autoresearch.Keep then
+                         state.baseline <- score_after;
+                       state.current_cycle <- state.current_cycle + 1;
+                       Autoresearch.save_state ~base_path:ctx.base_path state;
+                       let config =
+                         Room.default_config ctx.base_path
+                         |> Room.config_with_resolved_scope
+                       in
+                       (match
+                          Autoresearch.load_swarm_link_by_loop
+                            ~base_path:ctx.base_path id
+                        with
+                       | Some link ->
+                         (try
+                            Team_session_store.append_event config link.session_id
+                              ~event_type:"linked_autoresearch_cycle"
+                              ~detail:
+                                (`Assoc
+                                  [
+                                    ("loop_id", `String id);
+                                    ("cycle", `Int record.cycle);
+                                    ("hypothesis", `String hypothesis);
+                                    ( "decision",
+                                      `String
+                                        (Autoresearch.decision_to_string
+                                           record.decision) );
+                                    ("delta", `Float record.delta);
+                                    ("baseline", `Float state.baseline);
+                                    ("best_score", `Float state.best_score);
+                                  ])
+                          with
+                          | Eio.Cancel.Cancelled _ as e -> raise e
+                          | exn ->
+                            Log.Autoresearch.warn "cycle event append failed: %s"
+                              (Printexc.to_string exn))
+                       | None -> ());
+                       broadcast_cycle_result state record;
+                       `Assoc
+                         [
+                           ("loop_id", `String id);
+                           ("cycle", `Int record.cycle);
+                           ("hypothesis", `String hypothesis);
+                           ("score_before", `Float score_before);
+                           ("score_after", `Float score_after);
+                           ("delta", `Float record.delta);
+                           ( "decision",
+                             `String
+                               (Autoresearch.decision_to_string record.decision) );
+                           ("commit_hash", `String commit_hash);
+                           ("baseline", `Float state.baseline);
+                           ("best_score", `Float state.best_score);
+                           ( "cycles_remaining",
+                             `Int (state.max_cycles - state.current_cycle) );
+                         ])

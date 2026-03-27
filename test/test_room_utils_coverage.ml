@@ -329,20 +329,31 @@ let test_backend_config_for_uses_explicit_masc_pg_url () =
       check (option string) "postgres url comes from MASC_POSTGRES_URL" (Some url)
         cfg.postgres_url)
 
-let test_postgres_url_from_env_normalizes_supabase_pooler () =
-  (* normalize_postgres_url rewrites Supabase Transaction Pooler port 6543
-     to Session Pooler port 5432 to avoid prepared-statement failures. *)
+let test_postgres_url_from_env_keeps_supabase_transaction_pooler () =
   let raw_url =
     "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
-  in
-  let normalized_url =
-    "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
   in
   with_envs
     (pg_env_bindings ~masc_postgres_url:raw_url ())
     (fun () ->
-      check (option string) "transaction pooler url normalized"
-        (Some normalized_url)
+      check (option string) "transaction pooler url preserved"
+        (Some raw_url)
+        (Room_utils.postgres_url_from_env ()))
+
+let test_postgres_url_from_env_prefers_supabase_transaction_companion () =
+  let legacy_session_url =
+    "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+  in
+  let transaction_url =
+    "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
+  in
+  with_envs
+    (pg_env_bindings
+       ~masc_postgres_url:legacy_session_url
+       ~supabase_db_url:transaction_url ())
+    (fun () ->
+      check (option string) "transaction companion preferred over legacy session"
+        (Some transaction_url)
         (Room_utils.postgres_url_from_env ()))
 
 (* ============================================================
@@ -569,8 +580,10 @@ let () =
         test_backend_config_for_rejects_legacy_pg_envs_in_explicit_postgres_mode;
       test_case "uses explicit masc pg url" `Quick
         test_backend_config_for_uses_explicit_masc_pg_url;
-      test_case "normalizes supabase pooler" `Quick
-        test_postgres_url_from_env_normalizes_supabase_pooler;
+      test_case "keeps supabase transaction pooler" `Quick
+        test_postgres_url_from_env_keeps_supabase_transaction_pooler;
+      test_case "prefers supabase transaction companion" `Quick
+        test_postgres_url_from_env_prefers_supabase_transaction_companion;
     ];
     "safe_filename", [
       test_case "normal" `Quick test_safe_filename_normal;

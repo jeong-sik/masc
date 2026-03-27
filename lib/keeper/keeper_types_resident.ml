@@ -28,53 +28,6 @@ let session_base_dir_ (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "perpetual" in
   ensure_dir_ d
 
-let env_present name =
-  match Sys.getenv_opt name with
-  | Some value -> String.trim value <> ""
-  | None -> false
-
-let label_is_local_runtime (label : string) =
-  let l = String.lowercase_ascii (String.trim label) in
-  String.length l >= 6 && String.sub l 0 6 = "llama:"
-
-(** Check whether a model label refers to an available provider.
-    Currently always returns true (all providers are considered available). *)
-let label_is_available (_label : string) = true
-
-let keeper_fallback_model_labels () =
-  let gemini_available =
-    match Provider_adapter.resolve_gemini_direct_auth () with
-    | Provider_adapter.Gemini_api_key
-    | Provider_adapter.Gemini_vertex_adc _ -> true
-    | Provider_adapter.Gemini_auth_missing _ -> false
-  in
-  let families_with_availability =
-    [
-      (env_present "ZAI_API_KEY", Provider_adapter.Glm_family);
-      (gemini_available, Provider_adapter.Gemini_family);
-      (env_present "ANTHROPIC_API_KEY", Provider_adapter.Claude_family);
-    ]
-  in
-  families_with_availability
-  |> List.filter_map (fun (enabled, family) ->
-    if enabled then
-      match Provider_adapter.default_model_label_for_family family with
-      | Ok label -> Some label
-      | Error _ -> None
-    else None)
-
-let maybe_append_keeper_fallback_models (models : string list) =
-  let all_local = models <> [] && List.for_all label_is_local_runtime models in
-  let any_available = List.exists label_is_available models in
-  if (not all_local) || any_available then
-    models
-  else
-    let extra =
-      keeper_fallback_model_labels ()
-      |> List.filter (fun label -> not (List.mem label models))
-    in
-    if extra = [] then models else models @ extra
-
 (** Check API key availability using model label strings.
     Delegates to Oas_model_resolve which uses OAS Provider_registry directly. *)
 let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =

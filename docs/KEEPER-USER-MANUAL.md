@@ -203,7 +203,6 @@ spawn 시 인자로 직접 설정하는 필드.
 |------|------|--------|------|----------|
 | `name` | string | (필수) | keeper 고유 이름. `[A-Za-z0-9._-]`만 허용 | 재생성 필요 |
 | `goal` | string | (필수) | keeper의 현재 목표 | `masc_keeper_up` 재실행 시 `goal` 인자 |
-| `models` | string list | (필수) | MODEL cascade 목록. `provider:model_id` 형식 | `masc_keeper_up`의 `models` 인자 |
 | `instructions` | string | `""` | 커스텀 시스템 프롬프트 | `masc_keeper_up`의 `instructions` 인자 |
 | `presence_keepalive` | bool | `true` | keepalive fiber 활성화 여부 | `masc_keeper_up`의 `presence_keepalive` 인자 |
 | `presence_keepalive_sec` | int | `30` | heartbeat 주기 (초) | `masc_keeper_up`의 `presence_keepalive_sec` 인자 |
@@ -616,7 +615,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는 `docs/
 
 Resident-keeper (`.masc/resident-keepers/<name>.json`)는 등록 메타데이터(persona_name, desired, timestamps)만 저장한다.
 
-repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 실행 파일 기준 `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다.
+repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `~/.masc/config`를 먼저 본 뒤 repo `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다.
 
 ### 8.2 Template 변경 반영
 

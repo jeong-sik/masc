@@ -149,6 +149,8 @@ let make_session ?(orchestration_mode = Team_session_types.Auto)
     last_turn_at = None;
     stop_reason = None;
     generated_report = false;
+    delivery_contract = None;
+    latest_delivery_verdict = None;
     artifacts_dir = "/tmp/masc-test";
     created_at_iso = Types.now_iso ();
     updated_at_iso = Types.now_iso ();
@@ -194,6 +196,8 @@ let test_session_to_swarm_config_health_contract () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp in
   ignore (Room.init config ~agent_name:(Some "tester"));
+  Team_session_store.ensure_session_dirs config session.session_id;
+  Team_session_store.save_session config session;
   let swarm_cfg =
     Team_session_oas_bridge.session_to_swarm_config ~config ~masc_tools:[]
       ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
@@ -225,9 +229,33 @@ let test_session_to_swarm_config_health_contract () =
   Alcotest.(check int) "initial telemetry turn_count" 0 telemetry.turn_count;
   Alcotest.(check bool) "initial telemetry usage empty" true
     (Option.is_none telemetry.usage);
+  let collaboration = Option.get swarm_cfg.collaboration in
+  Alcotest.(check int) "participants projected" 2
+    (List.length collaboration.Agent_sdk.Collaboration.participants);
+  let first_participant =
+    List.hd collaboration.Agent_sdk.Collaboration.participants
+  in
+  Alcotest.(check bool) "participant summary present" true
+    (Option.is_some first_participant.Agent_sdk.Collaboration.summary);
+  let worker_specs =
+    match List.assoc_opt "worker_specs" collaboration.metadata with
+    | Some (`List specs) -> specs
+    | _ -> []
+  in
+  Alcotest.(check int) "worker specs preserved" 2 (List.length worker_specs);
+  (match List.assoc_opt "execution_scope" collaboration.metadata with
+   | Some (`String scope) ->
+       Alcotest.(check string) "session execution_scope metadata" "autonomous"
+         scope
+   | _ -> Alcotest.fail "expected execution_scope metadata");
   let resource_ok = Option.get swarm_cfg.resource_check () in
   Alcotest.(check bool) "resource check passes for initialized room" true
-    resource_ok
+    resource_ok;
+  Team_session_store.save_session config
+    { session with status = Team_session_types.Paused };
+  let resource_stale = Option.get swarm_cfg.resource_check () in
+  Alcotest.(check bool) "resource check fails when session no longer running"
+    false resource_stale
 
 let test_telemetry_of_run_result_carries_trace_ref () =
   let trace_ref =

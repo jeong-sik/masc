@@ -149,12 +149,16 @@ let test_realtime_transports_default_enabled_and_preserve_override () =
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe dir;
+      let home_dir = Filename.concat dir "home" in
+      mkdir_p (Filename.concat home_dir ".masc/config/prompts");
+      write_file (Filename.concat home_dir ".masc/config/cascade.json") "{}";
       let capture_default = Filename.concat dir "captured-default.txt" in
       let code_default, stdout_default, stderr_default =
         run_shell ~cwd:dir
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture_default);
+              ("HOME", home_dir);
               ("MASC_BASE_PATH", dir);
             ]
           (Printf.sprintf "%s --http --port 9956 --base-path %s"
@@ -168,9 +172,9 @@ let test_realtime_transports_default_enabled_and_preserve_override () =
         (contains_substring captured_default "MASC_WS_ENABLED=1");
       check bool "webrtc enabled by default" true
         (contains_substring captured_default "MASC_WEBRTC_ENABLED=1");
-      check bool "config dir defaults to local config" true
+      check bool "config dir defaults to home masc config when present" true
         (contains_substring captured_default
-           ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config"));
+           ("MASC_CONFIG_DIR=" ^ Filename.concat home_dir ".masc/config"));
       let capture_override = Filename.concat dir "captured-override.txt" in
       let code_override, stdout_override, stderr_override =
         run_shell ~cwd:dir
@@ -196,6 +200,31 @@ let test_realtime_transports_default_enabled_and_preserve_override () =
         (contains_substring captured_override "MASC_WS_ENABLED=0");
       check bool "webrtc override preserved" true
         (contains_substring captured_override "MASC_WEBRTC_ENABLED=0"))
+
+let test_realtime_transports_fall_back_to_repo_config_when_home_missing () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe dir;
+      let capture = Filename.concat dir "captured-fallback.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", Filename.concat dir "empty-home");
+              ("MASC_BASE_PATH", dir);
+            ]
+          (Printf.sprintf "%s --http --port 9959 --base-path %s"
+             (quote script) (quote dir))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      let captured = read_file capture in
+      check bool "falls back to repo-local config" true
+        (contains_substring captured
+           ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
 
 let test_worktree_prefers_local_build_over_workspace_build () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -240,6 +269,9 @@ let () =
           test_case "realtime transports default enabled and preserve override"
             `Quick
             test_realtime_transports_default_enabled_and_preserve_override;
+          test_case "realtime transports fall back to repo config when home missing"
+            `Quick
+            test_realtime_transports_fall_back_to_repo_config_when_home_missing;
           test_case "worktree prefers local build over workspace build" `Quick
             test_worktree_prefers_local_build_over_workspace_build;
         ] );

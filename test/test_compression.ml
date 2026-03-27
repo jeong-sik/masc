@@ -34,23 +34,11 @@ let test_backend_roundtrip () =
   Alcotest.(check string) "roundtrip preserves data" original decompressed
 
 let test_backend_header_format () =
+  (* compress_with_header is a passthrough (compression disabled).
+     Data should be returned unchanged — no ZSTD header. *)
   let data = String.make 512 'Z' in
-  let compressed = BackendCompression.compress_with_header data in
-  (* Check magic header (9-byte format: ZSTD\x00 or ZSTDD + 4-byte size) *)
-  let magic4 = String.sub compressed 0 4 in
-  Alcotest.(check string) "ZSTD magic prefix" "ZSTD" magic4;
-  (* Fifth byte: \x00 for standard, 'D' for dictionary *)
-  let is_dict = compressed.[4] = 'D' in
-  let magic5 = if is_dict then "ZSTDD" else "ZSTD\x00" in
-  Alcotest.(check string) "5-byte magic" magic5 (String.sub compressed 0 5);
-  (* Check original size stored in bytes 5-8 (big endian) *)
-  let orig_size =
-    (Char.code compressed.[5] lsl 24) lor
-    (Char.code compressed.[6] lsl 16) lor
-    (Char.code compressed.[7] lsl 8) lor
-    Char.code compressed.[8]
-  in
-  Alcotest.(check int) "original size in header" 512 orig_size
+  let result = BackendCompression.compress_with_header data in
+  Alcotest.(check string) "passthrough returns data unchanged" data result
 
 let test_backend_non_compressed_passthrough () =
   let plain = "This is plain text without ZSTD header" in
@@ -65,21 +53,14 @@ let test_backend_decompress_failure () =
   in
   Alcotest.(check (option string)) "invalid payload returns none" None result
 
-let test_backend_json_compression () =
-  (* Need larger JSON (>256 bytes) to trigger compression *)
+let test_backend_json_passthrough () =
+  (* compress_with_header is a passthrough — JSON data returned unchanged *)
   let json_parts = List.init 10 (fun i ->
     Printf.sprintf {|{"id":%d,"type":"agent_response","status":"ok","timestamp":%d}|} i (1234567890 + i)
   ) in
   let json = "[" ^ String.concat "," json_parts ^ "]" in
-  let len = String.length json in
-  if len > 256 then begin
-    let compressed = BackendCompression.compress_with_header json in
-    let ratio = (float_of_int (String.length compressed)) /. (float_of_int len) in
-    Alcotest.(check bool) "JSON compresses <85%" true (ratio < 0.85);
-    let decompressed = BackendCompression.decompress_auto compressed in
-    Alcotest.(check string) "JSON roundtrip" json decompressed
-  end else
-    Alcotest.skip () (* JSON too short for compression test *)
+  let result = BackendCompression.compress_with_header json in
+  Alcotest.(check string) "JSON passthrough unchanged" json result
 
 let backend_tests = [
   "skip small data", `Quick, test_backend_compress_skip_small;
@@ -88,7 +69,7 @@ let backend_tests = [
   "ZSTD header format", `Quick, test_backend_header_format;
   "non-compressed passthrough", `Quick, test_backend_non_compressed_passthrough;
   "decompress failure", `Quick, test_backend_decompress_failure;
-  "JSON compression ratio", `Quick, test_backend_json_compression;
+  "JSON passthrough", `Quick, test_backend_json_passthrough;
 ]
 
 (* DataChannel Compression tests removed — use ocaml-webrtc library *)
@@ -140,45 +121,33 @@ let codec_tests = [
 
 (* ===== Compression Ratio Benchmarks ===== *)
 
-let test_compression_ratio_text () =
+(* compress_with_header is a passthrough — ratio tests verify this. *)
+
+let test_passthrough_text () =
   let text = String.concat "" (List.init 20 (fun _ ->
     "The quick brown fox jumps over the lazy dog. "
   )) in
-  let compressed = BackendCompression.compress_with_header text in
-  let ratio = (float_of_int (String.length compressed)) /. (float_of_int (String.length text)) in
-  (* Expect at least 50% compression for repetitive text *)
-  Alcotest.(check bool) "text compresses >50%" true (ratio < 0.5)
+  let result = BackendCompression.compress_with_header text in
+  Alcotest.(check int) "text passthrough same length"
+    (String.length text) (String.length result)
 
-let test_compression_ratio_json () =
+let test_passthrough_json () =
   let json = String.concat "," (List.init 50 (fun i ->
     Printf.sprintf {|{"id":%d,"name":"item_%d","value":%d}|} i i (i * 100)
   )) in
   let full_json = "[" ^ json ^ "]" in
-  let compressed = BackendCompression.compress_with_header full_json in
-  let ratio = (float_of_int (String.length compressed)) /. (float_of_int (String.length full_json)) in
-  (* Expect at least 60% compression for JSON *)
-  Alcotest.(check bool) "JSON compresses >60%" true (ratio < 0.4)
+  let result = BackendCompression.compress_with_header full_json in
+  Alcotest.(check string) "JSON passthrough unchanged" full_json result
 
-let test_incompressible_data () =
-  (* Already-compressed data won't compress further *)
-  let already_compressed = BackendCompression.compress_with_header (String.make 500 'x') in
-  (* Try to compress the already-compressed data *)
-  let (result, _used_dict, did_compress) = BackendCompression.compress already_compressed in
-  (* Already-compressed data should NOT compress further (or compress poorly) *)
-  if did_compress then begin
-    let ratio = (float_of_int (String.length result)) /. (float_of_int (String.length already_compressed)) in
-    (* If it did compress, it should be marginal - allow up to 95% *)
-    Alcotest.(check bool) "pre-compressed data doesn't shrink much" true (ratio > 0.9 || String.length already_compressed < 32)
-  end else begin
-    (* Verify that the data wasn't compressed by checking it's unchanged or larger *)
-    Alcotest.(check bool) "pre-compressed data not compressed further"
-      true (String.length result >= String.length already_compressed)
-  end
+let test_passthrough_repeated () =
+  let data = String.make 500 'x' in
+  let result = BackendCompression.compress_with_header data in
+  Alcotest.(check string) "repeated data passthrough" data result
 
 let ratio_tests = [
-  "text compression ratio", `Quick, test_compression_ratio_text;
-  "JSON compression ratio", `Quick, test_compression_ratio_json;
-  "incompressible data", `Quick, test_incompressible_data;
+  "text passthrough", `Quick, test_passthrough_text;
+  "JSON passthrough", `Quick, test_passthrough_json;
+  "repeated data passthrough", `Quick, test_passthrough_repeated;
 ]
 
 (* ===== Test Entry Point ===== *)

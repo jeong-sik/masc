@@ -13,6 +13,7 @@ type config = {
   timeout_s : float;
   on_error : (exn -> unit) option;
   health_check : (unit -> bool) option;
+  warm_delay_s : float;
 }
 
 let default_config ~label ~interval_s =
@@ -24,6 +25,7 @@ let default_config ~label ~interval_s =
     timeout_s = 10.0;
     on_error = None;
     health_check = None;
+    warm_delay_s = 0.0;
   }
 
 let is_internal_race_cancel exn =
@@ -56,6 +58,10 @@ let notify_error config exn =
 
 let start ~sw ~clock ~config ~compute ~on_result =
   Eio.Fiber.fork ~sw (fun () ->
+    if config.warm_delay_s > 0.0 then begin
+      Log.Dashboard.debug "%s warm cache delayed %.0fs" config.label config.warm_delay_s;
+      Eio.Time.sleep clock config.warm_delay_s
+    end;
     let t0 = Time_compat.now () in
     (try
        match

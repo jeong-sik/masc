@@ -51,6 +51,45 @@ let status_line_from_buffer buf =
   | Some idx ->
       Some (String.sub contents 0 idx |> String.trim)
 
+let status_line_is_healthy line =
+  let parts =
+    String.split_on_char ' ' line
+    |> List.filter (fun value -> String.trim value <> "")
+  in
+  match parts with
+  | version :: code :: _ ->
+      (String.equal version "HTTP/1.1" || String.equal version "HTTP/1.0")
+      && String.equal code "200"
+  | _ -> false
+
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop idx =
+    if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  needle_len > 0 && loop 0
+
+let looks_like_server_command command =
+  List.exists
+    (fun marker -> contains_substring ~needle:marker command)
+    [ "main_eio"; "masc-mcp" ]
+
+let process_command pid =
+  match
+    Process_eio.run_argv_with_status ~timeout_sec:1.0
+      [ "ps"; "-p"; string_of_int pid; "-o"; "command=" ]
+  with
+  | Unix.WEXITED 0, output -> (
+      let trimmed = String.trim output in
+      if trimmed = "" then None else Some trimmed)
+  | _ -> None
+
 let read_status_line fd ~timeout_sec =
   let deadline = Unix.gettimeofday () +. max 0.0 timeout_sec in
   let scratch = Bytes.create 256 in
@@ -91,9 +130,7 @@ let probe_liveness ?(timeout_sec = 3.0) ?(path = "/health/live") port =
         in
         write_all socket request 0 (String.length request);
         match read_status_line socket ~timeout_sec with
-        | Some line ->
-            String.starts_with ~prefix:"HTTP/1.1 200" line
-            || String.starts_with ~prefix:"HTTP/1.0 200" line
+        | Some line -> status_line_is_healthy line
         | None -> false)
   with _ -> false
 
@@ -144,6 +181,17 @@ let acquire_pid_lock
           if pid_exists pid then
             if probe_liveness ~timeout_sec:probe_timeout_sec port then
               Already_running { pid }
+            else if (
+              match process_command pid with
+              | Some command -> not (looks_like_server_command command)
+              | None -> true)
+            then begin
+              Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+                (Printf.sprintf
+                   "[FATAL] PID %d is alive but does not look like a masc-mcp server; refusing takeover"
+                   pid);
+              Already_running { pid }
+            end
             else begin
               Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
                 (Printf.sprintf

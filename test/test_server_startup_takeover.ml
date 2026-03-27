@@ -145,6 +145,25 @@ let pid_from_file path =
   | Some pid -> pid
   | None -> Alcotest.failf "invalid pid file contents in %s" path
 
+let test_status_line_parser () =
+  Alcotest.(check bool) "200 ok" true
+    (Server_startup_takeover.status_line_is_healthy "HTTP/1.1 200 OK");
+  Alcotest.(check bool) "2000 rejected" false
+    (Server_startup_takeover.status_line_is_healthy "HTTP/1.1 2000 Weird");
+  Alcotest.(check bool) "503 rejected" false
+    (Server_startup_takeover.status_line_is_healthy "HTTP/1.1 503 Service Unavailable")
+
+let test_server_command_heuristic () =
+  Alcotest.(check bool) "main_eio path accepted" true
+    (Server_startup_takeover.looks_like_server_command
+       "/tmp/_build/default/bin/main_eio.exe --port 8935");
+  Alcotest.(check bool) "public name accepted" true
+    (Server_startup_takeover.looks_like_server_command
+       "/usr/local/bin/masc-mcp --host 127.0.0.1");
+  Alcotest.(check bool) "unrelated process rejected" false
+    (Server_startup_takeover.looks_like_server_command
+       "python3 -m http.server 8935")
+
 let test_rejects_responsive_holder () =
   with_temp_dir "startup-takeover-responsive" (fun dir ->
       with_http_server ~status_code:200 (fun ~pid ~port ->
@@ -205,6 +224,13 @@ let test_escalates_sigkill_for_unresponsive_holder () =
 let () =
   Alcotest.run "Server_startup_takeover"
     [
+      ( "helpers",
+        [
+          Alcotest.test_case "status line parser is exact" `Quick
+            test_status_line_parser;
+          Alcotest.test_case "server command heuristic rejects unrelated processes"
+            `Quick test_server_command_heuristic;
+        ] );
       ( "takeover",
         [
           Alcotest.test_case "responsive holder blocks takeover" `Quick

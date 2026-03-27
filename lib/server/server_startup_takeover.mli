@@ -4,6 +4,10 @@ type acquire_result =
 
 val pid_lock_path : int -> string
 
+val status_line_is_healthy : string -> bool
+
+val looks_like_server_command : string -> bool
+
 val probe_liveness : ?timeout_sec:float -> ?path:string -> int -> bool
 
 val wait_for_pid_exit :

@@ -160,13 +160,11 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     if not Env_config.KeeperBootstrap.enabled then
       Log.Keeper.info "autoboot: disabled via MASC_KEEPER_BOOTSTRAP_ENABLED=false"
     else begin
-    Log.Keeper.info "autoboot: fiber entered, waiting 5s for subsystem settle";
     (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
     Eio.Time.sleep clock 5.0;
-    Log.Keeper.info "autoboot: scanning keeper meta";
     let config = state.room_config in
     let names = Keeper_types.keepalive_keeper_names config in
-    Log.Keeper.info "autoboot: found %d keeper(s) to boot" (List.length names);
+    Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
     let booted = ref 0 in
     List.iter (fun name ->
         try

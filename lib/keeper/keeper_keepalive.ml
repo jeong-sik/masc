@@ -545,8 +545,10 @@ let run_grpc_heartbeat_fiber ~sw ~stop
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     (m : keeper_meta) : unit =
   if not m.presence_keepalive then ()
-  else if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name then ()
-  else if not (Keeper_registry.spawn_slots_available ()) then ()
+  else if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name then
+    Log.Keeper.info "start_keepalive: skipped %s (already running)" m.name
+  else if not (Keeper_registry.spawn_slots_available ()) then
+    Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name
   else (
     (* Register in Keeper_registry first — single source of truth. *)
     let reg = Keeper_registry.register ~base_path:ctx.config.base_path m.name m in

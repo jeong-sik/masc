@@ -1,7 +1,7 @@
 (** Keeper Tool Exposure Tests
 
     Verifies that keeper_allowed_tool_names returns the full tool set
-    unconditionally (mode removal), with voice gated by policy_voice_enabled
+    unconditionally, with voice tools available by default,
     and write_done producing empty list. *)
 
 open Alcotest
@@ -12,8 +12,7 @@ open Masc_mcp
    ============================================================ *)
 
 let make_meta ?(name = "test-keeper") ?(soul_profile = "")
-    ?(policy_shell_mode = "disabled") ?(policy_voice_enabled = false)
-    ?(policy_mode = "") () : Keeper_types.keeper_meta =
+    ?(policy_voice_enabled = false) () : Keeper_types.keeper_meta =
   let json =
     `Assoc
       [
@@ -21,9 +20,7 @@ let make_meta ?(name = "test-keeper") ?(soul_profile = "")
         ("agent_name", `String name);
         ("trace_id", `String "test-trace-exposure");
         ("soul_profile", `String soul_profile);
-        ("policy_shell_mode", `String policy_shell_mode);
         ("policy_voice_enabled", `Bool policy_voice_enabled);
-        ("policy_mode", `String policy_mode);
       ]
   in
   match Keeper_types.meta_of_json json with
@@ -60,10 +57,10 @@ let test_default_has_base_tools () =
   check bool "has keeper_time_now" true (has_tool "keeper_time_now" tools);
   check bool "has keeper_context_status" true (has_tool "keeper_context_status" tools)
 
-let test_default_has_no_voice () =
+let test_default_has_voice () =
   let meta = make_meta ~policy_voice_enabled:false () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no voice tools when voice disabled" false
+  check bool "voice tools available by default" true
     (has_tool "keeper_voice_speak" tools)
 
 let test_default_has_governance_tools () =
@@ -81,7 +78,7 @@ let test_default_has_research_tools () =
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
 
 (* ============================================================
-   3. Voice profile (still gated by policy_voice_enabled)
+   3. Voice tools are always available
    ============================================================ *)
 
 let test_voice_enabled_adds_voice_tools () =
@@ -94,8 +91,8 @@ let test_voice_enabled_adds_voice_tools () =
 let test_voice_disabled_no_voice_tools () =
   let meta = make_meta ~policy_voice_enabled:false () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no voice_speak" false (has_tool "keeper_voice_speak" tools);
-  check bool "no voice_agent" false (has_tool "keeper_voice_agent" tools)
+  check bool "voice_speak still available" true (has_tool "keeper_voice_speak" tools);
+  check bool "voice_agent still available" true (has_tool "keeper_voice_agent" tools)
 
 (* ============================================================
    4. All keepers get shell tools (mode removed)
@@ -136,8 +133,8 @@ let test_all_keepers_have_autoresearch () =
    ============================================================ *)
 
 let test_all_modes_same_tool_count () =
-  let heuristic = make_meta ~policy_mode:"" () in
-  let learned = make_meta ~policy_mode:"learned_offline_v1" () in
+  let heuristic = make_meta () in
+  let learned = make_meta ~soul_profile:"research" () in
   let h_tools = Keeper_exec_tools.keeper_allowed_tool_names heuristic in
   let l_tools = Keeper_exec_tools.keeper_allowed_tool_names learned in
   check int "same tool count across modes"
@@ -185,9 +182,7 @@ let test_sufficient_tool_count () =
 
 let test_research_learned_voice_combined () =
   let meta = make_meta ~soul_profile:"research"
-    ~policy_mode:"learned_offline_v1"
-    ~policy_voice_enabled:true
-    ~policy_shell_mode:"readonly" () in
+    ~policy_voice_enabled:true () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has voice" true (has_tool "keeper_voice_speak" tools);
   check bool "has shell readonly" true (has_tool "keeper_shell_readonly" tools);
@@ -201,9 +196,7 @@ let test_research_learned_voice_combined () =
 
 let test_no_duplicate_tools () =
   let meta = make_meta ~soul_profile:"research"
-    ~policy_mode:"learned_offline_v1"
-    ~policy_voice_enabled:true
-    ~policy_shell_mode:"readonly" () in
+    ~policy_voice_enabled:true () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let unique = List.sort_uniq String.compare tools in
   check int "no duplicates" (List.length unique) (List.length tools)
@@ -343,7 +336,7 @@ let () =
     ]);
     ("default_profile", [
       test_case "has base tools" `Quick test_default_has_base_tools;
-      test_case "no voice tools" `Quick test_default_has_no_voice;
+      test_case "has voice tools" `Quick test_default_has_voice;
       test_case "has governance tools" `Quick test_default_has_governance_tools;
       test_case "has research tools" `Quick test_default_has_research_tools;
     ]);

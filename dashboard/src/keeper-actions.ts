@@ -32,6 +32,13 @@ import {
   updateDiagnostic,
 } from './keeper-state'
 import { abortKeeperThreadMessage, applyKeeperStreamEvent } from './keeper-stream'
+import {
+  KEEPER_HISTORY_TAIL_MESSAGES,
+  KEEPER_REPLY_PREVIEW_MAX,
+  KEEPER_STATUS_TAIL_MESSAGES,
+  KEEPER_STREAM_IDLE_POLL_MS,
+  KEEPER_STREAM_IDLE_TIMEOUT_MS,
+} from './config/constants'
 
 async function refreshDashboardState(): Promise<void> {
   invalidateDashboardCache()
@@ -62,7 +69,7 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
       include_history_tail: true,
       include_compaction_history: false,
       tail_turns: 5,
-      tail_messages: 50,
+      tail_messages: KEEPER_STATUS_TAIL_MESSAGES,
     })
     let parsed: unknown = null
     try {
@@ -97,7 +104,7 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
       include_history_tail: true,
       include_compaction_history: false,
       tail_turns: 0,
-      tail_messages: 200,
+      tail_messages: KEEPER_HISTORY_TAIL_MESSAGES,
     })
     let parsed: unknown = null
     try { parsed = JSON.parse(text) } catch { parsed = null }
@@ -151,12 +158,12 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
 
     let lastEventAt = Date.now()
     idleTimeoutId = setInterval(() => {
-      if (Date.now() - lastEventAt > 120_000) {
+      if (Date.now() - lastEventAt > KEEPER_STREAM_IDLE_TIMEOUT_MS) {
         if (idleTimeoutId != null) clearInterval(idleTimeoutId)
         idleTimeoutId = null
         abortKeeperThreadMessage(keeperName)
       }
-    }, 5_000)
+    }, KEEPER_STREAM_IDLE_POLL_MS)
 
     await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
@@ -183,7 +190,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
     updateDiagnostic(keeperName, {
       last_reply_status: 'delivered',
       last_reply_at: new Date().toISOString(),
-      last_reply_preview: finalText.slice(0, 200),
+      last_reply_preview: finalText.slice(0, KEEPER_REPLY_PREVIEW_MAX),
       last_error: null,
     })
   } catch (err) {
@@ -223,7 +230,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
         updateDiagnostic(keeperName, {
           last_reply_status: 'delivered',
           last_reply_at: new Date().toISOString(),
-          last_reply_preview: (reply.text.trim() || '(empty reply)').slice(0, 200),
+          last_reply_preview: (reply.text.trim() || '(empty reply)').slice(0, KEEPER_REPLY_PREVIEW_MAX),
           last_error: null,
         })
         await refreshDashboardState()

@@ -1,7 +1,7 @@
 # Keeper Capability Matrix
 
 All keepers receive the full tool surface unconditionally.
-`initiative_enabled` controls whether triage (trigger detection) runs on each heartbeat.
+Triage and trigger detection run on each heartbeat using the proactive idle/cooldown settings.
 
 Research profile (`soul_profile = "research"`) adds autoresearch/research tools.
 
@@ -31,15 +31,9 @@ All keepers receive: base + board + fs + shell + library + taskboard + governanc
 Voice tools are added when `policy_voice_enabled = true`.
 `write_done = true` returns empty tool list (session terminated).
 
-## Initiative System
+## Triage System
 
-| Parameter | Default | Effect |
-|-----------|---------|--------|
-| `initiative_enabled` | true | Master gate for triage (trigger detection) |
-| `initiative_idle_sec` | 0 (use proactive.idle_sec) | Override idle threshold for triage triggers |
-| `initiative_cooldown_sec` | 0 (no cooldown) | Minimum wait between triage-triggered actions |
-
-When initiative is enabled, 9 trigger types are evaluated on each heartbeat:
+Triage evaluates 9 trigger types on each heartbeat:
 DirectMention, NewUnclaimedTask, FailedTask, AgentJoinedOrLeft, GoalDeadline,
 BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 

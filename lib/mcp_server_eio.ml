@@ -87,7 +87,7 @@ let requires_join_tools = [
   "masc_add_task"; "masc_claim_next"; "masc_transition";
   "masc_broadcast"; "masc_listen"; "masc_heartbeat";
   "masc_plan_set_task"; "masc_plan_clear_task";
-  "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
+  "masc_worktree_create"; "masc_worktree_remove";
   "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
   "masc_vote_cast"; "masc_vote_revoke";
   "masc_register_capabilities"; "masc_suspend"; "masc_leave";

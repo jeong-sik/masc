@@ -239,6 +239,30 @@ let prepare_for_division ~config ~cell ~full_context =
   let dna = extract_dna ~config ~parent_cell:cell ~full_context in
   let continuity_anchors = Mitosis_dna.build_continuity_anchors full_context in
   let quality = Mitosis_dna.validate_dna ~dna ~anchors:continuity_anchors in
+  let dna_event =
+    Dashboard_harness_health.record_dna_quality ~keeper_name:cell.id
+      ~score:quality.Mitosis_dna.score
+      ~dimensions:(Mitosis_dna.dna_quality_to_json quality)
+  in
+  (try
+     Sse.broadcast
+       (`Assoc
+         [
+           ("type", `String "oas:masc:harness:dna_quality");
+           ( "payload",
+             `Assoc
+               [
+                 ("timestamp", `Float dna_event.timestamp);
+                 ("keeper_name", `String dna_event.keeper_name);
+                 ("score", `Float dna_event.score);
+                 ("dimensions", dna_event.dimensions);
+               ] );
+         ])
+   with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Harness.warn "[mitosis] dna quality sse broadcast failed: %s"
+        (Printexc.to_string exn));
   if quality.Mitosis_dna.score < 0.3 then begin
     Log.Mitosis_log.warn
       "[mitosis] DNA quality too low (%.2f): goal=%b task=%b recent=%b truncation=%d. Skipping division."

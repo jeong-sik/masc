@@ -52,6 +52,8 @@ function loopSummary(
     recent_cycles: [cycleRecord(0)],
     error: null,
     session_id: null,
+    operation_id: null,
+    linked_at: null,
     queued_hypothesis: null,
     ...overrides,
   }
@@ -130,6 +132,8 @@ describe('Autoresearch surface refresh', () => {
     await refreshAutoresearchSurface()
     await flushUi()
 
+    expect(container.textContent).toContain('Research Brief')
+    expect(container.textContent).toContain('이 화면은 generator loop 자체를 설명합니다.')
     expect(container.textContent).toContain('1 / 5')
     expect(container.textContent).toContain('사이클 이력 (1건)')
 

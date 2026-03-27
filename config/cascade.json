@@ -12,6 +12,7 @@
   "capability_match_models": ["llama:auto", "glm:auto"],
   "tom_models": ["llama:auto", "glm:auto"],
   "verifier_models": ["llama:auto", "glm:auto"],
+  "cross_verifier_models": ["llama:auto", "glm:auto"],
   "code_swarm_verify_models": ["llama:auto", "glm:auto"],
   "code_swarm_models": ["llama:auto", "glm:auto"],
   "keeper_autonomy_models": ["llama:auto", "glm:auto"],

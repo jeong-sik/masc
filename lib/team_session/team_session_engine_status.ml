@@ -244,6 +244,14 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
   `Assoc
     [
       ("session", Team_session_types.session_to_yojson session);
+      ( "delivery_contract",
+        Option.fold ~none:`Null
+          ~some:Team_session_types.delivery_contract_to_yojson
+          session.delivery_contract );
+      ( "latest_delivery_verdict",
+        Option.fold ~none:`Null
+          ~some:Team_session_types.delivery_verdict_to_yojson
+          session.latest_delivery_verdict );
       ("runtime_running", `Bool runtime_running);
       ("scale_profile", `String (Team_session_types.scale_profile_to_string session.scale_profile));
       ("summary", summary);
@@ -387,6 +395,14 @@ let prove_session ~(config : Room.config) ~(session_id : string)
                 (`Assoc
                   [
                     ("session_id", `String session_id);
+                    ( "delivery_contract",
+                      Option.fold ~none:`Null
+                        ~some:Team_session_types.delivery_contract_to_yojson
+                        refreshed_session.delivery_contract );
+                    ( "latest_delivery_verdict",
+                      Option.fold ~none:`Null
+                        ~some:Team_session_types.delivery_verdict_to_yojson
+                        refreshed_session.latest_delivery_verdict );
                     ("proof", proof_json);
                     ("proof_json_path", `String proof_json_path);
                     ("proof_md_path", `String proof_md_path);

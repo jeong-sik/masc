@@ -1,6 +1,7 @@
 (** Tests for Tool_dispatch — O(1) central dispatch registry. *)
 
 module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Types = Types
 
 (** Helper: create a minimal tool_schema for registration. *)
@@ -114,6 +115,12 @@ let () =
                 (Tool_dispatch.is_join_required "masc_status");
               check bool "masc_who" false
                 (Tool_dispatch.is_join_required "masc_who"));
+          test_case "worktree list uses shipped registry policy" `Quick (fun () ->
+              ignore (Mcp_eio.get_clock_opt ());
+              check bool "masc_worktree_list read_only" true
+                (Tool_dispatch.is_read_only "masc_worktree_list");
+              check bool "masc_worktree_list not join_required" false
+                (Tool_dispatch.is_join_required "masc_worktree_list"));
         ] );
       ( "handler_receives_args",
         [

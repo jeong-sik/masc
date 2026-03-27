@@ -38,13 +38,14 @@ let make_config_root root =
   config
 
 let make_inputs ?env_config_dir ?env_personas_dir ?env_me_root ?env_workspace_root
-    ?env_dune_sourceroot ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc-mcp") () =
+    ?env_dune_sourceroot ?env_home ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc-mcp") () =
   Lib.Config_dir_resolver.
     {
       cwd;
       executable_name;
       env_config_dir;
       env_personas_dir;
+      env_home;
       env_me_root;
       env_workspace_root;
       env_dune_sourceroot;
@@ -91,6 +92,22 @@ let test_cwd_fallback () =
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
   check bool "keepers exists" true resolution.keepers.exists
 
+let test_home_masc_fallback () =
+  with_temp_dir "config-dir-home" @@ fun home ->
+  let home_root = Filename.concat home ".masc" in
+  let config = make_config_root home_root in
+  let resolution =
+    Lib.Config_dir_resolver.resolve_with
+      (make_inputs ~env_home:home ~cwd:"/tmp/missing-cwd"
+         ~executable_name:"/tmp/nonexistent-masc" ())
+  in
+  check string "status" "ready"
+    (Lib.Config_dir_resolver.status_to_string resolution.status);
+  check string "root source" "home_masc"
+    (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check string "root path" config resolution.config_root.path;
+  check bool "prompts exists" true resolution.prompts.exists
+
 let test_legacy_me_root_fallback () =
   with_temp_dir "config-dir-legacy" @@ fun me_root ->
   let repo_root =
@@ -118,6 +135,7 @@ let () =
           test_case "env override invalid does not fallback" `Quick
             test_env_override_invalid_no_fallback;
           test_case "cwd fallback" `Quick test_cwd_fallback;
+          test_case "home masc fallback" `Quick test_home_masc_fallback;
           test_case "legacy me_root fallback" `Quick
             test_legacy_me_root_fallback;
         ] );

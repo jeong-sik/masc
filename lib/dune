@@ -90,6 +90,7 @@
    dashboard_http_keeper
    dashboard_http_mdal
    dashboard_http_autoresearch
+   dashboard_harness_health
    dashboard_http_repo_synthesis
    dashboard_provider_runs
    proactive_refresh
@@ -595,6 +596,7 @@
  dashboard_http_keeper
  dashboard_http_mdal
  dashboard_http_autoresearch
+ dashboard_harness_health
  server_routes_http_common
  server_routes_http_pages
  server_routes_http_runtime

@@ -51,6 +51,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     match reject_legacy_model_args ~tool_name:"masc_keeper_up" args with
     | Error e -> Error (false, e)
     | Ok () ->
+    match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_up" args with
+    | Error e -> Error (false, e)
+    | Ok () ->
     let soul_profile_opt_res = parse_soul_profile_opt args "soul_profile" in
     let compaction_profile_opt_res =
       parse_compaction_profile_opt args "compaction_profile"

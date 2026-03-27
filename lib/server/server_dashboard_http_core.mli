@@ -78,10 +78,6 @@ val command_plane_summary_cache_parts :
 
 val operator_actor_hint : Httpun.Request.t -> string option
 
-(** {1 Semantics} *)
-
-val dashboard_semantics_http_json : unit -> Yojson.Safe.t
-
 (** {1 Batch API} *)
 
 val dashboard_batch_json :

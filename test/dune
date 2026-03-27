@@ -46,6 +46,7 @@
         test_keeper_bash_safety
         test_worktree_live_context
         test_tool_input_validation
+        test_autoresearch_oas_primitives
 )
  (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
           test_sse test_encryption test_cancellation test_graphql_api
@@ -73,6 +74,7 @@
           test_keeper_bash_safety
           test_worktree_live_context
           test_tool_input_validation
+          test_autoresearch_oas_primitives
   )
  (libraries masc_mcp agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))
@@ -567,6 +569,22 @@
  (name test_mcp_server_eio)
  (modules test_mcp_server_eio)
  (libraries masc_mcp alcotest eio eio_main yojson))
+
+(test
+ (name test_mcp_tool_matrix)
+ (modules test_mcp_tool_matrix test_mcp_tool_matrix_cases)
+ (deps tool_matrix_case_runner.exe)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
+(executable
+ (name tool_matrix_manifest)
+ (modules tool_matrix_manifest test_mcp_tool_matrix_cases)
+ (libraries masc_mcp eio eio_main yojson unix))
+
+(executable
+ (name tool_matrix_case_runner)
+ (modules tool_matrix_case_runner test_mcp_tool_matrix_cases)
+ (libraries masc_mcp eio eio_main yojson unix))
 
 ; DataChannel Eio test removed — WebRTC modules moved to ocaml-webrtc
 

@@ -46,15 +46,13 @@ import {
   commandPlaneChainRunError,
   commandPlaneChainFocusOperationId,
 } from './command-signals'
+import { COMMAND_HELP_TTL_MS, UI_REFRESH_TTL_MS } from './config/constants'
 
 let activeChainRunRequestId: string | null = null
 
 interface RefreshOptions {
   force?: boolean
 }
-
-const COMMAND_REFRESH_TTL_MS = 1_000
-const COMMAND_HELP_TTL_MS = 60_000
 
 let summaryRefreshInflight: Promise<void> | null = null
 let detailRefreshInflight: Promise<void> | null = null
@@ -119,7 +117,7 @@ export function setCommandPlaneSurface(surface: CommandPlaneSurface): void {
 
 export async function refreshCommandPlaneSummary(opts?: RefreshOptions): Promise<void> {
   if (summaryRefreshInflight) return summaryRefreshInflight
-  if (isFresh(lastSummaryRefreshAt, COMMAND_REFRESH_TTL_MS, opts)) return
+  if (isFresh(lastSummaryRefreshAt, UI_REFRESH_TTL_MS, opts)) return
   commandPlaneLoading.value = true
   commandPlaneError.value = null
   summaryRefreshInflight = (async () => {
@@ -144,7 +142,7 @@ export function focusCommandPlaneChainOperation(operationId: string | null): voi
 
 export async function refreshCommandPlaneSnapshot(opts?: RefreshOptions): Promise<void> {
   if (detailRefreshInflight) return detailRefreshInflight
-  if (isFresh(lastDetailRefreshAt, COMMAND_REFRESH_TTL_MS, opts)) return
+  if (isFresh(lastDetailRefreshAt, UI_REFRESH_TTL_MS, opts)) return
   commandPlaneDetailLoading.value = true
   commandPlaneDetailError.value = null
   detailRefreshInflight = (async () => {
@@ -177,7 +175,7 @@ export async function refreshCommandPlaneCurrentSurface(opts?: RefreshOptions): 
 
 export async function refreshCommandPlaneChainSummary(opts?: RefreshOptions): Promise<void> {
   if (chainRefreshInflight) return chainRefreshInflight
-  if (isFresh(lastChainRefreshAt, COMMAND_REFRESH_TTL_MS, opts)) return
+  if (isFresh(lastChainRefreshAt, UI_REFRESH_TTL_MS, opts)) return
   commandPlaneChainLoading.value = true
   commandPlaneChainError.value = null
   chainRefreshInflight = (async () => {
@@ -258,7 +256,7 @@ export async function refreshCommandPlaneSwarm(
 ): Promise<void> {
   const key = refreshKey(runId, operationId)
   if (swarmRefreshInflight && key === lastSwarmRefreshKey) return swarmRefreshInflight
-  if (key === lastSwarmRefreshKey && isFresh(lastSwarmRefreshAt, COMMAND_REFRESH_TTL_MS, opts)) return
+  if (key === lastSwarmRefreshKey && isFresh(lastSwarmRefreshAt, UI_REFRESH_TTL_MS, opts)) return
   commandPlaneSwarmLoading.value = true
   commandPlaneSwarmError.value = null
   lastSwarmRefreshKey = key
@@ -285,7 +283,7 @@ export async function refreshCommandPlaneOrchestra(
 ): Promise<void> {
   const key = refreshKey(runId, operationId)
   if (orchestraRefreshInflight && key === lastOrchestraRefreshKey) return orchestraRefreshInflight
-  if (key === lastOrchestraRefreshKey && isFresh(lastOrchestraRefreshAt, COMMAND_REFRESH_TTL_MS, opts)) return
+  if (key === lastOrchestraRefreshKey && isFresh(lastOrchestraRefreshAt, UI_REFRESH_TTL_MS, opts)) return
   commandPlaneOrchestraLoading.value = true
   commandPlaneOrchestraError.value = null
   lastOrchestraRefreshKey = key

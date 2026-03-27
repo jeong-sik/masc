@@ -39,7 +39,27 @@ OAS  ──does not know──→ MASC
 | Event bus bridge | Complete for current `masc:*` flow | `oas_events.ml` publishes, `oas_sse_bridge.ml` relays to dashboard SSE |
 | Checkpoint integration | Real | OAS checkpoint is used in shared worker/runtime paths |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
-| Team-session swarm | Partial complete | OAS Swarm runner is active, but bridge fidelity is still incomplete |
+| Team-session swarm | Partial complete | OAS Swarm runner is active, delivery-contract persistence/verdict export now live, but bridge fidelity is still incomplete |
+
+## Delivery-Contract Split
+
+- MASC owns the delivery contract itself: `contract_id`, acceptance checks, required artifacts, repair budget, evaluator role/cascade, proof/report surfaces.
+- OAS should stay generic and receive only reusable harness/runtime primitives.
+- Current local implementation keeps the contract in team-session state and feeds it into worker verification and proof artifacts without teaching OAS about MASC session semantics.
+
+## Candidate Upstream Work
+
+These are the next changes that are generic enough to propose upstream:
+
+- harness case/result/verdict/repair-directive primitives that MASC evaluators can reuse
+- richer swarm `agent_entry` metadata so `planned_worker` routing and telemetry survive end to end
+- structured runtime-health probe callback to replace the current boolean `resource_check`
+
+These stay in MASC:
+
+- room/task/board/operator/governance semantics
+- planner session policy and repair-budget policy
+- proof/report JSON/markdown contracts and coordination-specific evidence rules
 
 ## What This Means Practically
 

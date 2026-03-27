@@ -29,6 +29,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check version truth
+        run: |
+          chmod +x scripts/check-version-truth.sh
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            scripts/check-version-truth.sh --tag "${GITHUB_REF_NAME}"
+          else
+            scripts/check-version-truth.sh
+          fi
+
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3
         with:

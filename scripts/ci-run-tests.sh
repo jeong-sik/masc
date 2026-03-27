@@ -28,6 +28,9 @@ CI_TEST_RPC_RETRY_DONE=0
 CI_TEST_ALLOW_FLAKY_RETRY="${CI_TEST_ALLOW_FLAKY_RETRY:-1}"
 CI_TEST_FLAKY_RETRY_DONE=0
 CI_TEST_ISOLATED_BUILD_DIR="${CI_TEST_ISOLATED_BUILD_DIR:-.ci_build}"
+CI_CONTRACT_HARNESS_ENABLED="${CI_CONTRACT_HARNESS_ENABLED:-1}"
+CI_CONTRACT_HARNESS_CMD="${CI_CONTRACT_HARNESS_CMD:-scripts/harness/contract/run_all.sh}"
+CI_CONTRACT_HARNESS_TIMEOUT_SEC="${CI_CONTRACT_HARNESS_TIMEOUT_SEC:-900}"
 ACTIVE_TEST_BUILD_DIR="${DUNE_BUILD_DIR:-_build}"
 
 iso_now() {
@@ -283,6 +286,34 @@ if [[ "${status}" -ne 0 ]]; then
   diag_dump "nonzero_exit_${status}"
   log_line "[ci-run] ERROR: test command failed with exit=${status}"
   exit "${status}"
+fi
+
+if [[ "${CI_CONTRACT_HARNESS_ENABLED}" = "1" ]]; then
+  log_line "[ci-run] contract_harness_command: ${CI_CONTRACT_HARNESS_CMD}"
+  log_line "[ci-run] contract_harness_timeout_sec=${CI_CONTRACT_HARNESS_TIMEOUT_SEC}"
+  saved_timeout_sec="${TEST_TIMEOUT_SEC}"
+  TEST_TIMEOUT_SEC="${CI_CONTRACT_HARNESS_TIMEOUT_SEC}"
+  set +e
+  run_with_timeout "${CI_CONTRACT_HARNESS_CMD}"
+  contract_status=$?
+  set -e
+  TEST_TIMEOUT_SEC="${saved_timeout_sec}"
+
+  if [[ "${contract_status}" -eq 124 ]]; then
+    diag_dump "contract_harness_timeout"
+    log_line "[ci-run] ERROR: contract harness timed out after ${CI_CONTRACT_HARNESS_TIMEOUT_SEC}s"
+    exit 124
+  fi
+
+  if [[ "${contract_status}" -ne 0 ]]; then
+    diag_dump "contract_harness_exit_${contract_status}"
+    log_line "[ci-run] ERROR: contract harness failed with exit=${contract_status}"
+    exit "${contract_status}"
+  fi
+
+  log_line "[ci-run] contract harness completed successfully"
+else
+  log_line "[ci-run] contract harness skipped (CI_CONTRACT_HARNESS_ENABLED=${CI_CONTRACT_HARNESS_ENABLED})"
 fi
 
 log_line "[ci-run] tests completed successfully (elapsed_sec=$(elapsed_sec))"

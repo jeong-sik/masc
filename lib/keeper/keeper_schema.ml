@@ -180,19 +180,6 @@ let resident_schemas : tool_schema list = [
           ("type", `String "integer");
           ("description", `String "Minimum seconds between handoffs (default: 300).");
         ]);
-        ("voice_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, keeper lifecycle/check-in events may trigger voice output.");
-        ]);
-        ("voice_channel", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "voice_text"; `String "voice_only"; `String "text_only"]);
-          ("description", `String "How keeper event output is surfaced: voice+text, voice only, or text only.");
-        ]);
-        ("voice_agent_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Voice bridge agent id to use when emitting keeper voice events.");
-        ]);
       ]);
       ("required", `List [`String "name"]);
     ];

@@ -1,7 +1,11 @@
 // MASC Dashboard — MCP-over-HTTP client with session lifecycle
 
 import { fetchWithTimeout, DEFAULT_MCP_TIMEOUT_MS } from './core'
-import { MCP_INITIALIZE_TIMEOUT_MS } from '../config/constants'
+import {
+  MCP_INIT_COOLDOWN_MS,
+  MCP_INITIALIZE_TIMEOUT_MS,
+  MCP_INITIALIZED_NOTIFY_TIMEOUT_MS,
+} from '../config/constants'
 import { reportToolHostFailure } from './dashboard'
 
 // --- MCP Session Management ---
@@ -74,8 +78,6 @@ async function mcpPost(body: unknown, timeoutMs = DEFAULT_MCP_TIMEOUT_MS): Promi
   return res.text()
 }
 
-const INIT_COOLDOWN_MS = 2000
-
 async function ensureSession(): Promise<void> {
   if (mcpSessionId === '__blocked__') {
     throw new Error('MCP 연결이 차단되었습니다. 로컬 환경에서만 사용할 수 있는 기능입니다.')
@@ -100,7 +102,7 @@ async function ensureSession(): Promise<void> {
           },
           id: 0,
         }),
-      }, 10000)
+      }, MCP_INITIALIZE_TIMEOUT_MS)
       const sid = res.headers.get('Mcp-Session-Id')
       if (sid) mcpSessionId = sid
       // Send initialized notification
@@ -112,7 +114,7 @@ async function ensureSession(): Promise<void> {
             jsonrpc: '2.0',
             method: 'notifications/initialized',
           }),
-        }, 5000).catch(err => console.warn('[mcp] initialized notification failed:', err))
+        }, MCP_INITIALIZED_NOTIFY_TIMEOUT_MS).catch(err => console.warn('[mcp] initialized notification failed:', err))
       }
       initPromise = null
     } catch (err) {
@@ -120,7 +122,7 @@ async function ensureSession(): Promise<void> {
         mcpSessionId = '__blocked__'
       }
       // Keep initPromise alive briefly to prevent retry storms
-      setTimeout(() => { initPromise = null }, INIT_COOLDOWN_MS)
+      setTimeout(() => { initPromise = null }, MCP_INIT_COOLDOWN_MS)
       throw err
     }
   })()

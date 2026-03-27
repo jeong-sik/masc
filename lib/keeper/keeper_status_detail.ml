@@ -461,7 +461,7 @@ let handle_keeper_status ctx args : tool_result =
            ]);
            ("drift", drift_surface_json ());
            ("policy", `Assoc [
-             ("voice_enabled", `Bool m.policy_voice_enabled);
+             ("voice_tools_available", `Bool (List.mem "keeper_voice_speak" allowed_tools));
              ("allowed_paths", string_list_to_json m.allowed_paths);
            ("allowed_tools", string_list_to_json allowed_tools);
             ("available_internal_tools", string_list_to_json all_internal_tools);

@@ -115,6 +115,7 @@ let test_rpc_retry_uses_isolated_build_dir () =
           ("CI_TEST_HEARTBEAT_SEC", "1");
           ("CI_TEST_TIMEOUT_SEC", "30");
           ("CI_TEST_LOG_FILE", ci_log);
+          ("CI_CONTRACT_HARNESS_ENABLED", "0");
         ]
       in
       let code, stdout, stderr =

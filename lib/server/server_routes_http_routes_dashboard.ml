@@ -137,12 +137,6 @@ let add_routes ~sw ~clock router =
          let json = dashboard_memory_http_json req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
-  (* Legacy alias — kept for backward compatibility *)
-  |> Http.Router.get "/api/v1/dashboard/memory" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let json = dashboard_memory_http_json req in
-         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/governance" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in
@@ -152,11 +146,6 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/planning" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_planning_http_json req ~config:state.Mcp_server.room_config in
-         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/semantics" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let json = dashboard_semantics_http_json () in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission" (fun request reqd ->
@@ -215,11 +204,7 @@ let add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          let since = Server_utils.query_param req "since" in
          let until = Server_utils.query_param req "until" in
-         let stats = Eval_calibration.calibration_stats ?since ?until () in
-         let json = `Assoc [
-           ("generated_at", `Float (Time_compat.now ()));
-           ("calibration", stats);
-         ] in
+         let json = Dashboard_harness_health.json ?since ?until () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)

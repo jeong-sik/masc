@@ -90,58 +90,41 @@ module Session = struct
       List.length to_remove)
 end
 
-(** JSON-RPC helpers *)
-module Jsonrpc = struct
-  let is_valid_request json =
-    match json with
-    | `Assoc fields ->
-        List.mem_assoc "jsonrpc" fields &&
-        List.mem_assoc "method" fields
-    | _ -> false
+(** JSON-RPC low-level helpers (raw Yojson, pre-parse validation). *)
 
-  let is_batch json =
-    match json with
-    | `List _ -> true
-    | _ -> false
+let jsonrpc_is_valid_request = function
+  | `Assoc fields ->
+      List.mem_assoc "jsonrpc" fields &&
+      List.mem_assoc "method" fields
+  | _ -> false
 
-  let error_response ~id ~code ~message =
-    `Assoc [
-      ("jsonrpc", `String "2.0");
-      ("id", id);
-      ("error", `Assoc [
-        ("code", `Int code);
-        ("message", `String message);
-      ]);
-    ]
+let jsonrpc_is_batch = function
+  | `List _ -> true
+  | _ -> false
 
-let _parse_error () =
-    error_response
-      ~id:`Null
-      ~code:(-32700)
-      ~message:"Parse error"
+let jsonrpc_error_response ~id ~code ~message =
+  `Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", id);
+    ("error", `Assoc [
+      ("code", `Int code);
+      ("message", `String message);
+    ]);
+  ]
 
-  let extract_id = function
-    | `Assoc fields ->
-        List.assoc_opt "id" fields |> Option.value ~default:`Null
-    | _ -> `Null
+let jsonrpc_extract_id = function
+  | `Assoc fields ->
+      List.assoc_opt "id" fields |> Option.value ~default:`Null
+  | _ -> `Null
 
-  let method_not_found id =
-    error_response ~id ~code:(-32601)
-      ~message:"Method not found: no request handler configured"
-
-  let invalid_request id =
-    error_response ~id ~code:(-32600)
-      ~message:"Invalid Request"
-
-  let dispatch_request (handler : request_handler) request =
-    try
-      handler request
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      error_response
-        ~id:(extract_id request)
-        ~code:(-32603)
-        ~message:(Log.Server.error "streamable_http dispatch: %s" (Printexc.to_string exn); "Internal error")
-end
+let jsonrpc_dispatch_request (handler : request_handler) request =
+  try
+    handler request
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+    jsonrpc_error_response
+      ~id:(jsonrpc_extract_id request)
+      ~code:(-32603)
+      ~message:(Log.Server.error "streamable_http dispatch: %s" (Printexc.to_string exn); "Internal error")
 
 (** Handle POST /mcp - JSON-RPC request processing *)
 let handle_post ?session_id ~body ?request_handler () =
@@ -153,11 +136,12 @@ let handle_post ?session_id ~body ?request_handler () =
   let request_handler =
       Option.value request_handler
       ~default:(fun request ->
-        let id = Jsonrpc.extract_id request in
-        if Jsonrpc.is_valid_request request then
-          Jsonrpc.method_not_found id
+        let id = jsonrpc_extract_id request in
+        if jsonrpc_is_valid_request request then
+          jsonrpc_error_response ~id ~code:(-32601)
+            ~message:"Method not found: no request handler configured"
         else
-          Jsonrpc.invalid_request id)
+          jsonrpc_error_response ~id ~code:(-32600) ~message:"Invalid Request")
   in
 
   match json_result with
@@ -175,11 +159,11 @@ let handle_post ?session_id ~body ?request_handler () =
       Option.iter Session.touch session;
 
       (* Streamable HTTP transport no longer accepts JSON-RPC batches. *)
-      if Jsonrpc.is_batch json then
+      if jsonrpc_is_batch json then
         (Error_response (400, "JSON-RPC batch requests are not supported"), session)
-      else if Jsonrpc.is_valid_request json then
+      else if jsonrpc_is_valid_request json then
         (* Single request - delegate to MCP handler *)
-        let response = Jsonrpc.dispatch_request request_handler json in
+        let response = jsonrpc_dispatch_request request_handler json in
         (Json_response response, session)
       else
         (Error_response (400, "Invalid JSON-RPC request"), session)

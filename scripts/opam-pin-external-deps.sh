@@ -42,9 +42,8 @@ fi
 opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
 opam pin add agent_sdk "${agent_sdk_pin_source}" -n -y
 opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git#main -n -y
-# TODO: revert to #main after jeong-sik/grpc-direct#61 merges
-opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#fix/mcp-protocol-merge -n -y
-opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#fix/mcp-protocol-merge -n -y
+opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
+opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y
 opam pin add neo4j_packstream https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
 opam pin add neo4j_bolt_common https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
 opam pin add neo4j_bolt https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y

@@ -9,6 +9,7 @@ import { lastEvent, connected, reconnectCount, lastDisconnectedAt } from './sse'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
+  hydrateExecutionSnapshot,
   refreshExecution,
   refreshBoard,
   refreshMdal,
@@ -161,6 +162,15 @@ function handleRoomTruthSnapshot(payload: unknown): void {
   }
 }
 
+/** Hydrate execution signals directly from SSE payload — zero HTTP fetch. */
+function handleExecutionSnapshot(payload: unknown): void {
+  try {
+    hydrateExecutionSnapshot(payload)
+  } catch (err) {
+    console.debug('[SSE] execution snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
+  }
+}
+
 function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void {
   if (!event.name) return
   const newTs = event.ts_unix ? event.ts_unix * 1000 : Date.now()
@@ -259,6 +269,12 @@ export function setupSSEReaction(): () => void {
     // 0. Room-truth snapshot — server push, no HTTP fetch needed
     if (event.type === 'room_truth_snapshot' && event.payload) {
       handleRoomTruthSnapshot(event.payload)
+      return
+    }
+
+    // 0b. Execution snapshot — server push, no HTTP fetch needed
+    if (event.type === 'execution_snapshot' && event.payload) {
+      handleExecutionSnapshot(event.payload)
       return
     }
 

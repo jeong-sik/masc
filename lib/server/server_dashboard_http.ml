@@ -418,6 +418,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _execution_cache json;
+      broadcast_cached_surface ~event_type:"execution_snapshot" json;
       !_broadcast_room_truth_ref state)
 
 let start_transport_health_refresh_loop ~state ~sw ~clock =
@@ -442,7 +443,9 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
            ~label:"transport_health" ~interval_s:15.0)
         with timeout_s }
     ~compute
-    ~on_result:(mark_cached_surface_success _transport_health_cache)
+    ~on_result:(fun json ->
+      mark_cached_surface_success _transport_health_cache json;
+      broadcast_cached_surface ~event_type:"transport_health_snapshot" json)
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let fixture = query_param request "fixture" in
@@ -1114,6 +1117,20 @@ let room_truth_snapshot_from_caches (state : Mcp_server.server_state) :
           ("focus", focus_json);
         ])
 
+(** Broadcast a single cached surface to all Observer SSE sessions.
+    [event_type] becomes the SSE event "type" field.
+    Safe to call from any fiber — reads only from a cached ref. *)
+let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
+  let sse_json =
+    `Assoc
+      [
+        ("type", `String event_type);
+        ("payload", json);
+        ("ts_unix", `Float (Time_compat.now ()));
+      ]
+  in
+  Sse.broadcast_to Observers sse_json
+
 (** Broadcast current room-truth snapshot to all Observer SSE sessions.
     Called after proactive cache refreshes and keeper lifecycle events.
     Safe to call from any fiber — reads only from cached refs. *)
@@ -1136,6 +1153,17 @@ let broadcast_room_truth_snapshot (state : Mcp_server.server_state) : unit =
    [dashboard_room_truth_focus_json] and [broadcast_room_truth_snapshot]
    are defined. *)
 let () = _broadcast_room_truth_ref := broadcast_room_truth_snapshot
+
+(* Shadow the _core versions to wire in SSE broadcast. *)
+let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
+  Server_dashboard_http_core.start_operator_snapshot_refresh_loop
+    ~on_broadcast:(broadcast_cached_surface ~event_type:"operator_snapshot")
+    ~state ~sw ~clock
+
+let start_operator_digest_refresh_loop ~state ~sw ~clock =
+  Server_dashboard_http_core.start_operator_digest_refresh_loop
+    ~on_broadcast:(broadcast_cached_surface ~event_type:"operator_digest")
+    ~state ~sw ~clock
 
 let dashboard_memory_http_json request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in

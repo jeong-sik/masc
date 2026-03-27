@@ -82,12 +82,14 @@ val dashboard_batch_json :
 (** {1 Operator Snapshot/Digest} *)
 
 val start_operator_snapshot_refresh_loop :
+  ?on_broadcast:(Yojson.Safe.t -> unit) ->
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit
 
 val start_operator_digest_refresh_loop :
+  ?on_broadcast:(Yojson.Safe.t -> unit) ->
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

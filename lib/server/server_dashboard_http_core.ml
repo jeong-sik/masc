@@ -321,7 +321,7 @@ let operator_snapshot_extra sessions =
     ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
   ]
 
-let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
+let start_operator_snapshot_refresh_loop ?(on_broadcast = fun (_json : Yojson.Safe.t) -> ()) ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let compute () =
@@ -368,9 +368,11 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
                        "MASC_DASHBOARD_OPERATOR_SNAPSHOT_TIMEOUT_S"
                        ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
     ~compute
-    ~on_result:(mark_cached_surface_success _operator_snapshot_cache)
+    ~on_result:(fun json ->
+      mark_cached_surface_success _operator_snapshot_cache json;
+      on_broadcast json)
 
-let start_operator_digest_refresh_loop ~state ~sw ~clock =
+let start_operator_digest_refresh_loop ?(on_broadcast = fun (_json : Yojson.Safe.t) -> ()) ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let compute () =
@@ -421,7 +423,9 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
                        "MASC_DASHBOARD_OPERATOR_DIGEST_TIMEOUT_S"
                        ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
     ~compute
-    ~on_result:(mark_cached_surface_success _operator_digest_cache)
+    ~on_result:(fun json ->
+      mark_cached_surface_success _operator_digest_cache json;
+      on_broadcast json)
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in

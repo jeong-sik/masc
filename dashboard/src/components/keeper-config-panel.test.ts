@@ -71,11 +71,9 @@ const mocks = vi.hoisted(() => ({
     },
     sources: {
       live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
-      resident_spec_path: '/tmp/.masc/keepers/keeper-sangsu.toml',
-      resident_spec_exists: true,
       default_manifest_path: '/tmp/config/keepers/default.toml',
       default_source_kind: 'toml' as const,
-      precedence: ['live_override', 'resident_spec', 'default_manifest'],
+      precedence: ['live_meta', 'toml', 'persona'],
       has_live_override: true,
       override_fields: ['goal', 'instructions'],
     },

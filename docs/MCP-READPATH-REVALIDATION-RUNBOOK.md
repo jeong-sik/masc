@@ -19,7 +19,7 @@
   - live HTTP + WebSocket + WebRTC startup 확인
   - gRPC는 기본적으로 꺼 둔다
 
-기본 base path는 현재 repo root다. 즉 live `.masc` 상태와 resident keeper surface를 같이 검증한다.
+기본 base path는 현재 repo root다. 즉 live `.masc` 상태와 keeper runtime surface를 같이 검증한다.
 
 ## Success Criteria
 

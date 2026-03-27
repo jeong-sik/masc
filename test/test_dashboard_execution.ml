@@ -178,38 +178,48 @@ let test_dashboard_shell_current_room_status () =
       check string "shell diagnostics surface" "shell"
         (json |> member "projection_diagnostics" |> member "surface" |> to_string))
 
-let keeper_boot_entry name : Lib.Keeper_types.keeper_boot_entry =
-  let now = "2026-03-25T08:05:54Z" in
-  {
-    name;
-    persona_name = name;
-    voice_enabled = false;
-    voice_channel = "text_only";
-    voice_agent_id = "";
-    created_at = now;
-    updated_at = now;
-  }
+let create_keeper env sw config name =
+  let ctx : _ Lib.Tool_keeper.context =
+    {
+      config;
+      agent_name = "tester";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = Some (Eio.Stdenv.process_mgr env);
+    }
+  in
+  match
+    Lib.Tool_keeper.dispatch ctx ~name:"masc_keeper_up"
+      ~args:
+        (`Assoc
+          [
+            ("name", `String name);
+            ("goal", `String "Dashboard keeper fixture");
+            ("presence_keepalive", `Bool false);
+            ("proactive_enabled", `Bool false);
+          ])
+  with
+  | Some (true, _) -> ()
+  | Some (false, err) -> fail err
+  | None -> fail "missing masc_keeper_up dispatch"
 
-let test_dashboard_shell_counts_resident_keepers () =
+let test_dashboard_shell_counts_keepers () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:None);
-      ignore
-        (Lib.Keeper_types.write_resident_keeper config
-           (keeper_boot_entry "keeper-alpha"));
-      ignore
-        (Lib.Keeper_types.write_resident_keeper config
-           (keeper_boot_entry "keeper-beta"));
-      let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
-      let open Yojson.Safe.Util in
-      let counts = json |> member "counts" in
-      check int "shell keeper count from resident specs" 2
-        (counts |> member "keepers" |> to_int))
+      Eio.Switch.run (fun sw ->
+        create_keeper env sw config "keeper-alpha";
+        create_keeper env sw config "keeper-beta";
+        let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
+        let open Yojson.Safe.Util in
+        let counts = json |> member "counts" in
+        check int "shell keeper count from keeper meta" 2
+          (counts |> member "keepers" |> to_int)))
 
 let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
   let dir = test_dir () in
@@ -226,16 +236,15 @@ let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
            ());
-      ignore
-        (Lib.Keeper_types.write_resident_keeper config
-           (keeper_boot_entry "sangsu"));
-      let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
-      let open Yojson.Safe.Util in
-      let counts = json |> member "counts" in
-      check int "keeper-backed room has no general agents" 0
-        (counts |> member "agents" |> to_int);
-      check int "resident keeper still counted" 1
-        (counts |> member "keepers" |> to_int))
+      Eio.Switch.run (fun sw ->
+        create_keeper env sw config "sangsu";
+        let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
+        let open Yojson.Safe.Util in
+        let counts = json |> member "counts" in
+        check int "keeper-backed room has no general agents" 0
+          (counts |> member "agents" |> to_int);
+        check int "keeper still counted" 1
+          (counts |> member "keepers" |> to_int)))
 
 let test_dashboard_execution_fresh_join_not_marked_stale () =
   let dir = test_dir () in
@@ -279,8 +288,8 @@ let () =
             test_dashboard_execution_current_room_status;
           Alcotest.test_case "shell follows current room" `Quick
             test_dashboard_shell_current_room_status;
-          Alcotest.test_case "shell counts resident keepers cheaply" `Quick
-            test_dashboard_shell_counts_resident_keepers;
+          Alcotest.test_case "shell counts keepers cheaply" `Quick
+            test_dashboard_shell_counts_keepers;
           Alcotest.test_case "shell excludes keeper agents from general count" `Quick
             test_dashboard_shell_excludes_keeper_agents_from_general_count;
           Alcotest.test_case "fresh join is not stale" `Quick

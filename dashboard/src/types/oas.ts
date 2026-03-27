@@ -5,7 +5,7 @@ export interface OasAgentEvent {
     | 'selected'
     | 'decision'
     | 'action_executed'
-    | 'keeper_resident_lifecycle'
+    | 'keeper_lifecycle'
     | 'trust_updated'
     | 'reputation_changed'
   agent_name: string

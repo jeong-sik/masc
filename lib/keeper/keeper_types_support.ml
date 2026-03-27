@@ -1,4 +1,4 @@
-(** Keeper_types_resident — model selection, path utilities,
+(** Keeper_types_support — model selection, path utilities,
     and JSONL append/rotation helpers.
 
     Extracted from keeper_types.ml to reduce file size.

@@ -137,11 +137,6 @@ let runtime_keepalive_started_at (config : Room_utils.config)
   Keeper_registry.started_at ~base_path:config.base_path meta.name
 
 let runtime_surface_json config (meta : keeper_meta) =
-  let resident_spec =
-    match read_resident_keeper config meta.name with
-    | Ok spec_opt -> spec_opt
-    | Error _ -> None
-  in
   let keepalive_running = runtime_keepalive_running config meta in
   let fiber_health =
     match
@@ -158,8 +153,7 @@ let runtime_surface_json config (meta : keeper_meta) =
   `Assoc
     [
       ("paused", `Bool meta.paused);
-      ("registered", `Bool (Option.is_some resident_spec));
-      ("resident_registered", `Bool (Option.is_some resident_spec));
+      ("desired_keepalive", `Bool meta.presence_keepalive);
       ("keepalive_running", `Bool keepalive_running);
       ("registry_state",
        match registry_state with
@@ -174,12 +168,9 @@ let runtime_surface_json config (meta : keeper_meta) =
 let source_provenance_json config (meta : keeper_meta) =
   let snapshot = keeper_default_source_snapshot meta.name in
   let override_fields = live_override_fields meta snapshot.defaults in
-  let resident_path = resident_keeper_path config meta.name in
   `Assoc
     [
       ("live_meta_path", `String (keeper_meta_path config meta.name));
-      ("resident_spec_path", `String resident_path);
-      ("resident_spec_exists", `Bool (Sys.file_exists resident_path));
       ( "default_manifest_path",
         match snapshot.defaults.manifest_path with
         | Some path -> `String path
@@ -188,7 +179,7 @@ let source_provenance_json config (meta : keeper_meta) =
         match snapshot.source_kind with
         | Some kind -> `String kind
         | None -> `Null );
-      ("precedence", `List [ `String "live_meta"; `String "resident_spec"; `String "toml"; `String "persona" ]);
+      ("precedence", `List [ `String "live_meta"; `String "toml"; `String "persona" ]);
       ("has_live_override", `Bool (override_fields <> []));
       ("override_fields", string_list_to_json override_fields);
     ]

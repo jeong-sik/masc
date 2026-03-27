@@ -1,7 +1,7 @@
 (** Keeper_registry — Single source of truth for keeper state.
 
     Replaces scattered state across keeper_keepalive Hashtbl,
-    keeper_resident_supervisor Hashtbl, and file-based meta lookups.
+    keeper_supervisor Hashtbl, and file-based meta lookups.
     All keeper state queries and mutations go through this module.
 
     Thread-safe: all operations protected by Eio.Mutex when available,

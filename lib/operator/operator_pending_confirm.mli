@@ -14,7 +14,7 @@ val pending_confirms_path : Room.config -> string
 val trace_id : string -> string
 val normalized_actor : context_actor:string -> string option -> string
 val operator_surface_contract_json : Yojson.Safe.t
-val resident_judge_runtime_json : Room.config -> Yojson.Safe.t
+val operator_judge_runtime_json : Room.config -> Yojson.Safe.t
 
 type pending_confirm = {
   token : string;

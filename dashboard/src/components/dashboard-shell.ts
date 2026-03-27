@@ -15,7 +15,7 @@ import {
   currentSectionForRoute,
   visibleSectionItemsForTab,
 } from '../config/navigation'
-import { SnapshotCard } from './resident-runtime-rail'
+import { SnapshotCard } from './runtime-rail'
 
 const buildIdentityOpen = signal(false)
 

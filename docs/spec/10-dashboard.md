@@ -302,7 +302,7 @@ proof 문서가 존재하지 않으면 `Team_session_report_proof.generate_proof
 | `dashboard_http_keeper.ml` | 606 | `keepers_dashboard_json` 최상위 함수. Eio.Fiber.all로 keeper별 I/O를 병렬 실행 |
 
 `keepers_dashboard_json` 흐름:
-1. `Keeper_types.resident_keeper_names`로 keeper 이름 목록 취득
+1. `Keeper_types.keeper_names`로 keeper 이름 목록 취득
 2. keeper별로 `Eio.Fiber.all`로 병렬 I/O (metadata + metrics read)
 3. `Dated_jsonl.read_recent_lines`로 metrics 로드 (compact: 120줄, full: 500줄 cap)
 4. generation별 stats 집계 (`keeper_gen_window_stats`)

@@ -1,4 +1,4 @@
-(** Keeper_resident_supervisor — resident keepalive fiber supervision.
+(** Keeper_supervisor — keeper keepalive fiber supervision.
 
     Supervises the MASC-owned background keepalive fibers that maintain
     keeper presence and heartbeat snapshots. Uses [Keeper_registry] as
@@ -6,7 +6,7 @@
     liveness tracking ([done_p]/[done_r]) lives in registry entries.
 
     This is not the OAS [Agent.run] lifecycle; it sits outside the turn
-    loop and only manages resident liveness/restart policy.
+    loop and only manages keepalive liveness/restart policy.
 
     @since 2.102.0 *)
 
@@ -16,8 +16,8 @@ open Keeper_execution
 (* ── Pure helpers ────────────────────────────────────────── *)
 
 let backoff_delay attempt =
-  let base = Env_config.KeeperResidentSupervisor.backoff_base_s in
-  let max_delay = Env_config.KeeperResidentSupervisor.backoff_max_s in
+  let base = Env_config.KeeperSupervisor.backoff_base_s in
+  let max_delay = Env_config.KeeperSupervisor.backoff_max_s in
   Float.min max_delay (base *. Float.of_int (1 lsl (min attempt 20)))
 
 let keep_last_n n item lst =
@@ -30,7 +30,7 @@ let keep_last_n n item lst =
 let publish_lifecycle event_name keeper_name detail =
   match Keeper_keepalive.get_bus () with
   | Some bus ->
-      Oas_events.publish_keeper_resident_lifecycle bus ~event:event_name
+      Oas_events.publish_keeper_lifecycle bus ~event:event_name
         ~keeper_name ~detail
   | None -> ()
 
@@ -98,26 +98,26 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
 
 (* ── Sweep and recover ───────────────────────────────────── *)
 
-let reconcile_resident_keepers (ctx : _ context) =
+let reconcile_keepalive_keepers (ctx : _ context) =
   let base_path = ctx.config.base_path in
-  Keeper_types.list_resident_keepers ctx.config
-  |> List.iter (fun (entry : Keeper_types.keeper_boot_entry) ->
-         match read_meta ctx.config entry.name with
+  Keeper_types.keepalive_keeper_names ctx.config
+  |> List.iter (fun name ->
+         match read_meta ctx.config name with
          | Ok (Some meta)
            when not meta.paused
                 && meta.presence_keepalive
                 && not (Keeper_registry.is_running ~base_path meta.name) ->
              supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
              if Keeper_registry.is_running ~base_path meta.name then begin
-               publish_lifecycle "reconciled" meta.name "late resident registration";
-               Log.Keeper.info "%s: reconciled late resident keeper" meta.name
+               publish_lifecycle "reconciled" meta.name "keepalive desired";
+               Log.Keeper.info "%s: reconciled desired keepalive" meta.name
              end
          | _ -> ())
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
-  let max_restarts = Env_config.KeeperResidentSupervisor.max_restarts in
+  let max_restarts = Env_config.KeeperSupervisor.max_restarts in
   let base_path = ctx.config.base_path in
-  reconcile_resident_keepers ctx;
+  reconcile_keepalive_keepers ctx;
   let entries = Keeper_registry.all ~base_path () in
   let to_restart = ref [] in
   let to_unregister = ref [] in
@@ -168,4 +168,4 @@ let sweep_and_recover (ctx : _ context) =
           old_entry.name;
         Keeper_registry.unregister ~base_path old_entry.name
   ) !to_restart;
-  reconcile_resident_keepers ctx
+  reconcile_keepalive_keepers ctx

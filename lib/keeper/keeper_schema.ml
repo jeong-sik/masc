@@ -2,7 +2,7 @@
 
 open Types
 
-let resident_schemas : tool_schema list = [
+let keeper_schemas : tool_schema list = [
   {
     name = "masc_persona_list";
     description = "List available personas that have structured profile.json data. Use this before creating a keeper from a persona.";
@@ -19,7 +19,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_create_from_persona";
-    description = "Create or dry-run a keeper configuration from a persona profile.json. Registered keepers auto-start on server boot.";
+    description = "Create or dry-run a keeper configuration from a persona profile.json. Keepers with keepalive enabled auto-start on server boot.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -69,7 +69,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_up";
-    description = "Create or update a keeper. Registered keepers auto-start on server boot and are reconciled back into live presence.";
+    description = "Create or update a keeper. Keepers with keepalive enabled auto-start on server boot and are reconciled back into live presence.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -187,7 +187,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_status";
-    description = "Get keeper status (registered/live/reconcile state plus current context and monitoring tails).";
+    description = "Get keeper status (keepalive/live/reconcile state plus current context and monitoring tails).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -242,7 +242,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_msg";
-    description = "Send a message to a resident keeper and get a reply. Resident keepers keep durable context and should already be live.";
+    description = "Send a message to a keeper and get a reply. Keepers keep durable context and can be created inline if missing.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -349,7 +349,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_down";
-    description = "Stop a keeper and unregister it from auto-boot. Optionally remove underlying files.";
+    description = "Stop a keeper. Optionally remove underlying files.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -372,7 +372,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_list";
-    description = "List registered keepers that auto-start on server boot.";
+    description = "List known keepers from persisted keeper metadata.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -505,7 +505,7 @@ let persistent_alias_description schema =
   ^ ". Uses the current event-driven stateful assistant behavior."
 
 let persistent_agent_alias_schemas =
-  resident_schemas
+  keeper_schemas
   |> List.filter_map (fun (schema : tool_schema) ->
          match persistent_alias_name schema.name with
          | None -> None
@@ -574,4 +574,4 @@ let housekeep_schemas : tool_schema list = [
 ]
 
 let schemas : tool_schema list =
-  resident_schemas @ persistent_agent_alias_schemas @ housekeep_schemas
+  keeper_schemas @ persistent_agent_alias_schemas @ housekeep_schemas

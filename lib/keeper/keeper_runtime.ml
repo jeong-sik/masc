@@ -1,31 +1,11 @@
-(** Keeper_runtime — resident keeper reconciliation and keepalive bootstrap.
+(** Keeper_runtime — keeper reconciliation and keepalive bootstrap.
     Runtime-only mutable state stays behind keeper runtime/execution modules. *)
 
 open Keeper_types
-open Keeper_exec_status
 
 let maybe_promote_live_persistent_keeper config name =
-  match read_meta config name with
-  | Error _ | Ok None -> ()
-  | Ok (Some meta) ->
-      if is_resident_keeper config meta.name then ()
-      else
-        match parse_agent_status config ~agent_name:meta.agent_name with
-        | `Assoc fields -> (
-            let status =
-              match List.assoc_opt "status" fields with
-              | Some (`String value) -> String.lowercase_ascii value
-              | _ -> "offline"
-            in
-            let agent_type =
-              match List.assoc_opt "agent_type" fields with
-              | Some (`String value) -> String.lowercase_ascii value
-              | _ -> ""
-            in
-            if agent_type = "keeper" && List.mem status [ "active"; "busy"; "idle"; "listening" ] then
-              (match register_resident_keeper config meta.name with
-               | Ok () -> () | Error e -> Log.Keeper.warn "register_keeper failed: %s" e))
-        | _ -> ()
+  ignore config;
+  ignore name
 
 let ensure_keeper_meta config name =
   match read_meta config name with
@@ -71,16 +51,6 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
   if not Env_config.KeeperBootstrap.enabled then
     { enabled = false; scanned = 0; started = 0; stale = 0; recovering = 0 }
   else
-    let dir = keeper_dir ctx.config in
-    (match Safe_ops.list_dir_safe dir with
-    | Ok files ->
-        files
-        |> List.filter (fun f -> Filename.check_suffix f ".json")
-        |> List.iter (fun f ->
-               let name = Filename.remove_extension f in
-               if validate_name name then maybe_promote_live_persistent_keeper ctx.config name)
-    | Error e ->
-        Log.Keeper.warn "bootstrap: failed to scan persistent keepers dir: %s" e);
     let now_ts = Time_compat.now () in
     let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
     let stale_turn_sec =
@@ -98,13 +68,13 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
            max_int)
     in
     let entries =
-      list_resident_keepers ctx.config
+      keeper_names ctx.config
       |> take max_scan
     in
     let (enabled, scanned, started, stale, recovering) =
       List.fold_left
-        (fun (enabled_acc, scanned_acc, started_acc, stale_acc, recovering_acc) entry ->
-          match ensure_keeper_meta ctx.config entry.name with
+        (fun (enabled_acc, scanned_acc, started_acc, stale_acc, recovering_acc) name ->
+          match ensure_keeper_meta ctx.config name with
           | Error _ ->
               (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
           | Ok m ->
@@ -125,7 +95,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 else if already_running then false
                 else if max_keepers > 0 && !remaining_slots <= 0 then false
                 else (
-                  Keeper_resident_supervisor.supervise_keepalive
+                  Keeper_supervisor.supervise_keepalive
                     ~proactive_warmup_sec ctx m;
                   if max_keepers > 0 then remaining_slots := !remaining_slots - 1;
                   true
@@ -172,10 +142,10 @@ let start_supervisor_sweep ctx =
   else begin
     let consumer : (module Pulse.Consumer) =
       (module struct
-        let name = "keeper-resident-supervisor-sweep"
+        let name = "keeper-supervisor-sweep"
         let should_act _beat = true
         let on_beat _beat =
-          (try Keeper_resident_supervisor.sweep_and_recover ctx
+          (try Keeper_supervisor.sweep_and_recover ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Keeper.error "supervisor sweep failed: %s"
                (Printexc.to_string exn));
@@ -184,9 +154,9 @@ let start_supervisor_sweep ctx =
     in
     let p = Pulse.create
       ~clock:ctx.clock
-      ~rhythm:{ Pulse.base_s = Env_config.KeeperResidentSupervisor.sweep_interval_sec;
-                 min_s = Env_config.KeeperResidentSupervisor.sweep_interval_sec;
-                 max_s = Env_config.KeeperResidentSupervisor.sweep_interval_sec;
+      ~rhythm:{ Pulse.base_s = Env_config.KeeperSupervisor.sweep_interval_sec;
+                 min_s = Env_config.KeeperSupervisor.sweep_interval_sec;
+                 max_s = Env_config.KeeperSupervisor.sweep_interval_sec;
                  quiet = (0, 0) }
       ~lifecycle:Perpetual
       ~consumers:[consumer]
@@ -194,8 +164,8 @@ let start_supervisor_sweep ctx =
     with_sweeps_rw (fun () ->
       Hashtbl.replace supervisor_sweeps base_path p);
     Pulse.run ~sw:ctx.sw p;
-    Log.Keeper.info "resident supervisor sweep started (interval %.0fs)"
-      Env_config.KeeperResidentSupervisor.sweep_interval_sec
+    Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)"
+      Env_config.KeeperSupervisor.sweep_interval_sec
   end
 
 let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
@@ -205,7 +175,7 @@ let bootstrap_done_mu = Eio.Mutex.create ()
 let with_bootstrap_rw f = Eio_guard.with_mutex bootstrap_done_mu f
 
 let has_boot_entries config =
-  list_resident_keepers config <> []
+  keepalive_keeper_names config <> []
 
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
   if stats.enabled

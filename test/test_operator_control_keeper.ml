@@ -128,7 +128,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
           ~args:(`Assoc [ ("name", `String keeper_name) ])
       in
       Alcotest.(check bool) "keeper down ok" true ok;
-      (* After keeper_down, deactivate_resident_keeper sets desired=false
+      (* After keeper_down, deactivate_keeper sets desired=false
          but keeps the entry. masc_keeper_status may return success (entry
          found with desired=false) or not-found depending on version.
          Accept either: the important assertions are the persistent_agent
@@ -139,7 +139,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
        with
       | Some (false, _) -> ()  (* Entry removed: expected in older code *)
       | Some (true, _) -> ()   (* Entry deactivated (desired=false): current behavior *)
-      | None -> Alcotest.fail "missing resident keeper status dispatch");
+      | None -> Alcotest.fail "missing keeper status dispatch");
       let ok, body =
         dispatch_keeper_exn keeper_ctx ~name:"masc_persistent_agent_status"
           ~args:

@@ -6,10 +6,11 @@ let () = Random.self_init ()
 
 let () = Printf.printf "\n=== Tool_rate_limit Coverage Tests ===\n"
 
-(* Test helper *)
+(* Test helper — wraps in Eio context so dispatch paths that use
+   Eio.Mutex or Session operations work correctly. *)
 let test name f =
   try
-    f ();
+    Eio_main.run @@ (fun env -> Fs_compat.set_fs (Eio.Stdenv.fs env); f ());
     Printf.printf "✓ %s passed\n" name
   with e ->
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
@@ -33,10 +34,8 @@ let () = test "dispatch_unknown_tool" (fun () ->
   assert (Tool_rate_limit.dispatch ctx ~name:"unknown_tool" ~args = None)
 )
 
-(* Test rate_limit_status dispatch - needs Eio for Session.get_rate_limit_status *)
+(* Test rate_limit_status dispatch *)
 let () = test "dispatch_rate_limit_status" (fun () ->
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
   match Tool_rate_limit.dispatch ctx ~name:"masc_rate_limit_status" ~args with
@@ -44,10 +43,8 @@ let () = test "dispatch_rate_limit_status" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test handle_rate_limit_status - needs Eio *)
+(* Test handle_rate_limit_status *)
 let () = test "handle_rate_limit_status" (fun () ->
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
   let (success, result) = Tool_rate_limit.handle_rate_limit_status ctx args in

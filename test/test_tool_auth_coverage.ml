@@ -7,21 +7,22 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 let () = Printf.printf "\n=== Tool_auth Coverage Tests ===\n"
 
-(* Test helper *)
+(* Test helper — wraps in Eio context so dispatch paths that use
+   Eio.Mutex or structured concurrency work correctly. *)
 let test name f =
   try
-    f ();
+    Eio_main.run @@ (fun env -> Fs_compat.set_fs (Eio.Stdenv.fs env); f ());
     Printf.printf "✓ %s passed\n" name
   with e ->
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
     exit 1
 
-(* Create test context *)
+(* Create test context — called inside Eio scope from test helper *)
+let test_counter = ref 0
 let make_test_ctx () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  incr test_counter;
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc-auth-test-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
+    (Printf.sprintf "masc-auth-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   { Tool_auth.config; agent_name = "test-agent" }

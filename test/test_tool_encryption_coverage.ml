@@ -6,10 +6,11 @@ let () = Random.self_init ()
 
 let () = Printf.printf "\n=== Tool_encryption Coverage Tests ===\n"
 
-(* Test helper *)
+(* Test helper — wraps in Eio context so dispatch paths that use
+   Eio.Mutex or structured concurrency work correctly. *)
 let test name f =
   try
-    f ();
+    Eio_main.run @@ (fun env -> Fs_compat.set_fs (Eio.Stdenv.fs env); f ());
     Printf.printf "✓ %s passed\n" name
   with e ->
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);

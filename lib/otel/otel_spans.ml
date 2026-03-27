@@ -18,14 +18,14 @@ let init () =
     ignore (Ambient_context_eio.storage : Ambient_context.Storage.t)
   end
 
-let setup_exporter env =
+let setup_exporter ~sw env =
   if Otel_config.enabled && !initialized then begin
     let config =
       Opentelemetry_client_cohttp_eio.Config.make
         ~url:Otel_config.endpoint
         ()
     in
-    Opentelemetry_client_cohttp_eio.setup ~config env
+    Opentelemetry_client_cohttp_eio.setup ~config ~sw env
   end
 
 let shutdown () =

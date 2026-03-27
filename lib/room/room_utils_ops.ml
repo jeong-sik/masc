@@ -202,6 +202,11 @@ let read_text config path =
       if Fs_compat.file_exists path then Fs_compat.load_file path
       else ""
 
+let should_dual_write_local (config : config) =
+  match config.backend with
+  | FileSystem _ -> false
+  | Memory _ | PostgresNative _ -> true
+
 let write_json config path json =
   match key_of_path config path with
   | Some key ->
@@ -209,9 +214,10 @@ let write_json config path json =
       (match backend_set config ~key ~value:content with
        | Ok () -> ()
        | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e));
-      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
-      (try write_json_local path json
-       with _exn -> ())
+      if should_dual_write_local config then
+        (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
+        (try write_json_local path json
+         with _exn -> ())
   | None -> write_json_local path json
 
 let write_text_local path content =
@@ -228,9 +234,10 @@ let write_text config path content =
        | Error e ->
            Log.Misc.warn "write_text backend_set failed for %s: %s" key
              (Backend_types.show_error e));
-      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
-      (try write_text_local path content
-       with _exn -> ())
+      if should_dual_write_local config then
+        (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
+        (try write_text_local path content
+         with _exn -> ())
   | None -> write_text_local path content
 
 let delete_path config path =

@@ -23,6 +23,9 @@ import {
   normalizeRoomTruth,
 } from './room-truth-store'
 import { mergeServerStatus } from './store-normalizers'
+import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
+import { operatorSnapshot, operatorRoomDigest } from './operator-signals'
+import { hydrateTransportHealthFromSSE } from './components/transport-health'
 import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 import { showToast } from './components/common/toast'
 import { route } from './router'
@@ -171,6 +174,30 @@ function handleExecutionSnapshot(payload: unknown): void {
   }
 }
 
+function handleOperatorSnapshot(payload: unknown): void {
+  try {
+    operatorSnapshot.value = normalizeOperatorSnapshot(payload)
+  } catch (err) {
+    console.debug('[SSE] operator snapshot hydration failed', err instanceof Error ? err.message : '')
+  }
+}
+
+function handleOperatorDigest(payload: unknown): void {
+  try {
+    operatorRoomDigest.value = normalizeOperatorDigest(payload)
+  } catch (err) {
+    console.debug('[SSE] operator digest hydration failed', err instanceof Error ? err.message : '')
+  }
+}
+
+function handleTransportHealth(payload: unknown): void {
+  try {
+    hydrateTransportHealthFromSSE(payload)
+  } catch (err) {
+    console.debug('[SSE] transport health hydration failed', err instanceof Error ? err.message : '')
+  }
+}
+
 function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void {
   if (!event.name) return
   const newTs = event.ts_unix ? event.ts_unix * 1000 : Date.now()
@@ -275,6 +302,20 @@ export function setupSSEReaction(): () => void {
     // 0b. Execution snapshot — server push, no HTTP fetch needed
     if (event.type === 'execution_snapshot' && event.payload) {
       handleExecutionSnapshot(event.payload)
+      return
+    }
+
+    // 0c. Operator/transport snapshots — server push, no HTTP fetch needed
+    if (event.type === 'operator_snapshot' && event.payload) {
+      handleOperatorSnapshot(event.payload)
+      return
+    }
+    if (event.type === 'operator_digest' && event.payload) {
+      handleOperatorDigest(event.payload)
+      return
+    }
+    if (event.type === 'transport_health_snapshot' && event.payload) {
+      handleTransportHealth(event.payload)
       return
     }
 

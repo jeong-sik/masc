@@ -537,7 +537,7 @@ let () =
       test_case "normal" `Quick test_sanitize_message_normal;
       test_case "html" `Quick test_sanitize_message_html;
     ];
-    "storage_type_from_env", [
+    "storage_backend_selection", [
       test_case "defaults to filesystem" `Quick test_storage_type_defaults_to_filesystem;
       test_case "explicit postgres" `Quick test_storage_type_explicit_postgres;
       test_case "legacy url does not auto select" `Quick test_storage_type_legacy_url_does_not_auto_select;

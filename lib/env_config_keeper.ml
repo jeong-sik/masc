@@ -132,6 +132,32 @@ module KeeperAlert = struct
     get_float ~default:0.85 "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
 end
 
+(** {1 Keeper Runtime} *)
+
+module KeeperRuntime = struct
+  let debug =
+    get_bool ~default:false "MASC_KEEPER_DEBUG"
+
+  let snapshot_interval_sec =
+    max 15 (min 3600 (get_int ~default:60 "MASC_KEEPER_SNAPSHOT_SEC"))
+
+  let skill_selection_raw =
+    get_string ~default:"" "MASC_KEEPER_SKILL_SELECTION"
+
+  let deliberation_daily_budget_usd =
+    get_float ~default:0.10 "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD"
+end
+
+(** {1 Local Worker} *)
+
+module LocalWorker = struct
+  let max_tokens =
+    get_int ~default:1024 "MASC_LOCAL_WORKER_MAX_TOKENS"
+
+  let heartbeat_interval_sec =
+    get_int ~default:60 "MASC_LOCAL_WORKER_HEARTBEAT_SEC"
+end
+
 (** {1 Keeper Resident Supervisor Configuration} *)
 
 module KeeperResidentSupervisor = struct

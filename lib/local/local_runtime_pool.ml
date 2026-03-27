@@ -295,9 +295,8 @@ let current_fingerprint () =
     [
       String.concat "," (Llm_provider.Discovery.endpoints_from_env ());
       Env_config.Llama.server_url;
-      Option.value ~default:"" (Sys.getenv_opt "LLAMA_SWARM_MODEL");
-      Option.value ~default:""
-        (Sys.getenv_opt "MASC_LLAMA_RUNTIME_COOLDOWN_SEC");
+      Option.value ~default:"" (Env_config.Chain.Model.llama_swarm_model_opt ());
+      string_of_float Env_config.Chain.Llama.runtime_cooldown_sec;
       string_of_int
         (int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
            ~default:default_parallel_hint);

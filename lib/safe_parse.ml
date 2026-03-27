@@ -13,10 +13,7 @@
 *)
 
 (** Whether to log parse warnings. Default: false to avoid noise. *)
-let warn_enabled () =
-  match Sys.getenv_opt "MASC_PARSE_WARN" with
-  | Some "1" | Some "true" | Some "yes" -> true
-  | _ -> false
+let warn_enabled () = Env_config.Server.Runtime.parse_warn
 
 (** Log a parse warning if enabled. *)
 let warn ~context ~input ~fallback =

@@ -688,13 +688,7 @@ let parse_cursor_only_params params =
     | `String cursor -> Ok { cursor = Some cursor }
     | _ -> Error "Invalid params: cursor must be a string"
 
-let list_page_size () =
-  match Sys.getenv_opt "MASC_LIST_PAGE_SIZE" with
-  | Some raw -> (
-      match int_of_string_opt (String.trim raw) with
-      | Some v when v >= 10 && v <= 1024 -> v
-      | _ -> 512)
-  | None -> 512
+let list_page_size () = Env_config.Server.Misc.list_page_size
 
 let encode_cursor ~kind offset =
   Base64.encode_string (Printf.sprintf "%s:%d" kind offset)

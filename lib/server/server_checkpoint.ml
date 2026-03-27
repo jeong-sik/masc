@@ -162,9 +162,9 @@ let of_json (json : Yojson.Safe.t) : checkpoint option =
 (** {1 File I/O} *)
 
 let checkpoint_path () =
-  let masc_dir = match Sys.getenv_opt "MASC_BASE_PATH" with
-    | Some p when String.trim p <> "" -> Filename.concat p ".masc"
-    | _ -> ".masc"
+  let masc_dir = match Env_config.Server.Storage.base_path_opt () with
+    | Some p -> Filename.concat p ".masc"
+    | None -> ".masc"
   in
   Filename.concat masc_dir "server_checkpoint.json"
 

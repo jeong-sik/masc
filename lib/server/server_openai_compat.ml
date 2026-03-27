@@ -9,10 +9,7 @@
     Request/response format follows the OpenAI Chat Completions API spec. *)
 
 (** Whether the OpenAI-compatible endpoint is enabled (default: false). *)
-let is_enabled () =
-  match Sys.getenv_opt "MASC_OPENAI_COMPAT" with
-  | Some "1" | Some "true" -> true
-  | _ -> false
+let is_enabled () = Env_config.Server.Runtime.openai_compat
 
 (** Generate a random chat completion ID. *)
 let generate_completion_id () =

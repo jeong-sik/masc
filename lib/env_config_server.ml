@@ -204,5 +204,12 @@ module Misc = struct
     Sys.getenv_opt "MASC_MCP_URL" |> trim_opt
 
   let oas_sse_drain_interval_sec =
-    get_float ~default:5.0 "MASC_OAS_SSE_DRAIN_INTERVAL_SEC"
+    Float.min 5.0 (Float.max 0.05 (get_float ~default:0.25 "MASC_OAS_SSE_DRAIN_INTERVAL_SEC"))
+
+  let log_level =
+    get_string ~default:"info" "MASC_LOG_LEVEL"
+
+  let list_page_size =
+    let v = get_int ~default:512 "MASC_LIST_PAGE_SIZE" in
+    max 10 (min 1024 v)
 end

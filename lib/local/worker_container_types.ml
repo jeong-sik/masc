@@ -574,21 +574,9 @@ let estimate_cost_usd ~(model_id : string)
   Some (Llm_provider.Pricing.estimate_cost ~pricing
     ~input_tokens:usage.input_tokens ~output_tokens:usage.output_tokens ())
 
-let local_worker_max_tokens () =
-  match Sys.getenv_opt "MASC_LOCAL_WORKER_MAX_TOKENS" with
-  | None -> 1024
-  | Some raw -> (
-      match int_of_string_opt (String.trim raw) with
-      | Some value -> max 64 (min 2048 value)
-      | None -> 1024)
+let local_worker_max_tokens () = Env_config.LocalWorker.max_tokens
 
-let local_worker_heartbeat_interval_sec () =
-  match Sys.getenv_opt "MASC_LOCAL_WORKER_HEARTBEAT_SEC" with
-  | None -> 60
-  | Some raw -> (
-      match int_of_string_opt (String.trim raw) with
-      | Some value -> max 0 (min 600 value)
-      | None -> 60)
+let local_worker_heartbeat_interval_sec () = Env_config.LocalWorker.heartbeat_interval_sec
 
 let join_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
   let args =

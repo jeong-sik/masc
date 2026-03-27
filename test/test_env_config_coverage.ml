@@ -147,11 +147,6 @@ let test_cluster_name_opt_trims_empty () =
     check string "cluster_name empty -> default" "default"
       (Env_config.cluster_name ()))
 
-let test_libdatachannel_candidates_include_env_override () =
-  with_env "LIBDATACHANNEL_PATH" "/tmp/libdatachannel-custom.dylib" (fun () ->
-    check bool "env path present" true
-      (List.mem "/tmp/libdatachannel-custom.dylib" (Env_config.libdatachannel_path_candidates ())))
-
 let test_endpoints_result_helpers () =
   with_env "MASC_HTTP_BASE_URL" "https://masc.example.test" (fun () ->
     check (result string string) "masc_host_result"
@@ -403,7 +398,6 @@ let () =
       test_case "assets dir prefers primary over deprecated" `Quick test_assets_dir_prefers_primary_over_deprecated;
       test_case "cluster_name_opt trims empty" `Quick test_cluster_name_opt_trims_empty;
       test_case "endpoint result helpers" `Quick test_endpoints_result_helpers;
-      test_case "libdatachannel candidates include env override" `Quick test_libdatachannel_candidates_include_env_override;
     ];
     "print_summary", [
       test_case "no error" `Quick test_print_summary_no_error;

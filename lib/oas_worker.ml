@@ -128,6 +128,7 @@ type run_result = {
   session_id : string;
   turns : int;
   trace_ref : Oas.Raw_trace.run_ref option;
+  proof : Oas.Cdal_proof.t option;
 }
 
 (* ================================================================ *)
@@ -265,6 +266,7 @@ let run
     ~(config : config)
     ?(on_event : (Oas.Types.sse_event -> unit) option)
     ?(agent_ref : Oas.Agent.t option ref option)
+    ?(contract : Oas.Risk_contract.t option)
     (goal : string)
   : (run_result, string) result =
   let session_id = match config.session_id with
@@ -296,9 +298,16 @@ let run
      honouring the (run_result, string) result return type promised by .mli.
      Eio.Cancel.Cancelled is re-raised for structured-concurrency safety. *)
   (try
-    let result = match on_event with
-      | Some cb -> Oas.Agent.run_stream ~sw ~on_event:cb agent goal
-      | None -> Oas.Agent.run ~sw agent goal
+    let result, proof = match contract with
+      | Some c ->
+        let cr = Oas.Contract_runner.run ~sw ~contract:c agent goal in
+        (cr.response, Some cr.proof)
+      | None ->
+        let r = match on_event with
+          | Some cb -> Oas.Agent.run_stream ~sw ~on_event:cb agent goal
+          | None -> Oas.Agent.run ~sw agent goal
+        in
+        (r, None)
     in
     let checkpoint = match config.checkpoint_dir with
       | Some dir ->
@@ -323,7 +332,7 @@ let run
     let trace_ref = Oas.Agent.last_raw_trace_run agent in
     Oas.Agent.close agent;
     (match result with
-    | Ok response -> Ok { response; checkpoint; session_id; turns; trace_ref }
+    | Ok response -> Ok { response; checkpoint; session_id; turns; trace_ref; proof }
     | Error err ->
       Error (Printf.sprintf "Agent run failed: %s" (Oas.Error.to_string err)))
   with
@@ -477,6 +486,7 @@ let run_named
     ?raw_trace
     ?on_event
     ?agent_ref
+    ?contract
     ?transport
     ?(allowed_paths = [])
     ?working_context
@@ -525,7 +535,7 @@ let run_named
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in
-  match run ~sw ~net ~config ?on_event ?agent_ref goal with
+  match run ~sw ~net ~config ?on_event ?agent_ref ?contract goal with
   | Ok result when accept result.response ->
     record_cascade ~cascade_name ~outcome:`Success;
     Ok result

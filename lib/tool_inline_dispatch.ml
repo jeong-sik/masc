@@ -7,7 +7,7 @@
       masc_messages, masc_listen, masc_who
     - Tool_inline_dispatch_episode: masc_episode_flush, masc_episode_list
     - Tool_inline_dispatch_extra: remaining tools (introspect, recall,
-      board, conversation, lodge, etc.)
+      board, conversation, keeper, etc.)
 
     Keeps inline: verify, mcp_session, cancellation, subscription,
     progress, interrupt, approve, reject, pending_interrupts, branch,

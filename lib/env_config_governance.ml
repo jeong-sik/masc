@@ -112,116 +112,138 @@ module RateLimit = struct
     get_float ~default:3600.0 "MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC"
 end
 
-(** {1 Agent Autonomy Configuration (env vars retain MASC_LODGE_* prefix for backward compat)} *)
+(** {1 Agent Autonomy Configuration}
+    Primary env vars: MASC_AUTONOMY_*.
+    Deprecated fallback: MASC_LODGE_* (will be removed in a future release). *)
 
-module LodgeV2 = struct
-  (** Tick interval: 45 min default (configurable via MASC_LODGE_TICK_INTERVAL_SEC) *)
+module Autonomy = struct
   let tick_interval_seconds =
-    get_float ~default:2700.0 "MASC_LODGE_TICK_INTERVAL_SEC"
+    get_float_deprecated ~default:2700.0
+      ~primary:"MASC_AUTONOMY_TICK_INTERVAL_SEC"
+      ~deprecated:"MASC_LODGE_TICK_INTERVAL_SEC"
 
-  (** How many agents to activate per tick *)
   let agents_per_tick =
-    get_int ~default:3 "MASC_LODGE_AGENTS_PER_TICK"
+    get_int_deprecated ~default:3
+      ~primary:"MASC_AUTONOMY_AGENTS_PER_TICK"
+      ~deprecated:"MASC_LODGE_AGENTS_PER_TICK"
 
-  (** Max posts an agent can make per tick *)
   let max_posts_per_tick =
-    get_int ~default:1 "MASC_LODGE_MAX_POSTS_PER_TICK"
+    get_int_deprecated ~default:1
+      ~primary:"MASC_AUTONOMY_MAX_POSTS_PER_TICK"
+      ~deprecated:"MASC_LODGE_MAX_POSTS_PER_TICK"
 
-  (** Max comments an agent can make per tick *)
   let max_comments_per_tick =
-    get_int ~default:3 "MASC_LODGE_MAX_COMMENTS_PER_TICK"
+    get_int_deprecated ~default:3
+      ~primary:"MASC_AUTONOMY_MAX_COMMENTS_PER_TICK"
+      ~deprecated:"MASC_LODGE_MAX_COMMENTS_PER_TICK"
 
-  (** Max total actions per agent per day *)
   let max_daily_actions =
-    get_int ~default:10 "MASC_LODGE_MAX_DAILY_ACTIONS"
+    get_int_deprecated ~default:10
+      ~primary:"MASC_AUTONOMY_MAX_DAILY_ACTIONS"
+      ~deprecated:"MASC_LODGE_MAX_DAILY_ACTIONS"
 
-  (** Importance sum threshold to trigger reflection *)
   let reflection_threshold =
-    get_int ~default:100 "MASC_LODGE_REFLECTION_THRESHOLD"
+    get_int_deprecated ~default:100
+      ~primary:"MASC_AUTONOMY_REFLECTION_THRESHOLD"
+      ~deprecated:"MASC_LODGE_REFLECTION_THRESHOLD"
 
-  (** Use plan-based agent selection (vs legacy round-robin) *)
   let use_planner =
-    get_bool ~default:true "MASC_LODGE_USE_PLANNER"
+    get_bool_deprecated ~default:true
+      ~primary:"MASC_AUTONOMY_USE_PLANNER"
+      ~deprecated:"MASC_LODGE_USE_PLANNER"
 
-  (** Enable heartbeat *)
   let enabled =
-    get_bool ~default:true "MASC_LODGE_ENABLED"
+    get_bool_deprecated ~default:true
+      ~primary:"MASC_AUTONOMY_ENABLED"
+      ~deprecated:"MASC_LODGE_ENABLED"
 
-  (** Quiet hours start (KST, inclusive) *)
   let quiet_start =
-    get_int ~default:3 "MASC_LODGE_QUIET_START"
+    get_int_deprecated ~default:3
+      ~primary:"MASC_AUTONOMY_QUIET_START"
+      ~deprecated:"MASC_LODGE_QUIET_START"
 
-  (** Quiet hours end (KST, exclusive) *)
   let quiet_end =
-    get_int ~default:7 "MASC_LODGE_QUIET_END"
+    get_int_deprecated ~default:7
+      ~primary:"MASC_AUTONOMY_QUIET_END"
+      ~deprecated:"MASC_LODGE_QUIET_END"
 
-  (** Min gap between same agent check-ins (seconds) *)
   let min_checkin_gap_seconds =
-    get_float ~default:1800.0 "MASC_LODGE_MIN_CHECKIN_GAP"
+    get_float_deprecated ~default:1800.0
+      ~primary:"MASC_AUTONOMY_MIN_CHECKIN_GAP"
+      ~deprecated:"MASC_LODGE_MIN_CHECKIN_GAP"
 
-  (** Min gap between posts by the same agent (seconds).
-      Default 600s (10 min). Lower than per-tick limit for finer control. *)
   let min_post_gap_seconds =
-    get_float ~default:600.0 "MASC_LODGE_MIN_POST_GAP"
+    get_float_deprecated ~default:600.0
+      ~primary:"MASC_AUTONOMY_MIN_POST_GAP"
+      ~deprecated:"MASC_LODGE_MIN_POST_GAP"
 
-  (** Min gap between comments by the same agent (seconds). *)
   let min_comment_gap_seconds =
-    get_float ~default:8.0 "MASC_LODGE_MIN_COMMENT_GAP"
+    get_float_deprecated ~default:8.0
+      ~primary:"MASC_AUTONOMY_MIN_COMMENT_GAP"
+      ~deprecated:"MASC_LODGE_MIN_COMMENT_GAP"
 
-  (** Max posts per agent per day. *)
   let max_posts_per_day =
-    get_int ~default:8 "MASC_LODGE_MAX_POSTS_PER_DAY"
+    get_int_deprecated ~default:8
+      ~primary:"MASC_AUTONOMY_MAX_POSTS_PER_DAY"
+      ~deprecated:"MASC_LODGE_MAX_POSTS_PER_DAY"
 
-  (** Max comments per agent per day. *)
   let max_comments_per_day =
-    get_int ~default:40 "MASC_LODGE_MAX_COMMENTS_PER_DAY"
+    get_int_deprecated ~default:40
+      ~primary:"MASC_AUTONOMY_MAX_COMMENTS_PER_DAY"
+      ~deprecated:"MASC_LODGE_MAX_COMMENTS_PER_DAY"
 
-  (** Delegate MODEL calls to external Workers (Soul + Body pattern).
-      When true, MASC emits heartbeat_task events instead of calling MODEL directly.
-      Workers subscribe to events and invoke the local llama runtime. *)
+  (** Delegate MODEL calls to external Workers (Soul + Body pattern). *)
   let delegate_inference =
     get_bool ~default:false "MASC_DELEGATE_INFERENCE"
 end
 
-(** {1 Thompson Sampling Configuration (env vars retain MASC_LODGE_* prefix for backward compat)} *)
+(** Backward-compatible alias. Will be removed in a future release. *)
+module LodgeV2 = Autonomy
 
-module LodgeSelection = struct
-  (** Max ticks without selection before forced inclusion (starvation rescue).
-      With 4h ticks, 12 ticks = 48 hours max inactivity. *)
+(** {1 Thompson Sampling / Agent Selection Configuration}
+    Primary env vars: MASC_AUTONOMY_*.
+    Deprecated fallback: MASC_LODGE_* (will be removed in a future release). *)
+
+module AgentSelection = struct
   let max_starvation_ticks =
-    get_int ~default:12 "MASC_LODGE_MAX_STARVATION_TICKS"
+    get_int_deprecated ~default:12
+      ~primary:"MASC_AUTONOMY_MAX_STARVATION_TICKS"
+      ~deprecated:"MASC_LODGE_MAX_STARVATION_TICKS"
 
-  (** Coefficient for logarithmic starvation bonus.
-      bonus = coefficient * ln(1 + ticks_since_selection) *)
   let starvation_bonus_coefficient =
-    get_float ~default:0.15 "MASC_LODGE_STARVATION_BONUS_COEF"
+    get_float_deprecated ~default:0.15
+      ~primary:"MASC_AUTONOMY_STARVATION_BONUS_COEF"
+      ~deprecated:"MASC_LODGE_STARVATION_BONUS_COEF"
 
-  (** Weight for Thompson score in final selection (0-1).
-      Remaining weight goes to starvation bonus.
-      Higher = more quality-driven, lower = more fairness-driven. *)
   let thompson_weight =
-    get_float ~default:0.7 "MASC_LODGE_THOMPSON_WEIGHT"
+    get_float_deprecated ~default:0.7
+      ~primary:"MASC_AUTONOMY_THOMPSON_WEIGHT"
+      ~deprecated:"MASC_LODGE_THOMPSON_WEIGHT"
 
-  (** Use MODEL for final selection decision (experimental) *)
   let use_model_selection =
-    get_bool ~default:false "MASC_LODGE_MODEL_SELECTION"
+    get_bool_deprecated ~default:false
+      ~primary:"MASC_AUTONOMY_MODEL_SELECTION"
+      ~deprecated:"MASC_LODGE_MODEL_SELECTION"
 
-  (** Stats persistence interval (seconds) *)
   let stats_persist_interval_s =
-    get_float ~default:300.0 "MASC_LODGE_STATS_PERSIST_INTERVAL"
+    get_float_deprecated ~default:300.0
+      ~primary:"MASC_AUTONOMY_STATS_PERSIST_INTERVAL"
+      ~deprecated:"MASC_LODGE_STATS_PERSIST_INTERVAL"
 
-  (** Vote decay factor for Beta prior updates.
-      Applied to existing priors before adding new evidence.
-      0.95 decay ~ 7-day half-life (0.95^168 = 0.0002). *)
   let vote_decay_factor =
-    get_float ~default:0.95 "MASC_LODGE_VOTE_DECAY_FACTOR"
+    get_float_deprecated ~default:0.95
+      ~primary:"MASC_AUTONOMY_VOTE_DECAY_FACTOR"
+      ~deprecated:"MASC_LODGE_VOTE_DECAY_FACTOR"
 end
+
+(** Backward-compatible alias. Will be removed in a future release. *)
+module LodgeSelection = AgentSelection
 
 (** {1 Timeouts & Buffer Sizes} *)
 
 module Timeouts = struct
   (** GraphQL API call timeout (seconds).
-      Used by lodge agent operations (curl to GraphQL endpoint). *)
+      Used by keeper autonomy operations (curl to GraphQL endpoint). *)
   let graphql_timeout_sec =
     get_float ~default:30.0 "MASC_GRAPHQL_TIMEOUT_SEC"
 

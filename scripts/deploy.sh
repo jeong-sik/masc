@@ -132,12 +132,12 @@ else
     # Load secrets needed at runtime (GRAPHQL_API_KEY, SSL_CERT_FILE, etc.)
     # Only repo-local env files are loaded; ~/.zshenv is intentionally skipped
     # to avoid environment contamination from user shell configuration.
-    # Required env vars should be set in config/lodge.env or the repo .env files.
+    # Required env vars should be set in config/keeper.env or the repo .env files.
     preserve_env_override MASC_CONFIG_DIR
     preserve_env_override MASC_PERSONAS_DIR
-    LODGE_ENV="$REPO_DIR/config/lodge.env"
-    if [ -f "$LODGE_ENV" ]; then
-        set -a; source "$LODGE_ENV" 2>/dev/null || true; set +a
+    KEEPER_ENV="$REPO_DIR/config/keeper.env"
+    if [ -f "$KEEPER_ENV" ]; then
+        set -a; source "$KEEPER_ENV" 2>/dev/null || true; set +a
     fi
     if [ -f "$REPO_DIR/.env" ]; then
         set -a; source "$REPO_DIR/.env" 2>/dev/null || true; set +a

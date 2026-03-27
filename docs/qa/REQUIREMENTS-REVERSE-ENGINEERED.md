@@ -56,7 +56,7 @@
 | 2.2.3 | 세션 브리프 | execution.session_briefs | PASS | |
 | 2.2.4 | 오퍼레이션 브리프 | execution.operation_briefs | PASS | |
 | 2.2.5 | 키퍼 칼럼 | execution.keeper_column | PASS | |
-| 2.2.6 | Worker Support | lodge agents 연동 | PASS | |
+| 2.2.6 | Worker Support | keeper autonomy agents 연동 | PASS | |
 
 **한국어 상태 라벨**: 안정, 진행 중, 일시정지, 막힘, 중단됨, 주의, 위험, 오프라인, 대기, 확인 필요
 
@@ -98,7 +98,7 @@
 | 3.2.5 | Hearths | `GET /api/v1/board/hearths` | PASS | |
 | 3.2.6 | Flairs | `GET /api/v1/board/flairs` | PASS | |
 | 3.2.7 | Karma | `GET /api/v1/karma` | PASS | 리더보드 |
-| 3.2.8 | 자동 게시글 필터 | hideAutomationPosts toggle | PASS | lodge-system, team-session 작성자 필터 |
+| 3.2.8 | 자동 게시글 필터 | hideAutomationPosts toggle | PASS | keeper-system, team-session 작성자 필터 |
 
 **정렬 모드**: 최신순(recent), 인기순(hot), 급상승(trending), 최근 갱신(updated), 토론 많은 순(discussed)
 
@@ -145,7 +145,7 @@
 | 4.3.3 | 액션 실행 | `POST /api/v1/operator/action` | PASS | action_type 필드 필수 |
 | 4.3.4 | 대기 확인 | `POST /api/v1/operator/confirm` | PASS | confirm_token + actor + decision |
 
-**유효 action_type**: `keeper_message`, `keeper_recover`, `team_worker_spawn_batch`, `social_sweep`, `lodge_tick`
+**유효 action_type**: `keeper_message`, `keeper_recover`, `team_worker_spawn_batch`, `social_sweep`, `autonomy_tick`
 
 ---
 
@@ -190,7 +190,7 @@
 | 6.2 | TRPG Mode | NOT_IMPL | |
 | 6.3 | System Monitor | NOT_IMPL | |
 | 6.4 | MAGI Council | NOT_IMPL | |
-| 6.5 | Lodge | NOT_IMPL | |
+| 6.5 | Keeper Autonomy | NOT_IMPL | |
 | 6.6 | Experiment Lab | NOT_IMPL | |
 
 **5 모드**: trpg, experiment, monitor, council, social
@@ -217,11 +217,11 @@
 | 7.2.2 | Bearer Token | PASS | MCP 인증 |
 | 7.2.3 | ?token= 쿼리 | PASS | SSE 인증 |
 
-### 7.3 Lodge 에이전트
+### 7.3 Keeper Autonomy 에이전트
 
 | ID | 기능 | API | 판정 | 비고 |
 |----|------|-----|------|------|
-| 7.3.1 | 에이전트 목록 | `GET /api/v1/lodge/agents` | PASS | 정의 반환 |
+| 7.3.1 | 에이전트 목록 | `GET /api/v1/keeper/agents` | PASS | 정의 반환 |
 
 ### 7.4 Karma
 

@@ -110,8 +110,8 @@ let quiet_hours_active () =
     (* KST = UTC+9; must use gmtime, not localtime *)
     (tm.Unix.tm_hour + 9) mod 24
   in
-  let quiet_start = Env_config.LodgeV2.quiet_start in
-  let quiet_end = Env_config.LodgeV2.quiet_end in
+  let quiet_start = Env_config.Autonomy.quiet_start in
+  let quiet_end = Env_config.Autonomy.quiet_end in
   quiet_start < quiet_end
   && current_hour >= quiet_start
   && current_hour < quiet_end
@@ -293,7 +293,7 @@ let keeper_next_action_path ~health_state ~quiet_reason =
   | "offline" | "stale" | "degraded" -> "recover"
   | _ -> (
       match quiet_reason with
-      | Some "quiet_hours" -> "manual_lodge_poke"
+      | Some "quiet_hours" -> "manual_social_poke"
       | Some "not_running" | Some "agent_missing" -> "recover"
       | Some "graphql_error" | Some "model_error" | Some "startup" | Some "unknown" ->
           "probe"

@@ -113,8 +113,8 @@ while IFS=$'\t' read -r file lines last_date days_since has_oas ref_count catego
         # Keepers are mostly active (heartbeat system)
         action="active"; reason="keeper_system"
         ;;
-      lodge)
-        action="active"; reason="lodge_system"
+      autonomy)
+        action="active"; reason="autonomy_system"
         ;;
       command_plane)
         action="active"; reason="command_plane"

@@ -381,7 +381,7 @@ let test_revoke_voice_removes_all_tools () =
 
 (* Heartbeat voice integration (#4, #5) verified in
    test_tool_heartbeat_coverage.ml which has Eio context and
-   direct access to Lodge_heartbeat internals. *)
+   direct access to Keeper_heartbeat internals. *)
 
 (* ============================================================
    Keeper dispatch coverage: every shard schema has a dispatch handler

@@ -55,10 +55,10 @@ let publish_heartbeat_recovered (bus : Agent_sdk.Event_bus.t) ~agent_name ~previ
   ] in
   Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:heartbeat_recovered", payload))
 
-(** {1 Lodge Agent Lifecycle Events} *)
+(** {1 Autonomy Agent Lifecycle Events} *)
 
 (** Publish an agent selection event (Thompson Sampling result).
-    Emitted after [select_agents_with_thompson] in lodge_heartbeat. *)
+    Emitted after [select_agents_with_thompson] in keeper_heartbeat. *)
 let publish_agent_selected (bus : Agent_sdk.Event_bus.t) ~agent_name ~trigger
     ~thompson_score ~final_score =
   let payload = `Assoc [
@@ -69,7 +69,7 @@ let publish_agent_selected (bus : Agent_sdk.Event_bus.t) ~agent_name ~trigger
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   Agent_sdk.Event_bus.publish bus
-    (Agent_sdk.Event_bus.Custom ("masc:lodge:agent_selected", payload))
+    (Agent_sdk.Event_bus.Custom ("masc:autonomy:agent_selected", payload))
 
 (** Publish an agent action decision event (MODEL decision result).
     Emitted after MODEL decides post/comment/upvote/skip. *)
@@ -82,7 +82,7 @@ let publish_agent_decision (bus : Agent_sdk.Event_bus.t) ~agent_name ~action
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   Agent_sdk.Event_bus.publish bus
-    (Agent_sdk.Event_bus.Custom ("masc:lodge:agent_decision", payload))
+    (Agent_sdk.Event_bus.Custom ("masc:autonomy:agent_decision", payload))
 
 (** Publish an action execution result event.
     Emitted after an agent's action (post/comment/upvote) completes. *)
@@ -95,7 +95,7 @@ let publish_agent_action_executed (bus : Agent_sdk.Event_bus.t) ~agent_name
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   Agent_sdk.Event_bus.publish bus
-    (Agent_sdk.Event_bus.Custom ("masc:lodge:agent_action_executed", payload))
+    (Agent_sdk.Event_bus.Custom ("masc:autonomy:agent_action_executed", payload))
 
 (** {1 Keeper Snapshot Events} *)
 

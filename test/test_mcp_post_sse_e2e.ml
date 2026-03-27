@@ -270,8 +270,7 @@ let with_server f =
   let env =
     merge_env_overrides
       [
-        ("MASC_LODGE_ENABLED", "0");
-        ("MASC_LODGE_DAEMON_ENABLED", "0");
+        ("MASC_AUTONOMY_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
         ("MASC_POSTGRES_URL", "");

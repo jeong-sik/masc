@@ -43,8 +43,8 @@ let test_snapshot_exposes_keeper_and_social_actions () =
             Yojson.Safe.Util.(row |> member "target_type" |> to_string);
           Alcotest.(check bool) "confirm_required false" false
             Yojson.Safe.Util.(row |> member "confirm_required" |> to_bool);
-          Alcotest.(check bool) "lodge_tick hidden from available actions" true
-            (Option.is_none (find_action "lodge_tick"));
+          Alcotest.(check bool) "autonomy_tick hidden from available actions" true
+            (Option.is_none (find_action "autonomy_tick"));
           let keeper_probe =
             match find_action "keeper_probe" with
             | Some row -> row

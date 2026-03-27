@@ -100,13 +100,13 @@ let test_is_agent () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check bool) "lowercase no space = lodge" true
+  Alcotest.(check bool) "lowercase no space = agent" true
     (Tool_board.is_agent "dreamer");
-  Alcotest.(check bool) "with space = not lodge" false
+  Alcotest.(check bool) "with space = not agent" false
     (Tool_board.is_agent "John Smith");
-  Alcotest.(check bool) "uppercase = not lodge" false
+  Alcotest.(check bool) "uppercase = not agent" false
     (Tool_board.is_agent "Dreamer");
-  Alcotest.(check bool) "empty = not lodge" false
+  Alcotest.(check bool) "empty = not agent" false
     (Tool_board.is_agent "")
 
 let test_format_timestamp_relative () =

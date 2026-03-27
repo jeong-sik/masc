@@ -203,7 +203,7 @@ let author_looks_automation author =
 
 let is_system_board_author author =
   List.mem author
-    [ "ecosystem"; "keeper"; "keeper-alert-bot"; "lodge-system"; "operator";
+    [ "ecosystem"; "keeper"; "keeper-alert-bot"; "keeper-system"; "operator";
       "team-session" ]
 
 let meta_source = function

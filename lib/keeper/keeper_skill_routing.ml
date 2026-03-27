@@ -51,7 +51,7 @@ let canonical_keeper_skill_token (raw : string) : string option =
   | "masc-keeper-autonomy"
   | "masc_keeper_autonomy"
   | "keeper-autonomy"
-  | "lodge"
+  | "lodge"  (* backward compat *)
   | "social"
   | "keeper"
   | "autonomy" ->

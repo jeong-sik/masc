@@ -21,7 +21,7 @@
 ┌────────────────────────────────────────────────────┐
 │ Layer 1: Env_config_core        (경로, 포트, 네트워크)  │
 │ Layer 2: Env_config_runtime     (타이머, 캐시, 세션)    │
-│ Layer 3: Env_config_governance  (모델, 추론, Lodge)     │
+│ Layer 3: Env_config_governance  (모델, 추론, Autonomy)   │
 │ Layer 4: Env_config_keeper      (Keeper 부트/알림/감독)  │
 │ Layer 5: Level2/Level4_config   (메트릭, Swarm, 학습)   │
 │ Layer 6: Runtime_params         (런타임 오버라이드)       │
@@ -121,7 +121,7 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc
 
 ### 3.3 Governance (Env_config_governance)
 
-모델 선택, 추론 캐시, Lodge 자율 에이전트, Thompson Sampling 설정.
+모델 선택, 추론 캐시, Keeper Autonomy 자율 에이전트, Thompson Sampling 설정.
 
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
@@ -141,29 +141,31 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc
 | `MASC_CLAUDE_DEFAULT_MODEL` | string | `"claude-sonnet-4-6"` | Claude 기본 모델 |
 | `MASC_OPENAI_DEFAULT_MODEL` | string | `"gpt-4.1"` | OpenAI 기본 모델 |
 
-**Lodge (자율 에이전트)**: `MASC_LODGE_*` prefix.
+**Keeper Autonomy (자율 에이전트)**: `MASC_AUTONOMY_*` prefix (deprecated: `MASC_LODGE_*`).
 
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
-| `MASC_LODGE_TICK_INTERVAL_SEC` | float | 2700.0 | Tick 주기 (45분) |
-| `MASC_LODGE_AGENTS_PER_TICK` | int | 3 | Tick당 활성화 에이전트 수 |
-| `MASC_LODGE_MAX_POSTS_PER_TICK` | int | 1 | Tick당 게시물 상한 |
-| `MASC_LODGE_MAX_COMMENTS_PER_TICK` | int | 3 | Tick당 댓글 상한 |
-| `MASC_LODGE_MAX_DAILY_ACTIONS` | int | 10 | 일일 총 행동 상한 |
-| `MASC_LODGE_REFLECTION_THRESHOLD` | int | 100 | 회고 트리거 임계값 |
-| `MASC_LODGE_USE_PLANNER` | bool | true | Planner 기반 선택 |
-| `MASC_LODGE_ENABLED` | bool | true | 하트비트 활성화 |
-| `MASC_LODGE_QUIET_START` | int | 3 | 조용한 시간대 시작 (KST) |
-| `MASC_LODGE_QUIET_END` | int | 7 | 조용한 시간대 종료 (KST) |
+| `MASC_AUTONOMY_TICK_INTERVAL_SEC` | float | 2700.0 | Tick 주기 (45분) |
+| `MASC_AUTONOMY_AGENTS_PER_TICK` | int | 3 | Tick당 활성화 에이전트 수 |
+| `MASC_AUTONOMY_MAX_POSTS_PER_TICK` | int | 1 | Tick당 게시물 상한 |
+| `MASC_AUTONOMY_MAX_COMMENTS_PER_TICK` | int | 3 | Tick당 댓글 상한 |
+| `MASC_AUTONOMY_MAX_DAILY_ACTIONS` | int | 10 | 일일 총 행동 상한 |
+| `MASC_AUTONOMY_REFLECTION_THRESHOLD` | int | 100 | 회고 트리거 임계값 |
+| `MASC_AUTONOMY_USE_PLANNER` | bool | true | Planner 기반 선택 |
+| `MASC_AUTONOMY_ENABLED` | bool | true | 하트비트 활성화 |
+| `MASC_AUTONOMY_QUIET_START` | int | 3 | 조용한 시간대 시작 (KST) |
+| `MASC_AUTONOMY_QUIET_END` | int | 7 | 조용한 시간대 종료 (KST) |
 | `MASC_DELEGATE_INFERENCE` | bool | false | Worker 위임 모드 (Soul+Body) |
 
-**Thompson Sampling** (`MASC_LODGE_*` prefix 유지):
+> **Deprecated**: `MASC_LODGE_*` env vars are still accepted as fallback but will be removed in a future release.
+
+**Thompson Sampling** (`MASC_AUTONOMY_*` prefix):
 
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
-| `MASC_LODGE_MAX_STARVATION_TICKS` | int | 12 | 기아 방지 최대 tick 수 |
-| `MASC_LODGE_THOMPSON_WEIGHT` | float | 0.7 | Thompson score 비중 |
-| `MASC_LODGE_VOTE_DECAY_FACTOR` | float | 0.95 | Vote decay 계수 |
+| `MASC_AUTONOMY_MAX_STARVATION_TICKS` | int | 12 | 기아 방지 최대 tick 수 |
+| `MASC_AUTONOMY_THOMPSON_WEIGHT` | float | 0.7 | Thompson score 비중 |
+| `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | float | 0.95 | Vote decay 계수 |
 
 ### 3.4 Keeper (Env_config_keeper)
 

@@ -363,7 +363,7 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     // OAS bridge events
-    case 'oas:masc:lodge:agent_selected': {
+    case 'oas:masc:autonomy:agent_selected': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       pushOasAgentEvent({
         type: 'selected',
@@ -379,7 +379,7 @@ function handleEvent(event: SSEEvent): void {
       })
       break
     }
-    case 'oas:masc:lodge:agent_decision': {
+    case 'oas:masc:autonomy:agent_decision': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       pushOasAgentEvent({
         type: 'decision',
@@ -393,7 +393,7 @@ function handleEvent(event: SSEEvent): void {
       })
       break
     }
-    case 'oas:masc:lodge:agent_action_executed': {
+    case 'oas:masc:autonomy:agent_action_executed': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       pushOasAgentEvent({
         type: 'action_executed',

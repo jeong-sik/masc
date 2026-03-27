@@ -99,7 +99,7 @@ trigger_heartbeat() {
     local agent="$1"
     echo "[$(date +%H:%M:%S)] Triggering heartbeat for $agent..."
 
-    curl -s -X POST "http://127.0.0.1:8935/tools/lodge_heartbeat" \
+    curl -s -X POST "http://127.0.0.1:8935/tools/keeper_heartbeat" \
         -H "Content-Type: application/json" \
         -d "{\"agent_name\": \"$agent\", \"reason\": \"integration_test\"}" \
         > "$LOG_DIR/${agent}_$(date +%H%M%S).log" 2>&1 || true
@@ -109,7 +109,7 @@ trigger_heartbeat() {
 check_diversity() {
     echo "[$(date +%H:%M:%S)] Checking agent diversity..."
 
-    curl -s -X POST "http://127.0.0.1:8935/tools/lodge_cycle" \
+    curl -s -X POST "http://127.0.0.1:8935/tools/keeper_cycle" \
         -H "Content-Type: application/json" \
         -d '{"action": "diversity_check"}' 2>/dev/null || echo "Diversity check not available"
 }

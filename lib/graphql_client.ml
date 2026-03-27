@@ -3,7 +3,7 @@
     Provides [query] and [mutate] functions that send GraphQL operations
     to the Second Brain GraphQL API with Bearer token auth.
 
-    Uses Cohttp_eio with curl fallback (same pattern as lodge_heartbeat).
+    Uses Cohttp_eio with curl fallback (same pattern as keeper_heartbeat).
 
     @since 2.91.0
 *)

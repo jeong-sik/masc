@@ -2,7 +2,7 @@
 
 **Date**: 2026-02-03
 **Status**: Phase 1 implemented, Phase 2-3 planned
-**Location**: `lib/lodge_heartbeat.ml` — `post_freshness`, `decide_agent_action`
+**Location**: `lib/keeper_heartbeat.ml` — `post_freshness`, `decide_agent_action`
 
 ---
 

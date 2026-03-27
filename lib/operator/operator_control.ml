@@ -510,7 +510,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
 let validate_request request =
   match request.action_type with
   | "broadcast" | "room_pause" | "room_resume" | "social_sweep" | "lodge_tick"
-  | "team_turn" | "team_note"
+  | "autonomy_tick" | "team_turn" | "team_note"
   | "team_broadcast" | "team_task_inject" | "team_worker_spawn_batch"
   | "team_stop"
   | "keeper_message" | "keeper_probe" | "keeper_recover"

@@ -16,7 +16,7 @@ The architecture **separates concerns** into:
 1. **Type-level declarations** (`execution_scope` in `planned_worker` specs)
 2. **Tool allowlisting** (`spawned_agent_public_tool_names` in `agent_tool_surfaces.ml`)
 3. **Worker completion tracking** (session state delta in `team_session_types.ml`)
-4. **MODEL cascade orchestration** (`lodge_cascade.ml` for model fallbacks)
+4. **MODEL cascade orchestration** (`autonomy_cascade.ml` for model fallbacks)
 
 **Key finding**: Tool availability is currently **hardcoded via allowlist**, not dynamically enforced based on `execution_scope` values. This creates a **gap**: declaring `Observe_only` in specs does not prevent tool invocation at runtime.
 
@@ -87,7 +87,7 @@ type execution_scope =
 
 2. **mdal_auditable_tool_names**: Code operation tools for MDAL auditable execution
 
-3. **lodge_worker_base_tool_names**: Board/profile tools with configurable `allow_post` flag
+3. **autonomy_worker_base_tool_names**: Board/profile tools with configurable `allow_post` flag
 
 ### Gap: No Scope-Based Tool Gating
 
@@ -127,7 +127,7 @@ type session_state = {
 
 ### Cascade Architecture
 
-**Location**: `lib/lodge_cascade.ml`
+**Location**: `lib/autonomy_cascade.ml`
 
 **Type signature**:
 ```ocaml
@@ -141,7 +141,7 @@ let call ~cascade_name ~prompt
 
 ### Use Case in Team Sessions
 
-- Used by **lodge subsystems** (lodge_direct, lodge_context_rewrite, lodge_comment, lodge_agent_match)
+- Used by **autonomy subsystems** (autonomy_direct, autonomy_context_rewrite, autonomy_comment, autonomy_agent_match)
 - Used by **judicial subsystems** (governance_judge, operator_judge)
 - Enables **fallback resilience**: if local llama unavailable, cascade to cloud GLM
 

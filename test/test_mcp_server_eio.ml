@@ -1518,7 +1518,8 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
     Masc_mcp.Room.add_task state.room_config
       ~title:"alias-reuse-task"
       ~priority:2
-      ~description:""
+      ~description:
+        "Verify that an explicit alias can reuse the nickname established during claim/start/done transitions."
   in
 
   let transition ?(extra = []) action =
@@ -1546,7 +1547,9 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
     transition
       ~extra:
         [
-          ("notes", `String "Completed alias-reuse-task implementation and verified");
+          ( "notes",
+            `String
+              "Completed the alias reuse regression by claiming, starting, and finishing task-001 with the same explicit alias, confirming the joined nickname stayed stable and the transition responses reported success." );
         ]
       "done"
   in

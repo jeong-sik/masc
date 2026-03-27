@@ -62,16 +62,15 @@ IMPORTANT: If context_ratio exceeds 0.8, handoff to a successor agent. Do not ig
 let parse_claude_json output =
   try
     let json = Yojson.Safe.from_string output in
-    let module U = Yojson.Safe.Util in
-    let usage = json |> U.member "usage" in
-    let input_tokens = usage |> U.member "input_tokens" |> U.to_int_option in
-    let output_tokens = usage |> U.member "output_tokens" |> U.to_int_option in
-    let cache_creation = usage |> U.member "cache_creation_input_tokens" |> U.to_int_option in
-    let cache_read = usage |> U.member "cache_read_input_tokens" |> U.to_int_option in
-    let cost_usd = json |> U.member "total_cost_usd" |> U.to_float_option in
-    let result_text = json |> U.member "result" |> U.to_string_option in
+    let usage = Safe_ops.json_member_opt "usage" json |> Option.value ~default:(`Assoc []) in
+    let input_tokens = Safe_ops.json_int_opt "input_tokens" usage in
+    let output_tokens = Safe_ops.json_int_opt "output_tokens" usage in
+    let cache_creation = Safe_ops.json_int_opt "cache_creation_input_tokens" usage in
+    let cache_read = Safe_ops.json_int_opt "cache_read_input_tokens" usage in
+    let cost_usd = Safe_ops.json_float_opt "total_cost_usd" json in
+    let result_text = Safe_ops.json_string_opt "result" json in
     (result_text, input_tokens, output_tokens, cache_creation, cache_read, cost_usd)
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+  with Yojson.Json_error _ ->
     (* If JSON parsing fails, return raw output with no token info *)
     (Some output, None, None, None, None, None)
 
@@ -79,9 +78,8 @@ let parse_claude_json output =
 let extract_gemini_response_text output =
   try
     let json = Yojson.Safe.from_string output in
-    let module U = Yojson.Safe.Util in
-    json |> U.member "response" |> U.to_string_option
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+    Safe_ops.json_string_opt "response" json
+  with Yojson.Json_error _ ->
     None
 
 (** Parse Gemini output for token tracking.
@@ -89,22 +87,17 @@ let extract_gemini_response_text output =
 let parse_gemini_output output =
   try
     let json = Yojson.Safe.from_string output in
-    let module U = Yojson.Safe.Util in
-    let usage_opt =
-      match json |> U.member "usageMetadata" with
-      | `Assoc _ as usage -> Some usage
-      | _ -> None
-    in
+    let usage_opt = Safe_ops.json_member_opt "usageMetadata" json in
     let stats_models_opt =
-      match json |> U.member "stats" with
-      | `Assoc _ as stats ->
-          (match stats |> U.member "models" with
-           | `Assoc entries -> Some entries
+      match Safe_ops.json_member_opt "stats" json with
+      | Some (`Assoc _ as stats) ->
+          (match Safe_ops.json_member_opt "models" stats with
+           | Some (`Assoc entries) -> Some entries
            | _ -> None)
       | _ -> None
     in
     let input_tokens =
-      match Option.bind usage_opt (fun usage -> usage |> U.member "promptTokenCount" |> U.to_int_option) with
+      match Option.bind usage_opt (fun usage -> Safe_ops.json_int_opt "promptTokenCount" usage) with
       | Some _ as value -> value
       | None ->
           (match stats_models_opt with
@@ -113,9 +106,8 @@ let parse_gemini_output output =
                let sum_field field =
                  entries
                  |> List.fold_left (fun acc (_name, item) ->
-                        acc
-                        + (item |> U.member "tokens" |> U.member field |> U.to_int_option
-                          |> Option.value ~default:0))
+                        let tokens = Safe_ops.json_member_opt "tokens" item |> Option.value ~default:(`Assoc []) in
+                        acc + (Safe_ops.json_int_opt field tokens |> Option.value ~default:0))
                       0
                in
                let input = sum_field "input" in
@@ -124,7 +116,7 @@ let parse_gemini_output output =
                if chosen > 0 then Some chosen else None)
     in
     let output_tokens =
-      match Option.bind usage_opt (fun usage -> usage |> U.member "candidatesTokenCount" |> U.to_int_option) with
+      match Option.bind usage_opt (fun usage -> Safe_ops.json_int_opt "candidatesTokenCount" usage) with
       | Some _ as value -> value
       | None ->
           (match stats_models_opt with
@@ -133,15 +125,14 @@ let parse_gemini_output output =
                let total =
                  entries
                  |> List.fold_left (fun acc (_name, item) ->
-                        acc
-                        + (item |> U.member "tokens" |> U.member "candidates" |> U.to_int_option
-                          |> Option.value ~default:0))
+                        let tokens = Safe_ops.json_member_opt "tokens" item |> Option.value ~default:(`Assoc []) in
+                        acc + (Safe_ops.json_int_opt "candidates" tokens |> Option.value ~default:0))
                       0
                in
                if total > 0 then Some total else None)
     in
     let cached_tokens =
-      match Option.bind usage_opt (fun usage -> usage |> U.member "cachedContentTokenCount" |> U.to_int_option) with
+      match Option.bind usage_opt (fun usage -> Safe_ops.json_int_opt "cachedContentTokenCount" usage) with
       | Some _ as value -> value
       | None ->
           (match stats_models_opt with
@@ -150,9 +141,8 @@ let parse_gemini_output output =
                let total =
                  entries
                  |> List.fold_left (fun acc (_name, item) ->
-                        acc
-                        + (item |> U.member "tokens" |> U.member "cached" |> U.to_int_option
-                          |> Option.value ~default:0))
+                        let tokens = Safe_ops.json_member_opt "tokens" item |> Option.value ~default:(`Assoc []) in
+                        acc + (Safe_ops.json_int_opt "cached" tokens |> Option.value ~default:0))
                       0
                in
                if total > 0 then Some total else None)
@@ -172,7 +162,7 @@ let parse_gemini_output output =
       | _ -> None
     in
     (input_tokens, output_tokens, cached_tokens, cost)
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+  with Yojson.Json_error _ ->
     (None, None, None, None)
 
 (** Default spawn configs for known agents *)

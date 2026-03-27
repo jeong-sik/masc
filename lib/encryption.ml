@@ -135,22 +135,18 @@ let envelope_to_json envelope =
 
 (** Parse JSON to envelope *)
 let envelope_of_json json : envelope option =
-  let open Yojson.Safe.Util in
-  try
-    let encrypted = json |> member "_encrypted" |> to_bool in
-    let version = json |> member "v" |> to_int in
-    let nonce = json |> member "nonce" |> to_string in
-    let ciphertext = json |> member "ct" |> to_string in
-    let adata = json |> member "adata" |> to_string in
+  match Safe_ops.json_bool_opt "_encrypted" json,
+        Safe_ops.json_int_opt "v" json,
+        Safe_ops.json_string_opt "nonce" json,
+        Safe_ops.json_string_opt "ct" json,
+        Safe_ops.json_string_opt "adata" json with
+  | Some encrypted, Some version, Some nonce, Some ciphertext, Some adata ->
     Some { encrypted; version; nonce; ciphertext; adata }
-  with Yojson.Safe.Util.Type_error _ -> None
+  | _ -> None
 
 (** Check if JSON is an encrypted envelope *)
 let is_encrypted_json json =
-  let open Yojson.Safe.Util in
-  try
-    json |> member "_encrypted" |> to_bool
-  with Yojson.Safe.Util.Type_error _ -> false
+  Safe_ops.json_bool ~default:false "_encrypted" json
 
 (** Smart read: transparently decrypt if encrypted, pass through if plain *)
 let smart_read_json ~config ~adata path : (Yojson.Safe.t, encryption_error) result =

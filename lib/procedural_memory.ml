@@ -59,28 +59,28 @@ let to_json (p : procedure) : Yojson.Safe.t =
   ]
 
 let of_json (json : Yojson.Safe.t) : procedure option =
-  try
-    let open Yojson.Safe.Util in
-    Some {
-      id = json |> member "id" |> to_string;
-      agent_name = json |> member "agent_name" |> to_string;
-      pattern = json |> member "pattern" |> to_string;
-      evidence =
-        (try json |> member "evidence" |> to_list |> List.map to_string
-         with Type_error _ -> []);
-      success_count = json |> member "success_count" |> to_int;
-      failure_count = json |> member "failure_count" |> to_int;
-      confidence = json |> member "confidence" |> to_float;
-      created_at = json |> member "created_at" |> to_float;
-      last_applied =
-        (try json |> member "last_applied" |> to_float
-         with Type_error _ -> 0.0);
-    }
-  with
-  | Yojson.Safe.Util.Type_error _ -> None
-  | exn ->
-      Log.Memory.warn "procedure of_json unexpected: %s" (Printexc.to_string exn);
-      None
+  match Safe_ops.json_string_opt "id" json,
+        Safe_ops.json_string_opt "agent_name" json,
+        Safe_ops.json_string_opt "pattern" json with
+  | Some id, Some agent_name, Some pattern ->
+    (match Safe_ops.json_int_opt "success_count" json,
+           Safe_ops.json_int_opt "failure_count" json,
+           Safe_ops.json_float_opt "confidence" json,
+           Safe_ops.json_float_opt "created_at" json with
+     | Some success_count, Some failure_count, Some confidence, Some created_at ->
+       Some {
+         id;
+         agent_name;
+         pattern;
+         evidence = Safe_ops.json_string_list "evidence" json;
+         success_count;
+         failure_count;
+         confidence;
+         created_at;
+         last_applied = Safe_ops.json_float ~default:0.0 "last_applied" json;
+       }
+     | _ -> None)
+  | _ -> None
 
 (* ================================================================ *)
 (* File I/O                                                         *)

@@ -91,8 +91,7 @@ let dna_quality_event_json (event : dna_quality_event) =
     ]
 
 let string_field json key =
-  try Yojson.Safe.Util.(json |> member key |> to_string)
-  with Yojson.Safe.Util.Type_error _ | Not_found -> ""
+  Safe_ops.json_string ~default:"" key json
 
 let recent_verdicts_json ?(limit = 8) ?(since = "") ?(until = "") () =
   let store = Eval_calibration.get_store () in
@@ -127,8 +126,7 @@ let recent_verdicts_json ?(limit = 8) ?(since = "") ?(until = "") () =
            else None)
     |> List.sort (fun left right ->
            let ts json =
-             try Yojson.Safe.Util.(json |> member "timestamp" |> to_float)
-             with Yojson.Safe.Util.Type_error _ | Not_found -> 0.0
+             Safe_ops.json_float ~default:0.0 "timestamp" json
            in
            Float.compare (ts right) (ts left))
     |> trim_recent limit

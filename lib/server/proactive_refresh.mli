@@ -10,6 +10,7 @@ type config = {
   failure_threshold : int;  (** Consecutive failures before backoff kicks in. *)
   timeout_s : float;        (** Warm-cache timeout. *)
   on_error : (exn -> unit) option;  (** Called on timeout or exception. *)
+  health_check : (unit -> bool) option;  (** Pre-compute gate. If [Some f] and [f ()] returns [false], the cycle is skipped and backoff applied. *)
 }
 
 val default_config : label:string -> interval_s:float -> config

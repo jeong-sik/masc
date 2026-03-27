@@ -197,8 +197,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'harness',
-      label: '하네스 헬스',
-      description: 'Evaluator 캘리브레이션, 컴팩션 전략, DNA 품질 추이를 봅니다.',
+      label: '세이프티 하네스',
+      description: 'Evaluator, compaction, DNA safety rail이 실험을 어떻게 감시하는지 봅니다.',
       params: { section: 'harness' },
     },
   ],

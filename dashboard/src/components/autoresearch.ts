@@ -355,6 +355,59 @@ function WarningsList({ warnings }: { warnings: string[] }) {
   `
 }
 
+function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
+  const linkedAt = loop.linked_at != null ? formatTimestamp(loop.linked_at) : '미연결'
+
+  return html`
+    <${SurfaceCard} variant="compact">
+      <div class="flex flex-col gap-3">
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1 font-medium">Research Brief</div>
+          <div class="text-[13px] leading-[1.55] text-[var(--text-body)]">
+            이 루프는 <span class="font-semibold text-[var(--text-strong)]">${loop.goal}</span> 를 목표로
+            <span class="font-mono text-[var(--text-strong)]"> ${loop.target_file} </span>
+            변경을 시도하고,
+            <span class="font-mono text-[var(--text-strong)]"> ${loop.metric_fn} </span>
+            결과로 keep/discard를 반복합니다.
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+            <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">무엇을 연구하나</div>
+            <div class="leading-relaxed text-[var(--text-body)]">${loop.goal}</div>
+          </div>
+          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+            <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">무엇으로 성공을 보나</div>
+            <div class="font-mono text-[var(--text-body)]">${loop.metric_fn}</div>
+            <div class="mt-1 text-[var(--text-dim)]">baseline ${loop.baseline.toFixed(4)} -> best ${loop.best_score.toFixed(4)}</div>
+          </div>
+          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+            <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">연결된 실행 컨텍스트</div>
+            <div class="flex flex-col gap-1 text-[var(--text-body)]">
+              <span>session ${loop.session_id ?? '없음'}</span>
+              <span>operation ${loop.operation_id ?? '없음'}</span>
+              <span>linked ${linkedAt}</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+            <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">현재 가설 / 메모</div>
+            <div class="flex flex-col gap-1 text-[var(--text-body)] leading-relaxed">
+              <span>${loop.queued_hypothesis ?? '대기 가설 없음'}</span>
+              <span class="text-[var(--text-dim)]">${loop.program_note ?? 'program note 없음'}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[12px] leading-[1.5] text-[var(--text-muted)]">
+          이 화면은 generator loop 자체를 설명합니다. Safety Harness는 evaluator와 장기 실행 safety rail을 보여주며,
+          각 cycle의 keep/discard 판정을 직접 대체하지 않습니다.
+        </div>
+      </div>
+    <//>
+  `
+}
+
 // --- Detail view ---
 
 function LoopDetailView() {
@@ -383,6 +436,8 @@ function LoopDetailView() {
 
   return html`
     <div class="flex flex-col gap-5">
+      <${ResearchBrief} loop=${loop} />
+
       <${SurfaceCard} variant="compact">
         <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-3 font-medium">루프 개요</div>
         <${LoopOverview} loop=${loop} />

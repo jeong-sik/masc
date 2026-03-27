@@ -41,6 +41,8 @@ export interface AutoresearchLoopSummary {
   recent_cycles: AutoresearchCycleRecord[]
   error: string | null
   session_id: string | null
+  operation_id: string | null
+  linked_at: number | null
   queued_hypothesis: string | null
 }
 

@@ -322,13 +322,16 @@ let run_cmd host port base_path =
             Eio.Time.sleep clock 0.05;
             await_shutdown_signal ()
         | Some signal_name ->
+            let shutdown_cfg = Masc_mcp.Shutdown.config_from_env () in
+            let force_timeout = shutdown_cfg.force_timeout_s in
             Log.Server.info
-              "[MASC] Received %s, shutting down gracefully..."
-              signal_name;
+              "[MASC] Received %s, shutting down gracefully (timeout=%.0fs)..."
+              signal_name force_timeout;
             Eio.Fiber.fork_daemon ~sw (fun () ->
-                Eio.Time.sleep clock 5.0;
+                Eio.Time.sleep clock force_timeout;
                 Log.Server.error
-                  "[MASC] Graceful shutdown timed out after 5s, forcing exit.";
+                  "[MASC] Graceful shutdown timed out after %.0fs, forcing exit."
+                  force_timeout;
                 exit 1);
             let shutdown_data =
               Printf.sprintf

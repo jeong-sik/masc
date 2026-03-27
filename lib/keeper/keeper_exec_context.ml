@@ -335,9 +335,52 @@ let compact_if_needed
         PruneToolOutputs; MergeContiguous;
         DropLowImportance; SummarizeOld]
       in
+      let strategy_names =
+        List.map
+          (function
+            | Context_compact_oas.PruneToolOutputs -> "PruneToolOutputs"
+            | Context_compact_oas.MergeContiguous -> "MergeContiguous"
+            | Context_compact_oas.DropLowImportance -> "DropLowImportance"
+            | Context_compact_oas.SummarizeOld -> "SummarizeOld"
+            | Context_compact_oas.Dynamic _ -> "Dynamic")
+          strategies
+      in
       Log.Harness.info
         "[pre_compact] keeper=%s ratio=%.4f messages=%d tokens=%d trigger=%s"
         meta.name ratio message_count token_count reason;
+      let pre_compact_event =
+        Dashboard_harness_health.record_pre_compact
+          ~keeper_name:meta.name ~context_ratio:ratio ~message_count
+          ~token_count ~strategies:strategy_names
+          ~model_family:meta.cascade_name ~trigger:reason
+      in
+      (try
+         Sse.broadcast
+           (`Assoc
+             [
+               ("type", `String "oas:masc:harness:pre_compact");
+               ( "payload",
+                 `Assoc
+                   [
+                     ("timestamp", `Float pre_compact_event.timestamp);
+                     ("keeper_name", `String pre_compact_event.keeper_name);
+                     ("context_ratio", `Float pre_compact_event.context_ratio);
+                     ("message_count", `Int pre_compact_event.message_count);
+                     ("token_count", `Int pre_compact_event.token_count);
+                     ( "strategies",
+                       `List
+                         (List.map
+                            (fun value -> `String value)
+                            pre_compact_event.strategies) );
+                     ("model_family", `String pre_compact_event.model_family);
+                     ("trigger", `String pre_compact_event.trigger);
+                   ] );
+             ])
+       with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Log.Harness.warn "[pre_compact] sse broadcast failed: %s"
+            (Printexc.to_string exn));
       let messages, token_count =
           Context_compact_oas.compact
             ~system_prompt:ctx.system_prompt

@@ -20,6 +20,11 @@ let result_to_response = function
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
 
+let verdict_to_string (result : Anti_rationalization.review_result) =
+  match result.verdict with
+  | Anti_rationalization.Approve -> "approve"
+  | Anti_rationalization.Reject reason -> "reject:" ^ reason
+
 (** Validate task_id is non-empty. Prevents phantom operations on empty IDs. *)
 let validate_task_id task_id =
   if task_id = "" then Error (Types.TaskNotFound "")
@@ -295,7 +300,35 @@ let handle_transition ctx args =
         } in
         let on_verdict result =
           Eval_calibration.record_verdict
-            ~task_id ~req:ar_req ~result () in
+            ~task_id ~req:ar_req ~result ();
+          (try
+             Sse.broadcast
+               (`Assoc
+                 [
+                   ("type", `String "oas:masc:harness:verdict_recorded");
+                   ( "payload",
+                     `Assoc
+                       [
+                         ("timestamp", `Float (Time_compat.now ()));
+                         ("task_id", `String task_id);
+                         ("task_title", `String ar_req.task_title);
+                         ("agent_name", `String ar_req.agent_name);
+                         ("gate", `String result.gate);
+                         ("verdict", `String (verdict_to_string result));
+                         ( "evaluator_cascade",
+                           `String result.evaluator_cascade );
+                         ( "fallback_reason",
+                           match result.fallback_reason with
+                           | Some reason -> `String reason
+                           | None -> `Null );
+                       ] );
+                 ])
+           with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Harness.warn
+                "[anti-rationalization] verdict sse broadcast failed: %s"
+                (Printexc.to_string exn)) in
         let few_shot_block =
           Eval_calibration.format_few_shot_block
             (Eval_calibration.select_examples ~max_examples:3) in

@@ -36,10 +36,18 @@ fi
 # Test 3: JSON-RPC initialize via Streamable HTTP (/mcp)
 MCP_ACCEPT="Accept: application/json, text/event-stream"
 init_req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"e2e-harness","version":"1.0"}}}'
-init_resp=$(curl -sf -X POST "${MASC_BASE_URL}/mcp" \
-  -H "Content-Type: application/json" \
-  -H "${MCP_ACCEPT}" \
-  -d "$init_req" 2>&1 || true)
+init_deadline=$(( $(date +%s) + 15 ))
+init_resp=""
+while [[ "$(date +%s)" -lt "$init_deadline" ]]; do
+  init_resp=$(curl -sf -X POST "${MASC_BASE_URL}/mcp" \
+    -H "Content-Type: application/json" \
+    -H "${MCP_ACCEPT}" \
+    -d "$init_req" 2>&1 || true)
+  if echo "$init_resp" | jq -e '.result.serverInfo' >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
 if echo "$init_resp" | jq -e '.result.serverInfo' >/dev/null 2>&1; then
   pass "MCP initialize returns serverInfo"
   server_name=$(echo "$init_resp" | jq -r '.result.serverInfo.name')
@@ -50,10 +58,21 @@ else
 fi
 
 # Test 4: Tools list via MCP (uses same session)
-SESSION_ID=$(curl -sf -i -X POST "${MASC_BASE_URL}/mcp" \
-  -H "Content-Type: application/json" \
-  -H "${MCP_ACCEPT}" \
-  -d "$init_req" 2>&1 | awk 'tolower($1)=="mcp-session-id:" { gsub("\r", "", $2); print $2; exit }')
+session_deadline=$(( $(date +%s) + 15 ))
+SESSION_ID=""
+while [[ "$(date +%s)" -lt "$session_deadline" ]]; do
+  SESSION_ID="$(
+    curl -sf -i -X POST "${MASC_BASE_URL}/mcp" \
+      -H "Content-Type: application/json" \
+      -H "${MCP_ACCEPT}" \
+      -d "$init_req" 2>&1 \
+    | awk 'tolower($1)=="mcp-session-id:" { gsub("\r", "", $2); print $2; exit }'
+  )"
+  if [[ -n "$SESSION_ID" ]]; then
+    break
+  fi
+  sleep 1
+done
 tools_req='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 tools_resp=$(curl -sf -X POST "${MASC_BASE_URL}/mcp" \
   -H "Content-Type: application/json" \

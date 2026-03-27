@@ -33,12 +33,20 @@ else
   exit 1
 fi
 
-ws_resp="$(curl -sf -i -m 5 \
-  -H "Connection: Upgrade" \
-  -H "Upgrade: websocket" \
-  -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-  -H "Sec-WebSocket-Version: 13" \
-  "http://127.0.0.1:${ws_port}/" 2>&1 || echo "FAILED")"
+wait_deadline=$(( $(date +%s) + 20 ))
+ws_resp="FAILED"
+while [[ "$(date +%s)" -lt "$wait_deadline" ]]; do
+  ws_resp="$(curl -sS -i -m 5 \
+    -H "Connection: Upgrade" \
+    -H "Upgrade: websocket" \
+    -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+    -H "Sec-WebSocket-Version: 13" \
+    "http://127.0.0.1:${ws_port}/" 2>&1 || true)"
+  if echo "$ws_resp" | grep -q "101"; then
+    break
+  fi
+  sleep 1
+done
 if echo "$ws_resp" | grep -q "101"; then
   pass "WebSocket handshake on :${ws_port}: 101 Switching Protocols"
 else

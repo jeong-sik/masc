@@ -20,7 +20,7 @@
 ; Pure synchronous tests
 ; ============================================================
 (tests
- (names test_room test_types test_auth test_http_negotiation
+ (names test_room test_room_state_recovery test_types test_auth test_http_negotiation
         test_sse test_encryption test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_mitosis test_spawn
@@ -47,7 +47,7 @@
         test_worktree_live_context
         test_tool_input_validation
 )
- (modules test_room test_types test_auth test_http_negotiation
+ (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
           test_sse test_encryption test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_mitosis test_spawn
@@ -90,6 +90,11 @@
  (name test_runtime_params)
  (modules test_runtime_params)
  (libraries masc_mcp alcotest yojson unix eio eio_main))
+
+(test
+ (name test_config_dir_resolver)
+ (modules test_config_dir_resolver)
+ (libraries masc_mcp alcotest unix))
 
 ; Room coverage tests (claim_next auto-release, batch ops, transitions)
 ; Requires eio_main because Room.init uses Eio.Mutex internally
@@ -298,7 +303,7 @@
  (modules test_verifier_oas_bridge)
  (libraries masc_mcp agent_sdk alcotest yojson))
 
-; OAS adapter tests (sentinel roundtrip, context_compact_oas strategies)
+; OAS adapter tests (legacy roundtrip removal, context_compact_oas strategies)
 (test
  (name test_oas_adapters)
  (modules test_oas_adapters)
@@ -345,11 +350,6 @@
  (name test_cache_eio)
  (modules test_cache_eio)
  (libraries masc_mcp alcotest str yojson eio eio_main))
-
-(test
- (name test_chain_native_eio_bootstrap)
- (modules test_chain_native_eio_bootstrap)
- (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
  (name test_race_cancel)

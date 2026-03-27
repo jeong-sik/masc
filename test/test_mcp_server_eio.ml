@@ -160,6 +160,18 @@ let test_resolve_join_state_skips_unknown_agent () =
   Alcotest.(check bool) "unknown agent skipped" false !called;
   Alcotest.(check bool) "unknown agent treated unjoined" false joined
 
+let test_should_read_legacy_persisted_agent_name () =
+  let should_read =
+    Masc_mcp.Mcp_server_eio_execute.should_read_legacy_persisted_agent_name
+  in
+  Alcotest.(check bool) "ephemeral fallback reads legacy state" true
+    (should_read ~has_explicit_agent_name:false ~agent_name:"agent-12345678");
+  Alcotest.(check bool) "stable nickname skips legacy read" false
+    (should_read ~has_explicit_agent_name:false
+       ~agent_name:"codex-swift-fox");
+  Alcotest.(check bool) "explicit agent name skips legacy read" false
+    (should_read ~has_explicit_agent_name:true ~agent_name:"agent-12345678")
+
 let rec collect_tools ~clock ~sw ?profile ?cursor state acc =
   let response = tools_list_response ~clock ~sw ?profile ?cursor state in
   let tools = tools_from_response response in
@@ -333,6 +345,41 @@ let test_eio_context_delegation () =
     (Option.is_some delegated_net);
   Alcotest.(check bool) "clock delegated to shared Eio_context" true
     (Eio_context.get_clock () == alias_clock)
+
+let option_ref_equal left right =
+  match left, right with
+  | None, None -> true
+  | Some l, Some r -> l == r
+  | None, Some _ | Some _, None -> false
+
+let test_eio_context_with_test_env_restores () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  let before_net = Eio_context.get_net_opt () in
+  let before_clock = Eio_context.get_clock_opt () in
+  let before_mono_clock = Eio_context.get_mono_clock_opt () in
+  let before_switch = Eio_context.get_switch_opt () in
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    Alcotest.(check bool) "scoped net set" true
+      (Option.is_some (Eio_context.get_net_opt ()));
+    Alcotest.(check bool) "scoped clock set" true
+      (Option.is_some (Eio_context.get_clock_opt ()));
+    Alcotest.(check bool) "scoped mono_clock set" true
+      (Option.is_some (Eio_context.get_mono_clock_opt ()));
+    Alcotest.(check bool) "scoped switch set" true
+      (Option.is_some (Eio_context.get_switch_opt ())));
+  Alcotest.(check bool) "net restored" true
+    (option_ref_equal before_net (Eio_context.get_net_opt ()));
+  Alcotest.(check bool) "clock restored" true
+    (option_ref_equal before_clock (Eio_context.get_clock_opt ()));
+  Alcotest.(check bool) "mono_clock restored" true
+    (option_ref_equal before_mono_clock (Eio_context.get_mono_clock_opt ()));
+  Alcotest.(check bool) "switch restored" true
+    (option_ref_equal before_switch (Eio_context.get_switch_opt ()))
 
 (* ===== Unit Tests for Protocol Helpers ===== *)
 
@@ -1506,7 +1553,8 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
     Masc_mcp.Room.add_task state.room_config
       ~title:"alias-reuse-task"
       ~priority:2
-      ~description:""
+      ~description:
+        "Verify that an explicit alias can reuse the nickname established during claim/start/done transitions."
   in
 
   let transition ?(extra = []) action =
@@ -1534,7 +1582,9 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
     transition
       ~extra:
         [
-          ("notes", `String "Completed alias-reuse-task implementation and verified");
+          ( "notes",
+            `String
+              "Completed the alias reuse regression by claiming, starting, and finishing task-001 with the same explicit alias, confirming the joined nickname stayed stable and the transition responses reported success." );
         ]
       "done"
   in
@@ -2512,6 +2562,7 @@ let state_tests = [
   "create_state", `Quick, test_create_state;
   "type compatibility", `Quick, test_type_compatibility;
   "eio context delegation", `Quick, test_eio_context_delegation;
+  "eio context scoped restore", `Quick, test_eio_context_with_test_env_restores;
   "resolve_join_state skips read-only lookup", `Quick,
     test_resolve_join_state_skips_read_only_lookup;
   "resolve_join_state checks join-required tools", `Quick,
@@ -2611,6 +2662,8 @@ let eio_tests = [
   "coding mode allows governance status", `Quick, test_execute_tool_coding_mode_allows_governance_status;
   "canonical team_session_step direct call", `Quick,
     test_execute_tool_team_session_step_direct_call;
+  "legacy persisted agent read only for ephemeral names", `Quick,
+    test_should_read_legacy_persisted_agent_name;
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
   "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
   "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;

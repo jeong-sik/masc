@@ -104,10 +104,10 @@ function navigateWithContext(
 ): void {
   persistWorkflowContext(context)
   navigate(
-    'operations',
+    'command',
     mode === 'intervene'
       ? { section: 'intervene', ...missionInterveneParams(context) }
-      : { section: 'command', ...missionCommandParams(context) },
+      : { section: 'warroom', ...missionCommandParams(context) },
   )
 }
 
@@ -143,8 +143,8 @@ export function openSession(mode: 'intervene' | 'command', sessionId: string): v
     focus_kind: 'team_session',
   }
   if (mode === 'command') params.surface = 'swarm'
-  navigate('operations', {
-    section: mode === 'command' ? 'command' : 'intervene',
+  navigate('command', {
+    section: mode === 'command' ? 'warroom' : 'intervene',
     ...params,
   })
 }

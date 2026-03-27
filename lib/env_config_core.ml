@@ -88,12 +88,23 @@ let warn_deprecated ~old_name ~new_name =
       old_name new_name
   end
 
-let sb_path_opt () =
-  match me_root_opt () with
-  | Some root ->
-      let path = Filename.concat root "scripts/sb" in
-      if existing_file path then Some path else None
+let deprecated_opt ~old_name ~new_name =
+  match Sys.getenv_opt old_name |> trim_opt with
+  | Some value ->
+      warn_deprecated ~old_name ~new_name;
+      Some value
   | None -> None
+
+let sb_path_opt () =
+  match deprecated_opt ~old_name:"MASC_SB_PATH"
+          ~new_name:"MASC_WORKSPACE_ROOT or ME_ROOT" with
+  | Some path -> Some path
+  | None -> (
+      match me_root_opt () with
+      | Some root ->
+          let path = Filename.concat root "scripts/sb" in
+          if existing_file path then Some path else None
+      | None -> None)
 
 let sb_path_result () =
   match sb_path_opt () with
@@ -120,36 +131,36 @@ let masc_http_port () =
 let masc_http_port_int () =
   Safe_ops.int_of_string_with_default ~default:8935 (masc_http_port ())
 
+let masc_host_opt () =
+  match Sys.getenv_opt "MASC_HOST" |> trim_opt with
+  | Some host -> Some host
+  | None -> deprecated_opt ~old_name:"MASC_HTTP_BIND_HOST" ~new_name:"MASC_HOST"
+
 (** Centralized MASC_HOST reader.
     Reads MASC_HOST (primary) with MASC_HTTP_BIND_HOST (deprecated) fallback.
     Default: "127.0.0.1". *)
 let masc_host () =
-  let from_bind = Sys.getenv_opt "MASC_HTTP_BIND_HOST" |> trim_opt in
-  (match from_bind with
-   | Some _ ->
-       warn_deprecated ~old_name:"MASC_HTTP_BIND_HOST" ~new_name:"MASC_HOST"
-   | None -> ());
-  let primary = Sys.getenv_opt "MASC_HOST" |> trim_opt in
-  match from_bind, primary with
-  | Some v, _ -> v  (* deprecated fallback — still honored *)
-  | None, Some v -> v
-  | None, None -> "127.0.0.1"
+  match masc_host_opt () with
+  | Some host -> host
+  | None -> "127.0.0.1"
 
 (** Centralized MASC_ASSETS_DIR reader.
     Reads MASC_ASSETS_DIR (primary) with MASC_ASSETS_ROOT (deprecated) fallback.
     Returns None when neither is set. *)
 let assets_dir_opt () =
-  match Sys.getenv_opt "MASC_ASSETS_ROOT" |> trim_opt with
-  | Some d ->
-      warn_deprecated ~old_name:"MASC_ASSETS_ROOT" ~new_name:"MASC_ASSETS_DIR";
-      Some d
-  | None -> Sys.getenv_opt "MASC_ASSETS_DIR" |> trim_opt
+  match Sys.getenv_opt "MASC_ASSETS_DIR" |> trim_opt with
+  | Some dir -> Some dir
+  | None ->
+      deprecated_opt ~old_name:"MASC_ASSETS_ROOT" ~new_name:"MASC_ASSETS_DIR"
+
+let cluster_name_opt () =
+  Sys.getenv_opt "MASC_CLUSTER_NAME" |> trim_opt
 
 (** Centralized MASC_CLUSTER_NAME reader.
     Default: "default". All call sites should use this instead of
     reading Sys.getenv_opt "MASC_CLUSTER_NAME" directly. *)
 let cluster_name () =
-  match Sys.getenv_opt "MASC_CLUSTER_NAME" |> trim_opt with
+  match cluster_name_opt () with
   | Some name -> name
   | None -> "default"
 
@@ -163,7 +174,7 @@ and masc_http_base_url_result () =
   | Some base -> Ok (strip_trailing_slashes base)
   | None ->
       let host =
-        match Sys.getenv_opt "MASC_HOST" |> trim_opt with
+        match masc_host_opt () with
         | Some value -> Ok value
         | None ->
             Error
@@ -198,4 +209,3 @@ let libdatachannel_path_opt () =
   |> List.find_opt existing_file
 
 (** {1 Zombie Detection / Cleanup Configuration} *)
-

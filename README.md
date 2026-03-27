@@ -22,14 +22,24 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 dune build --root .
 
-./start-masc-mcp.sh --http --port 8935
-curl http://127.0.0.1:8935/health
+./start-masc-mcp.sh --http
+PORT="$(./start-masc-mcp.sh --print-port)"  # query the effective port for this checkout
+curl "http://127.0.0.1:${PORT}/health"
 ```
 
 기본값:
 
-- HTTP / MCP port: `8935`
+- repo root checkout HTTP / MCP port: `8935`
+- git worktree checkout HTTP / MCP port: `9100-9999` 범위에서 checkout path 기준으로 자동 파생
 - 기본 bind host: `127.0.0.1`
+- repo-managed config root: `MASC_CONFIG_DIR` 우선, 없으면 실행 파일 기준 `config/` 자동 탐색
+
+메모:
+
+- 현재 checkout의 기본 포트 확인: `./start-masc-mcp.sh --print-port`
+- worktree에서 `--port`를 생략하면 script가 worktree별 기본 포트를 자동 선택한다.
+- 고정 포트가 필요하면 `MASC_MCP_PORT=94xx` 또는 `--port 94xx`로 덮어쓴다.
+- `--print-port`는 현재 checkout의 기본 포트 조회용이다. 서버 시작은 보통 `./start-masc-mcp.sh --http`로 충분하다.
 
 `0.0.0.0` 같은 non-loopback 주소에 바인드할 때는 auth 설정을 먼저 맞춘 뒤 원격 노출 경로로 취급하세요. 자세한 내용은 `docs/REMOTE-MCP-OPERATOR.md`, `docs/spec/09-server-transport.md`를 봅니다.
 
@@ -47,6 +57,8 @@ curl http://127.0.0.1:8935/health
   }
 }
 ```
+
+worktree에서는 `8935` 대신 `./start-masc-mcp.sh --print-port` 출력값으로 바꾼다.
 
 메모:
 
@@ -77,14 +89,15 @@ masc_start(path="/your/project", task_title="My first task")
 
 자주 쓰는 대시보드 진입점:
 
-- 모니터링: `http://127.0.0.1:8935/dashboard#monitoring?section=sessions`
-- 운영 액션: `http://127.0.0.1:8935/dashboard#command?section=intervene`
-- 숨겨진 실험용 war room: `http://127.0.0.1:8935/dashboard#command?section=warroom`
+- 모니터링: `http://127.0.0.1:<PORT>/dashboard#monitoring?section=sessions`
+- 운영 액션: `http://127.0.0.1:<PORT>/dashboard#command?section=intervene`
+- 숨겨진 실험용 war room: `http://127.0.0.1:<PORT>/dashboard#command?section=warroom`
 
 메모:
 
 - 대시보드는 read/operate UI이고, canonical write/control path는 MCP입니다.
 - `start-masc-mcp.sh`는 `npm`이 있을 때 dashboard SPA를 자동으로 빌드합니다.
+- dev server를 따로 띄울 때는 `PORT="$(./start-masc-mcp.sh --print-port)"` 후 `cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" npm run dev`를 사용하세요.
 - 수동 재빌드가 필요하면 `cd dashboard && npm run build`를 실행하세요.
 
 ## 검증

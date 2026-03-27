@@ -24,7 +24,7 @@ let make_test_ctx () =
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:(Some "test-agent") in
-  { Tool_task.config; agent_name = "test-agent" }
+  { Tool_task.config; agent_name = "test-agent"; sw = None }
 
 let str_contains s substring =
   let len_s = String.length s in

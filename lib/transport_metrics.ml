@@ -158,11 +158,8 @@ let int_field key json =
   | _ -> 0
 
 let cluster_summary_json config =
-  match Command_plane_v2.topology_json config with
-  | `Assoc fields -> (
-      match List.assoc_opt "summary" fields with
-      | Some (`Assoc _ as json) -> json
-      | _ -> `Assoc [])
+  match Command_plane_v2.topology_summary_json config with
+  | `Assoc _ as json -> json
   | _ -> `Assoc []
 
 let http_listener_mode () =

@@ -113,6 +113,40 @@ let test_sb_path_result_missing_is_error () =
       check bool "sb path result is error" true
         (match Env_config.sb_path_result () with Error _ -> true | Ok _ -> false)))
 
+let test_sb_path_legacy_env_still_works () =
+  let path = Filename.temp_file "masc-sb" ".sh" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      with_env "MASC_SB_PATH" path (fun () ->
+        with_env "MASC_WORKSPACE_ROOT" "" (fun () ->
+          with_env "ME_ROOT" "" (fun () ->
+            check (result string string) "legacy sb path still accepted"
+              (Ok path) (Env_config.sb_path_result ())))))
+
+let test_masc_host_prefers_primary_over_deprecated () =
+  with_env "MASC_HOST" "primary.example.test" (fun () ->
+    with_env "MASC_HTTP_BIND_HOST" "legacy.example.test" (fun () ->
+      let resolved = Env_config.masc_host () in
+      let explicit = Env_config.masc_host_opt () in
+      check string "primary host wins" "primary.example.test" resolved;
+      check (option string) "explicit host wins" (Some "primary.example.test")
+        explicit))
+
+let test_assets_dir_prefers_primary_over_deprecated () =
+  with_env "MASC_ASSETS_DIR" "/tmp/assets-primary" (fun () ->
+    with_env "MASC_ASSETS_ROOT" "/tmp/assets-legacy" (fun () ->
+      let resolved = Env_config.assets_dir_opt () in
+      check (option string) "primary assets dir wins" (Some "/tmp/assets-primary")
+        resolved))
+
+let test_cluster_name_opt_trims_empty () =
+  with_env "MASC_CLUSTER_NAME" "   " (fun () ->
+    check (option string) "cluster_name_opt empty -> none" None
+      (Env_config.cluster_name_opt ());
+    check string "cluster_name empty -> default" "default"
+      (Env_config.cluster_name ()))
+
 let test_libdatachannel_candidates_include_env_override () =
   with_env "LIBDATACHANNEL_PATH" "/tmp/libdatachannel-custom.dylib" (fun () ->
     check bool "env path present" true
@@ -364,6 +398,10 @@ let () =
       test_case "base url prefers env and trims" `Quick test_masc_http_base_url_prefers_env_and_trims;
       test_case "base url uses explicit host+port" `Quick test_masc_http_base_url_uses_explicit_host_and_port;
       test_case "sb_path_result missing is error" `Quick test_sb_path_result_missing_is_error;
+      test_case "sb_path legacy env still works" `Quick test_sb_path_legacy_env_still_works;
+      test_case "masc_host prefers primary over deprecated" `Quick test_masc_host_prefers_primary_over_deprecated;
+      test_case "assets dir prefers primary over deprecated" `Quick test_assets_dir_prefers_primary_over_deprecated;
+      test_case "cluster_name_opt trims empty" `Quick test_cluster_name_opt_trims_empty;
       test_case "endpoint result helpers" `Quick test_endpoints_result_helpers;
       test_case "libdatachannel candidates include env override" `Quick test_libdatachannel_candidates_include_env_override;
     ];

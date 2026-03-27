@@ -160,7 +160,7 @@ let () =
     (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
     Runtime_params.record_audit ~base_path:tmp_dir
       ~key:"test.key" ~old_value:(`Int 1) ~new_value:(`Int 2)
-      ~case_id:"case-001" ~actor:"sentinel" ();
+      ~case_id:"case-001" ~actor:"system" ();
     Runtime_params.record_audit ~base_path:tmp_dir
       ~key:"test.key2" ~old_value:(`String "a") ~new_value:(`String "b")
       ~actor:"human" ();

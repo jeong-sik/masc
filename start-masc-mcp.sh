@@ -14,7 +14,11 @@ if command -v opam >/dev/null 2>&1; then
     eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true
 fi
 
-# Storage backends are opt-in. Use MASC_STORAGE_TYPE + MASC_REDIS_URL/MASC_POSTGRES_URL explicitly.
+# Storage backend: filesystem by default (single-machine, no PG dependency).
+# PG auto-detect caused 4-min connection timeouts that starved Eio fibers
+# and blocked keeper autoboot (2026-03-28 incident). Board LISTEN/NOTIFY
+# uses its own dedicated PG connection and is unaffected by this setting.
+export MASC_STORAGE_TYPE="${MASC_STORAGE_TYPE:-filesystem}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"

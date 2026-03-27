@@ -360,6 +360,7 @@ let test_eio_context_with_test_env_restores () =
   let mono_clock = Eio.Stdenv.mono_clock env in
   let before_net = Eio_context.get_net_opt () in
   let before_clock = Eio_context.get_clock_opt () in
+  let before_mono_clock = Eio_context.get_mono_clock_opt () in
   let before_switch = Eio_context.get_switch_opt () in
   Eio.Switch.run @@ fun sw ->
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
@@ -367,12 +368,16 @@ let test_eio_context_with_test_env_restores () =
       (Option.is_some (Eio_context.get_net_opt ()));
     Alcotest.(check bool) "scoped clock set" true
       (Option.is_some (Eio_context.get_clock_opt ()));
+    Alcotest.(check bool) "scoped mono_clock set" true
+      (Option.is_some (Eio_context.get_mono_clock_opt ()));
     Alcotest.(check bool) "scoped switch set" true
       (Option.is_some (Eio_context.get_switch_opt ())));
   Alcotest.(check bool) "net restored" true
     (option_ref_equal before_net (Eio_context.get_net_opt ()));
   Alcotest.(check bool) "clock restored" true
     (option_ref_equal before_clock (Eio_context.get_clock_opt ()));
+  Alcotest.(check bool) "mono_clock restored" true
+    (option_ref_equal before_mono_clock (Eio_context.get_mono_clock_opt ()));
   Alcotest.(check bool) "switch restored" true
     (option_ref_equal before_switch (Eio_context.get_switch_opt ()))
 

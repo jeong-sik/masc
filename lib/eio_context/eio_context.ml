@@ -54,6 +54,9 @@ let get_mono_clock () =
   | Some mc -> mc
   | None -> invalid_arg "Eio mono_clock not initialized"
 
+let get_mono_clock_opt () =
+  Atomic.get current_mono_clock
+
 let set_switch sw =
   Atomic.set current_sw (Some sw)
 

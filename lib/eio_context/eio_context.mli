@@ -17,6 +17,9 @@ val get_mono_clock : unit -> Eio.Time.Mono.ty Eio.Resource.t
 (** Get the global Eio monotonic clock.
     @raise Invalid_argument if not initialized. *)
 
+val get_mono_clock_opt : unit -> Eio.Time.Mono.ty Eio.Resource.t option
+(** Get the global Eio monotonic clock if available. *)
+
 val set_switch : Eio.Switch.t -> unit
 (** Set the global Eio switch. *)
 
@@ -27,7 +30,9 @@ val with_test_env :
   sw:Eio.Switch.t ->
   (unit -> 'a) -> 'a
 (** Temporarily override the global Eio context for a test scope and restore the
-    previous values afterwards. *)
+    previous values afterwards.
+    Callers should keep all spawned work inside the provided structured Eio switch
+    so the override does not outlive the test scope. *)
 
 val get_net_opt : unit -> eio_net option
 (** Get the Eio network handle if available. *)

@@ -357,7 +357,7 @@ let normalize_runtime value =
   | _ -> None
 
 let env_keeper_models () =
-  match Sys.getenv_opt "MASC_GOAL_MODELS" with
+  match Env_config.Chain.Model.goal_models_opt () with
   | None -> []
   | Some raw -> split_csv raw
 
@@ -547,9 +547,7 @@ let handle_goal_dispatch ctx args =
     match get_string_opt args "runtime" with
     | Some v -> v
     | None -> (
-        match Sys.getenv_opt "MASC_GOAL_DISPATCH_RUNTIME" with
-        | Some env_v -> env_v
-        | None -> "task")
+        Env_config.Chain.Model.goal_dispatch_runtime)
   in
   let runtime_opt = normalize_runtime runtime_raw in
   let goal_ids = get_string_list args "goal_ids" in

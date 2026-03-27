@@ -120,9 +120,7 @@ let dispatch_structured ~name ~args : Tool_result.t option =
 (** Feature flag: use the new dispatch path.
     Default ON since v2.102 — use MASC_DISPATCH_V2=0 to disable. *)
 let v2_enabled =
-  match Sys.getenv_opt "MASC_DISPATCH_V2" with
-  | Some "0" | Some "false" | Some "FALSE" -> false
-  | _ -> true
+  Env_config.Server.Runtime.dispatch_v2
 
 (** Number of registered tool names. *)
 let registered_count () = Hashtbl.length registry

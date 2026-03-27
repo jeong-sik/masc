@@ -83,7 +83,7 @@ module Model = struct
     Sys.getenv_opt "MASC_GOAL_MODELS" |> trim_opt
 
   let goal_dispatch_runtime =
-    get_string ~default:"local" "MASC_GOAL_DISPATCH_RUNTIME"
+    get_string ~default:"task" "MASC_GOAL_DISPATCH_RUNTIME"
 end
 
 (** {1 Local LLM (Llama)} *)

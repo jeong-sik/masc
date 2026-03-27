@@ -102,7 +102,7 @@ module Runtime = struct
     get_bool ~default:false "MASC_OPENAI_COMPAT"
 
   let dispatch_v2 =
-    get_bool ~default:false "MASC_DISPATCH_V2"
+    get_bool ~default:true "MASC_DISPATCH_V2"
 
   let auto_respond =
     get_bool ~default:false "MASC_AUTO_RESPOND"

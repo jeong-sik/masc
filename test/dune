@@ -164,6 +164,11 @@
  (libraries masc_mcp alcotest yojson unix))
 
 (test
+ (name test_dashboard_harness_health)
+ (modules test_dashboard_harness_health)
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
+
+(test
  (name test_dashboard_repo_synthesis)
  (modules test_dashboard_repo_synthesis)
  (libraries masc_mcp alcotest yojson unix))

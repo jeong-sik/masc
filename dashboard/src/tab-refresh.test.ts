@@ -1,4 +1,32 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('./store', () => ({
+  refreshExecution: vi.fn(),
+  refreshBoard: vi.fn(),
+  refreshGoals: vi.fn(),
+}))
+
+vi.mock('./room-truth-store', () => ({
+  requestRoomTruth: vi.fn(),
+}))
+
+vi.mock('./operator-store', () => ({
+  refreshOperatorRoomDigest: vi.fn(),
+  refreshOperatorSnapshot: vi.fn(),
+}))
+
+vi.mock('./mission-store', () => ({
+  refreshMissionSnapshot: vi.fn(),
+}))
+
+vi.mock('./command-store', () => ({
+  commandPlaneSurface: { value: 'overview' },
+  refreshCommandPlaneChainSummary: vi.fn(),
+  refreshCommandPlaneCurrentSurface: vi.fn(),
+  refreshCommandPlaneOrchestra: vi.fn(),
+  refreshCommandPlaneSwarm: vi.fn(),
+}))
+
 import { refreshPlanForRoute } from './tab-refresh'
 
 describe('refreshPlanForRoute', () => {
@@ -53,6 +81,11 @@ describe('refreshPlanForRoute', () => {
       tab: 'lab',
       params: { section: 'autoresearch' },
     })).toEqual(['autoresearch'])
+
+    expect(refreshPlanForRoute({
+      tab: 'lab',
+      params: { section: 'harness' },
+    })).toEqual(['harness'])
 
     expect(refreshPlanForRoute({
       tab: 'lab',

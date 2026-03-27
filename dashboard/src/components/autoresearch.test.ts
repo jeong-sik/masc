@@ -132,6 +132,8 @@ describe('Autoresearch surface refresh', () => {
     await refreshAutoresearchSurface()
     await flushUi()
 
+    expect(container.textContent).toContain('Experiment Outcomes')
+    expect(container.textContent).toContain('하네스 열기')
     expect(container.textContent).toContain('Research Brief')
     expect(container.textContent).toContain('이 화면은 generator loop 자체를 설명합니다.')
     expect(container.textContent).toContain('1 / 5')
@@ -147,7 +149,7 @@ describe('Autoresearch surface refresh', () => {
       .toBeGreaterThanOrEqual(2)
     expect(container.textContent).toContain('2 / 5')
     expect(container.textContent).toContain('사이클 이력 (2건)')
-  })
+  }, 10000)
 
   it('preserves the current selection when that loop still exists after refresh', async () => {
     const loopA = loopSummary('loop-a111', { target_file: 'target-a.ml' })

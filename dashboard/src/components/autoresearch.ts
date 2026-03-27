@@ -7,6 +7,7 @@ import { useEffect } from 'preact/hooks'
 import { SurfaceCard } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { formatElapsedCompact } from '../lib/format-time'
+import { navigate } from '../router'
 import {
   deleteAutoresearchLoop,
   fetchAutoresearchLoops,
@@ -412,6 +413,35 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
   `
 }
 
+function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
+  return html`
+    <${SurfaceCard} variant="compact">
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-[1.3fr_1fr]">
+        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Experiment Outcomes</div>
+          <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">이 화면은 keep/discard 루프를 봅니다.</div>
+          <div class="mt-2 text-sm leading-[1.6] text-[var(--text-body)]">
+            어떤 파일을 바꾸고 어떤 metric을 밀어 올리려는지, 그리고 현재 ${loopCount}개 루프가 어떤 cycle에 있는지 직접 봅니다.
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] p-3">
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Safety Harness</div>
+          <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">심판 기계의 건강도는 별도로 봅니다.</div>
+          <div class="mt-2 text-sm leading-[1.6] text-[var(--text-body)]">
+            evaluator fallback, pre-compaction pressure, continuity DNA quality는 하네스에서 봅니다.
+          </div>
+          <button
+            type="button"
+            class="mt-3 rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
+            onClick=${() => navigate('lab', { section: 'harness' })}
+          >하네스 열기</button>
+        </div>
+      </div>
+    <//>
+  `
+}
+
 // --- Detail view ---
 
 function LoopDetailView() {
@@ -534,6 +564,8 @@ export function Autoresearch() {
 
   return html`
     <div class="flex flex-col gap-5">
+      <${OutcomeVsHarnessCallout} loopCount=${loops.length} />
+
       <div class="flex items-center justify-between">
         <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium">
           전체 ${loops.length}개 루프

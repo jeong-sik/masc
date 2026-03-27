@@ -158,6 +158,31 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "provenance" "fallback" resolved.provenance;
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
+let keeper_usage ?cost_usd ~input_tokens ~output_tokens () : Agent_sdk.Types.api_usage =
+  {
+    input_tokens;
+    output_tokens;
+    cache_creation_input_tokens = 0;
+    cache_read_input_tokens = 0;
+    cost_usd;
+  }
+
+let test_keeper_merge_usage_preserves_present_cost () =
+  let a = keeper_usage ~input_tokens:10 ~output_tokens:5 ~cost_usd:0.2 () in
+  let b = keeper_usage ~input_tokens:3 ~output_tokens:7 () in
+  let merged = Masc_mcp.Keeper_alerting.merge_usage a b in
+  check int "input tokens merged" 13 merged.input_tokens;
+  check int "output tokens merged" 12 merged.output_tokens;
+  check (option (float 0.000001)) "cost preserved from left" (Some 0.2)
+    merged.cost_usd
+
+let test_keeper_merge_usage_sums_costs_when_both_present () =
+  let a = keeper_usage ~input_tokens:10 ~output_tokens:5 ~cost_usd:0.2 () in
+  let b = keeper_usage ~input_tokens:3 ~output_tokens:7 ~cost_usd:0.05 () in
+  let merged = Masc_mcp.Keeper_alerting.merge_usage a b in
+  check (option (float 0.000001)) "costs summed" (Some 0.25)
+    merged.cost_usd
+
 let test_keeper_model_set_removed () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1882,6 +1907,10 @@ let () =
            test_resolved_keeper_skill_route_marks_agent_judgment;
          test_case "resolved skill route falls back when parse missing" `Quick
            test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing;
+         test_case "keeper merge usage preserves present cost" `Quick
+           test_keeper_merge_usage_preserves_present_cost;
+         test_case "keeper merge usage sums costs" `Quick
+           test_keeper_merge_usage_sums_costs_when_both_present;
          test_case "keeper model set removed" `Quick
            test_keeper_model_set_removed;
          test_case "keeper up rejects legacy model args" `Quick

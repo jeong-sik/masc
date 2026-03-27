@@ -370,8 +370,9 @@ module Transport = struct
   (** gRPC server port. Default: 8936. *)
   let grpc_port = get_port ~default:8936 "MASC_GRPC_PORT"
 
-  (** Whether gRPC transport is enabled. Default: true. *)
-  let grpc_enabled = get_bool ~default:true "MASC_GRPC_ENABLED"
+  (** Whether gRPC transport is enabled. Default: true.
+      Runtime-readable (tests change this via putenv). *)
+  let grpc_enabled () = get_bool ~default:true "MASC_GRPC_ENABLED"
 
   (** gRPC client target address. Derived from grpc_port when unset. *)
   let grpc_target_opt () =
@@ -380,8 +381,9 @@ module Transport = struct
   (** WebSocket server port. Default: 8937. *)
   let ws_port = get_port ~default:8937 "MASC_WS_PORT"
 
-  (** Whether WebSocket transport is enabled. Default: true. *)
-  let ws_enabled = get_bool ~default:true "MASC_WS_ENABLED"
+  (** Whether WebSocket transport is enabled. Default: true.
+      Runtime-readable (tests change this via putenv). *)
+  let ws_enabled () = get_bool ~default:true "MASC_WS_ENABLED"
 
   (** Whether WebRTC transport is enabled. Default: true. *)
   let webrtc_enabled = get_bool ~default:true "MASC_WEBRTC_ENABLED"

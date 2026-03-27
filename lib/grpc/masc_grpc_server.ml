@@ -13,7 +13,7 @@ let health_service_name = "grpc.health.v1.Health"
 let configured_port () = Env_config.Transport.grpc_port
 
 (** Check whether gRPC is enabled (default: enabled, opt-out via env). *)
-let is_enabled () = Env_config.Transport.grpc_enabled
+let is_enabled () = Env_config.Transport.grpc_enabled ()
 
 module Reflection_bridge = struct
   let reflection_v1_service_name = "grpc.reflection.v1.ServerReflection"

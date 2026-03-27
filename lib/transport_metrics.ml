@@ -113,7 +113,7 @@ let set_grpc_listen_status status =
 let set_ws_listen_status status =
   Atomic.set ws_listen_status status
 
-let grpc_enabled () = Env_config.Transport.grpc_enabled
+let grpc_enabled () = Env_config.Transport.grpc_enabled ()
 
 let grpc_port () = Env_config.Transport.grpc_port
 
@@ -190,7 +190,7 @@ let queue_pressure max_queue_depth =
   else if max_queue_depth >= 8 then "watch"
   else "steady"
 
-let ws_enabled () = Env_config.Transport.ws_enabled
+let ws_enabled () = Env_config.Transport.ws_enabled ()
 
 let ws_port () = Env_config.Transport.ws_port
 

@@ -143,10 +143,10 @@ end
 
 module Transport : sig
   val grpc_port : int
-  val grpc_enabled : bool
+  val grpc_enabled : unit -> bool
   val grpc_target_opt : unit -> string option
   val ws_port : int
-  val ws_enabled : bool
+  val ws_enabled : unit -> bool
   val webrtc_enabled : bool
   val use_h2 : unit -> string
   val agent_transport_opt : unit -> string option

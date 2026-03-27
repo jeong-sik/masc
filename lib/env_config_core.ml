@@ -40,9 +40,10 @@ let get_float ~default name =
 let get_bool ~default name =
   match Sys.getenv_opt name with
   | Some v ->
-      (match String.lowercase_ascii v with
+      (match String.trim v |> String.lowercase_ascii with
        | "true" | "1" | "yes" -> true
        | "false" | "0" | "no" -> false
+       | "" -> default
        | _ -> default)
   | None -> default
 

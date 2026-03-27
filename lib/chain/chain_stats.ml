@@ -8,7 +8,7 @@
     - 비용 추정
     - 성공/실패율 계산
     - 시간별 추이 분석
-    - Thread-safe 통계 수집 (Mutex 사용)
+    - 통계 수집 (non-yielding ops, single-domain Eio atomic)
 
     @author Chain Engine
     @since 2026-01
@@ -94,15 +94,6 @@ let stats_data : raw_data = {
   active_chains = 0;
 }
 
-(** Eio mutex for fiber-cooperative synchronization.
-    Created at module init time (not lazily) to guarantee availability
-    before any concurrent fiber accesses stats_data or cascade_data. *)
-let stats_mutex = Eio.Mutex.create ()
-
-(** Helper for mutex-protected operations *)
-let with_mutex f =
-  Eio.Mutex.use_rw ~protect:true stats_mutex (fun () -> f ())
-
 (** {1 Data Collection} *)
 
 (** Get current hour (0-23) *)
@@ -117,50 +108,42 @@ let incr_counter tbl key delta =
 
 (** Event handler for statistics collection *)
 let stats_handler event =
-  with_mutex (fun () ->
-    match event with
-    | ChainStart _ ->
-      let hour = current_hour () in
-      incr_counter stats_data.hourly_chains hour 1;
-      stats_data.active_chains <- stats_data.active_chains + 1
+  match event with
+  | ChainStart _ ->
+    let hour = current_hour () in
+    incr_counter stats_data.hourly_chains hour 1;
+    stats_data.active_chains <- stats_data.active_chains + 1
 
-    | NodeComplete payload ->
-      stats_data.node_durations <- payload.node_duration_ms :: stats_data.node_durations;
-      let tokens = payload.node_tokens in
-      stats_data.total_tokens <- stats_data.total_tokens + tokens.total_tokens;
-      stats_data.total_cost <- stats_data.total_cost +. tokens.estimated_cost_usd;
+  | NodeComplete payload ->
+    stats_data.node_durations <- payload.node_duration_ms :: stats_data.node_durations;
+    let tokens = payload.node_tokens in
+    stats_data.total_tokens <- stats_data.total_tokens + tokens.total_tokens;
+    stats_data.total_cost <- stats_data.total_cost +. tokens.estimated_cost_usd;
+    let hour = current_hour () in
+    incr_counter stats_data.hourly_tokens hour tokens.total_tokens
 
-      (* Track hourly tokens *)
-      let hour = current_hour () in
-      incr_counter stats_data.hourly_tokens hour tokens.total_tokens
+  | ChainComplete payload ->
+    stats_data.chain_durations <- payload.complete_duration_ms :: stats_data.chain_durations;
+    stats_data.chain_timestamps <- Unix.gettimeofday () :: stats_data.chain_timestamps;
+    stats_data.success_count <- stats_data.success_count + 1;
+    stats_data.active_chains <- max 0 (stats_data.active_chains - 1)
 
-    | ChainComplete payload ->
-      stats_data.chain_durations <- payload.complete_duration_ms :: stats_data.chain_durations;
-      stats_data.chain_timestamps <- Unix.gettimeofday () :: stats_data.chain_timestamps;
-      stats_data.success_count <- stats_data.success_count + 1;
-      stats_data.active_chains <- max 0 (stats_data.active_chains - 1)
+  | Error payload ->
+    stats_data.failure_count <- stats_data.failure_count + 1;
+    incr_counter stats_data.errors payload.error_message 1;
+    stats_data.active_chains <- max 0 (stats_data.active_chains - 1)
 
-    | Error payload ->
-      stats_data.failure_count <- stats_data.failure_count + 1;
-      incr_counter stats_data.errors payload.error_message 1;
-      stats_data.active_chains <- max 0 (stats_data.active_chains - 1)
-
-    | NodeStart _ -> ()
-  )
+  | NodeStart _ -> ()
 
 (** Track model-specific token usage *)
 let track_model_tokens ~model ~tokens =
-  with_mutex (fun () ->
-    incr_counter stats_data.tokens_by_model model tokens;
-    incr_counter stats_data.call_counts_by_model model 1
-  )
+  incr_counter stats_data.tokens_by_model model tokens;
+  incr_counter stats_data.call_counts_by_model model 1
 
 (** Track model-specific latency *)
 let track_model_latency ~model ~latency_ms =
-  with_mutex (fun () ->
-    let current = Hashtbl.find_opt stats_data.latencies_by_model model |> Option.value ~default:[] in
-    Hashtbl.replace stats_data.latencies_by_model model (latency_ms :: current)
-  )
+  let current = Hashtbl.find_opt stats_data.latencies_by_model model |> Option.value ~default:[] in
+  Hashtbl.replace stats_data.latencies_by_model model (latency_ms :: current)
 
 (** {1 Percentile Calculation} *)
 
@@ -182,80 +165,65 @@ let percentiles ps list =
 
 (** Compute current statistics *)
 let compute ?(since=0.0) () =
-  with_mutex (fun () ->
-    (* Filter durations by timestamp if since > 0 *)
-    let filtered_durations =
-      if since <= 0.0 then stats_data.chain_durations
-      else
-        List.filter_map (fun (d, ts) -> if ts >= since then Some d else None)
-          (List.combine stats_data.chain_durations stats_data.chain_timestamps
-           |> fun pairs -> if List.length pairs = 0 then [] else pairs)
-    in
-
-    (* Calculate duration percentiles *)
-    let chain_ps = percentiles [0.5; 0.95; 0.99] filtered_durations in
-    let p50, p95, p99 = match chain_ps with
-      | [a; b; c] -> (a, b, c)
-      | _ -> (0.0, 0.0, 0.0)
-    in
-
-    (* Calculate average *)
-    let avg_duration =
-      if filtered_durations = [] then 0.0
-      else
-        let sum = List.fold_left (+) 0 filtered_durations in
-        float_of_int sum /. float_of_int (List.length filtered_durations)
-    in
-
-    (* Convert hashtables to lists *)
-    let tokens_by_model =
-      Hashtbl.fold (fun k v acc -> (k, v) :: acc) stats_data.tokens_by_model []
-      |> List.sort (fun (_, a) (_, b) -> compare b a)  (* Sort by tokens desc *)
-    in
-
-    let failure_reasons =
-      Hashtbl.fold (fun k v acc -> (k, v) :: acc) stats_data.errors []
-      |> List.sort (fun (_, a) (_, b) -> compare b a)  (* Sort by count desc *)
-    in
-
-    let hourly_tokens =
-      List.init 24 (fun h ->
-        (h, Hashtbl.find_opt stats_data.hourly_tokens h |> Option.value ~default:0))
-      |> List.filter (fun (_, v) -> v > 0)
-    in
-
-    let hourly_chains =
-      List.init 24 (fun h ->
-        (h, Hashtbl.find_opt stats_data.hourly_chains h |> Option.value ~default:0))
-      |> List.filter (fun (_, v) -> v > 0)
-    in
-
-    (* Calculate success rate *)
-    let total_attempts = stats_data.success_count + stats_data.failure_count in
-    let success_rate =
-      if total_attempts = 0 then 1.0
-      else float_of_int stats_data.success_count /. float_of_int total_attempts
-    in
-
-    {
-      total_chains = List.length stats_data.chain_durations;
-      total_nodes = List.length stats_data.node_durations;
-      active_chains = stats_data.active_chains;
-      avg_duration_ms = avg_duration;
-      p50_duration_ms = p50;
-      p95_duration_ms = p95;
-      p99_duration_ms = p99;
-      total_tokens = stats_data.total_tokens;
-      tokens_by_model;
-      estimated_cost_usd = stats_data.total_cost;
-      success_count = stats_data.success_count;
-      failure_count = stats_data.failure_count;
-      success_rate;
-      failure_reasons;
-      hourly_tokens;
-      hourly_chains;
-    }
-  )
+  let filtered_durations =
+    if since <= 0.0 then stats_data.chain_durations
+    else
+      List.filter_map (fun (d, ts) -> if ts >= since then Some d else None)
+        (List.combine stats_data.chain_durations stats_data.chain_timestamps
+         |> fun pairs -> if List.length pairs = 0 then [] else pairs)
+  in
+  let chain_ps = percentiles [0.5; 0.95; 0.99] filtered_durations in
+  let p50, p95, p99 = match chain_ps with
+    | [a; b; c] -> (a, b, c)
+    | _ -> (0.0, 0.0, 0.0)
+  in
+  let avg_duration =
+    if filtered_durations = [] then 0.0
+    else
+      let sum = List.fold_left (+) 0 filtered_durations in
+      float_of_int sum /. float_of_int (List.length filtered_durations)
+  in
+  let tokens_by_model =
+    Hashtbl.fold (fun k v acc -> (k, v) :: acc) stats_data.tokens_by_model []
+    |> List.sort (fun (_, a) (_, b) -> compare b a)
+  in
+  let failure_reasons =
+    Hashtbl.fold (fun k v acc -> (k, v) :: acc) stats_data.errors []
+    |> List.sort (fun (_, a) (_, b) -> compare b a)
+  in
+  let hourly_tokens =
+    List.init 24 (fun h ->
+      (h, Hashtbl.find_opt stats_data.hourly_tokens h |> Option.value ~default:0))
+    |> List.filter (fun (_, v) -> v > 0)
+  in
+  let hourly_chains =
+    List.init 24 (fun h ->
+      (h, Hashtbl.find_opt stats_data.hourly_chains h |> Option.value ~default:0))
+    |> List.filter (fun (_, v) -> v > 0)
+  in
+  let total_attempts = stats_data.success_count + stats_data.failure_count in
+  let success_rate =
+    if total_attempts = 0 then 1.0
+    else float_of_int stats_data.success_count /. float_of_int total_attempts
+  in
+  {
+    total_chains = List.length stats_data.chain_durations;
+    total_nodes = List.length stats_data.node_durations;
+    active_chains = stats_data.active_chains;
+    avg_duration_ms = avg_duration;
+    p50_duration_ms = p50;
+    p95_duration_ms = p95;
+    p99_duration_ms = p99;
+    total_tokens = stats_data.total_tokens;
+    tokens_by_model;
+    estimated_cost_usd = stats_data.total_cost;
+    success_count = stats_data.success_count;
+    failure_count = stats_data.failure_count;
+    success_rate;
+    failure_reasons;
+    hourly_tokens;
+    hourly_chains;
+  }
 
 (** {1 Cascade Data (must precede reset)} *)
 
@@ -304,27 +272,25 @@ let cascade_data : cascade_raw = {
 
 (** Reset all statistics *)
 let reset () =
-  with_mutex (fun () ->
-    stats_data.chain_durations <- [];
-    stats_data.chain_timestamps <- [];
-    stats_data.node_durations <- [];
-    Hashtbl.clear stats_data.tokens_by_model;
-    Hashtbl.clear stats_data.call_counts_by_model;
-    Hashtbl.clear stats_data.latencies_by_model;
-    Hashtbl.clear stats_data.errors;
-    Hashtbl.clear stats_data.hourly_tokens;
-    Hashtbl.clear stats_data.hourly_chains;
-    stats_data.success_count <- 0;
-    stats_data.failure_count <- 0;
-    stats_data.total_tokens <- 0;
-    stats_data.total_cost <- 0.0;
-    stats_data.active_chains <- 0;
-    cascade_data.cascade_count <- 0;
-    cascade_data.tier_resolutions <- [];
-    cascade_data.tier_resolution_count <- 0;
-    cascade_data.escalation_count <- 0;
-    cascade_data.hard_failure_count <- 0
-  )
+  stats_data.chain_durations <- [];
+  stats_data.chain_timestamps <- [];
+  stats_data.node_durations <- [];
+  Hashtbl.clear stats_data.tokens_by_model;
+  Hashtbl.clear stats_data.call_counts_by_model;
+  Hashtbl.clear stats_data.latencies_by_model;
+  Hashtbl.clear stats_data.errors;
+  Hashtbl.clear stats_data.hourly_tokens;
+  Hashtbl.clear stats_data.hourly_chains;
+  stats_data.success_count <- 0;
+  stats_data.failure_count <- 0;
+  stats_data.total_tokens <- 0;
+  stats_data.total_cost <- 0.0;
+  stats_data.active_chains <- 0;
+  cascade_data.cascade_count <- 0;
+  cascade_data.tier_resolutions <- [];
+  cascade_data.tier_resolution_count <- 0;
+  cascade_data.escalation_count <- 0;
+  cascade_data.hard_failure_count <- 0
 
 (** {1 Subscription Management} *)
 
@@ -376,77 +342,67 @@ let cost_per_1k_tokens model =
 
 (** Calculate model-specific statistics *)
 let model_statistics () : model_stats list =
-  with_mutex (fun () ->
-    Hashtbl.fold (fun model tokens (acc : model_stats list) ->
-      let cost = float_of_int tokens *. cost_per_1k_tokens model /. 1000.0 in
-      let call_count =
-        Hashtbl.find_opt stats_data.call_counts_by_model model
-        |> Option.value ~default:1
-      in
-      let avg_tokens = float_of_int tokens /. float_of_int (max 1 call_count) in
-      let avg_latency_ms =
-        match Hashtbl.find_opt stats_data.latencies_by_model model with
-        | None -> 0.0
-        | Some [] -> 0.0
-        | Some latencies ->
-            let sum = List.fold_left (+) 0 latencies in
-            float_of_int sum /. float_of_int (List.length latencies)
-      in
-      ({
-        model_name = model;
-        call_count;
-        total_tokens = tokens;
-        avg_tokens_per_call = avg_tokens;
-        total_cost_usd = cost;
-        avg_latency_ms;
-      } : model_stats) :: acc
-    ) stats_data.tokens_by_model ([] : model_stats list)
-    |> List.sort (fun (a : model_stats) (b : model_stats) -> compare b.total_tokens a.total_tokens)
-  )
+  Hashtbl.fold (fun model tokens (acc : model_stats list) ->
+    let cost = float_of_int tokens *. cost_per_1k_tokens model /. 1000.0 in
+    let call_count =
+      Hashtbl.find_opt stats_data.call_counts_by_model model
+      |> Option.value ~default:1
+    in
+    let avg_tokens = float_of_int tokens /. float_of_int (max 1 call_count) in
+    let avg_latency_ms =
+      match Hashtbl.find_opt stats_data.latencies_by_model model with
+      | None -> 0.0
+      | Some [] -> 0.0
+      | Some latencies ->
+          let sum = List.fold_left (+) 0 latencies in
+          float_of_int sum /. float_of_int (List.length latencies)
+    in
+    ({
+      model_name = model;
+      call_count;
+      total_tokens = tokens;
+      avg_tokens_per_call = avg_tokens;
+      total_cost_usd = cost;
+      avg_latency_ms;
+    } : model_stats) :: acc
+  ) stats_data.tokens_by_model ([] : model_stats list)
+  |> List.sort (fun (a : model_stats) (b : model_stats) -> compare b.total_tokens a.total_tokens)
 
 (** {1 Cascade Statistics} *)
 
 (** Track a cascade execution result *)
 let track_cascade ~resolved_tier ~escalations ~hard_failures =
-  with_mutex (fun () ->
-    cascade_data.cascade_count <- cascade_data.cascade_count + 1;
-    cascade_data.tier_resolutions <- resolved_tier :: cascade_data.tier_resolutions;
-    cascade_data.tier_resolution_count <- cascade_data.tier_resolution_count + 1;
-    (* Cap tier history to prevent unbounded memory growth.
-       Truncate at 2x threshold for amortized O(1) - avoids O(n) on every insert. *)
-    if cascade_data.tier_resolution_count > max_tier_history * 2 then begin
-      cascade_data.tier_resolutions <- list_take max_tier_history cascade_data.tier_resolutions;
-      cascade_data.tier_resolution_count <- max_tier_history
-    end;
-    cascade_data.escalation_count <- cascade_data.escalation_count + escalations;
-    cascade_data.hard_failure_count <- cascade_data.hard_failure_count + hard_failures
-  )
+  cascade_data.cascade_count <- cascade_data.cascade_count + 1;
+  cascade_data.tier_resolutions <- resolved_tier :: cascade_data.tier_resolutions;
+  cascade_data.tier_resolution_count <- cascade_data.tier_resolution_count + 1;
+  if cascade_data.tier_resolution_count > max_tier_history * 2 then begin
+    cascade_data.tier_resolutions <- list_take max_tier_history cascade_data.tier_resolutions;
+    cascade_data.tier_resolution_count <- max_tier_history
+  end;
+  cascade_data.escalation_count <- cascade_data.escalation_count + escalations;
+  cascade_data.hard_failure_count <- cascade_data.hard_failure_count + hard_failures
 
 (** Compute cascade statistics snapshot *)
 let cascade_snapshot () : cascade_stats =
-  with_mutex (fun () ->
-    let total = cascade_data.cascade_count in
-    let tiers = cascade_data.tier_resolutions in
-    let tier0 = List.length (List.filter (fun t -> t = 0) tiers) in
-    let tier1 = List.length (List.filter (fun t -> t = 1) tiers) in
-    let tier2_plus = List.length (List.filter (fun t -> t >= 2) tiers) in
-    let avg = if total = 0 then 0.0
-      else float_of_int (List.fold_left (+) 0 tiers) /. float_of_int total in
-    (* Savings: if all went to max tier, cost would be higher.
-       Estimate: tier0 saves ~100%, tier1 saves ~50%, tier2+ saves 0% *)
-    let savings = if total = 0 then 0.0
-      else (float_of_int tier0 *. 1.0 +. float_of_int tier1 *. 0.5) /. float_of_int total *. 100.0 in
-    {
-      total_cascades = total;
-      tier0_resolved = tier0;
-      tier1_resolved = tier1;
-      tier2_plus_resolved = tier2_plus;
-      total_escalations = cascade_data.escalation_count;
-      total_hard_failures = cascade_data.hard_failure_count;
-      avg_tier = avg;
-      estimated_savings_pct = savings;
-    }
-  )
+  let total = cascade_data.cascade_count in
+  let tiers = cascade_data.tier_resolutions in
+  let tier0 = List.length (List.filter (fun t -> t = 0) tiers) in
+  let tier1 = List.length (List.filter (fun t -> t = 1) tiers) in
+  let tier2_plus = List.length (List.filter (fun t -> t >= 2) tiers) in
+  let avg = if total = 0 then 0.0
+    else float_of_int (List.fold_left (+) 0 tiers) /. float_of_int total in
+  let savings = if total = 0 then 0.0
+    else (float_of_int tier0 *. 1.0 +. float_of_int tier1 *. 0.5) /. float_of_int total *. 100.0 in
+  {
+    total_cascades = total;
+    tier0_resolved = tier0;
+    tier1_resolved = tier1;
+    tier2_plus_resolved = tier2_plus;
+    total_escalations = cascade_data.escalation_count;
+    total_hard_failures = cascade_data.hard_failure_count;
+    avg_tier = avg;
+    estimated_savings_pct = savings;
+  }
 
 (** {1 Serialization} *)
 

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "run_id": "run-20260328-abc123",
+  "contract_id": "md5:7f3a1b2c4d5e6f7890abcdef12345678",
+  "requested_execution_mode": "draft",
+  "effective_execution_mode": "draft",
+  "mode_decision_source": "capability_match",
+  "risk_class": "medium",
+  "provider_snapshot": {
+    "provider_name": "anthropic",
+    "model_id": "claude-sonnet-4-6",
+    "api_version": "2025-04-01"
+  },
+  "capability_snapshot": {
+    "tools": ["bash", "edit", "read", "glob", "grep"],
+    "mcp_servers": ["masc-mcp"],
+    "max_turns": 50,
+    "max_tokens": 8192,
+    "thinking_enabled": true
+  },
+  "tool_trace_refs": [
+    "proof-store://run-20260328-abc123/tool_traces/turn-01.jsonl",
+    "proof-store://run-20260328-abc123/tool_traces/turn-02.jsonl"
+  ],
+  "raw_evidence_refs": [
+    "proof-store://run-20260328-abc123/evidence/diff-output.json",
+    "proof-store://run-20260328-abc123/evidence/test-results.json"
+  ],
+  "checkpoint_ref": "proof-store://run-20260328-abc123/evidence/checkpoint-final.json",
+  "result_status": "completed",
+  "started_at": 1743148800.0,
+  "ended_at": 1743149100.0
+}

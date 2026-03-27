@@ -25,6 +25,7 @@
    board_dispatch
    board_listener
    capability_registry
+   cdal_proof_decoder
    bounded
    cache_eio
    cascade_inference

@@ -1,0 +1,27 @@
+{
+  "schema_version": 99,
+  "run_id": "run-future-unknown",
+  "contract_id": "sha256:deadbeef",
+  "requested_execution_mode": "hypermode",
+  "effective_execution_mode": "hypermode",
+  "mode_decision_source": "future_logic",
+  "risk_class": "extreme",
+  "provider_snapshot": {
+    "provider_name": "future-provider",
+    "model_id": "gpt-99",
+    "api_version": "2030-01-01"
+  },
+  "capability_snapshot": {
+    "tools": [],
+    "mcp_servers": [],
+    "max_turns": 1000,
+    "max_tokens": null,
+    "thinking_enabled": null
+  },
+  "tool_trace_refs": [],
+  "raw_evidence_refs": [],
+  "checkpoint_ref": null,
+  "result_status": "completed",
+  "started_at": 0.0,
+  "ended_at": 0.0
+}

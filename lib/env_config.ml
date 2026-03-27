@@ -137,12 +137,12 @@ let to_json () : Yojson.Safe.t =
       "llama_swarm_model", str_opt Chain.Model.llama_swarm_model_opt;
     ];
     "dashboard", `Assoc [
-      "fixtures_enabled", bool_val Dashboard.Fixtures.enabled;
-      "governance_judge_enabled", bool_val Dashboard.GovernanceJudge.enabled;
-      "governance_judge_interval_sec", int_val Dashboard.GovernanceJudge.interval_sec;
-      "operator_judge_enabled", bool_val Dashboard.OperatorJudge.enabled;
-      "operator_judge_interval_sec", int_val Dashboard.OperatorJudge.interval_sec;
-      "relay_calibration_enabled", bool_val Dashboard.Relay.calibration_enabled;
+      "fixtures_enabled", bool_val Env_config_dashboard.Fixtures.enabled;
+      "governance_judge_enabled", bool_val Env_config_dashboard.GovernanceJudge.enabled;
+      "governance_judge_interval_sec", int_val Env_config_dashboard.GovernanceJudge.interval_sec;
+      "operator_judge_enabled", bool_val Env_config_dashboard.OperatorJudge.enabled;
+      "operator_judge_interval_sec", int_val Env_config_dashboard.OperatorJudge.interval_sec;
+      "relay_calibration_enabled", bool_val Env_config_dashboard.Relay.calibration_enabled;
     ];
     "external", `Assoc [
       "graphql_url", str (Server.External.graphql_url ());

@@ -21,6 +21,7 @@ let current_clock : float Eio.Time.clock_ty Eio.Resource.t option Atomic.t = Ato
 let current_mono_clock : Eio.Time.Mono.ty Eio.Resource.t option Atomic.t = Atomic.make None
 let current_sw : Eio.Switch.t option Atomic.t = Atomic.make None
 let net_initialized : bool Atomic.t = Atomic.make false
+let with_test_env_lock = Mutex.create ()
 
 let snapshot_state () =
   {
@@ -57,12 +58,17 @@ let set_switch sw =
   Atomic.set current_sw (Some sw)
 
 let with_test_env ~net ~clock ~mono_clock ~sw f =
+  Mutex.lock with_test_env_lock;
   let snapshot = snapshot_state () in
   set_net net;
   set_clock clock;
   set_mono_clock mono_clock;
   set_switch sw;
-  Fun.protect ~finally:(fun () -> restore_state snapshot) f
+  Fun.protect
+    ~finally:(fun () ->
+      restore_state snapshot;
+      Mutex.unlock with_test_env_lock)
+    f
 
 let get_net_opt () : eio_net option =
   Atomic.get current_net

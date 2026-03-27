@@ -16,7 +16,9 @@ let make_test_messages () : Agent_sdk.Types.message list =
     Agent_sdk.Types.system_msg "You are a helpful assistant.";
     Agent_sdk.Types.user_msg "Hello, what is 2+2?";
     Agent_sdk.Types.assistant_msg "The answer is 4.";
-    Masc_mcp.Oas_message.tool_result ~tool_use_id:"call-1" ~content:"result: 4" ();
+    { Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+      content = [ Agent_sdk.Types.ToolResult { tool_use_id = "call-1"; content = "result: 4"; is_error = false } ];
+      name = None; tool_call_id = None };
     Agent_sdk.Types.user_msg "Thanks, now solve x^2 = 9.";
     Agent_sdk.Types.assistant_msg "x = 3 or x = -3.";
   ]
@@ -54,7 +56,10 @@ let test_roundtrip_system_msg_dropped () =
     true (Option.is_none result)
 
 let test_roundtrip_tool_msg () =
-  let msg = Masc_mcp.Oas_message.tool_result ~tool_use_id:"tc-1" ~content:"tool output here" () in
+  let msg : Agent_sdk.Types.message =
+    { role = Agent_sdk.Types.Tool;
+      content = [ Agent_sdk.Types.ToolResult { tool_use_id = "tc-1"; content = "tool output here"; is_error = false } ];
+      name = None; tool_call_id = None } in
   match (fun (m : Agent_sdk.Types.message) -> match m.role with Agent_sdk.Types.System -> None | _ -> Some m) msg with
   | None -> Alcotest.fail "tool message should not be dropped"
   | Some oas ->

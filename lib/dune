@@ -60,7 +60,6 @@
    dashboard_governance_judge
    dashboard_operator_judge
    dashboard_surface_readiness
-   dashboard_semantics
    dashboard_utils
    dashboard_execution
    dashboard_execution_helpers
@@ -210,7 +209,6 @@
    chain_executor_retry
    chain_adapter_eio
    checkpoint_store
-   server_checkpoint
    run_log_eio
    chain_spawn_registry
    chain_executor_helpers
@@ -222,7 +220,6 @@
    chain_orchestrator_eio
    chain_run_store
    chain_native_eio
-   oas_message
    oas_response
    thompson_sampling
    memory_pg
@@ -250,17 +247,14 @@
    mcp_server_eio_protocol
    mcp_session
    metrics_store_eio
-   generational_metrics
    handoff_quality
    adaptive_thresholds
    mdal_store
-   message_schema
    verification
    trace
    mitosis
    mitosis_defaults
    mitosis_dna
-   mitosis_metrics
    operator_approval
    operator_pending_confirm
    operator_digest
@@ -450,7 +444,6 @@
    masc_grpc_transport
    shutdown
    supervisor
-   keeper_chat_ag_ui
    audit_log
    build_identity
   voice_config
@@ -464,7 +457,6 @@
    eval_gate
    eval_harness
    eval_calibration
-   eval_ablation
    ;; Keeper contract
    keeper_schema
    keeper_config
@@ -526,7 +518,6 @@
    context_compact_oas
    verifier_oas
    procedural_memory
-   procedure_tool_materializer
    oas_events
    oas_worker
    tool_council_oas

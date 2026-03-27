@@ -30,6 +30,87 @@ let validate_task_id task_id =
   if task_id = "" then Error (Types.TaskNotFound "")
   else Ok task_id
 
+let review_completion_notes
+    ~(completion_contract : string list option)
+    ~(evaluator_cascade : string option)
+    ~(ctx : context)
+    ~(task_opt : Types.task option)
+    ~(task_id : string)
+    ~(notes : string) : string option =
+  match task_opt with
+  | None -> None
+  | Some task ->
+      let ar_req : Anti_rationalization.review_request = {
+        task_title = task.title;
+        task_description = task.description;
+        completion_notes = notes;
+        agent_name = ctx.agent_name;
+      } in
+      let on_verdict result =
+        Eval_calibration.record_verdict
+          ~task_id ~req:ar_req ~result ();
+        (try
+           Sse.broadcast
+             (`Assoc
+               [
+                 ("type", `String "oas:masc:harness:verdict_recorded");
+                 ( "payload",
+                   `Assoc
+                     [
+                       ("timestamp", `Float (Time_compat.now ()));
+                       ("task_id", `String task_id);
+                       ("task_title", `String ar_req.task_title);
+                       ("agent_name", `String ar_req.agent_name);
+                       ("gate", `String result.gate);
+                       ("verdict", `String (verdict_to_string result));
+                       ( "evaluator_cascade",
+                         `String result.evaluator_cascade );
+                       ( "fallback_reason",
+                         match result.fallback_reason with
+                         | Some reason -> `String reason
+                         | None -> `Null );
+                     ] );
+               ])
+         with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Harness.warn
+              "[anti-rationalization] verdict sse broadcast failed: %s"
+              (Printexc.to_string exn))
+      in
+      let few_shot_block =
+        Eval_calibration.format_few_shot_block
+          (Eval_calibration.select_examples ~max_examples:3)
+      in
+      match (Anti_rationalization.review
+         ?sw:ctx.sw
+         ?evaluator_cascade
+         ?completion_contract
+         ~on_verdict ~few_shot_block ar_req).verdict with
+      | Anti_rationalization.Reject reason -> Some reason
+      | Anti_rationalization.Approve -> None
+
+let can_review_completion ~(task_opt : Types.task option) ~(agent_name : string) =
+  match task_opt with
+  | Some task ->
+      (match task.task_status with
+       | Types.Claimed { assignee; _ }
+       | Types.InProgress { assignee; _ } ->
+           String.equal assignee agent_name
+       | _ -> false)
+  | None -> false
+
+let completion_rejection_message ?(allow_force = false) reason =
+  if allow_force then
+    Printf.sprintf
+      "Completion rejected by anti-rationalization gate: %s\n\
+       Revise your completion notes to describe actual work, then retry.\n\
+       Use force=true to override (operator only)." reason
+  else
+    Printf.sprintf
+      "Completion rejected by anti-rationalization gate: %s\n\
+       Revise your completion notes to describe actual work, then retry." reason
+
 (* Handlers *)
 
 let handle_add_task ctx args =
@@ -132,6 +213,10 @@ let handle_done ctx args =
   (* Get task info BEFORE completion to extract actual start time *)
   let tasks = Room.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
+  if not (can_review_completion ~task_opt ~agent_name:ctx.agent_name) then
+    result_to_response
+      (Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes)
+  else
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
@@ -146,6 +231,19 @@ let handle_done ctx args =
         | _ -> (default_time, []))
     | None -> (default_time, [])
   in
+  let gate_rejection =
+    review_completion_notes
+      ~completion_contract:None
+      ~evaluator_cascade:None
+      ~ctx
+      ~task_opt
+      ~task_id
+      ~notes
+  in
+  match gate_rejection with
+  | Some reason ->
+      (false, completion_rejection_message reason)
+  | None ->
   let result = Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes in
   (* Notify A2A subscribers on successful completion *)
   (match result with
@@ -305,64 +403,19 @@ let handle_transition ctx args =
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
   (* Anti-rationalization gate: verify completion notes before allowing "done" *)
   let gate_rejection =
-    if action_lc = "done" && not force then
-      match task_opt with
-      | Some task ->
-        let ar_req : Anti_rationalization.review_request = {
-          task_title = task.title;
-          task_description = task.description;
-          completion_notes = notes;
-          agent_name = ctx.agent_name;
-        } in
-        let on_verdict result =
-          Eval_calibration.record_verdict
-            ~task_id ~req:ar_req ~result ();
-          (try
-             Sse.broadcast
-               (`Assoc
-                 [
-                   ("type", `String "oas:masc:harness:verdict_recorded");
-                   ( "payload",
-                     `Assoc
-                       [
-                         ("timestamp", `Float (Time_compat.now ()));
-                         ("task_id", `String task_id);
-                         ("task_title", `String ar_req.task_title);
-                         ("agent_name", `String ar_req.agent_name);
-                         ("gate", `String result.gate);
-                         ("verdict", `String (verdict_to_string result));
-                         ( "evaluator_cascade",
-                           `String result.evaluator_cascade );
-                         ( "fallback_reason",
-                           match result.fallback_reason with
-                           | Some reason -> `String reason
-                           | None -> `Null );
-                       ] );
-                 ])
-           with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-              Log.Harness.warn
-                "[anti-rationalization] verdict sse broadcast failed: %s"
-                (Printexc.to_string exn)) in
-        let few_shot_block =
-          Eval_calibration.format_few_shot_block
-            (Eval_calibration.select_examples ~max_examples:3) in
-        (match (Anti_rationalization.review
-           ?sw:ctx.sw
-           ?evaluator_cascade
-           ?completion_contract
-           ~on_verdict ~few_shot_block ar_req).verdict with
-         | Anti_rationalization.Reject reason -> Some reason
-         | Anti_rationalization.Approve -> None)
-      | None -> None
+    if action_lc = "done" && not force && can_review_completion ~task_opt ~agent_name:ctx.agent_name then
+      review_completion_notes
+        ~completion_contract
+        ~evaluator_cascade
+        ~ctx
+        ~task_opt
+        ~task_id
+        ~notes
     else None
   in
   match gate_rejection with
   | Some reason ->
-    (false, Printf.sprintf "Completion rejected by anti-rationalization gate: %s\n\
-                             Revise your completion notes to describe actual work, then retry.\n\
-                             Use force=true to override (operator only)." reason)
+    (false, completion_rejection_message ~allow_force:true reason)
   | None ->
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with

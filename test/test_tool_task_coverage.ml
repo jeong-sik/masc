@@ -26,6 +26,14 @@ let make_test_ctx () =
   let _ = Room.init config ~agent_name:(Some "test-agent") in
   { Tool_task.config; agent_name = "test-agent"; sw = None }
 
+let make_temp_dir prefix =
+  incr test_counter;
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s-%d-%d" prefix
+       (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  dir
+
 let str_contains s substring =
   let len_s = String.length s in
   let len_sub = String.length substring in
@@ -83,28 +91,24 @@ let () = test "dispatch_claim_next" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test masc_done triggers calibration logging (#3164) *)
-let () = test "masc_done_records_calibration_verdict" (fun () ->
+(* Test handle_done triggers calibration logging (#3164) *)
+let () = test "handle_done_records_calibration_verdict" (fun () ->
   let ctx = make_test_ctx () in
   (* Setup: add task, claim it *)
   let _ = Tool_task.handle_add_task ctx
     (`Assoc [("title", `String "Calibration test task")]) in
   let _ = Tool_task.handle_claim ctx
     (`Assoc [("task_id", `String "task-001")]) in
-  (* Set calibration store to a temp dir *)
-  incr test_counter;
-  let verdict_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc-verdict-test-%d-%d"
-       (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
-  (try Unix.mkdir verdict_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let verdict_dir = make_temp_dir "masc-verdict-test" in
   Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
   (* Trigger done with short notes (< 10 chars) to hit length gate *)
-  let (_success, _result) = Tool_task.handle_transition ctx
+  let (success, result) = Tool_task.handle_done ctx
     (`Assoc [
       ("task_id", `String "task-001");
-      ("action", `String "done");
       ("notes", `String "x")
     ]) in
+  assert (not success);
+  assert (str_contains result "Completion rejected by anti-rationalization gate");
   (* Verify: verdict was recorded in the store *)
   let store = Eval_calibration.get_store () in
   let records = Dated_jsonl.read_recent store 10 in
@@ -120,17 +124,36 @@ let () = test "masc_done_records_calibration_verdict" (fun () ->
   Eval_calibration.reset_store_for_testing ()
 )
 
-let () = test "masc_done_respects_completion_contract_and_records_custom_evaluator" (fun () ->
+let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx
+    (`Assoc [("title", `String "Approved calibration task")]) in
+  let _ = Tool_task.handle_claim ctx
+    (`Assoc [("task_id", `String "task-001")]) in
+  let verdict_dir = make_temp_dir "masc-verdict-approve-test" in
+  Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
+  let success, result = Tool_task.handle_done ctx
+    (`Assoc [
+      ("task_id", `String "task-001");
+      ("notes", `String "Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly.")
+    ]) in
+  if not success then failwith result;
+  let store = Eval_calibration.get_store () in
+  let records = Dated_jsonl.read_recent store 10 in
+  assert (List.length records >= 1);
+  let first = List.hd records in
+  let verdict = Yojson.Safe.Util.(first |> member "verdict" |> to_string) in
+  assert (verdict = "approve");
+  Eval_calibration.reset_store_for_testing ()
+)
+
+let () = test "handle_transition_respects_completion_contract_and_records_custom_evaluator" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx
     (`Assoc [("title", `String "Contract calibration task")]) in
   let _ = Tool_task.handle_claim ctx
     (`Assoc [("task_id", `String "task-001")]) in
-  incr test_counter;
-  let verdict_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc-verdict-contract-test-%d-%d"
-       (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
-  (try Unix.mkdir verdict_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let verdict_dir = make_temp_dir "masc-verdict-contract-test" in
   Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
   let success, result = Tool_task.handle_transition ctx
     (`Assoc [

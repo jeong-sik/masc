@@ -65,12 +65,12 @@ let trimmed_env_opt key =
   | None -> None
 
 let me_root () =
-  match trimmed_env_opt "ME_ROOT" with
+  match Env_config.me_root_opt () with
   | Some root -> root
   | None -> (
       match trimmed_env_opt "HOME" with
       | Some home -> Filename.concat home "me"
-      | None -> Filename.concat (Filename.get_temp_dir_name ()) "me")
+      | None -> Sys.getcwd ())
 
 let pre_compact_store_base_dir () =
   Filename.concat (me_root ()) "data/harness-pre-compact"
@@ -129,6 +129,9 @@ let read_store_records store ?since ?until () =
     let start_date = if since = "" then "2020-01-01" else since in
     let end_date = if until = "" then "2099-12-31" else until in
     Dated_jsonl.read_range store ~since:start_date ~until:end_date
+
+let has_any_records store =
+  Dated_jsonl.read_recent store 1 <> []
 
 let max_timestamp left right =
   match (left, right) with
@@ -329,9 +332,13 @@ let latest_timestamp_of_verdicts (verdicts : harness_verdict_item list) =
   | item :: _ -> Some item.timestamp
   | [] -> None
 
-let latest_sorted = function
-  | item :: _ -> Some item
-  | [] -> None
+let latest_by_timestamp timestamp_of items =
+  List.fold_left
+    (fun acc item ->
+      match acc with
+      | Some current when timestamp_of current >= timestamp_of item -> acc
+      | _ -> Some item)
+    None items
 
 let pre_compact_timestamp (event : pre_compact_event) = event.timestamp
 let pre_compact_ratio (event : pre_compact_event) = event.context_ratio
@@ -457,19 +464,31 @@ let json ?since ?until () =
   let calibration = Eval_calibration.calibration_stats ?since ?until () in
   let recent_verdicts = read_recent_verdicts ?since ?until () in
   let has_window = Option.is_some since || Option.is_some until in
-  let all_pre_compact_events = read_pre_compact_events () in
+  let pre_compact_store = get_pre_compact_store () in
+  let pre_compact_events = read_pre_compact_events ?since ?until () in
   let latest_pre_compact : pre_compact_event option =
-    latest_sorted all_pre_compact_events
+    if has_window then
+      Dated_jsonl.read_recent pre_compact_store 1
+      |> List.filter_map pre_compact_event_of_json
+      |> latest_by_timestamp pre_compact_timestamp
+    else latest_by_timestamp pre_compact_timestamp pre_compact_events
   in
-  let pre_compact_events =
-    if has_window then read_pre_compact_events ?since ?until ()
-    else all_pre_compact_events
+  let pre_compact_has_any =
+    if has_window then has_any_records pre_compact_store
+    else pre_compact_events <> []
   in
-  let all_dna_quality_events = read_dna_quality_events () in
-  let latest_dna : dna_quality_event option = latest_sorted all_dna_quality_events in
-  let dna_quality_events =
-    if has_window then read_dna_quality_events ?since ?until ()
-    else all_dna_quality_events
+  let dna_quality_store = get_dna_quality_store () in
+  let dna_quality_events = read_dna_quality_events ?since ?until () in
+  let latest_dna : dna_quality_event option =
+    if has_window then
+      Dated_jsonl.read_recent dna_quality_store 1
+      |> List.filter_map dna_quality_event_of_json
+      |> latest_by_timestamp dna_quality_timestamp
+    else latest_by_timestamp dna_quality_timestamp dna_quality_events
+  in
+  let dna_quality_has_any =
+    if has_window then has_any_records dna_quality_store
+    else dna_quality_events <> []
   in
   `Assoc
     [
@@ -484,10 +503,10 @@ let json ?since ?until () =
       ("recent_verdicts", `List (List.map verdict_item_json recent_verdicts));
       ( "pre_compact",
         recent_pre_compact_json ?since ?until
-          ~has_any:(all_pre_compact_events <> [])
+          ~has_any:pre_compact_has_any
           ~latest:latest_pre_compact ~events:pre_compact_events () );
       ( "dna_quality",
         recent_dna_quality_json ?since ?until
-          ~has_any:(all_dna_quality_events <> []) ~latest:latest_dna
+          ~has_any:dna_quality_has_any ~latest:latest_dna
           ~events:dna_quality_events () );
     ]

@@ -174,7 +174,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          let meta = {
            name = p.name;
            agent_name = keeper_agent_name p.name;
-           persona_profile_path = Option.value ~default:"" p.profile_defaults.manifest_path;
            trace_id;
            trace_history = [];
            goal;
@@ -254,9 +253,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             mention_reactive_turn_count = 0;
             noop_turn_count = 0;
             last_triage_triggers = "";
-            initiative_enabled = true;
-            initiative_idle_sec = 0;
-            initiative_cooldown_sec = 0;
             active_team_session_id = None;
             last_team_session_started_at = "";
             team_session_start_count_total = 0;

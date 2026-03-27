@@ -210,6 +210,8 @@ let sample_session config ~session_id ~started_at ~updated_at_iso =
     last_turn_at = None;
     stop_reason = None;
     generated_report = false;
+    delivery_contract = None;
+    latest_delivery_verdict = None;
     artifacts_dir = Team_session_store.session_dir config session_id;
     created_at_iso = updated_at_iso;
     updated_at_iso;

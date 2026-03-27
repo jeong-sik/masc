@@ -24,6 +24,8 @@ function sourceLabel(source: string): string {
   switch (source) {
     case 'env':
       return 'env override'
+    case 'home_masc':
+      return 'home config'
     case 'invalid_env':
       return 'invalid env'
     case 'exe_relative':

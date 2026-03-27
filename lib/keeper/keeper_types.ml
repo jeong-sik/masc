@@ -47,7 +47,6 @@ type proactive_config = {
 type keeper_meta = {
   name: string;
   agent_name: string;
-  persona_profile_path: string;
   trace_id: string;
   trace_history: string list;
   goal: string;
@@ -99,9 +98,6 @@ type keeper_meta = {
   mention_reactive_turn_count: int;
   noop_turn_count: int;
   last_triage_triggers: string;
-  initiative_enabled: bool;
-  initiative_idle_sec: int;
-  initiative_cooldown_sec: int;
   paused: bool;
   current_task_id: string option;
   (** Currently claimed task ID for cost attribution.
@@ -135,12 +131,57 @@ let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
            "legacy keeper model args removed for %s: %s. Keepers now use cascade_name and last_model_used only."
            tool_name (String.concat ", " fields))
 
+let drop_assoc_keys (keys : string list) (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (List.filter (fun (key, _) -> not (List.mem key keys)) fields)
+  | _ -> json
+
+let reject_removed_keeper_meta_fields (json : Yojson.Safe.t) =
+  let present = present_json_keys removed_keeper_meta_key_names json in
+  match present with
+  | [] -> Ok ()
+  | fields ->
+      Error
+        (Printf.sprintf
+           "removed keeper meta fields: %s"
+           (String.concat ", " fields))
+
+let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) :
+    Yojson.Safe.t * bool =
+  match json with
+  | `Assoc fields ->
+      let present =
+        fields
+        |> List.filter_map (fun (key, _) ->
+               if List.mem key removed_keeper_meta_key_names then Some key else None)
+      in
+      if present = [] then (json, false)
+      else
+        let scrubbed = drop_assoc_keys removed_keeper_meta_key_names json in
+        let content = Yojson.Safe.pretty_to_string scrubbed in
+        (try
+           Fs_compat.save_file path content;
+           Log.Keeper.info
+             "scrubbed removed keeper meta fields for %s: %s"
+             path
+             (String.concat ", " present)
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Log.Keeper.warn
+               "failed to scrub removed keeper meta fields for %s: %s"
+               path
+               (Printexc.to_string exn));
+        (scrubbed, true)
+  | _ -> (json, false)
+
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   `Assoc
     [
       ("name", `String m.name);
       ("agent_name", `String m.agent_name);
-      ("persona_profile_path", `String m.persona_profile_path);
       ("trace_id", `String m.trace_id);
       ("trace_history", `List (List.map (fun s -> `String s) m.trace_history));
       ("goal", `String m.goal);
@@ -220,9 +261,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("mention_reactive_turn_count", `Int m.mention_reactive_turn_count);
       ("noop_turn_count", `Int m.noop_turn_count);
       ("last_triage_triggers", `String m.last_triage_triggers);
-      ("initiative_enabled", `Bool m.initiative_enabled);
-      ("initiative_idle_sec", `Int m.initiative_idle_sec);
-      ("initiative_cooldown_sec", `Int m.initiative_cooldown_sec);
       ("paused", `Bool m.paused);
       ("current_task_id",
         (match m.current_task_id with None -> `Null | Some s -> `String s));
@@ -230,9 +268,11 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
   try
+    match reject_removed_keeper_meta_fields json with
+    | Error e -> Error e
+    | Ok () ->
     let name = Safe_ops.json_string ~default:"" "name" json in
     let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
-    let persona_profile_path = Safe_ops.json_string ~default:"" "persona_profile_path" json in
     let trace_id = Safe_ops.json_string ~default:"" "trace_id" json in
     let trace_history =
       Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
@@ -427,15 +467,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let last_triage_triggers =
       Safe_ops.json_string ~default:"" "last_triage_triggers" json
     in
-    let initiative_enabled =
-      Safe_ops.json_bool ~default:true "initiative_enabled" json
-    in
-    let initiative_idle_sec =
-      Safe_ops.json_int ~default:0 "initiative_idle_sec" json
-    in
-    let initiative_cooldown_sec =
-      Safe_ops.json_int ~default:0 "initiative_cooldown_sec" json
-    in
     let paused =
       Safe_ops.json_bool ~default:false "paused" json
     in
@@ -449,7 +480,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         {
           name;
           agent_name = if agent_name = "" then keeper_agent_name name else agent_name;
-          persona_profile_path;
           trace_id;
           trace_history;
           goal;
@@ -532,9 +562,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           mention_reactive_turn_count;
           noop_turn_count;
           last_triage_triggers;
-          initiative_enabled;
-          initiative_idle_sec;
-          initiative_cooldown_sec;
           paused;
           current_task_id;
         }
@@ -675,6 +702,19 @@ let is_resident_keeper config name =
   let path = resident_keeper_path config name in
   Sys.file_exists path
 
+let read_meta_file_path path : (keeper_meta option, string) result =
+  if not (Sys.file_exists path) then Ok None
+  else
+    match Safe_ops.read_json_file_safe path with
+    | Error e -> Error e
+    | Ok json ->
+        let json, _scrubbed =
+          scrub_persisted_keeper_meta_json ~path json
+        in
+        (match meta_of_json json with
+         | Ok meta -> Ok (Some meta)
+         | Error e -> Error e)
+
 let register_resident_keeper config name : (unit, string) result =
   let created_at =
     match read_resident_keeper config name with
@@ -682,15 +722,9 @@ let register_resident_keeper config name : (unit, string) result =
     | _ -> now_iso ()
   in
   let meta_opt =
-    let path = keeper_meta_path config name in
-    if not (Sys.file_exists path) then None
-    else
-      match Safe_ops.read_json_file_safe path with
-      | Ok json -> (
-          match meta_of_json json with
-          | Ok meta -> Some meta
-          | Error _ -> None)
-      | Error _ -> None
+    match read_meta_file_path (keeper_meta_path config name) with
+    | Ok meta_opt -> meta_opt
+    | Error _ -> None
   in
   match meta_opt with
   | Some meta ->
@@ -732,22 +766,18 @@ let sync_registered_resident_keeper config name :
   | Error e -> Error e
 
 let fresher_meta config (meta : keeper_meta) : keeper_meta =
-  let path = keeper_meta_path config meta.name in
-  match Safe_ops.read_json_file_safe path with
-  | Ok json -> (
-      match meta_of_json json with
-      | Ok existing ->
-          let existing_ts =
-            Resilience.Time.parse_iso8601_opt existing.updated_at
-            |> Option.value ~default:0.0
-          in
-          let incoming_ts =
-            Resilience.Time.parse_iso8601_opt meta.updated_at
-            |> Option.value ~default:0.0
-          in
-          if existing_ts > incoming_ts then existing else meta
-      | Error _ -> meta)
-  | Error _ -> meta
+  match read_meta_file_path (keeper_meta_path config meta.name) with
+  | Ok (Some existing) ->
+      let existing_ts =
+        Resilience.Time.parse_iso8601_opt existing.updated_at
+        |> Option.value ~default:0.0
+      in
+      let incoming_ts =
+        Resilience.Time.parse_iso8601_opt meta.updated_at
+        |> Option.value ~default:0.0
+      in
+      if existing_ts > incoming_ts then existing else meta
+  | Ok None | Error _ -> meta
 
 let write_meta config (m : keeper_meta) : (unit, string) result =
   let persisted = fresher_meta config m in
@@ -771,14 +801,7 @@ let read_meta config name : (keeper_meta option, string) result =
   if keeper_debug then
     Log.Keeper.debug "read_meta name=%s path=%s exists=%b"
       name path (Sys.file_exists path);
-  if not (Sys.file_exists path) then Ok None
-  else
-    match Safe_ops.read_json_file_safe path with
-    | Error e -> Error e
-    | Ok json -> (
-        match meta_of_json json with
-        | Ok m -> Ok (Some m)
-        | Error e -> Error e)
+  read_meta_file_path path
 
 (* Model selection, path utilities, and JSONL helpers
    extracted to Keeper_types_resident *)

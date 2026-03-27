@@ -44,6 +44,7 @@ describe('HarnessHealth', () => {
     const get = vi.fn<(path: string) => Promise<unknown>>()
       .mockResolvedValue({
         generated_at: 1711440000,
+        scope_note: 'Autoresearch는 generator loop, Harness는 safety rail을 설명합니다.',
         calibration: {
           total_verdicts: 12,
           approve_count: 9,
@@ -55,6 +56,52 @@ describe('HarnessHealth', () => {
           agreement_rate: 0.75,
           fallback_count: 2,
           recent_fallback_reasons: [],
+        },
+        recent_verdicts: [
+          {
+            timestamp: 1711440000,
+            task_id: 'task-1',
+            task_title: 'Review task notes',
+            agent_name: 'judge',
+            gate: 'llm',
+            verdict: 'approve',
+            evaluator_cascade: 'verifier',
+            fallback_reason: null,
+          },
+        ],
+        pre_compact: {
+          description: 'Pre-compaction signal',
+          total_recent: 1,
+          recent_events: [
+            {
+              timestamp: 1711440000,
+              keeper_name: 'keeper-a',
+              context_ratio: 0.91,
+              message_count: 88,
+              token_count: 32000,
+              strategies: ['PruneToolOutputs'],
+              model_family: 'verifier',
+              trigger: 'ratio(0.91>=0.85)',
+            },
+          ],
+        },
+        dna_quality: {
+          description: 'DNA signal',
+          total_recent: 1,
+          recent_events: [
+            {
+              timestamp: 1711440000,
+              keeper_name: 'keeper-a',
+              score: 0.82,
+              dimensions: {
+                has_goal_anchor: true,
+                has_task_anchor: true,
+                has_recent_context: true,
+                truncation_artifacts: 0,
+                content_length: 420,
+              },
+            },
+          ],
         },
       })
 
@@ -75,7 +122,11 @@ describe('HarnessHealth', () => {
     await flushUi()
 
     expect(get).toHaveBeenCalledWith('/api/v1/dashboard/harness-health')
-    expect(container.textContent).toContain('Evaluator 캘리브레이션')
+    expect(container.textContent).toContain('Safety Harness')
+    expect(container.textContent).toContain('Evaluator Calibration')
+    expect(container.textContent).toContain('Pre-Compaction Rail')
+    expect(container.textContent).toContain('DNA Quality Rail')
+    expect(container.textContent).toContain('Autoresearch는 generator loop')
 
     const markup = container.innerHTML
     expect(markup).toContain('text-[var(--accent)]')

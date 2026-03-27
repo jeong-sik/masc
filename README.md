@@ -49,7 +49,7 @@ Defaults:
 - repo root checkout HTTP / MCP port: `8935`
 - git worktree checkout HTTP / MCP port: `9100-9999` 범위에서 checkout path 기준으로 자동 파생
 - 기본 bind host: `127.0.0.1`
-- repo-managed config root: `MASC_CONFIG_DIR` 우선, 없으면 실행 파일 기준 `config/` 자동 탐색
+- repo-managed config root: `MASC_CONFIG_DIR` 우선, 없으면 `~/.masc/config` 우선, 그 다음 repo `config/` 자동 탐색
 
 메모:
 

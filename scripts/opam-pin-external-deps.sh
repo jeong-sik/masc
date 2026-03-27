@@ -4,8 +4,10 @@
 # NOTE: Most first-party packages here intentionally float on #main. OAS does
 # not float at install time, but it is ratcheted to the current upstream main
 # commit in one shared place so CI/runtime stay reproducible while still
-# consuming the latest required OAS feature set. If you need reproducible
-# builds for the remaining dependencies, pin them to specific commit SHAs instead:
+# consuming the latest required OAS feature set. Set AGENT_SDK_PIN_URL to a
+# local checkout/worktree path when validating unreleased OAS changes locally.
+# If you need reproducible builds for the remaining dependencies, pin them to
+# specific commit SHAs instead:
 #   opam pin add <pkg> <url>#<commit-sha> -n -y
 set -euo pipefail
 
@@ -14,7 +16,7 @@ source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 
 include_bisect=false
 include_compact_protocol=false
-agent_sdk_pin_url="${AGENT_SDK_PIN_URL:-https://github.com/jeong-sik/oas.git#47bef58e6d3016d103543494eaa0cee179c8fba9}"
+agent_sdk_pin_source="${AGENT_SDK_PIN_URL:-${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}}"
 
 for arg in "$@"; do
   case "$arg" in
@@ -38,7 +40,7 @@ fi
 opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
 opam pin add mcp_protocol_eio https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
 opam pin add mcp_protocol_http https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
-opam pin add agent_sdk "${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}" -n -y
+opam pin add agent_sdk "${agent_sdk_pin_source}" -n -y
 opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git#main -n -y
 opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
 opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y

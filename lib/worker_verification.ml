@@ -11,6 +11,7 @@ module Oas = Agent_sdk
 type verified_result = {
   run_result : Worker_container_types.run_result;
   verified_output : Oas.Verified_output.verified Oas.Verified_output.output;
+  verifier_verdict : Verifier_oas.verdict;
 }
 
 type verification_outcome =
@@ -18,23 +19,51 @@ type verification_outcome =
   | Unverified of {
       run_result : Worker_container_types.run_result;
       reason : string;
+      verifier_verdict : Verifier_oas.verdict option;
     }
 
 let verify_worker_result
+    ?delivery_contract
     ~(goal : string)
     (run_result : Worker_container_types.run_result)
     : verification_outcome =
   match run_result.api_response with
   | None ->
-    Unverified { run_result; reason = "no api_response available (legacy runner)" }
+    Unverified
+      {
+        run_result;
+        reason = "no api_response available (legacy runner)";
+        verifier_verdict = None;
+      }
   | Some response ->
     let unverified = Oas.Verified_output.of_response
       ~producer:run_result.model_used response in
+    let contract_goal =
+      match delivery_contract with
+      | None -> goal
+      | Some (contract : Team_session_types.delivery_contract) ->
+          let acceptance =
+            if contract.acceptance_checks = [] then
+              "(none)"
+            else
+              String.concat "; " contract.acceptance_checks
+          in
+          let required_artifacts =
+            if contract.required_artifacts = [] then
+              "(none)"
+            else
+              String.concat "; " contract.required_artifacts
+          in
+          Printf.sprintf
+            "%s\n\nDelivery contract %s\nSummary: %s\nAcceptance checks: %s\nRequired artifacts: %s\nRepair budget: %d"
+            goal contract.contract_id contract.summary acceptance
+            required_artifacts contract.repair_budget
+    in
     let req : Verifier_oas.verification_request = {
       action_description = Printf.sprintf "Worker %s produced output"
         run_result.model_used;
       action_result = run_result.output;
-      goal;
+      goal = contract_goal;
       context_summary = Printf.sprintf "model=%s tokens_in=%s tokens_out=%s"
         run_result.model_used
         (Option.fold ~none:"?" ~some:string_of_int run_result.input_tokens)
@@ -48,20 +77,54 @@ let verify_worker_result
         ~confidence:0.9
         ~evidence:"cheap_model_pass" in
       (match verified with
-       | Some v -> Verified { run_result; verified_output = v }
-       | None -> Unverified { run_result; reason = "verification threshold not met" })
+       | Some v ->
+           Verified
+             {
+               run_result;
+               verified_output = v;
+               verifier_verdict = Verifier_oas.Pass;
+             }
+       | None ->
+           Unverified
+             {
+               run_result;
+               reason = "verification threshold not met";
+               verifier_verdict = Some Verifier_oas.Pass;
+             })
     | Ok (Verifier_oas.Warn reason) ->
       let verified = Oas.Verified_output.verify unverified
         ~verifier:"verifier_oas"
         ~confidence:0.6
         ~evidence:(Printf.sprintf "cheap_model_warn: %s" reason) in
       (match verified with
-       | Some v -> Verified { run_result; verified_output = v }
-       | None -> Unverified { run_result; reason })
+       | Some v ->
+           Verified
+             {
+               run_result;
+               verified_output = v;
+               verifier_verdict = Verifier_oas.Warn reason;
+             }
+       | None ->
+           Unverified
+             {
+               run_result;
+               reason;
+               verifier_verdict = Some (Verifier_oas.Warn reason);
+             })
     | Ok (Verifier_oas.Fail reason) ->
-      Unverified { run_result; reason }
+      Unverified
+        {
+          run_result;
+          reason;
+          verifier_verdict = Some (Verifier_oas.Fail reason);
+        }
     | Error reason ->
-      Unverified { run_result; reason = Printf.sprintf "verifier_error: %s" reason }
+      Unverified
+        {
+          run_result;
+          reason = Printf.sprintf "verifier_error: %s" reason;
+          verifier_verdict = None;
+        }
 
 let text_of_outcome = function
   | Verified vr -> Oas.Verified_output.text vr.verified_output

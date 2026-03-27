@@ -17,6 +17,10 @@ let () =
             Test_tool_team_session_proof.test_report_uses_participant_and_turn_metrics;
           Alcotest.test_case "report-and-proof-expose-spawn-tool-usage" `Quick
             Test_tool_team_session_proof.test_report_and_proof_expose_spawn_tool_usage;
+          Alcotest.test_case "report-and-proof-expose-delivery-contract-and-verdict"
+            `Quick
+            Test_tool_team_session_proof
+              .test_report_and_proof_expose_delivery_contract_and_verdict;
           Alcotest.test_case "duration-reached-path" `Quick
             Test_tool_team_session_lifecycle.test_duration_reached_path;
           Alcotest.test_case "recover-elapsed-session" `Quick
@@ -38,6 +42,10 @@ let () =
             Test_tool_team_session_step_validation.test_missing_required_args;
           Alcotest.test_case "step-actor-must-match-caller" `Quick
             Test_tool_team_session_step_validation.test_step_actor_must_match_caller;
+          Alcotest.test_case "step-updates-delivery-contract-and-status-exposes-it"
+            `Quick
+            Test_tool_team_session_step_validation
+              .test_step_updates_delivery_contract_and_status_exposes_it;
           Alcotest.test_case "step-spawn-requires-proc-mgr" `Quick
             Test_tool_team_session_step_validation.test_step_spawn_requires_proc_mgr;
           Alcotest.test_case "step-spawn-default-local-allows-worker-size" `Quick

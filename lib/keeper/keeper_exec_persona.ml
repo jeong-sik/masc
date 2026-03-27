@@ -34,7 +34,7 @@ let find_jsonl_row_by_action_id rows action_id =
          | _ -> None)
 
 let resolved_keeper_args_to_json
-    ~name ~persona_name ~persona_profile_path ~goal ~short_goal ~mid_goal ~long_goal
+    ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~soul_profile ~will ~needs ~desires ~policy_voice_enabled
     ~room_scope ~scope_kind ~mention_targets
     ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
@@ -43,7 +43,6 @@ let resolved_keeper_args_to_json
     [
       ("name", `String name);
       ("persona_name", `String persona_name);
-      ("persona_profile_path", `String persona_profile_path);
       ("goal", `String goal);
       ("short_goal", `String short_goal);
       ("mid_goal", `String mid_goal);
@@ -90,6 +89,10 @@ let resolved_keeper_args_from_persona args :
         Error "persona_name is required"
       else
         match reject_legacy_model_args ~tool_name:"masc_keeper_create_from_persona" args with
+        | Error err -> Error err
+        | Ok () ->
+        match reject_removed_keeper_input_keys
+                ~tool_name:"masc_keeper_create_from_persona" args with
         | Error err -> Error err
         | Ok () ->
         match load_persona_summary persona_name with
@@ -210,7 +213,6 @@ let resolved_keeper_args_from_persona args :
               resolved_keeper_args_to_json
                 ~name
                 ~persona_name
-                ~persona_profile_path:persona.profile_path
                 ~goal ~short_goal ~mid_goal ~long_goal
                 ~instructions ~soul_profile ~will ~needs ~desires
                 ~policy_voice_enabled

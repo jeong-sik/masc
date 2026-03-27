@@ -266,6 +266,17 @@ let backend_config_for base_path =
   }
 
 let create_backend cfg =
+  let filesystem_fallback reason =
+    Log.Backend.warn "%s Falling back to Memory backend." reason;
+    Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.Backend_types.cluster_name))
+  in
+  let fs_usable fs =
+    try
+      ignore (Eio.Path.kind ~follow:true fs);
+      true
+    with
+    | Stdlib.Effect.Unhandled _ -> false
+  in
   match cfg.Backend_types.backend_type with
   | Backend_types.Memory ->
       (* Backend.Memory now has Effect.Unhandled/Poisoned fallback
@@ -274,12 +285,19 @@ let create_backend cfg =
       Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name))
   | Backend_types.FileSystem ->
       (match Fs_compat.get_fs_opt () with
-       | Some fs -> Ok (FileSystem (Backend.FileSystem.create ~fs cfg))
+       | Some fs when fs_usable fs ->
+           Ok (FileSystem (Backend.FileSystem.create ~fs cfg))
+       | Some _fs ->
+           (* Tests sometimes inherit a stale Fs_compat handle from a previous
+              Eio_main.run. Using it outside an active Eio scheduler explodes
+              with Effect.Unhandled, so prefer the shared Memory fallback. *)
+           filesystem_fallback
+             "Stale Eio fs context for FileSystem backend;"
        | None ->
            (* No Eio fs context available (e.g., test without Fs_compat.set_fs).
               Fall back to shared Memory backend for the same base path. *)
-           Log.Backend.warn "No Eio fs context for FileSystem backend, falling back to Memory";
-           Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name)))
+           filesystem_fallback
+             "No Eio fs context for FileSystem backend;")
   | Backend_types.PostgresNative ->
       (* PostgresNative requires Eio context - use create_backend_eio instead *)
       Error (Backend_types.BackendNotSupported "PostgresNative requires Eio context (use create_backend_eio)")

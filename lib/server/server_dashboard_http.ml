@@ -683,7 +683,7 @@ let dashboard_room_truth_focus_json ~initialized ~runtime_count ~operator_digest
                   ("suggested_params", `Assoc []);
                 ]))
 
-let dashboard_room_truth_http_json ~state ~sw ~clock request =
+let dashboard_room_truth_http_json ~state ~sw:_ ~clock _request =
   (* Fast-path: if the proactive execution refresh hasn't produced a result
      yet, return "initializing" immediately instead of blocking for 15-20s
      on cold-start on-demand compute.  The frontend retries every 3s via
@@ -720,12 +720,13 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let config = state.Mcp_server.room_config in
   let started_at = Unix.gettimeofday () in
   let t0 = Time_compat.now () in
-  (* Parallel fetch: shell, execution, and command_summary are independent. *)
+  (* Staged fetch: shell may still need a guarded refresh, while execution
+     stays on the proactive cache to keep room-truth off the cold path. *)
   let shell_ref = ref (`Assoc []) in
   let execution_ref = ref (`Assoc []) in
   let command_ref = ref (`Assoc []) in
   (* Single env var for room-truth fiber timeouts.
-     Cold start uses higher defaults to allow PG + caching to warm up. *)
+     Cold start uses higher defaults to allow shell/room reads to warm up. *)
   let warm_timeout_s =
     float_of_env_default "MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S"
       ~default:5.0 ~min_v:2.0 ~max_v:25.0
@@ -750,21 +751,12 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let shell_timeout_s =
     if !_shell_warmed then base_timeout_s else cold_timeout_s
   in
-  let execution_timeout_s =
-    if is_cold then Float.max base_timeout_s 20.0 else base_timeout_s
-  in
   (* Sequential fetch to avoid PG connection concurrent usage (#3305).
      Each component has its own timeout guard and cache fallback,
      so sequential execution adds minimal latency on cache hit. *)
   shell_ref := fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
     (fun () -> dashboard_shell_http_json config) (`Assoc []);
-  execution_ref := (
-    if cached_surface_has_success _execution_cache then
-      cached_surface_json _execution_cache
-    else
-      fiber_with_timeout ~timeout_s:execution_timeout_s "execution"
-        (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
-        (cached_surface_json _execution_cache));
+  execution_ref := cached_surface_json _execution_cache;
   (* command_plane_summary_http_json reads from a proactive cache ref —
      no PG I/O needed.  Skip the Room.is_initialized guard (which does a
      PG query in PostgresNative mode) to avoid 200-500ms latency. *)
@@ -775,21 +767,11 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let execution_json = !execution_ref in
   let command_summary_json = !command_ref in
   let parallel_ms = (Time_compat.now () -. t0) *. 1000.0 in
-  Log.Dashboard.info "room-truth parallel fetch: %.0fms" parallel_ms;
+  Log.Dashboard.info "room-truth fetch: %.0fms" parallel_ms;
   let execution_cache_state =
     json_assoc_field "projection_diagnostics" execution_json
     |> json_string_field_opt "cache_state"
   in
-  if execution_cache_state = Some "initializing" then
-    `Assoc
-      [
-        ("status", `String "initializing");
-        ("generated_at", `String (Types.now_iso ()));
-        ( "message",
-          `String
-            "Execution snapshot is still warming up. The dashboard will retry automatically." );
-      ]
-  else
   (* Derive digest fields from execution_json to avoid duplicate
      Operator_control.digest_json call (saves ~3s).
      execution_json already calls digest_json internally. *)

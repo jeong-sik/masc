@@ -277,16 +277,30 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
   let bool_ key = Keeper_toml_loader.toml_bool_opt doc (k key) in
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
-  (* Validate soul_profile if provided *)
-  (match str "soul_profile" with
-   | Some raw ->
-     (match canonical_soul_profile raw with
-      | None ->
-        Error (Printf.sprintf
-                 "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, minimal)"
-                 raw)
-      | Some _ -> Ok ())
-   | None -> Ok ())
+  let removed_present =
+    removed_keeper_input_key_names
+    |> List.map k
+    |> List.filter (fun key -> List.mem_assoc key doc)
+  in
+  (match removed_present with
+   | [] -> Ok ()
+   | fields ->
+       Error
+         (Printf.sprintf
+            "removed keeper TOML keys: %s"
+            (String.concat ", " fields)))
+  |> fun result ->
+  Result.bind result (fun () ->
+      match str "soul_profile" with
+      | Some raw ->
+          (match canonical_soul_profile raw with
+           | None ->
+               Error
+                 (Printf.sprintf
+                    "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, minimal)"
+                    raw)
+           | Some _ -> Ok ())
+      | None -> Ok ())
   |> Result.map (fun () ->
        {
          manifest_path = None;

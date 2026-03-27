@@ -12,8 +12,7 @@ open Masc_mcp
    ============================================================ *)
 
 let make_meta ?(name = "test-keeper") ?(soul_profile = "")
-    ?(policy_shell_mode = "disabled") ?(policy_voice_enabled = false)
-    ?(policy_mode = "") () : Keeper_types.keeper_meta =
+    ?(policy_voice_enabled = false) () : Keeper_types.keeper_meta =
   let json =
     `Assoc
       [
@@ -21,9 +20,7 @@ let make_meta ?(name = "test-keeper") ?(soul_profile = "")
         ("agent_name", `String name);
         ("trace_id", `String "test-trace-exposure");
         ("soul_profile", `String soul_profile);
-        ("policy_shell_mode", `String policy_shell_mode);
         ("policy_voice_enabled", `Bool policy_voice_enabled);
-        ("policy_mode", `String policy_mode);
       ]
   in
   match Keeper_types.meta_of_json json with
@@ -136,8 +133,8 @@ let test_all_keepers_have_autoresearch () =
    ============================================================ *)
 
 let test_all_modes_same_tool_count () =
-  let heuristic = make_meta ~policy_mode:"" () in
-  let learned = make_meta ~policy_mode:"learned_offline_v1" () in
+  let heuristic = make_meta () in
+  let learned = make_meta ~soul_profile:"research" () in
   let h_tools = Keeper_exec_tools.keeper_allowed_tool_names heuristic in
   let l_tools = Keeper_exec_tools.keeper_allowed_tool_names learned in
   check int "same tool count across modes"
@@ -185,9 +182,7 @@ let test_sufficient_tool_count () =
 
 let test_research_learned_voice_combined () =
   let meta = make_meta ~soul_profile:"research"
-    ~policy_mode:"learned_offline_v1"
-    ~policy_voice_enabled:true
-    ~policy_shell_mode:"readonly" () in
+    ~policy_voice_enabled:true () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has voice" true (has_tool "keeper_voice_speak" tools);
   check bool "has shell readonly" true (has_tool "keeper_shell_readonly" tools);
@@ -201,9 +196,7 @@ let test_research_learned_voice_combined () =
 
 let test_no_duplicate_tools () =
   let meta = make_meta ~soul_profile:"research"
-    ~policy_mode:"learned_offline_v1"
-    ~policy_voice_enabled:true
-    ~policy_shell_mode:"readonly" () in
+    ~policy_voice_enabled:true () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let unique = List.sort_uniq String.compare tools in
   check int "no duplicates" (List.length unique) (List.length tools)

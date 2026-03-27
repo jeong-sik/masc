@@ -39,6 +39,13 @@ let warm_execution_cache () =
     Lib.Server_dashboard_http._execution_cache
     (`Assoc [("status", `String "ok")])
 
+let expire_execution_warmup () =
+  let surface = Lib.Server_dashboard_http._execution_cache in
+  Lib.Server_dashboard_http_cache.invalidate_cached_surface surface;
+  let stale_attempt_ts = Unix.gettimeofday () -. 120.0 in
+  surface.last_attempt_unix <- Some stale_attempt_ts;
+  surface.last_attempt_at <- Some "stale_attempt_for_test"
+
 let keeper_boot_entry name : Lib.Keeper_types.keeper_boot_entry =
   let now = "2026-03-25T08:05:54Z" in
   {
@@ -243,6 +250,38 @@ let test_operator_digest_shape_matches_room_truth () =
         ) expected_keys;
       ))
 
+let test_dashboard_room_truth_cold_cache_falls_back_to_partial_truth () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      warm_execution_cache ();
+      cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      expire_execution_warmup ();
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_room_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/room-truth")
+        in
+        let open Yojson.Safe.Util in
+        check bool "expired warmup skips top-level initializing payload"
+          true
+          (json |> member "status" = `Null);
+        check bool "room block still present"
+          true
+          (json |> member "room" <> `Null);
+        check int "execution summary falls back to zero sessions"
+          0
+          (json |> member "execution" |> member "summary" |> member "active_sessions" |> to_int);
+        check string "room truth diagnostics keep execution cache state"
+          "initializing"
+          (json |> member "projection_diagnostics" |> member "execution_cache_state" |> to_string);
+      ))
+
 let () =
   Alcotest.run "Dashboard Room Truth"
     [
@@ -256,5 +295,7 @@ let () =
           test_case "mixed runtimes keep counts aligned" `Quick
             test_dashboard_room_truth_mixed_runtime_counts;
           test_case "operator digest shape matches room-truth" `Quick test_operator_digest_shape_matches_room_truth;
+          test_case "expired execution warmup falls back to partial truth" `Quick
+            test_dashboard_room_truth_cold_cache_falls_back_to_partial_truth;
         ] );
     ]

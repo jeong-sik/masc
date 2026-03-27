@@ -15,6 +15,114 @@ type 'a step_env = {
   wait_mode : Team_session_types.wait_mode;
 }
 
+let delivery_contract_for_session config session_id =
+  match Team_session_store.load_session config session_id with
+  | Some session -> session.delivery_contract
+  | None -> None
+
+let delivery_contract_json_for_session config session_id =
+  Option.map Team_session_types.delivery_contract_to_yojson
+    (delivery_contract_for_session config session_id)
+
+let latest_delivery_verdict_for_session config session_id =
+  match Team_session_store.load_session config session_id with
+  | Some session -> session.latest_delivery_verdict
+  | None -> None
+
+let latest_delivery_verdict_json_for_session config session_id =
+  Option.map Team_session_types.delivery_verdict_to_yojson
+    (latest_delivery_verdict_for_session config session_id)
+
+let delivery_verdict_of_verification ~session_id ~worker_run_id
+    ~(contract : Team_session_types.delivery_contract)
+    (outcome : Worker_verification.verification_outcome) :
+    Team_session_types.delivery_verdict =
+  let shared_evidence_refs =
+    Team_session_types.dedup_strings
+      (contract.evidence_refs
+      @ [ "team-session:" ^ session_id; "worker-run:" ^ worker_run_id ])
+  in
+  let build ~status ~summary ?repair_directive () =
+    {
+      Team_session_types.contract_id = contract.contract_id;
+      status;
+      summary;
+      evaluator = "verifier_oas";
+      evaluator_role = contract.evaluator_role;
+      evaluator_cascade = contract.evaluator_cascade;
+      repair_directive;
+      evidence_refs = shared_evidence_refs;
+      generated_at_iso = Types.now_iso ();
+    }
+  in
+  match outcome with
+  | Worker_verification.Verified { verifier_verdict; _ } -> (
+      match verifier_verdict with
+      | Verifier_oas.Pass ->
+          build ~status:Team_session_types.Delivery_pass
+            ~summary:
+              "Verifier accepted the worker output against the current delivery contract."
+            ()
+      | Verifier_oas.Warn reason ->
+          build ~status:Team_session_types.Delivery_repair ~summary:reason
+            ~repair_directive:reason ()
+      | Verifier_oas.Fail reason ->
+          build ~status:Team_session_types.Delivery_fail ~summary:reason
+            ~repair_directive:reason ())
+  | Worker_verification.Unverified { reason; verifier_verdict; _ } -> (
+      match verifier_verdict with
+      | Some (Verifier_oas.Warn detail) ->
+          build ~status:Team_session_types.Delivery_repair ~summary:reason
+            ~repair_directive:detail ()
+      | Some (Verifier_oas.Fail detail) ->
+          build ~status:Team_session_types.Delivery_fail ~summary:reason
+            ~repair_directive:detail ()
+      | Some Verifier_oas.Pass ->
+          build ~status:Team_session_types.Delivery_fail ~summary:reason
+            ()
+      | None ->
+          build ~status:Team_session_types.Delivery_repair ~summary:reason
+            ~repair_directive:
+              "Verifier could not produce a stable verdict. Re-run or inspect the captured evidence."
+            ())
+
+let record_delivery_verdict_for_worker_run ~(config : Room.config)
+    ~(session_id : string) ~(worker_run_id : string)
+    (outcome : Worker_verification.verification_outcome) : unit =
+  match delivery_contract_for_session config session_id with
+  | None -> ()
+  | Some contract ->
+      let verdict =
+        delivery_verdict_of_verification ~session_id ~worker_run_id ~contract
+          outcome
+      in
+      ignore
+        (Team_session_store.update_session config session_id (fun session ->
+             {
+               session with
+               latest_delivery_verdict = Some verdict;
+               updated_at_iso = Types.now_iso ();
+             }));
+      Team_session_store.append_event config session_id
+        ~event_type:"delivery_contract_verdict"
+        ~detail:
+          (`Assoc
+            [
+              ("contract_id", `String contract.contract_id);
+              ("worker_run_id", `String worker_run_id);
+              ( "status",
+                `String
+                  (Team_session_types.delivery_verdict_status_to_string
+                     verdict.status) );
+              ("summary", `String verdict.summary);
+              ( "repair_directive",
+                Option.fold ~none:`Null ~some:(fun value -> `String value)
+                  verdict.repair_directive );
+              ("evaluator", `String verdict.evaluator);
+              ("evaluator_cascade", `String verdict.evaluator_cascade);
+              ("generated_at_iso", `String verdict.generated_at_iso);
+            ])
+
 let append_spawn_event (env : _ step_env) ?worker_run_id ?spawn_agent ?runtime_actor ?spawn_role
     ?spawn_model ?execution_scope ?worker_class ?worker_size
     ?worker_backend ?wait_mode ?trace_capability

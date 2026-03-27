@@ -98,6 +98,81 @@ let test_step_actor_must_match_caller () =
     (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
   cleanup_dir base_dir
 
+let test_step_updates_delivery_contract_and_status_exposes_it () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"contract-aware delivery loop"
+    |> get_session_id
+  in
+  let step_ok, step_body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+            ("message", `String "planner contract seeded");
+            ( "delivery_contract",
+              `Assoc
+                [
+                  ("contract_id", `String "contract-demo");
+                  ("summary", `String "Ship the change with proof");
+                  ( "acceptance_checks",
+                    `List
+                      [
+                        `String "report mentions the new contract";
+                        `String "proof exposes evaluator verdict";
+                      ] );
+                  ( "required_artifacts",
+                    `List [ `String "report.json"; `String "proof.json" ] );
+                  ("repair_budget", `Int 2);
+                  ( "generator_roles",
+                    `List [ `String "planner"; `String "implementer-a" ] );
+                  ("evaluator_role", `String "reviewer");
+                  ("evaluator_cascade", `String "cross_verifier");
+                  ("evidence_refs", `List [ `String "session:contract-demo" ]);
+                ] );
+          ])
+  in
+  Alcotest.(check bool) "step ok" true step_ok;
+  let step_json = parse_json_exn step_body |> result_field in
+  Alcotest.(check string) "step response contract id" "contract-demo"
+    Yojson.Safe.Util.(step_json |> member "delivery_contract" |> member "contract_id" |> to_string);
+  Alcotest.(check bool) "step response verdict initially null" true
+    Yojson.Safe.Util.(step_json |> member "latest_delivery_verdict" = `Null);
+  let stored_session =
+    Team_session_store.load_session config session_id |> Option.get
+  in
+  let contract =
+    match stored_session.Team_session_types.delivery_contract with
+    | Some contract -> contract
+    | None -> Alcotest.fail "delivery contract was not persisted"
+  in
+  Alcotest.(check string) "contract id" "contract-demo" contract.contract_id;
+  Alcotest.(check int) "repair budget" 2 contract.repair_budget;
+  Alcotest.(check string) "evaluator cascade" "cross_verifier"
+    contract.evaluator_cascade;
+  let status_ok, status_body =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status ok" true status_ok;
+  let status_json = parse_json_exn status_body |> result_field in
+  let status_contract =
+    status_json |> Yojson.Safe.Util.member "delivery_contract"
+  in
+  Alcotest.(check string) "status contract id" "contract-demo"
+    Yojson.Safe.Util.(status_contract |> member "contract_id" |> to_string);
+  cleanup_dir base_dir
+
 let test_step_spawn_requires_proc_mgr () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->

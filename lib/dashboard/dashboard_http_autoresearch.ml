@@ -56,6 +56,12 @@ let loop_summary_json (base_path : string)
         match state.error_message with Some e -> `String e | None -> `Null );
       ( "session_id",
         match link with Some l -> `String l.session_id | None -> `Null );
+      ( "operation_id",
+        match link with Some l -> (
+          match l.operation_id with Some value -> `String value | None -> `Null)
+        | None -> `Null );
+      ( "linked_at",
+        match link with Some l -> `Float l.linked_at | None -> `Null );
       ( "queued_hypothesis",
         match state.queued_hypothesis with
         | Some v -> `String v
@@ -96,6 +102,12 @@ let persisted_to_loop_summary_json (base_path : string)
         match p.error_message with Some e -> `String e | None -> `Null );
       ( "session_id",
         match link with Some l -> `String l.session_id | None -> `Null );
+      ( "operation_id",
+        match link with Some l -> (
+          match l.operation_id with Some value -> `String value | None -> `Null)
+        | None -> `Null );
+      ( "linked_at",
+        match link with Some l -> `Float l.linked_at | None -> `Null );
       ( "queued_hypothesis",
         match p.queued_hypothesis with
         | Some v -> `String v

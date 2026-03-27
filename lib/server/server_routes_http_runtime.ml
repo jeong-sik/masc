@@ -94,6 +94,8 @@ let transport_json request =
   let grpc_enabled = Masc_grpc_server.is_enabled () in
   let grpc_port = Masc_grpc_server.configured_port () in
   let grpc_listening = Transport_metrics.grpc_listening () in
+  (* Note: listen_status is read separately from listening — brief tearing is
+     possible but acceptable for this diagnostic-only endpoint. *)
   let grpc_listen_status = Atomic.get Transport_metrics.grpc_listen_status in
   let webrtc_enabled = Server_webrtc_transport.is_enabled () in
   `Assoc

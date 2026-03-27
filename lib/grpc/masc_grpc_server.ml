@@ -495,6 +495,6 @@ let start
           port
       | exn ->
         Transport_metrics.set_grpc_runtime_listening false;
-        Transport_metrics.set_grpc_listen_status "bind_failed";
+        Transport_metrics.set_grpc_listen_status "stopped";
         Log.Server.error "gRPC server failed: %s" (Printexc.to_string exn)))
   end

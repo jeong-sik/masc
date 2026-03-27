@@ -616,7 +616,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는 `docs/
 
 Resident-keeper (`.masc/resident-keepers/<name>.json`)는 등록 메타데이터(persona_name, desired, timestamps)만 저장한다.
 
-repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 실행 파일 기준 `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다.
+repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `~/.masc/config`를 먼저 본 뒤 repo `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다.
 
 ### 8.2 Template 변경 반영
 

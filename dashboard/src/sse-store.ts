@@ -168,7 +168,7 @@ function handleRoomTruthSnapshot(payload: unknown): void {
 /** Hydrate execution signals directly from SSE payload — zero HTTP fetch. */
 function handleExecutionSnapshot(payload: unknown): void {
   try {
-    hydrateExecutionSnapshot(payload)
+    hydrateExecutionSnapshot(payload as Record<string, unknown>)
   } catch (err) {
     console.debug('[SSE] execution snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
   }

@@ -36,6 +36,12 @@ export type SSEEventType =
   | 'oas:masc:harness:verdict_recorded'
   | 'oas:masc:harness:pre_compact'
   | 'oas:masc:harness:dna_quality'
+  // Server-push snapshot events (proactive cache broadcasts)
+  | 'room_truth_snapshot'
+  | 'execution_snapshot'
+  | 'operator_snapshot'
+  | 'operator_digest'
+  | 'transport_health_snapshot'
 
 export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
 export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 'sse'

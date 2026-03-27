@@ -8,8 +8,14 @@
     - Trust-Vulnerability Paradox (TVP) - arxiv:2510.18563v1
     - "3+ failures/min" threshold from operational experience
 
+    Implementation: all breaker records are immutable and stored in a
+    persistent [StringMap].  The single mutable field [breakers] in [t]
+    is protected by [Eio.Mutex].
+
     @since 0.6.0 - MASC Social v4 Tier 1
 *)
+
+module StringMap = Map.Make (String)
 
 (** {1 Types} *)
 
@@ -29,13 +35,13 @@ type failure_record = {
 
 type breaker = {
   agent_id: string;
-  mutable state: state;
-  mutable failures: failure_record list;  (** Recent failures within window *)
-  mutable last_check: float;
+  state: state;
+  failures: failure_record list;
+  last_check: float;
 }
 
 type t = {
-  breakers: (string, breaker) Hashtbl.t;
+  mutable breakers: breaker StringMap.t;
   mutex: Eio.Mutex.t;
   failure_threshold: int;     (** Failures before opening (default: 3) *)
   failure_window_sec: float;  (** Window to count failures (default: 60s) *)
@@ -66,7 +72,7 @@ let create
     ?(cooldown = default_cooldown)
     () =
   {
-    breakers = Hashtbl.create 64;
+    breakers = StringMap.empty;
     mutex = Eio.Mutex.create ();
     failure_threshold;
     failure_window_sec = failure_window;
@@ -84,8 +90,12 @@ let create_from_env () =
 let with_lock t f =
   Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> f ())
 
+(** Write a breaker back to the map. *)
+let put_breaker t breaker =
+  t.breakers <- StringMap.add breaker.agent_id breaker t.breakers
+
 let get_or_create_breaker t ~agent_id =
-  match Hashtbl.find_opt t.breakers agent_id with
+  match StringMap.find_opt agent_id t.breakers with
   | Some b -> b
   | None ->
       let b = {
@@ -94,13 +104,13 @@ let get_or_create_breaker t ~agent_id =
         failures = [];
         last_check = Time_compat.now ();
       } in
-      Hashtbl.add t.breakers agent_id b;
+      t.breakers <- StringMap.add agent_id b t.breakers;
       b
 
+(** Return a new breaker with expired failures removed. *)
 let prune_old_failures t breaker =
-  let now = Time_compat.now () in
-  let threshold = now -. t.failure_window_sec in
-  breaker.failures <- List.filter (fun f -> f.timestamp > threshold) breaker.failures
+  let threshold = Time_compat.now () -. t.failure_window_sec in
+  { breaker with failures = List.filter (fun f -> f.timestamp > threshold) breaker.failures }
 
 (** {1 Core Operations} *)
 
@@ -109,24 +119,22 @@ let record_failure t ~agent_id ~reason =
   with_lock t (fun () ->
     let breaker = get_or_create_breaker t ~agent_id in
     let now = Time_compat.now () in
-
-    (* Add new failure *)
-    breaker.failures <- { timestamp = now; reason } :: breaker.failures;
-
-    (* Prune old failures *)
-    prune_old_failures t breaker;
-
-    (* Check if we should open the breaker *)
+    let breaker = { breaker with
+      failures = { timestamp = now; reason } :: breaker.failures } in
+    let breaker = prune_old_failures t breaker in
     let failure_count = List.length breaker.failures in
-    if failure_count >= t.failure_threshold then begin
-      breaker.state <- Open {
-        until = now +. t.cooldown_sec;
-        reason = Printf.sprintf "%d failures in %.0fs: %s"
-                   failure_count t.failure_window_sec reason;
-        failure_count;
-      };
-      Log.Session.warn "[CircuitBreaker] OPENED for %s: %d failures" agent_id failure_count
-    end
+    let breaker =
+      if failure_count >= t.failure_threshold then begin
+        Log.Session.warn "[CircuitBreaker] OPENED for %s: %d failures" agent_id failure_count;
+        { breaker with state = Open {
+          until = now +. t.cooldown_sec;
+          reason = Printf.sprintf "%d failures in %.0fs: %s"
+                     failure_count t.failure_window_sec reason;
+          failure_count;
+        } }
+      end else breaker
+    in
+    put_breaker t breaker
   )
 
 (** Record a success - helps transition from HalfOpen to Closed *)
@@ -135,15 +143,11 @@ let record_success t ~agent_id =
     let breaker = get_or_create_breaker t ~agent_id in
     match breaker.state with
     | HalfOpen ->
-        (* Success in half-open means we can close *)
-        breaker.state <- Closed;
-        breaker.failures <- [];
-        Log.Session.info "[CircuitBreaker] CLOSED for %s after recovery" agent_id
+        Log.Session.info "[CircuitBreaker] CLOSED for %s after recovery" agent_id;
+        put_breaker t { breaker with state = Closed; failures = [] }
     | Closed ->
-        (* Clear old failures on success *)
-        prune_old_failures t breaker
+        put_breaker t (prune_old_failures t breaker)
     | Open _ ->
-        (* Shouldn't happen - success while open means someone bypassed the check *)
         ()
   )
 
@@ -152,26 +156,27 @@ let check t ~agent_id : (unit, string) result =
   with_lock t (fun () ->
     let breaker = get_or_create_breaker t ~agent_id in
     let now = Time_compat.now () in
-    breaker.last_check <- now;
+    let breaker = { breaker with last_check = now } in
 
     match breaker.state with
     | Closed ->
+        put_breaker t breaker;
         Ok ()
 
     | Open { until; reason = _; _ } when now >= until ->
-        (* Cooldown expired - transition to half-open *)
-        breaker.state <- HalfOpen;
         Log.Session.info "[CircuitBreaker] HALF-OPEN for %s, testing..." agent_id;
+        put_breaker t { breaker with state = HalfOpen };
         Ok ()
 
     | Open { until; reason; failure_count } ->
+        put_breaker t breaker;
         let remaining = int_of_float (until -. now) in
         Error (Printf.sprintf
           "Circuit breaker OPEN for %s (%d failures). Retry in %ds. Reason: %s"
           agent_id failure_count remaining reason)
 
     | HalfOpen ->
-        (* Allow one request through to test *)
+        put_breaker t breaker;
         Ok ()
   )
 
@@ -180,11 +185,11 @@ let force_open t ~agent_id ~reason ~duration_sec =
   with_lock t (fun () ->
     let breaker = get_or_create_breaker t ~agent_id in
     let now = Time_compat.now () in
-    breaker.state <- Open {
+    put_breaker t { breaker with state = Open {
       until = now +. duration_sec;
       reason = "MANUAL: " ^ reason;
       failure_count = 0;
-    };
+    } };
     Log.Session.warn "[CircuitBreaker] FORCE-OPENED for %s: %s (%.0fs)"
       agent_id reason duration_sec
   )
@@ -193,8 +198,7 @@ let force_open t ~agent_id ~reason ~duration_sec =
 let force_close t ~agent_id =
   with_lock t (fun () ->
     let breaker = get_or_create_breaker t ~agent_id in
-    breaker.state <- Closed;
-    breaker.failures <- [];
+    put_breaker t { breaker with state = Closed; failures = [] };
     Log.Session.info "[CircuitBreaker] FORCE-CLOSED for %s" agent_id
   )
 
@@ -210,7 +214,7 @@ type breaker_status = {
 
 let get_status t ~agent_id =
   with_lock t (fun () ->
-    match Hashtbl.find_opt t.breakers agent_id with
+    match StringMap.find_opt agent_id t.breakers with
     | None -> {
         agent_id;
         state_name = "closed";
@@ -219,7 +223,8 @@ let get_status t ~agent_id =
         open_reason = None;
       }
     | Some breaker ->
-        prune_old_failures t breaker;
+        let breaker = prune_old_failures t breaker in
+        put_breaker t breaker;
         let state_name, open_until, open_reason = match breaker.state with
           | Closed -> ("closed", None, None)
           | HalfOpen -> ("half_open", None, None)
@@ -245,8 +250,9 @@ let status_to_json (s : breaker_status) : Yojson.Safe.t =
 
 let list_all_breakers t =
   with_lock t (fun () ->
-    Hashtbl.fold (fun agent_id breaker acc ->
-      prune_old_failures t breaker;
+    StringMap.fold (fun agent_id breaker acc ->
+      let breaker = prune_old_failures t breaker in
+      put_breaker t breaker;
       let state_name, open_until, open_reason = match breaker.state with
         | Closed -> ("closed", None, None)
         | HalfOpen -> ("half_open", None, None)
@@ -269,13 +275,15 @@ let cleanup t ~older_than_seconds =
   with_lock t (fun () ->
     let now = Time_compat.now () in
     let threshold = now -. float_of_int older_than_seconds in
-    let to_remove = Hashtbl.fold (fun agent_id breaker acc ->
-      match breaker.state with
-      | Closed when breaker.last_check < threshold -> agent_id :: acc
-      | _ -> acc
-    ) t.breakers [] in
-    List.iter (Hashtbl.remove t.breakers) to_remove;
-    List.length to_remove
+    let removed, kept =
+      StringMap.fold (fun agent_id breaker (n, m) ->
+        match breaker.state with
+        | Closed when breaker.last_check < threshold -> (n + 1, m)
+        | _ -> (n, StringMap.add agent_id breaker m)
+      ) t.breakers (0, StringMap.empty)
+    in
+    t.breakers <- kept;
+    removed
   )
 
 (** {1 Wrap — Combined check + execute + record} *)

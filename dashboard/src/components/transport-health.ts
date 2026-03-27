@@ -113,6 +113,7 @@ const error: Signal<string | null> = signal(null)
 
 /** Hydrate transport health from SSE payload — zero HTTP fetch. */
 export function hydrateTransportHealthFromSSE(data: unknown): void {
+  if (data == null || typeof data !== 'object') return
   transportHealth.value = data as TransportHealthData
 }
 let inflightTransportHealthRefresh: Promise<void> | null = null

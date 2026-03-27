@@ -14,7 +14,7 @@ import {
   refreshBoard,
   refreshMdal,
 } from './store'
-import { refreshRoomTruth } from './room-truth-store'
+import { requestRoomTruth, requestRoomTruthNow, roomTruthError } from './room-truth-store'
 import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 import { showToast } from './components/common/toast'
 import { route } from './router'
@@ -171,7 +171,7 @@ function handleDashboardRefresh(): void {
   invalidateDashboardCache()
   if (!_fetchDebounce) {
     _fetchDebounce = setTimeout(() => {
-      void refreshRoomTruth({ force: true })
+      requestRoomTruthNow()
       void refreshActiveRoute()
       _fetchDebounce = null
     }, SSE_DEFAULT_DEBOUNCE_MS)
@@ -217,21 +217,21 @@ function handleReconnect(): void {
   void hydrateAfterReconnect()
 }
 
-async function hydrateAfterReconnect(): Promise<void> {
-  try {
-    await refreshRoomTruth({ force: true })
-    await refreshActiveRoute()
-  } catch (err) {
-    console.warn('[SSE] reconnect hydration failed, retrying in 3s', err instanceof Error ? err.message : err)
-    setTimeout(() => {
-      void refreshRoomTruth({ force: true }).catch(retryErr =>
-        console.warn('[SSE] reconnect room-truth retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
-      )
-      void refreshActiveRoute().catch(retryErr =>
-        console.warn('[SSE] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
-      )
-    }, SSE_RECONNECT_RETRY_MS)
-  }
+function hydrateAfterReconnect(): void {
+  requestRoomTruthNow()
+  void refreshActiveRoute().catch(err =>
+    console.warn('[SSE] reconnect route refresh failed', err instanceof Error ? err.message : err),
+  )
+  // Safety-net retry: if room-truth fetch failed (e.g. server warm-up),
+  // the scheduler's error signal will be set. Retry once after delay.
+  setTimeout(() => {
+    if (roomTruthError.value) {
+      requestRoomTruthNow()
+    }
+    void refreshActiveRoute().catch(retryErr =>
+      console.warn('[SSE] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
+    )
+  }, SSE_RECONNECT_RETRY_MS)
 }
 
 // --- SSE reaction setup ---
@@ -319,9 +319,7 @@ export function startPeriodicRefresh(): void {
     if (!connected.value) {
       invalidateDashboardCache()
     }
-    void refreshRoomTruth().catch(err =>
-      console.warn('[periodic] room-truth refresh failed', err instanceof Error ? err.message : err),
-    )
+    requestRoomTruth()
     void refreshActiveRoute().catch(err =>
       console.warn('[periodic] route refresh failed', err instanceof Error ? err.message : err),
     )

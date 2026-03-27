@@ -1,6 +1,6 @@
 import type { RouteState } from './types'
 import { refreshExecution, refreshBoard, refreshGoals } from './store'
-import { refreshRoomTruth } from './room-truth-store'
+import { requestRoomTruth } from './room-truth-store'
 import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionSnapshot } from './mission-store'
 import {
@@ -102,7 +102,7 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
 }
 
 const REFRESHERS: Record<RefreshTask, () => void> = {
-  roomTruth: () => { void refreshRoomTruth() },
+  roomTruth: () => { requestRoomTruth() },
   missionSnapshot: () => { void refreshMissionSnapshot() },
   execution: () => { void refreshExecution({ force: true }) },
   activityGraph: () => { void refreshActivityGraphSurface() },

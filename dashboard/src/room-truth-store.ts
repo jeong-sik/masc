@@ -7,4 +7,4 @@ export {
   roomTruthInitializing,
 } from './room-truth-signals'
 export { normalizeRoomTruth } from './room-truth-normalizers'
-export { refreshRoomTruth } from './room-truth-actions'
+export { refreshRoomTruth, requestRoomTruth, requestRoomTruthNow, disposeRoomTruthScheduler } from './room-truth-actions'

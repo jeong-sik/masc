@@ -220,7 +220,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
             Some
               (`Assoc
                 [
-                  ("runtime_class", `String "keeper");
+                  ("runtime_class", `String "resident_keeper");
                   ("registered", `Bool true);
                   ("pipeline_stage", `String pipeline_stage);
                   ("name", `String meta.name);
@@ -301,7 +301,7 @@ let persistent_agents_json ?keeper_names config =
             Some
               (`Assoc
                 [
-                  ("runtime_class", `String "keeper");
+                  ("runtime_class", `String "persistent_agent");
                   ("registered", `Bool false);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);

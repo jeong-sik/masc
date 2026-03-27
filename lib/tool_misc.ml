@@ -326,14 +326,16 @@ let keeper_policies_json ctx =
     Keeper_types.resident_keeper_names ctx.config
     |> List.filter_map (fun name ->
            match Keeper_types.read_meta ctx.config name with
-           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"keeper" meta)
+           | Ok (Some meta) ->
+               Some (keeper_policy_row ctx ~runtime_class:"resident_keeper" meta)
            | Ok None | Error _ -> None)
   in
   let unregistered_rows =
     Keeper_types.persistent_agent_names ctx.config
     |> List.filter_map (fun name ->
            match Keeper_types.read_meta ctx.config name with
-           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"keeper" meta)
+           | Ok (Some meta) ->
+               Some (keeper_policy_row ctx ~runtime_class:"persistent_agent" meta)
            | Ok None | Error _ -> None)
   in
   `Assoc

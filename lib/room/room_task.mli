@@ -1,0 +1,97 @@
+(** Room_task -- Task lifecycle: add, claim, transition, complete, cancel.
+
+    This module is [include]d by {!Room}; all bindings are part of
+    the public Room interface.  Re-exports {!Room_utils} and
+    {!Room_state}. *)
+
+include module type of Room_utils
+include module type of Room_state
+
+(** {1 Task activity helpers} *)
+
+val emit_task_activity :
+  config -> agent_name:string -> task_id:string ->
+  kind:string -> payload:Yojson.Safe.t -> unit
+
+val task_status_to_string : Types.task_status -> string
+
+val task_started_at_unix : Types.task_status -> float
+
+val task_transition_details :
+  from_status:Types.task_status ->
+  to_status:Types.task_status ->
+  ?notes:string -> ?reason:string -> ?duration_ms:int ->
+  ?forced:bool -> unit -> Yojson.Safe.t
+
+val observe_task_transition :
+  config -> agent_name:string -> task_id:string ->
+  transition:string -> details:Yojson.Safe.t -> unit
+
+(** {1 Task creation} *)
+
+val add_task :
+  config -> title:string -> priority:int -> description:string -> string
+
+val add_task_with_role :
+  config -> title:string -> priority:int -> description:string ->
+  required_role:Types_core.role -> string
+
+val batch_add_tasks :
+  config -> (string * int * string) list -> string
+
+(** {1 Task claiming} *)
+
+val claim_task :
+  config -> agent_name:string -> task_id:string -> string
+
+val claim_task_r :
+  config -> agent_name:string -> task_id:string ->
+  ?agent_role:Types_core.role -> unit -> string Types.masc_result
+
+(** {1 Task transitions} *)
+
+val transition_task_r :
+  config -> agent_name:string -> task_id:string -> action:string ->
+  ?expected_version:int -> ?notes:string -> ?reason:string ->
+  ?force:bool -> unit -> string Types.masc_result
+
+val release_task_r :
+  config -> agent_name:string -> task_id:string ->
+  ?expected_version:int -> unit -> string Types.masc_result
+
+val force_release_task_r :
+  config -> agent_name:string -> task_id:string ->
+  unit -> string Types.masc_result
+
+val force_done_task_r :
+  config -> agent_name:string -> task_id:string ->
+  notes:string -> unit -> string Types.masc_result
+
+(** {1 Task completion} *)
+
+val complete_task :
+  config -> agent_name:string -> task_id:string -> notes:string -> string
+
+val complete_task_r :
+  config -> agent_name:string -> task_id:string ->
+  notes:string -> string Types.masc_result
+
+(** {1 Task cancellation} *)
+
+val cancel_task_r :
+  config -> agent_name:string -> task_id:string ->
+  reason:string -> string Types.masc_result
+
+(** {1 Re-exported type (backward compatibility)} *)
+
+type claim_next_result = Types.claim_next_result =
+  | Claim_next_claimed of {
+      task_id : string;
+      title : string;
+      priority : int;
+      released_task_id : string option;
+      message : string;
+    }
+  | Claim_next_no_unclaimed
+  | Claim_next_no_eligible of { excluded_count : int }
+  | Claim_next_error of string

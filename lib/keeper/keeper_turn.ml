@@ -70,6 +70,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> (false, "❌ " ^ e)
     | Ok () ->
+    (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
+    | Error e -> (false, "❌ " ^ e)
+    | Ok () ->
     match ensure_keeper_exists
       ~ctx ~name ~require_existing ~profile_defaults
       ~inline_goal ~inline_short_goal ~inline_mid_goal ~inline_long_goal
@@ -208,4 +211,4 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               ] in
               (true, Yojson.Safe.to_string reply_json)
 
-))
+)))

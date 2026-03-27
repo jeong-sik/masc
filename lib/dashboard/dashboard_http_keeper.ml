@@ -453,9 +453,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
-              ("initiative_enabled", `Bool m.initiative_enabled);
-              ("initiative_idle_sec", `Int m.initiative_idle_sec);
-              ("initiative_cooldown_sec", `Int m.initiative_cooldown_sec);
               ("proactive_count_total", `Int m.proactive.count_total);
               ("autonomous_turn_count", `Int m.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.autonomous_text_turn_count);

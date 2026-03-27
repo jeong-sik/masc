@@ -97,33 +97,6 @@ let string_is_valid_utf8 s =
   in
   loop 0
 
-let test_keeper_fallback_model_labels_prefers_available_remote_models () =
-  with_env "ZAI_API_KEY" "zai-test" (fun () ->
-      with_env "ANTHROPIC_API_KEY" "" (fun () ->
-          with_env "GEMINI_API_KEY" "" (fun () ->
-              let labels = Masc_mcp.Keeper_types.keeper_fallback_model_labels () in
-              check (list string) "glm fallback only"
-                [Printf.sprintf "glm:%s" Masc_mcp.Env_config.Glm.default_model] labels)))
-
-let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
-  with_env "ZAI_API_KEY" "zai-test" (fun () ->
-      let labels =
-        Masc_mcp.Keeper_types.maybe_append_keeper_fallback_models
-          ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
-      in
-      let llama_listening =
-        Masc_mcp.Keeper_types.label_is_available "llama:qwen3.5-35b-a3b-ud-q8-xl"
-      in
-      let expected =
-        if llama_listening then
-          ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
-        else
-          ["llama:qwen3.5-35b-a3b-ud-q8-xl";
-           Printf.sprintf "glm:%s" Masc_mcp.Env_config.Glm.default_model]
-      in
-      check (list string) "append glm fallback only when local runtime unavailable"
-        expected labels)
-
 let test_model_client_sanitize_message_utf8_repairs_invalid_fields () =
   let raw : Agent_sdk.Types.message =
     { Agent_sdk.Types.role = User;
@@ -157,7 +130,7 @@ let test_resolved_keeper_skill_route_marks_agent_judgment () =
     reason = "fallback";
   } in
   let reply =
-    "SKILL: lodge-social (+masc-heartbeat)\nSKILL_REASON: agent-selected\nActual reply body"
+    "SKILL: masc-keeper-autonomy (+masc-heartbeat)\nSKILL_REASON: agent-selected\nActual reply body"
   in
   let resolved =
     Masc_mcp.Keeper_alerting.resolved_keeper_skill_route
@@ -167,7 +140,7 @@ let test_resolved_keeper_skill_route_marks_agent_judgment () =
   in
   check string "selection mode" "agent" resolved.selection_mode;
   check string "provenance" "judgment" resolved.provenance;
-  check string "primary skill" "lodge-social" resolved.route.primary_skill
+  check string "primary skill" "masc-keeper-autonomy" resolved.route.primary_skill
 
 let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   let fallback_route : Masc_mcp.Keeper_alerting.keeper_skill_route = {
@@ -255,6 +228,54 @@ let test_keeper_msg_rejects_legacy_model_args () =
       check bool "keeper msg rejects legacy model args" false ok;
       check bool "legacy model error surfaced" true
         (contains_substring body "legacy keeper model args removed"))
+
+let test_keeper_up_rejects_removed_runtime_args () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let keeper_ctx : _ Masc_mcp.Keeper_types.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let ok, body =
+        Masc_mcp.Keeper_turn.handle_keeper_up keeper_ctx
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("goal", `String "Maintain Sangsu persona");
+              ("trigger_mode", `String "explicit_only");
+            ])
+      in
+      check bool "keeper up rejects removed runtime args" false ok;
+      check bool "removed arg error surfaced" true
+        (contains_substring body "removed keeper args"))
+
+let test_keeper_msg_rejects_removed_runtime_args () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let keeper_ctx : _ Masc_mcp.Keeper_types.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let ok, body =
+        Masc_mcp.Keeper_turn.handle_keeper_msg keeper_ctx
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("message", `String "ping");
+              ("initiative_enabled", `Bool true);
+            ])
+      in
+      check bool "keeper msg rejects removed runtime args" false ok;
+      check bool "removed arg error surfaced" true
+        (contains_substring body "removed keeper args"))
 
 (* write_persona_profile removed: persona concept deleted, see CLAUDE.md *)
 
@@ -814,7 +835,6 @@ let test_resident_list_items_expose_runtime_config_summary () =
               ("scope_kind", `String "global");
               ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool true);
-              ("trigger_mode", `String "explicit_only");
             ])
       in
       if not ok then fail up_body;
@@ -838,8 +858,8 @@ let test_resident_list_items_expose_runtime_config_summary () =
         Yojson.Safe.Util.(row |> member "presence_keepalive" |> to_bool);
       check bool "proactive enabled true" true
         Yojson.Safe.Util.(row |> member "proactive_enabled" |> to_bool);
-      check bool "initiative enabled true" true
-        Yojson.Safe.Util.(row |> member "initiative_enabled" |> to_bool);
+      check bool "initiative enabled removed" true
+        Yojson.Safe.Util.(row |> member "initiative_enabled" = `Null);
       check bool "policy mode removed" true
         Yojson.Safe.Util.(row |> member "policy_mode" = `Null);
       check bool "trigger mode removed" true
@@ -1679,10 +1699,6 @@ let () =
     ("read_file_tail_lines", [
          test_case "drops partial first line" `Quick test_read_file_tail_lines_drops_partial_first_line;
          test_case "keeps line-boundary start" `Quick test_read_file_tail_lines_keeps_line_boundary_start;
-         test_case "fallback labels prefer available remote models" `Quick
-           test_keeper_fallback_model_labels_prefers_available_remote_models;
-         test_case "append glm fallback for local only model" `Quick
-           test_maybe_append_keeper_fallback_models_adds_glm_when_local_only;
          test_case "model client repairs invalid utf8 fields" `Quick
            test_model_client_sanitize_message_utf8_repairs_invalid_fields;
          test_case "model client preserves message list size" `Quick
@@ -1697,6 +1713,10 @@ let () =
            test_keeper_up_rejects_legacy_model_args;
          test_case "keeper msg rejects legacy model args" `Quick
            test_keeper_msg_rejects_legacy_model_args;
+         test_case "keeper up rejects removed runtime args" `Quick
+           test_keeper_up_rejects_removed_runtime_args;
+         test_case "keeper msg rejects removed runtime args" `Quick
+           test_keeper_msg_rejects_removed_runtime_args;
          test_case "resident and persistent lists split" `Quick
            test_resident_keeper_and_persistent_agent_lists_split;
          test_case "resident and persistent detailed lists annotate runtime class" `Quick

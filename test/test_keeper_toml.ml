@@ -211,6 +211,48 @@ soul_profile = "nonexistent"
          try ignore (Str.search_forward (Str.regexp "invalid\\|soul\\|unknown") lc 0); true
          with Not_found -> false)
 
+let test_profile_rejects_removed_model_keys () =
+  let input = {|
+[keeper]
+goal = "test"
+models = ["llama:test"]
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok _ -> fail "expected removed TOML key error"
+       | Error msg ->
+           check bool "mentions removed models key" true
+             (try
+                ignore
+                  (Str.search_forward
+                     (Str.regexp_string "keeper.models")
+                     msg 0);
+                true
+              with Not_found -> false))
+
+let test_profile_rejects_removed_initiative_keys () =
+  let input = {|
+[keeper]
+goal = "test"
+initiative_enabled = true
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok _ -> fail "expected removed TOML key error"
+       | Error msg ->
+           check bool "mentions removed initiative key" true
+             (try
+                ignore
+                  (Str.search_forward
+                     (Str.regexp_string "keeper.initiative_enabled")
+                     msg 0);
+                true
+              with Not_found -> false))
+
 (* ================================================================ *)
 (* File loading tests                                                *)
 (* ================================================================ *)
@@ -365,6 +407,10 @@ let () =
           test_case "minimal" `Quick test_profile_minimal;
           test_case "full" `Quick test_profile_full;
           test_case "invalid soul_profile" `Quick test_profile_invalid_soul_profile;
+          test_case "rejects removed model keys" `Quick
+            test_profile_rejects_removed_model_keys;
+          test_case "rejects removed initiative keys" `Quick
+            test_profile_rejects_removed_initiative_keys;
         ] );
       ( "file_loading",
         [

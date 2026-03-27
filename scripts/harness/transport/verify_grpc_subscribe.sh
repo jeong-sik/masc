@@ -71,7 +71,7 @@ else
 fi
 
 subscribe_resp="$(
-  grpcurl -plaintext \
+  grpcurl -plaintext -max-time 5 \
     -import-path "${PROTO_DIR}" \
     -proto masc_coordination.proto \
     -d '{"agent_name":"e2e-harness","session_id":"grpc-e2e-harness","since_seq":"0","event_types":["message"]}' \

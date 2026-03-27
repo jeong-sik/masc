@@ -236,8 +236,6 @@ let command_plane_summary_cache_parts ~allow_initializing ~state =
       in
       (Some (`Assoc (List.remove_assoc "swarm_status" fields)), swarm_status)
   | _ -> (None, None)
-let dashboard_semantics_http_json () =
-  Dashboard_semantics.json ()
 
 let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in

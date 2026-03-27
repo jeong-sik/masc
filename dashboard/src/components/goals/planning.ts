@@ -127,5 +127,3 @@ export function Planning() {
     </div>
   `
 }
-
-export const Goals = Planning

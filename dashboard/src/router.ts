@@ -1,10 +1,9 @@
 // MASC Dashboard — Hash-based router
 // Reads location.hash for canonical dashboard routes.
-// Legacy tab IDs (pre-restructure) are transparently redirected to the current IA.
 
 import { signal, type ReadonlySignal } from '@preact/signals'
-import type { RouteState, TabId, AnyTabId, LegacyTabId } from './types'
-import { VALID_TABS, LEGACY_TAB_REDIRECTS } from './types'
+import type { RouteState, TabId } from './types'
+import { VALID_TABS } from './types'
 import { normalizeRouteParams } from './config/navigation'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
@@ -15,19 +14,9 @@ const COMMAND_SURFACE_SEGMENTS = new Set([
   'chains',
   'control',
 ])
-const LAB_SECTION_SEGMENTS = new Set(['overview', 'autoresearch'])
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
-}
-
-/** Resolve a raw string to a new TabId, applying legacy redirects if needed. */
-function resolveTab(raw: string | null | undefined): { tab: TabId; params?: Record<string, string> } | null {
-  if (!raw) return null
-  if (isTabId(raw)) return { tab: raw }
-  const redirect = LEGACY_TAB_REDIRECTS[raw as LegacyTabId]
-  if (redirect) return { tab: redirect.tab, params: redirect.params }
-  return null
 }
 
 function decodeSafe(input: string): string {
@@ -60,11 +49,11 @@ function parseSegments(
   segments: string[],
   params: Record<string, string>,
 ): RouteState {
-  // Deep-link: /chains/operation/:id -> operations command surface
+  // Deep-link: /chains/operation/:id -> warroom chains surface
   if (segments[0] === 'chains') {
     const nextParams: Record<string, string> = {
       ...params,
-      section: 'command',
+      section: 'warroom',
       surface: 'chains',
     }
     if (segments[1] === 'operation' && segments[2]) {
@@ -77,58 +66,13 @@ function parseSegments(
     }
   }
 
-  // Legacy deep-link: /lab/:surface
-  if (segments[0] === 'lab') {
-    if (segments[1]) {
-      const section = decodeSafe(segments[1])
-      const nextParams = { ...params }
-      if (LAB_SECTION_SEGMENTS.has(section)) {
-        nextParams.section = section
-        return {
-          tab: 'lab',
-          params: normalizeRouteParams('lab', nextParams),
-          postId: null,
-        }
-      }
-      nextParams.section = 'command'
-      nextParams.surface = section
-      return {
-        tab: 'command',
-        params: normalizeRouteParams('command', nextParams),
-        postId: null,
-      }
-    }
-    if (params.surface) {
-      const nextParams = { ...params }
-      nextParams.section = 'command'
-      return {
-        tab: 'command',
-        params: normalizeRouteParams('command', nextParams),
-        postId: null,
-      }
-    }
-    if (!params.section && !params.surface) {
-      return {
-        tab: 'command',
-        params: normalizeRouteParams('command', { ...params, section: 'command' }),
-        postId: null,
-      }
-    }
-    const nextParams = { ...params }
-    return {
-      tab: 'lab',
-      params: normalizeRouteParams('lab', nextParams),
-      postId: null,
-    }
-  }
-
-  if ((segments[0] === 'operations' || segments[0] === 'command') && segments[1]) {
+  if (segments[0] === 'command' && segments[1]) {
     const nextParams = { ...params }
     const second = decodeSafe(segments[1])
-    if (second === 'intervene' || second === 'command' || second === 'tools') {
+    if (second === 'intervene' || second === 'warroom' || second === 'governance') {
       nextParams.section = second
     } else if (COMMAND_SURFACE_SEGMENTS.has(second)) {
-      nextParams.section = 'command'
+      nextParams.section = 'warroom'
       nextParams.surface = second
     }
     return {
@@ -138,9 +82,8 @@ function parseSegments(
     }
   }
 
-  if ((segments[0] === 'status' || segments[0] === 'monitoring' || segments[0] === 'work' || segments[0] === 'workspace') && segments[1]) {
-    const rawTab = segments[0]
-    const tab = (rawTab === 'status' ? 'monitoring' : rawTab === 'work' ? 'workspace' : rawTab) as 'monitoring' | 'workspace'
+  if ((segments[0] === 'monitoring' || segments[0] === 'workspace' || segments[0] === 'lab') && segments[1]) {
+    const tab = segments[0] as 'monitoring' | 'workspace' | 'lab'
     const nextParams = { ...params, section: decodeSafe(segments[1]) }
     return {
       tab,
@@ -152,21 +95,13 @@ function parseSegments(
   const tabFromPath = segments[0]
   const tabFromQuery = params.tab
 
-  // Lab tab removed (#2898). Redirect legacy lab bookmarks to command tab.
-  if ((tabFromPath === 'lab' || tabFromQuery === 'lab') && params.surface && !params.section) {
-    const nextParams = { ...params, section: 'command' }
-    return {
-      tab: 'command',
-      params: normalizeRouteParams('command', nextParams),
-      postId: null,
-    }
-  }
+  const resolvedTab =
+    (isTabId(tabFromPath) && tabFromPath)
+    || (isTabId(tabFromQuery) && tabFromQuery)
+    || 'overview'
+  const mergedParams = normalizeRouteParams(resolvedTab, params)
 
-  // Resolve with legacy redirect support
-  const resolved = resolveTab(tabFromPath) || resolveTab(tabFromQuery) || { tab: 'overview' as TabId }
-  const mergedParams = normalizeRouteParams(resolved.tab, { ...params, ...(resolved.params ?? {}) })
-
-  return { tab: resolved.tab, params: mergedParams, postId: null }
+  return { tab: resolvedTab, params: mergedParams, postId: null }
 }
 
 function parseHash(hash: string): RouteState {
@@ -225,7 +160,7 @@ function toHash(r: RouteState): string {
 
 export const route = signal<RouteState>(parseHash(window.location.hash))
 
-// Listen for hash changes — silently replace legacy hashes with canonical form
+// Listen for hash changes and normalize the route state into canonical hashes.
 window.addEventListener('hashchange', () => {
   const parsed = parseHash(window.location.hash)
   route.value = parsed
@@ -241,16 +176,10 @@ window.addEventListener('hashchange', () => {
 
 // --- Navigation helpers ---
 
-/** Navigate to a tab. Accepts both new and legacy tab IDs (legacy are silently redirected). */
-export function navigate(tab: AnyTabId, params?: Record<string, string>): void {
-  const redirect = LEGACY_TAB_REDIRECTS[tab as LegacyTabId]
-  const resolvedTab: TabId = redirect ? redirect.tab : tab as TabId
-  const baseParams = redirect?.params
-    ? { ...redirect.params, ...(params ?? {}) }
-    : params ?? {}
+export function navigate(tab: TabId, params?: Record<string, string>): void {
   const next = {
-    tab: resolvedTab,
-    params: normalizeRouteParams(resolvedTab, baseParams),
+    tab,
+    params: normalizeRouteParams(tab, params ?? {}),
     postId: null,
   } satisfies RouteState
   const nextHash = toHash(next)
@@ -287,7 +216,6 @@ export function initRouter(): void {
   // Priority 1: explicit hash route
   if (window.location.hash && window.location.hash !== '#') {
     route.value = parseHash(window.location.hash)
-    // Replace legacy hash with canonical form
     const canonical = toHash(route.value)
     if (window.location.hash !== canonical) {
       window.history.replaceState(

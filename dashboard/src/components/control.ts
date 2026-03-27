@@ -30,5 +30,3 @@ export function Operations() {
     </div>
   `
 }
-
-export const Control = Operations

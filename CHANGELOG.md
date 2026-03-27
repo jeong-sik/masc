@@ -3,6 +3,57 @@
 
 ## [Unreleased]
 
+## [2.158.0] - 2026-03-28
+
+### Changed
+- **Env config consolidation** — consolidate MASC_ env vars into Env_config sub-modules (#3464).
+- **mcp_protocol floor** — require >= 1.2.0 (#3488).
+
+### Fixed
+- **Dashboard SSE guard** — guard hydrateTransportHealthFromSSE against non-object payload (#3480).
+- **gRPC harness timeout** — add max-time to Subscribe check to prevent CI hang (#3479).
+
+## [2.157.0] - 2026-03-28
+
+### Added
+- **Dashboard SSE push** — push room-truth, execution, operator, and transport data via SSE instead of client-pull (#3445, #3461, #3465).
+- **Autoresearch early stopping** — patience-based early stopping + build verification gate (#3462).
+- **Contract-driven agent loop RFC** — design doc and validation set (#3475).
+
+### Changed
+- **SDK adapter seam** — reserve SDK names and prep canonical MCP adapter (#3442).
+- **Immutable data structures** — circuit_breaker Hashtbl to StringMap (#3459), keeper registry_entry to Atomic signals (#3463), autoresearch loop_state 15 mutable fields removed (#3474).
+- **Dashboard fetch hygiene** — dead code removal, interval tuning, execution coalescing (#3458).
+- **Autoresearch review findings** — simplify output (#3471).
+
+### Fixed
+- **WS bind isolation** — isolate WS bind failure and add listen_status (#3455).
+- **CI mcp_protocol pins** — adapt to single-package merge, revert grpc-direct temp branch (#3470, #3473, #3478).
+- **Dashboard type safety** — use DashboardExecutionResponse type in hydrateExecutionSnapshot (#3476).
+- **Test Eio context** — wrap coverage test helpers in Eio context (#3457).
+
+## [2.156.0] - 2026-03-27
+
+### Added
+- **MCP progress messages** — add progress notifications and _meta tracing to key operations (#3454).
+- **MCP tool output schemas** — custom tool titles and output schemas for structured content (#3452).
+
+### Changed
+- **Safe_ops migration** — replace Type_error catches with Safe_ops helpers across 3 batches (#3436, #3440, #3444), remove 7 Type_error JSON helpers (#3450).
+- **Module interfaces** — add .mli for 4 medium-complexity modules (#3449).
+- **mcp_protocol upgrade** — bump to v0.16.0, remove dead Jsonrpc module (#3443).
+- **Dashboard fetch coalescing** — coalesce room-truth fetches via FetchScheduler (#3437).
+- **Lab tool separation** — split lab tools and experiments surfaces (#3434).
+- **Dashboard to pnpm** — fix happy-dom advisory and switch to pnpm (#3432).
+
+### Fixed
+- **Config_error exception** — replace failwith with Config_error in env_config_core (#3451).
+- **Memory leaks** — plug 6 grow-only Hashtbl leaks in cleanup loop (#3439).
+- **Dashboard panels** — compact empty mission panels (#3399), tighten config path panel (#3405).
+- **Board filter** — fix classification and trim keeper diagnostics (#3409).
+- **Startup isolation** — isolate startup takeover probe and reclaim path (#3438).
+- **Keeper read-path** — reduce dashboard keeper read-path stalls (#3435).
+
 ## [2.155.0] - 2026-03-27
 
 ### Added

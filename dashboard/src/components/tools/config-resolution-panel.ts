@@ -23,51 +23,121 @@ function toneClass(status: string): string {
 function sourceLabel(source: string): string {
   switch (source) {
     case 'env':
-      return 'ENV'
+      return 'env override'
     case 'home_masc':
-      return 'HOME'
+      return 'home config'
     case 'invalid_env':
-      return 'INVALID ENV'
+      return 'invalid env'
     case 'exe_relative':
-      return 'EXE'
+      return 'exe fallback'
     case 'cwd':
-      return 'CWD'
+      return 'cwd fallback'
     case 'legacy_me_root':
-      return 'LEGACY'
+      return 'legacy fallback'
     case 'input':
-      return 'INPUT'
+      return 'input'
     case 'workspace':
-      return 'WORKSPACE'
+      return 'workspace'
     case 'resolved_base':
-      return 'BASE'
+      return 'resolved base'
     case 'runtime_data':
-      return 'DATA'
+      return 'runtime data'
     case 'prompt_registry':
-      return 'PROMPTS'
+      return 'prompt registry'
     default:
-      return 'MISSING'
+      return 'missing'
+  }
+}
+
+function normalizePath(path: string): string {
+  if (path === '/') return path
+  return path.replace(/\/+$/, '')
+}
+
+function describePath(path: string, rootPath: string, isRoot: boolean): {
+  primary: string
+  context: string | null
+  kind: string | null
+} {
+  const normalizedPath = normalizePath(path)
+  const normalizedRoot = normalizePath(rootPath)
+
+  if (isRoot || normalizedRoot === '') {
+    return {
+      primary: normalizedPath,
+      context: null,
+      kind: null,
+    }
+  }
+
+  if (normalizedPath === normalizedRoot) {
+    return {
+      primary: '.',
+      context: 'same as config root',
+      kind: 'root-relative',
+    }
+  }
+
+  const rootPrefix = normalizedRoot === '/' ? '/' : `${normalizedRoot}/`
+  if (normalizedPath.startsWith(rootPrefix)) {
+    return {
+      primary: normalizedPath.slice(rootPrefix.length),
+      context: 'under config root',
+      kind: 'root-relative',
+    }
+  }
+
+  return {
+    primary: normalizedPath,
+    context: 'outside config root',
+    kind: 'external',
   }
 }
 
 function ConfigRow({
   label,
   item,
+  rootPath = '',
+  rootSource = '',
+  isRoot = false,
 }: {
   label: string
   item: DashboardConfigResolutionItem
+  rootPath?: string
+  rootSource?: string
+  isRoot?: boolean
 }) {
+  const pathInfo = describePath(item.path, rootPath, isRoot)
+  const showSourceBadge = !isRoot && (rootSource === '' || item.source !== rootSource)
+
   return html`
-    <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3">
+    <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3" title=${item.path}>
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
         <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${toneClass(item.exists ? 'ready' : item.source === 'invalid_env' ? 'invalid_env' : 'warn')}">
           ${item.exists ? 'present' : 'missing'}
         </span>
-        <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
-          ${sourceLabel(item.source)}
-        </span>
+        ${showSourceBadge
+          ? html`
+              <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-muted)]">
+                ${sourceLabel(item.source)}
+              </span>
+            `
+          : null}
+        ${pathInfo.kind
+          ? html`
+              <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-muted)]">
+                ${pathInfo.kind}
+              </span>
+            `
+          : null}
       </div>
-      <div class="break-all font-mono text-[12px] leading-relaxed text-[var(--text-body)]">${item.path}</div>
+      <div class="break-all font-mono text-[12px] leading-relaxed text-[var(--text-body)]">${pathInfo.primary}</div>
+      ${pathInfo.context
+        ? html`
+            <div class="mt-2 text-[11px] text-[var(--text-muted)]">${pathInfo.context}</div>
+          `
+        : null}
     </div>
   `
 }
@@ -138,6 +208,9 @@ export function ConfigResolutionPanel({
 }) {
   if (!resolution && !runtimeResolution) return null
 
+  const rootPath = resolution?.config_root.path ?? ''
+  const rootSource = resolution?.config_root.source ?? ''
+
   return html`
     <${Card} title="설정 경로" class="section mb-4">
       <div class="mb-4 text-[12px] leading-relaxed text-[var(--text-muted)]">
@@ -151,6 +224,9 @@ export function ConfigResolutionPanel({
                 <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${toneClass(resolution.status)}">
                   ${resolution.status}
                 </span>
+                <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                  ${sourceLabel(resolution.config_root.source)}
+                </span>
                 <span class="text-[12px] text-[var(--text-muted)]">repo-managed config root</span>
               </div>
 
@@ -159,11 +235,37 @@ export function ConfigResolutionPanel({
               </div>
 
               <div class="grid gap-3 md:grid-cols-2">
-                <${ConfigRow} label="config root" item=${resolution.config_root} />
-                <${ConfigRow} label="cascade" item=${resolution.cascade} />
-                <${ConfigRow} label="prompts" item=${resolution.prompts} />
-                <${ConfigRow} label="keepers" item=${resolution.keepers} />
-                <${ConfigRow} label="personas" item=${resolution.personas} />
+                <${ConfigRow}
+                  label="config root"
+                  item=${resolution.config_root}
+                  rootPath=${rootPath}
+                  rootSource=${rootSource}
+                  isRoot=${true}
+                />
+                <${ConfigRow}
+                  label="cascade"
+                  item=${resolution.cascade}
+                  rootPath=${rootPath}
+                  rootSource=${rootSource}
+                />
+                <${ConfigRow}
+                  label="prompts"
+                  item=${resolution.prompts}
+                  rootPath=${rootPath}
+                  rootSource=${rootSource}
+                />
+                <${ConfigRow}
+                  label="keepers"
+                  item=${resolution.keepers}
+                  rootPath=${rootPath}
+                  rootSource=${rootSource}
+                />
+                <${ConfigRow}
+                  label="personas"
+                  item=${resolution.personas}
+                  rootPath=${rootPath}
+                  rootSource=${rootSource}
+                />
               </div>
             </div>
           `

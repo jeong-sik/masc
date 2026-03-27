@@ -17,7 +17,7 @@ describe('ConfigResolutionPanel', () => {
     container.remove()
   })
 
-  it('renders resolved paths and warnings', () => {
+  it('renders resolved paths, root-relative config paths, and runtime diagnostics', () => {
     render(
       html`<${ConfigResolutionPanel}
         resolution=${{
@@ -61,14 +61,101 @@ describe('ConfigResolutionPanel', () => {
 
     expect(container.textContent).toContain('설정 경로')
     expect(container.textContent).toContain('/tmp/legacy/config')
+    expect(container.textContent).toContain('legacy fallback')
     expect(container.textContent).toContain('Using legacy config fallback from ME_ROOT-style path')
+    expect(container.textContent).toContain('cascade.json')
+    expect(container.textContent).toContain('root-relative')
+    expect(container.textContent).toContain('under config root')
+    expect(container.textContent).not.toContain('/tmp/legacy/config/cascade.json')
     expect(container.textContent).toContain('/tmp/custom-personas')
-    expect(container.textContent).toContain('INVALID ENV')
+    expect(container.textContent).toContain('invalid env')
     expect(container.textContent).toContain('/tmp/workspace/.masc')
     expect(container.textContent).toContain('/tmp/shared/prompts')
     expect(container.textContent).toContain('source mismatch')
     expect(container.textContent).toContain('SIGTERM')
     expect(container.textContent).toContain('Runtime build commit (deadbee) differs from workspace HEAD (cafef00d).')
+  })
+  it('keeps the full path on hover title and hides duplicate source badges', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/tmp/root-config', exists: true, source: 'env' },
+          cascade: { path: '/tmp/root-config/cascade.json', exists: true, source: 'env' },
+          prompts: { path: '/tmp/root-config/prompts', exists: true, source: 'env' },
+          keepers: { path: '/tmp/root-config/keepers', exists: true, source: 'cwd' },
+          personas: { path: '/tmp/root-config/personas', exists: true, source: 'env' },
+        }}
+      />`,
+      container,
+    )
+
+    const cards = Array.from(container.querySelectorAll('[title]'))
+    expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config/cascade.json')
+    expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config')
+    expect(container.textContent?.match(/env override/g)?.length ?? 0).toBe(1)
+    expect(container.textContent).toContain('cwd fallback')
+  })
+
+  it('does not collapse sibling paths that only share the root prefix', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/tmp/root', exists: true, source: 'env' },
+          cascade: { path: '/tmp/root/cascade.json', exists: true, source: 'env' },
+          prompts: { path: '/tmp/root/prompts', exists: true, source: 'env' },
+          keepers: { path: '/tmp/root/keepers', exists: true, source: 'env' },
+          personas: { path: '/tmp/root-extra/personas', exists: true, source: 'env' },
+        }}
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('/tmp/root-extra/personas')
+    expect(container.textContent).toContain('outside config root')
+  })
+
+  it('renders the same-as-root case without repeating the full path', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/tmp/root', exists: true, source: 'env' },
+          cascade: { path: '/tmp/root', exists: true, source: 'env' },
+          prompts: { path: '/tmp/root/prompts', exists: true, source: 'env' },
+          keepers: { path: '/tmp/root/keepers', exists: true, source: 'env' },
+          personas: { path: '/tmp/root/personas', exists: true, source: 'env' },
+        }}
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('same as config root')
+    expect(container.textContent).toContain('.')
+  })
+
+  it('treats slash root as a valid root-relative prefix', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/', exists: true, source: 'cwd' },
+          cascade: { path: '/etc/cascade.json', exists: true, source: 'cwd' },
+          prompts: { path: '/var/prompts', exists: true, source: 'cwd' },
+          keepers: { path: '/opt/keepers', exists: true, source: 'cwd' },
+          personas: { path: '/srv/personas', exists: true, source: 'cwd' },
+        }}
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('etc/cascade.json')
+    expect(container.textContent).toContain('root-relative')
   })
 
   it('renders home config source label', () => {
@@ -87,7 +174,7 @@ describe('ConfigResolutionPanel', () => {
       container,
     )
 
-    expect(container.textContent).toContain('HOME')
+    expect(container.textContent).toContain('home config')
     expect(container.textContent).toContain('/home/test/.masc/config')
   })
 })

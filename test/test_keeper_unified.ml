@@ -361,7 +361,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = None };
     tools_used = tools;
     checkpoint = None;
-    proof = None;
+    proof_manifest_json = None;
   }
 
 let test_metrics_text_response () =

@@ -125,8 +125,68 @@ type run_result = {
   session_id : string;
   turns : int;
   trace_ref : Oas.Raw_trace.run_ref option;
-  proof : Oas.Cdal_proof.t option;
+  proof_manifest_json : Yojson.Safe.t option;
 }
+
+(* CDAL proof capture — enabled via MASC_CDAL_PROOF_CAPTURE=true env var.
+   Creates a minimal placeholder contract (Diagnose/Low) for walking skeleton.
+   Future: accept explicit Risk_contract.t from caller. *)
+let cdal_proof_capture_enabled () =
+  match Sys.getenv_opt "MASC_CDAL_PROOF_CAPTURE" with
+  | Some "true" | Some "1" -> true
+  | _ -> false
+
+let cdal_make_minimal_contract () : Oas.Risk_contract.t =
+  { runtime_constraints = {
+      requested_execution_mode = Oas.Execution_mode.Diagnose;
+      risk_class = Oas.Risk_class.Low;
+      allowed_mutations = [];
+      review_requirement = None;
+    };
+    eval_criteria = `Null;
+  }
+
+let cdal_make_capability_snapshot (config : config) : Oas.Cdal_proof.capability_snapshot =
+  { tools = List.map (fun (t : Oas.Tool.t) -> t.schema.name) config.tools;
+    mcp_servers = [];
+    max_turns = config.max_turns;
+    max_tokens = (if config.max_tokens > 0 then Some config.max_tokens else None);
+    thinking_enabled = None;
+  }
+
+let cdal_setup_proof_capture (config : config) (user_hooks : Oas.Hooks.hooks)
+  : Oas.Proof_capture.state option * Oas.Hooks.hooks =
+  if not (cdal_proof_capture_enabled ()) then (None, user_hooks)
+  else
+    let store = Oas.Proof_store.default_config in
+    let contract = cdal_make_minimal_contract () in
+    let caps = cdal_make_capability_snapshot config in
+    let mode_decision : Oas.Mode_resolver.decision =
+      match Oas.Mode_resolver.resolve
+              ~requested:Oas.Execution_mode.Diagnose
+              ~risk_class:Oas.Risk_class.Low
+              ~capabilities:caps with
+      | Ok d -> d
+      | Error _ -> { effective_mode = Oas.Execution_mode.Diagnose;
+                     source = "fallback" }
+    in
+    let state = Oas.Proof_capture.create ~store ~contract
+        ~mode_decision ~capability_snapshot:caps in
+    let proof_hooks = Oas.Proof_capture.hooks state in
+    let composed = Oas.Hooks.compose ~outer:proof_hooks ~inner:user_hooks in
+    (Some state, composed)
+
+let cdal_finalize_proof (pcs : Oas.Proof_capture.state option)
+    ~(result_ok : bool) : Yojson.Safe.t option =
+  match pcs with
+  | None -> None
+  | Some state ->
+    let result_status =
+      if result_ok then Oas.Cdal_proof.Completed
+      else Oas.Cdal_proof.Errored
+    in
+    let proof = Oas.Proof_capture.finalize state ~result_status in
+    Some (Oas.Cdal_proof.to_json proof)
 
 (* ================================================================ *)
 (* Internal: resolve provider                                        *)
@@ -282,6 +342,11 @@ let run
   Option.iter (fun bus ->
     publish_lifecycle bus ~name:config.name ~event:"build" ~detail:goal
   ) config.event_bus;
+  (* CDAL: compose proof capture hooks around user hooks *)
+  let user_hooks = match config.hooks with
+    | Some h -> h | None -> Oas.Hooks.empty in
+  let proof_state, final_hooks = cdal_setup_proof_capture config user_hooks in
+  let config = { config with hooks = Some final_hooks } in
   match build ~net ~config with
   | Error e ->
     Option.iter (fun bus ->
@@ -295,10 +360,10 @@ let run
      honouring the (run_result, string) result return type promised by .mli.
      Eio.Cancel.Cancelled is re-raised for structured-concurrency safety. *)
   (try
-    let result, proof = match contract with
+    let result, contract_proof_json = match contract with
       | Some c ->
         let cr = Oas.Contract_runner.run ~sw ~contract:c agent goal in
-        (cr.response, Some cr.proof)
+        (cr.response, Some (Oas.Cdal_proof.to_json cr.proof))
       | None ->
         let r = match on_event with
           | Some cb -> Oas.Agent.run_stream ~sw ~on_event:cb agent goal
@@ -328,8 +393,14 @@ let run
     let turns = (Oas.Agent.state agent).turn_count in
     let trace_ref = Oas.Agent.last_raw_trace_run agent in
     Oas.Agent.close agent;
+    (* CDAL proof: Contract_runner proof takes priority over standalone capture *)
+    let proof_manifest_json = match contract_proof_json with
+      | Some _ -> contract_proof_json
+      | None -> cdal_finalize_proof proof_state ~result_ok:(Result.is_ok result)
+    in
     (match result with
-    | Ok response -> Ok { response; checkpoint; session_id; turns; trace_ref; proof }
+    | Ok response ->
+      Ok { response; checkpoint; session_id; turns; trace_ref; proof_manifest_json }
     | Error err ->
       Error (Printf.sprintf "Agent run failed: %s" (Oas.Error.to_string err)))
   with

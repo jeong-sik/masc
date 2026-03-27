@@ -24,7 +24,11 @@ type run_result = {
   session_id : string;
   turns : int;
   trace_ref : Oas.Raw_trace.run_ref option;
-  proof : Oas.Cdal_proof.t option;
+  proof_manifest_json : Yojson.Safe.t option;
+  (** CDAL proof bundle manifest as JSON.
+      Populated when [?contract] is provided (via Contract_runner) or
+      when [MASC_CDAL_PROOF_CAPTURE=true] (standalone capture).
+      OAS types do not cross this boundary. *)
 }
 
 (** Cascade call/error metrics as JSON array, sorted by call count. *)

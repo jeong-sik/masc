@@ -36,15 +36,18 @@
 
 (** {1 Types} *)
 
-(** Usage metrics for tracking prompt effectiveness *)
-type prompt_metrics = {
+module Types = Prompt_registry_types
+
+type prompt_metrics = Types.prompt_metrics = {
   usage_count: int;      (** Number of times this prompt has been used *)
   avg_score: float;      (** Average quality score (0.0 - 1.0) *)
   last_used: float;      (** Unix timestamp of last usage *)
-} [@@deriving yojson]
+}
 
-(** A single prompt entry in the registry *)
-type prompt_entry = {
+let prompt_metrics_to_yojson = Types.prompt_metrics_to_yojson
+let prompt_metrics_of_yojson = Types.prompt_metrics_of_yojson
+
+type prompt_entry = Types.prompt_entry = {
   id: string;                     (** Unique identifier *)
   template: string;               (** Prompt template with {{var}} placeholders *)
   version: string;                (** Semantic version string *)
@@ -52,10 +55,12 @@ type prompt_entry = {
   metrics: prompt_metrics option; (** Optional usage metrics *)
   created_at: float;              (** Unix timestamp of creation *)
   deprecated: bool;               (** Whether this prompt is deprecated *)
-} [@@deriving yojson]
+}
 
-(** Registry statistics *)
-type registry_stats = {
+let prompt_entry_to_yojson = Types.prompt_entry_to_yojson
+let prompt_entry_of_yojson = Types.prompt_entry_of_yojson
+
+type registry_stats = Types.registry_stats = {
   total_prompts: int;
   active_prompts: int;
   deprecated_prompts: int;
@@ -63,14 +68,14 @@ type registry_stats = {
   avg_usage: float;
 }
 
-type prompt_meta = {
+type prompt_meta = Types.prompt_meta = {
   description: string;
   category: string;
   required_file: bool;
   template_variables: string list;
 }
 
-type prompt_resolution = {
+type prompt_resolution = Types.prompt_resolution = {
   effective: string;
   source: string;
   file_value: string option;
@@ -133,29 +138,21 @@ let extract_variables template =
 
 (** {1 In-memory Registry Storage} *)
 
-(** In-memory registry storage: (id, version) -> entry *)
-let registry : (string, prompt_entry) Hashtbl.t = Hashtbl.create 64
+let store = Prompt_registry_store.default ()
+let registry = store.registry
+let version_index = store.version_index
+let override_tbl = store.override_tbl
+let meta_tbl = store.meta_tbl
 
-(** Version index: id -> [version list] for quick version lookup *)
-let version_index : (string, string list) Hashtbl.t = Hashtbl.create 64
-
-(** Override store — highest priority. Dashboard/API edits go here. *)
-let override_tbl : (string, string) Hashtbl.t = Hashtbl.create 16
-
-(** Description and category metadata for prompts *)
-let meta_tbl : (string, prompt_meta) Hashtbl.t = Hashtbl.create 32
-
-let registry_mutex = Eio.Mutex.create ()
-
-let with_mutex f = Eio_guard.with_mutex registry_mutex f
+let with_mutex f = Prompt_registry_store.with_lock store f
 
 (** {1 Persistence} *)
 
 (** File-based persistence directory *)
-let prompts_dir = ref None
+let prompts_dir = store.prompts_dir
 
 (** Markdown prompt source directory for operator-managed prompt text. *)
-let markdown_dir = ref None
+let markdown_dir = store.markdown_dir
 
 (** Make a storage key from id and version *)
 let make_key ~id ~version = Printf.sprintf "%s@%s" id version

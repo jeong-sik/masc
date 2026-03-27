@@ -71,35 +71,44 @@ let _https_connector_cache :
    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
    [> Eio.Flow.two_way_ty ] Eio.Resource.t) option ref = ref None
 
-let build_https_connector () =
+let https_error message = Error message
+
+let build_https_connector_result () =
   match Ca_certs.authenticator () with
-  | Error (`Msg msg) ->
-      failwith ("CA certs unavailable: " ^ msg)
-  | Error _ ->
-      failwith "CA certs unavailable: unknown error"
-  | Ok authenticator ->
-      (match Tls.Config.client ~authenticator () with
-       | Error (`Msg msg) ->
-           failwith ("TLS config error: " ^ msg)
-       | Ok tls_config ->
-           fun uri (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t) ->
-             let flow : [> Eio.Flow.two_way_ty ] Eio.Resource.t = (raw :> _) in
-           let host =
-             match Uri.host uri with
-             | None -> None
-             | Some h ->
-                 (match Domain_name.of_string h with
-                  | Ok d -> Some (Domain_name.host_exn d)
-                  | Error _ -> None)
-           in
-           match host with
-           | None -> failwith "TLS host missing/invalid"
-           | Some host -> Tls_eio.client_of_flow tls_config ~host flow)
+  | Error (`Msg msg) -> https_error ("CA certs unavailable: " ^ msg)
+  | Error _ -> https_error "CA certs unavailable: unknown error"
+  | Ok authenticator -> (
+      match Tls.Config.client ~authenticator () with
+      | Error (`Msg msg) -> https_error ("TLS config error: " ^ msg)
+      | Ok tls_config ->
+          Ok
+            (fun uri
+                  (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
+                ->
+              let flow : [> Eio.Flow.two_way_ty ] Eio.Resource.t = (raw :> _) in
+              let host =
+                match Uri.host uri with
+                | None -> None
+                | Some h -> (
+                    match Domain_name.of_string h with
+                    | Ok d -> Some (Domain_name.host_exn d)
+                    | Error _ -> None)
+              in
+              match host with
+              | None -> raise (Invalid_argument "TLS host missing/invalid")
+              | Some host -> Tls_eio.client_of_flow tls_config ~host flow))
+
+let get_https_connector_result () =
+  match !_https_connector_cache with
+  | Some c -> Ok c
+  | None -> (
+      match build_https_connector_result () with
+      | Ok c ->
+          _https_connector_cache := Some c;
+          Ok c
+      | Error _ as error -> error)
 
 let get_https_connector () =
-  match !_https_connector_cache with
-  | Some c -> c
-  | None ->
-    let c = build_https_connector () in
-    _https_connector_cache := Some c;
-    c
+  match get_https_connector_result () with
+  | Ok connector -> connector
+  | Error message -> failwith message

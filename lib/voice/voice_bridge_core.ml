@@ -96,17 +96,23 @@ let voice_mcp_port () =
   | None -> Env_config_runtime.Voice.default_port
 
 let client_for_uri ~sw ~net uri =
-  let https = if Uri.scheme uri = Some "https" then
-    Some (Eio_context.get_https_connector ())
-  else None in
-  Masc_http_client.make_closing_client ~sw ~net ~https
+  match
+    if Uri.scheme uri <> Some "https" then Ok None
+    else
+      match Eio_context.get_https_connector_result () with
+      | Ok connector -> Ok (Some connector)
+      | Error message -> Error message
+  with
+  | Ok https -> Ok (Masc_http_client.make_closing_client ~sw ~net ~https)
+  | Error message -> Error message
 
 let client_for_uri_result ~sw ~net uri =
-  try Ok (client_for_uri ~sw ~net uri)
-  with
+  try client_for_uri ~sw ~net uri with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Error (Printf.sprintf "HTTPS client init error: %s" (Printexc.to_string exn))
+      Error
+        (Printf.sprintf "HTTPS client init error: %s"
+           (Printexc.to_string exn))
 
 (** ============================================
     Structured Logging
@@ -259,4 +265,3 @@ let append_provider_metadata json endpoint =
             ("endpoint_url", endpoint_url_json endpoint);
           ])
   | other -> other
-

@@ -47,3 +47,12 @@ val get_https_connector :
    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
    [ `Close | `Flow | `R | `Shutdown | `Tls | `W ] Eio.Resource.t)
 (** TLS connector for Cohttp_eio HTTPS support. *)
+
+val get_https_connector_result :
+  unit ->
+  ((Uri.t ->
+    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
+    [ `Close | `Flow | `R | `Shutdown | `Tls | `W ] Eio.Resource.t),
+   string)
+  result
+(** Non-raising HTTPS connector lookup. *)

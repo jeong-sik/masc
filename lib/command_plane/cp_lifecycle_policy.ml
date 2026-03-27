@@ -1,16 +1,19 @@
 include Cp_lifecycle
 open Result_syntax
 
+let required_string json ~key ~message =
+  match Json_util.require_string json key with
+  | Ok value when String.trim value <> "" -> Ok value
+  | Ok _ | Error _ -> Error message
+
 let request_or_apply_assignment config ~(actor : string) ~requested_action json =
-  let operation_id =
-    match get_string_opt json "operation_id" with
-    | Some value -> value
-    | None -> invalid_arg "operation_id is required. Call masc_operation_start first."
+  let* operation_id =
+    required_string json ~key:"operation_id"
+      ~message:"operation_id is required. Call masc_operation_start first."
   in
-  let target_unit_id =
-    match get_string_opt json "target_unit_id" with
-    | Some value -> value
-    | None -> invalid_arg "target_unit_id is required"
+  let* target_unit_id =
+    required_string json ~key:"target_unit_id"
+      ~message:"target_unit_id is required"
   in
   with_operation config operation_id (fun _ current ->
       let _, _, units, _ = topology_units config in
@@ -77,20 +80,18 @@ let request_or_apply_assignment config ~(actor : string) ~requested_action json 
              ~note:(get_string_opt json "note") ~event_type:requested_action))
 
 let dispatch_assign_json config ~(actor : string) json =
-  try request_or_apply_assignment config ~actor ~requested_action:"dispatch_assign" json
-  with Invalid_argument message -> Error message
+  request_or_apply_assignment config ~actor ~requested_action:"dispatch_assign"
+    json
 
 let dispatch_rebalance_json config ~(actor : string) json =
-  try request_or_apply_assignment config ~actor ~requested_action:"dispatch_rebalance" json
-  with Invalid_argument message -> Error message
+  request_or_apply_assignment config ~actor
+    ~requested_action:"dispatch_rebalance" json
 
 let dispatch_escalate_json config ~(actor : string) json =
-  try
-    let operation_id =
-      match get_string_opt json "operation_id" with
-      | Some value -> value
-      | None -> invalid_arg "operation_id is required. Call masc_operation_start first."
-    in
+  let* operation_id =
+    required_string json ~key:"operation_id"
+      ~message:"operation_id is required. Call masc_operation_start first."
+  in
     with_operation config operation_id (fun _ current ->
         let _, _, units, _ = topology_units config in
         let target_unit_id =
@@ -109,7 +110,6 @@ let dispatch_escalate_json config ~(actor : string) json =
               ("target_unit_id", `String target_unit_id);
               ("note", match get_string_opt json "note" with Some value -> `String value | None -> `Null);
             ]))
-  with Invalid_argument message -> Error message
 
 let dispatch_recall_json config ~(actor : string) json =
   match get_string_opt json "operation_id" with
@@ -141,62 +141,59 @@ let unit_update_json config ~(actor : string) json =
   with Invalid_argument message -> Error message
 
 let unit_reparent_json config ~(actor : string) json =
-  try
-    let unit_id =
-      match get_string_opt json "unit_id" with
-      | Some value -> value
-      | None -> invalid_arg "unit_id is required"
-    in
-    let parent_unit_id = get_string_opt json "parent_unit_id" in
-    update_unit config ~actor ~unit_id
-      (fun current ->
-        { current with parent_unit_id; updated_at = Types.now_iso () })
-      ~event_type:"unit_reparented"
-      (`Assoc [ ("parent_unit_id", match parent_unit_id with Some value -> `String value | None -> `Null) ])
-    |> Result.map (fun unit ->
-           `Assoc
-             [
-               ("status", `String "ok");
-               ("result", unit_to_json unit);
-               ("topology", topology_json config);
-             ])
-  with Invalid_argument message -> Error message
+  let* unit_id =
+    required_string json ~key:"unit_id" ~message:"unit_id is required"
+  in
+  let parent_unit_id = get_string_opt json "parent_unit_id" in
+  update_unit config ~actor ~unit_id
+    (fun current ->
+      { current with parent_unit_id; updated_at = Types.now_iso () })
+    ~event_type:"unit_reparented"
+    (`Assoc
+      [
+        ( "parent_unit_id",
+          match parent_unit_id with Some value -> `String value | None -> `Null
+        );
+      ])
+  |> Result.map (fun unit ->
+         `Assoc
+           [
+             ("status", `String "ok");
+             ("result", unit_to_json unit);
+             ("topology", topology_json config);
+           ])
 
 let unit_reassign_json config ~(actor : string) json =
-  try
-    let unit_id =
-      match get_string_opt json "unit_id" with
-      | Some value -> value
-      | None -> invalid_arg "unit_id is required"
-    in
-    let leader_id = get_string_opt json "leader_id" in
-    let roster =
-      match U.member "roster" json with
-      | `List _ -> get_string_list json "roster"
-      | _ -> []
-    in
-    update_unit config ~actor ~unit_id
-      (fun current ->
-        {
-          current with
-          leader_id = option_first_some leader_id current.leader_id;
-          roster = if roster = [] then current.roster else roster;
-          updated_at = Types.now_iso ();
-        })
-      ~event_type:"unit_reassigned"
-      (`Assoc
-        [
-          ("leader_id", match leader_id with Some value -> `String value | None -> `Null);
-          ("roster", if roster = [] then json_list_of_strings [] else json_list_of_strings roster);
-        ])
-    |> Result.map (fun unit ->
-           `Assoc
-             [
-               ("status", `String "ok");
-               ("result", unit_to_json unit);
-               ("topology", topology_json config);
-             ])
-  with Invalid_argument message -> Error message
+  let* unit_id =
+    required_string json ~key:"unit_id" ~message:"unit_id is required"
+  in
+  let leader_id = get_string_opt json "leader_id" in
+  let roster =
+    match U.member "roster" json with
+    | `List _ -> get_string_list json "roster"
+    | _ -> []
+  in
+  update_unit config ~actor ~unit_id
+    (fun current ->
+      {
+        current with
+        leader_id = option_first_some leader_id current.leader_id;
+        roster = if roster = [] then current.roster else roster;
+        updated_at = Types.now_iso ();
+      })
+    ~event_type:"unit_reassigned"
+    (`Assoc
+      [
+        ("leader_id", match leader_id with Some value -> `String value | None -> `Null);
+        ("roster", if roster = [] then json_list_of_strings [] else json_list_of_strings roster);
+      ])
+  |> Result.map (fun unit ->
+         `Assoc
+           [
+             ("status", `String "ok");
+             ("result", unit_to_json unit);
+             ("topology", topology_json config);
+           ])
 
 let policy_status_json config =
   `Assoc
@@ -343,37 +340,33 @@ let policy_kill_switch_json config ~(actor : string) json =
               ]))
 
 let policy_update_json config ~(actor : string) json =
-  try
-    let unit_id =
-      match get_string_opt json "unit_id" with
-      | Some value -> value
-      | None -> invalid_arg "unit_id is required"
-    in
-    let policy_json =
-      match U.member "policy" json with `Assoc _ as value -> value | _ -> `Assoc []
-    in
-    let budget_json =
-      match U.member "budget" json with `Assoc _ as value -> value | _ -> `Assoc []
-    in
-    update_unit config ~actor ~unit_id
-      (fun current ->
-        {
-          current with
-          policy = policy_of_json policy_json current.kind;
-          budget = budget_of_json budget_json current.kind;
-          updated_at = Types.now_iso ();
-        })
-      ~event_type:"unit_policy_updated"
-      (`Assoc [ ("policy", policy_json); ("budget", budget_json) ])
-    |> Result.map (fun unit ->
-           `Assoc
-             [
-               ("status", `String "ok");
-               ("result", unit_to_json unit);
-               ("topology", topology_json config);
-               ("capacity", capacity_json config);
-             ])
-  with Invalid_argument message -> Error message
+  let* unit_id =
+    required_string json ~key:"unit_id" ~message:"unit_id is required"
+  in
+  let policy_json =
+    match U.member "policy" json with `Assoc _ as value -> value | _ -> `Assoc []
+  in
+  let budget_json =
+    match U.member "budget" json with `Assoc _ as value -> value | _ -> `Assoc []
+  in
+  update_unit config ~actor ~unit_id
+    (fun current ->
+      {
+        current with
+        policy = policy_of_json policy_json current.kind;
+        budget = budget_of_json budget_json current.kind;
+        updated_at = Types.now_iso ();
+      })
+    ~event_type:"unit_policy_updated"
+    (`Assoc [ ("policy", policy_json); ("budget", budget_json) ])
+  |> Result.map (fun unit ->
+         `Assoc
+           [
+             ("status", `String "ok");
+             ("result", unit_to_json unit);
+             ("topology", topology_json config);
+             ("capacity", capacity_json config);
+           ])
 
 let apply_policy_decision config ~(actor : string) (decision : policy_decision_record) =
   let apply =

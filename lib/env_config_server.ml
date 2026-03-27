@@ -80,7 +80,7 @@ module Storage = struct
     get_string ~default:"filesystem" "MASC_STORAGE_TYPE"
 
   let pg_pool_size =
-    get_int ~default:4 "MASC_PG_POOL_SIZE"
+    max 1 (min 50 (get_int ~default:10 "MASC_PG_POOL_SIZE"))
 
   let base_path_opt () =
     Sys.getenv_opt "MASC_BASE_PATH" |> trim_opt
@@ -93,7 +93,7 @@ end
 
 module Runtime = struct
   let startup_watchdog_sec =
-    get_float ~default:30.0 "MASC_STARTUP_WATCHDOG_SEC"
+    Float.max 30.0 (Float.min 600.0 (get_float ~default:240.0 "MASC_STARTUP_WATCHDOG_SEC"))
 
   let telemetry_enabled =
     get_bool ~default:true "MASC_TELEMETRY_ENABLED"
@@ -104,8 +104,8 @@ module Runtime = struct
   let dispatch_v2 =
     get_bool ~default:true "MASC_DISPATCH_V2"
 
-  let auto_respond =
-    get_bool ~default:false "MASC_AUTO_RESPOND"
+  let auto_respond_raw =
+    get_string ~default:"" "MASC_AUTO_RESPOND"
 
   let parse_warn =
     get_bool ~default:false "MASC_PARSE_WARN"
@@ -132,6 +132,9 @@ module Agent = struct
 
   let name_opt () =
     Sys.getenv_opt "MASC_AGENT_NAME" |> trim_opt
+
+  let orchestrator_agent =
+    get_string ~default:"claude" "MASC_ORCHESTRATOR_AGENT"
 end
 
 (** {1 Config & Personas Directories} *)

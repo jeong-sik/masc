@@ -11,17 +11,13 @@ let max_output_chars () = Safe_parse.env_int ~var:"MASC_CHAIN_OUTPUT_MAX_CHARS" 
 let max_preview_chars () = Safe_parse.env_int ~var:"MASC_CHAIN_OUTPUT_PREVIEW_CHARS" ~default:240
 
 let default_store_path () =
-  let home =
-    match Sys.getenv_opt "HOME" with
-    | Some path when String.trim path <> "" -> path
-    | _ -> "/tmp"
-  in
+  let home = Option.value ~default:"/tmp" (Env_config_core.home_dir_opt ()) in
   Filename.concat home "logs/masc_chain_run_store.jsonl"
 
 let store_path () =
-  match Sys.getenv_opt "MASC_CHAIN_RUN_STORE_PATH" with
-  | Some path when String.trim path <> "" -> path
-  | _ -> default_store_path ()
+  match Env_config.Chain.Paths.run_store_path_opt () with
+  | Some path -> path
+  | None -> default_store_path ()
 
 let ensure_dir path =
   Fs_compat.mkdir_p path

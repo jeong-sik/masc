@@ -17,9 +17,9 @@ open Yojson.Safe.Util
 type mode = Disabled | Spawn | Model
 
 let get_mode () =
-  match Sys.getenv_opt "MASC_AUTO_RESPOND" with
-  | Some "true" | Some "1" | Some "yes" | Some "spawn" -> Spawn
-  | Some "model" | Some "fast" -> Model
+  match Env_config.Server.Runtime.auto_respond_raw with
+  | "true" | "1" | "yes" | "spawn" -> Spawn
+  | "model" | "fast" -> Model
   | _ -> Disabled
 
 let is_enabled () = get_mode () <> Disabled
@@ -292,7 +292,7 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
       debug_log "EXIT: No mention";
       None
   | Some _ when not (is_enabled ()) ->
-      let env_val = match Sys.getenv_opt "MASC_AUTO_RESPOND" with Some v -> v | None -> "not set" in
+      let env_val = match Env_config.Server.Runtime.auto_respond_raw with "" -> "not set" | v -> v in
       debug_log (Printf.sprintf "EXIT: Disabled (env=%s)" env_val);
       Log.AutoResponder.info "Disabled (MASC_AUTO_RESPOND=%s)" env_val;
       None

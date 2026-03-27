@@ -18,15 +18,7 @@ module Ws_eio = Httpun_ws_eio
 let default_port = 8937
 
 (** Read the configured WS port from environment or use default. *)
-let configured_port () =
-  match Sys.getenv_opt "MASC_WS_PORT" with
-  | Some s -> (
-    match int_of_string_opt s with
-    | Some p when p > 0 && p < 65536 -> p
-    | _ ->
-      Log.Server.warn "MASC_WS_PORT=%s is not a valid port, using %d" s default_port;
-      default_port)
-  | None -> default_port
+let configured_port () = Env_config.Server.Ws.port
 
 (** Check whether standalone WS is enabled (default: enabled).
     Disable with MASC_WS_ENABLED=0 or MASC_WS_ENABLED=false. *)

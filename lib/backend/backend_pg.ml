@@ -186,10 +186,7 @@ let cleanup_pubsub_limit_q =
 open Result_syntax
 
 (** Read MASC_PG_POOL_SIZE from env, clamped to [1, 50]. Default: 10. *)
-let configured_pool_size () =
-  match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-  | Some s -> (try max 1 (min (int_of_string s) 50) with Failure _ -> 10)
-  | None -> 10
+let configured_pool_size () = Env_config.Server.Storage.pg_pool_size
 
 (** Add TCP keepalive query params to a URI if not already present. *)
 let uri_with_keepalive uri =

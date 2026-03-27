@@ -41,8 +41,7 @@ let load_config () =
     check_interval_s = get_env_float "MASC_ORCHESTRATOR_INTERVAL" 300.0;
     min_priority = get_env_int "MASC_ORCHESTRATOR_MIN_PRIORITY" 2;
     agent_timeout_s = get_env_int "MASC_ORCHESTRATOR_TIMEOUT" 300;
-    orchestrator_agent = (match Sys.getenv_opt "MASC_ORCHESTRATOR_AGENT" with
-      | Some a -> a | None -> "claude");
+    orchestrator_agent = Env_config.Server.Agent.orchestrator_agent;
     enabled = get_env_bool "MASC_ORCHESTRATOR_ENABLED" false;
     port = Env_config_core.masc_http_port_int ();
   }

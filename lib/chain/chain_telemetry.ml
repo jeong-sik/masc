@@ -25,12 +25,9 @@ let with_mutex mutex f = Eio_guard.with_mutex mutex f
 (** History file path - configurable via environment.
     MASC_CHAIN_HISTORY_FILE is canonical; CHAIN_HISTORY_FILE remains a generic fallback. *)
 let history_file () =
-  match Sys.getenv_opt "MASC_CHAIN_HISTORY_FILE" with
-  | Some path when String.trim path <> "" -> path
-  | _ -> (
-      match Sys.getenv_opt "CHAIN_HISTORY_FILE" with
-      | Some path when String.trim path <> "" -> path
-      | _ -> "data/chain_history.jsonl")
+  match Env_config.Chain.Paths.history_file_opt () with
+  | Some path -> path
+  | None -> "data/chain_history.jsonl"
 
 (** Append a JSON record to history file (thread-safe via OS) *)
 let append_history (json : Yojson.Safe.t) =

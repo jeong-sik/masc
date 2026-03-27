@@ -69,13 +69,7 @@ let elapsed_since_start () =
 let default_watchdog_timeout_sec = 240.0
 
 (** Read watchdog timeout from env, clamped to [30, 600]. *)
-let watchdog_timeout_sec () =
-  match Sys.getenv_opt "MASC_STARTUP_WATCHDOG_SEC" with
-  | Some s ->
-    (match float_of_string_opt s with
-     | Some v -> Float.max 30.0 (Float.min 600.0 v)
-     | None -> default_watchdog_timeout_sec)
-  | None -> default_watchdog_timeout_sec
+let watchdog_timeout_sec () = Env_config.Server.Runtime.startup_watchdog_sec
 
 let mark_state_ready ~backend_mode =
   update (fun current ->

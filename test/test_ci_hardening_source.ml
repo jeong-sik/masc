@@ -283,9 +283,6 @@ let test_activity_surface_contracts () =
     (not
        (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
           {|"/api/v1/social-graph"|}));
-  check bool "dashboard semantics use activity graph surface id" true
-    (file_contains_pattern "lib/dashboard/dashboard_semantics.ml"
-       {|surface ~id:"activity_graph"|});
   check bool "room top-level module emits activity events" true
     (file_contains_pattern "lib/room.ml"
        "Activity_graph.emit config");

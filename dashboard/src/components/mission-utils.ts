@@ -176,12 +176,10 @@ export function enrichedKeeperRow(brief: DashboardMissionKeeperBrief): EnrichedK
       trimText(keeper?.recent_input_preview, 120) ?? null,
     recentOutput:
       trimText(keeper?.recent_output_preview, 120)
-      ?? trimText(keeper?.diagnostic?.last_reply_preview, 120)
       ?? trimText(keeper?.last_proactive_preview, 120)
       ?? null,
     recentEvent:
       trimText(keeper?.last_proactive_reason, 120)
-      ?? trimText(keeper?.diagnostic?.summary, 120)
       ?? null,
     recentTools: keeper?.recent_tool_names ?? [],
   }

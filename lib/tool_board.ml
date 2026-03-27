@@ -248,17 +248,9 @@ let handle_post_list args =
   | Error msg -> (false, Printf.sprintf "❌ %s" msg)
   | Ok sort_by ->
       let all_posts = Board_dispatch.list_posts ~visibility_filter ?hearth
+        ~exclude_system
         ~exclude_automation
         ~sort_by:(dispatch_sort_of sort_by) ~limit:(limit + offset + 100) () in
-
-      (* Filter out system posts when exclude_system is true *)
-      let all_posts = if exclude_system then
-        List.filter (fun (p : Board.post) ->
-          Board.classify_post_kind p <> Board.System_post
-          && Board.Agent_id.to_string p.author <> "system"
-        ) all_posts
-      else all_posts
-      in
 
       (* Sorting is already handled by Board_dispatch *)
       let sorted_posts = all_posts in
@@ -624,12 +616,30 @@ let handle_migrate _args =
   | Board_dispatch.Jsonl _ ->
       (false, "❌ Migration requires PostgreSQL backend. Set MASC_POSTGRES_URL and restart.")
 
+let handle_reclassify args =
+  let dry_run = get_bool args "dry_run" true in
+  let limit = get_int args "limit" 5200 |> max 0 |> min 5200 in
+  let report = Board_dispatch.reclassify_posts ~limit ~dry_run () in
+  (true, Yojson.Safe.pretty_to_string (Board.reclassify_report_to_yojson report))
+
 let tool_migrate : Types.tool_schema = {
   name = "masc_board_migrate";
   description = "Migrate Board data from JSONL files to PostgreSQL (idempotent, safe to re-run)";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc []);
+  ];
+}
+
+let tool_reclassify : Types.tool_schema = {
+  name = "masc_board_reclassify";
+  description = "Recompute canonical board post kinds from explicit author/provenance contracts. Hidden admin tool for safe dry-run backfills.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("dry_run", `Assoc [("type", `String "boolean"); ("description", `String "Preview changes without writing (default: true)")]);
+      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max active posts to scan (default: 5200, max: 5200)")]);
+    ]);
   ];
 }
 
@@ -646,6 +656,7 @@ let tools = [
   tool_profile;
   tool_hearth_list;
   tool_migrate;
+  tool_reclassify;
 ]
 
 (** Tool dispatcher *)
@@ -662,4 +673,5 @@ let handle_tool name args =
   | "masc_board_profile" -> handle_profile args
   | "masc_board_hearths" -> handle_hearth_list args
   | "masc_board_migrate" -> handle_migrate args
+  | "masc_board_reclassify" -> handle_reclassify args
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)

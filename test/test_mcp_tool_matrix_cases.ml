@@ -79,6 +79,7 @@ let all_known_tool_names =
     "masc_board_migrate";
     "masc_board_post";
     "masc_board_profile";
+    "masc_board_reclassify";
     "masc_board_search";
     "masc_board_stats";
     "masc_board_vote";

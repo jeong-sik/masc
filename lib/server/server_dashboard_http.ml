@@ -283,54 +283,14 @@ let keepalive_running_of_lifecycle_event = function
   | "stopped" | "crashed" | "dead" -> Some false
   | _ -> None
 
-let patch_keeper_diagnostic ~keepalive_running (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields ->
-      let fields =
-        upsert_assoc_field "keepalive_running" (`Bool keepalive_running) fields
-      in
-      let fields =
-        if keepalive_running then
-          let fields =
-            match List.assoc_opt "continuity_state" fields with
-            | Some (`String ("not_running" | "disabled")) ->
-                upsert_assoc_field "continuity_state" (`String "recovering") fields
-            | _ -> fields
-          in
-          match List.assoc_opt "quiet_reason" fields with
-          | Some (`String "not_running") ->
-              upsert_assoc_field "quiet_reason" `Null fields
-          | _ -> fields
-        else
-          fields
-          |> upsert_assoc_field "continuity_state" (`String "not_running")
-          |> upsert_assoc_field "quiet_reason" (`String "not_running")
-      in
-      `Assoc fields
-  | other -> other
-
 let patch_keeper_row ~keeper_name ~keepalive_running = function
   | `Assoc fields as row -> (
       match Yojson.Safe.Util.member "name" row with
       | `String name when String.equal name keeper_name ->
-          let diagnostic =
-            match Yojson.Safe.Util.member "diagnostic" row with
-            | `Assoc _ as json ->
-                patch_keeper_diagnostic ~keepalive_running json
-            | `Null ->
-                `Assoc
-                  [
-                    ("keepalive_running", `Bool keepalive_running);
-                    ( "continuity_state",
-                      `String (if keepalive_running then "recovering" else "not_running") );
-                  ]
-            | other -> other
-          in
           let row_fields : (string * Yojson.Safe.t) list = fields in
           `Assoc
             (row_fields
-            |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running)
-            |> upsert_assoc_field "diagnostic" diagnostic)
+            |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running))
       | _ -> row)
   | other -> other
 
@@ -958,9 +918,9 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
     board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
   in
   let posts =
-    Board_dispatch.list_posts ?hearth ~sort_by ~limit:fetch_limit ()
+    Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
+      ~exclude_automation ~limit:fetch_limit ()
   in
-  let posts = filter_board_posts ~exclude_system ~exclude_automation posts in
   let karma_map = Board_dispatch.get_all_karma () in
   let get_karma author =
     Option.value ~default:0 (List.assoc_opt author karma_map)

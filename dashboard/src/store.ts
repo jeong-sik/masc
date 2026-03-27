@@ -87,6 +87,7 @@ export const keeperHeartbeats = signal<Map<string, number>>(new Map())
 export const boardPosts = signal<BoardPost[]>([])
 export const boardSortMode = signal<BoardSortMode>('recent')
 export const boardExcludeSystem = signal(true)
+export const boardExcludeAutomation = signal(false)
 
 // --- Goals state ---
 
@@ -456,7 +457,10 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
 export async function refreshBoard(): Promise<void> {
   boardLoading.value = true
   try {
-    const data = await fetchDashboardMemory(boardSortMode.value, { excludeSystem: boardExcludeSystem.value })
+    const data = await fetchDashboardMemory(boardSortMode.value, {
+      excludeSystem: boardExcludeSystem.value,
+      excludeAutomation: boardExcludeAutomation.value,
+    })
     boardPosts.value = data.posts ?? []
     lastBoardRefreshAt.value = new Date().toISOString()
   } catch (err) {

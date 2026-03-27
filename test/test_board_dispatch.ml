@@ -3,10 +3,14 @@
 open Masc_mcp
 
 let () = Mirage_crypto_rng_unix.use_default ()
+let () = Random.self_init ()
 
 (** Temp directory for test isolation — set before any Board.global call *)
-let test_base_path =
-  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc-test-board-dispatch" in
+let fresh_test_base_path () =
+  let dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-board-dispatch-%06x" (Random.bits ()))
+  in
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 
@@ -14,7 +18,7 @@ let test_base_path =
 let with_eio f () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Unix.putenv "MASC_BASE_PATH" test_base_path;
+  ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
@@ -95,6 +99,70 @@ let test_list_posts_with_sort () =
   let counts = List.map List.length [posts_hot; posts_recent; posts_trending; posts_updated; posts_discussed] in
   let all_same = List.for_all (fun c -> c = List.hd counts) counts in
   Alcotest.(check bool) "all sort orders return same count" true all_same
+
+let test_list_posts_with_filters () =
+  let keeper_meta = `Assoc [ ("source", `String "keeper_board_post") ] in
+  let scoped_authors = [ "filter-human"; "filter-harness-bot"; "filter-keeper" ] in
+  let is_scoped_author (p : Board.post) =
+    List.mem (Board.Agent_id.to_string p.author) scoped_authors
+  in
+  ignore (Board_dispatch.create_post ~author:"filter-human" ~content:"human-filter-test" ());
+  ignore (Board_dispatch.create_post ~author:"filter-harness-bot"
+            ~content:"automation" ~visibility:Board.Internal ~ttl_hours:1
+            ~hearth:"dashboard-harness" ());
+  ignore (Board_dispatch.create_post ~author:"filter-keeper" ~content:"keeper"
+            ~post_kind:Board.Automation_post ~meta_json:keeper_meta ());
+  let all_posts =
+    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:50 ()
+    |> List.filter is_scoped_author
+  in
+  let no_system =
+    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~exclude_system:true
+      ~limit:50 ()
+    |> List.filter is_scoped_author
+  in
+  let no_automation =
+    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
+      ~exclude_automation:true ~limit:50 ()
+    |> List.filter is_scoped_author
+  in
+  let human_only =
+    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~exclude_system:true
+      ~exclude_automation:true ~limit:50 ()
+    |> List.filter is_scoped_author
+  in
+  Alcotest.(check int) "all posts" 3 (List.length all_posts);
+  Alcotest.(check int) "exclude system" 2 (List.length no_system);
+  Alcotest.(check int) "exclude automation" 2 (List.length no_automation);
+  Alcotest.(check int) "exclude both" 1 (List.length human_only);
+  Alcotest.(check string) "human remains" "filter-human"
+    (human_only |> List.hd |> fun (p : Board.post) -> Board.Agent_id.to_string p.author)
+
+let test_reclassify_posts_dry_run_and_apply () =
+  let keeper_meta = `Assoc [ ("source", `String "keeper_board_post") ] in
+  match
+    Board_dispatch.create_post ~author:"dm-keeper" ~content:"keeper"
+      ~post_kind:Board.Automation_post ~meta_json:keeper_meta ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let post_id = Board.Post_id.to_string post.id in
+      let dry_run = Board_dispatch.reclassify_posts ~dry_run:true () in
+      Alcotest.(check int) "dry run changed" 1 dry_run.changed;
+      (match Board_dispatch.get_post ~post_id with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok fetched ->
+           Alcotest.(check string) "still automation before apply" "automation"
+             (Board.post_kind_to_string fetched.post_kind));
+      let applied = Board_dispatch.reclassify_posts ~dry_run:false () in
+      Alcotest.(check int) "apply changed" 1 applied.changed;
+      Board_dispatch.reset_for_test ();
+      Board_dispatch.init_jsonl ();
+      match Board_dispatch.get_post ~post_id with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok fetched ->
+          Alcotest.(check string) "persisted as system" "system"
+            (Board.post_kind_to_string fetched.post_kind)
 
 (** {1 Comment Operations} *)
 
@@ -234,6 +302,9 @@ let () =
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
+      Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);
+      Alcotest.test_case "reclassify dry-run and apply" `Quick
+        (with_eio test_reclassify_posts_dry_run_and_apply);
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);

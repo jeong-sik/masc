@@ -1,7 +1,7 @@
 import { get, post, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import type {
-  BoardPost, BoardComment,
+  BoardPost, BoardComment, BoardSortMode,
   GovernanceCaseBrief, GovernanceCaseBundle, GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute, GovernanceExecutionOrder,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
@@ -380,6 +380,24 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   }
 }
 
+export async function fetchBoard(
+  sortBy?: BoardSortMode,
+  options?: { excludeSystem?: boolean; excludeAutomation?: boolean },
+): Promise<{ posts: BoardPost[] }> {
+  return withRetries('fetchBoard', async () => {
+    const params = new URLSearchParams()
+    if (sortBy) params.set('sort_by', sortBy)
+    if (options?.excludeSystem) params.set('exclude_system', 'true')
+    if (options?.excludeAutomation) params.set('exclude_automation', 'true')
+    params.set('limit', options?.excludeSystem || options?.excludeAutomation ? '150' : '100')
+    const qs = params.toString()
+    const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
+    const posts = Array.isArray(raw.posts)
+      ? raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
+      : []
+    return { posts }
+  })
+}
 export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
   return withRetries('fetchBoardPost', async () => {
     const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?format=flat`)

@@ -423,7 +423,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 `String
                   (Keeper_exec_status.keeper_surface_status ~agent_status:agent
                      ~diagnostic) );
-              ("diagnostic", diagnostic);
               ("keeper_age_s", `Float keeper_age_s);
               ("uptime_hours", `Float (keeper_age_s /. 3600.0));
               ("last_turn_ago_s", `Float last_turn_ago_s);

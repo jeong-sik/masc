@@ -250,6 +250,11 @@ let test_permission_for_tool_board_post () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
+let test_permission_for_tool_board_reclassify () =
+  match Auth.permission_for_tool "masc_board_reclassify" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
 let test_permission_for_tool_portal_open () =
   match Auth.permission_for_tool "masc_portal_open" with
   | Some Types.CanOpenPortal -> ()
@@ -548,6 +553,7 @@ let () =
       test_case "webrtc_answer" `Quick test_permission_for_tool_webrtc_answer;
       test_case "board_list" `Quick test_permission_for_tool_board_list;
       test_case "board_post" `Quick test_permission_for_tool_board_post;
+      test_case "board_reclassify" `Quick test_permission_for_tool_board_reclassify;
       test_case "portal_open" `Quick test_permission_for_tool_portal_open;
       test_case "portal_send" `Quick test_permission_for_tool_portal_send;
       test_case "worktree_create" `Quick test_permission_for_tool_worktree_create;

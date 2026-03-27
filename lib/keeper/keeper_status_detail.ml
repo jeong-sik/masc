@@ -283,25 +283,6 @@ let handle_keeper_status ctx args : tool_result =
              in
              (`List (List.rev items_rev), raw_count, fragment_count, filtered_count)
          in
-         let history_items =
-           match history_tail with
-           | `List xs -> xs
-           | _ -> []
-         in
-         let diagnostic =
-           keeper_diagnostic_json
-             ~meta:m
-             ~agent_status
-             ~keepalive_running
-             ~history_items
-             ~now_ts
-           |> augment_keeper_diagnostic_json
-                ~registered:(is_resident_keeper ctx.config m.name)
-                ~meta:m
-                ~keepalive_running
-                ~keepalive_started_at:(runtime_keepalive_started_at ctx.config m)
-                ~now_ts
-         in
          let compaction_history_tail =
            if not include_compaction_history then
              (`List [], 0)
@@ -417,7 +398,6 @@ let handle_keeper_status ctx args : tool_result =
            ("paused", `Bool m.paused);
            ("keepalive_running", `Bool keepalive_running);
            ("agent", agent_status);
-           ("diagnostic", diagnostic);
            ("keeper_age_s", `Float keeper_age_s);
            ("last_turn_ago_s", `Float last_turn_ago_s);
            ("last_handoff_ago_s", `Float last_handoff_ago_s);

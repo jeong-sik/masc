@@ -111,6 +111,10 @@ let post_count_q =
   (Printf.sprintf
     "SELECT COUNT(*)::int FROM masc_board_posts WHERE %s" ttl_where)
 
+let update_post_kind_q =
+  (Caqti_type.(t2 string string) ->. Caqti_type.unit)
+  "UPDATE masc_board_posts SET post_kind = $2 WHERE id = $1"
+
 (* Sort-order specific list queries. $1=visibility (NULL=any), $2=hearth (NULL=any), $3=limit.
    NOTE: PostgreSQL cannot infer type from `$n IS NULL` alone, so explicit ::TEXT cast needed. *)
 let mk_list_q order_clause =

@@ -156,7 +156,6 @@ let keeper_list_row_json ~registered ~runtime_class config name =
             ("meta", keeper_brief_meta_json meta);
             ("agent_name", `String meta.agent_name);
             ("status", `String status);
-            ("diagnostic", diagnostic);
             ("keepalive_running", `Bool keepalive_running);
             ("presence_keepalive", `Bool meta.presence_keepalive);
             ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);

@@ -82,13 +82,29 @@ let () =
 
   let test_post_kind_system_author () =
     let store = create_store () in
-    match create_post store ~author:"lodge-system" ~content:"System post" () with
+    match create_post store ~author:"operator" ~content:"System post" () with
     | Ok post ->
         let json = post_to_yojson post in
         let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
         assert (String.equal kind "system");
         Printf.printf "✓ System author classifies post as system\n"
     | Error e -> fail_board_test "Failed to create system post" e
+  in
+
+  let test_post_kind_keeper_provenance_upgrade () =
+    let store = create_store () in
+    let meta = `Assoc [ ("source", `String "keeper_board_post") ] in
+    match
+      create_post store ~author:"dm-keeper" ~content:"Keeper board post"
+        ~post_kind:Automation_post ~meta_json:meta ()
+    with
+    | Ok post ->
+        assert (classify_post_kind post = System_post);
+        let json = post_to_yojson post in
+        let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
+        assert (String.equal kind "system");
+        Printf.printf "✓ Keeper provenance upgrades automation post to system\n"
+    | Error e -> fail_board_test "Failed to create keeper provenance post" e
   in
 
   (* Run Eio tests *)
@@ -98,5 +114,6 @@ let () =
   test_post_kind_human_default ();
   test_post_kind_automation_contract ();
   test_post_kind_system_author ();
+  test_post_kind_keeper_provenance_upgrade ();
 
   Printf.printf "\n✅ All Board TTL tests passed!\n\n"

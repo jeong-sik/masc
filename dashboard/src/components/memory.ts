@@ -11,6 +11,7 @@ import {
   boardPosts,
   boardSortMode,
   boardExcludeSystem,
+  boardExcludeAutomation,
   boardLoading,
   lastBoardRefreshAt,
   refreshBoard,
@@ -39,7 +40,6 @@ const detailLoading = signal(false)
 const detailPostId = signal<string | null>(null)
 const commentText = signal('')
 const commentSubmitting = signal(false)
-const hideAutomationPosts = signal(false)
 const showNewPostForm = signal(false)
 const newPostTitle = signal('')
 const newPostContent = signal('')
@@ -72,24 +72,8 @@ function isUpdated(post: BoardPost): boolean {
   return post.updated_at !== post.created_at
 }
 
-function isAutomationBoardPost(post: BoardPost): boolean {
-  if (post.post_kind) return post.post_kind === 'automation'
-  const hearth = (post.hearth ?? '').toLowerCase()
-  if (post.visibility !== 'internal' || !post.expires_at || !hearth) return false
-  if (hearth.startsWith('mdal')) return true
-  if (hearth.includes('harness')) return true
-  return false
-}
-
-function isSystemBoardAuthor(author: string): boolean {
-  return author === 'team-session'
-}
-
 function boardPostKind(post: BoardPost): 'human' | 'automation' | 'system' {
-  if (post.post_kind) return post.post_kind
-  if (isSystemBoardAuthor(post.author)) return 'system'
-  if (isAutomationBoardPost(post)) return 'automation'
-  return 'human'
+  return post.post_kind ?? 'human'
 }
 
 function splitVisiblePosts(posts: BoardPost[]): { human: BoardPost[]; operations: BoardPost[]; hiddenAutomation: number } {
@@ -99,7 +83,7 @@ function splitVisiblePosts(posts: BoardPost[]): { human: BoardPost[]; operations
   posts.forEach(post => {
     const kind = boardPostKind(post)
     if (kind === 'system' && boardExcludeSystem.value) return
-    if (kind === 'automation' && hideAutomationPosts.value) {
+    if (kind === 'automation' && boardExcludeAutomation.value) {
       hiddenAutomation += 1
       return
     }
@@ -276,7 +260,7 @@ function NewPostForm() {
 
 function SortBar() {
   const current = boardSortMode.value
-  const hideLabel = hideAutomationPosts.value ? '자동화 제외' : '자동화 포함'
+  const hideLabel = boardExcludeAutomation.value ? '자동화 제외' : '자동화 포함'
   return html`
     <div class="flex flex-col gap-3 mb-4 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
       <div class="flex items-center gap-1.5 flex-wrap">
@@ -301,12 +285,12 @@ function SortBar() {
       <div class="flex items-center gap-2 flex-wrap">
         <button type="button"
           class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer
-            ${hideAutomationPosts.value
+            ${boardExcludeAutomation.value
               ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)]'
               : 'bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
             }"
           onClick=${() => {
-            hideAutomationPosts.value = !hideAutomationPosts.value
+            boardExcludeAutomation.value = !boardExcludeAutomation.value
             refreshBoard()
           }}
         >
@@ -355,7 +339,7 @@ function MemorySummary() {
       </div>
       <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">잡음 필터</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 제외` : '모두 표시'}</strong>
+        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${boardExcludeAutomation.value ? `자동화 ${grouped.hiddenAutomation}건 제외` : '모두 표시'}</strong>
       </div>
       <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">시스템 글 정책</span>

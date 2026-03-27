@@ -192,17 +192,16 @@ let get_post ~post_id =
   | Postgres t -> Board_pg.get_post t ~post_id
 
 let list_posts ?(visibility_filter=None) ?hearth ?post_kind_filter ?(sort_by=Hot)
-    ?(exclude_automation=false) ?(limit=50) () =
+    ?(exclude_system=false) ?(exclude_automation=false) ?(limit=50) () =
   let apply_post_kind_filter posts =
-    match (post_kind_filter, exclude_automation) with
-    | Some kind, _ ->
-        List.filter
-          (fun (p : Board.post) -> Board.classify_post_kind p = kind)
-          posts
-    | None, true ->
-        List.filter (fun (p : Board.post) ->
-          Board.classify_post_kind p <> Board.Automation_post) posts
-    | None, false -> posts
+    posts
+    |> List.filter (fun (p : Board.post) ->
+           Board.post_matches_filters ~exclude_system ~exclude_automation p)
+    |> (match post_kind_filter with
+       | Some kind ->
+           List.filter
+             (fun (p : Board.post) -> Board.classify_post_kind p = kind)
+       | None -> Fun.id)
   in
   match backend () with
   | Jsonl store ->
@@ -220,7 +219,7 @@ let list_posts ?(visibility_filter=None) ?hearth ?post_kind_filter ?(sort_by=Hot
         | Discussed -> Board_pg.Discussed
       in
       let needs_filter =
-        Option.is_some post_kind_filter || exclude_automation
+        Option.is_some post_kind_filter || exclude_system || exclude_automation
       in
       (* Over-fetch when post-query filtering is needed to avoid short results *)
       let fetch_limit = if needs_filter then max limit (limit * 3) else limit in
@@ -366,6 +365,11 @@ let get_agent_karma ~agent_name =
 (** Post to JSON with karma (delegates to Board for flair extraction) *)
 let post_to_yojson_with_karma (p : Board.post) ~author_karma =
   Board.post_to_yojson_with_karma p ~author_karma
+
+let reclassify_posts ?(limit=5200) ?(dry_run=true) () =
+  match backend () with
+  | Jsonl store -> Board.reclassify_posts store ~limit ~dry_run ()
+  | Postgres t -> Board_pg.reclassify_posts t ~limit ~dry_run ()
 
 (** Backend name for diagnostics *)
 let backend_name () =

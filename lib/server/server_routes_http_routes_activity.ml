@@ -97,8 +97,10 @@ let add_routes router =
          let fetch_limit =
            board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
          in
-         let posts = Board_dispatch.list_posts ?hearth ~sort_by ~limit:fetch_limit () in
-         let posts = filter_board_posts ~exclude_system ~exclude_automation posts in
+         let posts =
+           Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
+             ~exclude_automation ~limit:fetch_limit ()
+         in
          let karma_map = Board_dispatch.get_all_karma () in
          let get_karma author =
            try List.assoc author karma_map with Not_found -> 0

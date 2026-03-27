@@ -29,13 +29,10 @@ import {
   setActiveStream,
   setRecordValue,
   setStatusDetail,
-  updateDiagnostic,
 } from './keeper-state'
 import { abortKeeperThreadMessage, applyKeeperStreamEvent } from './keeper-stream'
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
-  KEEPER_REPLY_PREVIEW_MAX,
-  KEEPER_STATUS_TAIL_MESSAGES,
   KEEPER_STREAM_IDLE_POLL_MS,
   KEEPER_STREAM_IDLE_TIMEOUT_MS,
 } from './config/constants'
@@ -62,14 +59,14 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
   try {
     const text = await callMcpTool('masc_keeper_status', {
       name: keeperName,
-      fast: false,
-      include_context: true,
-      include_metrics_overview: true,
+      fast: true,
+      include_context: false,
+      include_metrics_overview: false,
       include_memory_bank: false,
-      include_history_tail: true,
+      include_history_tail: false,
       include_compaction_history: false,
-      tail_turns: 5,
-      tail_messages: KEEPER_STATUS_TAIL_MESSAGES,
+      tail_turns: 0,
+      tail_messages: 0,
     })
     let parsed: unknown = null
     try {
@@ -187,12 +184,6 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
       timestamp: new Date().toISOString(),
       error: null,
     })
-    updateDiagnostic(keeperName, {
-      last_reply_status: 'delivered',
-      last_reply_at: new Date().toISOString(),
-      last_reply_preview: finalText.slice(0, KEEPER_REPLY_PREVIEW_MAX),
-      last_error: null,
-    })
   } catch (err) {
     const isAbort =
       err instanceof Error && err.name === 'AbortError'
@@ -202,10 +193,6 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
         streamState: null,
         error: 'Stream cancelled',
         timestamp: new Date().toISOString(),
-      })
-      updateDiagnostic(keeperName, {
-        last_reply_status: 'error',
-        last_error: 'Stream cancelled',
       })
       setRecordValue(keeperActionErrors, keeperName, 'Stream cancelled')
       throw err
@@ -227,12 +214,6 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
           timestamp: new Date().toISOString(),
         })
         finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered', error: null })
-        updateDiagnostic(keeperName, {
-          last_reply_status: 'delivered',
-          last_reply_at: new Date().toISOString(),
-          last_reply_preview: (reply.text.trim() || '(empty reply)').slice(0, KEEPER_REPLY_PREVIEW_MAX),
-          last_error: null,
-        })
         await refreshDashboardState()
         return
       } catch (fallbackErr) {
@@ -251,10 +232,6 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
     finalizeAssistantEntry(keeperName, localId, {
       delivery: 'error' as KeeperConversationDelivery,
       error: errorMessage,
-    })
-    updateDiagnostic(keeperName, {
-      last_reply_status: 'error',
-      last_error: errorMessage,
     })
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err

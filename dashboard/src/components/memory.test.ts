@@ -2,7 +2,7 @@ import { h } from 'preact'
 import { render, screen } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { Memory } from './memory'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem } from '../store'
+import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation } from '../store'
 import { route } from '../router'
 
 // Ensure jest-dom matchers are available
@@ -14,6 +14,7 @@ vi.mock('../store', () => ({
   boardLoading: { value: false },
   boardSortMode: { value: 'recent' },
   boardExcludeSystem: { value: false },
+  boardExcludeAutomation: { value: false },
   lastBoardRefreshAt: { value: 0 },
   refreshBoard: vi.fn(),
 }))
@@ -42,6 +43,7 @@ describe('Memory Component', () => {
     boardLoading.value = false
     boardSortMode.value = 'recent'
     boardExcludeSystem.value = false
+    boardExcludeAutomation.value = false
     route.value = { params: {} } as any
   })
 
@@ -72,5 +74,24 @@ describe('Memory Component', () => {
     ] as any
     render(h(Memory, null))
     expect(screen.getByText('Test Post')).toBeInTheDocument()
+  })
+
+  it('hides automation posts when the automation filter is enabled', () => {
+    boardExcludeAutomation.value = true
+    boardPosts.value = [
+      {
+        id: 'post-automation',
+        title: 'Automation Post',
+        body: 'noise',
+        author: 'dm-keeper',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        comment_count: 0,
+        votes: 0,
+        post_kind: 'automation',
+      },
+    ] as any
+    render(h(Memory, null))
+    expect(screen.queryByText('Automation Post')).not.toBeInTheDocument()
   })
 })

@@ -13,7 +13,6 @@ export {
   normalizeKeeperDiagnostic,
   normalizeKeeperProbeResult,
   normalizeKeeperRecoverResult,
-  deriveKeeperDiagnostic,
 } from './keeper-state'
 export { abortKeeperThreadMessage } from './keeper-stream'
 export {

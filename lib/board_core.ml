@@ -208,15 +208,30 @@ let author_looks_automation author =
   || contains_substring author "smoke"
   || contains_substring author "probe"
 
-let infer_post_kind ~author ~visibility ~expires_at ~hearth =
+let is_system_board_author author =
+  List.mem author
+    [ "ecosystem"; "keeper"; "keeper-alert-bot"; "lodge-system"; "operator";
+      "team-session" ]
+
+let meta_source = function
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt "source" fields with
+      | Some (`String source) ->
+          let source = String.lowercase_ascii (String.trim source) in
+          if source = "" then None else Some source
+      | _ -> None)
+  | _ -> None
+
+let infer_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth =
   let author = String.lowercase_ascii author in
   let hearth =
     match hearth with
     | Some value -> String.lowercase_ascii (String.trim value)
     | None -> ""
   in
-  if author = "lodge-system" || author = "team-session"
-     || author = "keeper" || author = "ecosystem" then
+  if is_system_board_author author
+     || meta_source meta_json = Some "keeper_board_post"
+  then
     System_post
   else if visibility = Internal && expires_at > 0.0 && hearth <> ""
           && (String.starts_with ~prefix:"mdal" hearth
@@ -232,6 +247,7 @@ let classify_post_kind (p : post) =
   let inferred =
     infer_post_kind
       ~author:(Agent_id.to_string p.author)
+      ~meta_json:p.meta_json
       ~visibility:p.visibility
       ~expires_at:p.expires_at
       ~hearth:p.hearth
@@ -240,6 +256,36 @@ let classify_post_kind (p : post) =
   | Human_post, (Automation_post | System_post as upgraded) -> upgraded
   | Automation_post, System_post -> System_post
   | stored, _ -> stored
+
+let post_matches_filters ~exclude_system ~exclude_automation (p : post) =
+  let kind = classify_post_kind p in
+  (not exclude_system || kind <> System_post)
+  && (not exclude_automation || kind <> Automation_post)
+
+type reclassify_report = {
+  backend : string;
+  dry_run : bool;
+  scanned : int;
+  changed : int;
+  unchanged : int;
+  skipped : int;
+  apply_failures : int;
+  changed_post_ids : string list;
+}
+
+let reclassify_report_to_yojson (report : reclassify_report) =
+  `Assoc
+    [
+      ("backend", `String report.backend);
+      ("dry_run", `Bool report.dry_run);
+      ("scanned", `Int report.scanned);
+      ("changed", `Int report.changed);
+      ("unchanged", `Int report.unchanged);
+      ("skipped", `Int report.skipped);
+      ("apply_failures", `Int report.apply_failures);
+      ( "changed_post_ids",
+        `List (List.map (fun id -> `String id) report.changed_post_ids) );
+    ]
 
 let state_start_marker = "[STATE]"
 let state_end_marker = "[/STATE]"
@@ -323,7 +369,7 @@ let normalize_post_payload ~author ~content ?title ?body ?post_kind ?meta_json
   let normalized_kind =
     match post_kind with
     | Some kind -> kind
-    | None -> infer_post_kind ~author ~visibility ~expires_at ~hearth
+    | None -> infer_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth
   in
   let merged_meta = merge_meta_json ?state_block:extracted_state meta_json in
   normalized_title, normalized_body, normalized_kind, merged_meta
@@ -334,7 +380,7 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
     ("author", `String (Agent_id.to_string p.author));
     ("title", `String p.title);
     ("body", `String p.body);
-    ("post_kind", `String (post_kind_to_string p.post_kind));
+    ("post_kind", `String (post_kind_to_string (classify_post_kind p)));
     ("content", `String p.content);
     ("visibility", `String (visibility_to_string p.visibility));
     ("created_at", `Float p.created_at);
@@ -489,6 +535,54 @@ let get_post store ~post_id : (post, board_error) result =
         | Some post -> Ok post
         | None -> Error (Post_not_found post_id)
       )
+
+let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    let scan_limit = max 0 (min limit 5200) in
+    let total = !(store.post_count) in
+    let scanned = ref 0 in
+    let changed = ref 0 in
+    let unchanged = ref 0 in
+    let changed_post_ids = ref [] in
+    let record_changed_id id =
+      if List.length !changed_post_ids < 20 then
+        changed_post_ids := id :: !changed_post_ids
+    in
+    let sorted_posts =
+      Hashtbl.fold (fun _ (post : post) acc -> post :: acc) store.posts []
+      |> List.sort (fun (a : post) (b : post) -> compare b.created_at a.created_at)
+    in
+    sorted_posts
+    |> List.filteri (fun idx _ -> idx < scan_limit)
+    |> List.iter (fun (post : post) ->
+           incr scanned;
+           let canonical_kind = classify_post_kind post in
+           if canonical_kind = post.post_kind then
+             incr unchanged
+           else begin
+             incr changed;
+             record_changed_id (Post_id.to_string post.id);
+             if not dry_run then
+               Hashtbl.replace store.posts (Post_id.to_string post.id)
+                 { post with post_kind = canonical_kind }
+           end);
+    if not dry_run && !changed > 0 then begin
+      invalidate_post_caches store;
+      rewrite_posts store;
+      store.dirty_posts <- false;
+      store.last_flush <- Time_compat.now ()
+    end;
+    {
+      backend = "jsonl";
+      dry_run;
+      scanned = !scanned;
+      changed = !changed;
+      unchanged = !unchanged;
+      skipped = max 0 (total - !scanned);
+      apply_failures = 0;
+      changed_post_ids = List.rev !changed_post_ids;
+    })
 
 let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post list =
   maybe_sweep store;

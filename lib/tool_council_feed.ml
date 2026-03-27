@@ -44,7 +44,7 @@ let handle_governance_feed ctx args =
   if filter = "human_only" || filter = "all" then begin
     let posts = Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit () in
     let human = List.filter (fun (p : Board.post) ->
-      p.post_kind = Board.Human_post) posts in
+      Board.classify_post_kind p = Board.Human_post) posts in
     List.iter (fun p ->
       items := `Assoc [
         ("kind", `String "human_post");

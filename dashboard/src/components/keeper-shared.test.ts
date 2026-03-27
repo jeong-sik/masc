@@ -27,6 +27,7 @@ vi.mock('./common/toast', () => ({
 }))
 
 import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
+import { hydrateKeeperStatus } from '../keeper-runtime'
 import { KeeperConversationPanel } from './keeper-shared'
 
 describe('KeeperConversationPanel', () => {
@@ -115,5 +116,6 @@ describe('KeeperConversationPanel', () => {
     expect(container.textContent).not.toContain('Lane state')
     expect(container.querySelector('[data-chat-variant="messenger"]')).not.toBeNull()
     expect(container.querySelector('textarea')?.getAttribute('placeholder')).toBe('메시지 입력...')
+    expect(hydrateKeeperStatus).not.toHaveBeenCalled()
   })
 })

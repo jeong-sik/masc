@@ -89,6 +89,31 @@ let test_list_posts_sort_orders = with_pg_backend (fun t ->
   ()
 )
 
+let test_reclassify_posts = with_pg_backend (fun t ->
+  let meta = `Assoc [ ("source", `String "keeper_board_post") ] in
+  match
+    Board_pg.create_post t ~author:"pg-test-keeper" ~content:"keeper"
+      ~post_kind:Board.Automation_post ~meta_json:meta ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      let dry_run = Board_pg.reclassify_posts t ~dry_run:true () in
+      Alcotest.(check int) "dry run changed" 1 dry_run.changed;
+      (match Board_pg.get_post t ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok fetched ->
+           Alcotest.(check string) "still automation before apply" "automation"
+             (Board.post_kind_to_string fetched.post_kind));
+      let applied = Board_pg.reclassify_posts t ~dry_run:false () in
+      Alcotest.(check int) "apply changed" 1 applied.changed;
+      match Board_pg.get_post t ~post_id:pid with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok fetched ->
+          Alcotest.(check string) "persisted as system" "system"
+            (Board.post_kind_to_string fetched.post_kind)
+)
+
 (** {1 Comment Operations} *)
 
 let test_add_and_get_comments = with_pg_backend (fun t ->
@@ -263,6 +288,7 @@ let () =
       Alcotest.test_case "create and get" `Quick test_create_and_get_post;
       Alcotest.test_case "list" `Quick test_list_posts;
       Alcotest.test_case "sort orders" `Quick test_list_posts_sort_orders;
+      Alcotest.test_case "reclassify posts" `Quick test_reclassify_posts;
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick test_add_and_get_comments;

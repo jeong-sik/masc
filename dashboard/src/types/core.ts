@@ -380,7 +380,6 @@ export interface Keeper {
   handoff_count_total?: number
   compaction_count?: number
   last_compaction_saved_tokens?: number
-  diagnostic?: KeeperDiagnostic | null
   skill_primary?: string | null
   skill_secondary?: string[]
   skill_reason?: string | null

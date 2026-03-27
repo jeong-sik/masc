@@ -551,6 +551,68 @@ let stats t =
       Log.BoardPg.error "stats error: %s" (Caqti_error.show err);
       `Assoc [("error", `String "Database operation failed")]
 
+let reclassify_posts t ?(limit = 5200) ?(dry_run = true) () =
+  let scan_limit = max 0 (min limit 5200) in
+  match Caqti_eio.Pool.use (fun conn ->
+    let module C = (val conn : Caqti_eio.CONNECTION) in
+    let* total = C.find post_count_q () in
+    let* rows =
+      if scan_limit = 0 then
+        Ok []
+      else
+        C.collect_list list_recent_q (None, None, scan_limit)
+    in
+    let posts = List.filter_map post_of_row rows in
+    let changed = ref 0 in
+    let unchanged = ref 0 in
+    let apply_failures = ref 0 in
+    let changed_post_ids = ref [] in
+    let record_changed_id id =
+      if List.length !changed_post_ids < 20 then
+        changed_post_ids := id :: !changed_post_ids
+    in
+    List.iter (fun (post : post) ->
+      let canonical_kind = classify_post_kind post in
+      if canonical_kind = post.post_kind then
+        incr unchanged
+      else begin
+        incr changed;
+        let post_id = Post_id.to_string post.id in
+        record_changed_id post_id;
+        if not dry_run then
+          match C.exec update_post_kind_q (post_id, post_kind_to_string canonical_kind) with
+          | Ok () -> ()
+          | Error err ->
+              incr apply_failures;
+              Log.BoardPg.error "reclassify post_kind failed for %s: %s"
+                post_id (Caqti_error.show err)
+      end) posts;
+    Ok
+      {
+        backend = "postgresql";
+        dry_run;
+        scanned = List.length posts;
+        changed = !changed;
+        unchanged = !unchanged;
+        skipped = max 0 (total - List.length posts);
+        apply_failures = !apply_failures;
+        changed_post_ids = List.rev !changed_post_ids;
+      }
+  ) t.pool with
+  | Ok report -> report
+  | Error err ->
+      Log.BoardPg.error "reclassify_posts error: %s" (Caqti_error.show err);
+      {
+        backend = "postgresql";
+        dry_run;
+        scanned = 0;
+        changed = 0;
+        unchanged = 0;
+        skipped = 0;
+        apply_failures = 1;
+        changed_post_ids = [];
+      }
+
 (** {1 Search} *)
 
 let search t ~query ~limit =

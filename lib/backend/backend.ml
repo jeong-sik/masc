@@ -137,16 +137,26 @@ module FileSystem = struct
   let _compress = Compression.compress_with_header
   let _decompress = Compression.decompress_auto
 
+  let has_zstd_header content =
+    String.length content >= 4 && String.sub content 0 4 = "ZSTD"
+
+  let decompress_with_context ~context content =
+    let had_header = has_zstd_header content in
+    let decompressed = _decompress content in
+    if had_header && String.equal decompressed content then
+      Log.Backend.warn "[EioFS] decompress fallback for %s" context;
+    decompressed
+
   (** Get value by key (auto-decompresses ZSTD if detected) *)
   let get t key =
     Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
       match key_to_path t key with
       | Error e -> Error e
-      | Ok path ->
+        | Ok path ->
           try
             let content = Eio.Path.load path in
             (* Compact Protocol v4: Auto-decompress if ZSTD header present *)
-            let decompressed = _decompress content in
+            let decompressed = decompress_with_context ~context:key content in
             Ok decompressed
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
@@ -502,7 +512,7 @@ module FileSystem = struct
               if n = 0 then None
               else
                 let raw = Bytes.sub_string buf 0 n in
-                Some (_decompress raw)
+                Some (decompress_with_context ~context:path_str raw)
             end
           in
           let new_content = f current in

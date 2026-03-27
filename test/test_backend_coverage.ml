@@ -163,14 +163,20 @@ let with_eio_backend f =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let clock = Eio.Stdenv.clock env in
-  (* Ensure clock is available for atomic lock-retry sleep on Linux *)
-  Eio_context.set_clock clock;
   let tmp_dir = make_test_dir "masc_eio" in
   let config = { Backend.default_config with base_path = tmp_dir; node_id = "test"; cluster_name = "test" } in
-  let backend = Backend.FileSystem.create ~fs config in
   Fun.protect
     ~finally:(fun () -> try rm_rf tmp_dir with _ -> ())
-    (fun () -> f backend)
+    (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        (fun () ->
+          let backend = Backend.FileSystem.create ~fs config in
+          f backend))
 
 let test_eio_lock_acquire () =
   with_eio_backend @@ fun backend ->

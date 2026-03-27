@@ -107,6 +107,27 @@ function SectionHeader({ title }: { title: string }) {
   `
 }
 
+function Callout({
+  title,
+  body,
+  tone = 'neutral',
+}: {
+  title: string
+  body: string
+  tone?: 'neutral' | 'warn'
+}) {
+  const toneClass =
+    tone === 'warn'
+      ? 'border-amber-400/20 bg-amber-500/10 text-amber-100'
+      : 'border-card-border/60 bg-card/35 text-text-body'
+  return html`
+    <div class="rounded-xl border px-3 py-3 shadow-sm ${toneClass}">
+      <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-1">${title}</div>
+      <div class="text-[12px] leading-relaxed">${body}</div>
+    </div>
+  `
+}
+
 function BoolBadge({ value }: { value: boolean }) {
   return value
     ? html`<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
@@ -366,113 +387,22 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
   return html`
     <div class="flex flex-col gap-1.5">
-
       ${toolbar}
 
-      ${'' /* --- Execution (read-only) --- */}
-      ${'' /* Active model is shown in the header badge — not duplicated here */}
-      <${SectionHeader} title="실행" />
-      <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">검증</span>
-        <${BoolBadge} value=${c.execution.verify} />
-      </div>
-      <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">모델</div>
-        <${ModelList} models=${c.execution.models} />
+      <${Callout}
+        title="편집 가능 범위"
+        body="여기서 저장되는 값은 keeper 프롬프트와 live override 계층입니다. 활성 모델은 keeper별 설정이 아니라 config/cascade.json 해석 결과로 결정됩니다."
+      />
+
+      ${promptSection}
+
+      <div class="mt-2">
+        <${Callout}
+          title="읽기 전용 런타임"
+          body="아래 값은 현재 서버가 해석한 실행 상태와 소스 경로입니다. 참고용이며, 이 패널에서 직접 변경되지는 않습니다."
+        />
       </div>
 
-      ${'' /* --- Compaction (read-only) --- */}
-      <${SectionHeader} title="컴팩션" />
-      <${ConfigRow} label="프로필" value=${c.compaction.profile || '--'} />
-      <${ConfigRow} label="비율 게이트" value=${(c.compaction.ratio_gate * 100).toFixed(0) + '%'} />
-      <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
-      <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
-      <${ConfigRow} label="쿨다운" value=${c.compaction.cooldown_sec + 's'} />
-
-      ${'' /* --- Proactive (read-only) --- */}
-      <${SectionHeader} title="프로액티브" />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">활성</span>
-        <${BoolBadge} value=${c.proactive.enabled} />
-      </div>
-      <${ConfigRow} label="유휴 트리거" value=${c.proactive.idle_sec + 's'} />
-      <${ConfigRow} label="쿨다운" value=${c.proactive.cooldown_sec + 's'} />
-
-      ${'' /* --- Runtime (read-only) --- */}
-      <${SectionHeader} title="런타임" />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">일시정지</span>
-        <${BoolBadge} value=${c.runtime.paused} />
-      </div>
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">자동 부팅 등록</span>
-        <${BoolBadge} value=${c.runtime.registered} />
-      </div>
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">킵얼라이브 실행</span>
-        <${BoolBadge} value=${c.runtime.keepalive_running} />
-      </div>
-      <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || '--'} />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">프레즌스 킵얼라이브</span>
-        <${BoolBadge} value=${c.runtime.presence_keepalive} />
-      </div>
-      <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
-
-      ${'' /* --- Coordination (read-only) --- */}
-      <${SectionHeader} title="조율" />
-      <${ConfigRow} label="룸 범위" value=${c.coordination.room_scope || '--'} />
-      <${ConfigRow} label="범위 유형" value=${c.coordination.scope_kind || '--'} />
-      <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>
-        <${ModelList} models=${c.coordination.mention_targets} />
-      </div>
-      <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 룸</div>
-        <${ModelList} models=${c.coordination.joined_room_ids} />
-      </div>
-
-      ${'' /* --- Drift (read-only) --- */}
-      <${SectionHeader} title="드리프트" />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">상태</span>
-        <${FeatureBadge} status=${c.drift.status} value=${c.drift.enabled} />
-      </div>
-      <${ConfigRow} label="최소 턴 간격" value=${formatMaybeNumber(c.drift.min_turn_gap)} />
-      <${ConfigRow} label="총 횟수" value=${formatMaybeNumber(c.drift.count_total)} />
-      ${c.drift.last_reason ? html`<${ConfigRow} label="마지막 사유" value=${c.drift.last_reason} />` : null}
-
-      ${'' /* --- Team Session (read-only) --- */}
-      <${SectionHeader} title="자동 팀 세션" />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">상태</span>
-        <${FeatureBadge} status=${c.auto_team_session.status} value=${c.auto_team_session.enabled} />
-      </div>
-
-      ${'' /* --- Handoff (read-only) --- */}
-      <${SectionHeader} title="핸드오프" />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">자동</span>
-        <${BoolBadge} value=${c.handoff.auto} />
-      </div>
-      <${ConfigRow} label="임계값" value=${(c.handoff.threshold * 100).toFixed(0) + '%'} />
-      <${ConfigRow} label="쿨다운" value=${c.handoff.cooldown_sec + 's'} />
-
-      ${'' /* --- Last Call Performance (read-only) --- */}
-      ${'' /* Totals (generation, turns, tokens, cost, compactions) are in KpiGrid */}
-      <${SectionHeader} title="마지막 호출 성능" />
-      <${ConfigRow} label="총 입력 토큰" value=${formatTokens(c.metrics.total_input_tokens)} />
-      <${ConfigRow} label="총 출력 토큰" value=${formatTokens(c.metrics.total_output_tokens)} />
-      <${ConfigRow} label="마지막 모델" value=${c.metrics.last_model_used || '--'} />
-      <${ConfigRow} label="마지막 입력 토큰" value=${formatTokens(c.metrics.last_input_tokens)} />
-      <${ConfigRow} label="마지막 출력 토큰" value=${formatTokens(c.metrics.last_output_tokens)} />
-      <${ConfigRow} label="마지막 총 토큰" value=${formatTokens(c.metrics.last_total_tokens)} />
-      <${ConfigRow} label="마지막 지연" value=${formatMaybeNumber(c.metrics.last_latency_ms, 'ms')} />
-      <${ConfigRow} label="마지막 처리량" value=${formatMaybeFloat(c.metrics.last_total_tokens_per_sec, 1, ' tok/s')} />
-      <${ConfigRow} label="마지막 출력 처리량" value=${formatMaybeFloat(c.metrics.last_output_tokens_per_sec, 1, ' tok/s')} />
-
-      ${'' /* --- Sources (read-only) --- */}
       <${SectionHeader} title="소스" />
       <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
@@ -500,8 +430,97 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ModelList} models=${c.sources.override_fields} />
       </div>
 
-      ${'' /* --- Prompt (editable) --- */}
-      ${promptSection}
+      <${SectionHeader} title="실행" />
+      <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">검증</span>
+        <${BoolBadge} value=${c.execution.verify} />
+      </div>
+      <div class="mt-1.5">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">모델</div>
+        <${ModelList} models=${c.execution.models} />
+      </div>
+
+      <${SectionHeader} title="컴팩션" />
+      <${ConfigRow} label="프로필" value=${c.compaction.profile || '--'} />
+      <${ConfigRow} label="비율 게이트" value=${(c.compaction.ratio_gate * 100).toFixed(0) + '%'} />
+      <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
+      <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
+      <${ConfigRow} label="쿨다운" value=${c.compaction.cooldown_sec + 's'} />
+
+      <${SectionHeader} title="프로액티브" />
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">활성</span>
+        <${BoolBadge} value=${c.proactive.enabled} />
+      </div>
+      <${ConfigRow} label="유휴 트리거" value=${c.proactive.idle_sec + 's'} />
+      <${ConfigRow} label="쿨다운" value=${c.proactive.cooldown_sec + 's'} />
+
+      <${SectionHeader} title="런타임" />
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">일시정지</span>
+        <${BoolBadge} value=${c.runtime.paused} />
+      </div>
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">자동 부팅 등록</span>
+        <${BoolBadge} value=${c.runtime.registered} />
+      </div>
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">킵얼라이브 실행</span>
+        <${BoolBadge} value=${c.runtime.keepalive_running} />
+      </div>
+      <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || '--'} />
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">프레즌스 킵얼라이브</span>
+        <${BoolBadge} value=${c.runtime.presence_keepalive} />
+      </div>
+      <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
+
+      <${SectionHeader} title="조율" />
+      <${ConfigRow} label="룸 범위" value=${c.coordination.room_scope || '--'} />
+      <${ConfigRow} label="범위 유형" value=${c.coordination.scope_kind || '--'} />
+      <div class="mt-1.5">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>
+        <${ModelList} models=${c.coordination.mention_targets} />
+      </div>
+      <div class="mt-1.5">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 룸</div>
+        <${ModelList} models=${c.coordination.joined_room_ids} />
+      </div>
+
+      <${SectionHeader} title="드리프트" />
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">상태</span>
+        <${FeatureBadge} status=${c.drift.status} value=${c.drift.enabled} />
+      </div>
+      <${ConfigRow} label="최소 턴 간격" value=${formatMaybeNumber(c.drift.min_turn_gap)} />
+      <${ConfigRow} label="총 횟수" value=${formatMaybeNumber(c.drift.count_total)} />
+      ${c.drift.last_reason ? html`<${ConfigRow} label="마지막 사유" value=${c.drift.last_reason} />` : null}
+
+      <${SectionHeader} title="자동 팀 세션" />
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">상태</span>
+        <${FeatureBadge} status=${c.auto_team_session.status} value=${c.auto_team_session.enabled} />
+      </div>
+
+      <${SectionHeader} title="핸드오프" />
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">자동</span>
+        <${BoolBadge} value=${c.handoff.auto} />
+      </div>
+      <${ConfigRow} label="임계값" value=${(c.handoff.threshold * 100).toFixed(0) + '%'} />
+      <${ConfigRow} label="쿨다운" value=${c.handoff.cooldown_sec + 's'} />
+
+      <${SectionHeader} title="마지막 호출 성능" />
+      <${ConfigRow} label="총 입력 토큰" value=${formatTokens(c.metrics.total_input_tokens)} />
+      <${ConfigRow} label="총 출력 토큰" value=${formatTokens(c.metrics.total_output_tokens)} />
+      <${ConfigRow} label="마지막 모델" value=${c.metrics.last_model_used || '--'} />
+      <${ConfigRow} label="마지막 입력 토큰" value=${formatTokens(c.metrics.last_input_tokens)} />
+      <${ConfigRow} label="마지막 출력 토큰" value=${formatTokens(c.metrics.last_output_tokens)} />
+      <${ConfigRow} label="마지막 총 토큰" value=${formatTokens(c.metrics.last_total_tokens)} />
+      <${ConfigRow} label="마지막 지연" value=${formatMaybeNumber(c.metrics.last_latency_ms, 'ms')} />
+      <${ConfigRow} label="마지막 처리량" value=${formatMaybeFloat(c.metrics.last_total_tokens_per_sec, 1, ' tok/s')} />
+      <${ConfigRow} label="마지막 출력 처리량" value=${formatMaybeFloat(c.metrics.last_output_tokens_per_sec, 1, ' tok/s')} />
     </div>
   `
 }

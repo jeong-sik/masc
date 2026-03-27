@@ -212,11 +212,25 @@ let elevenlabs_voice_ids = [
   ("Laura",  "FGY2WhTYpPnrIDTdsKH5");
 ]
 
+let trim_opt = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
 (** Ensure .masc/audio/ directory exists *)
+let resolved_base_path_opt () =
+  match trim_opt (Sys.getenv_opt "MASC_BASE_PATH") with
+  | Some path -> Some path
+  | None -> Room_utils_backend_setup.find_git_root (Sys.getcwd ())
+
 let masc_base_dir () =
-  match Sys.getenv_opt "ME_ROOT" with
-  | Some root when String.trim root <> "" -> Filename.concat root ".masc"
-  | _ -> ".masc"
+  match resolved_base_path_opt () with
+  | Some base_path -> Filename.concat base_path ".masc"
+  | None -> (
+      match trim_opt (Sys.getenv_opt "ME_ROOT") with
+      | Some root -> Filename.concat root ".masc"
+      | None -> ".masc")
 
 let ensure_audio_dir () =
   let dir = Filename.concat (masc_base_dir ()) "audio" in
@@ -259,4 +273,3 @@ let append_provider_metadata json endpoint =
             ("endpoint_url", endpoint_url_json endpoint);
           ])
   | other -> other
-

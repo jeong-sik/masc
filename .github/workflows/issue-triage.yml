@@ -1,0 +1,105 @@
+name: Issue Triage
+
+on:
+  issues:
+    types: [opened, edited, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  enforce-triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce type/target planning labels
+        uses: actions/github-script@v8
+        env:
+          TRIAGE_LABEL: triage-required
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue = context.payload.issue;
+            const issueNumber = issue.number;
+            const targetLabels = [
+              "target:v2.86.1",
+              "target:v2.87.0",
+              "target:v2.88.0",
+              "target:v2.89.0",
+              "target:v2.90.0",
+              "target:v2.91.0",
+              "target:v2.92.0",
+              "target:v2.93+",
+              "target:v2.148+"
+            ];
+
+            async function ensureLabel(name, color, description) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (err) {
+                if (err.status !== 404) throw err;
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name,
+                  color,
+                  description
+                });
+              }
+            }
+
+            function getLabelNames(labels) {
+              return labels.map((label) => (typeof label === "string" ? label : label.name));
+            }
+
+            function findTargetInBody(body) {
+              if (!body) return null;
+              return targetLabels.find((label) => body.includes(label)) || null;
+            }
+
+            await ensureLabel(
+              process.env.TRIAGE_LABEL,
+              "BFDADC",
+              "Issue is missing exactly one planning type/target label."
+            );
+
+            const labelNames = new Set(getLabelNames(issue.labels));
+            let typeMatches = [...labelNames].filter((name) => name.startsWith("type:"));
+            let targetMatches = [...labelNames].filter((name) => name.startsWith("target:"));
+
+            if (targetMatches.length === 0) {
+              const inferredTarget = findTargetInBody(issue.body || "");
+              if (inferredTarget) {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  labels: [inferredTarget]
+                });
+                labelNames.add(inferredTarget);
+                targetMatches = [inferredTarget];
+              }
+            }
+
+            typeMatches = [...labelNames].filter((name) => name.startsWith("type:"));
+            targetMatches = [...labelNames].filter((name) => name.startsWith("target:"));
+
+            const needsTriage = typeMatches.length !== 1 || targetMatches.length !== 1;
+            const hasTriageLabel = labelNames.has(process.env.TRIAGE_LABEL);
+
+            if (needsTriage && !hasTriageLabel) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                labels: [process.env.TRIAGE_LABEL]
+              });
+            } else if (!needsTriage && hasTriageLabel) {
+              await github.rest.issues.removeLabel({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                name: process.env.TRIAGE_LABEL
+              });
+            }

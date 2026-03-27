@@ -9,7 +9,8 @@ body:
       value: |
         Use this for behavior that is broken, incorrect, or regressed.
         Human reporters, Codex, and internal agents may all file this form.
-        Add exactly one `target:*` label after triage.
+        Choose exactly one target train below. Automation will keep `triage-required`
+        on the issue until it has exactly one `type:*` and one `target:*` label.
   - type: input
     id: version
     attributes:
@@ -27,6 +28,23 @@ body:
         - major workflow broken
         - moderate incorrect behavior
         - minor but real bug
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Target train
+      description: Choose the smallest plausible release lane. Triage can retarget later.
+      options:
+        - "target:v2.86.1"
+        - "target:v2.87.0"
+        - "target:v2.88.0"
+        - "target:v2.89.0"
+        - "target:v2.90.0"
+        - "target:v2.91.0"
+        - "target:v2.92.0"
+        - "target:v2.93+"
+        - "target:v2.148+"
     validations:
       required: true
   - type: textarea

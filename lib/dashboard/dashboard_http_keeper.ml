@@ -23,21 +23,11 @@ let tokens_per_sec_json ~tokens ~latency_ms =
   if tokens <= 0 || latency_ms <= 0 then `Null
   else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
 
-let resident_keeper_registry_entries_and_names (config : Room.config) =
-  let registry_entries = Keeper_registry.all ~base_path:config.base_path () in
-  let registry_names =
-    List.map (fun (e : Keeper_registry.registry_entry) -> e.name) registry_entries
-  in
-  let file_only_names =
-    List.filter
-      (fun n -> not (List.mem n registry_names))
-      (Keeper_types.resident_keeper_names config)
-  in
-  (registry_entries, registry_names @ file_only_names)
+let resident_keeper_names (config : Room.config) =
+  Keeper_types.resident_keeper_names config
 
 let resident_keeper_count (config : Room.config) : int =
-  let _, names = resident_keeper_registry_entries_and_names config in
-  List.length names
+  List.length (resident_keeper_names config)
 
 let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
@@ -45,17 +35,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
   let series_points = 120 in
-  (* Prefer KeeperRegistry (in-memory SSOT) with file fallback for
-     keepers not yet started in this server session. *)
-  let registry_entries, names =
-    resident_keeper_registry_entries_and_names config
-  in
-  let registry_meta_of name =
-    List.find_opt
-      (fun (e : Keeper_registry.registry_entry) -> e.name = name)
-      registry_entries
-    |> Option.map (fun (e : Keeper_registry.registry_entry) -> e.meta)
-  in
+  let names = resident_keeper_names config in
   let now_ts = Time_compat.now () in
   (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
      Results are collected into a shared ref array, then filter_map'd. *)
@@ -63,17 +43,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
   Eio.Fiber.all
     (List.mapi (fun idx name -> fun () ->
       results.(idx) <- (
-      let meta_opt =
-        match registry_meta_of name with
-        | Some m -> Some m
-        | None ->
-          (match Keeper_types.read_meta config name with
-           | Ok (Some m) -> Some m
-           | _ -> None)
-      in
-      match meta_opt with
-      | None -> None
-      | Some (m : Keeper_types.keeper_meta) ->
+      match Keeper_types.read_meta config name with
+      | Error _ | Ok None -> None
+      | Ok (Some (m : Keeper_types.keeper_meta)) ->
           let agent = Keeper_exec_status.parse_agent_status config ~agent_name:m.agent_name in
 
           let created_ts =
@@ -264,11 +236,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | _ -> 0
           in
           let keepalive_running = runtime_keepalive_running config m in
-          let registry_state =
-            match Keeper_registry.get ~base_path:config.base_path m.name with
-            | Some entry -> Some (Keeper_registry.state_to_string entry.state)
-            | None -> None
-          in
 
           let context =
             match last_metrics with
@@ -372,10 +339,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                    ~now_ts));
               ("runtime_class", `String "resident_keeper");
               ("registered", `Bool true);
-              ("registry_state",
-                match registry_state with
-                | Some state -> `String state
-                | None -> `Null);
+              ("registry_state", `Null);
               ("agent_name", `String m.agent_name);
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
               ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));

@@ -48,7 +48,7 @@ let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 
 let with_lock_rw f = Eio_guard.with_mutex mu f
-let with_lock_ro f = Eio_guard.with_mutex mu f
+let with_lock_ro f = Eio_guard.with_mutex_ro mu f
 
 let max_crash_log_entries = 5
 

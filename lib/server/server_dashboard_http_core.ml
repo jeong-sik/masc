@@ -956,7 +956,47 @@ let provider_capacity_json () : Yojson.Safe.t =
 
 let dashboard_shell_timeout_s =
   float_of_env_default "MASC_DASHBOARD_SHELL_TIMEOUT_S"
-    ~default:8.0 ~min_v:2.0 ~max_v:30.0
+    ~default:12.0 ~min_v:2.0 ~max_v:30.0
+
+let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
+  let current_room = dashboard_current_room_id config in
+  let started_at = Unix.gettimeofday () in
+  let measure_ms f =
+    let t0 = Unix.gettimeofday () in
+    let value = f () in
+    let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
+    (value, elapsed_ms)
+  in
+  let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
+  let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
+  let general_agents = dashboard_general_agent_count agents in
+  let tasks, tasks_ms = measure_ms (fun () -> dashboard_tasks_safe config) in
+  let keepers_total, keepers_ms =
+    measure_ms (fun () -> resident_keeper_count config)
+  in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("status", status_json);
+      ( "counts",
+        `Assoc
+          [
+            ("agents", `Int general_agents);
+            ("tasks", `Int (List.length tasks));
+            ("keepers", `Int keepers_total);
+          ] );
+      ("providers", provider_capacity_json ());
+    ]
+  |> with_projection_diagnostics ~surface:"shell" ~started_at
+       ~extra:
+         [
+           ("current_room", `String current_room);
+           ("keeper_count_source", `String "resident_registry");
+           ("status_ms", `Int status_ms);
+           ("agents_ms", `Int agents_ms);
+           ("tasks_ms", `Int tasks_ms);
+           ("keepers_ms", `Int keepers_ms);
+         ]
 
 let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in
@@ -964,43 +1004,16 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
     Printf.sprintf "shell:%s:%s" config.base_path current_room
   in
   let compute () =
-    let started_at = Unix.gettimeofday () in
-    let measure_ms f =
-      let t0 = Unix.gettimeofday () in
-      let value = f () in
-      let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
-      (value, elapsed_ms)
-    in
-    let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
-    let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
-    let general_agents = dashboard_general_agent_count agents in
-    let tasks, tasks_ms = measure_ms (fun () -> dashboard_tasks_safe config) in
-    let keepers_total, keepers_ms =
-      measure_ms (fun () -> resident_keeper_count config)
-    in
-    `Assoc
-      [
-        ("generated_at", `String (Types.now_iso ()));
-        ("status", status_json);
-        ( "counts",
-          `Assoc
-            [
-              ("agents", `Int general_agents);
-              ("tasks", `Int (List.length tasks));
-              ("keepers", `Int keepers_total);
-            ] );
-        ("providers", provider_capacity_json ());
-      ]
-    |> with_projection_diagnostics ~surface:"shell" ~started_at
-         ~extra:
-           [
-             ("current_room", `String current_room);
-             ("keeper_count_source", `String "resident_registry");
-             ("status_ms", `Int status_ms);
-             ("agents_ms", `Int agents_ms);
-             ("tasks_ms", `Int tasks_ms);
-             ("keepers_ms", `Int keepers_ms);
-           ]
+    match Eio_context.get_clock_opt (), Eio_context.get_switch_opt () with
+    | Some clock, Some sw ->
+        let readonly_config =
+          match cached_isolated_readonly_config ~sw ~clock ~config with
+          | Some isolated -> isolated
+          | None -> config
+        in
+        dashboard_shell_payload_json readonly_config
+    | _ ->
+        dashboard_shell_payload_json config
   in
   match Eio_context.get_clock_opt () with
   | Some clock ->

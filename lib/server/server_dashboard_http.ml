@@ -136,7 +136,7 @@ let runtime_resolution_json (config : Room.config) =
   let workspace_commit = git_rev_parse_short config.workspace_path in
   let resolved_base_commit = git_rev_parse_short config.base_path in
   let base_path_input =
-    Env_config_core.base_path_input_opt ()
+    Env_config_core.base_path_opt ()
     |> Option.value ~default:config.workspace_path
   in
   let prompt_markdown_dir =
@@ -207,7 +207,7 @@ let runtime_resolution_json (config : Room.config) =
     [
       ("status", `String status);
       ("warnings", `List (List.map (fun warning -> `String warning) warnings));
-      ("base_path_input", path_item_json ~source:"input" base_path_input);
+      ("base_path", path_item_json ~source:"input" base_path_input);
       ("workspace_path", path_item_json ~source:"workspace" config.workspace_path);
       ("resolved_base_path", path_item_json ~source:"resolved_base" config.base_path);
       ("data_root", path_item_json ~source:"runtime_data" (Room.masc_root_dir config));

@@ -118,7 +118,7 @@ let chain_source_roots (config : Room.config) =
   in
   let roots = add [] config.base_path in
   let roots =
-    match Env_config_core.base_path_input_opt () with
+    match Env_config_core.base_path_opt () with
     | Some path -> add roots path
     | None -> roots
   in

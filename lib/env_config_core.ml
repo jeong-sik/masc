@@ -138,15 +138,11 @@ let get_bool_deprecated ~default ~primary ~deprecated =
   | None -> default
 
 let sb_path_opt () =
-  match deprecated_opt ~old_name:"MASC_SB_PATH"
-          ~new_name:"MASC_WORKSPACE_ROOT or ME_ROOT" with
-  | Some path -> Some path
-  | None -> (
-      match me_root_opt () with
-      | Some root ->
-          let path = Filename.concat root "scripts/sb" in
-          if existing_file path then Some path else None
-      | None -> None)
+  match me_root_opt () with
+  | Some root ->
+      let path = Filename.concat root "scripts/sb" in
+      if existing_file path then Some path else None
+  | None -> None
 
 let sb_path_result () =
   match sb_path_opt () with
@@ -163,23 +159,16 @@ let sb_path () =
 let masc_http_port () =
   match Sys.getenv_opt "MASC_HTTP_PORT" |> trim_opt with
   | Some port -> port
-  | None -> (
-      match Sys.getenv_opt "MASC_PORT" |> trim_opt with
-      | Some port ->
-          warn_deprecated ~old_name:"MASC_PORT" ~new_name:"MASC_HTTP_PORT";
-          port
-      | None -> "8935")
+  | None -> "8935"
 
 let masc_http_port_int () =
   Safe_ops.int_of_string_with_default ~default:8935 (masc_http_port ())
 
 let masc_host_opt () =
-  match Sys.getenv_opt "MASC_HOST" |> trim_opt with
-  | Some host -> Some host
-  | None -> deprecated_opt ~old_name:"MASC_HTTP_BIND_HOST" ~new_name:"MASC_HOST"
+  Sys.getenv_opt "MASC_HOST" |> trim_opt
 
 (** Centralized MASC_HOST reader.
-    Reads MASC_HOST (primary) with MASC_HTTP_BIND_HOST (deprecated) fallback.
+    Reads MASC_HOST env var.
     Default: "127.0.0.1". *)
 let masc_host () =
   match masc_host_opt () with
@@ -187,13 +176,9 @@ let masc_host () =
   | None -> "127.0.0.1"
 
 (** Centralized MASC_ASSETS_DIR reader.
-    Reads MASC_ASSETS_DIR (primary) with MASC_ASSETS_ROOT (deprecated) fallback.
-    Returns None when neither is set. *)
+    Returns None when MASC_ASSETS_DIR is unset or empty. *)
 let assets_dir_opt () =
-  match Sys.getenv_opt "MASC_ASSETS_DIR" |> trim_opt with
-  | Some dir -> Some dir
-  | None ->
-      deprecated_opt ~old_name:"MASC_ASSETS_ROOT" ~new_name:"MASC_ASSETS_DIR"
+  Sys.getenv_opt "MASC_ASSETS_DIR" |> trim_opt
 
 let cluster_name_opt () =
   Sys.getenv_opt "MASC_CLUSTER_NAME" |> trim_opt
@@ -252,11 +237,6 @@ let base_path () =
   match base_path_opt () with
   | Some path -> path
   | None -> "."
-
-(** Deprecated input path alias. Reads MASC_BASE_PATH_INPUT with deprecation
-    warning. Call sites should migrate to [base_path]. *)
-let base_path_input_opt () =
-  deprecated_opt ~old_name:"MASC_BASE_PATH_INPUT" ~new_name:"MASC_BASE_PATH"
 
 (** Storage backend type. Set at runtime by server_runtime_bootstrap.
     Valid: "filesystem", "postgres-native". *)

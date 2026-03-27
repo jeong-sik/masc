@@ -32,7 +32,7 @@ describe('ConfigResolutionPanel', () => {
         runtimeResolution=${{
           status: 'warn',
           warnings: ['Runtime build commit (deadbee) differs from workspace HEAD (cafef00d).'],
-          base_path_input: { path: '/tmp/runtime-input', exists: true, source: 'input' },
+          base_path: { path: '/tmp/runtime-input', exists: true, source: 'input' },
           workspace_path: { path: '/tmp/workspace', exists: true, source: 'workspace' },
           resolved_base_path: { path: '/tmp/workspace', exists: true, source: 'resolved_base' },
           data_root: { path: '/tmp/workspace/.masc', exists: true, source: 'runtime_data' },

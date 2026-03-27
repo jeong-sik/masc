@@ -36,7 +36,6 @@ let assets_root () =
         | Some value -> value :: acc
         | None -> acc)
       [
-        base_path_assets "MASC_BASE_PATH_INPUT";
         base_path_assets "MASC_BASE_PATH";
         Some inferred_repo_assets;
         Some (Filename.concat exe_dir "assets");

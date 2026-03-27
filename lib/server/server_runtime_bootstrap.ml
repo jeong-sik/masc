@@ -51,7 +51,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       method mono_clock = mono_clock
     end
   in
-  Unix.putenv "MASC_BASE_PATH_INPUT" base_path;
+  Unix.putenv "MASC_BASE_PATH" base_path;
   let state =
     Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~net
       ~base_path

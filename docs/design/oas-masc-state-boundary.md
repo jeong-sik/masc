@@ -2,6 +2,13 @@
 
 Issue: #1736
 
+## Related
+
+- [Contract-Driven Agent Loop RFC](./contract-driven-agent-loop-rfc.md)
+- [Labeling and Judging Protocol](./contract-driven-agent-loop-labeling-protocol.md)
+- [Implementation Checklist](./contract-driven-agent-loop-implementation-checklist.md)
+- [RFC Review Memo](./contract-driven-agent-loop-rfc-review.md)
+
 ## Principle
 
 OAS manages **agent state** — the lifecycle of an individual agent or collaboration session.
@@ -55,7 +62,15 @@ State that describes the coordination domain — not how an agent thinks, but wh
 
 ### V1: `keeper_meta` is a god record mixing agent state and domain state
 
-`keeper_types.ml` defines `keeper_meta` with 106 fields. Approximately 30 of these are agent-runtime state:
+`keeper_types.ml` defines `keeper_meta` with 54 direct fields.
+
+Nested sub-records expand the effective surface further:
+
+- `usage_metrics`: 11 fields
+- `compaction_state`: 11 fields
+- `proactive_config`: 7 fields
+
+So the flattened operational surface is roughly 83 fields. Approximately 29-30 of these are agent-runtime state:
 
 **Agent state fields in keeper_meta (should be in OAS):**
 - `total_turns`, `total_input_tokens`, `total_output_tokens`, `total_tokens`, `total_cost_usd` — cumulative usage stats
@@ -72,7 +87,7 @@ State that describes the coordination domain — not how an agent thinks, but wh
 - `joined_room_ids`, `last_seen_seq_by_room` — current-room compatibility state (single-room canonical model)
 - `autonomy_level`, `active_goal_ids` — coordination state
 
-**Impact**: Every keeper turn reads the full 106-field record, updates agent-runtime fields, and writes it back. This couples domain persistence (MASC JSONL/PG) with agent-runtime state that OAS should own.
+**Impact**: Every keeper turn reads the full keeper record, updates agent-runtime fields, and writes it back. This couples domain persistence (MASC JSONL/PG) with agent-runtime state that OAS should own.
 
 ### V2: `keeper_working_context` duplicates OAS Context.t
 
@@ -98,19 +113,11 @@ This wraps `Agent_sdk.Context.t` with additional MASC-specific fields (`importan
 
 **Impact**: MASC-specific markers (`[MASC_GOAL]`, `[STATE]...[/STATE]`) embedded in messages that OAS Context_reducer must handle. Domain concepts leak into message content format.
 
-### V4: `Collaboration.t` used as decoration in `tool_council_oas.ml`
+### V4: `Collaboration.t` decoration issue resolved in `tool_council_oas.ml`
 
-`tool_council_oas.ml` creates `Collaboration.t` instances during petition submission:
-```ocaml
-let collab = Oas.Collaboration.create
-  ~goal:(Printf.sprintf "Governance petition: %s" title) () in
-let collab = Oas.Collaboration.add_participant collab ...
-let collab = Oas.Collaboration.set_phase collab Oas.Collaboration.Active in
-```
+The current `tool_council_oas.ml` no longer creates decorative `Collaboration.t` instances for petitions. Governance petitions persist directly via `Governance_v2`, and the module comment states that explicitly.
 
-The `collab` is created, its `id` is stored as a source_ref in the petition, and then discarded. No ongoing Collaboration lifecycle is maintained. This is decorative use — the governance domain state (petitions, cases, rulings) lives in `Governance_v2`, not in `Collaboration.t`.
-
-**Impact**: `Collaboration.t` is instantiated without purpose. The `collab.id` becomes a dangling reference.
+**Impact**: Resolved. The current code path no longer instantiates `Collaboration.t` as one-shot decoration for petitions.
 
 ### V5: `Runtime.session.votes` — governance concept in OAS wire protocol
 
@@ -190,7 +197,8 @@ type keeper_meta = {
 
 **Effort**: Medium. 70+ call sites reference keeper_meta fields directly.
 **Risk**: Low — structural refactor, no behavior change.
-**Prerequisite for**: Phases 2 and 3.
+**Prerequisite for**: Phase 2. Phase 3 is expected to follow after Phase 2 removes the wrapper boundary.
+**Removal deadline**: remove the embedded `stats` field by the end of Phase 2. If Phase 2 is deferred or dropped, open a separate migration issue and keep the field marked deprecated rather than silently permanent.
 
 ### Phase 2: Eliminate `keeper_working_context` wrapper
 
@@ -215,9 +223,9 @@ type working_context = {
 (* token_count read from Context.t *)
 ```
 
-**Effort**: Medium-High. `keeper_exec_context.ml` (620 lines) and `keeper_working_context.ml` (311 lines) need rewrite.
+**Effort**: Medium-High. `keeper_exec_context.ml` (694 lines) and `keeper_working_context.ml` (317 lines) need rewrite.
 **Risk**: Medium — checkpoint format change requires migration or dual-read.
-**Prerequisite for**: Phase 4.
+**Prerequisite for**: Phase 3.
 
 ### Phase 3: Remove MASC markers from message content
 
@@ -228,14 +236,14 @@ Replace `[MASC_GOAL]`, `[STATE]...[/STATE]`, `[MASC_MEMORY_SUMMARY v1]` prefixes
 **Effort**: Low-Medium.
 **Risk**: Low — messages are ephemeral within a session.
 
-### Phase 4: Clean `Collaboration.t` usage in governance
+### Phase 4: Mark decorative `Collaboration.t` violation as resolved
 
-Remove decorative `Collaboration.t` creation in `tool_council_oas.ml`:
-- Governance petitions should use `Governance_v2` directly, without creating a dangling `Collaboration.t`
-- If agent coordination around governance is needed, `Collaboration.t` should be managed as an ongoing session, not a one-shot decoration
+`tool_council_oas.ml` no longer creates decorative `Collaboration.t` records for petitions.
 
-**Effort**: Low. Single file change.
-**Risk**: Low — the `collab.id` stored in `source_refs` is already unused.
+남은 작업은 코드 수정이 아니라 boundary 문서와 invariants를 현재 상태에 맞게 유지하는 것이다.
+
+**Effort**: Low. Documentation + regression guard.
+**Risk**: Low.
 
 ### Phase 5: Remove `votes` from OAS `Runtime.session`
 
@@ -262,11 +270,11 @@ Replace `Memory_oas_bridge.seed_*` imperative calls with OAS hook registration:
 | Phase | Priority | Blocking? | Effort |
 |-------|----------|-----------|--------|
 | P1: Split keeper_meta | High | Yes (enables P2, P3) | Medium |
-| P4: Clean Collaboration usage | High | No | Low |
+| P4: Mark Collaboration usage resolved | Low | No | Low |
 | P5: Remove Runtime.session.votes | High | No | Medium |
 | P2: Eliminate working_context wrapper | Medium | Yes (enables P3) | Medium-High |
 | P3: Remove MASC markers | Medium | No | Low-Medium |
-| P6: Formalize bridge as hooks | Low | No | Medium |
+| P6: Formalize bridge as hooks | Medium | No | Medium |
 
 ## Invariants (post-migration)
 

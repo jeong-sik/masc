@@ -16,7 +16,7 @@ STOP_WAIT_SEC="${STOP_WAIT_SEC:-10}"
 export MCP_URL="${MCP_URL:-http://127.0.0.1:${PORT}/mcp}"
 export CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 export CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
-export CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-25}"
+export CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-65}"
 export HARNESS_LOG_FILE="${HARNESS_LOG_FILE:-$LOG_FILE}"
 
 SERVER_PID=""
@@ -32,12 +32,36 @@ cleanup() {
 }
 trap cleanup EXIT
 
+wait_for_mcp_initialize_ready() {
+  local mcp_url="$1"
+  local timeout_sec="${2:-25}"
+  local deadline=$(( $(date +%s) + timeout_sec ))
+  local body='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-bootstrap","version":"1.0"},"capabilities":{}}}'
+
+  while [[ "$(date +%s)" -lt "$deadline" ]]; do
+    local status
+    status="$(
+      curl -sS -o /dev/null -w '%{http_code}' --max-time 2 \
+        -X POST "$mcp_url" \
+        -H 'Content-Type: application/json' \
+        -H 'Accept: application/json, text/event-stream' \
+        -d "$body" 2>/dev/null || true
+    )"
+    if [[ "$status" == "200" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
 run_contract() {
   local step="$1"
   local total="$2"
   local script_name="$3"
   echo "[${step}/${total}] ${script_name}"
-  if ! (cd "$ROOT_DIR" && MCP_URL="$MCP_URL" bash "scripts/harness/contract/${script_name}"); then
+  if ! (cd "$ROOT_DIR" && MCP_URL="$MCP_URL" BASE_PATH="$BASE_PATH" bash "scripts/harness/contract/${script_name}"); then
     echo "FAIL: ${script_name}" >&2
     harness_print_log_tail "$LOG_FILE"
     exit 1
@@ -56,9 +80,15 @@ if ! harness_wait_for_health "$PORT" 25; then
   harness_print_log_tail "$LOG_FILE"
   exit 1
 fi
+if ! wait_for_mcp_initialize_ready "$MCP_URL" 25; then
+  echo "FAIL: MCP endpoint did not become initialize-ready at ${MCP_URL}" >&2
+  harness_print_log_tail "$LOG_FILE"
+  exit 1
+fi
 
-run_contract 1 3 "streamable_http_contract.sh"
-run_contract 2 3 "team_session_contract.sh"
-run_contract 3 3 "golden_path_1_contract.sh"
+run_contract 1 4 "streamable_http_contract.sh"
+run_contract 2 4 "team_session_contract.sh"
+run_contract 3 4 "golden_path_1_contract.sh"
+run_contract 4 4 "public_tool_live_sweep.sh"
 
 echo "PASS: contract harness suite"

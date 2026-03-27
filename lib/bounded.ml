@@ -474,23 +474,26 @@ let retry_config_of_json json =
 
 (** Parse constraints from JSON *)
 let constraints_of_json json =
-  let open Yojson.Safe.Util in
-  let get_int_opt key = Safe_ops.json_int_opt key json in
-  let get_float_opt key =
-    try Some (json |> member key |> to_float)
-    with Yojson.Safe.Util.Type_error _ -> None
-  in
-  {
-    max_turns = get_int_opt "max_turns";
-    max_tokens = get_int_opt "max_tokens";
-    max_cost_usd = get_float_opt "max_cost_usd";
-    max_time_seconds = get_float_opt "max_time_seconds";
-    token_buffer =
-      Safe_ops.json_int ~default:default_constraints.token_buffer "token_buffer" json;
-    hard_max_iterations =
-      Safe_ops.json_int ~default:default_constraints.hard_max_iterations "hard_max_iterations" json;
-    retry = retry_config_of_json json;
-  }
+  if json = `Null then
+    default_constraints
+  else
+    let open Yojson.Safe.Util in
+    let get_int_opt key = Safe_ops.json_int_opt key json in
+    let get_float_opt key =
+      try Some (json |> member key |> to_float)
+      with Yojson.Safe.Util.Type_error _ -> None
+    in
+    {
+      max_turns = get_int_opt "max_turns";
+      max_tokens = get_int_opt "max_tokens";
+      max_cost_usd = get_float_opt "max_cost_usd";
+      max_time_seconds = get_float_opt "max_time_seconds";
+      token_buffer =
+        Safe_ops.json_int ~default:default_constraints.token_buffer "token_buffer" json;
+      hard_max_iterations =
+        Safe_ops.json_int ~default:default_constraints.hard_max_iterations "hard_max_iterations" json;
+      retry = retry_config_of_json json;
+    }
 
 (** Parse goal from JSON *)
 let goal_of_json json =

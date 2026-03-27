@@ -573,6 +573,9 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_add_loop" -> Some (handle_keeper_add_loop ctx args)
   | "masc_keeper_list_loops" -> Some (handle_keeper_list_loops ctx args)
   | "masc_keeper_remove_loop" -> Some (handle_keeper_remove_loop ctx args)
+  | "masc_persistent_agent_add_loop" -> Some (handle_keeper_add_loop ctx args)
+  | "masc_persistent_agent_list_loops" -> Some (handle_keeper_list_loops ctx args)
+  | "masc_persistent_agent_remove_loop" -> Some (handle_keeper_remove_loop ctx args)
   (* Housekeeping: keepers maintain their own world *)
   | "masc_housekeep_scan" | "masc_housekeep_delete" | "masc_housekeep_prune" ->
       Tool_housekeep.dispatch ctx.config ~name ~args

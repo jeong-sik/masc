@@ -568,6 +568,22 @@
  (modules test_mcp_server_eio)
  (libraries masc_mcp alcotest eio eio_main yojson))
 
+(test
+ (name test_mcp_tool_matrix)
+ (modules test_mcp_tool_matrix test_mcp_tool_matrix_cases)
+ (deps tool_matrix_case_runner.exe)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
+(executable
+ (name tool_matrix_manifest)
+ (modules tool_matrix_manifest test_mcp_tool_matrix_cases)
+ (libraries masc_mcp eio eio_main yojson unix))
+
+(executable
+ (name tool_matrix_case_runner)
+ (modules tool_matrix_case_runner test_mcp_tool_matrix_cases)
+ (libraries masc_mcp eio eio_main yojson unix))
+
 ; DataChannel Eio test removed — WebRTC modules moved to ocaml-webrtc
 
 ; Ralph Eio test (Production-ready fiber-safe Ralph)

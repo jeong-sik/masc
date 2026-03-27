@@ -1,0 +1,1329 @@
+module Mcp_eio = Masc_mcp.Mcp_server_eio
+module Config = Masc_mcp.Config
+
+type init_mode =
+  | Fresh
+  | Init_only
+  | Init_joined
+
+type expectation =
+  | Expect_success
+  | Expect_success_or_guard of string list
+  | Expect_guard of string list
+
+type fixture = {
+  base_path : string;
+  sid : string;
+  agent_name : string;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
+  sw : Eio.Switch.t;
+  state : Mcp_eio.server_state;
+  worktree_dir : string;
+  mutable task_id : string option;
+  mutable board_post_id : string option;
+  mutable keeper_name : string option;
+  mutable verification_id : string option;
+  mutable webrtc_offer_id : string option;
+  mutable handover_id : string option;
+  mutable library_topic : string option;
+  mutable worktree_task_id : string option;
+  mutable code_file_path : string option;
+}
+
+type contract_case = {
+  init_mode : init_mode;
+  prepare : fixture -> unit;
+  arguments : fixture -> Types.tool_schema -> Yojson.Safe.t;
+  expectation : expectation;
+}
+
+let all_known_tool_names =
+  [
+    "masc_a2a_delegate";
+    "masc_a2a_discover";
+    "masc_a2a_query_skill";
+    "masc_a2a_subscribe";
+    "masc_a2a_unsubscribe";
+    "masc_add_task";
+    "masc_agent_card";
+    "masc_agent_fitness";
+    "masc_agent_relations";
+    "masc_agent_update";
+    "masc_agents";
+    "masc_approve";
+    "masc_archive_view";
+    "masc_audit_query";
+    "masc_audit_stats";
+    "masc_audit_trail";
+    "masc_auth_create_token";
+    "masc_auth_disable";
+    "masc_auth_enable";
+    "masc_auth_list";
+    "masc_auth_refresh";
+    "masc_auth_revoke";
+    "masc_auth_status";
+    "masc_autoresearch_cycle";
+    "masc_autoresearch_inject";
+    "masc_autoresearch_record_finding";
+    "masc_autoresearch_search_findings";
+    "masc_autoresearch_start";
+    "masc_autoresearch_status";
+    "masc_autoresearch_stop";
+    "masc_autoresearch_swarm_start";
+    "masc_batch_add_tasks";
+    "masc_board_comment";
+    "masc_board_comment_vote";
+    "masc_board_get";
+    "masc_board_hearths";
+    "masc_board_list";
+    "masc_board_migrate";
+    "masc_board_post";
+    "masc_board_profile";
+    "masc_board_search";
+    "masc_board_stats";
+    "masc_board_vote";
+    "masc_bounded_run";
+    "masc_branch";
+    "masc_broadcast";
+    "masc_cache_clear";
+    "masc_cache_delete";
+    "masc_cache_get";
+    "masc_cache_list";
+    "masc_cache_set";
+    "masc_cache_stats";
+    "masc_cancellation";
+    "masc_case_brief_submit";
+    "masc_case_status";
+    "masc_cases";
+    "masc_chain_run_get";
+    "masc_chain_snapshot";
+    "masc_check";
+    "masc_circuit_status";
+    "masc_claim_next";
+    "masc_cleanup_zombies";
+    "masc_code_delete";
+    "masc_code_edit";
+    "masc_code_git";
+    "masc_code_read";
+    "masc_code_search";
+    "masc_code_shell";
+    "masc_code_symbols";
+    "masc_code_write";
+    "masc_collaboration_evidence";
+    "masc_collaboration_graph";
+    "masc_compact_context";
+    "masc_consolidate_learning";
+    "masc_convo_conclude";
+    "masc_convo_get";
+    "masc_convo_list";
+    "masc_convo_reply";
+    "masc_convo_start";
+    "masc_cost_log";
+    "masc_cost_report";
+    "masc_dashboard";
+    "masc_deliver";
+    "masc_detachment_list";
+    "masc_detachment_status";
+    "masc_dispatch_assign";
+    "masc_dispatch_escalate";
+    "masc_dispatch_plan";
+    "masc_dispatch_rebalance";
+    "masc_dispatch_recall";
+    "masc_dispatch_tick";
+    "masc_encryption_disable";
+    "masc_encryption_enable";
+    "masc_encryption_status";
+    "masc_episode_flush";
+    "masc_episode_list";
+    "masc_error_add";
+    "masc_error_resolve";
+    "masc_execute";
+    "masc_execute_dry_run";
+    "masc_execution_orders";
+    "masc_find_by_capability";
+    "masc_fire_task";
+    "masc_gc";
+    "masc_generate_key";
+    "masc_get_metrics";
+    "masc_goal_dispatch";
+    "masc_goal_list";
+    "masc_goal_refresh";
+    "masc_goal_review";
+    "masc_goal_snapshot";
+    "masc_goal_upsert";
+    "masc_governance_feed";
+    "masc_governance_report";
+    "masc_governance_set";
+    "masc_governance_status";
+    "masc_handover_claim";
+    "masc_handover_claim_and_spawn";
+    "masc_handover_create";
+    "masc_handover_get";
+    "masc_handover_list";
+    "masc_hat_status";
+    "masc_hat_wear";
+    "masc_heartbeat";
+    "masc_heartbeat_list";
+    "masc_heartbeat_result";
+    "masc_heartbeat_start";
+    "masc_heartbeat_stop";
+    "masc_housekeep_delete";
+    "masc_housekeep_prune";
+    "masc_housekeep_scan";
+    "masc_improve_loop_pause";
+    "masc_improve_loop_resume";
+    "masc_improve_loop_start";
+    "masc_improve_loop_status";
+    "masc_improve_loop_tick";
+    "masc_init";
+    "masc_intent_create";
+    "masc_intent_forecast";
+    "masc_intent_status";
+    "masc_intent_update";
+    "masc_interrupt";
+    "masc_join";
+    "masc_keeper_add_loop";
+    "masc_keeper_create_from_persona";
+    "masc_keeper_down";
+    "masc_keeper_eval";
+    "masc_keeper_list";
+    "masc_keeper_list_loops";
+    "masc_keeper_msg";
+    "masc_keeper_remove_loop";
+    "masc_keeper_status";
+    "masc_keeper_tool_catalog";
+    "masc_keeper_trajectory";
+    "masc_keeper_up";
+    "masc_leave";
+    "masc_library_add";
+    "masc_library_list";
+    "masc_library_promote";
+    "masc_library_read";
+    "masc_library_search";
+    "masc_listen";
+    "masc_local_runtime_bench";
+    "masc_local_runtime_models";
+    "masc_local_runtime_status";
+    "masc_lock";
+    "masc_mcp_session";
+    "masc_mdal_iterate";
+    "masc_mdal_start";
+    "masc_mdal_status";
+    "masc_mdal_stop";
+    "masc_mdal_swarm_start";
+    "masc_memento_mori";
+    "masc_messages";
+    "masc_model_catalog";
+    "masc_note_add";
+    "masc_observe_alerts";
+    "masc_observe_capacity";
+    "masc_observe_operations";
+    "masc_observe_swarm";
+    "masc_observe_topology";
+    "masc_observe_traces";
+    "masc_operation_checkpoint";
+    "masc_operation_finalize";
+    "masc_operation_pause";
+    "masc_operation_resume";
+    "masc_operation_start";
+    "masc_operation_status";
+    "masc_operation_stop";
+    "masc_operator_action";
+    "masc_operator_confirm";
+    "masc_operator_digest";
+    "masc_operator_judgment_latest";
+    "masc_operator_judgment_write";
+    "masc_operator_snapshot";
+    "masc_pause";
+    "masc_pause_status";
+    "masc_pending_interrupts";
+    "masc_persistent_agent_add_loop";
+    "masc_persistent_agent_create_from_persona";
+    "masc_persistent_agent_down";
+    "masc_persistent_agent_eval";
+    "masc_persistent_agent_list";
+    "masc_persistent_agent_list_loops";
+    "masc_persistent_agent_msg";
+    "masc_persistent_agent_remove_loop";
+    "masc_persistent_agent_status";
+    "masc_persistent_agent_trajectory";
+    "masc_persistent_agent_up";
+    "masc_persona_list";
+    "masc_petition_submit";
+    "masc_plan_clear_task";
+    "masc_plan_get";
+    "masc_plan_get_task";
+    "masc_plan_init";
+    "masc_plan_set_task";
+    "masc_plan_update";
+    "masc_policy_approve";
+    "masc_policy_deny";
+    "masc_policy_freeze_unit";
+    "masc_policy_kill_switch";
+    "masc_policy_status";
+    "masc_policy_update";
+    "masc_poll_events";
+    "masc_portal_close";
+    "masc_portal_open";
+    "masc_portal_send";
+    "masc_portal_status";
+    "masc_progress";
+    "masc_rate_limit_config";
+    "masc_rate_limit_status";
+    "masc_recall_search";
+    "masc_register_capabilities";
+    "masc_reject";
+    "masc_relay_checkpoint";
+    "masc_relay_now";
+    "masc_relay_smart_check";
+    "masc_relay_status";
+    "masc_repo_synthesis_swarm_start";
+    "masc_reset";
+    "masc_resume";
+    "masc_room_strategy_get";
+    "masc_room_strategy_set";
+    "masc_route";
+    "masc_ruling_status";
+    "masc_run_deliverable";
+    "masc_run_get";
+    "masc_run_init";
+    "masc_run_list";
+    "masc_run_log";
+    "masc_run_plan";
+    "masc_runtime_params";
+    "masc_runtime_verify";
+    "masc_select_agent";
+    "masc_self_introspect";
+    "masc_set_param";
+    "masc_set_room";
+    "masc_spawn";
+    "masc_start";
+    "masc_status";
+    "masc_subscription";
+    "masc_surface_audit";
+    "masc_suspend";
+    "masc_task_history";
+    "masc_tasks";
+    "masc_team_session_compare";
+    "masc_team_session_events";
+    "masc_team_session_finalize";
+    "masc_team_session_list";
+    "masc_team_session_prove";
+    "masc_team_session_report";
+    "masc_team_session_start";
+    "masc_team_session_status";
+    "masc_team_session_step";
+    "masc_team_session_stop";
+    "masc_team_session_verify_trace";
+    "masc_tempo";
+    "masc_tempo_adjust";
+    "masc_tempo_get";
+    "masc_tempo_reset";
+    "masc_tempo_set";
+    "masc_tool_admin_snapshot";
+    "masc_tool_admin_update";
+    "masc_tool_help";
+    "masc_tool_stats";
+    "masc_transition";
+    "masc_transport_status";
+    "masc_unit_define";
+    "masc_unit_list";
+    "masc_unit_reassign";
+    "masc_unit_reparent";
+    "masc_unlock";
+    "masc_update_priority";
+    "masc_verify_auto";
+    "masc_verify_handoff";
+    "masc_verify_pending";
+    "masc_verify_request";
+    "masc_verify_status";
+    "masc_verify_submit";
+    "masc_voice_agent";
+    "masc_voice_conference_end";
+    "masc_voice_conference_start";
+    "masc_voice_session_end";
+    "masc_voice_session_start";
+    "masc_voice_sessions";
+    "masc_voice_speak";
+    "masc_voice_transcript";
+    "masc_walph_control";
+    "masc_walph_natural";
+    "masc_walph_status";
+    "masc_webrtc_answer";
+    "masc_webrtc_offer";
+    "masc_websocket_discovery";
+    "masc_who";
+    "masc_workflow_guide";
+    "masc_worktree_create";
+    "masc_worktree_list";
+    "masc_worktree_remove";
+  ]
+
+let strict_success_names =
+  [
+    "masc_add_task";
+    "masc_agent_card";
+    "masc_agents";
+    "masc_auth_disable";
+    "masc_auth_enable";
+    "masc_auth_list";
+    "masc_auth_status";
+    "masc_batch_add_tasks";
+    "masc_board_comment";
+    "masc_board_get";
+    "masc_board_list";
+    "masc_board_post";
+    "masc_board_vote";
+    "masc_broadcast";
+    "masc_cache_delete";
+    "masc_cache_get";
+    "masc_cache_list";
+    "masc_cache_set";
+    "masc_cache_stats";
+    "masc_check";
+    "masc_claim_next";
+    "masc_dashboard";
+    "masc_goal_list";
+    "masc_goal_snapshot";
+    "masc_goal_upsert";
+    "masc_handover_create";
+    "masc_handover_list";
+    "masc_heartbeat";
+    "masc_init";
+    "masc_join";
+    "masc_keeper_down";
+    "masc_keeper_list";
+    "masc_leave";
+    "masc_library_add";
+    "masc_library_list";
+    "masc_messages";
+    "masc_plan_get";
+    "masc_plan_init";
+    "masc_plan_set_task";
+    "masc_plan_update";
+    "masc_set_room";
+    "masc_start";
+    "masc_status";
+    "masc_tempo_adjust";
+    "masc_tempo_get";
+    "masc_tempo_reset";
+    "masc_tempo_set";
+    "masc_tool_help";
+    "masc_transition";
+    "masc_transport_status";
+    "masc_verify_auto";
+    "masc_verify_pending";
+    "masc_verify_request";
+    "masc_verify_status";
+    "masc_verify_submit";
+    "masc_websocket_discovery";
+    "masc_webrtc_answer";
+    "masc_webrtc_offer";
+    "masc_who";
+    "masc_workflow_guide";
+    "masc_worktree_create";
+    "masc_worktree_list";
+    "masc_worktree_remove";
+  ]
+
+let strict_guard_cases =
+  [
+    ("masc_reset", [ "confirm" ]);
+  ]
+
+let string_starts_with ~prefix s =
+  let plen = String.length prefix in
+  let slen = String.length s in
+  slen >= plen && String.sub s 0 plen = prefix
+
+let contains_substring haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  let rec loop idx =
+    if nlen = 0 then
+      true
+    else if idx + nlen > hlen then
+      false
+    else if String.sub haystack idx nlen = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  loop 0
+
+let contains_any haystack needles =
+  List.exists (fun needle -> contains_substring haystack needle) needles
+
+let assoc_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let json_string_field field = function
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`String value) -> Some value
+      | _ -> None)
+  | _ -> None
+
+let parse_json_from_text text =
+  try Some (Yojson.Safe.from_string text)
+  with Yojson.Json_error _ -> (
+    try
+      let idx = String.index text '{' in
+      Some
+        (Yojson.Safe.from_string
+           (String.sub text idx (String.length text - idx)))
+    with Not_found | Yojson.Json_error _ -> None)
+
+let extract_prefixed_token text prefixes =
+  let allowed = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '/' -> true
+    | _ -> false
+  in
+  let len = String.length text in
+  let scan_prefix prefix start =
+    let plen = String.length prefix in
+    let rec loop idx =
+      if idx + plen > len then
+        None
+      else if String.sub text idx plen = prefix then
+        let j = ref (idx + plen) in
+        while !j < len && allowed text.[!j] do
+          incr j
+        done;
+        Some (String.sub text idx (!j - idx))
+      else
+        loop (idx + 1)
+    in
+    loop start
+  in
+  let rec find = function
+    | [] -> None
+    | prefix :: rest -> (
+        match scan_prefix prefix 0 with
+        | Some value -> Some value
+        | None -> find rest)
+  in
+  find prefixes
+
+let extract_id text ~fields ~prefixes =
+  match parse_json_from_text text with
+  | Some json -> (
+      match List.find_map (fun field -> json_string_field field json) fields with
+      | Some _ as value -> value
+      | None -> extract_prefixed_token text prefixes)
+  | None -> extract_prefixed_token text prefixes
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let cleanup_dir = rm_rf
+
+let rec mkdir_p path =
+  if path = "" || path = Filename.dir_sep || Sys.file_exists path then
+    ()
+  else begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let temp_dir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let run_cmd_exn argv =
+  let cmd = String.concat " " (List.map Filename.quote argv) in
+  match Sys.command cmd with
+  | 0 -> ()
+  | code ->
+      failwith
+        (Printf.sprintf "command failed (%d): %s" code cmd)
+
+let write_text_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let setup_git_repo base_path =
+  let readme = Filename.concat base_path "README.md" in
+  let remote_dir = Filename.concat base_path ".remote.git" in
+  write_text_file readme "# tool-matrix\n";
+  run_cmd_exn [ "git"; "init"; "-b"; "main"; base_path ];
+  run_cmd_exn [ "git"; "-C"; base_path; "config"; "user.email"; "tool-matrix@example.test" ];
+  run_cmd_exn [ "git"; "-C"; base_path; "config"; "user.name"; "Tool Matrix" ];
+  run_cmd_exn [ "git"; "-C"; base_path; "add"; "README.md" ];
+  run_cmd_exn [ "git"; "-C"; base_path; "commit"; "-m"; "init" ];
+  run_cmd_exn [ "git"; "init"; "--bare"; remote_dir ];
+  run_cmd_exn [ "git"; "-C"; base_path; "remote"; "add"; "origin"; remote_dir ];
+  run_cmd_exn [ "git"; "-C"; base_path; "push"; "-u"; "origin"; "main" ];
+  run_cmd_exn [ "git"; "-C"; base_path; "fetch"; "origin" ];
+  let sandbox_dir = Filename.concat base_path ".worktrees/editor" in
+  run_cmd_exn
+    [ "git"; "-C"; base_path; "worktree"; "add"; sandbox_dir; "-b"; "matrix/editor"; "main" ];
+  sandbox_dir
+
+let execute_tool fixture ~name ~arguments =
+  Mcp_eio.execute_tool_eio ~sw:fixture.sw ~clock:fixture.clock
+    ~mcp_session_id:fixture.sid fixture.state ~name ~arguments
+
+let execute_tool_ok fixture ~name ~arguments =
+  match execute_tool fixture ~name ~arguments with
+  | true, body -> body
+  | false, body ->
+      failwith (Printf.sprintf "setup tool failed for %s: %s" name body)
+
+let ensure_initialized fixture =
+  match execute_tool fixture ~name:"masc_init"
+          ~arguments:(`Assoc [ ("agent_name", `String fixture.agent_name) ])
+  with
+  | true, _ -> ()
+  | false, body when contains_substring body "already initialized" -> ()
+  | false, body -> failwith ("masc_init failed: " ^ body)
+
+let ensure_joined fixture =
+  match execute_tool fixture ~name:"masc_join"
+          ~arguments:
+            (`Assoc
+              [
+                ("agent_name", `String fixture.agent_name);
+                ("capabilities", `List [ `String "testing"; `String "tool-matrix" ]);
+              ])
+  with
+  | true, _ -> ()
+  | false, body when contains_substring body "already joined" -> ()
+  | false, body -> failwith ("masc_join failed: " ^ body)
+
+let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock init_mode =
+  let base_path = temp_dir "mcp-tool-matrix-" in
+  let worktree_dir = setup_git_repo base_path in
+  Fs_compat.set_fs fs;
+  Mcp_eio.set_net net;
+  Mcp_eio.set_clock clock;
+  Eio_context.set_switch sw;
+  Eio_context.set_net net;
+  Eio_context.set_clock clock;
+  Eio_context.set_mono_clock mono_clock;
+  Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
+  let env : Caqti_eio.stdenv =
+    object
+      method net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t)
+      method clock = clock
+      method mono_clock = mono_clock
+    end
+  in
+  let state =
+    Mcp_eio.create_state_eio ~sw ~env
+      ~proc_mgr ~fs ~clock ~net ~base_path
+  in
+  let fixture =
+    {
+      base_path;
+      sid = "mcp-tool-matrix";
+      agent_name = "codex-tool-matrix";
+      clock;
+      sw;
+      state;
+      worktree_dir;
+      task_id = None;
+      board_post_id = None;
+      keeper_name = None;
+      verification_id = None;
+      webrtc_offer_id = None;
+      handover_id = None;
+      library_topic = None;
+      worktree_task_id = None;
+      code_file_path = None;
+    }
+  in
+  (match init_mode with
+  | Fresh -> ()
+  | Init_only -> ensure_initialized fixture
+  | Init_joined ->
+      ensure_initialized fixture;
+      ensure_joined fixture);
+  fixture
+
+let ensure_task fixture =
+  match fixture.task_id with
+  | Some task_id -> task_id
+  | None ->
+      let body =
+        execute_tool_ok fixture ~name:"masc_add_task"
+          ~arguments:
+            (`Assoc
+              [
+                ("title", `String "Tool Matrix Task");
+                ("priority", `Int 2);
+                ("description", `String "task fixture");
+              ])
+      in
+      let task_id =
+        match extract_id body ~fields:[ "task_id"; "id" ] ~prefixes:[ "task-" ] with
+        | Some value -> value
+        | None -> failwith ("failed to parse task id from: " ^ body)
+      in
+      fixture.task_id <- Some task_id;
+      task_id
+
+let ensure_plan_initialized fixture =
+  let task_id = ensure_task fixture in
+  ignore
+    (execute_tool_ok fixture ~name:"masc_plan_init"
+       ~arguments:
+         (`Assoc
+           [
+             ("task_id", `String task_id);
+           ]));
+  ignore
+    (execute_tool_ok fixture ~name:"masc_plan_set_task"
+       ~arguments:
+         (`Assoc
+           [
+             ("task_id", `String task_id);
+           ]))
+
+let ensure_board_post fixture =
+  match fixture.board_post_id with
+  | Some post_id -> post_id
+  | None ->
+      let body =
+        execute_tool_ok fixture ~name:"masc_board_post"
+          ~arguments:
+            (`Assoc
+              [
+                ("author", `String fixture.agent_name);
+                ("title", `String "Tool Matrix Post");
+                ("content", `String "tool-matrix-post");
+                ("visibility", `String "internal");
+              ])
+      in
+      let post_id =
+        match extract_id body ~fields:[ "id"; "post_id" ] ~prefixes:[ "post-" ] with
+        | Some value -> value
+        | None -> failwith ("failed to parse post id from: " ^ body)
+      in
+      fixture.board_post_id <- Some post_id;
+      post_id
+
+let ensure_verification_request fixture =
+  match fixture.verification_id with
+  | Some req_id -> req_id
+  | None ->
+      let base_path =
+        Masc_mcp.Room.masc_dir fixture.state.room_config
+      in
+      let req =
+        match
+          Masc_mcp.Verification.create_request ~base_path
+            ~task_id:(ensure_task fixture) ~output:(`String "tool matrix output")
+            ~criteria:[] ~worker:"tool-matrix-worker"
+            ~verifier:fixture.agent_name ()
+        with
+        | Ok request -> request
+        | Error err ->
+            failwith ("failed to seed verification request: " ^ err)
+      in
+      let req_id = req.id in
+      fixture.verification_id <- Some req_id;
+      req_id
+
+let ensure_cache_entry fixture =
+  ignore
+    (execute_tool_ok fixture ~name:"masc_cache_set"
+       ~arguments:
+         (`Assoc
+           [
+             ("key", `String "tool-matrix-cache");
+             ("value", `String "cached value");
+           ]))
+
+let ensure_webrtc_offer fixture =
+  match fixture.webrtc_offer_id with
+  | Some offer_id -> offer_id
+  | None ->
+      let body =
+        execute_tool_ok fixture ~name:"masc_webrtc_offer"
+          ~arguments:
+            (`Assoc
+              [
+                ("agent_name", `String fixture.agent_name);
+                ("ice_candidates", `List [ `String "candidate:tool-matrix" ]);
+              ])
+      in
+      let offer_id =
+        match extract_id body ~fields:[ "offer_id"; "id" ] ~prefixes:[ "offer-" ] with
+        | Some value -> value
+        | None -> failwith ("failed to parse offer id from: " ^ body)
+      in
+      fixture.webrtc_offer_id <- Some offer_id;
+      offer_id
+
+let ensure_handover fixture =
+  match fixture.handover_id with
+  | Some handover_id -> handover_id
+  | None ->
+      let body =
+        execute_tool_ok fixture ~name:"masc_handover_create"
+          ~arguments:
+            (`Assoc
+              [
+                ("agent_name", `String fixture.agent_name);
+                ("task_id", `String (ensure_task fixture));
+                ("reason", `String "explicit");
+                ("goal", `String "Tool Matrix Handover");
+                ("progress", `String "handover summary");
+              ])
+      in
+      let handover_id =
+        match extract_id body ~fields:[ "handover_id"; "id" ]
+                ~prefixes:[ "handover-" ] with
+        | Some value -> value
+        | None -> failwith ("failed to parse handover id from: " ^ body)
+      in
+      fixture.handover_id <- Some handover_id;
+      handover_id
+
+let ensure_library_topic fixture =
+  match fixture.library_topic with
+  | Some topic -> topic
+  | None ->
+      mkdir_p (Filename.concat fixture.base_path "me/docs/library");
+      mkdir_p (Filename.concat fixture.base_path "me/docs/library/candidates");
+      ignore
+        (execute_tool_ok fixture ~name:"masc_library_add"
+           ~arguments:
+             (`Assoc
+               [
+                 ("title", `String "Tool Matrix Library");
+                 ("content", `String "knowledge");
+                 ("source", `String "direct_experience");
+                 ("confidence", `Float 0.9);
+                 ("tags", `List [ `String "tool-matrix" ]);
+               ]));
+      fixture.library_topic <- Some "tool-matrix-library";
+      "tool-matrix-library"
+
+let ensure_worktree_created fixture =
+  match fixture.worktree_task_id with
+  | Some task_id -> task_id
+  | None ->
+      let task_id = ensure_task fixture in
+      ignore
+        (execute_tool_ok fixture ~name:"masc_worktree_create"
+           ~arguments:
+             (`Assoc
+               [
+                 ("agent_name", `String fixture.agent_name);
+                 ("task_id", `String task_id);
+                 ("base_branch", `String "main");
+               ]));
+      fixture.worktree_task_id <- Some task_id;
+      task_id
+
+let ensure_code_file fixture =
+  match fixture.code_file_path with
+  | Some path -> path
+  | None ->
+      let relative_path = ".worktrees/editor/sample.txt" in
+      let absolute_path = Filename.concat fixture.base_path relative_path in
+      write_text_file absolute_path "before\n";
+      fixture.code_file_path <- Some relative_path;
+      relative_path
+
+let ensure_lock fixture =
+  ignore
+    (execute_tool_ok fixture ~name:"masc_lock"
+       ~arguments:
+         (`Assoc
+           [
+             ("agent_name", `String fixture.agent_name);
+             ("file", `String "README.md");
+           ]))
+
+let prepare_for_name fixture name =
+  if List.mem name [ "masc_claim_next"; "masc_transition"; "masc_plan_set_task" ] then
+    ignore (ensure_task fixture);
+  if List.mem name [ "masc_plan_get"; "masc_plan_update"; "masc_plan_get_task"; "masc_plan_clear_task" ] then
+    ensure_plan_initialized fixture;
+  if List.mem name [ "masc_cache_get"; "masc_cache_delete" ] then
+    ensure_cache_entry fixture;
+  if List.mem name [ "masc_board_get"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote" ] then
+    ignore (ensure_board_post fixture);
+  if List.mem name [ "masc_verify_submit"; "masc_verify_status"; "masc_verify_auto"; "masc_verify_pending" ] then
+    ignore (ensure_verification_request fixture);
+  if name = "masc_webrtc_answer" then
+    ignore (ensure_webrtc_offer fixture);
+  if name = "masc_worktree_remove" then
+    ignore (ensure_worktree_created fixture);
+  if List.mem name [ "masc_code_edit"; "masc_code_delete"; "masc_code_git"; "masc_code_shell"; "masc_code_read"; "masc_code_symbols" ] then
+    ignore (ensure_code_file fixture);
+  if name = "masc_library_add" then begin
+    mkdir_p (Filename.concat fixture.base_path "me/docs/library");
+    mkdir_p (Filename.concat fixture.base_path "me/docs/library/candidates")
+  end;
+  if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_promote"; "masc_library_search" ] then
+    ignore (ensure_library_topic fixture);
+  if List.mem name [ "masc_handover_get"; "masc_handover_claim"; "masc_handover_claim_and_spawn" ] then
+    ignore (ensure_handover fixture);
+  if name = "masc_unlock" then
+    ensure_lock fixture
+
+let required_fields schema =
+  match assoc_field "required" schema.Types.input_schema with
+  | Some (`List values) ->
+      values
+      |> List.filter_map (function `String value -> Some value | _ -> None)
+  | _ -> []
+
+let property_schema schema field =
+  match assoc_field "properties" schema.Types.input_schema with
+  | Some (`Assoc props) -> List.assoc_opt field props
+  | _ -> None
+
+let enum_first = function
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt "enum" fields with
+      | Some (`List (`String value :: _)) -> Some value
+      | _ -> None)
+  | _ -> None
+
+let field_type = function
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt "type" fields with
+      | Some (`String value) -> Some value
+      | _ -> None)
+  | _ -> None
+
+let task_id_for_tool fixture _tool_name = ensure_task fixture
+
+let field_value fixture ~tool_name field_name schema =
+  let enum_choice = enum_first schema in
+  match field_name with
+  | "agent_name" | "author" | "owner" | "worker" | "agent" | "leader_id" ->
+      `String fixture.agent_name
+  | "path" when tool_name = "masc_set_room" || tool_name = "masc_start" ->
+      `String fixture.base_path
+  | "path" when List.mem tool_name [ "masc_code_write"; "masc_code_edit"; "masc_code_delete"; "masc_code_read"; "masc_code_symbols" ] ->
+      `String (ensure_code_file fixture)
+  | "cwd" -> `String fixture.worktree_dir
+  | "command" -> `String "git status"
+  | "content" when tool_name = "masc_code_write" -> `String "after\n"
+  | "content" -> `String "tool matrix content"
+  | "old_string" -> `String "before"
+  | "new_string" -> `String "after"
+  | "key" -> `String "tool-matrix-cache"
+  | "task_id" -> `String (task_id_for_tool fixture tool_name)
+  | "task_title" -> `String "Tool Matrix Started Task"
+  | "title" -> `String "Tool Matrix Title"
+  | "summary" -> `String "tool matrix summary"
+  | "description" -> `String "tool matrix description"
+  | "message" -> `String "tool matrix message"
+  | "goal" when tool_name = "masc_bounded_run" ->
+      `Assoc
+        [
+          ("path", `String "$.done");
+          ("condition", `Assoc [ ("eq", `Bool true) ]);
+        ]
+  | "goal" -> `String "tool matrix goal"
+  | "progress" -> `String "tool matrix progress"
+  | "reason" when tool_name = "masc_handover_create" -> `String "explicit"
+  | "notes" | "note" | "reason" -> `String "tool matrix note"
+  | "priority" -> `Int 2
+  | "assertions" -> `List [ `String "joined" ]
+  | "agents" -> `List [ `String "definitely-missing-agent" ]
+  | "capabilities" -> `List [ `String "testing"; `String "tool-matrix" ]
+  | "tasks" ->
+      `List
+        [
+          `Assoc
+            [
+              ("title", `String "Tool Matrix Batch Task");
+              ("priority", `Int 2);
+              ("description", `String "batch");
+            ];
+        ]
+  | "post_id" | "parent_id" -> `String (ensure_board_post fixture)
+  | "name"
+    when
+      List.mem tool_name
+        [
+          "masc_keeper_up";
+          "masc_persistent_agent_up";
+        ] ->
+      `String "bad keeper!"
+  | "name" when List.mem tool_name [ "masc_keeper_msg"; "masc_persistent_agent_msg" ] ->
+      `String "bad keeper!"
+  | "name" -> `String "tool-matrix"
+  | "verification_id" -> `String (ensure_verification_request fixture)
+  | "verifier" -> `String fixture.agent_name
+  | "verdict" -> `String "pass"
+  | "score" -> `Float 0.9
+  | "timeout_sec" when List.mem tool_name [ "masc_keeper_msg"; "masc_persistent_agent_msg" ] ->
+      `Float 1.0
+  | "timeout" when tool_name = "masc_listen" -> `Int 1
+  | "interval" when tool_name = "masc_heartbeat_start" -> `Int 5
+  | "offer_id" -> `String (ensure_webrtc_offer fixture)
+  | "ice_candidates" -> `List [ `String "candidate:tool-matrix" ]
+  | "tool_name" -> `String "masc_status"
+  | "target_agent" when tool_name = "masc_relay_now" ->
+      `String "definitely-missing-agent"
+  | "subscription_id" -> `String "subscription-001"
+  | "events" -> `List [ `String "agent.joined" ]
+  | "worker_name" -> `String "tool-matrix-worker"
+  | "tool_names" -> `List [ `String "masc_status" ]
+  | "decision_reason" -> `String "tool matrix reason"
+  | "decision_confidence" -> `Float 0.9
+  | "output" -> `String "tool matrix output"
+  | "criteria" -> `List []
+  | "topic" -> `String (ensure_library_topic fixture)
+  | "include_candidates" -> `Bool true
+  | "horizon" -> `String "short"
+  | "mode" -> (
+      match enum_choice with
+      | Some value -> `String value
+      | None -> `String "manual")
+  | "action" when tool_name = "masc_code_git" -> `String "status"
+  | "action" -> (
+      match enum_choice with
+      | Some value -> `String value
+      | None -> `String "claim")
+  | "args" -> `List []
+  | "visibility" -> `String "internal"
+  | "ttl_hours" -> `Int 24
+  | "limit" -> `Int 5
+  | "offset" -> `Int 0
+  | "since_seq" -> `Int 0
+  | "include_hidden" -> `Bool true
+  | "include_deprecated" -> `Bool true
+  | "include_usage" -> `Bool true
+  | "hearth" -> `String "tool-matrix"
+  | "query" -> `String "tool matrix"
+  | "search" -> `String "tool matrix"
+  | "prompt" -> `String "tool matrix"
+  | "topic_id" -> `String "topic-001"
+  | "room_id" -> `String "default"
+  | "checkpoint_ref" -> `String "checkpoint-001"
+  | "intent_id" -> `String "intent-001"
+  | "operation_id" -> `String "operation-001"
+  | "unit_id" -> `String "unit-001"
+  | "assigned_unit_id" -> `String "unit-001"
+  | "parent_unit_id" -> `String "company-tool-matrix"
+  | "workload_profile" | "workload_template" | "policy_class" | "budget_class"
+  | "status" | "state" -> (
+      match enum_choice with
+      | Some value -> `String value
+      | None -> `String "active")
+  | "objective" -> `String "tool matrix objective"
+  | "invariants" | "artifact_priors" | "roster" | "capability_profile"
+  | "active_goal_ids" | "depends_on_operation_ids" ->
+      `List [ `String "tool-matrix-item" ]
+  | "success_metric" | "current_focus" | "policy" | "budget" | "chain_input"
+  | "meta" ->
+      `Assoc []
+  | "to_agent" -> `String "peer-agent"
+  | "thread_id" -> `String "thread-001"
+  | "confirm" -> `Bool false
+  | "files" | "channels" -> `List []
+  | "bpm" -> `Int 120
+  | "param" -> `String "volume"
+  | "value" when tool_name = "masc_cache_set" -> `String "cached value"
+  | "value" -> `Float 0.5
+  | "require_existing" when List.mem tool_name [ "masc_keeper_msg"; "masc_persistent_agent_msg" ] ->
+      `Bool true
+  | "replace_all" | "create_dirs" | "dry_run" | "force" | "clear" ->
+      `Bool true
+  | "time" | "step" -> `Int 1
+  | "float" -> `Float 0.5
+  | _ -> (
+      match field_type schema, enum_choice with
+      | _, Some value -> `String value
+      | Some "integer", _ -> `Int 1
+      | Some "number", _ -> `Float 1.0
+      | Some "boolean", _ -> `Bool true
+      | Some "array", _ -> `List []
+      | Some "object", _ -> `Assoc []
+      | _ -> `String "tool-matrix")
+
+let tool_arguments fixture (schema : Types.tool_schema) =
+  let name = schema.Types.name in
+  let fields =
+    let required = required_fields schema in
+    let optional =
+      match name with
+      | "masc_start" -> [ "path"; "task_title" ]
+      | "masc_worktree_create" -> [ "base_branch" ]
+      | "masc_goal_upsert" -> [ "title"; "horizon" ]
+      | "masc_heartbeat_start" -> [ "interval" ]
+      | "masc_listen" -> [ "timeout" ]
+      | "masc_verify_request" -> [ "verifier" ]
+      | "masc_keeper_msg" | "masc_persistent_agent_msg" ->
+          [ "require_existing"; "timeout_sec" ]
+      | "masc_relay_now" -> [ "target_agent" ]
+      | _ -> []
+    in
+    List.sort_uniq String.compare (required @ optional)
+  in
+  `Assoc
+    (List.map
+       (fun field ->
+         (field, field_value fixture ~tool_name:name field (property_schema schema field)))
+       fields)
+
+let provider_guard_fragments =
+  [
+    "api key";
+    "not configured";
+    "runtime unavailable";
+    "provider";
+    "unsupported";
+    "unavailable";
+    "connection refused";
+    "failed to connect";
+    "no runtime";
+    "spawn error";
+    "no such file";
+  ]
+
+let state_guard_fragments =
+  [
+    "not found";
+    "missing";
+    "required";
+    "invalid";
+    "must be";
+    "join required";
+    "room not initialized";
+    "already exists";
+    "no active";
+    "unknown";
+    "not a member";
+    "no document matching";
+  ]
+
+let git_guard_fragments =
+  [
+    "not a git repository";
+    "worktree";
+    "origin/";
+    "file not found";
+    "allowlist";
+    "restricted";
+    "blocked";
+    "path traversal";
+  ]
+
+let guard_fragments_for_name name =
+  if
+    List.exists
+      (fun prefix -> string_starts_with ~prefix name)
+      [
+        "masc_a2a_";
+        "masc_autoresearch_";
+        "masc_handover_";
+        "masc_keeper_";
+        "masc_persistent_agent_";
+        "masc_local_runtime_";
+        "masc_mdal_";
+        "masc_relay_";
+        "masc_repo_synthesis_";
+        "masc_runtime_";
+        "masc_spawn";
+        "masc_team_session_";
+        "masc_voice_";
+        "masc_walph_";
+      ]
+  then
+    provider_guard_fragments @ state_guard_fragments
+  else if
+    List.exists
+      (fun prefix -> string_starts_with ~prefix name)
+      [ "masc_code_"; "masc_worktree_"; "masc_housekeep_" ]
+  then
+    git_guard_fragments @ state_guard_fragments
+  else
+    state_guard_fragments @ git_guard_fragments
+
+let case_for_name name =
+  let init_mode =
+    match name with
+    | "masc_init" | "masc_start" | "masc_set_room" -> Fresh
+    | "masc_join" -> Init_only
+    | _ -> Init_joined
+  in
+  let prepare fixture = prepare_for_name fixture name in
+  let expectation =
+    match List.assoc_opt name strict_guard_cases with
+    | Some fragments -> Expect_guard fragments
+    | None ->
+        if List.mem name strict_success_names then
+          Expect_success
+        else if List.mem name all_known_tool_names then
+          Expect_success_or_guard (guard_fragments_for_name name)
+        else
+          failwith ("missing contract for " ^ name)
+  in
+  { init_mode; prepare; arguments = (fun fixture schema -> tool_arguments fixture schema); expectation }
+
+let render_response_json response = Yojson.Safe.to_string response
+
+let response_text response =
+  let pieces =
+    match response with
+    | `Assoc fields -> (
+        let result_text =
+          match List.assoc_opt "result" fields with
+          | Some (`Assoc result_fields) -> (
+              match List.assoc_opt "content" result_fields with
+              | Some (`List content) ->
+                  content
+                  |> List.filter_map (function
+                       | `Assoc text_fields -> (
+                           match List.assoc_opt "text" text_fields with
+                           | Some (`String value) -> Some value
+                           | _ -> None)
+                       | _ -> None)
+              | _ -> [])
+          | _ -> []
+        in
+        let error_text =
+          match List.assoc_opt "error" fields with
+          | Some (`Assoc error_fields) -> (
+              match List.assoc_opt "message" error_fields with
+              | Some (`String value) -> [ value ]
+              | _ -> [])
+          | _ -> []
+        in
+        result_text @ error_text)
+    | _ -> []
+  in
+  String.concat "\n" (pieces @ [ render_response_json response ])
+
+let response_is_error = function
+  | `Assoc fields -> (
+      match List.assoc_opt "error" fields with
+      | Some (`Null) | None -> (
+          match List.assoc_opt "result" fields with
+          | Some (`Assoc result_fields) -> (
+              match List.assoc_opt "isError" result_fields with
+              | Some (`Bool value) -> value
+              | _ -> false)
+          | _ -> true)
+      | Some _ -> true)
+  | _ -> true
+
+let fatal_fragments =
+  [
+    "tool timed out after";
+    "internal error";
+    "dispatch_v2 handler error";
+    "unknown tool";
+    "tools/call timeout";
+  ]
+
+let evaluate_expectation ~name expectation response =
+  let text = response_text response in
+  let is_error = response_is_error response in
+  if contains_any text fatal_fragments then
+    Error
+      (Printf.sprintf "%s hit fatal tool-host failure: %s" name text)
+  else
+    match expectation with
+    | Expect_success ->
+        if is_error then
+          Error (Printf.sprintf "%s expected success but got error: %s" name text)
+        else
+          Ok ()
+    | Expect_guard fragments ->
+        if is_error && contains_any text fragments then
+          Ok ()
+        else if is_error then
+          Error
+            (Printf.sprintf "%s expected guard %s but got: %s" name
+               (String.concat ", " fragments) text)
+        else
+          Error (Printf.sprintf "%s expected guard but succeeded" name)
+    | Expect_success_or_guard fragments ->
+        if (not is_error) || contains_any text fragments then
+          Ok ()
+        else
+          Error
+            (Printf.sprintf "%s expected success or guard %s but got: %s" name
+               (String.concat ", " fragments) text)
+
+let call_tool_json fixture (schema : Types.tool_schema) arguments =
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 7001);
+          ("method", `String "tools/call");
+          ( "params",
+            `Assoc
+              [
+                ("name", `String schema.Types.name);
+                ("arguments", arguments);
+              ] );
+        ])
+  in
+  Mcp_eio.handle_request ~clock:fixture.clock ~sw:fixture.sw
+    ~mcp_session_id:fixture.sid fixture.state request
+
+let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
+    (schema : Types.tool_schema) =
+  let saved_home = Sys.getenv_opt "HOME" in
+  let saved_env =
+    [
+      ("MASC_STORAGE_TYPE", Sys.getenv_opt "MASC_STORAGE_TYPE");
+      ("MASC_POSTGRES_URL", Sys.getenv_opt "MASC_POSTGRES_URL");
+      ("DATABASE_URL", Sys.getenv_opt "DATABASE_URL");
+      ("SUPABASE_DB_URL", Sys.getenv_opt "SUPABASE_DB_URL");
+      ("SB_PG_URL", Sys.getenv_opt "SB_PG_URL");
+    ]
+  in
+  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
+  Unix.putenv "MASC_POSTGRES_URL" "";
+  Unix.putenv "DATABASE_URL" "";
+  Unix.putenv "SUPABASE_DB_URL" "";
+  Unix.putenv "SB_PG_URL" "";
+  let fixture =
+    make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock
+      (case_for_name schema.Types.name).init_mode
+  in
+  let result =
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter
+          (fun (name, value) ->
+            match value with
+            | Some raw -> Unix.putenv name raw
+            | None -> Unix.putenv name "")
+          saved_env;
+        match saved_home with
+        | Some home -> Unix.putenv "HOME" home
+        | None -> Unix.putenv "HOME" "")
+      (fun () ->
+        Unix.putenv "HOME" fixture.base_path;
+        try
+          let case = case_for_name schema.Types.name in
+          case.prepare fixture;
+          let arguments = case.arguments fixture schema in
+          let response = call_tool_json fixture schema arguments in
+          if String.equal schema.Types.name "masc_heartbeat_start" then
+            Heartbeat.list ()
+            |> List.iter (fun hb -> ignore (Heartbeat.stop hb.Heartbeat.id));
+          evaluate_expectation ~name:schema.Types.name case.expectation response
+        with exn ->
+          Error
+            (Printf.sprintf "%s raised during contract execution: %s"
+               schema.Types.name (Printexc.to_string exn)))
+  in
+  (fixture.base_path, result)

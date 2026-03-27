@@ -71,7 +71,7 @@ echo "  task_id=$task_id"
 
 # ── Step 3/8: claim ──
 echo "[3/8] masc_transition (claim)"
-r3="$(call_tool 1003 "masc_transition" "{\"task_id\":\"$task_id\",\"action\":\"claim\",\"notes\":\"GP1 contract claim\"}")"
+r3="$(call_tool 1003 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"claim\",\"notes\":\"GP1 contract claim\"}")"
 if require_ok "$r3"; then
   step_pass
 else
@@ -102,7 +102,7 @@ fi
 
 # ── Step 6/8: broadcast ──
 echo "[6/8] masc_broadcast"
-r6="$(call_tool 1006 "masc_broadcast" "{\"message\":\"GP1 contract verification in progress\"}")"
+r6="$(call_tool 1006 "masc_broadcast" "{\"agent_name\":\"$AGENT_NAME\",\"message\":\"GP1 contract verification in progress\"}")"
 if require_ok "$r6"; then
   step_pass
 else
@@ -122,7 +122,7 @@ fi
 
 # ── Step 8/8: done ──
 echo "[8/8] masc_transition (done)"
-r8="$(call_tool 1008 "masc_transition" "{\"task_id\":\"$task_id\",\"action\":\"done\",\"notes\":\"GP1 contract verification complete\"}")"
+r8="$(call_tool 1008 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"done\",\"notes\":\"Completed GP1 contract flow: joined room, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success.\"}")"
 if require_ok "$r8"; then
   step_pass
 else

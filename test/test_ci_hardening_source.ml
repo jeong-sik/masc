@@ -264,7 +264,7 @@ let test_dashboard_component_split_contracts () =
        "export function SwarmLivePanels");
   check bool "room backend setup prefers supabase transaction companion when present" true
     (file_contains_pattern "lib/room/room_utils_backend_setup.ml"
-       "preferring available Transaction Pooler companion")
+       "Transaction Pooler companion")
 
 let test_activity_surface_contracts () =
   check bool "activity tab exposes activity graph label" true

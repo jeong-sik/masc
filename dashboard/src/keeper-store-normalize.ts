@@ -1,6 +1,5 @@
 import type {
   Keeper,
-  KeeperDiagnostic,
   KeeperLifecycleState,
   KeeperMetricPoint,
 } from './types'
@@ -114,35 +113,6 @@ function normalizeMetricsWindow(raw: unknown): Keeper['metrics_window'] | undefi
   }
 
   return Object.keys(normalized).length > 0 ? normalized : undefined
-}
-
-function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null {
-  if (!isRecord(raw)) return null
-  const healthState = asString(raw.health_state)
-  const nextActionPath = asString(raw.next_action_path)
-  const lastReplyStatus = asString(raw.last_reply_status)
-  if (!healthState || !nextActionPath || !lastReplyStatus) return null
-  const quietReason = (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason']
-  return {
-    health_state: healthState as KeeperDiagnostic['health_state'],
-    quiet_reason: quietReason,
-    next_action_path: nextActionPath as KeeperDiagnostic['next_action_path'],
-    last_reply_status: lastReplyStatus as KeeperDiagnostic['last_reply_status'],
-    last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? asString(raw.last_reply_at) ?? null,
-    last_reply_preview: asString(raw.last_reply_preview) ?? null,
-    last_error: asString(raw.last_error) ?? null,
-    next_eligible_at_s: asNumber(raw.next_eligible_at_s) ?? null,
-    recoverable:
-      typeof raw.recoverable === 'boolean'
-        ? raw.recoverable
-        : nextActionPath === 'recover',
-    summary: asString(raw.summary),
-    keepalive_running:
-      typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
-    continuity_state:
-      (asString(raw.continuity_state) ?? null) as KeeperDiagnostic['continuity_state'],
-    continuity_summary: asString(raw.continuity_summary) ?? null,
-  }
 }
 
 export function normalizeKeepers(raw: unknown): Keeper[] {
@@ -261,7 +231,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),
         compaction_count: asNumber(row.compaction_count),
         last_compaction_saved_tokens: asNumber(row.last_compaction_saved_tokens),
-        diagnostic: normalizeKeeperDiagnostic(row.diagnostic),
         skill_primary: asString(row.skill_primary) ?? null,
         skill_secondary: skillSecondary,
         skill_reason: asString(row.skill_reason) ?? null,

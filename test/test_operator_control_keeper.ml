@@ -156,18 +156,13 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       in
       Alcotest.(check bool) "persistent status ok" true ok;
       let status_json = parse_json_exn body in
-      let diagnostic = status_json |> Yojson.Safe.Util.member "diagnostic" in
-      Alcotest.(check string) "health_state" "offline"
-        Yojson.Safe.Util.(diagnostic |> member "health_state" |> to_string);
-      Alcotest.(check string) "next action recover" "recover"
-        Yojson.Safe.Util.(diagnostic |> member "next_action_path" |> to_string);
-      Alcotest.(check bool) "recoverable true" true
-        Yojson.Safe.Util.(diagnostic |> member "recoverable" |> to_bool);
+      Alcotest.(check bool) "diagnostic removed from status" true
+        Yojson.Safe.Util.(status_json |> member "diagnostic" = `Null);
       Alcotest.(check string) "auto team session removed" "removed"
         Yojson.Safe.Util.(
           status_json |> member "auto_team_session" |> member "status" |> to_string);
-      Alcotest.(check bool) "summary present" true
-        (String.length Yojson.Safe.Util.(diagnostic |> member "summary" |> to_string) > 0))
+      Alcotest.(check bool) "keepalive running false" false
+        Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool))
 
 let test_keeper_config_exposes_live_runtime_and_sources () =
   Eio_main.run @@ fun env ->
@@ -369,12 +364,8 @@ let test_snapshot_keeper_tool_audit_fallback () =
         ((keeper |> member "allowed_tool_names" |> to_list) <> []);
       Alcotest.(check bool) "tool audit source omitted without evidence" true
         (keeper |> member "tool_audit_source" = `Null);
-      Alcotest.(check bool) "diagnostic present" true
-        (keeper |> member "diagnostic" <> `Null);
-      Alcotest.(check string) "diagnostic health offline" "offline"
-        (keeper |> member "diagnostic" |> member "health_state" |> to_string);
-      Alcotest.(check string) "diagnostic continuity disabled" "disabled"
-        (keeper |> member "diagnostic" |> member "continuity_state" |> to_string);
+      Alcotest.(check bool) "diagnostic removed from snapshot" true
+        (keeper |> member "diagnostic" = `Null);
       let ok, _ =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
           ~args:(`Assoc [ ("name", `String keeper_name) ])

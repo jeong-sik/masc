@@ -15,7 +15,6 @@ function normalizeStatus(value: string | null | undefined): string {
 export function linkedRuntimeState(keeper: Keeper | null | undefined): 'offline' | 'online' | 'unlinked' {
   if (!keeper) return 'unlinked'
   if (keeper.agent?.exists === false) return 'offline'
-  if (normalizeStatus(keeper.diagnostic?.health_state) === 'offline') return 'offline'
   if (normalizeStatus(keeper.status) === 'offline' || normalizeStatus(keeper.status) === 'inactive') {
     return 'offline'
   }

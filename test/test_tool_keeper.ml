@@ -916,12 +916,10 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
       in
       check bool "status ok" true ok;
       let json = parse_json_exn body in
-      check string "quiet reason not_running" "not_running"
-        Yojson.Safe.Util.(
-          json |> member "diagnostic" |> member "quiet_reason" |> to_string);
-      check string "continuity state not_running" "not_running"
-        Yojson.Safe.Util.(
-          json |> member "diagnostic" |> member "continuity_state" |> to_string);
+      check bool "diagnostic removed from status" true
+        Yojson.Safe.Util.(json |> member "diagnostic" = `Null);
+      check bool "keepalive stopped" false
+        Yojson.Safe.Util.(json |> member "keepalive_running" |> to_bool);
       check string "runtime registry state stopped" "stopped"
         Yojson.Safe.Util.(
           json |> member "runtime" |> member "registry_state" |> to_string);
@@ -1814,10 +1812,8 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       let status_json = Yojson.Safe.from_string status_body in
       check bool "keepalive running" true
         Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool);
-      check string "continuity state recovering" "recovering"
-        Yojson.Safe.Util.(
-          status_json |> member "diagnostic" |> member "continuity_state"
-          |> to_string))
+      check bool "diagnostic removed from status" true
+        Yojson.Safe.Util.(status_json |> member "diagnostic" = `Null))
 
 let test_resident_supervisor_recovers_missing_desired_keeper () =
   Eio_main.run @@ fun env ->
@@ -1871,12 +1867,8 @@ let test_resident_supervisor_recovers_missing_desired_keeper () =
       let status_json = Yojson.Safe.from_string status_body in
       check bool "keepalive running after supervisor recovery" true
         Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool);
-      check bool "continuity state reaches recovering or healthy" true
-        Yojson.Safe.Util.(
-          match status_json |> member "diagnostic" |> member "continuity_state"
-                |> to_string with
-          | "recovering" | "healthy" -> true
-          | _ -> false))
+      check bool "diagnostic removed from status" true
+        Yojson.Safe.Util.(status_json |> member "diagnostic" = `Null))
 
 let () =
   run "Tool_keeper" [

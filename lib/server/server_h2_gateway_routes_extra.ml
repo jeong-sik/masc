@@ -61,8 +61,10 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       let fetch_limit =
         board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
       in
-      let posts = Board_dispatch.list_posts ?hearth ~sort_by ~limit:fetch_limit () in
-      let posts = filter_board_posts ~exclude_system ~exclude_automation posts in
+      let posts =
+        Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
+          ~exclude_automation ~limit:fetch_limit ()
+      in
       let karma_map = Board_dispatch.get_all_karma () in
       let get_karma author =
         Option.value ~default:0 (List.assoc_opt author karma_map)

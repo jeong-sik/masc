@@ -232,7 +232,6 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
                   ("long_goal", `String meta.long_goal);
                   ("status", `String agent_status);
                   ("agent", agent_json);
-                  ("diagnostic", diagnostic);
                   ("generation", `Int meta.generation);
                   ("turn_count", `Int meta.usage.total_turns);
                   ("context_ratio",

@@ -126,7 +126,7 @@ function conversationStateClass(sending: boolean, hydrating: boolean): string {
 function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnostic | null {
   if (!keeper) return null
   const detail = keeperStatusDetails.value[keeper.name]
-  return detail?.diagnostic ?? keeper.diagnostic ?? null
+  return detail?.diagnostic ?? null
 }
 
 // ── Diagnostic chip ──────────────────────────────────────
@@ -146,12 +146,6 @@ export function KeeperDiagnosticSummary({
   keeper: Keeper | null | undefined
   showRawStatus?: boolean
 }) {
-  useEffect(() => {
-    if (keeper?.name) {
-      void hydrateKeeperStatus(keeper.name)
-    }
-  }, [keeper?.name])
-
   if (!keeper) {
     return html`<div class="text-xs text-[var(--text-muted)] leading-relaxed py-2">키퍼를 선택하여 직접 응답 상태를 확인하세요.</div>`
   }
@@ -159,25 +153,50 @@ export function KeeperDiagnosticSummary({
   const detail = keeperStatusDetails.value[keeper.name]
   const diagnostic = effectiveDiagnostic(keeper)
   const busy = keeperHydrating.value[keeper.name]
+  const refreshStatus = async () => {
+    try {
+      await hydrateKeeperStatus(keeper.name, true)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : `Failed to inspect ${keeper.name}`
+      showToast(message, 'error')
+    }
+  }
 
   return html`
     <div class="py-3 px-4 rounded-xl border border-[var(--card-border)] bg-[rgba(5,14,31,0.55)]">
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">명시적 상태 조회</div>
+        <button
+          type="button"
+          class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+          disabled=${busy}
+          onClick=${() => { void refreshStatus() }}
+        >
+          ${busy ? '불러오는 중...' : (detail ? '상태 새로고침' : '상태 불러오기')}
+        </button>
+      </div>
       <div class="flex flex-wrap gap-1.5 mb-2">
         ${continuityStateLabel(diagnostic?.continuity_state)
           ? html`<${DiagChip} label=${continuityStateLabel(diagnostic?.continuity_state)} />`
           : null}
-        <${DiagChip} label=${diagnostic?.health_state ?? 'unknown'} />
-        <${DiagChip} label=${quietReasonLabel(diagnostic?.quiet_reason)} />
-        <${DiagChip} label=${'next: ' + nextActionLabel(diagnostic?.next_action_path ?? 'direct_message')} />
+        ${diagnostic?.health_state
+          ? html`<${DiagChip} label=${diagnostic.health_state} />`
+          : null}
+        ${diagnostic?.quiet_reason
+          ? html`<${DiagChip} label=${quietReasonLabel(diagnostic.quiet_reason)} />`
+          : null}
+        ${diagnostic?.next_action_path
+          ? html`<${DiagChip} label=${'next: ' + nextActionLabel(diagnostic.next_action_path)} />`
+          : null}
         ${busy ? html`<${DiagChip} label="refreshing" />` : null}
       </div>
       <div class="text-xs text-[var(--text-body)] leading-relaxed">
         ${diagnostic?.continuity_summary
           ?? diagnostic?.summary
-          ?? '키퍼 진단 요약을 아직 사용할 수 없습니다. 프로브하거나 상세 오버레이를 열어 런타임 상태를 확인하세요.'}
+          ?? '자동 판단 필드는 기본으로 채우지 않습니다. 필요할 때만 상태를 불러오세요.'}
       </div>
       <div class="text-xs text-[var(--text-body)] leading-relaxed mt-1">
-        응답: ${diagnostic?.last_reply_status ?? 'unknown'}
+        응답: ${diagnostic?.last_reply_status ?? '미조회'}
         ${diagnostic?.last_reply_at ? html` -- ${formatTime(diagnostic.last_reply_at)}` : null}
         ${diagnostic?.next_eligible_at_s ? html` -- 다음 응답 가능 ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
       </div>
@@ -202,12 +221,6 @@ export function KeeperConversationPanel({
 }) {
   const [draft, setDraft] = useState('')
   const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
-
-  useEffect(() => {
-    if (keeperName) {
-      void hydrateKeeperStatus(keeperName)
-    }
-  }, [keeperName])
 
   useEffect(() => {
     writeKeeperChatMetadataVisible(showMetadata)
@@ -265,7 +278,7 @@ export function KeeperConversationPanel({
             >
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
             </button>
-            ${!historyExpanded && rawThread.length >= 10
+            ${!historyExpanded
               ? html`
                   <button
                     type="button"
@@ -273,7 +286,11 @@ export function KeeperConversationPanel({
                     disabled=${hydrating}
                     onClick=${() => { void expandHistory() }}
                   >
-                    ${hydrating ? '불러오는 중...' : `전체 이력 불러오기 (직접 대화 ${thread.length}건 표시 중)`}
+                    ${hydrating
+                      ? '불러오는 중...'
+                      : rawThread.length === 0
+                        ? '대화 이력 불러오기'
+                        : `전체 이력 불러오기 (직접 대화 ${thread.length}건 표시 중)`}
                   </button>
                 `
               : null}
@@ -331,8 +348,8 @@ export function KeeperRuntimeActions({
   const diagnostic = effectiveDiagnostic(keeper)
   const probing = keeperProbing.value[keeper.name] ?? false
   const recovering = keeperRecovering.value[keeper.name] ?? false
-  const recommended = diagnostic?.next_action_path ?? 'direct_message'
-  const canRecover = diagnostic?.recoverable ?? recommended === 'recover'
+  const recommended = diagnostic?.next_action_path ?? null
+  const canRecover = diagnostic?.recoverable === true
 
   const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-medium cursor-pointer transition-colors border'
   const ghostBtn = `${btnBase} border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]`

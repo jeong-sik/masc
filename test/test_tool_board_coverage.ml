@@ -318,6 +318,64 @@ let test_post_list_invalid_sort_rejected () =
   Alcotest.(check bool) "error mentions valid sorts" true
     (contains_substring body "invalid sort. Valid: hot, trending, recent, updated, discussed")
 
+let test_post_list_filter_combinations () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  ignore (dispatch "masc_board_post"
+    (make_args [("content", `String "human"); ("author", `String "human-author")]));
+  ignore (dispatch "masc_board_post"
+    (make_args
+      [ ("content", `String "automation");
+        ("author", `String "dashboard-harness-bot");
+        ("visibility", `String "internal");
+        ("ttl_hours", `Int 1);
+        ("hearth", `String "dashboard-harness") ]));
+  ignore (dispatch "masc_board_post"
+    (make_args
+      [ ("content", `String "keeper");
+        ("author", `String "dm-keeper");
+        ("post_kind", `String "automation");
+        ("meta", `Assoc [ ("source", `String "keeper_board_post") ]) ]));
+  let ok1, body1 = dispatch "masc_board_list"
+    (make_args [("exclude_system", `Bool true)]) in
+  let ok2, body2 = dispatch "masc_board_list"
+    (make_args [("exclude_automation", `Bool true)]) in
+  let ok3, body3 = dispatch "masc_board_list"
+    (make_args [("exclude_system", `Bool true); ("exclude_automation", `Bool true)]) in
+  Alcotest.(check bool) "exclude_system ok" true ok1;
+  Alcotest.(check bool) "exclude_automation ok" true ok2;
+  Alcotest.(check bool) "exclude both ok" true ok3;
+  Alcotest.(check bool) "exclude_system hides keeper" false
+    (contains_substring body1 "dm-keeper");
+  Alcotest.(check bool) "exclude_automation hides harness" false
+    (contains_substring body2 "dashboard-harness-bot");
+  Alcotest.(check bool) "exclude both keeps human" true
+    (contains_substring body3 "human-author");
+  Alcotest.(check bool) "exclude both hides keeper" false
+    (contains_substring body3 "dm-keeper");
+  Alcotest.(check bool) "exclude both hides harness" false
+    (contains_substring body3 "dashboard-harness-bot")
+
+let test_dispatch_reclassify_dry_run () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  ignore (dispatch "masc_board_post"
+    (make_args
+      [ ("content", `String "keeper");
+        ("author", `String "dm-keeper");
+        ("post_kind", `String "automation");
+        ("meta", `Assoc [ ("source", `String "keeper_board_post") ]) ]));
+  let ok, body = dispatch "masc_board_reclassify"
+    (make_args [("dry_run", `Bool true)]) in
+  Alcotest.(check bool) "reclassify ok" true ok;
+  let json = Yojson.Safe.from_string body in
+  Alcotest.(check bool) "dry_run true" true
+    Yojson.Safe.Util.(json |> member "dry_run" |> to_bool);
+  Alcotest.(check int) "changed one" 1
+    Yojson.Safe.Util.(json |> member "changed" |> to_int)
+
 let test_post_get_success () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -469,7 +527,7 @@ let test_tools_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "11 tool schemas" 11 (List.length Tool_board.tools)
+  Alcotest.(check int) "12 tool schemas" 12 (List.length Tool_board.tools)
 
 let test_tools_names_unique () =
   Eio_main.run @@ fun env ->
@@ -524,6 +582,8 @@ let () =
           Alcotest.test_case "list sort orders" `Quick test_post_list_sort_orders;
           Alcotest.test_case "list invalid sort rejected" `Quick
             test_post_list_invalid_sort_rejected;
+          Alcotest.test_case "list filter combinations" `Quick
+            test_post_list_filter_combinations;
           Alcotest.test_case "get success" `Quick test_post_get_success;
           Alcotest.test_case "get not found" `Quick test_post_get_not_found;
         ] );
@@ -549,6 +609,7 @@ let () =
         [
           Alcotest.test_case "unknown tool" `Quick test_dispatch_unknown_tool;
           Alcotest.test_case "migrate without pg" `Quick test_dispatch_migrate_without_pg;
+          Alcotest.test_case "reclassify dry run" `Quick test_dispatch_reclassify_dry_run;
         ] );
       ( "schemas",
         [

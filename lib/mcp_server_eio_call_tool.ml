@@ -219,7 +219,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
                (false,
                 Printf.sprintf
-                  "Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_DEFAULT_SEC or MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
+                  "Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_DEFAULT_SEC)"
                   timeout_sec
                   name))
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

@@ -48,17 +48,10 @@ let board_sort_label = function
   | Board_dispatch.Updated -> "updated"
   | Board_dispatch.Discussed -> "discussed"
 
-let is_system_board_author author =
-  author = "lodge-system" || author = "team-session"
-
 let filter_board_posts ~exclude_system ~exclude_automation posts =
   posts
-  |> List.filter (fun (p : Board.post) ->
-         let kind = Board.classify_post_kind p in
-         (not exclude_system
-          || (kind <> Board.System_post
-              && not (is_system_board_author (Board.Agent_id.to_string p.author))))
-         && (not exclude_automation || kind <> Board.Automation_post))
+  |> List.filter
+       (Board.post_matches_filters ~exclude_system ~exclude_automation)
 
 let max_filtered_board_window = 5200
 

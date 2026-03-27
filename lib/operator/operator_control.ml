@@ -21,6 +21,33 @@ let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
   | Some (false, err) -> Error err
   | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
 
+let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
+  match Keeper_types.read_meta ctx.config name with
+  | Error err -> Error err
+  | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
+  | Ok (Some meta) ->
+      let keepalive_running =
+        Keeper_status_bridge.runtime_keepalive_running ctx.config meta
+      in
+      let agent_status =
+        Keeper_exec_status.parse_agent_status ctx.config ~agent_name:meta.agent_name
+      in
+      let now_ts = Time_compat.now () in
+      Ok
+        (Keeper_exec_status.keeper_diagnostic_json
+           ~meta
+           ~agent_status
+           ~keepalive_running
+           ~history_items:[]
+           ~now_ts
+        |> Keeper_exec_status.augment_keeper_diagnostic_json
+             ~registered:(Keeper_types.is_resident_keeper ctx.config meta.name)
+             ~meta
+             ~keepalive_running
+             ~keepalive_started_at:
+               (Keeper_status_bridge.runtime_keepalive_started_at ctx.config meta)
+             ~now_ts)
+
 let dispatch_team_session_json_as (ctx : 'a context) ~session_id ~requested_actor
     ~tool_name ~args =
   let* authorized_actor =
@@ -340,11 +367,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       let* status_json =
         dispatch_keeper_json ctx ~tool_name:"masc_keeper_status" ~args:status_args
       in
-      let diagnostic =
-        match U.member "diagnostic" status_json with
-        | `Assoc _ as json -> json
-        | _ -> `Null
-      in
+      let* diagnostic = keeper_diagnostic_for_name ctx ~name in
       Ok
         (`Assoc
           [
@@ -359,26 +382,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
   | "keeper_recover" ->
       let* () = validate_target_type "keeper" request in
       let* name = require_target_id request in
-      let status_args =
-        `Assoc
-          [
-            ("name", `String name);
-            ("fast", `Bool false);
-            ("include_context", `Bool false);
-            ("include_metrics_overview", `Bool true);
-            ("include_memory_bank", `Bool false);
-            ("include_history_tail", `Bool false);
-            ("include_compaction_history", `Bool false);
-          ]
-      in
-      let* before_status =
-        dispatch_keeper_json ctx ~tool_name:"masc_keeper_status" ~args:status_args
-      in
-      let before_diagnostic =
-        match U.member "diagnostic" before_status with
-        | `Assoc _ as json -> json
-        | _ -> `Null
-      in
+      let* before_diagnostic = keeper_diagnostic_for_name ctx ~name in
       let recoverable =
         match U.member "recoverable" before_diagnostic with
         | `Bool value -> value
@@ -406,14 +410,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
           dispatch_keeper_json ctx ~tool_name:"masc_keeper_up"
             ~args:(`Assoc [ ("name", `String name) ])
         in
-        let* after_status =
-          dispatch_keeper_json ctx ~tool_name:"masc_keeper_status" ~args:status_args
-        in
-        let after_diagnostic =
-          match U.member "diagnostic" after_status with
-          | `Assoc _ as json -> json
-          | _ -> `Null
-        in
+        let* after_diagnostic = keeper_diagnostic_for_name ctx ~name in
         let recovered, skipped_reason =
           keeper_recovery_outcome after_diagnostic
         in

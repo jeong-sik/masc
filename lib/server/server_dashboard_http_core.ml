@@ -342,12 +342,14 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     try
       run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config
         (fun ~config ~sw ->
+          let t_sessions = Unix.gettimeofday () in
           let sessions =
             if Room.is_initialized config then
               dashboard_active_or_recent_sessions_cached ~clock config
             else
               []
           in
+          let dt_sessions = Unix.gettimeofday () -. t_sessions in
           let ctx : _ Operator_control.context =
             {
               config;
@@ -358,11 +360,21 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
               mcp_session_id = None;
             }
           in
-          Operator_control.snapshot_json ~actor:"dashboard" ~view:"summary"
-            ~include_messages:true ~include_sessions:true ~include_keepers:true
-            ~include_summary_fields:false
-            ~lightweight_summary:true
-            ~include_command_plane:false ~sessions ctx
+          let t_snapshot = Unix.gettimeofday () in
+          let json =
+            Operator_control.snapshot_json ~actor:"dashboard" ~view:"summary"
+              ~include_messages:true ~include_sessions:true ~include_keepers:true
+              ~include_summary_fields:false
+              ~lightweight_summary:true
+              ~include_command_plane:false ~sessions ctx
+          in
+          let dt_snapshot = Unix.gettimeofday () -. t_snapshot in
+          let dt_total = Unix.gettimeofday () -. started_at in
+          if dt_total >= 5.0 then
+            Log.Dashboard.warn
+              "[operator_snapshot profile] total=%.1fs sessions=%.1fs(%d) snapshot=%.1fs"
+              dt_total dt_sessions (List.length sessions) dt_snapshot;
+          json
           |> with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
                ~extra:(operator_snapshot_extra sessions))
     with
@@ -639,14 +651,25 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   in
   let compute () =
     mark_cached_surface_attempt _mission_cache;
+    let t0_mission = Unix.gettimeofday () in
     try
+      let t_cp = Unix.gettimeofday () in
       let command_plane_summary, swarm_status =
         command_plane_summary_cache_parts ~allow_initializing:false ~state
       in
-      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
-        (fun ~config ~sw ->
-          Dashboard_mission.json ?command_plane_summary ?swarm_status ~config ~sw
-            ~clock ~proc_mgr ())
+      let dt_cp = Unix.gettimeofday () -. t_cp in
+      let result =
+        run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
+          (fun ~config ~sw ->
+            Dashboard_mission.json ?command_plane_summary ?swarm_status ~config ~sw
+              ~clock ~proc_mgr ())
+      in
+      let dt_total = Unix.gettimeofday () -. t0_mission in
+      if dt_total >= 5.0 then
+        Log.Dashboard.warn
+          "[mission profile] total=%.1fs cp_summary=%.1fs compute=%.1fs"
+          dt_total dt_cp (dt_total -. dt_cp);
+      result
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

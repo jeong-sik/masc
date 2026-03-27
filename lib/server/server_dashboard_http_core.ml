@@ -881,7 +881,7 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
     match Eio_context.get_clock_opt (), Eio_context.get_switch_opt () with
     | Some clock, Some sw ->
         let readonly_config =
-          match cached_isolated_readonly_config ~sw ~clock ~config with
+          match Server_dashboard_http_runtime_support.cached_isolated_readonly_config runtime_support ~sw ~clock ~config with
           | Some isolated -> isolated
           | None -> config
         in

@@ -151,7 +151,7 @@ module Transport : sig
   val use_h2 : unit -> string
   val agent_transport_opt : unit -> string option
   val openai_compat_enabled : bool
-  val startup_watchdog_sec : float
+  val startup_watchdog_sec : unit -> float
 end
 
 module Board : sig
@@ -175,8 +175,8 @@ end
 
 module Tools : sig
   val dispatch_v2_enabled : bool
-  val full_surface_enabled : bool
-  val list_page_size : int
+  val full_surface_enabled : unit -> bool
+  val list_page_size : unit -> int
   val description_budget_opt : unit -> int option
   val readonly_retry_limit : int
   val public_tools_extra_opt : unit -> string option

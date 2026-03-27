@@ -158,9 +158,10 @@ module KeeperRuntime = struct
   (** Enable keeper debug logging. Default: false. *)
   let debug = get_bool ~default:false "MASC_KEEPER_DEBUG"
 
-  (** Daily budget for keeper deliberation (USD). *)
-  let deliberation_daily_budget_usd =
-    get_float ~default:1.0 "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD"
+  (** Daily budget for keeper deliberation (USD). Default: 0.10.
+      Runtime-readable (tests change this via putenv). *)
+  let deliberation_daily_budget_usd () =
+    get_float ~default:0.10 "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD"
 
   (** Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. *)
   let snapshot_sec =

@@ -270,8 +270,9 @@ end
 (** {1 Dashboard Configuration} *)
 
 module Dashboard_config = struct
-  (** Whether dashboard fixtures are enabled. Default: false. *)
-  let fixtures_enabled = get_bool ~default:false "MASC_DASHBOARD_FIXTURES_ENABLED"
+  (** Whether dashboard fixtures are enabled. Default: false.
+      Runtime-readable (tests change this via putenv). *)
+  let fixtures_enabled () = get_bool ~default:false "MASC_DASHBOARD_FIXTURES_ENABLED"
 
   (** Dashboard fixture name override. *)
   let fixture_opt () =

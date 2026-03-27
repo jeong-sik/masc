@@ -195,7 +195,7 @@ let public_mcp_set : (string, unit) Hashtbl.t =
 
 let is_public_mcp name = Hashtbl.mem public_mcp_set name
 
-let full_surface_override () = Env_config.Tools.full_surface_enabled
+let full_surface_override () = Env_config.Tools.full_surface_enabled ()
 
 let implementation_status_to_string = function
   | Real -> "real"

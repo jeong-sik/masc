@@ -407,8 +407,9 @@ module Transport = struct
   (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
   let openai_compat_enabled = get_bool ~default:false "MASC_OPENAI_COMPAT"
 
-  (** Startup watchdog timeout, clamped to [30, 600]. Default: 240. *)
-  let startup_watchdog_sec =
+  (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
+      Runtime-readable (tests change this via putenv). *)
+  let startup_watchdog_sec () =
     let v = get_float ~default:240.0 "MASC_STARTUP_WATCHDOG_SEC" in
     Float.max 30.0 (Float.min 600.0 v)
 end
@@ -459,11 +460,13 @@ module Tools = struct
   (** Dispatch v2 feature flag. Default: true (since v2.102). *)
   let dispatch_v2_enabled = get_bool ~default:true "MASC_DISPATCH_V2"
 
-  (** Full tool surface override. Default: false. *)
-  let full_surface_enabled = get_bool ~default:false "MASC_FULL_SURFACE"
+  (** Full tool surface override. Default: false.
+      Runtime-readable (tests change this via putenv). *)
+  let full_surface_enabled () = get_bool ~default:false "MASC_FULL_SURFACE"
 
-  (** Tool list page size, clamped to [10, 1024]. Default: 64. *)
-  let list_page_size =
+  (** Tool list page size, clamped to [10, 1024]. Default: 64.
+      Runtime-readable (tests change this via putenv). *)
+  let list_page_size () =
     let v = get_int ~default:64 "MASC_LIST_PAGE_SIZE" in
     max 10 (min 1024 v)
 

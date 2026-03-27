@@ -69,7 +69,7 @@ let elapsed_since_start () =
 let default_watchdog_timeout_sec = 240.0
 
 (** Read watchdog timeout from env, clamped to [30, 600]. *)
-let watchdog_timeout_sec () = Env_config.Transport.startup_watchdog_sec
+let watchdog_timeout_sec () = Env_config.Transport.startup_watchdog_sec ()
 
 let mark_state_ready ~backend_mode =
   update (fun current ->

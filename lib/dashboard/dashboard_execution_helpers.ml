@@ -237,7 +237,7 @@ let tone_rank = function
   | _ -> 0
 
 let dashboard_fixture_name ?fixture () =
-  let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled in
+  let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled () in
   if not fixtures_enabled then None
   else
     match fixture with

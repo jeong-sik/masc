@@ -688,7 +688,7 @@ let parse_cursor_only_params params =
     | `String cursor -> Ok { cursor = Some cursor }
     | _ -> Error "Invalid params: cursor must be a string"
 
-let list_page_size () = Env_config.Tools.list_page_size
+let list_page_size () = Env_config.Tools.list_page_size ()
 
 let encode_cursor ~kind offset =
   Base64.encode_string (Printf.sprintf "%s:%d" kind offset)

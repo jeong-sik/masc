@@ -5,9 +5,17 @@
 
     All operations are serialized via Eio.Mutex (allows other fibers
     to run while waiting, unlike Stdlib.Mutex which blocks the domain).
-    Falls back to unprotected access in non-Eio test contexts. *)
+    Falls back to unprotected access in non-Eio test contexts.
+
+    Implementation: registry_entry records are immutable (except embedded
+    Hashtbl fields board_wakeups and tool_usage which remain mutable
+    containers -- Phase 2 target).  Inter-fiber signaling uses [Atomic.t]
+    instead of [ref] for lock-free visibility.  The global registry is a
+    persistent [StringMap] behind [Eio.Mutex]. *)
 
 open Keeper_types
+
+module StringMap = Map.Make (String)
 
 type keeper_state =
   | Running
@@ -17,21 +25,21 @@ type keeper_state =
 type registry_entry = {
   base_path : string;
   name : string;
-  mutable meta : keeper_meta;
-  mutable state : keeper_state;
-  fiber_stop : bool ref;
-  fiber_wakeup : bool ref;
+  meta : keeper_meta;
+  state : keeper_state;
+  fiber_stop : bool Atomic.t;
+  fiber_wakeup : bool Atomic.t;
   started_at : float;
-  grpc_close : (unit -> unit) option ref;
+  grpc_close : (unit -> unit) option Atomic.t;
   done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
   done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
-  mutable restart_count : int;
-  mutable last_restart_ts : float;
-  mutable crash_log : (float * string) list;
-  mutable last_error : string option;
-  mutable last_agent_count : int;
+  restart_count : int;
+  last_restart_ts : float;
+  crash_log : (float * string) list;
+  last_error : string option;
+  last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
-  mutable board_cursor_ts : float;
+  board_cursor_ts : float;
   tool_usage : (string, tool_call_entry) Hashtbl.t;
 }
 
@@ -40,7 +48,7 @@ let state_to_string = function
   | Paused -> "paused"
   | Stopped -> "stopped"
 
-let registry : (string, registry_entry) Hashtbl.t = Hashtbl.create 16
+let registry : registry_entry StringMap.t ref = ref StringMap.empty
 let mu = Eio.Mutex.create ()
 let running_count_atomic = Atomic.make 0
 
@@ -50,13 +58,17 @@ let registry_key ~base_path name =
 let with_lock_rw f = Eio_guard.with_mutex mu f
 let with_lock_ro f = Eio_guard.with_mutex_ro mu f
 
+(** Write an entry back to the registry map. *)
+let put_entry key entry =
+  registry := StringMap.add key entry !registry
+
 let max_crash_log_entries = 5
 
 let register ~base_path name meta =
   with_lock_rw (fun () ->
     let done_p, done_r = Eio.Promise.create () in
     let key = registry_key ~base_path name in
-    (match Hashtbl.find_opt registry key with
+    (match StringMap.find_opt key !registry with
      | Some entry when entry.state = Running ->
          Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
      | _ -> ());
@@ -65,10 +77,10 @@ let register ~base_path name meta =
       name;
       meta;
       state = Running;
-      fiber_stop = ref false;
-      fiber_wakeup = ref false;
+      fiber_stop = Atomic.make false;
+      fiber_wakeup = Atomic.make false;
       started_at = Time_compat.now ();
-      grpc_close = ref None;
+      grpc_close = Atomic.make None;
       done_p;
       done_r;
       restart_count = 0;
@@ -80,21 +92,21 @@ let register ~base_path name meta =
       board_cursor_ts = 0.0;
       tool_usage = Hashtbl.create 16;
     } in
-    Hashtbl.replace registry key entry;
+    put_entry key entry;
     Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1);
     entry)
 
 let unregister ~base_path name =
   with_lock_rw (fun () ->
     let key = registry_key ~base_path name in
-    (match Hashtbl.find_opt registry key with
+    (match StringMap.find_opt key !registry with
      | Some entry when entry.state = Running ->
          Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
      | _ -> ());
-    Hashtbl.remove registry key)
+    registry := StringMap.remove key !registry)
 
 let get ~base_path name =
-  with_lock_ro (fun () -> Hashtbl.find_opt registry (registry_key ~base_path name))
+  with_lock_ro (fun () -> StringMap.find_opt (registry_key ~base_path name) !registry)
 
 let get_exn ~base_path name =
   match get ~base_path name with
@@ -103,17 +115,18 @@ let get_exn ~base_path name =
 
 let all ?base_path () =
   with_lock_ro (fun () ->
-    Hashtbl.fold
+    StringMap.fold
       (fun _k v acc ->
         match base_path with
         | Some expected when not (String.equal expected v.base_path) -> acc
         | _ -> v :: acc)
-      registry [])
+      !registry [])
 
 let update_meta ~base_path name meta =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
-    | Some entry -> entry.meta <- meta
+    let key = registry_key ~base_path name in
+    match StringMap.find_opt key !registry with
+    | Some entry -> put_entry key { entry with meta }
     | None -> ())
 
 let () =
@@ -122,7 +135,8 @@ let () =
 
 let set_state ~base_path name state =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    let key = registry_key ~base_path name in
+    match StringMap.find_opt key !registry with
     | Some entry ->
         if entry.state <> state then begin
           (match (entry.state, state) with
@@ -132,22 +146,25 @@ let set_state ~base_path name state =
            | (Paused | Stopped), Running ->
                Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
            | _ -> ());
-          entry.state <- state
+          put_entry key { entry with state }
         end
     | None -> ())
 
 let record_restart ~base_path name =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    let key = registry_key ~base_path name in
+    match StringMap.find_opt key !registry with
     | Some entry ->
-        entry.restart_count <- entry.restart_count + 1;
-        entry.last_restart_ts <- Time_compat.now ()
+        put_entry key { entry with
+          restart_count = entry.restart_count + 1;
+          last_restart_ts = Time_compat.now () }
     | None -> ())
 
 let record_error ~base_path name err =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
-    | Some entry -> entry.last_error <- Some err
+    let key = registry_key ~base_path name in
+    match StringMap.find_opt key !registry with
+    | Some entry -> put_entry key { entry with last_error = Some err }
     | None -> ())
 
 let is_running ~base_path name =
@@ -164,25 +181,27 @@ let count_running ?base_path () =
   | None -> Atomic.get running_count_atomic
   | Some expected ->
       with_lock_ro (fun () ->
-        Hashtbl.fold
+        StringMap.fold
           (fun _k v acc ->
             if String.equal expected v.base_path && v.state = Running then acc + 1
             else acc)
-          registry 0)
+          !registry 0)
 
 let record_crash ~base_path name ts msg =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    let key = registry_key ~base_path name in
+    match StringMap.find_opt key !registry with
     | Some entry ->
-        entry.crash_log <-
-          List.filteri (fun i _ -> i < max_crash_log_entries)
-            ((ts, msg) :: entry.crash_log)
+        put_entry key { entry with
+          crash_log =
+            List.filteri (fun i _ -> i < max_crash_log_entries)
+              ((ts, msg) :: entry.crash_log) }
     | None -> ())
 
 let set_grpc_close ~base_path name close_fn =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
-    | Some entry -> entry.grpc_close := close_fn
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
+    | Some entry -> Atomic.set entry.grpc_close close_fn
     | None -> ())
 
 let started_at ~base_path name =
@@ -193,25 +212,25 @@ let started_at ~base_path name =
 let spawn_slots_available () =
   let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
   max_keepers <= 0
-  || with_lock_ro (fun () -> Hashtbl.length registry < max_keepers)
+  || with_lock_ro (fun () -> StringMap.cardinal !registry < max_keepers)
 
 let wakeup ~base_path name =
-  with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
-    | Some entry -> entry.fiber_wakeup := true
+  with_lock_ro (fun () ->
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
+    | Some entry -> Atomic.set entry.fiber_wakeup true
     | None -> ())
 
 let wakeup_all ?base_path () =
-  with_lock_rw (fun () ->
-    Hashtbl.iter (fun _k entry ->
+  with_lock_ro (fun () ->
+    StringMap.iter (fun _k entry ->
       (match base_path with
        | Some expected when not (String.equal expected entry.base_path) -> ()
-       | _ -> if entry.state = Running then entry.fiber_wakeup := true)
-    ) registry)
+       | _ -> if entry.state = Running then Atomic.set entry.fiber_wakeup true)
+    ) !registry)
 
 let fiber_health_of ~base_path name =
   with_lock_ro (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
     | None -> Fiber_unknown
     | Some entry ->
         match Eio.Promise.peek entry.done_p with
@@ -231,28 +250,28 @@ let crash_log_of ~base_path name =
 let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts
     ~crash_log =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    let key = registry_key ~base_path name in
+    match StringMap.find_opt key !registry with
     | Some entry ->
-        entry.restart_count <- restart_count;
-        entry.last_restart_ts <- last_restart_ts;
-        entry.crash_log <- crash_log
+        put_entry key { entry with restart_count; last_restart_ts; crash_log }
     | None -> ())
 
 let get_last_agent_count ~base_path name =
   with_lock_ro (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
     | Some entry -> entry.last_agent_count
     | None -> 0)
 
 let set_last_agent_count ~base_path name count =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
-    | Some entry -> entry.last_agent_count <- count
+    let key = registry_key ~base_path name in
+    match StringMap.find_opt key !registry with
+    | Some entry -> put_entry key { entry with last_agent_count = count }
     | None -> ())
 
 let board_wakeup_allowed ~base_path name ~post_id ~debounce_sec =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
     | None -> true
     | Some entry ->
         let now_ts = Time_compat.now () in
@@ -264,44 +283,45 @@ let board_wakeup_allowed ~base_path name ~post_id ~debounce_sec =
 
 let clear_board_wakeups ~base_path name =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
     | Some entry -> Hashtbl.reset entry.board_wakeups
     | None -> ())
 
 let cleanup_tracking ~base_path name =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    let key = registry_key ~base_path name in
+    match StringMap.find_opt key !registry with
     | Some entry ->
-        entry.last_agent_count <- 0;
         Hashtbl.reset entry.board_wakeups;
-        entry.board_cursor_ts <- 0.0;
-        Hashtbl.reset entry.tool_usage
+        Hashtbl.reset entry.tool_usage;
+        put_entry key { entry with last_agent_count = 0; board_cursor_ts = 0.0 }
     | None -> ())
 
 let clear () =
   with_lock_rw (fun () ->
-    Hashtbl.clear registry;
+    registry := StringMap.empty;
     Atomic.set running_count_atomic 0)
 
-(* ── Board cursor ────────────────────────────────────────────── *)
+(* -- Board cursor -------------------------------------------------- *)
 
 let get_board_cursor_ts ~base_path name =
   with_lock_ro (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
     | Some entry -> entry.board_cursor_ts
     | None -> 0.0)
 
 let set_board_cursor_ts ~base_path name ts =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
-    | Some entry -> entry.board_cursor_ts <- ts
+    let key = registry_key ~base_path name in
+    match StringMap.find_opt key !registry with
+    | Some entry -> put_entry key { entry with board_cursor_ts = ts }
     | None -> ())
 
-(* ── Tool usage tracking ─────────────────────────────────────── *)
+(* -- Tool usage tracking ------------------------------------------- *)
 
 let record_tool_use ~base_path name ~tool_name ~success =
   with_lock_rw (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
     | None -> ()
     | Some entry ->
       let e =
@@ -319,7 +339,7 @@ let record_tool_use ~base_path name ~tool_name ~success =
 
 let tool_usage_of ~base_path name =
   with_lock_ro (fun () ->
-    match Hashtbl.find_opt registry (registry_key ~base_path name) with
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
     | None -> []
     | Some entry ->
       Hashtbl.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
@@ -328,12 +348,12 @@ let tool_usage_of ~base_path name =
 (** Look up a keeper by name across all base_paths (O(n) scan). *)
 let find_by_name name =
   with_lock_ro (fun () ->
-    Hashtbl.fold
+    StringMap.fold
       (fun _k v acc ->
         match acc with
         | Some _ -> acc
         | None -> if String.equal v.name name then Some v else None)
-      registry None)
+      !registry None)
 
 let tool_usage_of_by_name name =
   with_lock_ro (fun () ->

@@ -17,23 +17,23 @@ type keeper_state =
 type registry_entry = {
   base_path : string;
   name : string;
-  mutable meta : keeper_meta;
-  mutable state : keeper_state;
-  fiber_stop : bool ref;
-  fiber_wakeup : bool ref;
+  meta : keeper_meta;
+  state : keeper_state;
+  fiber_stop : bool Atomic.t;
+  fiber_wakeup : bool Atomic.t;
   started_at : float;
-  grpc_close : (unit -> unit) option ref;
+  grpc_close : (unit -> unit) option Atomic.t;
   done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
   done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
       (** Exposed so the supervisor fiber can resolve on stop/crash.
           Only the fiber owning this keeper should call [Eio.Promise.resolve]. *)
-  mutable restart_count : int;
-  mutable last_restart_ts : float;
-  mutable crash_log : (float * string) list;
-  mutable last_error : string option;
-  mutable last_agent_count : int;
+  restart_count : int;
+  last_restart_ts : float;
+  crash_log : (float * string) list;
+  last_error : string option;
+  last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
-  mutable board_cursor_ts : float;
+  board_cursor_ts : float;
   tool_usage : (string, Keeper_types.tool_call_entry) Hashtbl.t;
 }
 

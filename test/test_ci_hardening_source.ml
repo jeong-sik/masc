@@ -22,6 +22,9 @@ let file_contains_pattern file_rel pattern =
           (try ignore (Str.search_forward re content 0); true
            with Not_found -> false))
 
+let file_not_contains_pattern file_rel pattern =
+  not (file_contains_pattern file_rel pattern)
+
 let test_ci_sync_and_asset_contracts () =
   check bool "pr sync script added" true
     (file_contains_pattern "scripts/check-pr-sync.sh" "workflow payload head");
@@ -411,10 +414,14 @@ let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
     (file_contains_pattern "lib/mcp_server_eio.ml"
        {|"masc_worktree_list"; "masc_pending_interrupts";|});
-  check bool "worktree list excluded from join-required adjacency" true
+  check bool "worktree create/remove still require join" true
     (file_contains_pattern "lib/mcp_server_eio.ml"
        {|"masc_worktree_create"; "masc_worktree_remove";
-  "masc_portal_open"; "masc_portal_send"; "masc_portal_close";|})
+  "masc_portal_open"; "masc_portal_send"; "masc_portal_close";|});
+  check bool "worktree list excluded from join-required list" true
+    (file_not_contains_pattern "lib/mcp_server_eio.ml"
+       {|"masc_worktree_remove"; "masc_worktree_list";
+  "masc_portal_open";|})
 
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true
@@ -489,14 +496,14 @@ let () =
            test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;
            test_case "dashboard executor pool contracts" `Quick
              test_dashboard_executor_pool_contracts;
-      test_case "transport route contracts" `Quick
-        test_transport_route_contracts;
-      test_case "transport health contracts" `Quick
-        test_transport_health_contracts;
-      test_case "worktree list contracts" `Quick
-        test_worktree_list_contracts;
-      test_case "dashboard timeout guard contracts" `Quick
-        test_dashboard_timeout_guard_contracts;
+           test_case "transport route contracts" `Quick
+             test_transport_route_contracts;
+           test_case "transport health contracts" `Quick
+             test_transport_health_contracts;
+           test_case "worktree list contracts" `Quick
+             test_worktree_list_contracts;
+           test_case "dashboard timeout guard contracts" `Quick
+             test_dashboard_timeout_guard_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
            test_case "http client fd safety contracts" `Quick
              test_http_client_fd_safety_contracts;

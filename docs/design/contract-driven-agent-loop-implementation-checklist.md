@@ -14,15 +14,15 @@
 - [ ] baseline workload, repo snapshot, model route, provider route가 고정되어 있다.
 - [ ] 성공 지표와 중단 지표가 숫자로 정의되어 있다.
 - [ ] metric owner와 labeling / judging protocol owner가 지정되어 있다.
-- [ ] labeling / judging protocol 문서가 고정되어 있다.
+- [ ] labeling / judging protocol 문서와 version freeze가 고정되어 있다.
 - [ ] contract가 `runtime_constraints`와 `eval_criteria`를 구분하거나, passthrough 규칙이 명시되어 있다.
 - [ ] contract author가 `runtime_constraints`와 `eval_criteria`의 호환성을 검증했다.
 - [ ] `requested_execution_mode`와 `effective_execution_mode`의 결정 주체와 downgrade rule이 문서화되어 있다.
-- [ ] proof bundle minimal schema (field list + version)가 합의되어 있다.
+- [ ] RFC에 정의된 proof bundle minimal schema (field list + version)가 실험 기준으로 잠겨 있다.
 - [ ] cross-repo schema sharing mechanism이 문서화되어 있다.
 - [ ] feature flag 또는 experimental path가 있다.
 - [ ] rollback path가 문서화되어 있다.
-- [ ] proof artifact를 어디에 남길지 정해져 있다.
+- [ ] artifact store backend와 proof artifact를 어디에 남길지 정해져 있다.
 
 하나라도 `no`면 구현 시작 금지다.
 
@@ -59,11 +59,11 @@
 - [ ] input contract가 artifact로 남는다.
 - [ ] OAS proof bundle이 artifact로 남는다.
 - [ ] replayable tool-call transcript가 artifact로 남는다.
-- [ ] proof bundle minimal schema (field list + version)가 합의되어 있다.
+- [ ] RFC에 정의된 proof bundle minimal schema (field list + version)가 실험 기준으로 잠겨 있다.
 - [ ] proof bundle refs의 store namespace, retention window, dereference failure policy가 정의되어 있다.
 - [ ] evaluator result가 artifact로 남는다.
 - [ ] intervention summary가 artifact로 남는다.
-- [ ] final acceptance verdict가 artifact로 남는다.
+- [ ] final acceptance verdict가 MASC evaluator artifact로 남는다.
 - [ ] baseline과 candidate가 같은 model / time / tool budget으로 비교된다.
 - [ ] repo snapshot과 fixture set이 고정되어 있다.
 - [ ] judging protocol version이 artifact에 함께 기록된다.
@@ -81,7 +81,7 @@
 - [ ] `false_negative_escape_rate`
 
 위 지표 중 빠지는 항목이 있으면 그 이유와 대체 지표를 먼저 문서화해야 한다.
-`claim_coverage` 정의는 labeling protocol의 `Claim Coverage Definition`을 따른다.
+`claim_coverage` 정의와 예외(`drift` 제외 등)는 labeling protocol의 `Claim Coverage Definition`을 canonical source로 따른다.
 
 - [ ] digest field별 computation method가 분류되어 있다.
   - `structural only`

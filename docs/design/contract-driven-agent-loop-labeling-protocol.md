@@ -65,7 +65,7 @@ Golden set은 versioned artifact로 저장하고, evaluator 재보정 시 재실
 이 최소 크기는 **PoC 단계용 floor**다. canonical 승격 판단이나 작은 효과 크기 비교에는 더 큰 set이 필요할 수 있다.
 특히 `n=50` 수준에서는 5% 미만의 precision 차이를 안정적으로 감지하기 어렵다. PoC의 adopt/drop 판단은 큰 효과 크기(대략 15%+ 수준)에서만 신뢰할 수 있다고 본다.
 
-## 4.1 Worked Examples for `coding_task`
+### 4.1 Worked Examples for `coding_task`
 
 ### Example 1
 

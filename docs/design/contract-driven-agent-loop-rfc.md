@@ -583,6 +583,7 @@ artifact는 ownership과 lifecycle이 분명해야 한다.
 `evidence_precision`은 evidence 충족도를 측정하는 integrity metric이지 outcome correctness의 직접 측정값은 아니다. outcome quality는 `defect_escape_rate`와 workload별 success signal을 함께 봐야 한다.
 `claim_coverage`는 material output claim 중 explicit label(`supported` / `unsupported` / unresolved `ambiguous`)이 붙은 claim의 비율이다.
 즉 `claim_coverage = labeled_material_claims / total_material_claims`로 둔다.
+`claim_coverage`의 canonical measurement source는 labeling protocol이며, `drift` 제외 같은 예외 규칙도 그 문서를 따른다.
 1차 PoC에서는 `human_intervention_count`를 supervision cost proxy로 사용하고, 더 좋은 proxy 탐색은 후속 과제로 둔다.
 `claim_coverage`와 `evidence_precision`만으로는 laconic output을 과보상할 수 있으므로, material claim volume collapse나 지나치게 보수적인 output은 workload success signal 또는 defect escape signal과 함께 읽어야 한다.
 

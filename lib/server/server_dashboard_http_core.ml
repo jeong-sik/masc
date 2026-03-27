@@ -294,6 +294,14 @@ let operator_actor_hint request =
    Interval: 10s (was 120s). Even if compute takes ~8s, the ref is updated
    every ~18s worst-case, which is acceptable for dashboard SSE polling. *)
 
+(* Late-bound broadcast refs — set by server_dashboard_http.ml after
+   Sse module is in scope.  Same pattern as _broadcast_room_truth_ref. *)
+let _operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref =
+  ref (fun (_json : Yojson.Safe.t) -> ())
+
+let _operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
+  ref (fun (_json : Yojson.Safe.t) -> ())
+
 let _operator_snapshot_cache =
   create_cached_surface
     (`Assoc [ ("status", `String "initializing"); ("generated_at", `String (Types.now_iso ())) ])
@@ -368,7 +376,9 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
                        "MASC_DASHBOARD_OPERATOR_SNAPSHOT_TIMEOUT_S"
                        ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
     ~compute
-    ~on_result:(mark_cached_surface_success _operator_snapshot_cache)
+    ~on_result:(fun json ->
+      mark_cached_surface_success _operator_snapshot_cache json;
+      !_operator_snapshot_broadcast_ref json)
 
 let start_operator_digest_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
@@ -421,7 +431,9 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
                        "MASC_DASHBOARD_OPERATOR_DIGEST_TIMEOUT_S"
                        ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
     ~compute
-    ~on_result:(mark_cached_surface_success _operator_digest_cache)
+    ~on_result:(fun json ->
+      mark_cached_surface_success _operator_digest_cache json;
+      !_operator_digest_broadcast_ref json)
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in

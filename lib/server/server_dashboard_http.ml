@@ -252,6 +252,26 @@ let warm_shell_cache (state : Mcp_server.server_state) =
      Log.Dashboard.warn "shell cache pre-warm failed: %s"
        (Printexc.to_string exn))
 
+(** Broadcast a single cached surface to all Observer SSE sessions.
+    [event_type] becomes the SSE event "type" field.
+    Safe to call from any fiber — reads only from a cached ref. *)
+let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
+  let sse_json =
+    `Assoc
+      [
+        ("type", `String event_type);
+        ("payload", json);
+        ("ts_unix", `Float (Time_compat.now ()));
+      ]
+  in
+  Sse.broadcast_to Observers sse_json
+
+(* Wire operator broadcast refs now that Sse is in scope. *)
+let () = _operator_snapshot_broadcast_ref :=
+  broadcast_cached_surface ~event_type:"operator_snapshot"
+let () = _operator_digest_broadcast_ref :=
+  broadcast_cached_surface ~event_type:"operator_digest"
+
 let _execution_cache =
   create_cached_surface
     (`Assoc
@@ -418,6 +438,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _execution_cache json;
+      broadcast_cached_surface ~event_type:"execution_snapshot" json;
       !_broadcast_room_truth_ref state)
 
 let start_transport_health_refresh_loop ~state ~sw ~clock =
@@ -442,7 +463,9 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
            ~label:"transport_health" ~interval_s:15.0)
         with timeout_s }
     ~compute
-    ~on_result:(mark_cached_surface_success _transport_health_cache)
+    ~on_result:(fun json ->
+      mark_cached_surface_success _transport_health_cache json;
+      broadcast_cached_surface ~event_type:"transport_health_snapshot" json)
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let fixture = query_param request "fixture" in

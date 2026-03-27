@@ -20,4 +20,5 @@ let usage_or_zero (response : api_response) =
         output_tokens = 0;
         cache_creation_input_tokens = 0;
         cache_read_input_tokens = 0;
+        cost_usd = None;
       }

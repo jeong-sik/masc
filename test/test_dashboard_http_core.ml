@@ -115,6 +115,8 @@ let test_run_dashboard_compute_without_pool_uses_isolated_pg_backend () =
   | Room_utils.PostgresNative shared_backend ->
       let reused_shared_pool =
         Lib.Server_dashboard_http_core.run_dashboard_compute
+          ~net:(Eio.Stdenv.net env)
+          ~mono_clock:(Eio.Stdenv.mono_clock env)
           ~sw
           ~clock:(Eio.Stdenv.clock env)
           ~config

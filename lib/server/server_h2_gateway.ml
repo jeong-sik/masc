@@ -481,7 +481,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/shell" ->
           let state = get_server_state () in
-          let json = dashboard_shell_http_json state.Mcp_server.room_config in
+          let json =
+            dashboard_shell_http_json ?clock:state.Mcp_server.clock
+              state.Mcp_server.room_config
+          in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/config" ->

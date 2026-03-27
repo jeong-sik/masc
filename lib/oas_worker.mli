@@ -80,6 +80,8 @@ val run_model_by_label :
   ?memory:Oas.Memory.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
   (run_result, string) result
 
@@ -98,6 +100,8 @@ val run_named_with_masc_tools :
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
   (run_result, string) result
 
@@ -116,5 +120,7 @@ val run_model_with_masc_tools :
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
   (run_result, string) result

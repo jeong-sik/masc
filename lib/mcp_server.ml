@@ -580,9 +580,11 @@ type server_state = {
   session_registry: Session.registry;
   mutable on_sse_broadcast: (Yojson.Safe.t -> unit) option;  (* SSE push callback *)
   mutable encryption_config: Encryption.config;  (* P3: Data encryption *)
+  sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option; (* For agent spawning *)
   fs: Eio.Fs.dir_ty Eio.Path.t option; (* For filesystem access *)
   clock: float Eio.Time.clock_ty Eio.Resource.t option; (* For timestamps/sleep *)
+  mono_clock: Eio.Time.Mono.ty Eio.Resource.t option; (* For readonly PG compute isolation *)
   env: Caqti_eio.stdenv option; (* For DB/HTTP access - Agent Being Protocol *)
   net: Eio_context.eio_net option; (* For network calls - P3a: replaces global ref *)
 }
@@ -602,15 +604,17 @@ let create_state ~base_path =
     session_registry = registry;
     on_sse_broadcast = None;
     encryption_config = Encryption.default_config;
+    sw = None;
     proc_mgr = None;
     fs = None;
     clock = None;
+    mono_clock = None;
     env = None;
     net = None;
   }
 
 (** Create state with Eio context - required for PostgresNative backend *)
-let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
+let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   let config =
     Room.default_config_eio ~sw ~env
       ~on_backend_ready:(fun backend ->
@@ -639,9 +643,11 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
     session_registry = registry;
     on_sse_broadcast = None;
     encryption_config = Encryption.default_config;
+    sw = Some sw;
     proc_mgr = Some proc_mgr;
     fs = Some fs;
     clock = Some clock;
+    mono_clock = Some mono_clock;
     env = Some env;
     net = Some net;
   }

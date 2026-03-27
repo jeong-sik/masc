@@ -79,6 +79,7 @@ val create_state : ?test_mode:bool -> base_path:string -> unit -> server_state
     @param proc_mgr Eio process manager for agent spawning
     @param fs Eio filesystem for file operations
     @param clock Eio time clock for timestamps/sleep
+    @param mono_clock Eio monotonic clock for readonly PG compute isolation
     @param net Eio network capability for HTTP/TLS calls
     @param base_path Base path for MASC data directory *)
 val create_state_eio :
@@ -87,6 +88,7 @@ val create_state_eio :
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
   fs:Eio.Fs.dir_ty Eio.Path.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   net:[> `Generic | `Unix] Eio.Net.ty Eio.Resource.t ->
   base_path:string ->
   server_state

@@ -279,6 +279,10 @@ let test_activity_surface_contracts () =
   check bool "server exposes canonical activity graph route" true
     (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
        {|"/api/v1/activity/graph"|});
+  check bool "activity routes thread sw/clock instead of reading Eio_context directly" true
+    (not
+       (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
+          "Eio_context.get_switch"));
   check bool "server drops legacy social graph alias" true
     (not
        (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
@@ -344,16 +348,28 @@ let test_dashboard_executor_pool_contracts () =
        "Eio.Executor_pool.submit_exn");
   check bool "mission refresh loop uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config");
+       "run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw");
   check bool "mission actor path uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "run_dashboard_compute ~mode ~sw ~clock");
+       "run_dashboard_compute ~mode ?net ?mono_clock ~sw ~clock");
   check bool "execution refresh loop uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http.ml"
-       "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config");
+       "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~net");
+  check bool "server state captures mono_clock for threaded readonly compute" true
+    (file_contains_pattern "lib/mcp_server.ml"
+       "mono_clock: Eio.Time.Mono.ty Eio.Resource.t option");
+  check bool "dashboard core threads state runtime caps into readonly compute" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "let net, mono_clock = state_dashboard_runtime_caps state");
+  check bool "dashboard core no longer reads global eio net directly" true
+    (file_not_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "Eio_context.get_net ()");
+  check bool "dashboard core no longer reads global mono_clock directly" true
+    (file_not_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "Eio_context.get_mono_clock ()");
   check bool "execution parameterized path uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http.ml"
-       "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock");
+       "run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw");
   check bool "server bootstrap wires executor pool into dashboard" true
     (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
        "Server_dashboard_http.set_executor_pool exec_pool")
@@ -364,6 +380,9 @@ let test_transport_route_contracts () =
   check bool "frontend exposes ws discovery route" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
        {|Http.Router.get "/ws" websocket_discovery_handler|});
+  check bool "common http deps prefer runtime captured in server_state" true
+    (file_contains_pattern "lib/server/server_routes_http_common.ml"
+       "state.Mcp_server.sw");
   check bool "frontend exposes webrtc offer route" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
        {|Http.Router.post "/webrtc/offer"|});
@@ -411,6 +430,15 @@ let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
     (file_contains_pattern "lib/mcp_server_eio.ml"
        {|"masc_worktree_list"; "masc_pending_interrupts";|});
+  check bool "worker oas no longer reads global net directly" true
+    (file_not_contains_pattern "lib/worker_oas.ml"
+       "Eio_context.get_net_opt ()");
+  check bool "research dispatch uses threaded net capability from state" true
+    (file_contains_pattern "lib/mcp_server_eio_execute.ml"
+       "match state.Mcp_server.net with");
+  check bool "research dispatch no longer falls back to global Eio net" true
+    (file_not_contains_pattern "lib/mcp_server_eio_execute.ml"
+       "Eio_context.get_net ()");
   check bool "worktree create/remove still require join" true
     (file_contains_pattern "lib/mcp_server_eio.ml"
        {|"masc_worktree_create"; "masc_worktree_remove";
@@ -420,10 +448,33 @@ let test_worktree_list_contracts () =
        {|"masc_worktree_remove"; "masc_worktree_list";
   "masc_portal_open";|})
 
+let test_oas_worker_capability_threading_contracts () =
+  check bool "oas worker model-by-label accepts threaded sw capability" true
+    (file_contains_pattern "lib/oas_worker.mli"
+       "?sw:Eio.Switch.t ->");
+  check bool "oas worker model-by-label accepts threaded net capability" true
+    (file_contains_pattern "lib/oas_worker.mli"
+       "?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->");
+  check bool "chain native threads runtime net into oas worker" true
+    (file_contains_pattern "lib/chain/chain_native_eio.ml"
+       "?net:runtime.mcp_state.Mcp_server.net");
+  check bool "team session bridge threads switch into oas worker" true
+    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
+       "?raw_trace ~sw ()")
+
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|let json = dashboard_transport_health_http_json ~state in|});
+  check bool "dashboard shell helper accepts threaded clock capability" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "let dashboard_shell_http_json ?clock");
+  check bool "http dashboard shell route threads state clock" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "dashboard_shell_http_json ?clock:state.Mcp_server.clock");
+  check bool "h2 dashboard shell route threads state clock" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "dashboard_shell_http_json ?clock:state.Mcp_server.clock");
   check bool "h2 transport health route uses transport metrics" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        "Transport_metrics.transport_health_json");
@@ -499,6 +550,8 @@ let () =
              test_transport_health_contracts;
            test_case "worktree list contracts" `Quick
              test_worktree_list_contracts;
+           test_case "oas worker capability threading contracts" `Quick
+             test_oas_worker_capability_threading_contracts;
            test_case "dashboard timeout guard contracts" `Quick
              test_dashboard_timeout_guard_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;

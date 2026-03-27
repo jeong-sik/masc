@@ -24,6 +24,8 @@ val set_executor_pool : Eio.Executor_pool.t -> unit
 
 val run_dashboard_compute :
   ?mode:dashboard_compute_mode ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config:Room.config ->
@@ -158,7 +160,10 @@ val dashboard_agents_safe : Room.config -> Types.agent list
 val dashboard_messages_safe :
   Room.config -> since_seq:int -> limit:int -> Types.message list
 val provider_capacity_json : unit -> Yojson.Safe.t
-val dashboard_shell_http_json : Room.config -> Yojson.Safe.t
+val dashboard_shell_http_json :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Room.config ->
+  Yojson.Safe.t
 
 (** {1 Session Cache} *)
 

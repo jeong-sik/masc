@@ -291,6 +291,7 @@ let resume_model_id_of_checkpoint
     Returns a run_result on success, or an error string on failure. *)
 let rec run_worker_via_oas
     ~(sw : Eio.Switch.t)
+    ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(base_path : string)
     ~(meta : Worker_container_types.worker_container_meta)
     ~(provider : Oas.Provider.config)
@@ -306,11 +307,6 @@ let rec run_worker_via_oas
   let worker_name = meta.worker_name in
   let* auth_token =
     Worker_container_types.worker_auth_token ~base_path ~worker_name
-  in
-  let* net =
-    match Eio_context.get_net_opt () with
-    | Some net -> Ok net
-    | None -> Error "Eio net not initialized"
   in
   let heartbeat_cbs =
     make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name
@@ -347,6 +343,7 @@ let rec run_worker_via_oas
 
 and resume_worker_via_oas
     ~(sw : Eio.Switch.t)
+    ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(base_path : string)
     ~(meta : Worker_container_types.worker_container_meta)
     ~(checkpoint : Oas.Checkpoint.t)
@@ -359,11 +356,6 @@ and resume_worker_via_oas
   let session_id = meta.mcp_session_id in
   let* auth_token =
     Worker_container_types.worker_auth_token ~base_path ~worker_name
-  in
-  let* net =
-    match Eio_context.get_net_opt () with
-    | Some net -> Ok net
-    | None -> Error "Eio net not initialized"
   in
   let heartbeat_cbs =
     make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name

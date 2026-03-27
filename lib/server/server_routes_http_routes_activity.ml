@@ -12,22 +12,24 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
-let activity_http_deps : Server_activity_http.deps =
+let activity_http_deps ~sw ~clock : Server_activity_http.deps =
   {
     query_param;
     int_query_param;
     get_origin;
     cors_headers;
-    get_switch = (fun () -> Some (Eio_context.get_switch ()));
-    get_clock = (fun () -> Some (Eio_context.get_clock ()));
+    get_switch = (fun () -> Some sw);
+    get_clock = (fun () -> Some clock);
     get_session_id_any = Server_mcp_transport_http.get_session_id_any;
   }
 
-let activity_events_http_json ~state request =
-  Server_activity_http.events_http_json ~deps:activity_http_deps ~state request
+let activity_events_http_json ~sw ~clock ~state request =
+  Server_activity_http.events_http_json
+    ~deps:(activity_http_deps ~sw ~clock) ~state request
 
-let activity_graph_http_json ~state request =
-  Server_activity_http.graph_http_json ~deps:activity_http_deps ~state request
+let activity_graph_http_json ~sw ~clock ~state request =
+  Server_activity_http.graph_http_json
+    ~deps:(activity_http_deps ~sw ~clock) ~state request
 
 let json_upsert_string_field name value = function
   | `Assoc fields ->
@@ -36,16 +38,16 @@ let json_upsert_string_field name value = function
   | _non_object ->
       failwith (Printf.sprintf "json_upsert_string_field: expected JSON object, got non-object for field %S" name)
 
-let add_routes router =
+let add_routes ~sw ~clock router =
   router
   |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = activity_events_http_json ~state req in
+         let json = activity_events_http_json ~sw ~clock ~state req in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/activity/graph" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = activity_graph_http_json ~state req in
+         let json = activity_graph_http_json ~sw ~clock ~state req in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/activity/swimlane" (fun request reqd ->

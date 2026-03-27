@@ -5,7 +5,15 @@ open Result_syntax
 
 include Worker_container
 
-let run_worker_oas ~sw ~base_path ~worker_name
+let resolve_net ?net () =
+  match net with
+  | Some net -> Ok net
+  | None -> (
+      match Eio_context.get_net_opt () with
+      | Some net -> Ok net
+      | None -> Error "Eio net not initialized")
+
+let run_worker_oas ~sw ?net ~base_path ~worker_name
     ~(provider : Agent_sdk.Provider.config) ~(model_id : string)
     ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
@@ -160,11 +168,12 @@ let run_worker_oas ~sw ~base_path ~worker_name
         let gate_config =
           Worker_oas.gate_config_of_execution_scope meta.execution_scope
         in
-        Worker_oas.run_worker_via_oas ~sw ~base_path ~meta ~provider
+        let* net = resolve_net ?net () in
+        Worker_oas.run_worker_via_oas ~sw ~net ~base_path ~meta ~provider
           ~system_prompt ~prompt ~tools ~raw_trace ~gate_config
           ?worker_run_id ()
 
-let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
+let continue_worker ?worker_run_id ~sw ?net ~base_path ~room_config ~worker_name
     ~(team_session_id : string) ~(prompt : string) :
     unit -> (run_result, string) result =
   fun () ->
@@ -288,10 +297,11 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                 in
                 String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
               in
-              Worker_oas.resume_worker_via_oas ~sw ~base_path ~meta ~checkpoint
+              let* net = resolve_net ?net () in
+              Worker_oas.resume_worker_via_oas ~sw ~net ~base_path ~meta ~checkpoint
                 ~prompt ~tools ~raw_trace ?worker_run_id ()))
 
-let run_worker ~sw ~base_path ~worker_name ~model_label ~team_session_id
+let run_worker ~sw ?net ~base_path ~worker_name ~model_label ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
     ?thinking_enabled ?max_turns ?worker_run_id ~role
     ~selection_note
@@ -302,7 +312,7 @@ let run_worker ~sw ~base_path ~worker_name ~model_label ~team_session_id
     | Some cfg -> cfg.Llm_provider.Provider_config.model_id
     | None -> model_label
   in
-  run_worker_oas ~sw ~base_path ~worker_name ~provider ~model_id
+  run_worker_oas ~sw ?net ~base_path ~worker_name ~provider ~model_id
     ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
     ?thinking_enabled ?max_turns ?worker_run_id ~role

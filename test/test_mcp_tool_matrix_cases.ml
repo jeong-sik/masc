@@ -622,7 +622,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock init_mode =
   in
   let state =
     Mcp_eio.create_state_eio ~sw ~env
-      ~proc_mgr ~fs ~clock ~net ~base_path
+      ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path
   in
   let fixture =
     {

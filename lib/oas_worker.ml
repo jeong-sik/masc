@@ -554,6 +554,8 @@ let run_model_by_label
     ?memory
     ?on_event
     ?transport
+    ?sw
+    ?net
     ()
   : (run_result, string) result =
   (* Validate the label parses before proceeding via OAS Cascade_config *)
@@ -561,7 +563,7 @@ let run_model_by_label
   | None ->
     Error (Printf.sprintf "Cannot parse model label: %s" model_label)
   | Some _pc ->
-    match require_eio () with
+    match require_eio ?sw ?net () with
     | Error e -> Error e
     | Ok (sw, net) ->
         let transport_resolved = match transport with
@@ -598,6 +600,8 @@ let run_named_with_masc_tools
     ?raw_trace
     ?on_event
     ?transport
+    ?sw
+    ?net
     ()
   : (run_result, string) result =
   (* Convert MASC tools to OAS tools, then delegate to run_named.
@@ -610,7 +614,7 @@ let run_named_with_masc_tools
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
-    ?raw_trace ?on_event ?transport ()
+    ?raw_trace ?on_event ?transport ?sw ?net ()
 
 let run_model_with_masc_tools
     ~(model_label : string)
@@ -627,9 +631,11 @@ let run_model_with_masc_tools
     ?raw_trace
     ?on_event
     ?transport
+    ?sw
+    ?net
     ()
   : (run_result, string) result =
-  match require_eio () with
+  match require_eio ?sw ?net () with
   | Error e -> Error e
   | Ok (sw, net) ->
       let transport_resolved = match transport with

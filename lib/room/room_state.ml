@@ -85,9 +85,10 @@ let recover_room_state config json =
 
 (** Write room state — persists to both filesystem and PostgreSQL *)
 let write_state config state =
-  write_json config (state_path config) (room_state_to_yojson state);
+  let json = room_state_to_yojson state in
+  write_json config (state_path config) json;
   if is_pg_backend config then begin
-    let json_str = Yojson.Safe.to_string (room_state_to_yojson state) in
+    let json_str = Yojson.Safe.to_string json in
     (match backend_set config ~key:"room:state" ~value:json_str with
      | Ok () -> ()
      | Error e -> Log.Misc.error "room_state write_state backend_set failed: %s" (Backend_types.show_error e))

@@ -68,18 +68,19 @@ let dashboard_session_list_timeout_s =
 let dashboard_active_or_recent_sessions ~clock config =
   let cutoff_unix = Time_compat.now () -. 86400.0 in
   let cutoff_iso = Dashboard_utils.iso_of_unix cutoff_unix in
+  let limit = dashboard_session_list_limit () in
   let sessions =
     match
       Eio.Time.with_timeout clock dashboard_session_list_timeout_s (fun () ->
           Ok
             (Team_session_store.list_sessions ~since_unix:cutoff_unix
-               ~limit:(dashboard_session_list_limit ()) config))
+               ~limit config))
     with
     | Ok rows -> rows
     | Error `Timeout ->
         Log.Dashboard.warn
           "dashboard session list timed out after %.0fs (limit=%d); serving without session rows"
-          dashboard_session_list_timeout_s (dashboard_session_list_limit ());
+          dashboard_session_list_timeout_s limit;
         []
   in
   sessions

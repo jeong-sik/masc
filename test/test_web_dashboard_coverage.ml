@@ -101,7 +101,7 @@ let make_temp_dir label =
 
 (* ============================================================
    html Tests — Vite SPA index.html
-   When assets/dashboard/ is not built (e.g. CI without npm run build),
+   When assets/dashboard/ is not built (e.g. CI without pnpm run build),
    Web_dashboard.html() returns a fallback page.  Tests adapt accordingly.
    ============================================================ *)
 

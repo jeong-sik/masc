@@ -496,8 +496,8 @@ Journal: 최대 200개 항목 보관. agent/text/kind/timestamp.
 ### 4.6. Build Pipeline
 
 ```bash
-cd dashboard && npm run dev    # Vite dev server :5173 (HMR)
-cd dashboard && npm run build  # Production build -> ../assets/dashboard/
+cd dashboard && pnpm run dev    # Vite dev server :5173 (HMR)
+cd dashboard && pnpm run build  # Production build -> ../assets/dashboard/
 ```
 
 Vite 설정:

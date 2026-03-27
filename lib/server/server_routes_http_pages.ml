@@ -241,7 +241,7 @@ let serve_dashboard_index request reqd =
         ~request body reqd
   | Error _ ->
       Http.Response.html
-        "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>"
+        "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; pnpm run build</body></html>"
         reqd
 
 let is_compressible_asset name =

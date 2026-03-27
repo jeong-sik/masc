@@ -13,7 +13,7 @@ build:
 
 # Build dashboard SPA (Vite) — force rebuild
 dashboard:
-	cd dashboard && npm ci && npm run build
+	cd dashboard && pnpm install --frozen-lockfile && pnpm run build
 
 # Build everything (alias for build)
 build-all: build

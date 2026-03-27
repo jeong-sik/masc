@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build-dashboard-if-needed.sh — Rebuild dashboard SPA only when sources changed.
 # Called by `make build`. Compares source mtime against build output.
-# Skips when: no package.json, npm missing, or sources unchanged.
+# Skips when: no package.json, pnpm/corepack missing, or sources unchanged.
 
 set -euo pipefail
 
@@ -16,11 +16,17 @@ if [ ! -f "$DASHBOARD_DIR/package.json" ]; then
   exit 0
 fi
 
-# No npm — skip silently
-if ! command -v npm >/dev/null 2>&1; then
-  echo "[dashboard] npm not found, skipping." >&2
+dashboard_pm=()
+dashboard_pm_label=""
+if command -v pnpm >/dev/null 2>&1; then
+  dashboard_pm=(pnpm)
+elif command -v corepack >/dev/null 2>&1; then
+  dashboard_pm=(corepack pnpm)
+else
+  echo "[dashboard] pnpm/corepack not found, skipping." >&2
   exit 0
 fi
+dashboard_pm_label="${dashboard_pm[*]}"
 
 # Check if rebuild is needed: any source file newer than stamp
 needs_rebuild() {
@@ -52,17 +58,17 @@ if needs_rebuild; then
   echo "[dashboard] Sources changed, rebuilding SPA..." >&2
   log_file="$(mktemp /tmp/masc-dashboard-build.XXXXXX.log)"
   if [ -d "$DASHBOARD_DIR/node_modules" ]; then
-    if (cd "$DASHBOARD_DIR" && npm run build >"$log_file" 2>&1); then
+    if (cd "$DASHBOARD_DIR" && "${dashboard_pm[@]}" run build >"$log_file" 2>&1); then
       tail -n 3 "$log_file" >&2 || true
       rm -f "$log_file"
       touch "$STAMP"
       echo "[dashboard] Build complete." >&2
       exit 0
     fi
-    echo "[dashboard] Existing deps build failed, retrying after npm install..." >&2
+    echo "[dashboard] Existing deps build failed, retrying after ${dashboard_pm_label} install..." >&2
   fi
 
-  if ! (cd "$DASHBOARD_DIR" && npm install --prefer-offline --no-audit >"$log_file" 2>&1 && npm run build >>"$log_file" 2>&1); then
+  if ! (cd "$DASHBOARD_DIR" && "${dashboard_pm[@]}" install --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
     tail -n 20 "$log_file" >&2 || true
     rm -f "$log_file"
     echo "[dashboard] Build failed (non-fatal)." >&2

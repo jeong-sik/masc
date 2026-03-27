@@ -65,28 +65,35 @@ release_build_lock() {
 build_dashboard_spa() {
     local dashboard_dir="$SCRIPT_DIR/dashboard"
     local log_file=""
+    local dashboard_pm=()
+    local dashboard_pm_label=""
 
     if [ ! -f "$dashboard_dir/package.json" ]; then
         return 0
     fi
 
     echo "[dashboard] Building SPA before server start..." >&2
-    if ! command -v npm >/dev/null 2>&1; then
-        echo "[dashboard] npm not found, skipping dashboard build." >&2
+    if command -v pnpm >/dev/null 2>&1; then
+        dashboard_pm=(pnpm)
+    elif command -v corepack >/dev/null 2>&1; then
+        dashboard_pm=(corepack pnpm)
+    else
+        echo "[dashboard] pnpm/corepack not found, skipping dashboard build." >&2
         return 0
     fi
+    dashboard_pm_label="${dashboard_pm[*]}"
 
     log_file="$(mktemp /tmp/masc-dashboard-build.XXXXXX.log)"
     if [ -d "$dashboard_dir/node_modules" ]; then
-        if (cd "$dashboard_dir" && npm run build >"$log_file" 2>&1); then
+        if (cd "$dashboard_dir" && "${dashboard_pm[@]}" run build >"$log_file" 2>&1); then
             tail -n 3 "$log_file" >&2 || true
             rm -f "$log_file"
             return 0
         fi
-        echo "[dashboard] Existing deps build failed, retrying after npm install..." >&2
+        echo "[dashboard] Existing deps build failed, retrying after ${dashboard_pm_label} install..." >&2
     fi
 
-    if (cd "$dashboard_dir" && npm install --prefer-offline --no-audit >"$log_file" 2>&1 && npm run build >>"$log_file" 2>&1); then
+    if (cd "$dashboard_dir" && "${dashboard_pm[@]}" install --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
         tail -n 6 "$log_file" >&2 || true
         rm -f "$log_file"
         return 0

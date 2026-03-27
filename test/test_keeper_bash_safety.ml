@@ -21,6 +21,7 @@ let test_allowed_commands () =
     "make test";
     "python3 script.py";
     "npm run build";
+    "pnpm run build";
     "cat README.md";
     "ls -la";
     "head -20 file.ml";
@@ -93,6 +94,8 @@ let test_write_ops_detected () =
     "make deploy";
     "make install";
     "npm publish";
+    "pnpm install";
+    "pnpm publish";
     "mv file1 file2";
     "cp src dst";
     "mkdir newdir";
@@ -113,6 +116,8 @@ let test_read_ops_pass () =
     "make test";
     "npm run build";
     "npm run dev";
+    "pnpm run build";
+    "pnpm run dev";
     "rg pattern lib/";
     "cat file.ml";
     "ls -la";

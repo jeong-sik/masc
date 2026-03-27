@@ -47,7 +47,7 @@ Dashboard is a Preact+HTM SPA compiled with Vite. Common issues:
 
 **Always after dashboard changes:**
 ```bash
-cd dashboard && npm run build  # catches TypeScript errors
+cd dashboard && pnpm run build  # catches TypeScript errors
 ```
 
 ## 4. Test Breakage From Refactoring (6 occurrences)

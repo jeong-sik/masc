@@ -121,7 +121,10 @@ function scheduleHarnessReload(): void {
 }
 
 async function loadHarnessHealth(): Promise<void> {
-  if (harnessRequest) return harnessRequest
+  if (harnessRequest) {
+    harnessLoading.value = true
+    return harnessRequest
+  }
 
   harnessLoading.value = true
   harnessError.value = null

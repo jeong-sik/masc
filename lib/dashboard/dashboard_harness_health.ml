@@ -57,9 +57,20 @@ let trim_recent (type a) max_items (values : a list) : a list =
   if List.length values <= max_items then values
   else List.filteri (fun idx _ -> idx < max_items) values
 
+let trimmed_env_opt key =
+  match Sys.getenv_opt key with
+  | Some value ->
+      let value = String.trim value in
+      if String.equal value "" then None else Some value
+  | None -> None
+
 let me_root () =
-  try Sys.getenv "ME_ROOT" with
-  | Not_found -> Sys.getenv "HOME" ^ "/me"
+  match trimmed_env_opt "ME_ROOT" with
+  | Some root -> root
+  | None -> (
+      match trimmed_env_opt "HOME" with
+      | Some home -> Filename.concat home "me"
+      | None -> Filename.concat (Filename.get_temp_dir_name ()) "me")
 
 let pre_compact_store_base_dir () =
   Filename.concat (me_root ()) "data/harness-pre-compact"
@@ -118,15 +129,6 @@ let read_store_records store ?since ?until () =
     let start_date = if since = "" then "2020-01-01" else since in
     let end_date = if until = "" then "2099-12-31" else until in
     Dated_jsonl.read_range store ~since:start_date ~until:end_date
-
-let latest_from_store (type a) store (event_of_json : Yojson.Safe.t -> a option)
-    : a option =
-  match Dated_jsonl.read_recent store 1 |> List.filter_map event_of_json with
-  | event :: _ -> Some event
-  | [] -> None
-
-let has_any_records store =
-  Dated_jsonl.read_recent store 1 <> []
 
 let max_timestamp left right =
   match (left, right) with
@@ -327,6 +329,10 @@ let latest_timestamp_of_verdicts (verdicts : harness_verdict_item list) =
   | item :: _ -> Some item.timestamp
   | [] -> None
 
+let latest_sorted = function
+  | item :: _ -> Some item
+  | [] -> None
+
 let pre_compact_timestamp (event : pre_compact_event) = event.timestamp
 let pre_compact_ratio (event : pre_compact_event) = event.context_ratio
 let dna_quality_timestamp (event : dna_quality_event) = event.timestamp
@@ -367,11 +373,11 @@ let overview_json
         json_float_option (Option.map dna_quality_score latest_dna) );
     ]
 
-let record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count
-    ~strategies ~model_family ~trigger =
+let record_pre_compact_at ~timestamp ~keeper_name ~context_ratio ~message_count
+    ~token_count ~strategies ~model_family ~trigger =
   let event =
     {
-      timestamp = Time_compat.now ();
+      timestamp;
       keeper_name;
       context_ratio;
       message_count;
@@ -384,10 +390,16 @@ let record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count
   Dated_jsonl.append (get_pre_compact_store ()) (pre_compact_record_json event);
   event
 
-let record_dna_quality ~keeper_name ~score ~dimensions =
+let record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count
+    ~strategies ~model_family ~trigger =
+  record_pre_compact_at ~timestamp:(Time_compat.now ()) ~keeper_name
+    ~context_ratio ~message_count ~token_count ~strategies ~model_family
+    ~trigger
+
+let record_dna_quality_at ~timestamp ~keeper_name ~score ~dimensions =
   let event =
     {
-      timestamp = Time_compat.now ();
+      timestamp;
       keeper_name;
       score;
       dimensions;
@@ -396,16 +408,16 @@ let record_dna_quality ~keeper_name ~score ~dimensions =
   Dated_jsonl.append (get_dna_quality_store ()) (dna_quality_record_json event);
   event
 
+let record_dna_quality ~keeper_name ~score ~dimensions =
+  record_dna_quality_at ~timestamp:(Time_compat.now ()) ~keeper_name ~score
+    ~dimensions
+
 let recent_verdicts_json ?since ?until () =
   `List (List.map verdict_item_json (read_recent_verdicts ?since ?until ()))
 
-let recent_pre_compact_json ?since ?until () =
-  let events = read_pre_compact_events ?since ?until () in
-  let latest : pre_compact_event option =
-    latest_from_store (get_pre_compact_store ()) pre_compact_event_of_json
-  in
+let recent_pre_compact_json ?since ?until ~has_any
+    ~(latest : pre_compact_event option) ~(events : pre_compact_event list) () =
   let status = status_to_string (pre_compact_status latest) in
-  let has_any = has_any_records (get_pre_compact_store ()) in
   let recent_events = trim_recent max_runtime_events events in
   `Assoc
     [
@@ -422,13 +434,9 @@ let recent_pre_compact_json ?since ?until () =
       ("total_recent", `Int (List.length events));
     ]
 
-let recent_dna_quality_json ?since ?until () =
-  let events = read_dna_quality_events ?since ?until () in
-  let latest : dna_quality_event option =
-    latest_from_store (get_dna_quality_store ()) dna_quality_event_of_json
-  in
+let recent_dna_quality_json ?since ?until ~has_any
+    ~(latest : dna_quality_event option) ~(events : dna_quality_event list) () =
   let status = status_to_string (dna_quality_status latest) in
-  let has_any = has_any_records (get_dna_quality_store ()) in
   let recent_events = trim_recent max_runtime_events events in
   `Assoc
     [
@@ -448,11 +456,20 @@ let recent_dna_quality_json ?since ?until () =
 let json ?since ?until () =
   let calibration = Eval_calibration.calibration_stats ?since ?until () in
   let recent_verdicts = read_recent_verdicts ?since ?until () in
+  let has_window = Option.is_some since || Option.is_some until in
+  let all_pre_compact_events = read_pre_compact_events () in
   let latest_pre_compact : pre_compact_event option =
-    latest_from_store (get_pre_compact_store ()) pre_compact_event_of_json
+    latest_sorted all_pre_compact_events
   in
-  let latest_dna : dna_quality_event option =
-    latest_from_store (get_dna_quality_store ()) dna_quality_event_of_json
+  let pre_compact_events =
+    if has_window then read_pre_compact_events ?since ?until ()
+    else all_pre_compact_events
+  in
+  let all_dna_quality_events = read_dna_quality_events () in
+  let latest_dna : dna_quality_event option = latest_sorted all_dna_quality_events in
+  let dna_quality_events =
+    if has_window then read_dna_quality_events ?since ?until ()
+    else all_dna_quality_events
   in
   `Assoc
     [
@@ -465,6 +482,12 @@ let json ?since ?until () =
           ~latest_dna );
       ("calibration", calibration);
       ("recent_verdicts", `List (List.map verdict_item_json recent_verdicts));
-      ("pre_compact", recent_pre_compact_json ?since ?until ());
-      ("dna_quality", recent_dna_quality_json ?since ?until ());
+      ( "pre_compact",
+        recent_pre_compact_json ?since ?until
+          ~has_any:(all_pre_compact_events <> [])
+          ~latest:latest_pre_compact ~events:pre_compact_events () );
+      ( "dna_quality",
+        recent_dna_quality_json ?since ?until
+          ~has_any:(all_dna_quality_events <> []) ~latest:latest_dna
+          ~events:dna_quality_events () );
     ]

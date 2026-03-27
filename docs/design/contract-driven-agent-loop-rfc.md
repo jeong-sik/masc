@@ -23,6 +23,7 @@
 
 - 문서 PR 기준 상태는 `Go`다.
 - PoC-1 구현 착수는 `artifact store backend`, `adopt threshold 숫자`, `labeling protocol v0 freeze`가 확정되면 `Go`다.
+- 위 세 항목은 의도적으로 docs PR에 포함하지 않은 구현 전 gate다. 이 PR은 선택지를 잠그는 문서 SSOT를 머지하는 단계다.
 - 현재 경계 건강도 평가는 `B+`다. 구현 중 convenience-driven leakage가 보이면 즉시 중단하고 재검토한다.
 
 ## 1. Problem Statement
@@ -578,6 +579,7 @@ artifact는 ownership과 lifecycle이 분명해야 한다.
 - `false_negative_escape_rate`
 
 이 지표는 사전에 고정된 labeling / judging protocol 없이 사용하지 않는다.
+1차 PoC에서 `evidence_precision`의 canonical reported value는 labeling protocol의 `precision_strict`다.
 `evidence_precision`은 evidence 충족도를 측정하는 integrity metric이지 outcome correctness의 직접 측정값은 아니다. outcome quality는 `defect_escape_rate`와 workload별 success signal을 함께 봐야 한다.
 `claim_coverage`는 material output claim 중 explicit label(`supported` / `unsupported` / unresolved `ambiguous`)이 붙은 claim의 비율이다.
 즉 `claim_coverage = labeled_material_claims / total_material_claims`로 둔다.

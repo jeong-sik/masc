@@ -33,6 +33,7 @@
 
 - `precision_strict = supported / (supported + unsupported + ambiguous)`
 - `precision_lenient = supported / (supported + unsupported)`
+- 1차 PoC에서 `evidence_precision`의 canonical reported value는 `precision_strict`다.
 
 `adopt` 기준은 `precision_strict`를 사용한다.
 `precision_lenient`는 보조 지표로만 쓴다.

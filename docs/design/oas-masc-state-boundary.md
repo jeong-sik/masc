@@ -197,7 +197,7 @@ type keeper_meta = {
 
 **Effort**: Medium. 70+ call sites reference keeper_meta fields directly.
 **Risk**: Low — structural refactor, no behavior change.
-**Prerequisite for**: Phases 2 and 3.
+**Prerequisite for**: Phase 2. Phase 3 is expected to follow after Phase 2 removes the wrapper boundary.
 **Removal deadline**: remove the embedded `stats` field by the end of Phase 2. If Phase 2 is deferred or dropped, open a separate migration issue and keep the field marked deprecated rather than silently permanent.
 
 ### Phase 2: Eliminate `keeper_working_context` wrapper

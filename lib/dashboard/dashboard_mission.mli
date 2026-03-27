@@ -1,6 +1,8 @@
 val json :
   ?actor:string ->
   ?command_plane_summary:Yojson.Safe.t ->
+  ?snapshot_json:Yojson.Safe.t ->
+  ?digest_json:Yojson.Safe.t ->
   ?swarm_status:Yojson.Safe.t ->
   config:Room.config ->
   sw:Eio.Switch.t ->

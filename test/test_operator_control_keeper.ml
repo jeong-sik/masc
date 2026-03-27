@@ -1,6 +1,21 @@
 open Masc_mcp
 open Test_operator_control_support
 
+let set_env name value = Unix.putenv name value
+let unset_env name = Unix.putenv name ""
+
+let with_env name value f =
+  let prev = Sys.getenv_opt name in
+  (match value with
+   | Some v -> set_env name v
+   | None -> unset_env name);
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> set_env name v
+      | None -> unset_env name)
+    f
+
 let contains_substring s needle =
   let s_len = String.length s in
   let n_len = String.length needle in
@@ -200,120 +215,124 @@ goal = "Defaults goal"
 room_scope = "all"
 proactive_enabled = true
 |};
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
-      let keeper_ctx : _ Tool_keeper.context =
-        {
-          config;
-          agent_name = "operator";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-        }
-      in
-      let keeper_name = "config-provenance" in
-      let ok, _ =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
-          ~args:
-            (`Assoc
-              [
-                ("name", `String keeper_name);
-                ("presence_keepalive", `Bool false);
-              ])
-      in
-      Alcotest.(check bool) "keeper up ok" true ok;
-      let meta =
-        match Masc_mcp.Keeper_types.read_meta config keeper_name with
-        | Ok (Some meta) -> meta
-        | Ok None -> Alcotest.fail "keeper meta missing"
-        | Error err -> Alcotest.fail ("meta read failed: " ^ err)
-      in
-      let mutated =
-        {
-          meta with
-          room_scope = "current";
-          proactive = { meta.proactive with enabled = false };
-          usage =
+      with_env
+        "MASC_CONFIG_DIR"
+        (Some (Filename.concat base_dir "config"))
+        (fun () ->
+          let config = Room.default_config base_dir in
+          ignore (Room.init config ~agent_name:(Some "operator"));
+          let keeper_ctx : _ Tool_keeper.context =
             {
-              meta.usage with
-              total_input_tokens = 1200;
-              total_output_tokens = 800;
-              total_tokens = 2000;
-              total_cost_usd = 0.042;
-              last_model_used = "glm:auto";
-              last_input_tokens = 120;
-              last_output_tokens = 80;
-              last_total_tokens = 200;
-              last_latency_ms = 4000;
-            };
-          paused = true;
-          updated_at = Types.now_iso ();
-        }
-      in
-      (match Masc_mcp.Keeper_types.write_meta config mutated with
-      | Ok () -> ()
-      | Error err -> Alcotest.fail ("meta write failed: " ^ err));
-      let status, json =
-        Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
-      in
-      Alcotest.(check bool) "config found" true (status = `OK);
-      let open Yojson.Safe.Util in
-      Alcotest.(check bool) "trigger_mode removed from config surface" true
-        (json |> member "coordination" |> member "trigger_mode" = `Null);
-      Alcotest.(check string) "room_scope from live meta" "current"
-        (json |> member "coordination" |> member "room_scope" |> to_string);
-      Alcotest.(check bool) "runtime paused from live meta" true
-        (json |> member "runtime" |> member "paused" |> to_bool);
-      Alcotest.(check bool) "proactive enabled from live meta" false
-        (json |> member "proactive" |> member "enabled" |> to_bool);
-      Alcotest.(check string) "default source kind" "toml"
-        (json |> member "sources" |> member "default_source_kind" |> to_string);
-      Alcotest.(check bool) "live override flagged" true
-        (json |> member "sources" |> member "has_live_override" |> to_bool);
-      Alcotest.(check string) "auto team session removed" "removed"
-        (json |> member "auto_team_session" |> member "status" |> to_string);
-      let override_fields =
-        json |> member "sources" |> member "override_fields" |> to_list
-        |> List.map to_string
-      in
-      (* Source defaults keep room_scope = "all", while live meta is mutated to
-         "current", so the override must stay visible. *)
-      Alcotest.(check bool) "room_scope override flagged" true
-        (List.mem "coordination.room_scope" override_fields);
-      Alcotest.(check bool) "override field proactive" true
-        (List.mem "proactive.enabled" override_fields);
-      Alcotest.(check bool) "initiative surface removed" true
-        (json |> member "initiative" = `Null);
-      Alcotest.(check int) "total input tokens surfaced" 1200
-        (json |> member "metrics" |> member "total_input_tokens" |> to_int);
-      Alcotest.(check int) "last latency surfaced" 4000
-        (json |> member "metrics" |> member "last_latency_ms" |> to_int);
-      Alcotest.(check (option (float 0.001))) "last total tokens per sec surfaced"
-        (Some 50.0)
-        (json |> member "metrics" |> member "last_total_tokens_per_sec" |> to_float_option);
-      Alcotest.(check (option (float 0.001))) "last output tokens per sec surfaced"
-        (Some 20.0)
-        (json |> member "metrics" |> member "last_output_tokens_per_sec" |> to_float_option);
-      (* Prompt source depends on runtime bootstrap and any restored overrides;
-         accepted values come from Prompt_registry.resolve_prompt_unlocked. *)
-      let prompt_source =
-        json |> member "prompt" |> member "system_prompt_blocks"
-        |> member "world" |> member "source" |> to_string
-      in
-      Alcotest.(check bool) "prompt block source surfaced" true
-        (List.mem prompt_source [ "override"; "file"; "default"; "missing" ]);
-      let effective_system_prompt =
-        json |> member "prompt" |> member "effective_system_prompt" |> to_string
-      in
-      Alcotest.(check bool) "effective system prompt includes goal" true
-        (contains_substring effective_system_prompt ("Goal: " ^ mutated.goal));
-      Alcotest.(check bool) "effective system prompt includes world block" true
-        (contains_substring effective_system_prompt "<world>");
-      let ok, _ =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
-          ~args:(`Assoc [ ("name", `String keeper_name) ])
-      in
-      Alcotest.(check bool) "keeper down ok" true ok)
+              config;
+              agent_name = "operator";
+              sw;
+              clock = Eio.Stdenv.clock env;
+              proc_mgr = Some (Eio.Stdenv.process_mgr env);
+            }
+          in
+          let keeper_name = "config-provenance" in
+          let ok, _ =
+            dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+              ~args:
+                (`Assoc
+                  [
+                    ("name", `String keeper_name);
+                    ("presence_keepalive", `Bool false);
+                  ])
+          in
+          Alcotest.(check bool) "keeper up ok" true ok;
+          let meta =
+            match Masc_mcp.Keeper_types.read_meta config keeper_name with
+            | Ok (Some meta) -> meta
+            | Ok None -> Alcotest.fail "keeper meta missing"
+            | Error err -> Alcotest.fail ("meta read failed: " ^ err)
+          in
+          let mutated =
+            {
+              meta with
+              room_scope = "current";
+              proactive = { meta.proactive with enabled = false };
+              usage =
+                {
+                  meta.usage with
+                  total_input_tokens = 1200;
+                  total_output_tokens = 800;
+                  total_tokens = 2000;
+                  total_cost_usd = 0.042;
+                  last_model_used = "glm:auto";
+                  last_input_tokens = 120;
+                  last_output_tokens = 80;
+                  last_total_tokens = 200;
+                  last_latency_ms = 4000;
+                };
+              paused = true;
+              updated_at = Types.now_iso ();
+            }
+          in
+          (match Masc_mcp.Keeper_types.write_meta config mutated with
+          | Ok () -> ()
+          | Error err -> Alcotest.fail ("meta write failed: " ^ err));
+          let status, json =
+            Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
+          in
+          Alcotest.(check bool) "config found" true (status = `OK);
+          let open Yojson.Safe.Util in
+          Alcotest.(check bool) "trigger_mode removed from config surface" true
+            (json |> member "coordination" |> member "trigger_mode" = `Null);
+          Alcotest.(check string) "room_scope from live meta" "current"
+            (json |> member "coordination" |> member "room_scope" |> to_string);
+          Alcotest.(check bool) "runtime paused from live meta" true
+            (json |> member "runtime" |> member "paused" |> to_bool);
+          Alcotest.(check bool) "proactive enabled from live meta" false
+            (json |> member "proactive" |> member "enabled" |> to_bool);
+          Alcotest.(check string) "default source kind" "toml"
+            (json |> member "sources" |> member "default_source_kind" |> to_string);
+          Alcotest.(check bool) "live override flagged" true
+            (json |> member "sources" |> member "has_live_override" |> to_bool);
+          Alcotest.(check string) "auto team session removed" "removed"
+            (json |> member "auto_team_session" |> member "status" |> to_string);
+          let override_fields =
+            json |> member "sources" |> member "override_fields" |> to_list
+            |> List.map to_string
+          in
+          (* Source defaults keep room_scope = "all", while live meta is mutated to
+             "current", so the override must stay visible. *)
+          Alcotest.(check bool) "room_scope override flagged" true
+            (List.mem "coordination.room_scope" override_fields);
+          Alcotest.(check bool) "override field proactive" true
+            (List.mem "proactive.enabled" override_fields);
+          Alcotest.(check bool) "initiative surface removed" true
+            (json |> member "initiative" = `Null);
+          Alcotest.(check int) "total input tokens surfaced" 1200
+            (json |> member "metrics" |> member "total_input_tokens" |> to_int);
+          Alcotest.(check int) "last latency surfaced" 4000
+            (json |> member "metrics" |> member "last_latency_ms" |> to_int);
+          Alcotest.(check (option (float 0.001))) "last total tokens per sec surfaced"
+            (Some 50.0)
+            (json |> member "metrics" |> member "last_total_tokens_per_sec" |> to_float_option);
+          Alcotest.(check (option (float 0.001))) "last output tokens per sec surfaced"
+            (Some 20.0)
+            (json |> member "metrics" |> member "last_output_tokens_per_sec" |> to_float_option);
+          (* Prompt source depends on runtime bootstrap and any restored overrides;
+             accepted values come from Prompt_registry.resolve_prompt_unlocked. *)
+          let prompt_source =
+            json |> member "prompt" |> member "system_prompt_blocks"
+            |> member "world" |> member "source" |> to_string
+          in
+          Alcotest.(check bool) "prompt block source surfaced" true
+            (List.mem prompt_source [ "override"; "file"; "default"; "missing" ]);
+          let effective_system_prompt =
+            json |> member "prompt" |> member "effective_system_prompt" |> to_string
+          in
+          Alcotest.(check bool) "effective system prompt includes goal" true
+            (contains_substring effective_system_prompt ("Goal: " ^ mutated.goal));
+          Alcotest.(check bool) "effective system prompt includes world block" true
+            (contains_substring effective_system_prompt "<world>");
+          let ok, _ =
+            dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
+              ~args:(`Assoc [ ("name", `String keeper_name) ])
+          in
+          Alcotest.(check bool) "keeper down ok" true ok))
 
 let test_snapshot_keeper_tool_audit_fallback () =
   Eio_main.run @@ fun env ->

@@ -241,7 +241,8 @@ let backend_config_for base_path =
   in
   let backend_type =
     match storage_type with
-    | "postgres" | "postgresql" -> Backend_types.PostgresNative
+    | "postgres" | "postgresql" | "postgres-native" ->
+        Backend_types.PostgresNative
     | "memory" -> Backend_types.Memory
     | _ -> Backend_types.FileSystem
   in

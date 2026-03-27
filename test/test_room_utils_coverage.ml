@@ -295,6 +295,19 @@ let test_backend_config_for_uses_fallback_pg_url () =
       check (option string) "postgres url" (Some url) cfg.postgres_url)
 
 let test_postgres_url_from_env_keeps_supabase_transaction_pooler () =
+let test_backend_config_for_accepts_postgres_native_alias () =
+  let url = "postgresql://sb.example/test_backend_config_alias" in
+  with_envs
+    (pg_env_bindings ~masc_storage_type:"postgres-native" ~sb_pg_url:url ())
+    (fun () ->
+      let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
+      check bool "backend type is postgres native" true
+        (match cfg.backend_type with
+         | Backend_types.PostgresNative -> true
+         | _ -> false);
+      check (option string) "postgres url" (Some url) cfg.postgres_url)
+
+let test_postgres_url_from_env_keeps_supabase_transaction_pooler () =
   let raw_url =
     "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
   in
@@ -536,6 +549,8 @@ let () =
     ];
     "backend_config_for", [
       test_case "uses fallback pg url" `Quick test_backend_config_for_uses_fallback_pg_url;
+      test_case "accepts postgres-native alias" `Quick
+        test_backend_config_for_accepts_postgres_native_alias;
       test_case "keeps supabase transaction pooler" `Quick
         test_postgres_url_from_env_keeps_supabase_transaction_pooler;
       test_case "prefers supabase transaction companion" `Quick

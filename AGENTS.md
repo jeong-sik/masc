@@ -27,8 +27,7 @@ dune runtest --root .
 make test
 
 # Run (dev)
-PORT="$(./start-masc-mcp.sh --print-port)"
-./start-masc-mcp.sh --http --port "$PORT"
+./start-masc-mcp.sh --http
 
 # Type check only
 dune build --root . @check

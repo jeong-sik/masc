@@ -15,8 +15,8 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 dune build --root .
 
+./start-masc-mcp.sh --http
 PORT="$(./start-masc-mcp.sh --print-port)"
-./start-masc-mcp.sh --http --port "$PORT"
 ```
 
 기본 포트:
@@ -29,6 +29,7 @@ PORT="$(./start-masc-mcp.sh --print-port)"
 
 - 현재 checkout의 기본 포트 확인: `./start-masc-mcp.sh --print-port`
 - worktree에서 `--port`를 생략하면 script가 worktree별 기본 포트를 자동 선택한다.
+- `--print-port`는 현재 checkout의 기본 포트 조회용이다. 서버 시작은 보통 `./start-masc-mcp.sh --http`로 충분하다.
 
 ## 2. Health Check
 

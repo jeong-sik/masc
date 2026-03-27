@@ -22,8 +22,8 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 dune build --root .
 
+./start-masc-mcp.sh --http
 PORT="$(./start-masc-mcp.sh --print-port)"
-./start-masc-mcp.sh --http --port "$PORT"
 curl "http://127.0.0.1:${PORT}/health"
 ```
 
@@ -39,6 +39,7 @@ curl "http://127.0.0.1:${PORT}/health"
 - 현재 checkout의 기본 포트 확인: `./start-masc-mcp.sh --print-port`
 - worktree에서 `--port`를 생략하면 script가 worktree별 기본 포트를 자동 선택한다.
 - 고정 포트가 필요하면 `MASC_MCP_PORT=94xx` 또는 `--port 94xx`로 덮어쓴다.
+- `--print-port`는 현재 checkout의 기본 포트 조회용이다. 서버 시작은 보통 `./start-masc-mcp.sh --http`로 충분하다.
 
 `0.0.0.0` 같은 non-loopback 주소에 바인드할 때는 auth 설정을 먼저 맞춘 뒤 원격 노출 경로로 취급하세요. 자세한 내용은 `docs/REMOTE-MCP-OPERATOR.md`, `docs/spec/09-server-transport.md`를 봅니다.
 

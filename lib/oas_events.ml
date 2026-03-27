@@ -113,11 +113,11 @@ let publish_keeper_snapshot (bus : Agent_sdk.Event_bus.t) ~keeper_name
   Agent_sdk.Event_bus.publish bus
     (Agent_sdk.Event_bus.Custom ("masc:keeper:snapshot", payload))
 
-(** {1 Keeper Resident Lifecycle Events} *)
+(** {1 Keeper Lifecycle Events} *)
 
-(** Publish a resident keepalive lifecycle event.
+(** Publish a keeper keepalive lifecycle event.
     Event names: "started", "stopped", "crashed", "restarted", "dead". *)
-let publish_keeper_resident_lifecycle (bus : Agent_sdk.Event_bus.t) ~event ~keeper_name
+let publish_keeper_lifecycle (bus : Agent_sdk.Event_bus.t) ~event ~keeper_name
     ~detail =
   let payload = `Assoc [
     ("event", `String event);
@@ -126,7 +126,7 @@ let publish_keeper_resident_lifecycle (bus : Agent_sdk.Event_bus.t) ~event ~keep
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   Agent_sdk.Event_bus.publish bus
-    (Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", payload))
+    (Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", payload))
 
 (** {1 Phase 4: Social Events} *)
 

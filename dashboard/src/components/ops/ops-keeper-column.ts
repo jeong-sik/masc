@@ -96,7 +96,7 @@ export function OpsKeeperColumn() {
             })()}
           `)}
         </div>
-        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45] mt-3">Persistent agent는 resident keeper와 분리해서 참고용으로만 보여줍니다.</p>
+        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45] mt-3">Persistent agent alias는 같은 keeper 런타임을 호환 표기로 보여줍니다.</p>
         <div class="flex flex-col gap-2">
           ${persistentAgents.length === 0
             ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">분리된 persistent agent는 없습니다.</div>`

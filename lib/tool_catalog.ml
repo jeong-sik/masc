@@ -125,10 +125,10 @@ let explicit_metadata : (string * metadata) list =
         "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
     ( "masc_operator_judgment_write",
       hidden_active
-        "Internal resident-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
+        "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
     ( "masc_operator_judgment_latest",
       hidden_active
-        "Internal resident-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
+        "Internal operator-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
     (* Annotation overrides: correct misclassifications from name-pattern heuristics *)
     ( "masc_run_get",
       { default_metadata with readonly = Some true; idempotent = Some true } );

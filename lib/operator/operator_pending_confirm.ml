@@ -48,7 +48,7 @@ let operator_surface_contract_json =
       ("worker_cards", `String "truth");
     ]
 
-let resident_judge_runtime_json (config : Room.config) =
+let operator_judge_runtime_json (config : Room.config) =
   let runtime = Dashboard_operator_judge.runtime_status config.base_path in
   `Assoc
     [

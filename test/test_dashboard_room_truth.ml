@@ -46,17 +46,30 @@ let expire_execution_warmup () =
   surface.last_attempt_unix <- Some stale_attempt_ts;
   surface.last_attempt_at <- Some "stale_attempt_for_test"
 
-let keeper_boot_entry name : Lib.Keeper_types.keeper_boot_entry =
-  let now = "2026-03-25T08:05:54Z" in
-  {
-    name;
-    persona_name = name;
-    voice_enabled = false;
-    voice_channel = "text_only";
-    voice_agent_id = "";
-    created_at = now;
-    updated_at = now;
-  }
+let create_keeper env sw config name =
+  let ctx : _ Lib.Tool_keeper.context =
+    {
+      config;
+      agent_name = "tester";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = Some (Eio.Stdenv.process_mgr env);
+    }
+  in
+  match
+    Lib.Tool_keeper.dispatch ctx ~name:"masc_keeper_up"
+      ~args:
+        (`Assoc
+          [
+            ("name", `String name);
+            ("goal", `String "Dashboard keeper fixture");
+            ("presence_keepalive", `Bool false);
+            ("proactive_enabled", `Bool false);
+          ])
+  with
+  | Some (true, _) -> ()
+  | Some (false, err) -> fail err
+  | None -> fail "missing masc_keeper_up dispatch"
 
 let test_dashboard_room_truth_empty_room () =
   let dir = test_dir () in
@@ -66,8 +79,8 @@ let test_dashboard_room_truth_empty_room () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      warm_execution_cache ();
       Eio.Switch.run (fun sw ->
+        warm_execution_cache ();
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
@@ -153,11 +166,9 @@ let test_dashboard_room_truth_keeper_only_room_not_reported_empty () =
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
            ());
-      ignore
-        (Lib.Keeper_types.write_resident_keeper config
-           (keeper_boot_entry "sangsu"));
-      warm_execution_cache ();
       Eio.Switch.run (fun sw ->
+        create_keeper env sw config "sangsu";
+        warm_execution_cache ();
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
@@ -168,7 +179,7 @@ let test_dashboard_room_truth_keeper_only_room_not_reported_empty () =
         check int "keeper-only room counts general agents as zero"
           0
           (json |> member "room" |> member "counts" |> member "agents" |> to_int);
-        check int "keeper-only room still counts resident keeper"
+        check int "keeper-only room still counts keeper meta"
           1
           (json |> member "room" |> member "counts" |> member "keepers" |> to_int);
         check bool "keeper-only room does not report empty room focus"
@@ -200,11 +211,9 @@ let test_dashboard_room_truth_mixed_runtime_counts () =
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
            ());
-      ignore
-        (Lib.Keeper_types.write_resident_keeper config
-           (keeper_boot_entry "sangsu"));
-      warm_execution_cache ();
       Eio.Switch.run (fun sw ->
+        create_keeper env sw config "sangsu";
+        warm_execution_cache ();
         let json =
           Lib.Server_dashboard_http.dashboard_room_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
@@ -215,7 +224,7 @@ let test_dashboard_room_truth_mixed_runtime_counts () =
         check int "mixed room counts one general agent"
           1
           (json |> member "room" |> member "counts" |> member "agents" |> to_int);
-        check int "mixed room counts one resident keeper"
+        check int "mixed room counts one keeper"
           1
           (json |> member "room" |> member "counts" |> member "keepers" |> to_int);
         check bool "mixed room avoids empty runtime fallback"

@@ -3,7 +3,7 @@
 
     The loop persists selection state locally, ranks GitHub PRs/issues, and
     prepares or executes the next burn-down action in a dedicated worktree.
-    It intentionally keeps the action plan explicit so a resident keeper can
+    It intentionally keeps the action plan explicit so a keeper can
     inspect and drive the lane using normal MASC tools. *)
 
 open Tool_args

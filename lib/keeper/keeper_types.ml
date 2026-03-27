@@ -568,140 +568,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
 
-type keeper_boot_entry = {
-  name : string;
-  persona_name : string;
-  voice_enabled : bool;
-  voice_channel : string;
-  voice_agent_id : string;
-  created_at : string;
-  updated_at : string;
-}
-
-let resident_keeper_dir (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "resident-keepers" in
-  ensure_dir d
-
-let resident_keeper_path config name =
-  Filename.concat (resident_keeper_dir config) (name ^ ".json")
-
-let keeper_boot_to_json (entry : keeper_boot_entry) =
-  `Assoc
-    [
-      ("name", `String entry.name);
-      ("persona_name", `String entry.persona_name);
-      ("voice_enabled", `Bool entry.voice_enabled);
-      ("voice_channel", `String entry.voice_channel);
-      ("voice_agent_id", `String entry.voice_agent_id);
-      ("created_at", `String entry.created_at);
-      ("updated_at", `String entry.updated_at);
-    ]
-
-let keeper_boot_of_json (json : Yojson.Safe.t) :
-    (keeper_boot_entry, string) result =
-  try
-    let open Yojson.Safe.Util in
-    let name = json |> member "name" |> to_string in
-    let persona_name =
-      json |> member "persona_name" |> to_string_option
-      |> Option.value ~default:name
-    in
-    let voice_enabled =
-      json |> member "voice_enabled" |> to_bool_option
-      |> Option.value ~default:(default_voice_enabled_for name)
-    in
-    let voice_channel =
-      json |> member "voice_channel" |> to_string_option
-      |> Option.value ~default:(default_voice_channel_for name)
-    in
-    let voice_agent_id =
-      json |> member "voice_agent_id" |> to_string_option
-      |> Option.value ~default:(default_voice_agent_id_for name)
-    in
-    let created_at =
-      json |> member "created_at" |> to_string_option
-      |> Option.value ~default:(now_iso ())
-    in
-    let updated_at =
-      json |> member "updated_at" |> to_string_option
-      |> Option.value ~default:created_at
-    in
-    Ok
-      {
-        name;
-        persona_name;
-        voice_enabled;
-        voice_channel;
-        voice_agent_id;
-        created_at;
-        updated_at;
-      }
-  with Yojson.Safe.Util.Type_error (msg, _) | Failure msg ->
-    Error ("keeper boot entry parse error: " ^ msg)
-
-let keeper_boot_entry_of_meta ?created_at (meta : keeper_meta) : keeper_boot_entry =
-  {
-    name = meta.name;
-    persona_name = meta.name;
-    voice_enabled = meta.voice_enabled;
-    voice_channel = meta.voice_channel;
-    voice_agent_id = meta.voice_agent_id;
-    created_at = Option.value ~default:meta.created_at created_at;
-    updated_at = meta.updated_at;
-  }
-
-let write_resident_keeper config (entry : keeper_boot_entry) :
-    (unit, string) result =
-  let path = resident_keeper_path config entry.name in
-  let content = Yojson.Safe.pretty_to_string (keeper_boot_to_json entry) in
-  try
-    Fs_compat.save_file path content;
-    Ok ()
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Error
-      (Printf.sprintf "failed to write resident keeper %s: %s" path
-         (Printexc.to_string exn))
-
-let read_resident_keeper config name : (keeper_boot_entry option, string) result =
-  let path = resident_keeper_path config name in
-  if not (Sys.file_exists path) then Ok None
-  else
-    try
-      let json = Room_utils.read_json_local path in
-      match keeper_boot_of_json json with
-      | Ok entry -> Ok (Some entry)
-      | Error msg -> Error msg
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Error
-        (Printf.sprintf "failed to read resident keeper %s: %s" path
-           (Printexc.to_string exn))
-
-let remove_resident_keeper config name =
-  Safe_ops.remove_file_logged ~context:"resident_keeper_remove"
-    (resident_keeper_path config name)
-
-let list_resident_keepers config : keeper_boot_entry list =
-  let dir = resident_keeper_dir config in
-  match Safe_ops.list_dir_safe dir with
-  | Error _ -> []
-  | Ok files ->
-      files
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.map Filename.remove_extension
-      |> List.filter validate_name
-      |> List.filter_map (fun name ->
-             match read_resident_keeper config name with
-             | Ok (Some spec) -> Some spec
-             | _ -> None)
-      |> List.sort (fun a b -> String.compare a.name b.name)
-
-let resident_keeper_names config =
-  list_resident_keepers config |> List.map (fun entry -> entry.name)
-
-let is_resident_keeper config name =
-  let path = resident_keeper_path config name in
-  Sys.file_exists path
-
 let read_meta_file_path path : (keeper_meta option, string) result =
   if not (Sys.file_exists path) then Ok None
   else
@@ -715,39 +581,8 @@ let read_meta_file_path path : (keeper_meta option, string) result =
          | Ok meta -> Ok (Some meta)
          | Error e -> Error e)
 
-let register_resident_keeper config name : (unit, string) result =
-  let created_at =
-    match read_resident_keeper config name with
-    | Ok (Some entry) -> entry.created_at
-    | _ -> now_iso ()
-  in
-  let meta_opt =
-    match read_meta_file_path (keeper_meta_path config name) with
-    | Ok meta_opt -> meta_opt
-    | Error _ -> None
-  in
-  match meta_opt with
-  | Some meta ->
-      write_resident_keeper config
-        (keeper_boot_entry_of_meta ~created_at meta)
-  | None ->
-      write_resident_keeper config
-        {
-          name;
-          persona_name = name;
-          voice_enabled = default_voice_enabled_for name;
-          voice_channel = default_voice_channel_for name;
-          voice_agent_id = default_voice_agent_id_for name;
-          created_at;
-          updated_at = now_iso ();
-        }
-
-let persistent_agent_names ?resident_names config =
+let keeper_names config =
   let dir = keeper_dir config in
-  let resident = match resident_names with
-    | Some n -> n
-    | None -> resident_keeper_names config
-  in
   match Safe_ops.list_dir_safe dir with
   | Error _ -> []
   | Ok files ->
@@ -755,15 +590,17 @@ let persistent_agent_names ?resident_names config =
       |> List.filter (fun f -> Filename.check_suffix f ".json")
       |> List.map Filename.remove_extension
       |> List.filter validate_name
-      |> List.filter (fun name -> not (List.mem name resident))
       |> List.sort String.compare
 
-let sync_registered_resident_keeper config name :
-    (unit, string) result =
-  match read_resident_keeper config name with
-  | Ok None -> Ok ()
-  | Ok (Some _) -> register_resident_keeper config name
-  | Error e -> Error e
+let keepalive_keeper_names config =
+  keeper_names config
+  |> List.filter_map (fun name ->
+         match read_meta_file_path (keeper_meta_path config name) with
+         | Ok (Some meta) when meta.presence_keepalive -> Some meta.name
+         | _ -> None)
+
+let persistent_agent_names _config =
+  []
 
 let fresher_meta config (meta : keeper_meta) : keeper_meta =
   match read_meta_file_path (keeper_meta_path config meta.name) with
@@ -786,13 +623,7 @@ let write_meta config (m : keeper_meta) : (unit, string) result =
   try
     Fs_compat.save_file path content;
     (!runtime_meta_write_sync_hook) config persisted;
-    (match sync_registered_resident_keeper config persisted.name with
-     | Ok () -> Ok ()
-     | Error e ->
-         Error
-           (Printf.sprintf
-              "meta written but resident sync failed for %s: %s"
-              persisted.name e))
+    Ok ()
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "failed to write meta %s: %s" path (Printexc.to_string exn))
 
@@ -804,12 +635,12 @@ let read_meta config name : (keeper_meta option, string) result =
   read_meta_file_path path
 
 (* Model selection, path utilities, and JSONL helpers
-   extracted to Keeper_types_resident *)
-include Keeper_types_resident
+   extracted to Keeper_types_support *)
+include Keeper_types_support
 
 (** Fiber-level health for keeper supervisor monitoring.
-    Defined here (not in Keeper_resident_supervisor) to avoid circular
-    dependencies between keeper_exec_status and the resident supervisor. *)
+    Defined here (not in Keeper_supervisor) to avoid circular
+    dependencies between keeper_exec_status and the keeper supervisor. *)
 type fiber_health =
   | Fiber_alive    (** Fiber running, promise unresolved *)
   | Fiber_zombie   (** Registry entry exists but fiber terminated *)

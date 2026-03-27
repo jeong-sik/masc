@@ -12,7 +12,7 @@ Scope:
 
 | Area | File | Function | Lines | Kind | Purpose | Primary inputs |
 | --- | --- | --- | --- | --- | --- | --- |
-| Keeper identity | `lib/keeper/keeper_prompt.ml` | `build_keeper_system_prompt` | `41-143` | System prompt | Builds the resident keeper identity/worldview prompt with goal horizons and self-model traits. | `goal`, `short_goal`, `mid_goal`, `long_goal`, `soul_profile`, `will`, `needs`, `desires`, `instructions` |
+| Keeper identity | `lib/keeper/keeper_prompt.ml` | `build_keeper_system_prompt` | `41-143` | System prompt | Builds the keeper identity/worldview prompt with goal horizons and self-model traits. | `goal`, `short_goal`, `mid_goal`, `long_goal`, `soul_profile`, `will`, `needs`, `desires`, `instructions` |
 | Keeper constitution | `config/prompts/keeper.constitution.md` | `Prompt_registry.get_prompt` | n/a | Markdown prompt | Continuity and `[STATE]` block rules for keeper replies. | none |
 | Keeper world | `config/prompts/keeper.world.md` | `Prompt_registry.get_prompt` | n/a | Markdown prompt | Shared keeper world context block. | none |
 | Keeper capabilities | `config/prompts/keeper.capabilities.md` | `Prompt_registry.get_prompt` | n/a | Markdown prompt | Shared keeper capabilities block. | none |

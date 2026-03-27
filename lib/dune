@@ -472,7 +472,7 @@
    keeper_contract
    keeper_deliberation
    keeper_types_profile
-   keeper_types_resident
+   keeper_types_support
    keeper_types
    keeper_memory
    keeper_memory_policy
@@ -504,7 +504,7 @@
    keeper_keepalive
    keeper_recurring
    keeper_registry
-   keeper_resident_supervisor
+   keeper_supervisor
    keeper_runtime
    keeper_turn_session
    keeper_turn_setup
@@ -591,7 +591,7 @@
  dashboard_mission_agents
  dashboard_mission_assembly
  keeper_types_profile
- keeper_types_resident
+ keeper_types_support
  tool_team_session_routing_workers
  cp_lifecycle_search
  cp_lifecycle_intents

@@ -285,7 +285,7 @@ MASC 조율 이벤트를 OAS `Event_bus`에 `Custom("masc:<type>", json)` 형식
 | `masc:lodge:agent_decision` | MODEL 행동 결정 |
 | `masc:lodge:agent_action_executed` | 행동 실행 완료 |
 | `masc:keeper:snapshot` | keeper 상태 스냅샷 |
-| `masc:keeper:resident_lifecycle` | resident 시작/중단/충돌/재시작 |
+| `masc:keeper:lifecycle` | keeper 시작/중단/충돌/재시작 |
 | `masc:trust_updated` | 신뢰 점수 갱신 |
 | `masc:reputation_changed` | 평판 변경 |
 | `masc:institution_episode` | institution 에피소드 기록 |

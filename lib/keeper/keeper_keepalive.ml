@@ -1,4 +1,4 @@
-(** Keeper_keepalive — resident heartbeat fiber and board-reactive wakeup.
+(** Keeper_keepalive — keeper heartbeat fiber and board-reactive wakeup.
 
     Per-keeper lifecycle (start, stop, wakeup) is managed through
     [Keeper_registry] (SSOT).  This module provides the heartbeat loop
@@ -603,7 +603,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
     (match get_bus () with
      | Some bus ->
-         Oas_events.publish_keeper_resident_lifecycle bus ~event:"started"
+         Oas_events.publish_keeper_lifecycle bus ~event:"started"
            ~keeper_name:live_meta.name ~detail:"keepalive"
      | None -> ());
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
@@ -632,7 +632,7 @@ let stop_keepalive name =
       Keeper_registry.cleanup_tracking ~base_path:entry.base_path name;
       (match get_bus () with
        | Some bus ->
-           Oas_events.publish_keeper_resident_lifecycle bus ~event:"stopped"
+           Oas_events.publish_keeper_lifecycle bus ~event:"stopped"
              ~keeper_name:name ~detail:"manual stop"
        | None -> ())
   ) entries

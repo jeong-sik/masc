@@ -175,7 +175,7 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
 let keepers_json ?keeper_names ?(include_recent_activity = true) config =
   let names = match keeper_names with
     | Some n -> n
-    | None -> Keeper_types.resident_keeper_names config
+    | None -> Keeper_types.keeper_names config
   in
   let rows =
     List.filter_map
@@ -202,7 +202,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
               Keeper_exec_status.keeper_diagnostic_json ~meta
                 ~agent_status:agent_json ~keepalive_running ~history_items:[]
                 ~now_ts
-              |> Keeper_exec_status.augment_keeper_diagnostic_json ~registered:true
+              |> Keeper_exec_status.augment_keeper_diagnostic_json
+                   ~registered:meta.presence_keepalive
                    ~meta ~keepalive_running ~keepalive_started_at ~now_ts
             in
             let allowed_tool_names, latest_tool_names, latest_tool_call_count,
@@ -220,8 +221,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
             Some
               (`Assoc
                 [
-                  ("runtime_class", `String "resident_keeper");
-                  ("registered", `Bool true);
+                  ("runtime_class", `String "keeper");
+                  ("desired_keepalive", `Bool meta.presence_keepalive);
                   ("pipeline_stage", `String pipeline_stage);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
@@ -282,7 +283,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
 let persistent_agents_json ?keeper_names config =
-  let names = Keeper_types.persistent_agent_names ?resident_names:keeper_names config in
+  ignore keeper_names;
+  let names = Keeper_types.persistent_agent_names config in
   let rows =
     List.filter_map
       (fun name ->
@@ -300,8 +302,8 @@ let persistent_agents_json ?keeper_names config =
             Some
               (`Assoc
                 [
-                  ("runtime_class", `String "persistent_agent");
-                  ("registered", `Bool false);
+                  ("runtime_class", `String "keeper");
+                  ("desired_keepalive", `Bool meta.presence_keepalive);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
                   ("trace_id", `String meta.trace_id);
@@ -553,7 +555,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   in
   let keeper_names =
     if initialized && include_keepers then
-      Keeper_types.resident_keeper_names config
+      Keeper_types.keeper_names config
     else []
   in
   let result =
@@ -561,7 +563,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       ([
          ("trace_id", `String trace_id);
          ("server_profile", operator_server_profile_json);
-         ("resident_judge_runtime", resident_judge_runtime_json config);
+         ("operator_judge_runtime", operator_judge_runtime_json config);
          ("judgment_owner", `String "fallback_read_model");
          ("authoritative_judgment_available", `Bool false);
          ("provenance_summary", operator_surface_contract_json);

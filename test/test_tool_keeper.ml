@@ -661,7 +661,7 @@ let test_keeper_fs_edit_enforces_allowed_paths_and_modes () =
       check bool "fs_edit invalid mode rejected" true
         (contains_substring invalid_mode_error "unsupported_mode:invalid"))
 
-let test_resident_keeper_and_persistent_agent_lists_split () =
+let test_keeper_and_persistent_agent_lists_split () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -678,18 +678,18 @@ let test_resident_keeper_and_persistent_agent_lists_split () =
         | Some result -> result
         | None -> fail ("missing dispatch for " ^ name)
       in
-      let ok, resident_up_body =
+      let ok, keeper_up_body =
         dispatch "masc_keeper_up"
           (`Assoc
             [
-              ("name", `String "resident-demo");
-              ("goal", `String "Stay resident");
+              ("name", `String "keeper-demo");
+              ("goal", `String "Stay available");
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
-      if not ok then fail resident_up_body;
-      check bool "resident keeper up" true ok;
+      if not ok then fail keeper_up_body;
+      check bool "keeper up" true ok;
       let ok, persistent_up_body =
         dispatch "masc_persistent_agent_up"
           (`Assoc
@@ -702,18 +702,18 @@ let test_resident_keeper_and_persistent_agent_lists_split () =
       in
       if not ok then fail persistent_up_body;
       check bool "persistent agent up" true ok;
-      let ok, resident_body =
+      let ok, keeper_body =
         dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool false) ])
       in
-      check bool "resident list ok" true ok;
-      let resident_json = Yojson.Safe.from_string resident_body in
-      check bool "resident listed" true
+      check bool "keeper list ok" true ok;
+      let keeper_json = Yojson.Safe.from_string keeper_body in
+      check bool "keeper listed" true
         Yojson.Safe.Util.(
-          resident_json |> member "keepers" |> to_list
-          |> List.exists (( = ) (`String "resident-demo")));
-      check bool "persistent hidden" false
+          keeper_json |> member "keepers" |> to_list
+          |> List.exists (( = ) (`String "keeper-demo")));
+      check bool "second keeper also visible" true
         Yojson.Safe.Util.(
-          resident_json |> member "keepers" |> to_list
+          keeper_json |> member "keepers" |> to_list
           |> List.exists (( = ) (`String "persistent-demo")));
       let ok, persistent_body =
         dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool false) ])
@@ -725,13 +725,13 @@ let test_resident_keeper_and_persistent_agent_lists_split () =
           persistent_json |> member "persistent_agents" |> to_list
           |> List.exists (( = ) (`String "persistent-demo"))))
 
-let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
+let test_keeper_and_persistent_detailed_lists_annotate_runtime_class () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
       Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
       rm_rf base_dir)
     (fun () ->
@@ -749,13 +749,13 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
         dispatch "masc_keeper_up"
           (`Assoc
             [
-              ("name", `String "resident-demo");
-              ("goal", `String "Stay resident");
+              ("name", `String "keeper-demo");
+              ("goal", `String "Stay available");
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
-      check bool "resident up ok" true ok;
+      check bool "keeper up ok" true ok;
       let ok, _ =
         dispatch "masc_persistent_agent_up"
           (`Assoc
@@ -767,22 +767,20 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
             ])
       in
       check bool "persistent up ok" true ok;
-      let ok, resident_body =
+      let ok, keeper_body =
         dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool true) ])
       in
-      check bool "resident detailed list ok" true ok;
-      let resident_json = parse_json_exn resident_body in
-      let resident_row =
+      check bool "keeper detailed list ok" true ok;
+      let keeper_json = parse_json_exn keeper_body in
+      let keeper_row =
         Yojson.Safe.Util.(
-          resident_json |> member "keepers" |> to_list
-          |> List.find (fun row -> member "meta" row |> member "name" = `String "resident-demo"))
+          keeper_json |> member "keepers" |> to_list
+          |> List.find (fun row -> member "meta" row |> member "name" = `String "keeper-demo"))
       in
-      check string "resident runtime_class" "resident_keeper"
-        Yojson.Safe.Util.(resident_row |> member "runtime_class" |> to_string);
-      check bool "resident desired mirrors registration" true
-        Yojson.Safe.Util.(resident_row |> member "desired" = `Bool true);
-      check bool "resident registered" true
-        Yojson.Safe.Util.(resident_row |> member "registered" |> to_bool);
+      check string "keeper runtime_class" "keeper"
+        Yojson.Safe.Util.(keeper_row |> member "runtime_class" |> to_string);
+      check bool "keeper desired_keepalive false" false
+        Yojson.Safe.Util.(keeper_row |> member "desired_keepalive" |> to_bool);
       let ok, persistent_body =
         dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool true) ])
       in
@@ -793,20 +791,18 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
           persistent_json |> member "persistent_agents" |> to_list
           |> List.find (fun row -> member "meta" row |> member "name" = `String "persistent-demo"))
       in
-      check string "persistent runtime_class" "persistent_agent"
+      check string "persistent runtime_class" "keeper"
         Yojson.Safe.Util.(persistent_row |> member "runtime_class" |> to_string);
-      check bool "persistent desired mirrors registration" true
-        Yojson.Safe.Util.(persistent_row |> member "desired" = `Bool false);
-      check bool "persistent registered" false
-        Yojson.Safe.Util.(persistent_row |> member "registered" |> to_bool))
+      check bool "persistent desired_keepalive false" false
+        Yojson.Safe.Util.(persistent_row |> member "desired_keepalive" |> to_bool))
 
-let test_resident_list_items_expose_runtime_config_summary () =
+let test_keeper_list_items_expose_runtime_config_summary () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -829,8 +825,8 @@ let test_resident_list_items_expose_runtime_config_summary () =
         dispatch "masc_keeper_up"
           (`Assoc
             [
-              ("name", `String "resident-demo");
-              ("goal", `String "Stay resident");
+              ("name", `String "keeper-demo");
+              ("goal", `String "Stay available");
               ("room_scope", `String "all");
               ("scope_kind", `String "global");
               ("presence_keepalive", `Bool true);
@@ -841,15 +837,17 @@ let test_resident_list_items_expose_runtime_config_summary () =
       let ok, body =
         dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool false) ])
       in
-      check bool "resident list ok" true ok;
+      check bool "keeper list ok" true ok;
       let json = parse_json_exn body in
       let row =
         Yojson.Safe.Util.(
           json |> member "items" |> to_list
-          |> List.find (fun item -> member "name" item = `String "resident-demo"))
+          |> List.find (fun item -> member "name" item = `String "keeper-demo"))
       in
-      check string "runtime class" "resident_keeper"
+      check string "runtime class" "keeper"
         Yojson.Safe.Util.(row |> member "runtime_class" |> to_string);
+      check bool "desired keepalive true" true
+        Yojson.Safe.Util.(row |> member "desired_keepalive" |> to_bool);
       check string "scope kind" "global"
         Yojson.Safe.Util.(row |> member "scope_kind" |> to_string);
       check string "room scope" "all"
@@ -871,7 +869,7 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -894,19 +892,19 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
         dispatch "masc_keeper_up"
           (`Assoc
             [
-              ("name", `String "resident-demo");
-              ("goal", `String "Stay resident");
+              ("name", `String "keeper-demo");
+              ("goal", `String "Stay available");
               ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool true);
             ])
       in
       if not ok then fail up_body;
-      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
       let ok, body =
         dispatch "masc_keeper_status"
           (`Assoc
             [
-              ("name", `String "resident-demo");
+              ("name", `String "keeper-demo");
               ("include_history_tail", `Bool false);
               ("include_compaction_history", `Bool false);
               ("include_context", `Bool false);
@@ -924,18 +922,18 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
         Yojson.Safe.Util.(
           json |> member "runtime" |> member "registry_state" |> to_string);
       let ok, _ =
-        dispatch "masc_keeper_down" (`Assoc [ ("name", `String "resident-demo") ])
+        dispatch "masc_keeper_down" (`Assoc [ ("name", `String "keeper-demo") ])
       in
       check bool "keeper down ok" true ok;
       let entry =
-        match Masc_mcp.Keeper_registry.get ~base_path:config.base_path "resident-demo" with
+        match Masc_mcp.Keeper_registry.get ~base_path:config.base_path "keeper-demo" with
         | Some entry -> entry
         | None -> fail "missing registry entry after keeper_down"
       in
       check string "registry state paused" "paused"
         (Masc_mcp.Keeper_registry.state_to_string entry.state))
 
-let test_resident_keeper_msg_bootstraps_then_requires_message () =
+let test_keeper_msg_bootstraps_then_requires_message () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -959,7 +957,7 @@ let test_resident_keeper_msg_bootstraps_then_requires_message () =
           (`Assoc
             [
               ("name", `String "bootstrap-demo");
-              ("goal", `String "Bootstrap resident keeper");
+              ("goal", `String "Bootstrap keeper");
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
@@ -967,8 +965,10 @@ let test_resident_keeper_msg_bootstraps_then_requires_message () =
       check bool "missing message rejected" false ok;
       check bool "error mentions message" true
         (contains_substring body "message is required");
-      check bool "resident bootstrap created keeper" true
-        (Masc_mcp.Keeper_types.is_resident_keeper config "bootstrap-demo"))
+      check bool "keeper bootstrap created keeper meta" true
+        (match Masc_mcp.Keeper_types.read_meta config "bootstrap-demo" with
+         | Ok (Some _) -> true
+         | _ -> false)
 
 let test_persistent_agent_msg_rejects_missing_message () =
   Eio_main.run @@ fun env ->
@@ -1017,7 +1017,7 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
       Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
       rm_rf base_dir)
     (fun () ->
@@ -1035,13 +1035,13 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
         dispatch "masc_keeper_up"
           (`Assoc
             [
-              ("name", `String "resident-demo");
-              ("goal", `String "Stay resident");
+              ("name", `String "keeper-demo");
+              ("goal", `String "Stay available");
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
-      check bool "resident up ok" true ok;
+      check bool "keeper up ok" true ok;
       let ok, _ =
         dispatch "masc_persistent_agent_up"
           (`Assoc
@@ -1061,26 +1061,26 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
               (name ^ " has been removed") body
         | None -> fail (label ^ " should report removal explicitly")
       in
-      check_removed_tool "resident autonomy removed" "masc_keeper_autonomy"
-        (`Assoc [ ("name", `String "resident-demo") ]);
-      check_removed_tool "resident autonomy set removed" "masc_keeper_autonomy"
+      check_removed_tool "keeper autonomy removed" "masc_keeper_autonomy"
+        (`Assoc [ ("name", `String "keeper-demo") ]);
+      check_removed_tool "keeper autonomy set removed" "masc_keeper_autonomy"
         (`Assoc
           [
-            ("name", `String "resident-demo");
+            ("name", `String "keeper-demo");
             ("level", `String "L1_Reactive");
           ]);
-      check_removed_tool "resident goals removed" "masc_keeper_goals"
-        (`Assoc [ ("name", `String "resident-demo") ]);
+      check_removed_tool "keeper goals removed" "masc_keeper_goals"
+        (`Assoc [ ("name", `String "keeper-demo") ]);
       let ok, trajectory_body =
         dispatch "masc_keeper_trajectory"
-          (`Assoc [ ("name", `String "resident-demo"); ("limit", `Int 5) ])
+          (`Assoc [ ("name", `String "keeper-demo"); ("limit", `Int 5) ])
       in
-      check bool "resident trajectory ok" true ok;
+      check bool "keeper trajectory ok" true ok;
       check bool "trajectory body non-empty" true (String.length trajectory_body > 0);
       let ok, eval_body =
-        dispatch "masc_keeper_eval" (`Assoc [ ("name", `String "resident-demo") ])
+        dispatch "masc_keeper_eval" (`Assoc [ ("name", `String "keeper-demo") ])
       in
-      check bool "resident eval ok" true ok;
+      check bool "keeper eval ok" true ok;
       check bool "eval body non-empty" true (String.length eval_body > 0);
       (match
          Masc_mcp.Tool_keeper.dispatch keeper_ctx
@@ -1098,9 +1098,9 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
         dispatch "masc_persistent_agent_status"
           (`Assoc
             [
-              (* The persistent-agent alias should still surface resident registration
+              (* The persistent-agent alias should still surface keeper metadata
                  when querying an always-on keeper through the persistent wrapper. *)
-              ("name", `String "resident-demo");
+              ("name", `String "keeper-demo");
               ("fast", `Bool true);
               ("include_context", `Bool false);
               ("include_metrics_overview", `Bool false);
@@ -1111,16 +1111,18 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
       in
       check bool "persistent alias status ok" true ok;
       let persistent_status_json = parse_json_exn persistent_status_body in
-      check string "persistent alias runtime_class" "persistent_agent"
+      check string "persistent alias runtime_class" "keeper"
         Yojson.Safe.Util.(persistent_status_json |> member "runtime_class" |> to_string);
-      check bool "persistent alias marks resident" true
-        Yojson.Safe.Util.(persistent_status_json |> member "registered" |> to_bool);
+      check bool "persistent alias carries desired_keepalive false" false
+        Yojson.Safe.Util.(persistent_status_json |> member "desired_keepalive" |> to_bool);
       let ok, _ =
-        dispatch "masc_keeper_down" (`Assoc [ ("name", `String "resident-demo") ])
+        dispatch "masc_keeper_down" (`Assoc [ ("name", `String "keeper-demo") ])
       in
-      check bool "resident down ok" true ok;
-      check bool "resident registration removed" false
-        (Masc_mcp.Keeper_types.is_resident_keeper config "resident-demo"))
+      check bool "keeper down ok" true ok;
+      check bool "keeper meta retained and paused after down" true
+        (match Masc_mcp.Keeper_types.read_meta config "keeper-demo" with
+         | Ok (Some meta) -> meta.paused
+         | _ -> false))
 
 let test_keeper_status_detailed_reads_metrics_history_and_memory () =
   Eio_main.run @@ fun env ->
@@ -1270,13 +1272,13 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
         check string "voice channel" "text_only"
           Yojson.Safe.Util.(json |> member "voice_channel" |> to_string)
       end;
-      let resident_path =
-        Filename.concat base_dir ".masc/resident-keepers/sangsu.json"
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "sangsu" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta"
+        | Error e -> fail e
       in
-      check bool "resident spec exists" true (Sys.file_exists resident_path);
-      let resident_json = Yojson.Safe.from_file resident_path in
-      check string "resident spec name" "sangsu"
-        Yojson.Safe.Util.(resident_json |> member "name" |> to_string))
+      check string "keeper meta name" "sangsu" meta.name)
 
 let test_keeper_up_update_preserves_proactive_when_omitted () =
   Eio_main.run @@ fun env ->
@@ -1375,7 +1377,7 @@ let test_keeper_up_persists_explicit_goal_horizons () =
           (`Assoc
             [
               ("name", `String "goal-horizon-demo");
-              ("goal", `String "Keep the resident loop healthy");
+              ("goal", `String "Keep the keeper loop healthy");
               ("short_goal", `String "Close the current keeper blocker");
               ("mid_goal", `String "Stabilize keeper cleanup coverage");
               ("long_goal", `String "Continuously improve keeper maintenance");
@@ -1390,7 +1392,7 @@ let test_keeper_up_persists_explicit_goal_horizons () =
         | Ok None -> fail "missing keeper meta after create"
         | Error e -> fail e
       in
-      check string "goal persisted" "Keep the resident loop healthy" meta.goal;
+      check string "goal persisted" "Keep the keeper loop healthy" meta.goal;
       check string "short goal persisted" "Close the current keeper blocker"
         meta.short_goal;
       check string "mid goal persisted" "Stabilize keeper cleanup coverage"
@@ -1535,7 +1537,7 @@ let test_keeper_msg_persists_goal_horizon_updates_before_runtime () =
       check string "long goal updated"
         "Keep goal horizon behavior maintainable" meta.long_goal)
 
-let test_write_meta_syncs_registered_resident_seed () =
+let test_write_meta_syncs_registry_meta () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -1559,16 +1561,16 @@ let test_write_meta_syncs_registered_resident_seed () =
           (`Assoc
             [
               ("name", `String "buddy");
-              ("goal", `String "Stay resident");
+              ("goal", `String "Stay available");
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool true);
             ])
       in
-      check bool "resident keeper up ok" true ok;
+      check bool "keeper up ok" true ok;
       let meta =
         match Masc_mcp.Keeper_types.read_meta config "buddy" with
         | Ok (Some value) -> value
-        | Ok None -> fail "missing keeper meta after resident keeper up"
+        | Ok None -> fail "missing keeper meta after keeper up"
         | Error e -> fail e
       in
       let updated_meta =
@@ -1584,21 +1586,18 @@ let test_write_meta_syncs_registered_resident_seed () =
       (match Masc_mcp.Keeper_types.write_meta config updated_meta with
        | Ok () -> ()
        | Error e -> fail ("write_meta failed: " ^ e));
-      let resident_path =
-        Filename.concat base_dir ".masc/resident-keepers/buddy.json"
+      let persisted =
+        match Masc_mcp.Keeper_types.read_meta config "buddy" with
+        | Ok (Some value) -> value
+        | Ok None -> fail "missing keeper meta after write_meta"
+        | Error e -> fail e
       in
-      check bool "resident spec exists" true (Sys.file_exists resident_path);
-      let resident_json = Yojson.Safe.from_file resident_path in
-      check string "resident spec name" "buddy"
-        Yojson.Safe.Util.(resident_json |> member "name" |> to_string);
-      check bool "voice_enabled synced in boot entry" false
-        Yojson.Safe.Util.(resident_json |> member "voice_enabled" |> to_bool);
-      check string "voice_channel synced in boot entry" "text_only"
-        Yojson.Safe.Util.(resident_json |> member "voice_channel" |> to_string);
-      check string "voice_agent_id synced in boot entry" ""
-        Yojson.Safe.Util.(resident_json |> member "voice_agent_id" |> to_string);
-      check bool "seed_meta absent in thin format" true
-        (Yojson.Safe.Util.(resident_json |> member "seed_meta") = `Null);
+      check bool "persisted proactive updated" false persisted.proactive.enabled;
+      check bool "persisted voice enabled updated" false persisted.voice_enabled;
+      check string "persisted voice channel updated" "text_only"
+        persisted.voice_channel;
+      check string "persisted voice agent id updated" ""
+        persisted.voice_agent_id;
       (match Masc_mcp.Keeper_registry.get ~base_path:config.base_path "buddy" with
        | Some entry ->
            check bool "registry meta syncs proactive" false
@@ -1630,7 +1629,7 @@ let test_keeper_up_persists_allowed_paths_to_status_policy () =
           (`Assoc
             [
               ("name", `String "sangsu");
-              ("goal", `String "Stay resident");
+              ("goal", `String "Stay available");
               ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
@@ -1715,7 +1714,7 @@ let test_parse_agent_status_reads_compressed_filesystem_backend () =
                 name = agent_name;
                 agent_type = "keeper";
                 status = Types.Active;
-                capabilities = [ "keeper"; "resident" ];
+                capabilities = [ "keeper"; "keepalive" ];
                 current_task = Some (String.make 1024 't');
                 joined_at = "2026-03-25T00:00:00Z";
                 last_seen = "2026-03-25T00:01:00Z";
@@ -1743,7 +1742,7 @@ let test_parse_agent_status_reads_compressed_filesystem_backend () =
             check bool "no read error" true
               Yojson.Safe.Util.(status_json |> member "error" = `Null))))
 
-let test_resident_bootstrap_marks_stale_explicit_keeper () =
+let test_keeper_bootstrap_marks_stale_explicit_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -1767,7 +1766,7 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
           (`Assoc
             [
               ("name", `String "sangsu");
-              ("goal", `String "Stay resident");
+              ("goal", `String "Stay available");
               ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool false);
             ])
@@ -1793,9 +1792,9 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       | Error e -> fail e);
       let stats = Masc_mcp.Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
       check bool "bootstrap enabled" true stats.enabled;
-      check int "started stale resident" 1 stats.started;
-      check int "stale resident counted" 1 stats.stale;
-      check int "recovering stale resident counted" 1 stats.recovering;
+      check int "started stale keeper" 1 stats.started;
+      check int "stale keeper counted" 1 stats.stale;
+      check int "recovering stale keeper counted" 1 stats.recovering;
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc
@@ -1815,7 +1814,7 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       check bool "diagnostic removed from status" true
         Yojson.Safe.Util.(status_json |> member "diagnostic" = `Null))
 
-let test_resident_supervisor_recovers_missing_desired_keeper () =
+let test_keeper_supervisor_recovers_missing_desired_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -1839,7 +1838,7 @@ let test_resident_supervisor_recovers_missing_desired_keeper () =
           (`Assoc
             [
               ("name", `String "sangsu");
-              ("goal", `String "Stay resident");
+              ("goal", `String "Stay available");
               ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool false);
             ])
@@ -1848,7 +1847,7 @@ let test_resident_supervisor_recovers_missing_desired_keeper () =
       Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       check bool "keepalive stopped before recovery" false
         (Masc_mcp.Keeper_registry.is_running ~base_path:config.base_path "sangsu");
-      Masc_mcp.Keeper_resident_supervisor.sweep_and_recover keeper_ctx;
+      Masc_mcp.Keeper_supervisor.sweep_and_recover keeper_ctx;
       check bool "keepalive recovered by sweep" true
         (Masc_mcp.Keeper_registry.is_running ~base_path:config.base_path "sangsu");
       let ok, status_body =
@@ -1893,16 +1892,16 @@ let () =
            test_keeper_up_rejects_removed_runtime_args;
          test_case "keeper msg rejects removed runtime args" `Quick
            test_keeper_msg_rejects_removed_runtime_args;
-         test_case "resident and persistent lists split" `Quick
-           test_resident_keeper_and_persistent_agent_lists_split;
-         test_case "resident and persistent detailed lists annotate runtime class" `Quick
-           test_resident_and_persistent_detailed_lists_annotate_runtime_class;
-         test_case "resident list items expose runtime config summary" `Quick
-           test_resident_list_items_expose_runtime_config_summary;
+         test_case "keeper and persistent lists split" `Quick
+           test_keeper_and_persistent_agent_lists_split;
+         test_case "keeper and persistent detailed lists annotate runtime class" `Quick
+           test_keeper_and_persistent_detailed_lists_annotate_runtime_class;
+         test_case "keeper list items expose runtime config summary" `Quick
+           test_keeper_list_items_expose_runtime_config_summary;
          test_case "keepalive gap reports not_running instead of disabled" `Quick
            test_keepalive_gap_reports_not_running_instead_of_disabled;
-         test_case "resident keeper msg bootstraps then requires message" `Quick
-           test_resident_keeper_msg_bootstraps_then_requires_message;
+         test_case "keeper msg bootstraps then requires message" `Quick
+           test_keeper_msg_bootstraps_then_requires_message;
          test_case "persistent agent msg rejects missing message" `Quick
            test_persistent_agent_msg_rejects_missing_message;
          test_case "keeper dispatch auxiliary surfaces smoke" `Quick
@@ -1933,16 +1932,16 @@ let () =
            test_keeper_msg_persists_goal_horizon_updates_before_runtime;
          test_case "keeper up update preserves proactive when omitted" `Quick
            test_keeper_up_update_preserves_proactive_when_omitted;
-         test_case "write_meta syncs registered resident seed" `Quick
-           test_write_meta_syncs_registered_resident_seed;
+         test_case "write_meta syncs registry meta" `Quick
+           test_write_meta_syncs_registry_meta;
          test_case "keeper up persists allowed paths" `Quick
            test_keeper_up_persists_allowed_paths_to_status_policy;
          test_case "parse_agent_status reads compressed filesystem backend" `Quick
            test_parse_agent_status_reads_compressed_filesystem_backend;
-         test_case "resident bootstrap marks stale explicit keeper" `Quick
-           test_resident_bootstrap_marks_stale_explicit_keeper;
-         test_case "resident supervisor recovers missing desired keeper" `Quick
-           test_resident_supervisor_recovers_missing_desired_keeper;
+         test_case "keeper bootstrap marks stale explicit keeper" `Quick
+           test_keeper_bootstrap_marks_stale_explicit_keeper;
+         test_case "keeper supervisor recovers missing desired keeper" `Quick
+           test_keeper_supervisor_recovers_missing_desired_keeper;
          test_case "session dir mkdir_p creates full tree from scratch (issue #3019)" `Quick
            test_session_dir_mkdir_p_creates_full_tree;
        ]);

@@ -576,10 +576,10 @@ MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한
 ### 6.1 Agent Type (생명주기)
 
 ```ocaml
-type agent_type =
-  | Resident    (* Daemon -- 상시 실행 *)
-  | Visitor     (* Session 기반 *)
-  | Ephemeral   (* Task 기반, 작업 완료 후 소멸 *)
+type agent_lifecycle =
+  | Keeper_long_lived  (* Keepalive 기반 장기 실행 *)
+  | Visitor            (* Session 기반 *)
+  | Ephemeral          (* Task 기반, 작업 완료 후 소멸 *)
 ```
 
 ### 6.2 Agent Profile

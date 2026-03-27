@@ -23,11 +23,11 @@ let tokens_per_sec_json ~tokens ~latency_ms =
   if tokens <= 0 || latency_ms <= 0 then `Null
   else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
 
-let resident_keeper_names (config : Room.config) =
-  Keeper_types.resident_keeper_names config
+let keeper_names (config : Room.config) =
+  Keeper_types.keeper_names config
 
-let resident_keeper_count (config : Room.config) : int =
-  List.length (resident_keeper_names config)
+let keeper_count (config : Room.config) : int =
+  List.length (keeper_names config)
 
 let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
@@ -35,7 +35,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
   let series_points = 120 in
-  let names = resident_keeper_names config in
+  let names = keeper_names config in
   let now_ts = Time_compat.now () in
   (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
      Results are collected into a shared ref array, then filter_map'd. *)
@@ -310,17 +310,17 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 | _ -> []
               in
               let diagnostic =
-                Keeper_exec_status.keeper_diagnostic_json
-                  ~meta:m
-                  ~agent_status:agent
-                  ~keepalive_running
-                  ~history_items:conversation_items
-                  ~now_ts
-                |> Keeper_exec_status.augment_keeper_diagnostic_json
-                     ~registered:true
-                     ~meta:m
-                     ~keepalive_running
-                     ~keepalive_started_at:(runtime_keepalive_started_at config m)
+	                Keeper_exec_status.keeper_diagnostic_json
+	                  ~meta:m
+	                  ~agent_status:agent
+	                  ~keepalive_running
+	                  ~history_items:conversation_items
+	                  ~now_ts
+	                |> Keeper_exec_status.augment_keeper_diagnostic_json
+	                     ~registered:m.presence_keepalive
+	                     ~meta:m
+	                     ~keepalive_running
+	                     ~keepalive_started_at:(runtime_keepalive_started_at config m)
                      ~now_ts
               in
               let detail_fields =
@@ -342,8 +342,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                    ~surface_status:(Keeper_exec_status.keeper_surface_status
                                       ~agent_status:agent ~diagnostic)
                    ~now_ts));
-              ("runtime_class", `String "resident_keeper");
-              ("registered", `Bool true);
+              ("runtime_class", `String "keeper");
+              ("desired_keepalive", `Bool m.presence_keepalive);
               ("registry_state",
                 match registry_state with
                 | Some state -> `String state

@@ -518,7 +518,7 @@ export interface OperatorSessionCard {
   top_recommendation?: OperatorRecommendedAction | null
 }
 
-export interface OperatorResidentJudgeRuntime {
+export interface OperatorJudgeRuntime {
   enabled?: boolean
   judge_online?: boolean
   refreshing?: boolean
@@ -569,7 +569,7 @@ export interface OperatorDigest {
   health?: string
   judgment_owner?: string | null
   authoritative_judgment_available?: boolean
-  resident_judge_runtime?: OperatorResidentJudgeRuntime | null
+  operator_judge_runtime?: OperatorJudgeRuntime | null
   judgment?: OperatorJudgment | null
   active_guidance_layer?: string | null
   active_summary?: OperatorGuidanceSummary | null
@@ -603,7 +603,7 @@ export interface OperatorSnapshot {
   room: OperatorRoomSnapshot
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
-  resident_judge_runtime?: OperatorResidentJudgeRuntime | null
+  operator_judge_runtime?: OperatorJudgeRuntime | null
   persistent_agents?: OperatorKeeperSnapshot[]
   command_plane?: CommandPlaneSnapshot
   swarm_status?: CommandPlaneSwarmStatus

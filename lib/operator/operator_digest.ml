@@ -234,7 +234,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
           ("authoritative_judgment_available", `Bool false);
           ("provenance_summary", operator_surface_contract_json);
           ("judgment", `Null);
-          ("resident_judge_runtime", resident_judge_runtime_json config);
+          ("operator_judge_runtime", operator_judge_runtime_json config);
           ("command_plane", `Assoc []);
           ("swarm_status", Swarm_status.empty_json);
           ("attention_items", `List []);
@@ -308,7 +308,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
               ("provenance_summary", operator_surface_contract_json);
-              ("resident_judge_runtime", resident_judge_runtime_json config);
+              ("operator_judge_runtime", operator_judge_runtime_json config);
               ("command_plane", command_plane_digest_json);
               ("swarm_status", swarm_status_json);
               ("role_census", aggregate_worker_class_counts tracked_sessions);
@@ -370,7 +370,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
                       ("target_id", `String session_id);
                       ("health", `String digest.health);
                       ("provenance_summary", operator_surface_contract_json);
-                      ("resident_judge_runtime", resident_judge_runtime_json config);
+                      ("operator_judge_runtime", operator_judge_runtime_json config);
                       ("command_plane", command_plane_digest_json);
                       ("swarm_status", swarm_status_json);
                       ( "attention_items",

@@ -6,7 +6,7 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { route, initRouter } from './router'
 import { connectSSE, disconnectSSE } from './sse'
-import { refreshRoomTruth } from './room-truth-store'
+import { requestRoomTruthNow, disposeRoomTruthScheduler } from './room-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshForRoute } from './tab-refresh'
 import { refreshMissionSnapshot } from './mission-store'
@@ -36,7 +36,7 @@ export function App() {
     // Prime the lightweight shell status first so build/version metadata lands
     // while room-truth warms heavier execution/command projections.
     void refreshShell()
-    void refreshRoomTruth()
+    requestRoomTruthNow()
 
     // Register mission refresh for periodic recovery from transient failures.
     // Uses registration pattern to avoid circular imports.
@@ -52,6 +52,7 @@ export function App() {
       disconnectSSE()
       unsubSSE()
       stopPeriodicRefresh()
+      disposeRoomTruthScheduler()
     }
   }, [])
 

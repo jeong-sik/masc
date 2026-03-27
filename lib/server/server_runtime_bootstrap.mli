@@ -48,12 +48,6 @@ val warm_tool_registry_from_telemetry : Mcp_server.server_state -> unit
 val startup_prune_jsonl : Mcp_server.server_state -> unit
 val startup_prune_keeper_checkpoints : Mcp_server.server_state -> unit
 
-val bootstrap_keepers :
-  sw:Eio.Switch.t ->
-  clock:_ Eio.Time.clock ->
-  Mcp_server.server_state ->
-  unit
-
 (** {1 Main Entry Point} *)
 
 val run :

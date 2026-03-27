@@ -62,6 +62,7 @@ module Server_h2_gateway = Masc_mcp.Server_h2_gateway
 module Server_runtime_bootstrap = Masc_mcp.Server_runtime_bootstrap
 module Server_routes_http_runtime = Masc_mcp.Server_routes_http_runtime
 module Server_openai_compat = Masc_mcp.Server_openai_compat
+module Server_startup_takeover = Masc_mcp.Server_startup_takeover
 
 let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
 
@@ -264,70 +265,15 @@ let base_path =
 (* Shutdown exception removed: graceful shutdown returns normally from
    await_shutdown_signal, letting Eio.Fiber.first cancel run_server. *)
 
-let pid_lock_path port = Printf.sprintf "/tmp/masc-%d.pid" port
-
-let is_server_responsive port =
-  try
-    let url = Printf.sprintf "http://127.0.0.1:%d/health/live" port in
-    let cmd = Printf.sprintf "curl -s --max-time 3 -o /dev/null -w '%%{http_code}' %s" url in
-    let ic = Unix.open_process_in cmd in
-    let code = In_channel.input_all ic |> String.trim in
-    let _ = Unix.close_process_in ic in
-    code = "200"
-  with _ -> false
-
 let acquire_pid_lock port =
-  let path = pid_lock_path port in
-  (let contents =
-     try
-       let ic = open_in path in
-       let s = In_channel.input_all ic in
-       close_in ic; Some s
-     with _ -> None
-   in
-   match contents with
-   | Some data ->
-     let pid_str = String.trim data in
-     (match int_of_string_opt pid_str with
-      | Some pid ->
-        (try Unix.kill pid 0;
-           (* Process exists — check if it is actually responsive *)
-           if is_server_responsive port then begin
-             Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
-               (Printf.sprintf
-                  "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it first: kill %d"
-                  pid port pid);
-             exit 1
-           end else begin
-             (* Process alive but unresponsive (e.g. FD exhaustion) — kill and take over *)
-             Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
-               (Printf.sprintf
-                  "[WARN] PID %d alive but unresponsive on port %d; sending SIGTERM to reclaim"
-                  pid port);
-             (try Unix.kill pid Sys.sigterm with _ -> ());
-             Unix.sleepf 1.0;
-             (* If still alive after SIGTERM, force kill *)
-             (try
-                Unix.kill pid 0;
-                Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
-                  (Printf.sprintf "[WARN] PID %d did not exit; sending SIGKILL" pid);
-                (try Unix.kill pid Sys.sigkill with _ -> ());
-                Unix.sleepf 0.5
-              with Unix.Unix_error (Unix.ESRCH, _, _) -> ())
-           end
-         with Unix.Unix_error (Unix.ESRCH, _, _) ->
-           Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
-             (Printf.sprintf
-                "[WARN] Removing stale PID file (PID %d no longer running)"
-                pid))
-      | None ->
-        Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
-          "[WARN] Invalid PID file contents, overwriting")
-   | None -> ());
-  let oc = open_out path in
-  Printf.fprintf oc "%d\n" (Unix.getpid ());
-  close_out oc;
-  at_exit (fun () -> try Sys.remove path with _ -> ())
+  match Server_startup_takeover.acquire_pid_lock port with
+  | Server_startup_takeover.Acquired -> ()
+  | Server_startup_takeover.Already_running { pid } ->
+      Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+        (Printf.sprintf
+           "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it first: kill %d"
+           pid port pid);
+      exit 1
 
 let run_cmd host port base_path =
   acquire_pid_lock port;

@@ -248,6 +248,11 @@
  (libraries masc_mcp alcotest unix eio eio_main))
 
 (test
+ (name test_server_startup_takeover)
+ (modules test_server_startup_takeover)
+ (libraries masc_mcp alcotest unix))
+
+(test
  (name test_harness_shell_helpers)
  (modules test_harness_shell_helpers)
  (libraries alcotest unix))

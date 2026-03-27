@@ -120,6 +120,7 @@
    server_bootstrap_loops
    server_runtime_bootstrap
    server_startup_state
+   server_startup_takeover
    server_command_plane_http
    server_command_plane_http_support
    server_command_plane_http_stream

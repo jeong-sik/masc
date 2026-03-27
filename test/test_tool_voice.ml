@@ -58,7 +58,8 @@ let with_temp_voice_config config_json f =
   close_out oc;
   Fun.protect
     ~finally:(fun () -> cleanup_dir root)
-    (fun () -> with_env "ME_ROOT" root f)
+    (fun () ->
+      with_env "MASC_BASE_PATH" root (fun () -> with_env "ME_ROOT" root f))
 
 let write_voice_config root config_json =
   let masc_dir = Filename.concat root ".masc" in

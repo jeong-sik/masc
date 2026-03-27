@@ -99,9 +99,11 @@ let config_path_candidates () =
   |> dedupe_keep_order
 
 let config_path () =
-  match List.find_opt Sys.file_exists (config_path_candidates ()) with
-  | Some path -> path
-  | None -> List.hd (config_path_candidates ())
+  let candidates = config_path_candidates () in
+  match List.find_opt Sys.file_exists candidates, candidates with
+  | Some path, _ -> path
+  | None, path :: _ -> path
+  | None, [] -> cwd_voice_config_path ()
 
 let trim_nonempty = function
   | `String value ->

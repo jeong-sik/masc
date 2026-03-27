@@ -1,23 +1,15 @@
 (** Backend_pg - Eio-native PostgreSQL backend implementation.
-
-    Extracted from Backend.Postgres for separation of concerns.
-    Uses Caqti-eio for non-blocking PostgreSQL access with zstd compression.
-
-    Types come from Backend_types (shared with Backend).
-    Backend.Postgres delegates to this module.
-*)
+    Extracted from Backend.Postgres for separation of concerns and uses
+    Caqti-eio for non-blocking PostgreSQL access with zstd compression.
+    Types come from Backend_types (shared with Backend). *)
 
 module Compression = Backend_compression
 
 let _compress = Compression.compress_with_header
 let _decompress = Compression.decompress_auto
-
 (** {1 Types} *)
-
 include Backend_types
-
 (** {1 PostgreSQL Backend} *)
-
 type t = {
   pool: (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t;
   namespace: string;
@@ -289,11 +281,8 @@ let close _t = ()
 
 let get_pool t = t.pool
 
-let has_zstd_header content =
-  String.length content >= 4 && String.sub content 0 4 = "ZSTD"
-
 let decompress_with_context ~key content =
-  let had_header = has_zstd_header content in
+  let had_header = String.length content >= 4 && String.sub content 0 4 = "ZSTD" in
   let decompressed = _decompress content in
   if had_header && String.equal decompressed content then
     Log.Backend.warn "[EioPG] decompress fallback for %s" key;
@@ -361,8 +350,7 @@ let get_all t ~prefix =
   ) t.pool with
   | Ok pairs ->
       Ok (List.map (fun (k, v) ->
-        let logical_key = strip_namespace t.namespace k in
-        (logical_key, decompress_with_context ~key:k v)
+        (strip_namespace t.namespace k, decompress_with_context ~key:k v)
       ) pairs)
   | Error err -> Error (caqti_error_to_masc err)
 
@@ -378,8 +366,7 @@ let get_all_matching_recent t ~prefix ~suffix ~updated_since ~limit =
     ) t.pool with
     | Ok pairs ->
         Ok (List.map (fun (k, v) ->
-          let logical_key = strip_namespace t.namespace k in
-          (logical_key, decompress_with_context ~key:k v)
+          (strip_namespace t.namespace k, decompress_with_context ~key:k v)
         ) pairs)
     | Error err -> Error (caqti_error_to_masc err)
 

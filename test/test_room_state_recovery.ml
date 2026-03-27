@@ -173,7 +173,12 @@ let test_heartbeat_repairs_legacy_agent_last_seen () =
       ignore (Room.heartbeat config ~agent_name:"keeper-sangsu-agent");
 
       let repaired_json =
-        Yojson.Safe.from_file (agent_path config "keeper-sangsu-agent")
+        match Safe_ops.read_file_safe (agent_path config "keeper-sangsu-agent") with
+        | Error error -> fail error
+        | Ok raw ->
+            raw
+            |> Backend.Compression.decompress_auto
+            |> Yojson.Safe.from_string
       in
       check bool "last_seen rewritten as string" true
         (match Yojson.Safe.Util.member "last_seen" repaired_json with

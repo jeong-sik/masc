@@ -87,6 +87,8 @@ let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ])
     baseline_done_counts = [];
     final_done_delta_total = Some 1;
     final_done_delta_by_agent = Some [ ("worker-a", 1) ];
+    delivery_contract = None;
+    latest_delivery_verdict = None;
     started_at = now -. 120.0;
     planned_end_at = now +. 480.0;
     stopped_at = None;

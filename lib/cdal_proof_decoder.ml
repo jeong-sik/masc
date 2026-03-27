@@ -329,9 +329,19 @@ let to_json m =
 
 (* {1 Evidence gap extraction -- antifragile learning} *)
 
+(* Truncate JSON to ~200 bytes, respecting UTF-8 boundaries.
+   Backs up from the cut point to avoid splitting multi-byte sequences. *)
 let json_excerpt json =
   let s = Yojson.Safe.to_string json in
-  if String.length s > 200 then String.sub s 0 200 ^ "..." else s
+  let len = String.length s in
+  if len <= 200 then s
+  else
+    let pos = ref 200 in
+    (* Walk back past any UTF-8 continuation bytes (10xxxxxx) *)
+    while !pos > 0 && Char.code (String.get s !pos) land 0xC0 = 0x80 do
+      decr pos
+    done;
+    String.sub s 0 !pos ^ "..."
 
 let evidence_gap_of_error ~json err =
   let run_id =
@@ -339,6 +349,7 @@ let evidence_gap_of_error ~json err =
     | Some (`String s) -> Some s
     | _ -> None
   in
+  let excerpt = json_excerpt json in
   match err with
   | Schema_version_unsupported v ->
     { run_id;
@@ -346,16 +357,16 @@ let evidence_gap_of_error ~json err =
       invalid_fields = ["schema_version",
         Printf.sprintf "unsupported version %d (supported: %d)"
           v schema_version_supported];
-      raw_json_excerpt = json_excerpt json }
+      raw_json_excerpt = excerpt }
   | Missing_field f ->
     { run_id; missing_fields = [f]; invalid_fields = [];
-      raw_json_excerpt = json_excerpt json }
+      raw_json_excerpt = excerpt }
   | Invalid_field { field; reason } ->
     { run_id; missing_fields = []; invalid_fields = [field, reason];
-      raw_json_excerpt = json_excerpt json }
+      raw_json_excerpt = excerpt }
   | Json_parse_error msg ->
     { run_id; missing_fields = []; invalid_fields = ["_json", msg];
-      raw_json_excerpt = json_excerpt json }
+      raw_json_excerpt = excerpt }
 
 (* {1 Helpers} *)
 

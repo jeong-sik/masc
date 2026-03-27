@@ -179,6 +179,26 @@ let test_evidence_gap_schema_version () =
       (gap.invalid_fields <> [])
 
 (* ================================================================
+   Forward compatibility: unknown fields ignored
+   ================================================================ *)
+
+let test_unknown_fields_ignored () =
+  let json = read_fixture "proof_manifest_v1.json" in
+  match json with
+  | `Assoc pairs ->
+    let json' = `Assoc (pairs @ [
+      "_future_field", `String "unknown";
+      "_extra_nested", `Assoc ["x", `Int 42];
+    ]) in
+    (match Cdal_proof_decoder.of_json json' with
+     | Error e ->
+       Alcotest.fail (Cdal_proof_decoder.decode_error_to_string e)
+     | Ok m ->
+       Alcotest.(check string) "decoded despite unknown fields"
+         "run-20260328-abc123" m.run_id)
+  | _ -> Alcotest.fail "fixture not Assoc"
+
+(* ================================================================
    Test suite
    ================================================================ *)
 
@@ -198,6 +218,9 @@ let () =
     "I3: schema version guard", [
       Alcotest.test_case "v99 rejected" `Quick test_schema_version_guard;
       Alcotest.test_case "v0 rejected" `Quick test_schema_version_zero;
+    ];
+    "forward compat", [
+      Alcotest.test_case "unknown fields ignored" `Quick test_unknown_fields_ignored;
     ];
     "antifragile: evidence_gap", [
       Alcotest.test_case "missing field gap" `Quick test_evidence_gap_missing_field;

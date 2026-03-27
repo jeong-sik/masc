@@ -112,10 +112,10 @@ let decompress_auto (data : string) : string =
        | None -> data)  (* Return original on failure *)
   | None -> data
 
-(** Compress and add header if beneficial *)
+(** Compress and add header if beneficial.
+    Compression disabled: 4TB SSD makes ZSTD savings negligible, and corrupt
+    ZSTD headers in PG caused server-wide decompress storms (2026-03-28).
+    Kept as passthrough so callers need no changes. *)
 let compress_with_header ?(level = default_level) (data : string) : string =
-  let (compressed, used_dict, did_compress) = compress ~level data in
-  if did_compress then
-    encode_with_header ~used_dict (String.length data) compressed
-  else
-    data
+  let _ = level in
+  data

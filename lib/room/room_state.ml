@@ -83,31 +83,20 @@ let recover_room_state config json =
       Safe_ops.json_int_opt "speculation_budget" json;
   }
 
-(** Write room state — persists to both filesystem and PostgreSQL *)
+(** Write room state — filesystem only.
+    Room state is short-term coordination data (agent membership, heartbeats,
+    task claims). Persisting to PG adds latency and compression overhead
+    without benefit — agents re-join on server restart.
+    See: memory-tier-phase1 design (Camp 4 pragmatist). *)
 let write_state config state =
   let json = room_state_to_yojson state in
-  write_json config (state_path config) json;
-  if is_pg_backend config then begin
-    let json_str = Yojson.Safe.to_string json in
-    (match backend_set config ~key:"room:state" ~value:json_str with
-     | Ok () -> ()
-     | Error e -> Log.Misc.error "room_state write_state backend_set failed: %s" (Backend_types.show_error e))
-  end
+  write_json config (state_path config) json
 
-(** Read room state — checks PostgreSQL first for HTTP state persistence *)
+(** Read room state — filesystem only.
+    Room state is ephemeral coordination data; filesystem is the sole source
+    of truth.  PG read path removed to eliminate ZSTD decompress dependency. *)
 let read_state config =
-  let pg_state =
-    if is_pg_backend config then
-      match backend_get config ~key:"room:state" with
-      | Ok (Some json_str) ->
-          (try Some (Yojson.Safe.from_string json_str) with Yojson.Json_error _ -> None)
-      | Ok None | Error _ -> None
-    else None
-  in
-  let json = match pg_state with
-    | Some j -> j
-    | None -> read_json config (state_path config)
-  in
+  let json = read_json config (state_path config) in
   match room_state_of_yojson json with
   | Ok state -> state
   | Error msg ->

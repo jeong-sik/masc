@@ -164,6 +164,7 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     Eio.Time.sleep clock 5.0;
     let config = state.room_config in
     let names = Keeper_types.keepalive_keeper_names config in
+    Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
     let booted = ref 0 in
     List.iter (fun name ->
         try

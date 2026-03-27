@@ -968,7 +968,7 @@ let test_keeper_msg_bootstraps_then_requires_message () =
       check bool "keeper bootstrap created keeper meta" true
         (match Masc_mcp.Keeper_types.read_meta config "bootstrap-demo" with
          | Ok (Some _) -> true
-         | _ -> false)
+         | _ -> false))
 
 let test_persistent_agent_msg_rejects_missing_message () =
   Eio_main.run @@ fun env ->

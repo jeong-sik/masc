@@ -251,7 +251,6 @@
    adaptive_thresholds
    mdal_store
    verification
-   trace
    mitosis
    mitosis_defaults
    mitosis_dna

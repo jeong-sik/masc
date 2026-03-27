@@ -30,9 +30,7 @@ type node_in_flight = {
 let active_chains : (string, chain_in_flight) Hashtbl.t = Hashtbl.create 8
 let active_nodes : (string, node_in_flight) Hashtbl.t = Hashtbl.create 32
 let current_chain : chain_in_flight option ref = ref None
-let mu = Eio.Mutex.create ()
-
-let with_mu f = Eio_guard.with_mutex mu f
+(* No mutex needed: all Hashtbl/ref ops are non-yielding within a single Eio domain. *)
 
 (** Convert Unix.gettimeofday (seconds) to nanoseconds int64. *)
 let timestamp_to_ns (t : float) : int64 =
@@ -47,39 +45,36 @@ let on_event (event : Chain_telemetry.chain_event) =
     let span_id = OT.Span_id.create () in
     let start_ns = timestamp_to_ns p.start_timestamp in
     let cf = { trace_id; span_id; start_ns } in
-    with_mu (fun () ->
-      Hashtbl.replace active_chains p.start_chain_id cf;
-      current_chain := Some cf)
+    Hashtbl.replace active_chains p.start_chain_id cf;
+    current_chain := Some cf
 
   | NodeStart p ->
     let now_ns = OT.Timestamp_ns.now_unix_ns () in
     let node_span_id = OT.Span_id.create () in
-    with_mu (fun () ->
-      (* Associate node with the current running chain.
-         NodeStart events don't carry chain_id in the telemetry API,
-         so we link to the most recently started chain (LIFO). *)
-      let chain_ctx = !current_chain in
-      let nf = match chain_ctx with
-        | Some chain ->
-          { chain_trace_id = chain.trace_id;
-            chain_span_id = chain.span_id;
-            node_span_id;
-            node_start_ns = now_ns }
-        | None ->
-          (* Orphan node — no active chain. Create standalone trace. *)
-          { chain_trace_id = OT.Trace_id.create ();
-            chain_span_id = OT.Span_id.create ();
-            node_span_id;
-            node_start_ns = now_ns }
-      in
-      Hashtbl.replace active_nodes p.node_start_id nf)
+    (* Associate node with the current running chain.
+       NodeStart events don't carry chain_id in the telemetry API,
+       so we link to the most recently started chain (LIFO). *)
+    let nf = match !current_chain with
+      | Some chain ->
+        { chain_trace_id = chain.trace_id;
+          chain_span_id = chain.span_id;
+          node_span_id;
+          node_start_ns = now_ns }
+      | None ->
+        (* Orphan node — no active chain. Create standalone trace. *)
+        { chain_trace_id = OT.Trace_id.create ();
+          chain_span_id = OT.Span_id.create ();
+          node_span_id;
+          node_start_ns = now_ns }
+    in
+    Hashtbl.replace active_nodes p.node_start_id nf
 
   | NodeComplete p ->
     let end_ns = OT.Timestamp_ns.now_unix_ns () in
-    let node_opt = with_mu (fun () ->
+    let node_opt =
       let v = Hashtbl.find_opt active_nodes p.node_complete_id in
       Hashtbl.remove active_nodes p.node_complete_id;
-      v) in
+      v in
     (match node_opt with
      | None -> ()
      | Some nf ->
@@ -102,11 +97,11 @@ let on_event (event : Chain_telemetry.chain_event) =
 
   | ChainComplete p ->
     let end_ns = OT.Timestamp_ns.now_unix_ns () in
-    let chain_opt = with_mu (fun () ->
+    let chain_opt =
       let v = Hashtbl.find_opt active_chains p.complete_chain_id in
       Hashtbl.remove active_chains p.complete_chain_id;
       current_chain := None;
-      v) in
+      v in
     (match chain_opt with
      | None -> ()
      | Some cf ->
@@ -129,10 +124,10 @@ let on_event (event : Chain_telemetry.chain_event) =
 
   | Error p ->
     let end_ns = OT.Timestamp_ns.now_unix_ns () in
-    let node_opt = with_mu (fun () ->
+    let node_opt =
       let v = Hashtbl.find_opt active_nodes p.error_node_id in
       Hashtbl.remove active_nodes p.error_node_id;
-      v) in
+      v in
     (match node_opt with
      | None -> ()
      | Some nf ->

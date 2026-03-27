@@ -97,10 +97,7 @@ let make_tools
     Keeper_exec_tools.keeper_allowed_model_tools meta
   in
   let failure_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let failure_counts_mu = Eio.Mutex.create () in
-  let with_failure_counts f =
-    Eio_guard.with_mutex failure_counts_mu f
-  in
+  (* No mutex: Hashtbl ops are non-yielding, single domain. *)
   let args_key name input =
     let h = Hashtbl.hash (Yojson.Safe.to_string input) in
     Printf.sprintf "%s:%d" name h
@@ -114,8 +111,7 @@ let make_tools
         (fun input ->
           let key = args_key td.name input in
           let prior_fails =
-            with_failure_counts (fun () ->
-              match Hashtbl.find_opt failure_counts key with
+            (match Hashtbl.find_opt failure_counts key with
               | Some n -> n | None -> 0)
           in
           if prior_fails >= max_consecutive_failures then begin
@@ -133,16 +129,14 @@ let make_tools
               in
               if keeper_tool_result_is_failure result then begin
                 let count = prior_fails + 1 in
-                with_failure_counts (fun () ->
-                  Hashtbl.replace failure_counts key count);
+                Hashtbl.replace failure_counts key count;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
                 Log.Keeper.warn
                   "tool %s returned error result (%d/%d) for same args"
                   td.name count max_consecutive_failures;
                 (false, result)
               end else begin
-                with_failure_counts (fun () ->
-                  Hashtbl.remove failure_counts key);
+                Hashtbl.remove failure_counts key;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
                 (* PR#814 Gap 1: Capture git status delta after successful tool execution.
                    If the working tree changed, log it so the keeper is aware of
@@ -157,8 +151,7 @@ let make_tools
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               let count = prior_fails + 1 in
-              with_failure_counts (fun () ->
-                Hashtbl.replace failure_counts key count);
+              Hashtbl.replace failure_counts key count;
               Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
               let msg = Printf.sprintf "tool %s failed (%d/%d): %s"
                 td.name count max_consecutive_failures

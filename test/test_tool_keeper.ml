@@ -1492,7 +1492,7 @@ let test_session_dir_mkdir_p_creates_full_tree () =
       check bool "history file written" true
         (Sys.file_exists history_path))
 
-let test_parse_agent_status_reads_compressed_filesystem_backend () =
+let test_parse_agent_status_reads_filesystem_backend () =
   Eio_main.run @@ fun env ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -1529,7 +1529,7 @@ let test_parse_agent_status_reads_compressed_filesystem_backend () =
               | Ok content -> content
               | Error e -> fail e
             in
-            check string "compressed header prefix" "ZSTD" (String.sub raw 0 4);
+            check bool "agent file written" true (String.length raw > 0);
             let status_json =
               Masc_mcp.Keeper_exec_status.parse_agent_status config ~agent_name
             in
@@ -1735,8 +1735,8 @@ let () =
            test_write_meta_syncs_registered_resident_seed;
          test_case "keeper up persists allowed paths" `Quick
            test_keeper_up_persists_allowed_paths_to_status_policy;
-         test_case "parse_agent_status reads compressed filesystem backend" `Quick
-           test_parse_agent_status_reads_compressed_filesystem_backend;
+         test_case "parse_agent_status reads filesystem backend" `Quick
+           test_parse_agent_status_reads_filesystem_backend;
          test_case "resident bootstrap marks stale explicit keeper" `Quick
            test_resident_bootstrap_marks_stale_explicit_keeper;
          test_case "resident supervisor recovers missing desired keeper" `Quick

@@ -93,7 +93,7 @@ build_dashboard_spa() {
         echo "[dashboard] Existing deps build failed, retrying after ${dashboard_pm_label} install..." >&2
     fi
 
-    if (cd "$dashboard_dir" && "${dashboard_pm[@]}" install --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
+    if (cd "$dashboard_dir" && "${dashboard_pm[@]}" install --frozen-lockfile --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
         tail -n 6 "$log_file" >&2 || true
         rm -f "$log_file"
         return 0

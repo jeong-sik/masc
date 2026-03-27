@@ -92,6 +92,7 @@ describe('Overview freshness strip', () => {
     render(null, container)
     container.remove()
     vi.clearAllMocks()
+    vi.restoreAllMocks()
     vi.resetModules()
     vi.doUnmock('../../mission-store')
     vi.doUnmock('../../room-truth-store')

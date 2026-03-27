@@ -68,7 +68,7 @@ if needs_rebuild; then
     echo "[dashboard] Existing deps build failed, retrying after ${dashboard_pm_label} install..." >&2
   fi
 
-  if ! (cd "$DASHBOARD_DIR" && "${dashboard_pm[@]}" install --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
+  if ! (cd "$DASHBOARD_DIR" && "${dashboard_pm[@]}" install --frozen-lockfile --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
     tail -n 20 "$log_file" >&2 || true
     rm -f "$log_file"
     echo "[dashboard] Build failed (non-fatal)." >&2

@@ -3,10 +3,23 @@
     Centralized environment variable management following 12-Factor App principles.
     All env vars use MASC_* prefix for consistency.
 
+    Functions ending in [_result] return [(string, string) result] and are
+    the preferred API.  Convenience functions without [_result] suffix raise
+    {!Config_error} on missing/invalid environment variables.
+
     Usage:
       let threshold = Env_config.Zombie.threshold_seconds
       let lock_timeout = Env_config.Lock.timeout_seconds
 *)
+
+(** Raised by convenience functions ([me_root], [sb_path],
+    [masc_http_base_url]) when a required environment variable is missing.
+    Prefer the [_result] variants for structured error handling. *)
+exception Config_error of string
+
+let () = Printexc.register_printer (function
+  | Config_error msg -> Some (Printf.sprintf "Env_config_core.Config_error: %s" msg)
+  | _ -> None)
 
 (** Safe getters with defaults *)
 let get_string ~default name =
@@ -74,7 +87,7 @@ let me_root_result () =
 let me_root () =
   match me_root_result () with
   | Ok path -> path
-  | Error msg -> failwith msg
+  | Error msg -> raise (Config_error msg)
 
 (** Log a deprecation warning when a legacy env var is set.
     Called once per legacy var at startup/first-read. *)
@@ -116,7 +129,7 @@ let sb_path_result () =
 let sb_path () =
   match sb_path_result () with
   | Ok path -> path
-  | Error msg -> failwith msg
+  | Error msg -> raise (Config_error msg)
 
 let masc_http_port () =
   match Sys.getenv_opt "MASC_HTTP_PORT" |> trim_opt with
@@ -167,7 +180,7 @@ let cluster_name () =
 let rec masc_http_base_url () =
   match masc_http_base_url_result () with
   | Ok base -> base
-  | Error msg -> failwith msg
+  | Error msg -> raise (Config_error msg)
 
 and masc_http_base_url_result () =
   match Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt with

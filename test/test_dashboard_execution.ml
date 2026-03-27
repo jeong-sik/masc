@@ -211,6 +211,32 @@ let test_dashboard_shell_counts_resident_keepers () =
       check int "shell keeper count from resident specs" 2
         (counts |> member "keepers" |> to_int))
 
+let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:None);
+      ignore
+        (Lib.Room.join config
+           ~agent_name:"keeper-sangsu-agent"
+           ~agent_type_override:(Some "keeper")
+           ~capabilities:["keeper"]
+           ());
+      ignore
+        (Lib.Keeper_types.write_resident_keeper config
+           (keeper_boot_entry "sangsu"));
+      let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
+      let open Yojson.Safe.Util in
+      let counts = json |> member "counts" in
+      check int "keeper-backed room has no general agents" 0
+        (counts |> member "agents" |> to_int);
+      check int "resident keeper still counted" 1
+        (counts |> member "keepers" |> to_int))
+
 let test_dashboard_execution_fresh_join_not_marked_stale () =
   let dir = test_dir () in
   Fun.protect
@@ -255,6 +281,8 @@ let () =
             test_dashboard_shell_current_room_status;
           Alcotest.test_case "shell counts resident keepers cheaply" `Quick
             test_dashboard_shell_counts_resident_keepers;
+          Alcotest.test_case "shell excludes keeper agents from general count" `Quick
+            test_dashboard_shell_excludes_keeper_agents_from_general_count;
           Alcotest.test_case "fresh join is not stale" `Quick
             test_dashboard_execution_fresh_join_not_marked_stale;
         ] );

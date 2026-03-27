@@ -236,8 +236,6 @@ let command_plane_summary_cache_parts ~allow_initializing ~state =
       in
       (Some (`Assoc (List.remove_assoc "swarm_status" fields)), swarm_status)
   | _ -> (None, None)
-let dashboard_semantics_http_json () =
-  Dashboard_semantics.json ()
 
 let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
@@ -397,42 +395,6 @@ let operator_actor_hint request =
       let sanitized = sanitize_actor (String.trim raw) in
       if sanitized = "" then None else Some sanitized
   | None -> None
-
-let is_sensitive_dashboard_query_key key =
-  match String.lowercase_ascii (String.trim key) with
-  | "token" | "auth" | "authorization" -> true
-  | _ -> false
-
-let sanitize_dashboard_request_target target =
-  match String.split_on_char '?' (String.trim target) with
-  | [ path ] -> path
-  | path :: query_parts ->
-      let query = String.concat "?" query_parts in
-      let sanitized_query =
-        Uri.query_of_encoded query
-        |> List.map (fun (key, values) ->
-               let values =
-                 if is_sensitive_dashboard_query_key key then [ "REDACTED" ]
-                 else values
-               in
-               (key, values))
-        |> Uri.encoded_of_query
-      in
-      if sanitized_query = "" then path else path ^ "?" ^ sanitized_query
-  | [] -> ""
-
-let remember_dashboard_request_context ~surface ~cache_key request fields =
-  let target =
-    sanitize_dashboard_request_target request.Httpun.Request.target
-  in
-  let context =
-    (("surface", surface) :: ("target", target) :: fields)
-    |> List.filter_map (fun (key, value) ->
-           let trimmed = String.trim value in
-           if trimmed = "" then None else Some (Printf.sprintf "%s=%s" key trimmed))
-    |> String.concat " "
-  in
-  Dashboard_cache.remember_context cache_key context
 
 (* --- Operator proactive refresh ---
    Default (no-param) requests are served from a background-refreshed ref.
@@ -778,30 +740,6 @@ let _mission_cache =
         ("internal_signals", `List []);
       ])
 
-let cached_surface_json_if_ready cache ~is_ready =
-  let json = cached_surface_json cache in
-  if is_ready json then Some json else None
-
-let operator_snapshot_json_if_ready () =
-  cached_surface_json_if_ready _operator_snapshot_cache ~is_ready:(function
-      | `Assoc fields -> (
-          match List.assoc_opt "status" fields with
-          | Some (`String "initializing") -> false
-          | _ -> true)
-      | _ -> false)
-
-let operator_digest_json_if_ready () =
-  cached_surface_json_if_ready _operator_digest_cache ~is_ready:(function
-      | `Assoc fields -> (
-          match List.assoc_opt "health" fields with
-          | Some (`String "initializing") -> false
-          | _ -> true)
-      | _ -> false)
-
-let default_dashboard_actor = function
-  | None -> true
-  | Some raw -> String.equal (String.trim raw) "dashboard"
-
 let start_mission_refresh_loop ~state ~sw ~clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
@@ -815,12 +753,10 @@ let start_mission_refresh_loop ~state ~sw ~clock =
       let command_plane_summary, swarm_status =
         command_plane_summary_cache_parts ~allow_initializing:false ~state
       in
-      let snapshot_json = operator_snapshot_json_if_ready () in
-      let digest_json = operator_digest_json_if_ready () in
       run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
         (fun ~config ~sw ->
-          Dashboard_mission.json ?command_plane_summary ?snapshot_json
-            ?digest_json ?swarm_status ~config ~sw ~clock ~proc_mgr ())
+          Dashboard_mission.json ?command_plane_summary ?swarm_status ~config ~sw
+            ~clock ~proc_mgr ())
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -836,20 +772,28 @@ let start_mission_refresh_loop ~state ~sw ~clock =
 let dashboard_mission_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
   let compute ?actor () =
+    let started_at = Unix.gettimeofday () in
+    let command_plane_started_at = Unix.gettimeofday () in
     let command_plane_summary, swarm_status =
       command_plane_summary_cache_parts ~allow_initializing:false ~state
     in
-    let snapshot_json = operator_snapshot_json_if_ready () in
-    let digest_json =
-      if default_dashboard_actor actor then operator_digest_json_if_ready ()
-      else None
+    let command_plane_summary_ms =
+      int_of_float
+        ((Unix.gettimeofday () -. command_plane_started_at) *. 1000.0)
     in
     run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
       ~config:state.Mcp_server.room_config
       (fun ~config ~sw ->
-        Dashboard_mission.json ?actor ?command_plane_summary ?snapshot_json
-          ?digest_json ?swarm_status ~config ~sw ~clock
+        Dashboard_mission.json ?actor ?command_plane_summary ?swarm_status
+          ~config ~sw ~clock
           ~proc_mgr:state.Mcp_server.proc_mgr ())
+    |> with_projection_diagnostics ~surface:"mission" ~started_at
+         ~extra:
+           [
+             ("command_plane_summary_ms", `Int command_plane_summary_ms);
+             ("has_command_plane_summary", `Bool (Option.is_some command_plane_summary));
+             ("has_swarm_status", `Bool (Option.is_some swarm_status));
+           ]
   in
   let full_json =
     match actor with
@@ -858,11 +802,6 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
            after the first success, but let the very first default read
            bootstrap that success instead of staying "initializing" forever
            when proactive warm-up misses its first build window. *)
-        remember_dashboard_request_context
-          ~surface:"mission"
-          ~cache_key:"mission:default"
-          request
-          [ ("actor", "dashboard") ];
         cached_surface_or_first_success_json _mission_cache
           ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:25.0
           (fun () -> compute ())
@@ -872,9 +811,6 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
         room_scoped_cache_key state.Mcp_server.room_config "mission"
           (Option.value ~default:"" actor)
       in
-      remember_dashboard_request_context
-        ~surface:"mission" ~cache_key request
-        [ ("actor", Option.value ~default:"dashboard" actor) ];
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
         ~clock ~timeout_sec:25.0 (compute ?actor)
   in
@@ -1006,27 +942,50 @@ let dashboard_agents_safe config =
 let dashboard_messages_safe config ~since_seq ~limit =
   Room.get_messages_raw_in_room config ~room_id:(dashboard_current_room_id config) ~since_seq ~limit
 
+let is_keeper_agent (agent : Types.agent) =
+  String.equal (String.lowercase_ascii (String.trim agent.agent_type)) "keeper"
+
+let dashboard_general_agent_count agents =
+  agents
+  |> List.fold_left
+       (fun count agent -> if is_keeper_agent agent then count else count + 1)
+       0
+
 let provider_capacity_json () : Yojson.Safe.t =
   `Assoc []
+
+let dashboard_shell_timeout_s =
+  float_of_env_default "MASC_DASHBOARD_SHELL_TIMEOUT_S"
+    ~default:8.0 ~min_v:2.0 ~max_v:30.0
 
 let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in
   let cache_key =
     Printf.sprintf "shell:%s:%s" config.base_path current_room
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:15.0 (fun () ->
+  let compute () =
     let started_at = Unix.gettimeofday () in
-    let agents = dashboard_agents_safe config in
-    let tasks = dashboard_tasks_safe config in
-    let keepers_total = resident_keeper_count config in
+    let measure_ms f =
+      let t0 = Unix.gettimeofday () in
+      let value = f () in
+      let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
+      (value, elapsed_ms)
+    in
+    let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
+    let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
+    let general_agents = dashboard_general_agent_count agents in
+    let tasks, tasks_ms = measure_ms (fun () -> dashboard_tasks_safe config) in
+    let keepers_total, keepers_ms =
+      measure_ms (fun () -> resident_keeper_count config)
+    in
     `Assoc
       [
         ("generated_at", `String (Types.now_iso ()));
-        ("status", dashboard_shell_status_json config);
+        ("status", status_json);
         ( "counts",
           `Assoc
             [
-              ("agents", `Int (List.length agents));
+              ("agents", `Int general_agents);
               ("tasks", `Int (List.length tasks));
               ("keepers", `Int keepers_total);
             ] );
@@ -1037,4 +996,15 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
            [
              ("current_room", `String current_room);
              ("keeper_count_source", `String "resident_registry");
-           ])
+             ("status_ms", `Int status_ms);
+             ("agents_ms", `Int agents_ms);
+             ("tasks_ms", `Int tasks_ms);
+             ("keepers_ms", `Int keepers_ms);
+           ]
+  in
+  match Eio_context.get_clock_opt () with
+  | Some clock ->
+      Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0 ~clock
+        ~timeout_sec:dashboard_shell_timeout_s compute
+  | None ->
+      Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute

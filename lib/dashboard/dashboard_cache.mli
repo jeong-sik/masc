@@ -30,7 +30,7 @@ val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Sa
     deadlocking.  Concurrent requests for the same key are serialised — only
     one [f] runs; others wait for the result (stampede protection). *)
 
-exception Compute_timeout of string
+exception Compute_timeout of string * bool
 (** Raised internally when the compute function exceeds [timeout_sec].
     Callers of [get_or_compute_with_timeout] do not need to handle this —
     it is caught and converted to a timeout-error JSON response. *)

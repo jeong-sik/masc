@@ -109,7 +109,7 @@ export function SnapshotCard() {
         </button>
         <button type="button"
           class="w-full rounded-md border border-solid border-[var(--card-border)] px-3 py-2 bg-[rgba(255,255,255,0.04)] text-[var(--text-body)] text-[11px] font-medium cursor-pointer transition-colors duration-150 hover:bg-[rgba(255,255,255,0.08)]"
-          onClick=${() => navigate('operations', { section: 'intervene' })}
+          onClick=${() => navigate('command', { section: 'intervene' })}
         >
           운영 패널
         </button>
@@ -156,7 +156,7 @@ export function InterveneRailCard() {
         </button>
         <button type="button"
           class="w-full border border-solid border-[var(--card-border)] rounded-lg py-1.5 px-2 bg-[var(--white-4)] text-[var(--text-body)] text-[11px] cursor-pointer transition-colors duration-150 hover:bg-[var(--white-8)]"
-          onClick=${() => navigate('operations', { section: 'intervene' })}
+          onClick=${() => navigate('command', { section: 'intervene' })}
         >
           운영 패널
         </button>

@@ -163,6 +163,43 @@ type agent = {
   meta: agent_meta option; [@default None] (* session metadata *)
 } [@@deriving yojson { strict = false }, show]
 
+let agent_of_yojson_generated = agent_of_yojson
+
+let iso8601_of_unix_seconds ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let normalize_agent_last_seen = function
+  | `String _ as value -> Some value
+  | `Int seconds ->
+      Some (`String (iso8601_of_unix_seconds (float_of_int seconds)))
+  | `Float seconds ->
+      Some (`String (iso8601_of_unix_seconds seconds))
+  | _ -> None
+
+let agent_of_yojson json =
+  match agent_of_yojson_generated json with
+  | Ok _ as ok -> ok
+  | Error original_error -> (
+      match json with
+      | `Assoc fields -> (
+          match
+            List.assoc_opt "last_seen" fields
+            |> function
+            | Some value -> normalize_agent_last_seen value
+            | None -> None
+          with
+          | Some normalized_last_seen ->
+              let normalized_fields =
+                ("last_seen", normalized_last_seen)
+                :: List.remove_assoc "last_seen" fields
+              in
+              agent_of_yojson_generated (`Assoc normalized_fields)
+          | None -> Error original_error)
+      | _ -> Error original_error)
+
 (* ============================================ *)
 (* Multi-Room Types                             *)
 (* ============================================ *)

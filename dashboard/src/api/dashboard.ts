@@ -419,6 +419,7 @@ export interface ToolMetricsResponse {
 export interface DashboardToolsResponse {
   generated_at?: string
   config_resolution?: DashboardConfigResolution
+  runtime_resolution?: DashboardRuntimeResolution
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
 }
@@ -437,6 +438,35 @@ export interface DashboardConfigResolution {
   prompts: DashboardConfigResolutionItem
   keepers: DashboardConfigResolutionItem
   personas: DashboardConfigResolutionItem
+}
+
+export interface DashboardRuntimeDiagnostic {
+  ts: string
+  kind: string
+  signal?: string
+  message: string
+}
+
+export interface DashboardBuildIdentity {
+  release_version: string
+  commit: string | null
+  started_at: string
+  uptime_seconds: number
+}
+
+export interface DashboardRuntimeResolution {
+  status: 'ready' | 'warn' | string
+  warnings: string[]
+  base_path_input: DashboardConfigResolutionItem
+  workspace_path: DashboardConfigResolutionItem
+  resolved_base_path: DashboardConfigResolutionItem
+  data_root: DashboardConfigResolutionItem
+  prompt_markdown_dir: DashboardConfigResolutionItem
+  workspace_git_commit: string | null
+  resolved_base_git_commit: string | null
+  source_mismatch: boolean
+  diagnostics: DashboardRuntimeDiagnostic[]
+  build: DashboardBuildIdentity
 }
 
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {

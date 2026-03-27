@@ -610,7 +610,7 @@ if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
     echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
-    exec "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$BASE_PATH"
+    exec "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"
 elif [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
     echo "  Host: $HOST" >&2
@@ -627,7 +627,7 @@ elif [ "$HTTP_MODE" = "true" ]; then
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
     echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
-    exec "$SELECTED_EXE" --http --port "$PORT" --path "$BASE_PATH"
+    exec "$SELECTED_EXE" --http --port "$PORT" --path "$RESOLVED_BASE_PATH"
 else
     echo "Starting MASC MCP server (stdio mode, $RUNTIME_NAME)..." >&2
     echo "  Base path: $RESOLVED_BASE_PATH" >&2
@@ -636,8 +636,8 @@ else
     fi
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
     if [ "$EIO_MODE" = "true" ]; then
-        exec "$SELECTED_EXE" --base-path "$BASE_PATH"
+        exec "$SELECTED_EXE" --base-path "$RESOLVED_BASE_PATH"
     else
-        exec "$SELECTED_EXE" --stdio --path "$BASE_PATH"
+        exec "$SELECTED_EXE" --stdio --path "$RESOLVED_BASE_PATH"
     fi
 fi

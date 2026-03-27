@@ -75,7 +75,7 @@ MASC가 명시적으로 **하지 않는 것**:
 | HTTP/2 | h2-eio (h2c) | `MASC_USE_H2=1`로 활성화. SSE 멀티플렉싱 (브라우저 6-conn 제한 회피). |
 | TLS | mirage-crypto + tls-eio | 인증서: `SSL_CERT_FILE` 환경변수. |
 | JSON | yojson | JSON 파싱/생성. `Yojson.Safe.t` 표준 사용. |
-| PostgreSQL | caqti + caqti-eio | Board, session 상태 저장. Supabase Session Pooler (port 5432). |
+| PostgreSQL | caqti + caqti-eio | Board, session 상태 저장. Supabase Transaction Pooler (port 6543) preferred, session pooler is fallback. |
 | SQLite | sqlite3 | 로컬 경량 저장 (일부 모듈). |
 | Protocol | MCP JSON-RPC | `tools/call`, `tools/list` over SSE + POST. |
 | gRPC | grpc-direct (h2-eio) | Agent-to-Agent 통신. proto 정의: `proto/`. |
@@ -204,7 +204,7 @@ Command Plane 안으로 흡수된 오케스트레이션 substrate.
 |---------|----------|----------|------|------|
 | Neo4j | Railway (`turntable.proxy.rlwy.net:11490`) | Bolt (via GraphQL) | Agent 그래프, COLLABORATED_WITH 관계, Person 노드 | 직접 Cypher 접근 금지. GraphQL API 경유. |
 | Supabase pgvector | Supabase Cloud | PostgreSQL | Vector search (wiki, retrospectives) | `$SUPABASE_DB_URL` |
-| PostgreSQL | Supabase Session Pooler (`:5432`) | caqti-eio | Board 게시판, session 상태, 구조화 데이터 | Transaction Pooler (6543) 사용 시 prepared statement 충돌. |
+| PostgreSQL | Supabase Transaction Pooler (`:6543`) preferred | caqti-eio | Board 게시판, session 상태, 구조화 데이터 | MASC는 `oneshot` query policy로 prepared statement 충돌을 피한다. Session Pooler (`:5432`)는 legacy fallback. |
 | OAS Agent SDK | In-process (OCaml library) | Function call | Agent.run, Context_reducer, Swarm engine, Cascade | MASC의 agent lifecycle은 OAS에 위임. |
 | Langfuse | Cloud API | HTTP | LLM 호출 tracing, cost attribution | 선택적 활성화. |
 | GraphQL API | Railway (`second-brain-graphql-production.up.railway.app`) | HTTP | Agent 정보 로드, collaboration edge 기록 | `$GRAPHQL_API_KEY` 인증. Query cost limit 2000. |

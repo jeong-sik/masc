@@ -20,7 +20,9 @@ interface TransportHealthData {
   summary: {
     primary_path: string
     queue_pressure: string
-    recent_messages: number
+    recent_messages: number | null
+    recent_messages_available: boolean
+    recent_messages_source: string
     external_fanout_targets: number
   }
   sse: {
@@ -82,11 +84,13 @@ interface TransportHealthData {
   cluster: {
     cluster: string
     room_id: string
-    total_units: number
-    managed_units: number
-    live_agents: number
-    active_operations: number
-    stale_units: number
+    topology_available: boolean
+    topology_source: string
+    total_units: number | null
+    managed_units: number | null
+    live_agents: number | null
+    active_operations: number | null
+    stale_units: number | null
   }
   agent_health: {
     stale_total: number
@@ -147,7 +151,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     transport: 'Streamable HTTP',
     endpoint: (data) => data.streamable_http.endpoint,
     description: 'Stateless POST. 세션 불필요.',
-    live: (data) => `${data.summary.recent_messages} recent msgs · ${data.cluster.active_operations} active ops`,
+    live: (data) => `${formatMetricValue(data.summary.recent_messages)} recent msgs · ${formatMetricValue(data.cluster.active_operations)} active ops`,
   },
 ]
 
@@ -260,6 +264,10 @@ function staleTone(staleTotal: number): StatusTone {
   return 'bad'
 }
 
+function formatMetricValue(value: number | null): string | number {
+  return value === null ? 'n/a' : value
+}
+
 function MetricRow({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return html`
     <div class="flex items-center justify-between gap-3 py-1.5">
@@ -363,7 +371,13 @@ export function TransportHealthPanel() {
   const wsStatus = websocketTone(data)
   const webrtcStatus = webrtcTone(data)
   const h2Status = http2Tone(data)
-  const clusterStatus = staleTone(data.agent_health.stale_total)
+  const clusterStatus = data.cluster.topology_available ? staleTone(data.agent_health.stale_total) : 'warn'
+  const clusterEyebrow = data.cluster.topology_available
+    ? `${formatMetricValue(data.cluster.live_agents)} live`
+    : data.cluster.topology_source
+  const managedUnitsSub = data.cluster.topology_available
+    ? `${formatMetricValue(data.cluster.total_units)} 전체`
+    : `topology ${data.cluster.topology_source}`
 
   return html`
     <div class="space-y-4">
@@ -422,10 +436,10 @@ export function TransportHealthPanel() {
           <${MetricRow} label="레거시" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
         <//>
 
-        <${SectionCard} title="에이전트 풀" status=${clusterStatus} eyebrow=${`${data.cluster.live_agents} live`}>
-          <${MetricRow} label="관리 유닛" value=${data.cluster.managed_units} sub=${`${data.cluster.total_units} 전체`} />
-          <${MetricRow} label="활성 작업" value=${data.cluster.active_operations} />
-          <${MetricRow} label="부실 유닛" value=${data.cluster.stale_units} />
+        <${SectionCard} title="에이전트 풀" status=${clusterStatus} eyebrow=${clusterEyebrow}>
+          <${MetricRow} label="관리 유닛" value=${formatMetricValue(data.cluster.managed_units)} sub=${managedUnitsSub} />
+          <${MetricRow} label="활성 작업" value=${formatMetricValue(data.cluster.active_operations)} />
+          <${MetricRow} label="부실 유닛" value=${formatMetricValue(data.cluster.stale_units)} />
           <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
         <//>
       </div>

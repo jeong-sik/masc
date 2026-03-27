@@ -110,6 +110,11 @@ type PracticalCase = {
 const transportHealth: Signal<TransportHealthData | null> = signal(null)
 const loading: Signal<boolean> = signal(false)
 const error: Signal<string | null> = signal(null)
+
+/** Hydrate transport health from SSE payload — zero HTTP fetch. */
+export function hydrateTransportHealthFromSSE(data: unknown): void {
+  transportHealth.value = data as TransportHealthData
+}
 let inflightTransportHealthRefresh: Promise<void> | null = null
 
 const PRACTICAL_CASES: PracticalCase[] = [

@@ -543,6 +543,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
 
 type keeper_boot_entry = {
   name : string;
+  persona_name : string;
+  voice_enabled : bool;
+  voice_channel : string;
+  voice_agent_id : string;
   created_at : string;
   updated_at : string;
 }
@@ -558,6 +562,10 @@ let keeper_boot_to_json (entry : keeper_boot_entry) =
   `Assoc
     [
       ("name", `String entry.name);
+      ("persona_name", `String entry.persona_name);
+      ("voice_enabled", `Bool entry.voice_enabled);
+      ("voice_channel", `String entry.voice_channel);
+      ("voice_agent_id", `String entry.voice_agent_id);
       ("created_at", `String entry.created_at);
       ("updated_at", `String entry.updated_at);
     ]
@@ -567,6 +575,22 @@ let keeper_boot_of_json (json : Yojson.Safe.t) :
   try
     let open Yojson.Safe.Util in
     let name = json |> member "name" |> to_string in
+    let persona_name =
+      json |> member "persona_name" |> to_string_option
+      |> Option.value ~default:name
+    in
+    let voice_enabled =
+      json |> member "voice_enabled" |> to_bool_option
+      |> Option.value ~default:(default_voice_enabled_for name)
+    in
+    let voice_channel =
+      json |> member "voice_channel" |> to_string_option
+      |> Option.value ~default:(default_voice_channel_for name)
+    in
+    let voice_agent_id =
+      json |> member "voice_agent_id" |> to_string_option
+      |> Option.value ~default:(default_voice_agent_id_for name)
+    in
     let created_at =
       json |> member "created_at" |> to_string_option
       |> Option.value ~default:(now_iso ())
@@ -575,9 +599,29 @@ let keeper_boot_of_json (json : Yojson.Safe.t) :
       json |> member "updated_at" |> to_string_option
       |> Option.value ~default:created_at
     in
-    Ok { name; created_at; updated_at }
+    Ok
+      {
+        name;
+        persona_name;
+        voice_enabled;
+        voice_channel;
+        voice_agent_id;
+        created_at;
+        updated_at;
+      }
   with Yojson.Safe.Util.Type_error (msg, _) | Failure msg ->
     Error ("keeper boot entry parse error: " ^ msg)
+
+let keeper_boot_entry_of_meta ?created_at (meta : keeper_meta) : keeper_boot_entry =
+  {
+    name = meta.name;
+    persona_name = meta.name;
+    voice_enabled = meta.voice_enabled;
+    voice_channel = meta.voice_channel;
+    voice_agent_id = meta.voice_agent_id;
+    created_at = Option.value ~default:meta.created_at created_at;
+    updated_at = meta.updated_at;
+  }
 
 let write_resident_keeper config (entry : keeper_boot_entry) :
     (unit, string) result =
@@ -637,8 +681,32 @@ let register_resident_keeper config name : (unit, string) result =
     | Ok (Some entry) -> entry.created_at
     | _ -> now_iso ()
   in
-  write_resident_keeper config
-    { name; created_at; updated_at = now_iso () }
+  let meta_opt =
+    let path = keeper_meta_path config name in
+    if not (Sys.file_exists path) then None
+    else
+      match Safe_ops.read_json_file_safe path with
+      | Ok json -> (
+          match meta_of_json json with
+          | Ok meta -> Some meta
+          | Error _ -> None)
+      | Error _ -> None
+  in
+  match meta_opt with
+  | Some meta ->
+      write_resident_keeper config
+        (keeper_boot_entry_of_meta ~created_at meta)
+  | None ->
+      write_resident_keeper config
+        {
+          name;
+          persona_name = name;
+          voice_enabled = default_voice_enabled_for name;
+          voice_channel = default_voice_channel_for name;
+          voice_agent_id = default_voice_agent_id_for name;
+          created_at;
+          updated_at = now_iso ();
+        }
 
 let persistent_agent_names ?resident_names config =
   let dir = keeper_dir config in

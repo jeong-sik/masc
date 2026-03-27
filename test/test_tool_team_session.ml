@@ -101,5 +101,9 @@ let () =
             `Quick
             Test_tool_team_session_flow
               .test_memory_backend_event_lock_serializes_fibers;
+          Alcotest.test_case "filesystem-backend-event-lock-serializes-fibers"
+            `Quick
+            Test_tool_team_session_flow
+              .test_filesystem_backend_event_lock_serializes_fibers;
         ] );
     ]

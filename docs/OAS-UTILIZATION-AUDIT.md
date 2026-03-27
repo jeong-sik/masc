@@ -77,7 +77,7 @@ That is enough for current keeper/council/mitosis usage, but it does not mean ev
 
 The worst offenders were fixed in this pass, but any document still prioritizing:
 
-- Gardener migration
+- legacy ecosystem-loop migration
 - “Event_bus bridge planned”
 - “team_session is still pre-OAS”
 

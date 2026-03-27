@@ -1,7 +1,7 @@
 (** Context_compact_oas — direct delegation to OAS Context_reducer.
 
     MASC messages are [Agent_sdk.Types.message] — the same type OAS uses.
-    No role conversion or sentinel tagging is needed; OAS Context_reducer
+    No role conversion or extra tagging is needed; OAS Context_reducer
     natively supports all 4 roles (System, User, Assistant, Tool) and
     preserves ToolUse/ToolResult pairing.
 
@@ -9,7 +9,7 @@
     Custom closures to inject domain logic that OAS does not provide.
 
     @since Phase 1 — OAS Context_reducer integration
-    @since Phase B — Sentinel removal (roles are natively compatible) *)
+    @since Phase B — legacy tag removal (roles are natively compatible) *)
 
 (* ================================================================ *)
 (* Strategy Type                                                     *)

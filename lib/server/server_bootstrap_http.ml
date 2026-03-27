@@ -6,7 +6,7 @@ module Http = Http_server_eio
 
 let make_http_config ~host ~port : Http.config =
   let config = { Http.default_config with port; host } in
-  Unix.putenv "MASC_HTTP_BIND_HOST" config.host;
+  Unix.putenv "MASC_HOST" config.host;
   Unix.putenv "MASC_HTTP_PORT" (string_of_int config.port);
   (match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
   | Some existing when String.trim existing <> "" -> ()

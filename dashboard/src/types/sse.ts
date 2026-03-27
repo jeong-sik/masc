@@ -125,50 +125,6 @@ export interface RouteState {
   postId: string | null
 }
 
-
-export interface DashboardSemanticMetric {
-  id: string
-  label: string
-  what_it_measures: string
-  why_it_exists: string
-  source_path: string
-  update_trigger: string
-  agent_behavior_effect: string
-  ecosystem_effect: string
-  interpretation: string
-  bad_smell: string
-  next_action: string
-}
-
-export interface DashboardSemanticPanel {
-  id: string
-  title: string
-  purpose: string
-  problem_solved: string
-  when_active: string
-  agent_role: string
-  ecosystem_function: string
-  related_tools: string[]
-  metrics: DashboardSemanticMetric[]
-}
-
-export interface DashboardSemanticSurface {
-  id: string
-  label: string
-  purpose: string
-  problem_solved: string
-  when_active: string
-  agent_role: string
-  ecosystem_function: string
-  panels: DashboardSemanticPanel[]
-}
-
-export interface DashboardSemanticsResponse {
-  schema_version?: string
-  generated_at?: string
-  surfaces: DashboardSemanticSurface[]
-}
-
 export type TabId =
   | 'overview'
   | 'monitoring'
@@ -176,32 +132,6 @@ export type TabId =
   | 'workspace'
   | 'lab'
   | 'logs'
-
-/** Pre-restructure tab IDs kept for redirect aliases. */
-export type LegacyTabId =
-  | 'home'
-  | 'status'
-  | 'work'
-  | 'operations'
-  | 'situation'
-  | 'agents'
-  | 'activity'
-  | 'control'
-  | 'mission'
-  | 'proof'
-  | 'execution'
-  | 'tools'
-  | 'live'
-  | 'memory'
-  | 'governance'
-  | 'planning'
-  | 'intervene'
-  | 'social'
-  | 'agent-roster'
-  | 'keeper-roster'
-
-/** Accepts both new and legacy tab IDs (for navigate() backward compat). */
-export type AnyTabId = TabId | LegacyTabId
 
 export const VALID_TABS: TabId[] = [
   'overview',
@@ -211,30 +141,6 @@ export const VALID_TABS: TabId[] = [
   'lab',
   'logs',
 ]
-
-/** Maps legacy tab IDs to new tab + optional section params. */
-export const LEGACY_TAB_REDIRECTS: Record<LegacyTabId, { tab: TabId; params?: Record<string, string> }> = {
-  'home': { tab: 'overview' },
-  'status': { tab: 'monitoring', params: { section: 'sessions' } },
-  'work': { tab: 'workspace', params: { section: 'board' } },
-  'operations': { tab: 'command', params: { section: 'intervene' } },
-  'situation': { tab: 'monitoring', params: { section: 'sessions' } },
-  'agents': { tab: 'monitoring', params: { section: 'agents' } },
-  'activity': { tab: 'monitoring', params: { section: 'activity' } },
-  'control': { tab: 'command', params: { section: 'intervene' } },
-  'mission': { tab: 'monitoring', params: { section: 'sessions' } },
-  'agent-roster': { tab: 'monitoring', params: { section: 'agents' } },
-  'execution': { tab: 'monitoring', params: { section: 'sessions' } },
-  'keeper-roster': { tab: 'monitoring', params: { section: 'agents' } },
-  'live': { tab: 'monitoring', params: { section: 'activity' } },
-  'social': { tab: 'monitoring', params: { section: 'activity' } },
-  'proof': { tab: 'workspace', params: { section: 'evidence' } },
-  'memory': { tab: 'workspace', params: { section: 'board' } },
-  'governance': { tab: 'command', params: { section: 'governance' } },
-  'planning': { tab: 'workspace', params: { section: 'planning' } },
-  'tools': { tab: 'lab', params: { section: 'tools' } },
-  'intervene': { tab: 'command', params: { section: 'intervene' } },
-}
 
 // --- Activity Graph types ---
 

@@ -236,6 +236,11 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | _ -> 0
           in
           let keepalive_running = runtime_keepalive_running config m in
+          let registry_state =
+            match Keeper_registry.get ~base_path:config.base_path m.name with
+            | Some entry -> Some (Keeper_registry.state_to_string entry.state)
+            | None -> None
+          in
 
           let context =
             match last_metrics with
@@ -339,7 +344,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                    ~now_ts));
               ("runtime_class", `String "resident_keeper");
               ("registered", `Bool true);
-              ("registry_state", `Null);
+              ("registry_state",
+                match registry_state with
+                | Some state -> `String state
+                | None -> `Null);
               ("agent_name", `String m.agent_name);
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
               ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));

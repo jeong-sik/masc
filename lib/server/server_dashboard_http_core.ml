@@ -956,7 +956,7 @@ let provider_capacity_json () : Yojson.Safe.t =
 
 let dashboard_shell_timeout_s =
   float_of_env_default "MASC_DASHBOARD_SHELL_TIMEOUT_S"
-    ~default:12.0 ~min_v:2.0 ~max_v:30.0
+    ~default:8.0 ~min_v:2.0 ~max_v:30.0
 
 let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in

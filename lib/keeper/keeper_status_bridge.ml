@@ -158,6 +158,7 @@ let runtime_surface_json config (meta : keeper_meta) =
   `Assoc
     [
       ("paused", `Bool meta.paused);
+      ("registered", `Bool (Option.is_some resident_spec));
       ("resident_registered", `Bool (Option.is_some resident_spec));
       ("keepalive_running", `Bool keepalive_running);
       ("registry_state",

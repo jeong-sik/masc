@@ -438,13 +438,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          resident loop startup or lazy tasks (#keeper-bootstrap-stuck). *)
       Eio.Fiber.fork ~sw (fun () ->
         (try
-           match Eio.Time.with_timeout clock 15.0 (fun () ->
+           match Eio.Time.with_timeout clock 10.0 (fun () ->
              Server_dashboard_http.warm_shell_cache state;
              Ok ())
            with
            | Ok () -> ()
            | Error `Timeout ->
-             Log.Dashboard.warn "shell cache pre-warm timed out (15s)"
+             Log.Dashboard.warn "shell cache pre-warm timed out (10s)"
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->

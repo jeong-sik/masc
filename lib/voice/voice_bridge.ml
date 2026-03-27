@@ -29,79 +29,6 @@ let write_text path content =
 let read_file path =
   Fs_compat.load_file path
 
-let show_process_status = function
-  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
-  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
-  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
-
-let playback_success_json ~attempted ~succeeded ~method_name ?detail () =
-  `Assoc
-    [
-      ("enabled", `Bool attempted);
-      ("attempted", `Bool attempted);
-      ("succeeded", `Bool succeeded);
-      ("method", `String method_name);
-      ("detail", match detail with Some value -> `String value | None -> `Null);
-    ]
-
-let playback_skipped_json reason =
-  `Assoc
-    [
-      ("enabled", `Bool false);
-      ("attempted", `Bool false);
-      ("succeeded", `Bool false);
-      ("method", `Null);
-      ("detail", `String reason);
-    ]
-
-let play_audio_locally ~agent_id ~audio_file =
-  if not (local_playback_enabled_for_agent agent_id) then
-    Ok (playback_skipped_json "local playback disabled")
-  else
-    let run argv =
-      Process_eio.run_argv_with_status ~timeout_sec:120.0 argv
-    in
-    let run_afplay path =
-      let argv =
-        if Sys.file_exists "/usr/bin/afplay" then [ "/usr/bin/afplay"; path ]
-        else [ "afplay"; path ]
-      in
-      run argv
-    in
-    match run_afplay audio_file with
-    | Unix.WEXITED 0, _ ->
-        Ok (playback_success_json ~attempted:true ~succeeded:true ~method_name:"afplay" ())
-    | status, output ->
-        let wav_file = Filename.temp_file "masc_voice_playback" ".wav" in
-        Fun.protect
-          ~finally:(fun () -> try Sys.remove wav_file with Sys_error _ -> ())
-          (fun () ->
-            let ffmpeg_argv =
-              [ "ffmpeg"; "-y"; "-loglevel"; "error"; "-i"; audio_file; wav_file ]
-            in
-            match run ffmpeg_argv with
-            | Unix.WEXITED 0, _ -> (
-                match run_afplay wav_file with
-                | Unix.WEXITED 0, _ ->
-                    Ok
-                      (playback_success_json ~attempted:true ~succeeded:true
-                         ~method_name:"ffmpeg+afplay"
-                         ~detail:"converted to wav for playback" ())
-                | status2, output2 ->
-                    Error
-                      (Printf.sprintf
-                         "local playback failed after wav conversion: afplay=%s output=%s"
-                         (show_process_status status2)
-                         (String.trim output2)) )
-            | status_ffmpeg, output_ffmpeg ->
-                Error
-                  (Printf.sprintf
-                     "local playback failed: afplay=%s output=%s; ffmpeg=%s output=%s"
-                     (show_process_status status)
-                     (String.trim output)
-                     (show_process_status status_ffmpeg)
-                     (String.trim output_ffmpeg)) )
-
 let resolve_api_key endpoint =
   let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
   match Provider_adapter.voice_endpoint_auth_env_name endpoint with
@@ -183,11 +110,6 @@ let available_tts_endpoints ?provider () =
   match load_voice_config () with
   | Error _ -> []
   | Ok config -> Provider_adapter.select_voice_endpoints ?provider config.tts.endpoints
-
-let provider_error_json endpoint message =
-  append_provider_metadata
-    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
-    endpoint
 
 let public_config_json () =
   match load_voice_config () with
@@ -391,43 +313,6 @@ let single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Error (Printf.sprintf "Connection error: %s" (Printexc.to_string exn))
-
-(** Make HTTP POST request to Voice MCP server with timeout and retry - Eio version *)
-let call_voice_mcp ~sw:_ ~clock ~net ~tool_name ~arguments =
-  log_debug (Printf.sprintf "Calling tool: %s" tool_name);
-  let uri = voice_mcp_uri () in
-  let request_body = `Assoc [
-    ("jsonrpc", `String "2.0");
-    ("method", `String "tools/call");
-    ("id", `Int 1);
-    ("params", `Assoc [
-      ("name", `String tool_name);
-      ("arguments", arguments);
-    ]);
-  ] in
-  let body_str = Yojson.Safe.to_string request_body in
-  let headers = Cohttp.Header.of_list [
-    ("Content-Type", "application/json");
-    ("Accept", "application/json");
-  ] in
-  let operation () =
-    Eio.Switch.run @@ fun inner_sw ->
-    match client_for_uri_result ~sw:inner_sw ~net uri with
-    | Error error -> Error error
-    | Ok client ->
-        with_timeout ~clock (fun () ->
-          single_voice_mcp_call ~sw:inner_sw ~client ~uri ~headers ~body_str)
-  in
-      let result = retry_with_backoff ~clock
-        ~attempt:1
-        ~max_attempts:(max_retries ())
-        ~backoff_sec:(initial_backoff_seconds ())
-        operation
-      in
-      (match result with
-      | Ok _ -> log_debug (Printf.sprintf "Tool %s succeeded" tool_name)
-      | Error e -> log_error (Printf.sprintf "Tool %s failed: %s" tool_name e));
-      result
 
 (** Extract result from MCP response *)
 let extract_mcp_result json =

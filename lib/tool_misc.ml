@@ -264,86 +264,6 @@ let handle_webrtc_answer _ctx args : result =
   | Ok response -> (true, pretty_json_string response)
   | Error msg -> error_result msg
 
-(** Flat default keeper gate config.
-    allowlist_enabled=false: all tools are available by default.
-    Safety is enforced through the denied_tools list (eval_gate). *)
-let keeper_default_gate_config () : Eval_gate.gate_config =
-  {
-    max_cost_usd = 0.10;
-    max_tool_calls_per_turn = 5;
-    entropy_threshold = 2;
-    destructive_check_enabled = true;
-    allowlist_enabled = false;
-    allowed_tools = [];
-    denied_tools = [
-      "keeper_bash"; "keeper_edit"; "keeper_fs_edit"; "keeper_github";
-    ];
-  }
-
-let keeper_tool_policy_json () =
-  let gate = keeper_default_gate_config () in
-  `Assoc
-    [
-      ("configured_tool_policy", `String (if gate.allowlist_enabled then "allowlist" else "all"));
-      ( "configured_tool_names",
-        `List
-          (if gate.allowlist_enabled
-           then List.map (fun name -> `String name) gate.allowed_tools
-           else []) );
-      ("denied_tool_names", `List (List.map (fun name -> `String name) gate.denied_tools));
-      ("max_tool_calls_per_turn", `Int gate.max_tool_calls_per_turn);
-      ("destructive_check_enabled", `Bool gate.destructive_check_enabled);
-    ]
-
-let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
-  let status_json =
-    Keeper_exec_status.parse_agent_status ctx.config ~agent_name:meta.agent_name
-  in
-  let status =
-    match U.member "status" status_json with
-    | `String value -> value
-    | _ -> "unknown"
-  in
-  let policy_json =
-    match keeper_tool_policy_json () with
-    | `Assoc fields -> fields
-    | _ -> []
-  in
-  `Assoc
-    ([
-       ("name", `String meta.name);
-       ("runtime_class", `String runtime_class);
-       ("agent_name", `String meta.agent_name);
-       ("status", `String status);
-       ("action_budget", `String "conversation");
-       ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
-       ("updated_at", `String meta.updated_at);
-     ]
-    @ policy_json)
-
-let keeper_policies_json ctx =
-  let registered_rows =
-    Keeper_types.resident_keeper_names ctx.config
-    |> List.filter_map (fun name ->
-           match Keeper_types.read_meta ctx.config name with
-           | Ok (Some meta) ->
-               Some (keeper_policy_row ctx ~runtime_class:"resident_keeper" meta)
-           | Ok None | Error _ -> None)
-  in
-  let unregistered_rows =
-    Keeper_types.persistent_agent_names ctx.config
-    |> List.filter_map (fun name ->
-           match Keeper_types.read_meta ctx.config name with
-           | Ok (Some meta) ->
-               Some (keeper_policy_row ctx ~runtime_class:"persistent_agent" meta)
-           | Ok None | Error _ -> None)
-  in
-  `Assoc
-    [
-      ("registered_keepers", `List registered_rows);
-      ("unregistered_keepers", `List unregistered_rows);
-    ]
-
 let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
   (* Build reverse index: tool_name -> surface string list.
      Also index by backend_tool_name so keeper/privileged surfaces
@@ -477,27 +397,6 @@ let handle_tool_admin_snapshot ctx args =
       ]
   in
   (true, Yojson.Safe.pretty_to_string payload)
-
-let apply_keeper_policy_update config ~runtime_class args =
-  let name = get_string args "name" "" |> String.trim in
-  let membership_ok =
-    match runtime_class with
-    | "keeper" ->
-      List.mem name (Keeper_types.resident_keeper_names config)
-      || List.mem name (Keeper_types.persistent_agent_names config)
-    | _ -> false
-  in
-  if not (Keeper_types.validate_name name) then
-    Error "invalid keeper name"
-  else if not membership_ok then
-    Error
-      (Printf.sprintf "%s not found in %s set" name runtime_class)
-  else
-    match Keeper_types.read_meta config name with
-    | Error err -> Error err
-    | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
-    | Ok (Some _meta) ->
-        Error "keeper policy update is removed; keepers use a fixed tool policy now"
 
 let handle_tool_admin_update ctx args =
   let section =

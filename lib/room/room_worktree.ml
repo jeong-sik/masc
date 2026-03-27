@@ -52,16 +52,17 @@ let ensure_worktree_path root worktree_name =
   else
     Error (IoError "Invalid worktree path: must be created under .worktrees/")
 
-(** Link worktree info to a task in backlog *)
+(** Link worktree info to a task in backlog.
+    Uses read_json/write_json to handle Backend ZSTD compression transparently. *)
 let link_worktree_to_task config ~task_id ~worktree_info =
   let backlog_file = Filename.concat (tasks_dir config) "backlog.json" in
-  if not (Sys.file_exists backlog_file) then
-    Error (IoError "Backlog not found")
-  else begin
-    let content = Fs_compat.load_file backlog_file in
-    match Yojson.Safe.from_string content |> backlog_of_yojson with
-    | Error e -> Error (IoError e)
-    | Ok backlog ->
+  let json = read_json config backlog_file in
+  match backlog_of_yojson json with
+  | Error e -> Error (IoError e)
+  | Ok backlog ->
+      if backlog.tasks = [] then
+        Error (IoError "Backlog not found")
+      else
         let found = ref false in
         let new_tasks = List.map (fun task ->
           if task.id = task_id then begin
@@ -73,10 +74,9 @@ let link_worktree_to_task config ~task_id ~worktree_info =
           Error (TaskNotFound task_id)
         else begin
           let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
-          Fs_compat.save_file backlog_file (Yojson.Safe.pretty_to_string (backlog_to_yojson new_backlog));
+          write_json config backlog_file (backlog_to_yojson new_backlog);
           Ok ()
         end
-  end
 
 (** Create worktree for agent - Result version
     @param link_task If true, links worktree info to the task in backlog (default: true) *)
@@ -109,14 +109,12 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
 
           let update_agent_current_task () =
             let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-            if Sys.file_exists agent_file then begin
-              let content = Fs_compat.load_file agent_file in
-              match Yojson.Safe.from_string content |> agent_of_yojson with
-              | Ok agent ->
-                  let updated_agent = { agent with current_task = Some worktree_name } in
-                  Fs_compat.save_file agent_file (Yojson.Safe.pretty_to_string (agent_to_yojson updated_agent))
-              | Error msg -> Log.Misc.info "agent state read: %s" msg
-            end
+            let json = read_json config agent_file in
+            match agent_of_yojson json with
+            | Ok agent ->
+                let updated_agent = { agent with current_task = Some worktree_name } in
+                write_json config agent_file (agent_to_yojson updated_agent)
+            | Error msg -> Log.Misc.info "agent state read: %s" msg
           in
 
           (* Link worktree to task in backlog *)

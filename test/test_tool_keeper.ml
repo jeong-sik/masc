@@ -1753,9 +1753,10 @@ let test_parse_agent_status_reads_compressed_filesystem_backend () =
               | Ok content -> content
               | Error e -> fail e
             in
-            check bool "raw content stored with backend compression header" true
-              (String.length raw >= 4
-              && String.sub raw 0 4 = "ZSTD");
+            (* Compression disabled (passthrough) — stored as plain JSON *)
+            check bool "raw content stored as plain JSON (no ZSTD header)" true
+              (String.length raw < 4
+              || String.sub raw 0 4 <> "ZSTD");
             let status_json =
               Masc_mcp.Keeper_exec_status.parse_agent_status config ~agent_name
             in

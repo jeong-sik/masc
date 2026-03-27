@@ -6,7 +6,7 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
 let pg_env_var_names =
-  [| "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" |]
+  [| "MASC_POSTGRES_URL" |]
 
 let force_jsonl_fallback_env () =
   Unix.putenv "MASC_STORAGE_TYPE" "filesystem";

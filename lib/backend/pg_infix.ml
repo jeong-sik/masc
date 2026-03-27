@@ -14,16 +14,18 @@
     enables oneshot mode for the companion `:6543` target. *)
 
 let preferred_url_from_env () =
-  let candidates : string option list =
-    [
-      Backend_pg_url.env_url_opt "MASC_POSTGRES_URL";
-      Backend_pg_url.env_url_opt "DATABASE_URL";
-      Backend_pg_url.env_url_opt "SUPABASE_DB_URL";
-      Backend_pg_url.env_url_opt "SB_PG_URL";
-    ]
-  in
-  Option.map (fun selection -> selection.Backend_pg_url.url)
-    (Backend_pg_url.choose_preferred_url candidates)
+  let primary = [ Backend_pg_url.env_url_opt "MASC_POSTGRES_URL" ] in
+  match Backend_pg_url.choose_preferred_url primary with
+  | Some selection -> Some selection.Backend_pg_url.url
+  | None ->
+      (* Legacy fallback — mirrors room_utils_backend_setup deprecation *)
+      let legacy =
+        [ Backend_pg_url.env_url_opt "DATABASE_URL";
+          Backend_pg_url.env_url_opt "SUPABASE_DB_URL";
+          Backend_pg_url.env_url_opt "SB_PG_URL" ]
+      in
+      Option.map (fun s -> s.Backend_pg_url.url)
+        (Backend_pg_url.choose_preferred_url legacy)
 
 let use_oneshot =
   match preferred_url_from_env () with

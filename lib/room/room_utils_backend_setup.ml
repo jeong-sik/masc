@@ -170,42 +170,39 @@ let env_opt name =
   | _ -> None
 
 let postgres_url_from_env () =
-  let candidates : string option list =
-    [
-      env_opt "MASC_POSTGRES_URL";
-      env_opt "DATABASE_URL";
-      env_opt "SUPABASE_DB_URL";
-      env_opt "SB_PG_URL";
-    ]
-  in
-  match Backend_pg_url.choose_preferred_url candidates with
-  | Some { url; preferred_supabase_transaction_companion = true; preferred_host = Some host } ->
-      Log.Backend.info
-        "Supabase Session Pooler configured on %s:5432; preferring available Transaction Pooler companion on %s:6543"
-        host host;
-      Some url
-  | Some { url; _ } -> Some url
-  | None -> None
+  match env_opt "MASC_POSTGRES_URL" with
+  | Some _ as primary ->
+      let candidates = [ primary ] in
+      (match Backend_pg_url.choose_preferred_url candidates with
+       | Some { url; preferred_supabase_transaction_companion = true; preferred_host = Some host } ->
+           Log.Backend.info
+             "Supabase Session Pooler on %s:5432; preferring Transaction Pooler companion on %s:6543"
+             host host;
+           Some url
+       | Some { url; _ } -> Some url
+       | None -> None)
+  | None ->
+      (* Legacy fallback with deprecation warning *)
+      let legacy =
+        [ env_opt "DATABASE_URL"; env_opt "SUPABASE_DB_URL"; env_opt "SB_PG_URL" ]
+      in
+      (match Backend_pg_url.choose_preferred_url legacy with
+       | Some { url; _ } ->
+           Log.Backend.warn
+             "PostgreSQL URL found via legacy env var (DATABASE_URL/SUPABASE_DB_URL/SB_PG_URL). \
+              Set MASC_POSTGRES_URL explicitly. Legacy auto-detection is deprecated.";
+           Some url
+       | None -> None)
 
-(** Auto-detect best backend based on environment variables
-    Priority order:
-    1. MASC_POSTGRES_URL / DATABASE_URL / SUPABASE_DB_URL / SB_PG_URL
-       - if available, use PostgreSQL for distributed coordination
-    2. FileSystem - zero-dependency default for personal/small use *)
-let auto_detect_backend () =
-  if postgres_url_from_env () <> None then begin
-    Log.Backend.info "Auto-detect: PostgreSQL URL found → PostgresNative backend";
-    "postgres"
-  end else begin
-    Log.Backend.info "Auto-detect: No distributed DB found → FileSystem backend (default)";
-    "filesystem"
-  end
-
-(** Storage type from environment variable *)
+(** Storage type from environment variable.
+    Defaults to filesystem when MASC_STORAGE_TYPE is not set.
+    Requires explicit MASC_STORAGE_TYPE=postgres for PG mode. *)
 let storage_type_from_env () =
   match env_opt "MASC_STORAGE_TYPE" with
   | Some value -> String.lowercase_ascii value
-  | None -> auto_detect_backend ()  (* Smart default: PG if URL exists, else FileSystem *)
+  | None ->
+      Log.Backend.info "MASC_STORAGE_TYPE not set, defaulting to filesystem";
+      "filesystem"
 
 (* ============================================ *)
 (* Backend creation                             *)
@@ -230,8 +227,10 @@ let sanitize_namespace_segment name =
 let backend_config_for base_path =
   let raw_storage_type = storage_type_from_env () in
   let storage_type =
-    if raw_storage_type = "auto" then auto_detect_backend ()
-    else raw_storage_type
+    if raw_storage_type = "auto" then begin
+      Log.Backend.warn "MASC_STORAGE_TYPE=auto is deprecated; defaulting to filesystem";
+      "filesystem"
+    end else raw_storage_type
   in
   let postgres_url = postgres_url_from_env () in
   let cluster_name =

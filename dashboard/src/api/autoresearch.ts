@@ -1,7 +1,7 @@
 // MASC Dashboard — Autoresearch API client
 // Fetches loop list and detail from dedicated HTTP endpoints.
 
-import { get } from './core'
+import { get, post } from './core'
 
 export interface AutoresearchCycleRecord {
   cycle: number
@@ -56,6 +56,14 @@ export interface AutoresearchLoopDetail extends AutoresearchLoopSummary {
   history_count: number
 }
 
+export interface AutoresearchLoopActionResponse {
+  ok: boolean
+  action?: 'retry' | 'delete'
+  loop_id?: string
+  loop?: AutoresearchLoopSummary
+  error?: string
+}
+
 export function fetchAutoresearchLoops(): Promise<AutoresearchLoopsResponse> {
   return get('/api/v1/autoresearch/loops')
 }
@@ -65,4 +73,12 @@ export function fetchAutoresearchLoopDetail(
   historyLimit = 100,
 ): Promise<AutoresearchLoopDetail> {
   return get(`/api/v1/autoresearch/loops/${encodeURIComponent(loopId)}?history_limit=${historyLimit}`)
+}
+
+export function retryAutoresearchLoop(loopId: string): Promise<AutoresearchLoopActionResponse> {
+  return post('/api/v1/autoresearch/loops/retry', { loop_id: loopId })
+}
+
+export function deleteAutoresearchLoop(loopId: string): Promise<AutoresearchLoopActionResponse> {
+  return post('/api/v1/autoresearch/loops/delete', { loop_id: loopId })
 }

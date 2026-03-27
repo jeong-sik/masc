@@ -149,53 +149,7 @@ let graphql_csp_header nonce =
      worker-src 'self' blob:"
     nonce
 
-(** Resolve assets root *)
-let assets_root () =
-  let is_dir path =
-    Sys.file_exists path && Sys.is_directory path
-  in
-  let nonempty_env name =
-    match Sys.getenv_opt name with
-    | Some value ->
-        let trimmed = String.trim value in
-        if String.equal trimmed "" then None else Some trimmed
-    | None -> None
-  in
-  let base_path_assets name =
-    match nonempty_env name with
-    | Some path -> Some (Filename.concat path "assets")
-    | None -> None
-  in
-  let env_assets = Env_config_core.assets_dir_opt () in
-  match env_assets with
-  | Some path when is_dir path -> path
-  | _ ->
-      let exe_dir = Filename.dirname Sys.executable_name in
-      let inferred_repo_assets =
-        let root = Filename.dirname (Filename.dirname (Filename.dirname exe_dir)) in
-        Filename.concat root "assets"
-      in
-      let candidates =
-        List.fold_right
-          (fun path acc ->
-            match path with
-            | Some value -> value :: acc
-            | None -> acc)
-          [
-            base_path_assets "MASC_BASE_PATH_INPUT";
-            base_path_assets "MASC_BASE_PATH";
-            Some inferred_repo_assets;
-            Some (Filename.concat exe_dir "assets");
-            Some (Filename.concat (Sys.getcwd ()) "assets");
-          ]
-          []
-      in
-      match List.find_opt is_dir candidates with
-      | Some path -> path
-      | None ->
-          (match candidates with
-           | path :: _ -> path
-           | [] -> Filename.concat (Sys.getcwd ()) "assets")
+let assets_root = Web_dashboard.assets_root
 
 (** Local GraphiQL assets *)
 let graphiql_asset_root () =

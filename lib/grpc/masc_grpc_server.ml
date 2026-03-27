@@ -462,6 +462,7 @@ let start
   : unit =
   if not (is_enabled ()) then begin
     Transport_metrics.set_grpc_runtime_listening false;
+    Transport_metrics.set_grpc_listen_status "disabled";
     Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=0 to disable)";
   end
   else begin
@@ -477,18 +478,23 @@ let start
         Log.Server.info
           "  methods: Join, Leave, Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
         Transport_metrics.set_grpc_runtime_listening true;
+        Transport_metrics.set_grpc_listen_status "listening";
         (* Safe: finally is Atomic.set — no I/O, no exception risk *)
         Fun.protect
-          ~finally:(fun () -> Transport_metrics.set_grpc_runtime_listening false)
+          ~finally:(fun () ->
+            Transport_metrics.set_grpc_runtime_listening false;
+            Transport_metrics.set_grpc_listen_status "stopped")
           (fun () -> Grpc_eio.Server.serve ~sw ~env server)
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
         Transport_metrics.set_grpc_runtime_listening false;
+        Transport_metrics.set_grpc_listen_status "bind_failed";
         Log.Server.error
           "gRPC coordination transport unavailable on 127.0.0.1:%d: port already in use"
           port
       | exn ->
         Transport_metrics.set_grpc_runtime_listening false;
+        Transport_metrics.set_grpc_listen_status "bind_failed";
         Log.Server.error "gRPC server failed: %s" (Printexc.to_string exn)))
   end

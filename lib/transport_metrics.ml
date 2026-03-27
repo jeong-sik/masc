@@ -95,11 +95,23 @@ let set_ws_sessions count =
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false
 let ws_runtime_listening : bool Atomic.t = Atomic.make false
 
+(** Explanatory status for why a transport is or is not listening.
+    Valid values: ["not_started"], ["disabled"], ["listening"],
+    ["bind_failed"], ["stopped"]. *)
+let grpc_listen_status : string Atomic.t = Atomic.make "not_started"
+let ws_listen_status : string Atomic.t = Atomic.make "not_started"
+
 let set_grpc_runtime_listening listening =
   Atomic.set grpc_runtime_listening listening
 
 let set_ws_runtime_listening listening =
   Atomic.set ws_runtime_listening listening
+
+let set_grpc_listen_status status =
+  Atomic.set grpc_listen_status status
+
+let set_ws_listen_status status =
+  Atomic.set ws_listen_status status
 
 let grpc_enabled () =
   match Sys.getenv_opt "MASC_GRPC_ENABLED" with
@@ -143,7 +155,9 @@ let init () =
   register_ws_metrics ();
   register_agent_metrics ();
   set_grpc_runtime_listening false;
-  set_ws_runtime_listening false
+  set_grpc_listen_status "not_started";
+  set_ws_runtime_listening false;
+  set_ws_listen_status "not_started"
 
 (** {1 Transport Health JSON Snapshot} *)
 
@@ -302,6 +316,7 @@ let transport_health_json ~config =
       ("enabled", `Bool grpc_configured);
       ("configured", `Bool grpc_configured);
       ("listening", `Bool grpc_live);
+      ("listen_status", `String (Atomic.get grpc_listen_status));
       ("port", `Int (grpc_port ()));
       ("active_streams", `Int (int_of_float grpc_streams));
       ("subscribers", `Int grpc_subscribers_i);
@@ -312,6 +327,7 @@ let transport_health_json ~config =
       ("enabled", `Bool ws_configured);
       ("configured", `Bool ws_configured);
       ("listening", `Bool ws_live);
+      ("listen_status", `String (Atomic.get ws_listen_status));
       ("mode", `String "standalone");
       ("port", `Int (ws_port ()));
       ("sessions", `Int ws_sessions);

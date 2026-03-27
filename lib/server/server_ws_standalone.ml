@@ -106,50 +106,67 @@ let start
   : unit =
   if not (is_enabled ()) then begin
     Transport_metrics.set_ws_runtime_listening false;
+    Transport_metrics.set_ws_listen_status "disabled";
     Log.Server.info "WebSocket transport disabled (MASC_WS_ENABLED=0)"
   end else begin
     let port = configured_port () in
     let net = Eio.Stdenv.net env in
     let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
-    let socket =
-      Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:128 addr
-    in
-    Transport_metrics.set_ws_runtime_listening true;
-    let connection_handler =
-      Ws_eio.Server.create_connection_handler ~sw
-        (make_websocket_handler ~on_message)
-    in
-    Eio.Fiber.fork ~sw (fun () ->
-      (* Safe: finally is Atomic.set — no I/O, no exception risk *)
-      Fun.protect
-        ~finally:(fun () -> Transport_metrics.set_ws_runtime_listening false)
-        (fun () ->
-          Log.Server.info "WebSocket server starting on port %d" port;
-          let rec accept_loop backoff_s =
-            try
-              let flow, client_addr = Eio.Net.accept ~sw socket in
-              Eio.Fiber.fork ~sw (fun () ->
-                try connection_handler client_addr flow
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                  Log.Server.warn "WS standalone handler error: %s"
-                    (Printexc.to_string exn));
-              accept_loop 0.05
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              Log.Server.error "WS standalone accept error: %s"
-                (Printexc.to_string exn);
-              (* Backoff to avoid tight error loops *)
-              (try Eio.Time.sleep (Eio.Stdenv.clock env) backoff_s
-               with Eio.Cancel.Cancelled _ as e -> raise e
+    (* Isolate bind failure so it does not propagate to the bootstrap
+       catch-all and mark the entire startup as Degraded (#3408). *)
+    match Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:128 addr with
+    | socket ->
+      Transport_metrics.set_ws_runtime_listening true;
+      Transport_metrics.set_ws_listen_status "listening";
+      let connection_handler =
+        Ws_eio.Server.create_connection_handler ~sw
+          (make_websocket_handler ~on_message)
+      in
+      Eio.Fiber.fork ~sw (fun () ->
+        (* Safe: finally is Atomic.set — no I/O, no exception risk *)
+        Fun.protect
+          ~finally:(fun () ->
+            Transport_metrics.set_ws_runtime_listening false;
+            Transport_metrics.set_ws_listen_status "stopped")
+          (fun () ->
+            Log.Server.info "WebSocket server starting on port %d" port;
+            let rec accept_loop backoff_s =
+              try
+                let flow, client_addr = Eio.Net.accept ~sw socket in
+                Eio.Fiber.fork ~sw (fun () ->
+                  try connection_handler client_addr flow
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
                   | exn ->
-                      Log.Server.warn
-                        "WS standalone backoff sleep failed on port %d (backoff=%.2fs): %s"
-                        port backoff_s (Printexc.to_string exn));
-              let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
-              accept_loop next_backoff
-          in
-          accept_loop 0.05))
+                    Log.Server.warn "WS standalone handler error: %s"
+                      (Printexc.to_string exn));
+                accept_loop 0.05
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Server.error "WS standalone accept error: %s"
+                  (Printexc.to_string exn);
+                (* Backoff to avoid tight error loops *)
+                (try Eio.Time.sleep (Eio.Stdenv.clock env) backoff_s
+                 with Eio.Cancel.Cancelled _ as e -> raise e
+                    | exn ->
+                        Log.Server.warn
+                          "WS standalone backoff sleep failed on port %d (backoff=%.2fs): %s"
+                          port backoff_s (Printexc.to_string exn));
+                let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
+                accept_loop next_backoff
+            in
+            accept_loop 0.05))
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+    | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
+      Transport_metrics.set_ws_runtime_listening false;
+      Transport_metrics.set_ws_listen_status "bind_failed";
+      Log.Server.error
+        "WebSocket transport unavailable on 127.0.0.1:%d: port already in use"
+        port
+    | exception exn ->
+      Transport_metrics.set_ws_runtime_listening false;
+      Transport_metrics.set_ws_listen_status "bind_failed";
+      Log.Server.error "WebSocket bind failed on port %d: %s"
+        port (Printexc.to_string exn)
   end

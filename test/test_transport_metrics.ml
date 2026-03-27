@@ -233,8 +233,12 @@ let test_transport_health_json () =
     (grpc_json |> U.member "subscribers" |> U.to_int);
   check bool "grpc listening field exists" true
     (match grpc_json |> U.member "listening" with `Bool _ -> true | _ -> false);
+  check bool "grpc listen_status field exists" true
+    (match grpc_json |> U.member "listen_status" with `String _ -> true | _ -> false);
   check bool "websocket listening field exists" true
     (match ws_json |> U.member "listening" with `Bool _ -> true | _ -> false);
+  check bool "ws listen_status field exists" true
+    (match ws_json |> U.member "listen_status" with `String _ -> true | _ -> false);
   check bool "websocket section exists" true
     (match ws_json with `Assoc _ -> true | _ -> false);
   check bool "webrtc section exists" true
@@ -245,6 +249,62 @@ let test_transport_health_json () =
     (String.length (summary_json |> U.member "primary_path" |> U.to_string) > 0);
   ignore (Masc_mcp.Sse.close_all_clients ());
   cleanup_dir base_dir
+
+(* ============================================================
+   Listen Status (#3408)
+   ============================================================ *)
+
+let test_grpc_listen_status_lifecycle () =
+  TM.init ();
+  check string "grpc status after init" "not_started"
+    (Atomic.get TM.grpc_listen_status);
+  TM.set_grpc_listen_status "listening";
+  TM.set_grpc_runtime_listening true;
+  check string "grpc status after listening" "listening"
+    (Atomic.get TM.grpc_listen_status);
+  check bool "grpc listening returns true" true (TM.grpc_listening ());
+  TM.set_grpc_listen_status "stopped";
+  TM.set_grpc_runtime_listening false;
+  check string "grpc status after stopped" "stopped"
+    (Atomic.get TM.grpc_listen_status);
+  check bool "grpc listening returns false" false (TM.grpc_listening ())
+
+let test_ws_listen_status_lifecycle () =
+  TM.init ();
+  check string "ws status after init" "not_started"
+    (Atomic.get TM.ws_listen_status);
+  TM.set_ws_listen_status "listening";
+  TM.set_ws_runtime_listening true;
+  check string "ws status after listening" "listening"
+    (Atomic.get TM.ws_listen_status);
+  check bool "ws listening returns true" true (TM.ws_listening ());
+  TM.set_ws_listen_status "stopped";
+  TM.set_ws_runtime_listening false;
+  check string "ws status after stopped" "stopped"
+    (Atomic.get TM.ws_listen_status);
+  check bool "ws listening returns false" false (TM.ws_listening ())
+
+let test_listen_status_bind_failed () =
+  TM.init ();
+  TM.set_grpc_listen_status "bind_failed";
+  TM.set_grpc_runtime_listening false;
+  TM.set_ws_listen_status "bind_failed";
+  TM.set_ws_runtime_listening false;
+  check bool "grpc not listening on bind_failed" false (TM.grpc_listening ());
+  check bool "ws not listening on bind_failed" false (TM.ws_listening ());
+  check string "grpc status is bind_failed" "bind_failed"
+    (Atomic.get TM.grpc_listen_status);
+  check string "ws status is bind_failed" "bind_failed"
+    (Atomic.get TM.ws_listen_status)
+
+let test_listen_status_disabled () =
+  TM.init ();
+  TM.set_grpc_listen_status "disabled";
+  TM.set_ws_listen_status "disabled";
+  check string "grpc status disabled" "disabled"
+    (Atomic.get TM.grpc_listen_status);
+  check string "ws status disabled" "disabled"
+    (Atomic.get TM.ws_listen_status)
 
 (* ============================================================
    Test Runner
@@ -282,5 +342,15 @@ let () =
     ]);
     ("json", [
       test_case "transport_health_json structure" `Quick test_transport_health_json;
+    ]);
+    ("listen_status", [
+      test_case "grpc listen_status lifecycle" `Quick
+        test_grpc_listen_status_lifecycle;
+      test_case "ws listen_status lifecycle" `Quick
+        test_ws_listen_status_lifecycle;
+      test_case "listen_status bind_failed" `Quick
+        test_listen_status_bind_failed;
+      test_case "listen_status disabled" `Quick
+        test_listen_status_disabled;
     ]);
   ]

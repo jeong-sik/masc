@@ -64,11 +64,13 @@ let websocket_discovery_json request =
   let configured = Server_ws_standalone.is_enabled () in
   let port = Server_ws_standalone.configured_port () in
   let listening = Transport_metrics.ws_listening () in
+  let listen_status = Atomic.get Transport_metrics.ws_listen_status in
   let base_fields =
     [
       ("enabled", `Bool configured);
       ("configured", `Bool configured);
       ("listening", `Bool listening);
+      ("listen_status", `String listen_status);
       ("mode", `String "standalone");
       ("discovery_path", `String "/ws");
       ("session_count", `Int (Server_mcp_transport_ws.session_count ()));
@@ -92,6 +94,7 @@ let transport_json request =
   let grpc_enabled = Masc_grpc_server.is_enabled () in
   let grpc_port = Masc_grpc_server.configured_port () in
   let grpc_listening = Transport_metrics.grpc_listening () in
+  let grpc_listen_status = Atomic.get Transport_metrics.grpc_listen_status in
   let webrtc_enabled = Server_webrtc_transport.is_enabled () in
   `Assoc
     [
@@ -112,6 +115,7 @@ let transport_json request =
              ("enabled", `Bool grpc_enabled);
              ("configured", `Bool grpc_enabled);
              ("listening", `Bool grpc_listening);
+             ("listen_status", `String grpc_listen_status);
              ("port", `Int grpc_port);
              ("service", `String Masc_grpc_service.service_name);
              ("health_service", `String Masc_grpc_server.health_service_name);

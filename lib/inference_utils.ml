@@ -30,13 +30,7 @@ let total_tokens (u : Agent_sdk.Types.api_usage) = u.input_tokens + u.output_tok
 (** Zero usage marker — delegates to OAS Types.zero_api_usage.
     @since 2.123.0 — delegated to OAS *)
 let zero_usage : Agent_sdk.Types.api_usage =
-  {
-    input_tokens = 0;
-    output_tokens = 0;
-    cache_read_input_tokens = 0;
-    cache_creation_input_tokens = 0;
-    cost_usd = None;
-  }
+  { input_tokens = 0; output_tokens = 0; cache_read_input_tokens = 0; cache_creation_input_tokens = 0; cost_usd = None }
 
 (** Extract usage from an api_response, defaulting to zero.
     @since 2.123.0 *)

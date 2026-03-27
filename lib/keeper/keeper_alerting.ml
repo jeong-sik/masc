@@ -6,13 +6,6 @@ open Keeper_memory
 
 let keeper_model_tools = Tool_shard.keeper_model_tools
 
-let merge_cost_usd (a : float option) (b : float option) : float option =
-  match a, b with
-  | Some x, Some y -> Some (x +. y)
-  | Some _, None -> a
-  | None, Some _ -> b
-  | None, None -> None
-
 let merge_usage
     (a : Agent_sdk.Types.api_usage)
     (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
@@ -22,7 +15,11 @@ let merge_usage
       a.cache_creation_input_tokens + b.cache_creation_input_tokens;
     cache_read_input_tokens =
       a.cache_read_input_tokens + b.cache_read_input_tokens;
-    cost_usd = merge_cost_usd a.cost_usd b.cost_usd }
+    cost_usd =
+      (match a.cost_usd, b.cost_usd with
+       | Some x, Some y -> Some (x +. y)
+       | Some x, None | None, Some x -> Some x
+       | None, None -> None) }
 
 let contains_ci (haystack : string) (needle : string) : bool =
   let h = String.lowercase_ascii haystack in

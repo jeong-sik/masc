@@ -85,10 +85,6 @@ val remember_dashboard_request_context :
   (string * string) list ->
   unit
 
-(** {1 Semantics} *)
-
-val dashboard_semantics_http_json : unit -> Yojson.Safe.t
-
 (** {1 Batch API} *)
 
 val dashboard_batch_json :

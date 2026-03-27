@@ -207,40 +207,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
       in
       match worker_auth_token ~base_path ~worker_name with
       | Error e -> Error e
-      | Ok auth_token ->
-          let* net =
-            match Eio_context.get_net_opt () with
-            | Some net -> Ok net
-            | None -> Error "Eio net not initialized"
-          in
-          let heartbeat_cbs =
-            let interval = local_worker_heartbeat_interval_sec () in
-            if interval > 0 then
-              [ { Oas.Agent_types.interval_sec = float_of_int interval;
-                  callback = (fun () ->
-                    match
-                      call_masc_tool ~sw ~auth_token
-                        ~session_id:meta.mcp_session_id
-                        ~tool_name:"masc_heartbeat" ~args:(`Assoc [])
-                    with
-                    | Ok _ -> ()
-                    | Error e ->
-                        Log.LocalWorker.warn "heartbeat error for %s: %s"
-                          worker_name e) } ]
-            else []
-          in
-          Fun.protect
-            ~finally:(fun () ->
-              ignore
-                (leave_worker ~sw ~auth_token
-                   ~session_id:meta.mcp_session_id ~worker_name))
-            (fun () ->
-              let _ =
-                match join_worker ~sw ~auth_token
-                        ~session_id:meta.mcp_session_id ~worker_name with
-                | Ok _ -> ()
-                | Error e -> raise (Failure ("worker join failed: " ^ e))
-              in
+          | Ok auth_token ->
               let allowed_tools =
                 match meta.shell_profile with
                 | Shell_dev ->
@@ -296,27 +263,6 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                         |> Result.map_error Oas.Error.to_string)
               in
               let tools = mcp_tools @ shell_tools in
-              let tool_names_ref = ref [] in
-              let hooks =
-                {
-                  Oas.Hooks.empty with
-                  pre_tool_use =
-                    Some
-                      (function
-                        | Oas.Hooks.PreToolUse { tool_name; _ } ->
-                            tool_names_ref := tool_name :: !tool_names_ref;
-                            Oas.Hooks.Continue
-                        | _ -> Oas.Hooks.Continue);
-                }
-              in
-              let resume_model_id =
-                if checkpoint.model <> "" then checkpoint.model
-                else meta.effective_model
-              in
-              let resume_label =
-                Printf.sprintf "llama:%s" resume_model_id
-              in
-              let resume_provider = oas_provider_of_label resume_label in
               let prompt =
                 let tool_contract =
                   "Tool contract reminder: if you call masc_team_session_step \
@@ -342,40 +288,8 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                 in
                 String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
               in
-              let max_turns =
-                match meta.max_turns_override with
-                | Some value -> max 1 value
-                | None ->
-                    (match meta.execution_scope with
-                    | Team_session_types.Limited_code_change -> 20
-                    | Team_session_types.Observe_only -> 8
-                    | Team_session_types.Autonomous -> 30)
-              in
-              let thinking_enabled =
-                Option.value ~default:false meta.thinking_enabled
-              in
-              let resume_guardrails =
-                let gate =
-                  Worker_oas.gate_config_of_execution_scope meta.execution_scope
-                in
-                Verifier_oas.eval_gate_to_oas_guardrails gate
-              in
-              let config, options =
-                build_resume_config ~worker_name ~provider:resume_provider
-                  ~model_id:resume_model_id
-                  ~system_prompt:
-                    (default_system_prompt ~worker_name ~model_id:resume_model_id
-                       ?session_id:meta.team_session_id ?role:meta.role
-                       ?selection_note:meta.selection_note ())
-                  ~tools ~max_turns ~thinking_enabled ~hooks ~raw_trace
-                  ~periodic_callbacks:heartbeat_cbs
-                  ~guardrails:resume_guardrails ()
-              in
-              let agent =
-                Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config ()
-              in
-              Worker_oas.run_existing_worker_agent ~sw ~base_path ~meta ~prompt
-                ~workspace_path ~raw_trace ?worker_run_id ~tool_names_ref agent)))
+              Worker_oas.resume_worker_via_oas ~sw ~base_path ~meta ~checkpoint
+                ~prompt ~tools ~raw_trace ?worker_run_id ()))
 
 let run_worker ~sw ~base_path ~worker_name ~model_label ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope

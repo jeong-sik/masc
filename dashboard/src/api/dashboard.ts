@@ -21,7 +21,6 @@ import type {
   DashboardPlanningResponse,
   DashboardRoomTruthResponse,
   DashboardShellResponse,
-  DashboardSemanticsResponse,
   BoardSortMode,
   GovernanceDecisionItem,
   GovernanceTimelineEvent,
@@ -95,24 +94,6 @@ export function reportToolHostFailure(
   report: ToolHostFailureReport,
 ): Promise<{ ok: boolean }> {
   return post('/api/v1/dashboard/logs/tool-host-failures', report, undefined, 3000)
-}
-
-export interface AgentActivityEntry {
-  agent_id: string
-  tool_calls: number
-  success_count: number
-  failure_count: number
-  first_seen: number
-  last_seen: number
-}
-
-export interface AgentActivityResponse {
-  hours: number
-  agents: AgentActivityEntry[]
-}
-
-export function fetchAgentActivity(hours = 24): Promise<AgentActivityResponse> {
-  return get(`/api/v1/agent-activity?hours=${hours}`)
 }
 
 export interface AgentTimelineEvent {
@@ -258,14 +239,6 @@ export interface RuntimeParamsResponse {
 
 export function fetchRuntimeParams(): Promise<RuntimeParamsResponse> {
   return get('/api/v1/governance/params')
-}
-
-export function fetchGovernanceFeed(filter = 'decisions', limit = 20): Promise<unknown[]> {
-  return get(`/api/v1/governance/feed?filter=${filter}&limit=${limit}`)
-}
-
-export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
-  return get('/api/v1/dashboard/semantics')
 }
 
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
@@ -446,6 +419,7 @@ export interface ToolMetricsResponse {
 export interface DashboardToolsResponse {
   generated_at?: string
   config_resolution?: DashboardConfigResolution
+  runtime_resolution?: DashboardRuntimeResolution
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
 }
@@ -464,6 +438,35 @@ export interface DashboardConfigResolution {
   prompts: DashboardConfigResolutionItem
   keepers: DashboardConfigResolutionItem
   personas: DashboardConfigResolutionItem
+}
+
+export interface DashboardRuntimeDiagnostic {
+  ts: string
+  kind: string
+  signal?: string
+  message: string
+}
+
+export interface DashboardBuildIdentity {
+  release_version: string
+  commit: string | null
+  started_at: string
+  uptime_seconds: number
+}
+
+export interface DashboardRuntimeResolution {
+  status: 'ready' | 'warn' | string
+  warnings: string[]
+  base_path_input: DashboardConfigResolutionItem
+  workspace_path: DashboardConfigResolutionItem
+  resolved_base_path: DashboardConfigResolutionItem
+  data_root: DashboardConfigResolutionItem
+  prompt_markdown_dir: DashboardConfigResolutionItem
+  workspace_git_commit: string | null
+  resolved_base_git_commit: string | null
+  source_mismatch: boolean
+  diagnostics: DashboardRuntimeDiagnostic[]
+  build: DashboardBuildIdentity
 }
 
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
@@ -517,75 +520,6 @@ export function savePromptOverride(key: string, value: string): Promise<PromptMu
 
 export function clearPromptOverride(key: string): Promise<PromptMutationResponse> {
   return post('/api/v1/prompts', { action: 'clear', key })
-}
-
-// --- Individual resource fetchers (selective SSE-driven refresh) ---
-
-export interface PaginatedAgentsResponse {
-  agents: unknown[]
-  limit: number
-  offset: number
-  total: number
-}
-
-export interface PaginatedTasksResponse {
-  tasks: unknown[]
-  limit: number
-  offset: number
-  total: number
-}
-
-export interface PaginatedMessagesResponse {
-  messages: unknown[]
-  limit: number
-  since_seq: number
-  total: number
-}
-
-export function fetchAgentsList(): Promise<PaginatedAgentsResponse> {
-  return get('/api/v1/agents?limit=100')
-}
-
-export function fetchTasksList(opts?: {
-  includeDone?: boolean
-  includeCancelled?: boolean
-}): Promise<PaginatedTasksResponse> {
-  const params = new URLSearchParams({ limit: '200' })
-  if (opts?.includeDone) params.set('include_done', 'true')
-  if (opts?.includeCancelled) params.set('include_cancelled', 'true')
-  return get(`/api/v1/tasks?${params}`)
-}
-
-export function fetchMessagesList(sinceSeq?: number): Promise<PaginatedMessagesResponse> {
-  const params = new URLSearchParams({ limit: '50' })
-  if (sinceSeq != null && sinceSeq > 0) params.set('since_seq', String(sinceSeq))
-  return get(`/api/v1/messages?${params}`)
-}
-
-export interface FetchMdalLoopsOptions {
-  limit?: number
-  historyLimit?: number
-  status?: 'running' | 'interrupted' | 'completed' | 'stopped' | 'error'
-}
-
-export interface MdalLoopsResponse {
-  loops?: unknown[]
-  total?: number
-  returned?: number
-  limit?: number
-  history_limit?: number
-  status?: string | null
-}
-
-export function fetchMdalLoops(options: FetchMdalLoopsOptions = {}): Promise<MdalLoopsResponse> {
-  return withRetries('fetchMdalLoops', async () => {
-    const params = new URLSearchParams()
-    if (options.limit != null) params.set('limit', String(options.limit))
-    if (options.historyLimit != null) params.set('history_limit', String(options.historyLimit))
-    if (options.status) params.set('status', options.status)
-    const query = params.toString()
-    return get<MdalLoopsResponse>(`/api/v1/mdal/loops${query ? `?${query}` : ''}`)
-  })
 }
 
 // --- Command Plane ---

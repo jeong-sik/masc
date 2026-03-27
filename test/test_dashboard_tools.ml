@@ -36,6 +36,7 @@ let test_dashboard_tools_projection () =
       let inventory_rows = inventory |> member "tools" |> to_list in
       let usage = json |> member "tool_usage" in
       let config_resolution = json |> member "config_resolution" in
+      let runtime_resolution = json |> member "runtime_resolution" in
       check bool "inventory has tools" true (List.length inventory_rows > 0);
       (* Verify registered_count is a valid integer field *)
       let reg_count = usage |> member "registered_count" |> to_int in
@@ -47,6 +48,22 @@ let test_dashboard_tools_projection () =
       check bool "config warnings surfaced as list" true
         (match config_resolution |> member "warnings" with
          | `List _ -> true
+         | _ -> false);
+      check bool "runtime data_root path surfaced" true
+        (match runtime_resolution |> member "data_root" |> member "path" with
+         | `String value -> String.length value > 0
+         | _ -> false);
+      check bool "runtime source_mismatch surfaced" true
+        (match runtime_resolution |> member "source_mismatch" with
+         | `Bool _ -> true
+         | _ -> false);
+      check bool "runtime diagnostics surfaced as list" true
+        (match runtime_resolution |> member "diagnostics" with
+         | `List _ -> true
+         | _ -> false);
+      check bool "build started_at surfaced" true
+        (match runtime_resolution |> member "build" |> member "started_at" with
+         | `String value -> String.length value > 0
          | _ -> false);
       check bool "usage dispatch flag present" true
         (match usage |> member "dispatch_v2_enabled" with

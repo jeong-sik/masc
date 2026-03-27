@@ -14,8 +14,6 @@ import type {
   KeeperLifecycleState,
   Goal,
   MdalLoop,
-  DashboardSemanticsResponse,
-  DashboardSemanticPanel,
   DashboardExecutionSummary,
   DashboardExecutionQueueItem,
   DashboardExecutionSessionBrief,
@@ -28,9 +26,6 @@ import {
   fetchDashboardMemory,
   fetchDashboardPlanning,
   fetchDashboardShell,
-  fetchMessagesList,
-  fetchAgentActivity,
-  type AgentActivityEntry,
 } from './api'
 import { journal } from './sse'
 import { showToast } from './components/common/toast'
@@ -63,19 +58,6 @@ export interface ShellCounts {
 }
 
 export const shellCounts = signal<ShellCounts | null>(null)
-export const agentActivity = signal<AgentActivityEntry[]>([])
-
-// --- Provider capacity ---
-
-export interface ProviderCapacity {
-  agent_capacity: {
-    min_agents: number
-    target_agents: number
-    max_agents: number
-  }
-}
-
-export const providerCapacity = signal<ProviderCapacity | null>(null)
 
 // --- Core state signals ---
 
@@ -181,9 +163,6 @@ export const dashboardLoading = signal(false)
 export const boardLoading = signal(false)
 export const mdalLoading = signal(false)
 
-// Semantics: loaded once on startup, never refreshed (static data).
-export const dashboardSemantics = signal<DashboardSemanticsResponse | null>(null)
-
 // --- Refresh timestamps ---
 
 export const lastDashboardRefreshAt = signal<string | null>(null)
@@ -194,18 +173,6 @@ export const lastMdalRefreshAt = signal<string | null>(null)
 // --- Execution TTL guard (Phase 1C) ---
 
 export const lastExecutionRefreshAt = signal<number>(0)
-
-// --- Derived state ---
-
-export const activeAgents: ReadonlySignal<Agent[]> = computed(() =>
-  agents.value.filter(
-    a =>
-      a.status === 'active'
-      || a.status === 'busy'
-      || a.status === 'listening'
-      || a.status === 'idle',
-  )
-)
 
 export const tasksByStatus = computed(() => {
   const all = tasks.value
@@ -337,15 +304,6 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   return inflightDashboardRefresh
 }
 
-export function findDashboardSemanticPanel(panelId: string): DashboardSemanticPanel | null {
-  const surfaces = dashboardSemantics.value?.surfaces ?? []
-  for (const surface of surfaces) {
-    const panel = surface.panels.find(row => row.id === panelId)
-    if (panel) return panel
-  }
-  return null
-}
-
 function applyPlanningEnvelope(data: {
   goals?: unknown[]
   mdal?: {
@@ -416,9 +374,6 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
           keepers: data.counts.keepers ?? 0,
         }
       }
-      if (data.providers) {
-        providerCapacity.value = data.providers as unknown as ProviderCapacity
-      }
       lastShellRefreshAt = Date.now()
     } catch (err) {
       console.warn('[Dashboard] shell fetch error:', err)
@@ -428,15 +383,6 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
     }
   })()
   return inflightShellRefresh
-}
-
-export async function refreshAgentActivity(): Promise<void> {
-  try {
-    const data = await fetchAgentActivity(24)
-    agentActivity.value = data.agents ?? []
-  } catch (err) {
-    console.warn('[Dashboard] agent activity fetch error:', err)
-  }
 }
 
 export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
@@ -505,28 +451,6 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
     }
   })()
   return inflightExecutionRefresh
-}
-
-export async function refreshAgents(): Promise<void> {
-  return refreshExecution()
-}
-
-export async function refreshTasks(): Promise<void> {
-  return refreshExecution()
-}
-
-export async function refreshMessages(): Promise<void> {
-  try {
-    const current = messages.value
-    const maxSeq = current.reduce((max, message) => Math.max(max, message.seq ?? 0), 0)
-    const data = await fetchMessagesList(maxSeq)
-    const incoming = (Array.isArray(data.messages) ? data.messages : [])
-      .map(normalizeMessage)
-      .filter((row): row is Message => row !== null)
-    messages.value = mergeMessages(current, incoming)
-  } catch (err) {
-    console.warn('[Dashboard] messages fetch error:', err)
-  }
 }
 
 export async function refreshBoard(): Promise<void> {

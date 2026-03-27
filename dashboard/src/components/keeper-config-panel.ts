@@ -411,12 +411,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">레지던트 스펙 존재</span>
-        <${BoolBadge} value=${c.sources.resident_spec_exists} />
+        <${BoolBadge} value=${c.sources.registration_exists} />
       </div>
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">라이브 메타 경로</div>
       <${LongText} text=${c.sources.live_meta_path} />
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">레지던트 스펙 경로</div>
-      <${LongText} text=${c.sources.resident_spec_path} />
+      <${LongText} text=${c.sources.registration_path} />
       ${c.sources.default_manifest_path ? html`
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">기본 매니페스트 경로</div>
         <${LongText} text=${c.sources.default_manifest_path} />

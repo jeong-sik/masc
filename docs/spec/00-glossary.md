@@ -119,7 +119,7 @@ Task 할당을 위한 에이전트 역할: `Writer`(구현), `Reviewer`(리뷰/Q
 **Keeper Meta**
 Keeper의 전체 설정과 런타임 상태를 담는 레코드 타입. 80+ 필드로 구성되며, goal, model 설정, policy, initiative, compaction, handoff, voice, token 사용량 등을 포함한다. `-> lib/keeper/keeper_types.ml`
 
-**Resident (Agent Type)**
+**Always-on Agent**
 항상 실행 중인 데몬 에이전트. Keeper가 대표적이다. `-> lib/agent_ecosystem.mli`
 
 **Visitor (Agent Type)**

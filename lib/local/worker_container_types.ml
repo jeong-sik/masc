@@ -558,7 +558,8 @@ let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Agent_sdk.Types.api
   { Agent_sdk.Types.input_tokens;
     output_tokens;
     cache_creation_input_tokens = 0;
-    cache_read_input_tokens = 0 }
+    cache_read_input_tokens = 0;
+    cost_usd = Some 0.0 }
 
 let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
   { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
@@ -566,7 +567,11 @@ let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) 
     cache_creation_input_tokens =
       a.cache_creation_input_tokens + b.cache_creation_input_tokens;
     cache_read_input_tokens =
-      a.cache_read_input_tokens + b.cache_read_input_tokens }
+      a.cache_read_input_tokens + b.cache_read_input_tokens;
+    cost_usd =
+      Some
+        (Option.value a.cost_usd ~default:0.0
+         +. Option.value b.cost_usd ~default:0.0) }
 
 let estimate_cost_usd ~(model_id : string)
     (usage : Agent_sdk.Types.api_usage) : float option =
@@ -648,5 +653,3 @@ let worker_auth_token ~base_path ~worker_name =
     | Error err -> Error (Types.masc_error_to_string err)
   else
     Ok None
-
-

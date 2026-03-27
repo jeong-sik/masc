@@ -14,7 +14,11 @@ let merge_usage
     cache_creation_input_tokens =
       a.cache_creation_input_tokens + b.cache_creation_input_tokens;
     cache_read_input_tokens =
-      a.cache_read_input_tokens + b.cache_read_input_tokens }
+      a.cache_read_input_tokens + b.cache_read_input_tokens;
+    cost_usd =
+      Some
+        (Option.value a.cost_usd ~default:0.0
+         +. Option.value b.cost_usd ~default:0.0) }
 
 let contains_ci (haystack : string) (needle : string) : bool =
   let h = String.lowercase_ascii haystack in

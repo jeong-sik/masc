@@ -154,7 +154,7 @@ let test_dashboard_room_truth_keeper_only_room_not_reported_empty () =
            ~capabilities:["keeper"]
            ());
       ignore
-        (Lib.Keeper_types.write_resident_keeper config
+        (Lib.Keeper_types.write_keeper_registration config
            (keeper_boot_entry "sangsu"));
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
@@ -168,7 +168,7 @@ let test_dashboard_room_truth_keeper_only_room_not_reported_empty () =
         check int "keeper-only room counts general agents as zero"
           0
           (json |> member "room" |> member "counts" |> member "agents" |> to_int);
-        check int "keeper-only room still counts resident keeper"
+        check int "keeper-only room still counts keeper"
           1
           (json |> member "room" |> member "counts" |> member "keepers" |> to_int);
         check bool "keeper-only room does not report empty room focus"
@@ -201,7 +201,7 @@ let test_dashboard_room_truth_mixed_runtime_counts () =
            ~capabilities:["keeper"]
            ());
       ignore
-        (Lib.Keeper_types.write_resident_keeper config
+        (Lib.Keeper_types.write_keeper_registration config
            (keeper_boot_entry "sangsu"));
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
@@ -215,7 +215,7 @@ let test_dashboard_room_truth_mixed_runtime_counts () =
         check int "mixed room counts one general agent"
           1
           (json |> member "room" |> member "counts" |> member "agents" |> to_int);
-        check int "mixed room counts one resident keeper"
+        check int "mixed room counts one keeper"
           1
           (json |> member "room" |> member "counts" |> member "keepers" |> to_int);
         check bool "mixed room avoids empty runtime fallback"

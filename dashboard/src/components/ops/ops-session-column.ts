@@ -62,7 +62,7 @@ export function OpsSessionColumn() {
   const selectedSessionActionable = selectedSession ? !isSessionTerminal(selectedSession) : false
   const activeSummary = sessionDigest?.active_summary
   const guidanceLayer = sessionDigest?.active_guidance_layer ?? 'fallback'
-  const residentRuntime = sessionDigest?.resident_judge_runtime ?? snapshot?.resident_judge_runtime
+  const operatorJudgeRuntime = sessionDigest?.operator_judge_runtime ?? snapshot?.operator_judge_runtime
   const linkedAutoresearch =
     selectedSessionActionable ? selectedSession?.linked_autoresearch ?? null : null
   const busy = operatorActionBusy.value || autoresearchBusy.value
@@ -193,15 +193,15 @@ export function OpsSessionColumn() {
           <article class="ops-guidance-card p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-2 ${guidanceLayerTone(guidanceLayer)}">
             <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
               <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
-              <span>${runtimeJudgeLabel(residentRuntime)}</span>
+              <span>${runtimeJudgeLabel(operatorJudgeRuntime)}</span>
             </div>
             <div class="text-[var(--text-strong)] leading-[1.5]">
-              ${activeSummary?.summary ?? '현재 이 session에 대한 resident guidance가 없습니다. fallback digest를 표시합니다.'}
+              ${activeSummary?.summary ?? '현재 이 session에 대한 운영 guidance가 없습니다. fallback digest를 표시합니다.'}
             </div>
             <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
               <span>authoritative ${sessionDigest.authoritative_judgment_available ? 'yes' : 'no'}</span>
               <span>${guidanceFreshnessLabel(activeSummary)}</span>
-              ${residentRuntime?.model_used ? html`<span>${residentRuntime.model_used}</span>` : null}
+              ${operatorJudgeRuntime?.model_used ? html`<span>${operatorJudgeRuntime.model_used}</span>` : null}
             </div>
           </article>
           ${activeRecommendedActions.length > 0 ? html`

@@ -318,7 +318,7 @@ let patch_keeper_rows ~keeper_name ~keepalive_running rows =
   List.map (patch_keeper_row ~keeper_name ~keepalive_running) rows
 
 let running_keeper_names (config : Room.config) =
-  Keeper_types.resident_keeper_names config
+  Keeper_types.registered_keeper_names config
   |> List.filter_map (fun name ->
          match Keeper_types.read_meta config name with
          | Ok (Some meta)

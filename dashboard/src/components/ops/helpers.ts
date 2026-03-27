@@ -8,7 +8,7 @@ import type {
   OperatorKeeperSnapshot,
   PendingConfirmation,
   OperatorRecommendedAction,
-  OperatorResidentJudgeRuntime,
+  OperatorJudgeRuntime,
   OperatorSessionSnapshot,
 } from '../../types'
 import {
@@ -64,7 +64,7 @@ export { prettyJson, displayStatus }
 export function guidanceLayerLabel(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
     case 'judgment':
-      return '상주 판단'
+      return '운영 판단'
     case 'fallback':
       return '보조 읽기 모델'
     default:
@@ -83,14 +83,14 @@ export function guidanceLayerTone(value?: string | null): OpsPriorityTone {
   }
 }
 
-export function runtimeJudgeLabel(runtime?: OperatorResidentJudgeRuntime | null): string {
+export function runtimeJudgeLabel(runtime?: OperatorJudgeRuntime | null): string {
   if (!runtime?.enabled) return '꺼짐'
   if (runtime.refreshing) return '갱신 중'
   if (runtime.judge_online) return '온라인'
   return runtime.last_error ? '오류' : '대기'
 }
 
-export function runtimeJudgeTone(runtime?: OperatorResidentJudgeRuntime | null): OpsPriorityTone {
+export function runtimeJudgeTone(runtime?: OperatorJudgeRuntime | null): OpsPriorityTone {
   if (!runtime?.enabled) return 'warn'
   if (runtime.judge_online) return 'ok'
   if (runtime.refreshing) return 'warn'

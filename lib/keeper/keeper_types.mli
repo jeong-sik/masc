@@ -2,7 +2,7 @@
     path resolution, and model-selection utilities.
 
     Re-exports everything from {!Keeper_types_profile} (context, schemas,
-    profile defaults, path helpers) and {!Keeper_types_resident}
+    profile defaults, path helpers) and {!Keeper_types_runtime}
     (model selection, JSONL helpers, metrics store). *)
 
 include module type of Keeper_types_profile
@@ -137,7 +137,7 @@ val scrub_persisted_keeper_meta_json :
 val meta_to_json : keeper_meta -> Yojson.Safe.t
 val meta_of_json : Yojson.Safe.t -> (keeper_meta, string) result
 
-(** {1 Keeper boot entry (resident keepers)} *)
+(** {1 Keeper boot entry (keepers)} *)
 
 type keeper_boot_entry = {
   name : string;
@@ -149,32 +149,32 @@ type keeper_boot_entry = {
   updated_at : string;
 }
 
-val resident_keeper_dir : Room.config -> string
-val resident_keeper_path : Room.config -> string -> string
+val keeper_registration_dir : Room.config -> string
+val keeper_registration_path : Room.config -> string -> string
 val keeper_boot_to_json : keeper_boot_entry -> Yojson.Safe.t
 val keeper_boot_of_json : Yojson.Safe.t -> (keeper_boot_entry, string) result
 val keeper_boot_entry_of_meta : ?created_at:string -> keeper_meta -> keeper_boot_entry
 
-val write_resident_keeper : Room.config -> keeper_boot_entry -> (unit, string) result
-val read_resident_keeper : Room.config -> string -> (keeper_boot_entry option, string) result
-val remove_resident_keeper : Room.config -> string -> unit
-val list_resident_keepers : Room.config -> keeper_boot_entry list
-val resident_keeper_names : Room.config -> string list
-val is_resident_keeper : Room.config -> string -> bool
+val write_keeper_registration : Room.config -> keeper_boot_entry -> (unit, string) result
+val read_keeper_registration : Room.config -> string -> (keeper_boot_entry option, string) result
+val remove_keeper_registration : Room.config -> string -> unit
+val list_registered_keepers : Room.config -> keeper_boot_entry list
+val registered_keeper_names : Room.config -> string list
+val is_registered_keeper : Room.config -> string -> bool
 
 (** {1 Meta file I/O} *)
 
 val read_meta_file_path : string -> (keeper_meta option, string) result
-val register_resident_keeper : Room.config -> string -> (unit, string) result
-val persistent_agent_names : ?resident_names:string list -> Room.config -> string list
-val sync_registered_resident_keeper : Room.config -> string -> (unit, string) result
+val register_keeper : Room.config -> string -> (unit, string) result
+val persistent_agent_names : ?registered_names:string list -> Room.config -> string list
+val sync_registered_keeper : Room.config -> string -> (unit, string) result
 val fresher_meta : Room.config -> keeper_meta -> keeper_meta
 val write_meta : Room.config -> keeper_meta -> (unit, string) result
 val read_meta : Room.config -> string -> (keeper_meta option, string) result
 
-(** {1 Re-exports from Keeper_types_resident} *)
+(** {1 Re-exports from Keeper_types_runtime} *)
 
-include module type of Keeper_types_resident
+include module type of Keeper_types_runtime
 
 (** {1 Fiber health (for keeper supervisor)} *)
 

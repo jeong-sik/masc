@@ -6,7 +6,7 @@ How agents enter a MASC room and how the system distinguishes agent types.
 
 | Path | Name Format | Lifecycle | Trigger |
 |------|------------|-----------|---------|
-| Keeper auto-start | `keeper-{persona}-agent` | Long-lived | `masc_keeper_up` or resident bootstrap |
+| Keeper auto-start | `keeper-{persona}-agent` | Long-lived | `masc_keeper_up` or keeper bootstrap |
 | MCP auto-join | `agent-{session_hash}` | Ephemeral | First tool call with `Mcp-Session-Id` header |
 | Explicit join | User-specified or nickname | Ephemeral | `masc_join` tool call |
 | Swarm worker | Session-prefix based | Ephemeral | Team session / operator dispatch |

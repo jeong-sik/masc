@@ -56,7 +56,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     match
       Prompt_registry.render_prompt_template "keeper.unified.system"
         [
-          ("identity_header", Printf.sprintf "You are %s, a resident keeper agent." meta.name);
+          ("identity_header", Printf.sprintf "You are %s, a keeper agent." meta.name);
           ("trait_lines", trait_lines);
           ("instructions_block", instructions_block);
           ("goal_lines", goal_lines);

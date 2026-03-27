@@ -577,7 +577,7 @@ MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한
 
 ```ocaml
 type agent_type =
-  | Resident    (* Daemon -- 상시 실행 *)
+  | Keeper      (* Daemon -- 상시 실행 *)
   | Visitor     (* Session 기반 *)
   | Ephemeral   (* Task 기반, 작업 완료 후 소멸 *)
 ```

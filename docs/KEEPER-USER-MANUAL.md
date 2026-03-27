@@ -615,7 +615,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는 `docs/
 | TOML declaration | `<CONFIG_ROOT>/keepers/<name>.toml` | Persona 없이 선언적 정의 |
 | Persistent meta | `.masc/perpetual-keepers/<name>.json` | 런타임 상태 (turn 카운트, context ratio 등) |
 
-Resident-keeper (`.masc/resident-keepers/<name>.json`)는 resident 등록 메타데이터(이름, 생성/갱신 시각)만 저장한다.
+Keeper registration (`.masc/keeper-registrations/<name>.json`)은 등록 메타데이터(이름, 생성/갱신 시각)만 저장한다.
 
 repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `~/.masc/config`를 먼저 본 뒤 repo `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다. 즉 웹/대시보드는 파일을 직접 읽지 않고, 서버가 해석한 config root와 persona root를 사용한다.
 

@@ -320,9 +320,9 @@ let keeper_diagnostic_summary ~health_state ~quiet_reason =
   | _ -> (
       match quiet_reason with
       | Some "disabled" ->
-          "Keeper autonomy is disabled by configuration. Direct messages still work, but resident automation will stay quiet."
+          "Keeper autonomy is disabled by configuration. Direct messages still work, but keeper automation will stay quiet."
       | Some "not_running" ->
-          "Keeper should be resident, but its keepalive loop is not running."
+          "Keeper is registered, but its keepalive loop is not running."
       | Some "agent_missing" ->
           "Keeper keepalive is running, but the live agent record is missing or offline."
       | Some "quiet_hours" ->
@@ -370,7 +370,7 @@ let keeper_continuity_summary continuity_state =
   | "healthy" ->
       "Keeper runtime is aligned with the registered live presence."
   | "disabled" ->
-      "Resident live presence is disabled by configuration."
+      "Keeper live presence is disabled by configuration."
   | _ -> "Keeper runtime is offline."
 
 let augment_keeper_diagnostic_json

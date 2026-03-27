@@ -484,7 +484,7 @@
 
 ### Infrastructure
 - **OAS** — update Raw_trace API for v0.29.0 (#1198)
-- **startup** — run resident loops in background fiber for fast HTTP readiness (#1175)
+- **startup** — run background loops in background fiber for fast HTTP readiness (#1175)
 
 ## [2.96.0] - 2026-03-16
 
@@ -608,7 +608,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.85.0] - 2026-03-12
 
 ### Added
-- **Safe Keeper Tooling** — resident keepers now expose keeper-safe voice and readonly shell tooling plus an internal tool catalog surface (#826)
+- **Safe Keeper Tooling** — keepers now expose keeper-safe voice and readonly shell tooling plus an internal tool catalog surface (#826)
 - **Audit Telemetry Phase 1** — core collaboration events now emit audit logging for traceability (#833)
 - **Room-wide Orchestra Map** — dashboard adds an orchestra overview surface and backing command-plane read model (#834)
 - **Tool Registry P4** — tool-registry metadata and dispatch surfaces are expanded through the phase-4 enhancement set (#830)
@@ -625,7 +625,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **OAS-backed Agent Control Contract** — internal agent-control export now publishes `/api/v1/openapi.json` with canonical MCP operation metadata and current Agent SDK aliases
-- **Resident Judgment Overlay** — operator snapshot includes resident judgment and dashboard surfacing (#811)
+- **Operator Judgment Overlay** — operator snapshot includes operator judgment and dashboard surfacing (#811)
 - **Admin Snapshot Surface** — admin-level snapshot and update tools for keeper inspection (#814)
 - **Local Voice Playback** — internal local voice playback selection for browser-based voice (#816)
 - **Backlog Triage** — backlog triage sessions now start on worker pressure signals (#812)
@@ -663,7 +663,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ollama Runtime Removal** — removed Ollama runtime path, MODEL calls go through `Lodge_cascade` only (#785)
 - **Dashboard Utils Extraction** — deduplicated 5 utility functions from 12 files into `Dashboard_utils` module (#791)
 - **Transport Deps Injection** — Eio context passed via deps record instead of global singleton (#793)
-- **Keeper Resident Split** — split resident keepers from persistent agents for independent lifecycle (#799)
+- **Keeper Registration Split** — split keepers from persistent agents for independent lifecycle (#799)
 - **Dashboard Assets Rebuild** — rebuild stale assets and remove dead batch endpoint code (#798)
 
 ### Fixed
@@ -728,7 +728,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Live Monitor Tab** — 3-panel real-time swarm/agent view (#688)
 - **Command War Room** — centralized operator console (#681)
 - **Board Admin Keeper** — force task ops + zombie cascade (#666)
-- **Default Resident** — MODEL judgment layer for board/task/keeper consumers (#699, #709)
+- **Default Keeper** — MODEL judgment layer for board/task/keeper consumers (#699, #709)
 - **Intent-Backed Predictive Control** — CPv2 intent forecast + correction loop (#668)
 - **Swarm Live Run** — `masc_swarm_live_run` MCP tool for inline benchmark (#689)
 - **64-Agent Structural Gaps** — checkpoint, goal loop, MDAL swarm (#693)

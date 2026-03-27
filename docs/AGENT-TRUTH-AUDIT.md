@@ -33,7 +33,7 @@ Date: 2026-03-11
 - `recommended_actions`와 `recommended_next_action`은 `fallback`
 - `Mission briefing`은 `narrative`
 
-`operator_control`과 `swarm_status`는 resident judge가 없으므로 현재 canonical judgment owner가 아니다. 둘 다 fallback read-model 계층으로 노출한다.
+`operator_control`과 `swarm_status`는 operator judge가 없으므로 현재 canonical judgment owner가 아니다. 둘 다 fallback read-model 계층으로 노출한다.
 
 ### Keeper / classifier-style surfaces
 

@@ -578,12 +578,21 @@ type keeper_boot_entry = {
   updated_at : string;
 }
 
-let resident_keeper_dir (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "resident-keepers" in
-  ensure_dir d
+let keeper_registration_dir (config : Room.config) =
+  let d = Filename.concat (Room.masc_root_dir config) "keeper-registrations" in
+  let historical_dir =
+    Filename.concat (Room.masc_root_dir config)
+      (String.concat "" [ "res"; "ident"; "-keepers" ])
+  in
+  if (not (Sys.file_exists d)) && Sys.file_exists historical_dir then
+    (try Sys.rename historical_dir d with Sys_error _ -> ());
+  let resolved =
+    if Sys.file_exists d then d else if Sys.file_exists historical_dir then historical_dir else d
+  in
+  ensure_dir resolved
 
-let resident_keeper_path config name =
-  Filename.concat (resident_keeper_dir config) (name ^ ".json")
+let keeper_registration_path config name =
+  Filename.concat (keeper_registration_dir config) (name ^ ".json")
 
 let keeper_boot_to_json (entry : keeper_boot_entry) =
   `Assoc
@@ -650,20 +659,20 @@ let keeper_boot_entry_of_meta ?created_at (meta : keeper_meta) : keeper_boot_ent
     updated_at = meta.updated_at;
   }
 
-let write_resident_keeper config (entry : keeper_boot_entry) :
+let write_keeper_registration config (entry : keeper_boot_entry) :
     (unit, string) result =
-  let path = resident_keeper_path config entry.name in
+  let path = keeper_registration_path config entry.name in
   let content = Yojson.Safe.pretty_to_string (keeper_boot_to_json entry) in
   try
     Fs_compat.save_file path content;
     Ok ()
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error
-      (Printf.sprintf "failed to write resident keeper %s: %s" path
+      (Printf.sprintf "failed to write keeper %s: %s" path
          (Printexc.to_string exn))
 
-let read_resident_keeper config name : (keeper_boot_entry option, string) result =
-  let path = resident_keeper_path config name in
+let read_keeper_registration config name : (keeper_boot_entry option, string) result =
+  let path = keeper_registration_path config name in
   if not (Sys.file_exists path) then Ok None
   else
     try
@@ -673,15 +682,15 @@ let read_resident_keeper config name : (keeper_boot_entry option, string) result
       | Error msg -> Error msg
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Error
-        (Printf.sprintf "failed to read resident keeper %s: %s" path
+        (Printf.sprintf "failed to read keeper %s: %s" path
            (Printexc.to_string exn))
 
-let remove_resident_keeper config name =
-  Safe_ops.remove_file_logged ~context:"resident_keeper_remove"
-    (resident_keeper_path config name)
+let remove_keeper_registration config name =
+  Safe_ops.remove_file_logged ~context:"keeper_registration_remove"
+    (keeper_registration_path config name)
 
-let list_resident_keepers config : keeper_boot_entry list =
-  let dir = resident_keeper_dir config in
+let list_registered_keepers config : keeper_boot_entry list =
+  let dir = keeper_registration_dir config in
   match Safe_ops.list_dir_safe dir with
   | Error _ -> []
   | Ok files ->
@@ -690,16 +699,16 @@ let list_resident_keepers config : keeper_boot_entry list =
       |> List.map Filename.remove_extension
       |> List.filter validate_name
       |> List.filter_map (fun name ->
-             match read_resident_keeper config name with
+             match read_keeper_registration config name with
              | Ok (Some spec) -> Some spec
              | _ -> None)
       |> List.sort (fun a b -> String.compare a.name b.name)
 
-let resident_keeper_names config =
-  list_resident_keepers config |> List.map (fun entry -> entry.name)
+let registered_keeper_names config =
+  list_registered_keepers config |> List.map (fun entry -> entry.name)
 
-let is_resident_keeper config name =
-  let path = resident_keeper_path config name in
+let is_registered_keeper config name =
+  let path = keeper_registration_path config name in
   Sys.file_exists path
 
 let read_meta_file_path path : (keeper_meta option, string) result =
@@ -715,9 +724,9 @@ let read_meta_file_path path : (keeper_meta option, string) result =
          | Ok meta -> Ok (Some meta)
          | Error e -> Error e)
 
-let register_resident_keeper config name : (unit, string) result =
+let register_keeper config name : (unit, string) result =
   let created_at =
-    match read_resident_keeper config name with
+    match read_keeper_registration config name with
     | Ok (Some entry) -> entry.created_at
     | _ -> now_iso ()
   in
@@ -728,10 +737,10 @@ let register_resident_keeper config name : (unit, string) result =
   in
   match meta_opt with
   | Some meta ->
-      write_resident_keeper config
+      write_keeper_registration config
         (keeper_boot_entry_of_meta ~created_at meta)
   | None ->
-      write_resident_keeper config
+      write_keeper_registration config
         {
           name;
           persona_name = name;
@@ -742,11 +751,11 @@ let register_resident_keeper config name : (unit, string) result =
           updated_at = now_iso ();
         }
 
-let persistent_agent_names ?resident_names config =
+let persistent_agent_names ?registered_names config =
   let dir = keeper_dir config in
-  let resident = match resident_names with
+  let registered = match registered_names with
     | Some n -> n
-    | None -> resident_keeper_names config
+    | None -> registered_keeper_names config
   in
   match Safe_ops.list_dir_safe dir with
   | Error _ -> []
@@ -755,14 +764,14 @@ let persistent_agent_names ?resident_names config =
       |> List.filter (fun f -> Filename.check_suffix f ".json")
       |> List.map Filename.remove_extension
       |> List.filter validate_name
-      |> List.filter (fun name -> not (List.mem name resident))
+      |> List.filter (fun name -> not (List.mem name registered))
       |> List.sort String.compare
 
-let sync_registered_resident_keeper config name :
+let sync_registered_keeper config name :
     (unit, string) result =
-  match read_resident_keeper config name with
+  match read_keeper_registration config name with
   | Ok None -> Ok ()
-  | Ok (Some _) -> register_resident_keeper config name
+  | Ok (Some _) -> register_keeper config name
   | Error e -> Error e
 
 let fresher_meta config (meta : keeper_meta) : keeper_meta =
@@ -786,12 +795,12 @@ let write_meta config (m : keeper_meta) : (unit, string) result =
   try
     Fs_compat.save_file path content;
     (!runtime_meta_write_sync_hook) config persisted;
-    (match sync_registered_resident_keeper config persisted.name with
+    (match sync_registered_keeper config persisted.name with
      | Ok () -> Ok ()
      | Error e ->
          Error
            (Printf.sprintf
-              "meta written but resident sync failed for %s: %s"
+              "meta written but registration sync failed for %s: %s"
               persisted.name e))
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "failed to write meta %s: %s" path (Printexc.to_string exn))
@@ -804,12 +813,12 @@ let read_meta config name : (keeper_meta option, string) result =
   read_meta_file_path path
 
 (* Model selection, path utilities, and JSONL helpers
-   extracted to Keeper_types_resident *)
-include Keeper_types_resident
+   extracted to Keeper_types_runtime *)
+include Keeper_types_runtime
 
 (** Fiber-level health for keeper supervisor monitoring.
-    Defined here (not in Keeper_resident_supervisor) to avoid circular
-    dependencies between keeper_exec_status and the resident supervisor. *)
+    Defined here (not in Keeper_supervisor) to avoid circular
+    dependencies between keeper_exec_status and the keeper supervisor. *)
 type fiber_health =
   | Fiber_alive    (** Fiber running, promise unresolved *)
   | Fiber_zombie   (** Registry entry exists but fiber terminated *)

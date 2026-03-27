@@ -1,7 +1,7 @@
 open Masc_mcp
 open Test_operator_control_support
 
-let test_digest_room_prefers_fresh_resident_judgment () =
+let test_digest_room_prefers_fresh_registered_judgment () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -22,7 +22,7 @@ let test_digest_room_prefers_fresh_resident_judgment () =
               ("resolved_tool", `String "masc_operator_confirm");
               ("target_type", `String "room");
               ("target_id", `Null);
-              ("reason", `String "resident judge requires manual gate");
+              ("reason", `String "operator judge requires manual gate");
               ("payload_preview", `Assoc [ ("reason", `String "manual review") ]);
             ])
         ~fresh_for_sec:90.0 ();
@@ -42,7 +42,7 @@ let test_digest_room_prefers_fresh_resident_judgment () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "judgment owner" "resident_operator_keeper"
+      Alcotest.(check string) "judgment owner" "operator_keeper"
         Yojson.Safe.Util.(digest |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "authoritative judgment available" true
         Yojson.Safe.Util.
@@ -58,7 +58,7 @@ let test_digest_room_prefers_fresh_resident_judgment () =
       Alcotest.(check bool) "judgment present" true
         (Yojson.Safe.Util.member "judgment" digest <> `Null))
 
-let test_digest_room_ignores_stale_resident_judgment () =
+let test_digest_room_ignores_stale_registered_judgment () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -88,7 +88,7 @@ let test_digest_room_ignores_stale_resident_judgment () =
       Alcotest.(check bool) "judgment missing" true
         (Yojson.Safe.Util.member "judgment" digest = `Null))
 
-let test_digest_team_session_prefers_fresh_resident_judgment () =
+let test_digest_team_session_prefers_fresh_registered_judgment () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -123,7 +123,7 @@ let test_digest_team_session_prefers_fresh_resident_judgment () =
         | Error err -> Alcotest.fail err
       in
       Alcotest.(check string) "team_session judgment owner"
-        "resident_operator_keeper"
+        "operator_keeper"
         Yojson.Safe.Util.(digest |> member "judgment_owner" |> to_string);
       Alcotest.(check string) "team_session active guidance layer" "judgment"
         Yojson.Safe.Util.(digest |> member "active_guidance_layer" |> to_string);
@@ -188,7 +188,7 @@ let test_operator_judgment_write_and_latest_roundtrip () =
               [
                 ("surface", `String "command.warroom");
                 ("target_type", `String "room");
-                ("summary", `String "Resident judge requests a human checkpoint.");
+                ("summary", `String "Operator judge requests a human checkpoint.");
                 ("confidence", `Float 0.88);
                 ("fresh_ttl_sec", `Int 90);
                 ("evidence_refs", `List [ `String "trace:opsd-1" ]);
@@ -210,7 +210,7 @@ let test_operator_judgment_write_and_latest_roundtrip () =
       Alcotest.(check string) "latest ok" "ok"
         Yojson.Safe.Util.(latest |> member "status" |> to_string);
       Alcotest.(check string) "latest summary"
-        "Resident judge requests a human checkpoint."
+        "Operator judge requests a human checkpoint."
         Yojson.Safe.Util.(latest |> member "judgment" |> member "summary" |> to_string))
 
 let test_confirm_keeps_pending_token_when_delegated_action_fails () =

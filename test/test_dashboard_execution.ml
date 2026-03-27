@@ -190,7 +190,7 @@ let keeper_boot_entry name : Lib.Keeper_types.keeper_boot_entry =
     updated_at = now;
   }
 
-let test_dashboard_shell_counts_resident_keepers () =
+let test_dashboard_shell_counts_registered_keepers () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -200,15 +200,15 @@ let test_dashboard_shell_counts_resident_keepers () =
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:None);
       ignore
-        (Lib.Keeper_types.write_resident_keeper config
+        (Lib.Keeper_types.write_keeper_registration config
            (keeper_boot_entry "keeper-alpha"));
       ignore
-        (Lib.Keeper_types.write_resident_keeper config
+        (Lib.Keeper_types.write_keeper_registration config
            (keeper_boot_entry "keeper-beta"));
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       let counts = json |> member "counts" in
-      check int "shell keeper count from resident specs" 2
+      check int "shell keeper count from registrations" 2
         (counts |> member "keepers" |> to_int))
 
 let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
@@ -227,14 +227,14 @@ let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
            ~capabilities:["keeper"]
            ());
       ignore
-        (Lib.Keeper_types.write_resident_keeper config
+        (Lib.Keeper_types.write_keeper_registration config
            (keeper_boot_entry "sangsu"));
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       let counts = json |> member "counts" in
       check int "keeper-backed room has no general agents" 0
         (counts |> member "agents" |> to_int);
-      check int "resident keeper still counted" 1
+      check int "keeper still counted" 1
         (counts |> member "keepers" |> to_int))
 
 let test_dashboard_execution_fresh_join_not_marked_stale () =
@@ -279,8 +279,8 @@ let () =
             test_dashboard_execution_current_room_status;
           Alcotest.test_case "shell follows current room" `Quick
             test_dashboard_shell_current_room_status;
-          Alcotest.test_case "shell counts resident keepers cheaply" `Quick
-            test_dashboard_shell_counts_resident_keepers;
+          Alcotest.test_case "shell counts keepers cheaply" `Quick
+            test_dashboard_shell_counts_registered_keepers;
           Alcotest.test_case "shell excludes keeper agents from general count" `Quick
             test_dashboard_shell_excludes_keeper_agents_from_general_count;
           Alcotest.test_case "fresh join is not stale" `Quick

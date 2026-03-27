@@ -201,7 +201,7 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
        (Printexc.to_string exn))
 
 (* bootstrap_keepers removed: the keeper_autoboot subsystem in
-   start_resident_loops now handles keeper startup in a dedicated
+   start_runtime_loops now handles keeper startup in a dedicated
    fiber with a 5-second delay, avoiding PG pool contention with
    the 7+ dashboard refresh loops that share the same pool. *)
 
@@ -304,7 +304,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ( "keeper_checkpoint_prune",
             fun () -> startup_prune_keeper_checkpoints state );
           (* keeper_bootstrap removed: keeper_autoboot subsystem in
-             start_resident_loops handles this in a dedicated fiber,
+             start_runtime_loops handles this in a dedicated fiber,
              avoiding PG pool contention with dashboard refresh loops. *)
         ]
       in
@@ -350,7 +350,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in
       Server_dashboard_http.set_executor_pool exec_pool;
       Log.Server.info "Executor_pool created (2 domains) for dashboard";
-      (* Start auxiliary transports before optional warmups and resident loops.
+      (* Start auxiliary transports before optional warmups and background loops.
          Otherwise HTTP can report ready while gRPC/WS startup is still stuck
          behind heavier startup work. *)
       (* gRPC coordination transport (opt-in via MASC_GRPC_ENABLED=1) *)
@@ -424,7 +424,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Eio.Time.sleep clock 2.0;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
       (* Pre-warm shell cache in a separate fiber so it cannot block
-         resident loop startup or lazy tasks (#keeper-bootstrap-stuck). *)
+         background loop startup or lazy tasks (#keeper-bootstrap-stuck). *)
       Eio.Fiber.fork ~sw (fun () ->
         (try
            match Eio.Time.with_timeout clock 10.0 (fun () ->
@@ -439,7 +439,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          | exn ->
            Log.Dashboard.warn "shell cache pre-warm failed: %s"
              (Printexc.to_string exn)));
-      Server_bootstrap_loops.start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
+      Server_bootstrap_loops.start_runtime_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
       start_lazy_startup state
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

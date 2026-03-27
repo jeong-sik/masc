@@ -254,7 +254,7 @@ Pending_ruling -> Ready_auto_execute -> Executed
 | `operator_digest_event.ml` | 이벤트 기반 다이제스트 |
 | `operator_digest_guidance.ml` | 추천 행동 생성 |
 | `operator_digest_types.ml` | 다이제스트 타입 정의 |
-| `operator_judgment.ml` | 상주 판단(resident judgment) 저장/조회 |
+| `operator_judgment.ml` | 상주 판단(operator judgment) 저장/조회 |
 | `operator_approval.ml` | OAS Approval pipeline 연동 |
 
 ### 6.2 Pending Confirm 흐름
@@ -290,7 +290,7 @@ masc_operator_action(action_type=X) ->
 - **Snapshot** (`masc_operator_snapshot`) -- 원시 상태 데이터. view 모드: summary, sessions, keepers, messages, full
 - **Digest** (`masc_operator_digest`) -- 개입 지향 분석. 건강 상태, 주의 항목, 명령 평면 검색, microarch 신호, 추천 행동 포함
 
-### 6.5 Resident Judgment
+### 6.5 Operator Judgment
 
 운영자 또는 keeper가 작성하는 지속적 판단 기록.
 

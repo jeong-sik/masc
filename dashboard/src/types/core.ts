@@ -507,8 +507,8 @@ export interface KeeperConfigCoordination {
 
 export interface KeeperConfigSources {
   live_meta_path: string
-  resident_spec_path: string
-  resident_spec_exists: boolean
+  registration_path: string
+  registration_exists: boolean
   default_manifest_path: string | null
   default_source_kind: 'toml' | 'persona' | null
   precedence: string[]

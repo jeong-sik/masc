@@ -60,14 +60,14 @@ graph LR
 
 | 범주 | 대표 파일 | 파일 수 |
 |------|----------|--------|
-| Types | `keeper_types.ml`, `_profile.ml`, `_resident.ml` | 3 |
+| Types | `keeper_types.ml`, `_profile.ml`, `_runtime.ml` | 3 |
 | Config / Contract | `keeper_config.ml`, `keeper_contract.ml`, `keeper_toml_loader.ml` | 3 |
 | Context | `keeper_working_context.ml`, `keeper_exec_context.ml`, `keeper_checkpoint_store.ml` | 3 |
 | Memory | `keeper_memory*.ml` (bank, policy, recall) | 4 |
 | Prompt / Skill | `keeper_prompt.ml`, `keeper_unified_prompt.ml`, `keeper_skill_routing.ml` | 3 |
 | Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_oas.ml`, `keeper_hooks_oas.ml`, `keeper_extend_turns.ml` | 5 |
 | Decision | `keeper_deliberation.ml`, `keeper_verifier.ml`, `keeper_learning.ml`, `keeper_feedback_tool.ml` | 4 |
-| Supervision | `keeper_resident_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` | 3 |
+| Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` | 3 |
 | MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_persona.ml`, `keeper_schema.ml` | 4 |
 | Alerting / Metrics | `keeper_alerting*.ml`, `keeper_exec_status*.ml`, `keeper_status_detail.ml` | 6+ |
 
@@ -420,9 +420,9 @@ Destructive check 대상 도구: `keeper_bash`, `keeper_fs_edit`, `keeper_edit`,
 
 `config/keepers/*.toml`로 keeper를 선언적으로 정의. 파일명이 keeper 이름. 지원 타입: string, int, float, bool, string array. 테이블은 dotted key로 평탄화. 예시: `config/keepers/example.toml`.
 
-### 9.3 Resident Keeper Spec
+### 9.3 Keeper Registration Spec
 
-상주 keeper는 `.masc/resident-keepers/{name}.json`에 영속화. `desired: bool`이 부팅 시 자동 시작 여부를 결정. `seed_meta`에 초기 `keeper_meta` JSON을 포함.
+등록 keeper는 `.masc/keeper-registrations/{name}.json`에 영속화. `desired: bool`이 부팅 시 자동 시작 여부를 결정. `seed_meta`에 초기 `keeper_meta` JSON을 포함.
 
 ---
 
@@ -572,7 +572,7 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 ### 15.2 keeper_types.ml include chain
 
-`keeper_types.ml`이 `include Keeper_types_profile`과 `include Keeper_types_resident`를 연쇄적으로 포함하여, 실제 타입 정의가 3개 파일에 분산된다. 순환 의존 회피를 위한 구조이지만 가독성이 낮다.
+`keeper_types.ml`이 `include Keeper_types_profile`과 `include Keeper_types_runtime`를 연쇄적으로 포함하여, 실제 타입 정의가 3개 파일에 분산된다. 순환 의존 회피를 위한 구조이지만 가독성이 낮다.
 
 ### 15.3 keeper_memory 계층의 include chain
 
@@ -606,7 +606,7 @@ MASC 자체 memory 4개(memory_stream, institution, procedural, context_manager)
 | Eval Harness | `lib/eval_harness.ml` |
 | Anti-Fake | `lib/anti_fake.ml` |
 | Trajectory | `lib/trajectory.ml` |
-| Supervisor | `lib/keeper/keeper_resident_supervisor.ml` |
+| Supervisor | `lib/keeper/keeper_supervisor.ml` |
 | Config | `lib/keeper/keeper_config.ml` |
 | TOML Example | `config/keepers/example.toml` |
 | Memory: MASC-OAS 통합 | `memory/masc-oas-memory-integration.md` |

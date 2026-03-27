@@ -40,11 +40,11 @@ let test_snapshot_has_expected_sections () =
         (Yojson.Safe.Util.member "attention_summary" json <> `Null);
       Alcotest.(check bool) "recommendation summary present" true
         (Yojson.Safe.Util.member "recommendation_summary" json <> `Null);
-      Alcotest.(check bool) "resident judge runtime present" true
-        (Yojson.Safe.Util.member "resident_judge_runtime" json <> `Null);
-      Alcotest.(check bool) "resident judge enabled by default" true
+      Alcotest.(check bool) "operator judge runtime present" true
+        (Yojson.Safe.Util.member "operator_judge_runtime" json <> `Null);
+      Alcotest.(check bool) "operator judge enabled by default" true
         Yojson.Safe.Util.
-          (json |> member "resident_judge_runtime" |> member "enabled" |> to_bool);
+          (json |> member "operator_judge_runtime" |> member "enabled" |> to_bool);
       Alcotest.(check string) "judgment owner" "fallback_read_model"
         Yojson.Safe.Util.(json |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "no authoritative judgment" false
@@ -318,8 +318,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
       Alcotest.(check bool) "command_plane present" true
         (Yojson.Safe.Util.member "command_plane" digest <> `Null);
-      Alcotest.(check bool) "resident judge runtime present" true
-        (Yojson.Safe.Util.member "resident_judge_runtime" digest <> `Null);
+      Alcotest.(check bool) "operator judge runtime present" true
+        (Yojson.Safe.Util.member "operator_judge_runtime" digest <> `Null);
       Alcotest.(check bool) "command_plane microarch present" true
         (Yojson.Safe.Util.
            (digest |> member "command_plane" |> member "operations"

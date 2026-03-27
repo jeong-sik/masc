@@ -27,20 +27,20 @@ let () =
           Alcotest.test_case "digest room pending confirm attention" `Quick
             Test_operator_control_snapshot
             .test_digest_room_exposes_pending_confirm_attention;
-          Alcotest.test_case "digest room prefers fresh resident judgment"
+          Alcotest.test_case "digest room prefers fresh operator judgment"
             `Quick
             Test_operator_control_judgment
-            .test_digest_room_prefers_fresh_resident_judgment;
-          Alcotest.test_case "digest room ignores stale resident judgment"
+            .test_digest_room_prefers_fresh_registered_judgment;
+          Alcotest.test_case "digest room ignores stale operator judgment"
             `Quick
             Test_operator_control_judgment
-            .test_digest_room_ignores_stale_resident_judgment;
+            .test_digest_room_ignores_stale_registered_judgment;
           Alcotest.test_case "digest team session shape" `Quick
             Test_operator_control_snapshot.test_digest_team_session_shape;
-          Alcotest.test_case "digest team session prefers fresh resident judgment"
+          Alcotest.test_case "digest team session prefers fresh operator judgment"
             `Quick
             Test_operator_control_judgment
-            .test_digest_team_session_prefers_fresh_resident_judgment;
+            .test_digest_team_session_prefers_fresh_registered_judgment;
           Alcotest.test_case
             "parse session judgment ignores null recommended action"
             `Quick

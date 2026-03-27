@@ -858,7 +858,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   let general_agents = dashboard_general_agent_count agents in
   let tasks, tasks_ms = measure_ms (fun () -> dashboard_tasks_safe config) in
   let keepers_total, keepers_ms =
-    measure_ms (fun () -> resident_keeper_count config)
+    measure_ms (fun () -> registered_keeper_count config)
   in
   `Assoc
     [
@@ -877,7 +877,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
        ~extra:
          [
            ("current_room", `String current_room);
-           ("keeper_count_source", `String "resident_registry");
+           ("keeper_count_source", `String "registration_registry");
            ("status_ms", `Int status_ms);
            ("agents_ms", `Int agents_ms);
            ("tasks_ms", `Int tasks_ms);

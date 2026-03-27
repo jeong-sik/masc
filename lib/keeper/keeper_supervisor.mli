@@ -1,4 +1,4 @@
-(** Keeper_resident_supervisor — resident keepalive fiber supervision.
+(** Keeper_supervisor — keeper keepalive fiber supervision.
 
     Wraps the MASC-owned keeper heartbeat fibers with Promise-based
     liveness tracking via [Keeper_registry]. Detects zombie fibers
@@ -18,7 +18,7 @@ val supervise_keepalive :
 (** Start a keeper heartbeat loop inside a supervised fiber.
     Registers in [Keeper_registry] (SSOT) and launches the fiber.
     On fiber termination, resolves the Promise and publishes
-    resident-lifecycle events via Event_bus. *)
+    keeper-lifecycle events via Event_bus. *)
 
 (** {1 Sweep and Recovery} *)
 

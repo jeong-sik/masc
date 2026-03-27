@@ -432,13 +432,13 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:masc:keeper:resident_lifecycle': {
+    case 'oas:masc:keeper:lifecycle': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const agentName = (p.agent_name as string) ?? ''
       const lifecycleEvent = (p.event as string) ?? undefined
       const detail = (p.detail as string) ?? undefined
       pushOasAgentEvent({
-        type: 'keeper_resident_lifecycle',
+        type: 'keeper_lifecycle',
         agent_name: agentName,
         event: lifecycleEvent,
         detail,
@@ -449,14 +449,14 @@ function handleEvent(event: SSEEvent): void {
       })
       addTypedJournalEntry(
         agentName,
-        `Resident ${[lifecycleEvent, detail].filter(Boolean).join(' · ') || 'lifecycle'}`,
+        `Keeper ${[lifecycleEvent, detail].filter(Boolean).join(' · ') || 'lifecycle'}`,
         'oas',
         'oas_event',
         {
           severity: event.severity,
           source: event.source,
           narrativeText:
-            `${actorLabel(agentName)} resident lifecycle 이벤트`
+            `${actorLabel(agentName)} keeper lifecycle 이벤트`
             + ([lifecycleEvent, detail].filter(Boolean).length > 0
               ? ` (${[lifecycleEvent, detail].filter(Boolean).join(' · ')})`
               : ''),

@@ -1,6 +1,6 @@
 (** Keeper_registry — Single source of truth for keeper state.
 
-    Consolidates keeper_keepalive Hashtbl, keeper_resident_supervisor
+    Consolidates keeper_keepalive Hashtbl, keeper_supervisor
     Hashtbl, and file-based meta into one registry.
 
     All operations are serialized via Eio.Mutex (allows other fibers
@@ -237,7 +237,7 @@ let fiber_health_of ~base_path name =
         | None -> Fiber_alive
         | Some `Stopped -> Fiber_unknown
         | Some (`Crashed _) ->
-            let max_restarts = Env_config.KeeperResidentSupervisor.max_restarts in
+            let max_restarts = Env_config.KeeperSupervisor.max_restarts in
             if entry.restart_count >= max_restarts
             then Fiber_dead
             else Fiber_zombie)

@@ -216,7 +216,7 @@ let test_keeper_paths_use_cluster_root () =
       with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
           let config = Room.default_config dir |> Room.config_with_resolved_scope in
           let keeper_dir = Keeper_types.keeper_dir config in
-          let resident_dir = Keeper_types.resident_keeper_dir config in
+          let registration_dir = Keeper_types.keeper_registration_dir config in
           let expected_root =
             Filename.concat
               (Filename.concat (Filename.concat dir ".masc") "clusters")
@@ -224,8 +224,8 @@ let test_keeper_paths_use_cluster_root () =
           in
           Alcotest.(check bool) "keeper dir under cluster root" true
             (String.starts_with ~prefix:expected_root keeper_dir);
-          Alcotest.(check bool) "resident dir under cluster root" true
-            (String.starts_with ~prefix:expected_root resident_dir)))
+          Alcotest.(check bool) "registered dir under cluster root" true
+            (String.starts_with ~prefix:expected_root registration_dir)))
 
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();

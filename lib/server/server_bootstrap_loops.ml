@@ -1,4 +1,4 @@
-(** Server_bootstrap_loops — Resident loops and background maintenance.
+(** Server_bootstrap_loops — Background loops and background maintenance.
 
     Extracted from Server_runtime_bootstrap to isolate the large
     subsystem-spawning functions into a focused module. *)
@@ -7,7 +7,7 @@ let install_tooling ~governance_level (state : Mcp_server.server_state) =
   Governance_pipeline.install ~config:state.room_config ~governance_level;
   Tool_permissions.install ~get_agent_name:(fun () -> None)
 
-let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
+let start_runtime_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
   Sse.set_clock clock;
@@ -32,7 +32,7 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   let keeper_lifecycle_sub =
     Agent_sdk.Event_bus.subscribe event_bus
       ~filter:(function
-        | Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", _) -> true
+        | Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", _) -> true
         | _ -> false)
   in
   Eio.Fiber.fork ~sw (fun () ->
@@ -41,7 +41,7 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
         let events = Agent_sdk.Event_bus.drain keeper_lifecycle_sub in
         List.iter
           (function
-            | Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", payload) ->
+            | Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", payload) ->
                 (match
                    ( Safe_ops.json_string_opt "event" payload,
                      Safe_ops.json_string_opt "keeper_name" payload )
@@ -67,7 +67,7 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
       loop ()
     in
     loop ());
-  (* Inject Event_bus into keeper resident runtime for telemetry publishing *)
+  (* Inject Event_bus into keeper runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
   Board_dispatch.set_keeper_board_signal_hook (fun signal ->
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
@@ -155,7 +155,7 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
       ());
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
-  (* Auto-boot keepers: read .masc/resident-keepers/*.json,
+  (* Auto-boot keepers: read .masc/keeper-registrations/*.json,
      load each keeper's meta, and start keepalive loops. *)
   fork_subsystem "keeper_autoboot" (fun () ->
     if not Env_config.KeeperBootstrap.enabled then
@@ -164,7 +164,7 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
     Eio.Time.sleep clock 5.0;
     let config = state.room_config in
-    let entries = Keeper_types.list_resident_keepers config in
+    let entries = Keeper_types.list_registered_keepers config in
     let booted = ref 0 in
     List.iter (fun (entry : Keeper_types.keeper_boot_entry) ->
         try
@@ -196,7 +196,7 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
       !booted (List.length entries)
     end);
   (* Phase 5: unified startup subsystem summary *)
-  Log.info ~ctx:"startup" "subsystems: resident loops started"
+  Log.info ~ctx:"startup" "subsystems: background loops started"
 
 let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.

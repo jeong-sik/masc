@@ -41,7 +41,7 @@ let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
            ~history_items:[]
            ~now_ts
         |> Keeper_exec_status.augment_keeper_diagnostic_json
-             ~registered:(Keeper_types.is_resident_keeper ctx.config meta.name)
+             ~registered:(Keeper_types.is_registered_keeper ctx.config meta.name)
              ~meta
              ~keepalive_running
              ~keepalive_started_at:

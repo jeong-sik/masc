@@ -58,7 +58,7 @@ export function OpsRoomColumn() {
       ? roomDigest.active_recommended_actions
       : recommendedActions
   const activeSummary = roomDigest?.active_summary
-  const residentRuntime = roomDigest?.resident_judge_runtime ?? snapshot?.resident_judge_runtime
+  const operatorJudgeRuntime = roomDigest?.operator_judge_runtime ?? snapshot?.operator_judge_runtime
   const guidanceLayer = roomDigest?.active_guidance_layer ?? 'fallback'
   const roomFeed = recentMessages.slice(0, 5)
   const currentActor = actorName.value.trim() || 'dashboard'
@@ -96,7 +96,7 @@ export function OpsRoomColumn() {
         <article class="ops-guidance-card p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-2 ${guidanceLayerTone(guidanceLayer)}">
           <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
             <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
-            <span>${residentRuntime?.keeper_name ?? roomDigest?.judgment_owner ?? 'judge 없음'}</span>
+            <span>${operatorJudgeRuntime?.keeper_name ?? roomDigest?.judgment_owner ?? 'judge 없음'}</span>
           </div>
           <div class="text-[var(--text-strong)] leading-[1.5]">
             ${activeSummary?.summary ?? '현재 active guidance 요약이 없습니다. fallback queue만 표시합니다.'}
@@ -104,7 +104,7 @@ export function OpsRoomColumn() {
           <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
             <span>authoritative ${roomDigest?.authoritative_judgment_available ? 'yes' : 'no'}</span>
             <span>${guidanceFreshnessLabel(activeSummary)}</span>
-            ${residentRuntime?.model_used ? html`<span>${residentRuntime.model_used}</span>` : null}
+            ${operatorJudgeRuntime?.model_used ? html`<span>${operatorJudgeRuntime.model_used}</span>` : null}
           </div>
         </article>
         ${operatorDigestLoading.value && !roomDigest ? html`
@@ -239,9 +239,9 @@ export function OpsRoomColumn() {
             <span>상태</span>
             <strong>${room.paused ? '일시정지' : '진행 중'}</strong>
           </div>
-          <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1 ${runtimeJudgeTone(residentRuntime)}">
+          <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1 ${runtimeJudgeTone(operatorJudgeRuntime)}">
             <span>레지던트 판정기</span>
-            <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
+            <strong>${runtimeJudgeLabel(operatorJudgeRuntime)}</strong>
           </div>
         </div>
 

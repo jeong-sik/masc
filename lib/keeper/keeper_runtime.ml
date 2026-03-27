@@ -1,4 +1,4 @@
-(** Keeper_runtime — resident keeper reconciliation and keepalive bootstrap.
+(** Keeper_runtime — keeper reconciliation and keepalive bootstrap.
     Runtime-only mutable state stays behind keeper runtime/execution modules. *)
 
 open Keeper_types
@@ -8,7 +8,7 @@ let maybe_promote_live_persistent_keeper config name =
   match read_meta config name with
   | Error _ | Ok None -> ()
   | Ok (Some meta) ->
-      if is_resident_keeper config meta.name then ()
+      if is_registered_keeper config meta.name then ()
       else
         match parse_agent_status config ~agent_name:meta.agent_name with
         | `Assoc fields -> (
@@ -23,7 +23,7 @@ let maybe_promote_live_persistent_keeper config name =
               | _ -> ""
             in
             if agent_type = "keeper" && List.mem status [ "active"; "busy"; "idle"; "listening" ] then
-              (match register_resident_keeper config meta.name with
+              (match register_keeper config meta.name with
                | Ok () -> () | Error e -> Log.Keeper.warn "register_keeper failed: %s" e))
         | _ -> ()
 
@@ -98,7 +98,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
            max_int)
     in
     let entries =
-      list_resident_keepers ctx.config
+      list_registered_keepers ctx.config
       |> take max_scan
     in
     let (enabled, scanned, started, stale, recovering) =
@@ -125,7 +125,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 else if already_running then false
                 else if max_keepers > 0 && !remaining_slots <= 0 then false
                 else (
-                  Keeper_resident_supervisor.supervise_keepalive
+                  Keeper_supervisor.supervise_keepalive
                     ~proactive_warmup_sec ctx m;
                   if max_keepers > 0 then remaining_slots := !remaining_slots - 1;
                   true
@@ -172,10 +172,10 @@ let start_supervisor_sweep ctx =
   else begin
     let consumer : (module Pulse.Consumer) =
       (module struct
-        let name = "keeper-resident-supervisor-sweep"
+        let name = "keeper-supervisor-sweep"
         let should_act _beat = true
         let on_beat _beat =
-          (try Keeper_resident_supervisor.sweep_and_recover ctx
+          (try Keeper_supervisor.sweep_and_recover ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Keeper.error "supervisor sweep failed: %s"
                (Printexc.to_string exn));
@@ -184,9 +184,9 @@ let start_supervisor_sweep ctx =
     in
     let p = Pulse.create
       ~clock:ctx.clock
-      ~rhythm:{ Pulse.base_s = Env_config.KeeperResidentSupervisor.sweep_interval_sec;
-                 min_s = Env_config.KeeperResidentSupervisor.sweep_interval_sec;
-                 max_s = Env_config.KeeperResidentSupervisor.sweep_interval_sec;
+      ~rhythm:{ Pulse.base_s = Env_config.KeeperSupervisor.sweep_interval_sec;
+                 min_s = Env_config.KeeperSupervisor.sweep_interval_sec;
+                 max_s = Env_config.KeeperSupervisor.sweep_interval_sec;
                  quiet = (0, 0) }
       ~lifecycle:Perpetual
       ~consumers:[consumer]
@@ -194,8 +194,8 @@ let start_supervisor_sweep ctx =
     with_sweeps_rw (fun () ->
       Hashtbl.replace supervisor_sweeps base_path p);
     Pulse.run ~sw:ctx.sw p;
-    Log.Keeper.info "resident supervisor sweep started (interval %.0fs)"
-      Env_config.KeeperResidentSupervisor.sweep_interval_sec
+    Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)"
+      Env_config.KeeperSupervisor.sweep_interval_sec
   end
 
 let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
@@ -205,7 +205,7 @@ let bootstrap_done_mu = Eio.Mutex.create ()
 let with_bootstrap_rw f = Eio_guard.with_mutex bootstrap_done_mu f
 
 let has_boot_entries config =
-  list_resident_keepers config <> []
+  list_registered_keepers config <> []
 
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
   if stats.enabled

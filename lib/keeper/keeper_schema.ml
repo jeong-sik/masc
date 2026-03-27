@@ -2,7 +2,7 @@
 
 open Types
 
-let resident_schemas : tool_schema list = [
+let keeper_schemas : tool_schema list = [
   {
     name = "masc_persona_list";
     description = "List available personas that have structured profile.json data. Use this before creating a keeper from a persona.";
@@ -242,7 +242,7 @@ let resident_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_msg";
-    description = "Send a message to a resident keeper and get a reply. Resident keepers keep durable context and should already be live.";
+    description = "Send a message to a keeper and get a reply. Keepers keep durable context and should already be live.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -505,7 +505,7 @@ let persistent_alias_description schema =
   ^ ". Uses the current event-driven stateful assistant behavior."
 
 let persistent_agent_alias_schemas =
-  resident_schemas
+  keeper_schemas
   |> List.filter_map (fun (schema : tool_schema) ->
          match persistent_alias_name schema.name with
          | None -> None
@@ -574,4 +574,4 @@ let housekeep_schemas : tool_schema list = [
 ]
 
 let schemas : tool_schema list =
-  resident_schemas @ persistent_agent_alias_schemas @ housekeep_schemas
+  keeper_schemas @ persistent_agent_alias_schemas @ housekeep_schemas

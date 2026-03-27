@@ -23,11 +23,11 @@ let tokens_per_sec_json ~tokens ~latency_ms =
   if tokens <= 0 || latency_ms <= 0 then `Null
   else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
 
-let resident_keeper_names (config : Room.config) =
-  Keeper_types.resident_keeper_names config
+let registered_keeper_names (config : Room.config) =
+  Keeper_types.registered_keeper_names config
 
-let resident_keeper_count (config : Room.config) : int =
-  List.length (resident_keeper_names config)
+let registered_keeper_count (config : Room.config) : int =
+  List.length (registered_keeper_names config)
 
 let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
@@ -35,7 +35,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
   let series_points = 120 in
-  let names = resident_keeper_names config in
+  let names = registered_keeper_names config in
   let now_ts = Time_compat.now () in
   (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
      Results are collected into a shared ref array, then filter_map'd. *)
@@ -342,7 +342,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                    ~surface_status:(Keeper_exec_status.keeper_surface_status
                                       ~agent_status:agent ~diagnostic)
                    ~now_ts));
-              ("runtime_class", `String "resident_keeper");
+              ("runtime_class", `String "keeper");
               ("registered", `Bool true);
               ("registry_state",
                 match registry_state with

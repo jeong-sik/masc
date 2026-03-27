@@ -203,7 +203,7 @@ let judgment_write_schema =
   {
     name = "masc_operator_judgment_write";
     description =
-      "Internal operator-judge write path. Use this to store a durable resident judgment for room or team-session supervision. Hidden from the default catalog and intended for keeper/automation experiments.";
+      "Internal operator-judge write path. Use this to store a durable operator judgment for room or team-session supervision. Hidden from the default catalog and intended for keeper/automation experiments.";
     input_schema =
       `Assoc
         [
@@ -248,7 +248,7 @@ let judgment_latest_schema =
   {
     name = "masc_operator_judgment_latest";
     description =
-      "Internal operator-judge read path. Returns the latest stored resident judgment for a room or team session. Hidden from the default catalog.";
+      "Internal operator-judge read path. Returns the latest stored operator judgment for a room or team session. Hidden from the default catalog.";
     input_schema =
       `Assoc
         [

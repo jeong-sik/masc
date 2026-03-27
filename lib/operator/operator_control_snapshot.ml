@@ -175,7 +175,7 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
 let keepers_json ?keeper_names ?(include_recent_activity = true) config =
   let names = match keeper_names with
     | Some n -> n
-    | None -> Keeper_types.resident_keeper_names config
+    | None -> Keeper_types.registered_keeper_names config
   in
   let rows =
     List.filter_map
@@ -220,7 +220,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
             Some
               (`Assoc
                 [
-                  ("runtime_class", `String "resident_keeper");
+                  ("runtime_class", `String "keeper");
                   ("registered", `Bool true);
                   ("pipeline_stage", `String pipeline_stage);
                   ("name", `String meta.name);
@@ -282,7 +282,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
 let persistent_agents_json ?keeper_names config =
-  let names = Keeper_types.persistent_agent_names ?resident_names:keeper_names config in
+  let names = Keeper_types.persistent_agent_names ?registered_names:keeper_names config in
   let rows =
     List.filter_map
       (fun name ->
@@ -550,7 +550,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   in
   let keeper_names =
     if initialized && include_keepers then
-      Keeper_types.resident_keeper_names config
+      Keeper_types.registered_keeper_names config
     else []
   in
   let result =
@@ -558,7 +558,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       ([
          ("trace_id", `String trace_id);
          ("server_profile", operator_server_profile_json);
-         ("resident_judge_runtime", resident_judge_runtime_json config);
+         ("operator_judge_runtime", operator_judge_runtime_json config);
          ("judgment_owner", `String "fallback_read_model");
          ("authoritative_judgment_available", `Bool false);
          ("provenance_summary", operator_surface_contract_json);

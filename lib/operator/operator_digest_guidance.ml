@@ -61,7 +61,7 @@ let active_guidance_fields ~config ~actor ~target_type ~target_id
         | _ -> "fallback"
       in
       [
-        ("judgment_owner", `String "resident_operator_keeper");
+        ("judgment_owner", `String "operator_keeper");
         ("authoritative_judgment_available", `Bool true);
         ("judgment", judgment_json);
         ("active_guidance_layer", `String "judgment");

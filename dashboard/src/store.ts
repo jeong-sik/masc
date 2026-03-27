@@ -20,6 +20,7 @@ import type {
   DashboardExecutionOperationBrief,
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
+  type DashboardExecutionResponse,
 } from './types'
 import {
   fetchDashboardExecution,
@@ -375,7 +376,7 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
 
 /** Hydrate all execution-related signals from a raw data payload.
  *  Shared by doFetchExecution (HTTP) and SSE execution_snapshot handler. */
-export function hydrateExecutionSnapshot(data: Record<string, unknown>): void {
+export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void {
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
   const previousRoom = serverStatus.value?.room
   if (normalizedStatus) {

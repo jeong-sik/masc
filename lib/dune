@@ -274,6 +274,9 @@
    operator_judgment
    notify
    orchestrator
+   otel_config
+   otel_dispatch_hook
+   otel_spans
    planning_eio
    post_verifier
    provider_adapter

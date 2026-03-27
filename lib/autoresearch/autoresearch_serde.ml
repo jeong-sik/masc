@@ -104,8 +104,8 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
              (Printf.sprintf
                 "missing required autoresearch state field: %s" key))
   in
-  let int_ key ~default = try json |> member key |> to_int with Type_error _ -> default in
-  let float_ key ~default = try json |> member key |> to_float with Type_error _ -> default in
+  let int_ key ~default = Safe_ops.json_int ~default key json in
+  let float_ key ~default = Safe_ops.json_float ~default key json in
   {
     loop_id = required_str "loop_id";
     status = status_of_string (required_str "status") |> Option.value ~default:Error;
@@ -125,10 +125,7 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
     max_cycles = int_ "max_cycles" ~default:10;
     error_message = json |> member "error" |> to_string_option;
     elapsed_s = float_ "elapsed_s" ~default:0.0;
-    updated_at = (
-      try Some (json |> member "updated_at" |> to_float)
-      with Type_error _ -> None
-    );
+    updated_at = Safe_ops.json_float_opt "updated_at" json;
     source_workdir =
       json |> member "source_workdir" |> to_string_option
       |> Option.value ~default:(str "workdir" ~default:".");

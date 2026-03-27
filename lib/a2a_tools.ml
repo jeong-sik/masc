@@ -40,22 +40,19 @@ let subscription_to_json (sub : subscription) : Yojson.Safe.t =
 
 (** Subscription from JSON *)
 let subscription_of_json (json : Yojson.Safe.t) : subscription option =
-  try
-    let module U = Yojson.Safe.Util in
-    let id = json |> U.member "id" |> U.to_string in
-    let agent_filter = match json |> U.member "agent_filter" with
-      | `Null -> None
-      | `String s -> Some s
-      | _ -> None
+  match Safe_ops.json_string_opt "id" json,
+        Safe_ops.json_string_opt "created_at" json with
+  | Some id, Some created_at ->
+    let agent_filter = Safe_ops.json_string_opt "agent_filter" json in
+    let event_types =
+      Safe_ops.json_list "event_types" json
+      |> List.filter_map (function
+           | `String s -> (match event_type_of_string s with Ok e -> Some e | Error _ -> None)
+           | _ -> None)
     in
-    let event_types = json |> U.member "event_types" |> U.to_list |> List.filter_map (function
-      | `String s -> (match event_type_of_string s with Ok e -> Some e | Error _ -> None)
-      | _ -> None)
-    in
-    let created_at = json |> U.member "created_at" |> U.to_string in
     Some { id; agent_filter; event_types; created_at }
-  with Yojson.Safe.Util.Type_error (msg, _) ->
-    Log.Misc.warn "subscription_of_json: %s" msg;
+  | _ ->
+    Log.Misc.warn "subscription_of_json: missing required fields";
     None
 
 (** Save subscriptions to file *)

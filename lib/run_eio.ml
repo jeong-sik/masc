@@ -37,17 +37,16 @@ let run_record_to_json (r : run_record) : Yojson.Safe.t =
   ]
 
 let run_record_of_json (json : Yojson.Safe.t) : run_record option =
-  let open Yojson.Safe.Util in
-  try
-    let task_id = json |> member "task_id" |> to_string in
-    let agent_name = json |> member "agent_name" |> to_string_option in
-    let plan = json |> member "plan" |> to_string_option |> Option.value ~default:"" in
-    let deliverable = json |> member "deliverable" |> to_string_option |> Option.value ~default:"" in
-    let created_at = json |> member "created_at" |> to_string in
-    let updated_at = json |> member "updated_at" |> to_string in
+  match Safe_ops.json_string_opt "task_id" json,
+        Safe_ops.json_string_opt "created_at" json,
+        Safe_ops.json_string_opt "updated_at" json with
+  | Some task_id, Some created_at, Some updated_at ->
+    let agent_name = Safe_ops.json_string_opt "agent_name" json in
+    let plan = Safe_ops.json_string ~default:"" "plan" json in
+    let deliverable = Safe_ops.json_string ~default:"" "deliverable" json in
     Some { task_id; agent_name; plan; deliverable; created_at; updated_at }
-  with Yojson.Safe.Util.Type_error (msg, _) ->
-    Log.Misc.error "run_of_json type error: %s" msg;
+  | _ ->
+    Log.Misc.error "run_of_json: missing required fields";
     None
 
 let log_entry_to_json (e : log_entry) : Yojson.Safe.t =
@@ -57,13 +56,12 @@ let log_entry_to_json (e : log_entry) : Yojson.Safe.t =
   ]
 
 let log_entry_of_json (json : Yojson.Safe.t) : log_entry option =
-  let open Yojson.Safe.Util in
-  try
-    let timestamp = json |> member "timestamp" |> to_string in
-    let note = json |> member "note" |> to_string in
+  match Safe_ops.json_string_opt "timestamp" json,
+        Safe_ops.json_string_opt "note" json with
+  | Some timestamp, Some note ->
     Some { timestamp; note }
-  with Yojson.Safe.Util.Type_error (msg, _) ->
-    Log.Misc.error "log_entry_of_json type error: %s" msg;
+  | _ ->
+    Log.Misc.error "log_entry_of_json: missing required fields";
     None
 
 let runs_dir (config : config) =

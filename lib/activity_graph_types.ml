@@ -56,14 +56,10 @@ let entity_to_yojson (value : entity_ref) =
   `Assoc [ ("kind", `String value.kind); ("id", `String value.id) ]
 
 let entity_of_yojson (json : Yojson.Safe.t) : entity_ref option =
-  let open Yojson.Safe.Util in
-  try
-    Some
-      {
-        kind = json |> member "kind" |> to_string;
-        id = json |> member "id" |> to_string;
-      }
-  with Type_error _ -> None
+  match Safe_ops.json_string_opt "kind" json,
+        Safe_ops.json_string_opt "id" json with
+  | Some kind, Some id -> Some { kind; id }
+  | _ -> None
 
 let event_to_yojson (value : event) =
   `Assoc
@@ -86,27 +82,18 @@ let event_to_yojson (value : event) =
     ]
 
 let event_of_yojson (json : Yojson.Safe.t) : event option =
-  let open Yojson.Safe.Util in
-  try
-    Some
-      {
-        seq = json |> member "seq" |> to_int;
-        ts_ms = json |> member "ts_ms" |> to_int;
-        ts_iso = json |> member "ts_iso" |> to_string;
-        room_id = json |> member "room_id" |> to_string;
-        kind = json |> member "kind" |> to_string;
-        actor = entity_of_yojson (json |> member "actor");
-        subject = entity_of_yojson (json |> member "subject");
-        payload = json |> member "payload";
-        tags =
-          (match json |> member "tags" with
-          | `List items ->
-              List.filter_map
-                (function `String value -> Some value | _ -> None)
-                items
-          | _ -> []);
-      }
-  with Type_error _ -> None
+  match Safe_ops.json_int_opt "seq" json,
+        Safe_ops.json_int_opt "ts_ms" json,
+        Safe_ops.json_string_opt "ts_iso" json,
+        Safe_ops.json_string_opt "room_id" json,
+        Safe_ops.json_string_opt "kind" json with
+  | Some seq, Some ts_ms, Some ts_iso, Some room_id, Some kind ->
+    let actor = Option.bind (Safe_ops.json_member_opt "actor" json) entity_of_yojson in
+    let subject = Option.bind (Safe_ops.json_member_opt "subject" json) entity_of_yojson in
+    let payload = Safe_ops.json_member_opt "payload" json |> Option.value ~default:(`Assoc []) in
+    let tags = Safe_ops.json_string_list "tags" json in
+    Some { seq; ts_ms; ts_iso; room_id; kind; actor; subject; payload; tags }
+  | _ -> None
 
 let graph_node_to_yojson (value : graph_node) =
   `Assoc

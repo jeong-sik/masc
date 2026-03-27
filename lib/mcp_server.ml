@@ -332,72 +332,93 @@ let make_resource_template ?title ?annotations ~uri_template ~name ~description
 
 let resources : mcp_resource list = [
   make_resource ~uri:"masc://status" ~name:"MASC Status"
+    ~title:"Room Status"
     ~description:"Current room status snapshot (same as masc_status)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://status.json" ~name:"MASC Status (JSON)"
+    ~title:"Room Status (JSON)"
     ~description:"Current room status snapshot as JSON (for data collection)"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://tasks" ~name:"Quest Board"
+    ~title:"Task Board"
     ~description:"Task board snapshot (defaults to active tasks; same as masc_tasks)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://tasks.json" ~name:"Quest Board (JSON)"
+    ~title:"Task Board (JSON)"
     ~description:"Task board snapshot as JSON (backlog.json; all statuses)"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://who" ~name:"Active Agents"
+    ~title:"Online Agents"
     ~description:"In-memory agent/session status (same as masc_who)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://who.json" ~name:"Active Agents (JSON)"
+    ~title:"Online Agents (JSON)"
     ~description:"In-memory agent/session status as JSON"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://agents" ~name:"Agents (Metadata)"
+    ~title:"Agent Registry"
     ~description:"Agent registry snapshot (capabilities, tasks, last_seen)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://agents.json" ~name:"Agents (Metadata, JSON)"
+    ~title:"Agent Registry (JSON)"
     ~description:"Agent registry snapshot as JSON"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://messages?since_seq=0&limit=10"
     ~name:"Recent Messages"
+    ~title:"Recent Messages"
     ~description:"Recent messages snapshot (same as masc_messages)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://messages.json?since_seq=0&limit=10"
     ~name:"Recent Messages (JSON)"
+    ~title:"Recent Messages (JSON)"
     ~description:"Recent messages snapshot as JSON (for data collection)"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://events?limit=50" ~name:"Recent Events"
+    ~title:"Event Log"
     ~description:"Recent event log snapshot (task/agent/worktree transitions)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://events.json?limit=50"
     ~name:"Recent Events (JSON)"
+    ~title:"Event Log (JSON)"
     ~description:"Recent event log snapshot as JSON"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://worktrees" ~name:"Worktrees"
+    ~title:"Git Worktrees"
     ~description:"Git worktree snapshot for the current repo"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://worktrees.json" ~name:"Worktrees (JSON)"
+    ~title:"Git Worktrees (JSON)"
     ~description:"Git worktree snapshot as JSON"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://schema" ~name:"Task FSM Schema"
+    ~title:"Task State Machine"
     ~description:"Task state machine rules (markdown)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://schema.json" ~name:"Task FSM Schema (JSON)"
+    ~title:"Task State Machine (JSON)"
     ~description:"Task state machine rules as JSON"
     ~mime_type:"application/json" ();
   (* Agent Being Protocol - Institution Memory *)
   make_resource ~uri:"masc://institution" ~name:"Institution Memory"
+    ~title:"Institution Memory"
     ~description:"Institutional knowledge: mission, values, procedural memory, succession policy"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://institution.json"
     ~name:"Institution Memory (JSON)"
+    ~title:"Institution Memory (JSON)"
     ~description:"Institutional knowledge as JSON for agent onboarding"
     ~mime_type:"application/json" ();
   (* Library - curated knowledge from direct research *)
   make_resource ~uri:"masc://library" ~name:"Library Index"
+    ~title:"Research Library"
     ~description:"List of curated library documents (direct research only)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://library.json" ~name:"Library Index (JSON)"
+    ~title:"Research Library (JSON)"
     ~description:"List of curated library documents as JSON with full metadata"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://tool-help-index" ~name:"Tool Help Index"
+    ~title:"Tool Help Index"
     ~description:"Canonical help index for MCP-exposed MASC tools"
     ~mime_type:"text/markdown" ();
 ]
@@ -405,30 +426,37 @@ let resources : mcp_resource list = [
 let resource_templates : mcp_resource_template list = [
   make_resource_template ~uri_template:"masc://messages{?since_seq,limit}"
     ~name:"Messages (range)"
+    ~title:"Messages by Range"
     ~description:"Read messages with optional since_seq and limit"
     ~mime_type:"text/markdown" ();
   make_resource_template ~uri_template:"masc://messages.json{?since_seq,limit}"
     ~name:"Messages (range, JSON)"
+    ~title:"Messages by Range (JSON)"
     ~description:"Read messages as JSON with optional since_seq and limit"
     ~mime_type:"application/json" ();
   make_resource_template ~uri_template:"masc://events{?limit}"
     ~name:"Events (range)"
+    ~title:"Events by Range"
     ~description:"Read recent event log entries with optional limit"
     ~mime_type:"text/markdown" ();
   make_resource_template ~uri_template:"masc://events.json{?limit}"
     ~name:"Events (range, JSON)"
+    ~title:"Events by Range (JSON)"
     ~description:"Read recent event log entries as JSON with optional limit"
     ~mime_type:"application/json" ();
   make_resource_template ~uri_template:"masc://library/{topic}"
     ~name:"Library Document"
+    ~title:"Library Document"
     ~description:"Read a specific library document by topic name"
     ~mime_type:"text/markdown" ();
   make_resource_template ~uri_template:"masc://library/{topic}.json"
     ~name:"Library Document (JSON)"
+    ~title:"Library Document (JSON)"
     ~description:"Read a specific library document as JSON with metadata"
     ~mime_type:"application/json" ();
   make_resource_template ~uri_template:"masc://tool-help/{tool_name}"
     ~name:"Tool Help"
+    ~title:"Tool Help"
     ~description:"Read canonical help for a specific MCP tool"
     ~mime_type:"text/markdown" ();
 ]

@@ -180,14 +180,122 @@ let label_words_from_identifier ident =
            ^ String.lowercase_ascii
                (String.sub word 1 (String.length word - 1)))
 
+(** Custom human-readable titles for key tools.
+    Falls back to auto-generated Title Case when absent. *)
+let custom_tool_titles : (string * string) list = [
+  (* Room lifecycle *)
+  ("masc_init", "Initialize Room");
+  ("masc_join", "Join Room");
+  ("masc_leave", "Leave Room");
+  ("masc_status", "Room Status");
+  ("masc_reset", "Reset Room");
+  ("masc_who", "List Online Agents");
+  ("masc_check", "Check Preconditions");
+  ("masc_workflow_guide", "Workflow Guide");
+  (* Task management *)
+  ("masc_tasks", "List Tasks");
+  ("masc_add_task", "Add Task");
+  ("masc_batch_add_tasks", "Batch Add Tasks");
+  ("masc_transition", "Transition Task State");
+  ("masc_claim_next", "Claim Next Task");
+  ("masc_update_priority", "Update Task Priority");
+  ("masc_task_history", "Task Event History");
+  ("masc_archive_view", "View Task Archive");
+  (* Communication *)
+  ("masc_broadcast", "Broadcast Message");
+  ("masc_messages", "Read Messages");
+  ("masc_a2a_delegate", "Agent-to-Agent Delegate");
+  ("masc_a2a_subscribe", "Subscribe to Agent Events");
+  (* Planning *)
+  ("masc_plan_init", "Initialize Plan");
+  ("masc_plan_get", "Get Plan");
+  ("masc_plan_update", "Update Plan");
+  ("masc_plan_set_task", "Set Current Task");
+  ("masc_plan_get_task", "Get Current Task");
+  ("masc_plan_clear_task", "Clear Current Task");
+  ("masc_note_add", "Add Note");
+  ("masc_deliver", "Deliver Result");
+  ("masc_error_add", "Record Error");
+  ("masc_error_resolve", "Resolve Error");
+  (* Agents *)
+  ("masc_agents", "List Agent Details");
+  ("masc_agent_update", "Update Agent Profile");
+  ("masc_register_capabilities", "Register Agent Capabilities");
+  ("masc_find_by_capability", "Find Agent by Capability");
+  (* Heartbeat *)
+  ("masc_heartbeat", "Send Heartbeat");
+  ("masc_heartbeat_start", "Start Auto-Heartbeat");
+  ("masc_heartbeat_stop", "Stop Auto-Heartbeat");
+  ("masc_heartbeat_list", "List Active Heartbeats");
+  (* Operations *)
+  ("masc_operator_snapshot", "Operator Snapshot");
+  ("masc_operator_digest", "Operator Digest");
+  ("masc_operator_action", "Operator Action");
+  ("masc_operator_confirm", "Operator Confirm");
+  (* Team sessions *)
+  ("masc_team_session_start", "Start Team Session");
+  ("masc_team_session_step", "Team Session Step");
+  ("masc_team_session_status", "Team Session Status");
+  ("masc_team_session_stop", "Stop Team Session");
+  ("masc_team_session_list", "List Team Sessions");
+  ("masc_team_session_events", "Team Session Events");
+  ("masc_team_session_finalize", "Finalize Team Session");
+  (* Command plane *)
+  ("masc_operation_start", "Start Operation");
+  ("masc_operation_status", "Operation Status");
+  ("masc_operation_stop", "Stop Operation");
+  ("masc_operation_pause", "Pause Operation");
+  ("masc_operation_resume", "Resume Operation");
+  ("masc_operation_finalize", "Finalize Operation");
+  ("masc_operation_checkpoint", "Operation Checkpoint");
+  (* Room strategy *)
+  ("masc_room_strategy_get", "Get Room Strategy");
+  ("masc_room_strategy_set", "Set Room Strategy");
+  (* Worktree *)
+  ("masc_worktree_create", "Create Worktree");
+  ("masc_worktree_status", "Worktree Status");
+  ("masc_worktree_remove", "Remove Worktree");
+  (* Keeper *)
+  ("masc_keeper_up", "Start Keeper");
+  ("masc_keeper_msg", "Send Keeper Message");
+  ("masc_keeper_status", "Keeper Status");
+  ("masc_keeper_down", "Stop Keeper");
+  ("masc_keeper_create_from_persona", "Create Keeper from Persona");
+  ("masc_keeper_tool_catalog", "Keeper Tool Catalog");
+  (* SDK aliases *)
+  ("masc_list_tasks", "List Tasks");
+  ("masc_room_status", "Room Status");
+  ("masc_claim_task", "Claim Task");
+  ("masc_set_current_task", "Set Current Task");
+  ("masc_complete_task", "Complete Task");
+  ("masc_release_task", "Release Task");
+  ("masc_cancel_task", "Cancel Task");
+  ("masc_send_direct", "Send Direct Message");
+  ("masc_claim_next", "Claim Next Task");
+  (* Misc *)
+  ("masc_poll_events", "Poll Events");
+  ("masc_cleanup_zombies", "Clean Up Zombie Agents");
+  ("masc_dispatch_plan", "Dispatch Plan");
+  ("masc_dispatch_assign", "Dispatch Assign");
+  ("masc_compact_context", "Compact Context");
+]
+
+let custom_title_table : (string, string) Hashtbl.t =
+  let table = Hashtbl.create (List.length custom_tool_titles) in
+  List.iter (fun (name, title) -> Hashtbl.replace table name title) custom_tool_titles;
+  table
+
 let tool_title_of_name name =
-  let trimmed =
-    if String.length name > 5 && String.sub name 0 5 = "masc_" then
-      String.sub name 5 (String.length name - 5)
-    else
-      name
-  in
-  String.concat " " (label_words_from_identifier trimmed)
+  match Hashtbl.find_opt custom_title_table name with
+  | Some title -> title
+  | None ->
+    let trimmed =
+      if String.length name > 5 && String.sub name 0 5 = "masc_" then
+        String.sub name 5 (String.length name - 5)
+      else
+        name
+    in
+    String.concat " " (label_words_from_identifier trimmed)
 
 let tool_icons_for_name name =
   let icon =
@@ -210,23 +318,181 @@ let permissive_object_schema properties =
       ("additionalProperties", `Bool true);
     ]
 
+let string_schema = `Assoc [ ("type", `String "string") ]
+let int_schema = `Assoc [ ("type", `String "integer") ]
+let bool_schema = `Assoc [ ("type", `String "boolean") ]
+let array_schema = `Assoc [ ("type", `String "array") ]
+let object_schema = `Assoc [ ("type", `String "object") ]
+
 let tool_output_schema_field = function
+  | "masc_status" ->
+      Some
+        (permissive_object_schema
+           [
+             ("cluster", string_schema);
+             ("project", string_schema);
+             ("room", string_schema);
+             ("path", string_schema);
+             ("agents", array_schema);
+             ("tasks", array_schema);
+             ("active_task_count", int_schema);
+             ("done_count", int_schema);
+             ("cancelled_count", int_schema);
+             ("total_task_count", int_schema);
+             ("message_count", int_schema);
+           ])
+  | "masc_tasks" | "masc_list_tasks" ->
+      Some
+        (permissive_object_schema
+           [
+             ("tasks", `Assoc [
+               ("type", `String "array");
+               ("items", permissive_object_schema [
+                 ("id", string_schema);
+                 ("title", string_schema);
+                 ("status", string_schema);
+                 ("assignee", string_schema);
+                 ("priority", int_schema);
+               ]);
+             ]);
+             ("total", int_schema);
+           ])
+  | "masc_agents" ->
+      Some
+        (permissive_object_schema
+           [
+             ("agents", `Assoc [
+               ("type", `String "array");
+               ("items", permissive_object_schema [
+                 ("name", string_schema);
+                 ("status", string_schema);
+                 ("last_heartbeat", string_schema);
+               ]);
+             ]);
+           ])
+  | "masc_heartbeat" ->
+      Some
+        (permissive_object_schema
+           [
+             ("agent_name", string_schema);
+             ("timestamp", string_schema);
+             ("success", bool_schema);
+           ])
+  | "masc_heartbeat_list" ->
+      Some
+        (permissive_object_schema
+           [
+             ("heartbeats", `Assoc [
+               ("type", `String "array");
+               ("items", permissive_object_schema [
+                 ("id", string_schema);
+                 ("agent_name", string_schema);
+                 ("interval", int_schema);
+                 ("message", string_schema);
+                 ("uptime_s", int_schema);
+               ]);
+             ]);
+           ])
+  | "masc_plan_get" ->
+      Some
+        (permissive_object_schema
+           [
+             ("task_id", string_schema);
+             ("plan", string_schema);
+             ("notes", string_schema);
+             ("deliverable", string_schema);
+           ])
+  | "masc_plan_get_task" ->
+      Some
+        (permissive_object_schema
+           [
+             ("task_id", string_schema);
+           ])
+  | "masc_who" | "masc_room_status" ->
+      Some
+        (permissive_object_schema
+           [
+             ("agents", array_schema);
+             ("count", int_schema);
+           ])
+  | "masc_room_strategy_get" ->
+      Some
+        (permissive_object_schema
+           [
+             ("room_id", string_schema);
+             ("search_strategy_default", string_schema);
+             ("speculation_enabled", bool_schema);
+             ("speculation_budget", int_schema);
+           ])
   | "masc_team_session_status" ->
       Some
         (permissive_object_schema
            [
-             ("status", `Assoc [ ("type", `String "string") ]);
-             ("result", `Assoc [ ("type", `String "object") ]);
+             ("status", string_schema);
+             ("result", object_schema);
+           ])
+  | "masc_team_session_list" ->
+      Some
+        (permissive_object_schema
+           [
+             ("sessions", array_schema);
+             ("count", int_schema);
            ])
   | "masc_operator_digest" ->
       Some
         (permissive_object_schema
            [
-             ("target_type", `Assoc [ ("type", `String "string") ]);
-             ("target_id", `Assoc [ ("type", `String "string") ]);
-             ("health", `Assoc [ ("type", `String "string") ]);
-             ("attention_items", `Assoc [ ("type", `String "array") ]);
-             ("recommended_actions", `Assoc [ ("type", `String "array") ]);
+             ("target_type", string_schema);
+             ("target_id", string_schema);
+             ("health", string_schema);
+             ("attention_items", array_schema);
+             ("recommended_actions", array_schema);
+           ])
+  | "masc_operator_snapshot" ->
+      Some
+        (permissive_object_schema
+           [
+             ("room", object_schema);
+             ("agents", array_schema);
+             ("tasks", array_schema);
+             ("operations", array_schema);
+           ])
+  | "masc_operation_status" ->
+      Some
+        (permissive_object_schema
+           [
+             ("operation_id", string_schema);
+             ("status", string_schema);
+             ("progress", object_schema);
+           ])
+  | "masc_check" ->
+      Some
+        (permissive_object_schema
+           [
+             ("assertions", `Assoc [
+               ("type", `String "array");
+               ("items", permissive_object_schema [
+                 ("name", string_schema);
+                 ("passed", bool_schema);
+                 ("hint", string_schema);
+               ]);
+             ]);
+             ("all_passed", bool_schema);
+           ])
+  | "masc_keeper_status" ->
+      Some
+        (permissive_object_schema
+           [
+             ("keeper_id", string_schema);
+             ("status", string_schema);
+             ("uptime_s", int_schema);
+           ])
+  | "masc_task_history" ->
+      Some
+        (permissive_object_schema
+           [
+             ("task_id", string_schema);
+             ("events", array_schema);
            ])
   | _ -> None
 

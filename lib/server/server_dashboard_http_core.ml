@@ -878,16 +878,9 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
     Printf.sprintf "shell:%s:%s" config.base_path current_room
   in
   let compute () =
-    match Eio_context.get_clock_opt (), Eio_context.get_switch_opt () with
-    | Some clock, Some sw ->
-        let readonly_config =
-          match cached_isolated_readonly_config ~sw ~clock ~config with
-          | Some isolated -> isolated
-          | None -> config
-        in
-        dashboard_shell_payload_json readonly_config
-    | _ ->
-        dashboard_shell_payload_json config
+    (* Shell endpoint is read-only; use config directly without isolation
+       since state is not available in this context. *)
+    dashboard_shell_payload_json config
   in
   match Eio_context.get_clock_opt () with
   | Some clock ->

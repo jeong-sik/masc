@@ -141,6 +141,14 @@ let persist_failure_feedback
   in
   ignore (Autoresearch_knowledge.record_finding ~finding)
 
+let check_patience_limit (state : Autoresearch.loop_state) =
+  if state.consecutive_discards >= state.patience then begin
+    state.status <- Autoresearch.Completed;
+    Autoresearch.add_insight state
+      (Printf.sprintf "Early stopped: %d consecutive discards without improvement"
+         state.patience)
+  end
+
 let forced_discard_record
     (state : Autoresearch.loop_state)
     ~hypothesis ~score_before ?score_after ?commit_hash
@@ -169,14 +177,6 @@ let forced_discard_record
        state.current_cycle hypothesis reason);
   check_patience_limit state;
   record
-
-let check_patience_limit (state : Autoresearch.loop_state) =
-  if state.consecutive_discards >= state.patience then begin
-    state.status <- Autoresearch.Completed;
-    Autoresearch.add_insight state
-      (Printf.sprintf "Early stopped: %d consecutive discards without improvement"
-         state.patience)
-  end
 
 let persist_discard_record
     (ctx : Tool_autoresearch_repo_synthesis.context)

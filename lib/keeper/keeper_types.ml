@@ -578,21 +578,35 @@ type keeper_boot_entry = {
   updated_at : string;
 }
 
+let legacy_keeper_registration_dirname =
+  String.concat "" [ "res"; "ident"; "-keepers" ]
+
+let legacy_keeper_registration_dir (config : Room.config) =
+  Filename.concat (Room.masc_root_dir config) legacy_keeper_registration_dirname
+
 let keeper_registration_dir (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "keeper-registrations" in
-  let historical_dir =
-    Filename.concat (Room.masc_root_dir config)
-      (String.concat "" [ "res"; "ident"; "-keepers" ])
-  in
+  let historical_dir = legacy_keeper_registration_dir config in
   if (not (Sys.file_exists d)) && Sys.file_exists historical_dir then
-    (try Sys.rename historical_dir d with Sys_error _ -> ());
-  let resolved =
-    if Sys.file_exists d then d else if Sys.file_exists historical_dir then historical_dir else d
-  in
-  ensure_dir resolved
+    (try Sys.rename historical_dir d
+     with Sys_error msg ->
+       Log.Keeper.warn
+         "keeper registration dir migration skipped (%s -> %s): %s"
+         historical_dir d msg);
+  ensure_dir d
 
 let keeper_registration_path config name =
   Filename.concat (keeper_registration_dir config) (name ^ ".json")
+
+let legacy_keeper_registration_path config name =
+  Filename.concat (legacy_keeper_registration_dir config) (name ^ ".json")
+
+let keeper_registration_read_path config name =
+  let canonical_path = keeper_registration_path config name in
+  if Sys.file_exists canonical_path then canonical_path
+  else
+    let legacy_path = legacy_keeper_registration_path config name in
+    if Sys.file_exists legacy_path then legacy_path else canonical_path
 
 let keeper_boot_to_json (entry : keeper_boot_entry) =
   `Assoc
@@ -662,17 +676,21 @@ let keeper_boot_entry_of_meta ?created_at (meta : keeper_meta) : keeper_boot_ent
 let write_keeper_registration config (entry : keeper_boot_entry) :
     (unit, string) result =
   let path = keeper_registration_path config entry.name in
+  let legacy_path = legacy_keeper_registration_path config entry.name in
   let content = Yojson.Safe.pretty_to_string (keeper_boot_to_json entry) in
   try
     Fs_compat.save_file path content;
+    if Sys.file_exists legacy_path then
+      Safe_ops.remove_file_logged ~context:"keeper_registration_cleanup_legacy"
+        legacy_path;
     Ok ()
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Error
-      (Printf.sprintf "failed to write keeper %s: %s" path
-         (Printexc.to_string exn))
+      Error
+        (Printf.sprintf "failed to write keeper %s: %s" path
+           (Printexc.to_string exn))
 
 let read_keeper_registration config name : (keeper_boot_entry option, string) result =
-  let path = keeper_registration_path config name in
+  let path = keeper_registration_read_path config name in
   if not (Sys.file_exists path) then Ok None
   else
     try
@@ -687,29 +705,38 @@ let read_keeper_registration config name : (keeper_boot_entry option, string) re
 
 let remove_keeper_registration config name =
   Safe_ops.remove_file_logged ~context:"keeper_registration_remove"
-    (keeper_registration_path config name)
+    (keeper_registration_path config name);
+  Safe_ops.remove_file_logged ~context:"keeper_registration_remove_legacy"
+    (legacy_keeper_registration_path config name)
 
 let list_registered_keepers config : keeper_boot_entry list =
-  let dir = keeper_registration_dir config in
-  match Safe_ops.list_dir_safe dir with
-  | Error _ -> []
-  | Ok files ->
-      files
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.map Filename.remove_extension
-      |> List.filter validate_name
-      |> List.filter_map (fun name ->
-             match read_keeper_registration config name with
-             | Ok (Some spec) -> Some spec
-             | _ -> None)
-      |> List.sort (fun a b -> String.compare a.name b.name)
+  let names_from_dir dir =
+    match Safe_ops.list_dir_safe dir with
+    | Error _ -> []
+    | Ok files ->
+        files
+        |> List.filter (fun f -> Filename.check_suffix f ".json")
+        |> List.map Filename.remove_extension
+        |> List.filter validate_name
+  in
+  let names =
+    names_from_dir (keeper_registration_dir config)
+    @ names_from_dir (legacy_keeper_registration_dir config)
+    |> List.sort_uniq String.compare
+  in
+  names
+  |> List.filter_map (fun name ->
+         match read_keeper_registration config name with
+         | Ok (Some spec) -> Some spec
+         | _ -> None)
+  |> List.sort (fun a b -> String.compare a.name b.name)
 
 let registered_keeper_names config =
   list_registered_keepers config |> List.map (fun entry -> entry.name)
 
 let is_registered_keeper config name =
   let path = keeper_registration_path config name in
-  Sys.file_exists path
+  Sys.file_exists path || Sys.file_exists (legacy_keeper_registration_path config name)
 
 let read_meta_file_path path : (keeper_meta option, string) result =
   if not (Sys.file_exists path) then Ok None

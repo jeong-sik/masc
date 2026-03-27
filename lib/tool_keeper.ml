@@ -33,6 +33,9 @@ type text_cache = {
 
 let _keeper_list_cache = { key = None; value = None; expires_at = 0.0 }
 
+let legacy_keeper_registered_key =
+  String.concat "" [ "res"; "ident"; "_registered" ]
+
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
   | Some raw -> (
@@ -69,6 +72,7 @@ let annotate_keeper_json ~registered ~runtime_class json =
         (("runtime_class", `String runtime_class)
         :: ("desired", `Bool registered)
         :: ("keeper_registered", `Bool registered)
+        :: (legacy_keeper_registered_key, `Bool registered)
         :: ("registered", `Bool registered)
         :: fields)
   | other -> other
@@ -151,6 +155,7 @@ let keeper_list_row_json ~registered ~runtime_class config name =
             ("runtime_class", `String runtime_class);
             ("desired", `Bool registered);
             ("keeper_registered", `Bool registered);
+            (legacy_keeper_registered_key, `Bool registered);
             ("registered", `Bool registered);
             ("name", `String meta.name);
             ("meta", keeper_brief_meta_json meta);

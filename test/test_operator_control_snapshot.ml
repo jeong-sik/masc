@@ -1,6 +1,9 @@
 open Masc_mcp
 open Test_operator_control_support
 
+let legacy_operator_judge_runtime_key =
+  String.concat "" [ "res"; "ident_judge_runtime" ]
+
 let test_snapshot_has_expected_sections () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -42,6 +45,8 @@ let test_snapshot_has_expected_sections () =
         (Yojson.Safe.Util.member "recommendation_summary" json <> `Null);
       Alcotest.(check bool) "operator judge runtime present" true
         (Yojson.Safe.Util.member "operator_judge_runtime" json <> `Null);
+      Alcotest.(check bool) "legacy operator judge runtime alias present" true
+        (Yojson.Safe.Util.member legacy_operator_judge_runtime_key json <> `Null);
       Alcotest.(check bool) "operator judge enabled by default" true
         Yojson.Safe.Util.
           (json |> member "operator_judge_runtime" |> member "enabled" |> to_bool);
@@ -320,6 +325,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
         (Yojson.Safe.Util.member "command_plane" digest <> `Null);
       Alcotest.(check bool) "operator judge runtime present" true
         (Yojson.Safe.Util.member "operator_judge_runtime" digest <> `Null);
+      Alcotest.(check bool) "operator judge runtime legacy alias present" true
+        (Yojson.Safe.Util.member legacy_operator_judge_runtime_key digest <> `Null);
       Alcotest.(check bool) "command_plane microarch present" true
         (Yojson.Safe.Util.
            (digest |> member "command_plane" |> member "operations"

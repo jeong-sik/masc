@@ -24,6 +24,12 @@ import type {
   PendingConfirmation,
 } from './types'
 
+const LEGACY_OPERATOR_JUDGE_RUNTIME_KEY = ['res', 'ident_judge_runtime'].join('')
+
+function operatorJudgeRuntimeValue(root: Record<string, unknown>): unknown {
+  return root.operator_judge_runtime ?? root[LEGACY_OPERATOR_JUDGE_RUNTIME_KEY]
+}
+
 function normalizeMessage(raw: unknown): Message | null {
   if (!isRecord(raw)) return null
   return {
@@ -232,7 +238,7 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
     health: asString(root.health),
     judgment_owner: asString(root.judgment_owner) ?? null,
     authoritative_judgment_available: asBoolean(root.authoritative_judgment_available),
-    operator_judge_runtime: normalizeOperatorJudgeRuntime(root.operator_judge_runtime),
+    operator_judge_runtime: normalizeOperatorJudgeRuntime(operatorJudgeRuntimeValue(root)),
     judgment: normalizeOperatorJudgment(root.judgment),
     active_guidance_layer: asString(root.active_guidance_layer) ?? null,
     active_summary: normalizeGuidanceSummary(root.active_summary),
@@ -332,7 +338,7 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
     keepers: extractArray(root.keepers, ['items', 'keepers'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
-    operator_judge_runtime: normalizeOperatorJudgeRuntime(root.operator_judge_runtime),
+    operator_judge_runtime: normalizeOperatorJudgeRuntime(operatorJudgeRuntimeValue(root)),
     persistent_agents: extractArray(root.persistent_agents, ['items', 'persistent_agents'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),

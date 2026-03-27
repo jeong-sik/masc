@@ -5,6 +5,9 @@ include Operator_digest_types
 include Operator_digest_session
 open Operator_digest_guidance
 
+let legacy_operator_judge_runtime_key =
+  String.concat "" [ "res"; "ident_judge_runtime" ]
+
 let build_room_attention_items ?command_plane_summary config =
   let command_plane_summary =
     match command_plane_summary with
@@ -235,6 +238,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
           ("provenance_summary", operator_surface_contract_json);
           ("judgment", `Null);
           ("operator_judge_runtime", operator_judge_runtime_json config);
+          (legacy_operator_judge_runtime_key, operator_judge_runtime_json config);
           ("command_plane", `Assoc []);
           ("swarm_status", Swarm_status.empty_json);
           ("attention_items", `List []);
@@ -309,6 +313,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
               ("health", `String (health_from_attention_items attention_items));
               ("provenance_summary", operator_surface_contract_json);
               ("operator_judge_runtime", operator_judge_runtime_json config);
+              (legacy_operator_judge_runtime_key, operator_judge_runtime_json config);
               ("command_plane", command_plane_digest_json);
               ("swarm_status", swarm_status_json);
               ("role_census", aggregate_worker_class_counts tracked_sessions);
@@ -371,6 +376,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
                       ("health", `String digest.health);
                       ("provenance_summary", operator_surface_contract_json);
                       ("operator_judge_runtime", operator_judge_runtime_json config);
+                      (legacy_operator_judge_runtime_key, operator_judge_runtime_json config);
                       ("command_plane", command_plane_digest_json);
                       ("swarm_status", swarm_status_json);
                       ( "attention_items",

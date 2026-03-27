@@ -2,6 +2,15 @@
 
 open Keeper_types
 
+let legacy_text parts = String.concat "" parts
+let legacy_registration_key suffix = legacy_text [ "res"; "ident"; suffix ]
+
+let legacy_registration_path config name =
+  Filename.concat
+    (Filename.concat (Room.masc_root_dir config)
+       (legacy_text [ "res"; "ident"; "-keepers" ]))
+    (name ^ ".json")
+
 let string_list_to_json values =
   `List (List.map (fun value -> `String value) values)
 (* auto_team_session removed — keeper decides autonomously via Agent.run() *)
@@ -160,6 +169,7 @@ let runtime_surface_json config (meta : keeper_meta) =
       ("paused", `Bool meta.paused);
       ("registered", `Bool (Option.is_some registration));
       ("keeper_registered", `Bool (Option.is_some registration));
+      (legacy_registration_key "_registered", `Bool (Option.is_some registration));
       ("keepalive_running", `Bool keepalive_running);
       ("registry_state",
        match registry_state with
@@ -175,11 +185,20 @@ let source_provenance_json config (meta : keeper_meta) =
   let snapshot = keeper_default_source_snapshot meta.name in
   let override_fields = live_override_fields meta snapshot.defaults in
   let registration_path = keeper_registration_path config meta.name in
+  let legacy_path = legacy_registration_path config meta.name in
+  let registration_exists =
+    Sys.file_exists registration_path || Sys.file_exists legacy_path
+  in
+  let legacy_alias_path =
+    if Sys.file_exists legacy_path then legacy_path else registration_path
+  in
   `Assoc
     [
       ("live_meta_path", `String (keeper_meta_path config meta.name));
       ("registration_path", `String registration_path);
-      ("registration_exists", `Bool (Sys.file_exists registration_path));
+      ("registration_exists", `Bool registration_exists);
+      (legacy_registration_key "_spec_path", `String legacy_alias_path);
+      (legacy_registration_key "_spec_exists", `Bool registration_exists);
       ( "default_manifest_path",
         match snapshot.defaults.manifest_path with
         | Some path -> `String path

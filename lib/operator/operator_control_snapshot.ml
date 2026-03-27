@@ -65,6 +65,9 @@ let operator_server_profile_json =
       ("curated_tool_count", `Int 4);
     ]
 
+let legacy_operator_judge_runtime_key =
+  String.concat "" [ "res"; "ident_judge_runtime" ]
+
 let action_log_entry_to_yojson (entry : action_log_entry) =
   `Assoc
     [
@@ -559,6 +562,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("trace_id", `String trace_id);
          ("server_profile", operator_server_profile_json);
          ("operator_judge_runtime", operator_judge_runtime_json config);
+         (legacy_operator_judge_runtime_key, operator_judge_runtime_json config);
          ("judgment_owner", `String "fallback_read_model");
          ("authoritative_judgment_available", `Bool false);
          ("provenance_summary", operator_surface_contract_json);

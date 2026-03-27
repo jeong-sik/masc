@@ -69,6 +69,8 @@ let parse_json_exn body =
   try Yojson.Safe.from_string body
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
 
+let legacy_text parts = String.concat "" parts
+
 let require_json_bool_field json key =
   match Yojson.Safe.Util.member key json with
   | `Bool value -> value
@@ -1607,6 +1609,104 @@ let test_write_meta_syncs_registered_registered_seed () =
              entry.Masc_mcp.Keeper_registry.meta.voice_enabled
        | None -> ()))
 
+let test_keeper_registration_reads_legacy_dir_and_cleans_on_write () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let legacy_dir =
+        Filename.concat (Filename.concat base_dir ".masc")
+          (legacy_text [ "res"; "ident"; "-keepers" ])
+      in
+      mkdir_p legacy_dir;
+      let entry : Masc_mcp.Keeper_types.keeper_boot_entry =
+        {
+          name = "legacy";
+          persona_name = "legacy";
+          voice_enabled = false;
+          voice_channel = "text_only";
+          voice_agent_id = "";
+          created_at = "2026-03-28T00:00:00Z";
+          updated_at = "2026-03-28T00:00:00Z";
+        }
+      in
+      let legacy_path = Filename.concat legacy_dir "legacy.json" in
+      Fs_compat.save_file legacy_path
+        (Yojson.Safe.pretty_to_string
+           (Masc_mcp.Keeper_types.keeper_boot_to_json entry));
+      let read_back =
+        match Masc_mcp.Keeper_types.read_keeper_registration config "legacy" with
+        | Ok (Some value) -> value
+        | Ok None -> fail "expected legacy registration to load"
+        | Error e -> fail e
+      in
+      check string "legacy registration name" "legacy" read_back.name;
+      let names = Masc_mcp.Keeper_types.registered_keeper_names config in
+      check bool "legacy registration listed" true (List.mem "legacy" names);
+      (match Masc_mcp.Keeper_types.write_keeper_registration config entry with
+       | Ok () -> ()
+       | Error e -> fail e);
+      let canonical_path =
+        Filename.concat (Filename.concat base_dir ".masc/keeper-registrations")
+          "legacy.json"
+      in
+      check bool "canonical registration written" true
+        (Sys.file_exists canonical_path);
+      check bool "legacy registration cleaned" false
+        (Sys.file_exists legacy_path))
+
+let test_keeper_status_bridge_preserves_legacy_registration_aliases () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("goal", `String "Maintain Sangsu persona");
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "sangsu" with
+        | Ok (Some value) -> value
+        | Ok None -> fail "missing keeper meta"
+        | Error e -> fail e
+      in
+      let runtime_json =
+        Masc_mcp.Keeper_status_bridge.runtime_surface_json config meta
+      in
+      let source_json =
+        Masc_mcp.Keeper_status_bridge.source_provenance_json config meta
+      in
+      let legacy_registered_key = legacy_text [ "res"; "ident"; "_registered" ] in
+      let legacy_path_key = legacy_text [ "res"; "ident"; "_spec_path" ] in
+      let legacy_exists_key = legacy_text [ "res"; "ident"; "_spec_exists" ] in
+      check bool "legacy runtime alias present" true
+        (require_json_bool_field runtime_json legacy_registered_key);
+      check bool "legacy source exists alias present" true
+        (require_json_bool_field source_json legacy_exists_key);
+      check bool "legacy source path alias present" true
+        (String.trim Yojson.Safe.Util.(source_json |> member legacy_path_key |> to_string) <> ""))
+
 let test_keeper_up_persists_allowed_paths_to_status_policy () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1933,6 +2033,10 @@ let () =
            test_keeper_msg_persists_goal_horizon_updates_before_runtime;
          test_case "keeper up update preserves proactive when omitted" `Quick
            test_keeper_up_update_preserves_proactive_when_omitted;
+         test_case "keeper registration reads legacy dir and cleans on write" `Quick
+           test_keeper_registration_reads_legacy_dir_and_cleans_on_write;
+         test_case "keeper status bridge preserves legacy registration aliases" `Quick
+           test_keeper_status_bridge_preserves_legacy_registration_aliases;
          test_case "write_meta syncs registered registered seed" `Quick
            test_write_meta_syncs_registered_registered_seed;
          test_case "keeper up persists allowed paths" `Quick

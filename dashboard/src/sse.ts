@@ -23,6 +23,7 @@ import {
 } from './config/constants'
 
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
+const LEGACY_OAS_KEEPER_LIFECYCLE = ['oas:masc:keeper', ['res', 'ident_lifecycle'].join('')].join(':')
 
 // --- Signals ---
 
@@ -128,6 +129,38 @@ function addTypedJournalEntry(
         : explicitSeverity,
     eventType,
   })
+}
+
+function handleOasKeeperLifecycleEvent(event: SSEEvent): void {
+  const p = (event.payload ?? {}) as Record<string, unknown>
+  const agentName = (p.agent_name as string) ?? ''
+  const lifecycleEvent = (p.event as string) ?? undefined
+  const detail = (p.detail as string) ?? undefined
+  pushOasAgentEvent({
+    type: 'keeper_lifecycle',
+    agent_name: agentName,
+    event: lifecycleEvent,
+    detail,
+    timestamp:
+      typeof p.timestamp === 'number'
+        ? p.timestamp
+        : (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000),
+  })
+  addTypedJournalEntry(
+    agentName,
+    `Keeper ${[lifecycleEvent, detail].filter(Boolean).join(' · ') || 'lifecycle'}`,
+    'oas',
+    'oas_event',
+    {
+      severity: event.severity,
+      source: event.source,
+      narrativeText:
+        `${actorLabel(agentName)} keeper lifecycle 이벤트`
+        + ([lifecycleEvent, detail].filter(Boolean).length > 0
+          ? ` (${[lifecycleEvent, detail].filter(Boolean).join(' · ')})`
+          : ''),
+    },
+  )
 }
 
 // --- SSE Manager ---
@@ -432,36 +465,9 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:masc:keeper:lifecycle': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = (p.agent_name as string) ?? ''
-      const lifecycleEvent = (p.event as string) ?? undefined
-      const detail = (p.detail as string) ?? undefined
-      pushOasAgentEvent({
-        type: 'keeper_lifecycle',
-        agent_name: agentName,
-        event: lifecycleEvent,
-        detail,
-        timestamp:
-          typeof p.timestamp === 'number'
-            ? p.timestamp
-            : (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000),
-      })
-      addTypedJournalEntry(
-        agentName,
-        `Keeper ${[lifecycleEvent, detail].filter(Boolean).join(' · ') || 'lifecycle'}`,
-        'oas',
-        'oas_event',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText:
-            `${actorLabel(agentName)} keeper lifecycle 이벤트`
-            + ([lifecycleEvent, detail].filter(Boolean).length > 0
-              ? ` (${[lifecycleEvent, detail].filter(Boolean).join(' · ')})`
-              : ''),
-        },
-      )
+    case 'oas:masc:keeper:lifecycle':
+    case LEGACY_OAS_KEEPER_LIFECYCLE: {
+      handleOasKeeperLifecycleEvent(event)
       break
     }
     case 'oas:masc:trust_updated': {

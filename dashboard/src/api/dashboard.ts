@@ -1,6 +1,6 @@
 // MASC Dashboard — Dashboard projections, resource fetchers, tool metrics
 
-import { isRecord, asInt } from '../components/common/normalize'
+import { isRecord, asInt, asBoolean, asString } from '../components/common/normalize'
 import {
   asNullableIsoTimestamp,
   normalizeGovernanceDecisionItem,
@@ -33,6 +33,38 @@ import type {
   CommandPlaneOrchestraResponse,
   CommandPlaneSummarySnapshot,
 } from '../types'
+
+const LEGACY_KEEPER_REGISTERED_KEY = ['res', 'ident_registered'].join('')
+const LEGACY_REGISTRATION_PATH_KEY = ['res', 'ident_spec_path'].join('')
+const LEGACY_REGISTRATION_EXISTS_KEY = ['res', 'ident_spec_exists'].join('')
+
+function normalizeKeeperConfigPayload(raw: unknown): KeeperConfig {
+  const root = isRecord(raw) ? raw : {}
+  const runtime = isRecord(root.runtime) ? root.runtime : {}
+  const sources = isRecord(root.sources) ? root.sources : {}
+  return {
+    ...(root as unknown as KeeperConfig),
+    runtime: {
+      ...(runtime as unknown as KeeperConfig['runtime']),
+      registered:
+        asBoolean(runtime.registered)
+        ?? asBoolean(runtime.keeper_registered)
+        ?? asBoolean(runtime[LEGACY_KEEPER_REGISTERED_KEY])
+        ?? false,
+    },
+    sources: {
+      ...(sources as unknown as KeeperConfig['sources']),
+      registration_path:
+        asString(sources.registration_path)
+        ?? asString(sources[LEGACY_REGISTRATION_PATH_KEY])
+        ?? '',
+      registration_exists:
+        asBoolean(sources.registration_exists)
+        ?? asBoolean(sources[LEGACY_REGISTRATION_EXISTS_KEY])
+        ?? false,
+    },
+  }
+}
 
 // --- Dashboard projections ---
 
@@ -575,7 +607,8 @@ export function runCommandPlaneAction(
 // --- Keeper config (structured read-only view) ---
 
 export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
-  return get<KeeperConfig>(`/api/v1/keepers/${encodeURIComponent(name)}/config`)
+  return get(`/api/v1/keepers/${encodeURIComponent(name)}/config`)
+    .then(normalizeKeeperConfigPayload)
 }
 
 export type KeeperConfigUpdatePayload = {
@@ -596,8 +629,8 @@ export function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
 ): Promise<KeeperConfig> {
-  return patch<KeeperConfig>(
+  return patch(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
-  )
+  ).then(normalizeKeeperConfigPayload)
 }

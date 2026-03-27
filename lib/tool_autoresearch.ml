@@ -88,26 +88,17 @@ let prepare_start_params (ctx : context) args =
     | Error e -> Error e
     | Ok metric_fn ->
     let build_verify_fn = get_string_opt args "build_verify_fn" in
-    (* Validate build_verify_fn for shell injection if provided *)
-    match build_verify_fn with
-    | Some cmd -> (
-      match Autoresearch_metric.validate_metric_fn cmd with
-      | Error e -> Error (Printf.sprintf "build_verify_fn: %s" e)
-      | Ok _ ->
-        Ok
-          {
-            goal;
-            metric_fn;
-            target_file;
-            source_workdir;
-            max_cycles;
-            cycle_timeout_s;
-            model_model;
-            baseline_override = get_float_opt args "baseline";
-            patience = get_int_opt args "patience";
-            build_verify_fn = Some cmd;
-          })
-    | None ->
+    let validated_build_verify_fn =
+      match build_verify_fn with
+      | Some cmd -> (
+        match Autoresearch_metric.validate_metric_fn cmd with
+        | Error e -> Error (Printf.sprintf "build_verify_fn: %s" e)
+        | Ok _ -> Ok (Some cmd))
+      | None -> Ok None
+    in
+    match validated_build_verify_fn with
+    | Error e -> Error e
+    | Ok build_verify_fn ->
       Ok
         {
           goal;
@@ -119,7 +110,7 @@ let prepare_start_params (ctx : context) args =
           model_model;
           baseline_override = get_float_opt args "baseline";
           patience = get_int_opt args "patience";
-          build_verify_fn = None;
+          build_verify_fn;
         }
 
 let register_loop (ctx : context) state =

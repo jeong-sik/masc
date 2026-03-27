@@ -167,13 +167,16 @@ let forced_discard_record
   Autoresearch.add_insight state
     (Printf.sprintf "Cycle %d: %s discarded (%s)"
        state.current_cycle hypothesis reason);
+  check_patience_limit state;
+  record
+
+let check_patience_limit (state : Autoresearch.loop_state) =
   if state.consecutive_discards >= state.patience then begin
     state.status <- Autoresearch.Completed;
     Autoresearch.add_insight state
       (Printf.sprintf "Early stopped: %d consecutive discards without improvement"
          state.patience)
-  end;
-  record
+  end
 
 let persist_discard_record
     (ctx : Tool_autoresearch_repo_synthesis.context)
@@ -494,16 +497,16 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                          ~reason:(Printf.sprintf "metric_fn failed: %s" e)
                          record
                      | Ok (score_after, elapsed_ms) ->
+                       (* Snapshot before record_cycle mutates state — needed if
+                          build gate later downgrades Keep to Discard *)
+                       let prev_best_score = state.best_score in
+                       let prev_best_cycle = state.best_cycle in
                        let record =
                          Autoresearch.record_cycle state
                            ~hypothesis ~score_before ~score_after
                            ~commit_hash:(Some commit_hash)
                            ~elapsed_ms ~model_used:state.model_model
                        in
-                       (* Build verification gate: if Keep and build_verify_fn is set,
-                          run the command and downgrade to Discard on non-zero exit.
-                          record_cycle already updated total_keeps/total_discards and
-                          baseline, so we fix up counters if overriding Keep -> Discard. *)
                        let build_gate_override =
                          match record.decision with
                          | Autoresearch.Keep -> (
@@ -536,17 +539,8 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                            state.total_discards <- state.total_discards + 1;
                            state.baseline <- score_before;
                            if state.best_cycle = state.current_cycle then begin
-                             (* Find actual best from history, excluding current cycle *)
-                             let prev_best =
-                               state.history
-                               |> List.filter (fun (r : Autoresearch.cycle_record) ->
-                                    r.decision = Autoresearch.Keep && r.cycle <> state.current_cycle)
-                               |> List.fold_left (fun (bs, bc) (r : Autoresearch.cycle_record) ->
-                                    if r.score_after > bs then (r.score_after, r.cycle) else (bs, bc))
-                                  (score_before, 0)
-                             in
-                             state.best_score <- fst prev_best;
-                             state.best_cycle <- snd prev_best
+                             state.best_score <- prev_best_score;
+                             state.best_cycle <- prev_best_cycle
                            end;
                            Autoresearch.add_insight state
                              (Printf.sprintf "Cycle %d: %s build verification failed, downgraded to discard"
@@ -559,12 +553,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                         | Autoresearch.Discard ->
                           Autoresearch.git_reset_last ~workdir;
                           state.consecutive_discards <- state.consecutive_discards + 1;
-                          if state.consecutive_discards >= state.patience then begin
-                            state.status <- Autoresearch.Completed;
-                            Autoresearch.add_insight state
-                              (Printf.sprintf "Early stopped: %d consecutive discards without improvement"
-                                 state.patience)
-                          end
+                          check_patience_limit state
                         | Autoresearch.Keep ->
                           state.consecutive_discards <- 0;
                           if score_after >= state.best_score then

@@ -3,6 +3,36 @@
 
 ## [Unreleased]
 
+## [2.155.0] - 2026-03-27
+
+### Added
+- **Dashboard markdown renderer** — headings, lists, mermaid diagram support (#3368).
+- **Dashboard overview freshness strip** — visual data staleness indicator (#3339).
+- **Governance empty state guidance** — contextual help when no governance events (#3346).
+
+### Changed
+- **Prompt frontmatter auto-discovery** — prompts loaded from markdown frontmatter (#3336).
+- **OAS agent_sdk floor** — bumped to 0.92.0 (#3359).
+- **Centralized env config** — revived HTTP and assets config reads (#3374).
+- **Legacy agent cleanup** — purged guardian/sentinel/gardener references (#3378).
+- **Config dir resolution** — separated from base path (#3377).
+
+### Fixed
+- **CI test stability** — resolved safe_ops non-Assoc JSON, agent coverage Eio context, team session routing (#3356).
+- **Eio-dependent test wrapping** — create_state inside Eio_main.run for dashboard/MCP tests (#3349, #3344).
+- **Room-truth test isolation** — seed execution cache, force filesystem backend (#3366, #3367).
+- **cohttp-eio FD leak** — migrated remaining call sites to closing client (#3361).
+- **Dashboard PG config** — cached readonly config with semaphore guard (#3350).
+- **Dashboard root-cause fixes** — revived after revert cycle (#3371, #3373).
+- **Room state recovery** — slim transport health (#3371).
+- **Eio sleep guards** — revived lock retry checks (#3375).
+- **Dashboard assets** — resolved from base path (#3372).
+- **Board PG test cleanup** — setup/teardown lifecycle (#3362).
+- **Keeper config API** — removed blocking bootstrap_runtime (#3345).
+- **Error boundary retry border** — restored missing style (#3338).
+- **OAS pin SHA in CI cache** — prevents stale opam cache hits (#3352).
+- **Room-truth perf** — cache-first + eliminated repeated mkdir_p (#3351, #3353).
+
 ## [2.150.0] - 2026-03-26
 
 ### Added

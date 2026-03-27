@@ -23,7 +23,7 @@ opam install . --deps-only
 dune build --root .
 
 ./start-masc-mcp.sh --http
-PORT="$(./start-masc-mcp.sh --print-port)"
+PORT="$(./start-masc-mcp.sh --print-port)"  # query the effective port for this checkout
 curl "http://127.0.0.1:${PORT}/health"
 ```
 

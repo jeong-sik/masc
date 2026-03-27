@@ -139,7 +139,7 @@ MODEL 호출은 `Provider_adapter.preferred_execution_model_labels()`가 동적 
 ### 권장 명령
 ```bash
 ./start-masc-mcp.sh --http
-PORT="$(./start-masc-mcp.sh --print-port)"
+PORT="$(./start-masc-mcp.sh --print-port)"  # query the effective port for this checkout
 curl "http://127.0.0.1:${PORT}/health"
 ```
 

@@ -113,7 +113,7 @@ resolve_repo_env_root() {
     echo "$SCRIPT_DIR"
 }
 
-detect_worktree_name() {
+is_worktree_checkout() {
     local path="$1"
     local git_dir common_dir
 
@@ -128,14 +128,10 @@ detect_worktree_name() {
     fi
 
     case "$git_dir" in
-        */worktrees/*)
-            echo "${git_dir##*/}"
-            return 0
-            ;;
+        */worktrees/*) return 0 ;;
     esac
 
     if [ "$git_dir" != "$common_dir" ]; then
-        echo "${git_dir##*/}"
         return 0
     fi
 
@@ -144,11 +140,10 @@ detect_worktree_name() {
 
 default_port_for_path() {
     local path="$1"
-    local worktree_name checksum checksum_source port_range_start port_range_size
+    local checksum port_range_start port_range_size
 
-    if worktree_name="$(detect_worktree_name "$path")"; then
-        checksum_source="${path}:${worktree_name}"
-        checksum="$(printf '%s' "$checksum_source" | cksum | cut -d' ' -f1)"
+    if is_worktree_checkout "$path"; then
+        checksum="$(printf '%s' "$path" | cksum | cut -d' ' -f1)"
         port_range_start=9100
         port_range_size=900
         echo $((port_range_start + (checksum % port_range_size)))

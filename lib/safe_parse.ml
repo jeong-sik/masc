@@ -81,59 +81,6 @@ let env_bool ~var ~default =
   | None -> default
   | Some v -> bool ~context:(Printf.sprintf "env:%s" var) ~default v
 
-(** {1 JSON Parsers (Yojson.Safe)} *)
-
-open Yojson.Safe.Util
-
-(** Get JSON member as string with default. *)
-let json_string ~context ~default json key =
-  try json |> member key |> to_string
-  with Type_error _ ->
-    warn ~context:(Printf.sprintf "%s.%s" context key) ~input:"<non-string>" ~fallback:default;
-    default
-
-(** Get JSON member as string option (no warning). *)
-let json_string_opt json key =
-  try Some (json |> member key |> to_string)
-  with Type_error _ -> None
-
-(** Get JSON member as int with default. *)
-let json_int ~context ~default json key =
-  try json |> member key |> to_int
-  with Type_error _ ->
-    warn ~context:(Printf.sprintf "%s.%s" context key)
-      ~input:"<non-int>" ~fallback:(string_of_int default);
-    default
-
-(** Get JSON member as int option (no warning). *)
-let json_int_opt json key =
-  try Some (json |> member key |> to_int)
-  with Type_error _ -> None
-
-(** Get JSON member as float with default. *)
-let json_float ~context ~default json key =
-  try json |> member key |> to_float
-  with Type_error _ ->
-    warn ~context:(Printf.sprintf "%s.%s" context key)
-      ~input:"<non-float>" ~fallback:(Printf.sprintf "%.2f" default);
-    default
-
-(** Get JSON member as bool with default. *)
-let json_bool ~context ~default json key =
-  try json |> member key |> to_bool
-  with Type_error _ ->
-    warn ~context:(Printf.sprintf "%s.%s" context key)
-      ~input:"<non-bool>" ~fallback:(string_of_bool default);
-    default
-
-(** Get JSON member as list with default empty list. *)
-let json_list ~context json key =
-  try json |> member key |> to_list
-  with Type_error _ ->
-    warn ~context:(Printf.sprintf "%s.%s" context key)
-      ~input:"<non-list>" ~fallback:"[]";
-    []
-
 (** {1 JSON Parsing} *)
 
 (** Parse JSON string, return None on failure. *)

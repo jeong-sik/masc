@@ -547,22 +547,19 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
            Ok (Buffer.contents buf)
        | "figma_summary_to_spec" ->
            (try
-             let open Yojson.Safe.Util in
              let json = Yojson.Safe.from_string input in
-             let get_string key = Safe_parse.json_string ~context:"FigmaSummary" ~default:"" json key in
-             let get_int key = Safe_parse.json_int ~context:"FigmaSummary" ~default:0 json key in
-             let get_bool key = Safe_parse.json_bool ~context:"FigmaSummary" ~default:false json key in
-             let get_string_opt key = Safe_parse.json_string ~context:"FigmaSummary" ~default:"" json key in
+             let get_string key = Safe_ops.json_string key json in
+             let get_int key = Safe_ops.json_int key json in
+             let get_bool key = Safe_ops.json_bool key json in
+             let get_string_opt key = Safe_ops.json_string key json in
              let name = get_string "name" in
              let typ = get_string "type" in
-             let children = Safe_parse.json_list ~context:"FigmaSummary" json "children" in
+             let children = Safe_ops.json_list "children" json in
              let child_entries =
                List.filter_map (fun child ->
-                 try
-                   let cname = child |> member "name" |> to_string in
-                   let ctype = child |> member "type" |> to_string in
-                   Some (ctype, cname)
-                 with Yojson.Safe.Util.Type_error _ -> None
+                 match Safe_ops.json_string_opt "name" child, Safe_ops.json_string_opt "type" child with
+                 | Some cname, Some ctype -> Some (ctype, cname)
+                 | _ -> None
                ) children
              in
              let texts =
@@ -627,7 +624,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
                ("implementation_notes", `List (List.map (fun s -> `String s) impl_notes));
              ] in
              Ok (Yojson.Safe.to_string spec)
-           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+           with Yojson.Json_error _ ->
              Error "Failed to parse figma summary JSON")
        | "reverse" ->
            let chars = String.to_seq input |> List.of_seq |> List.rev in

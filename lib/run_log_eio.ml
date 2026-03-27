@@ -184,10 +184,10 @@ let read_events () =
         with Yojson.Json_error _ -> None)
 
 let int_field json key ~default =
-  Safe_parse.json_int ~context:"run_log" ~default json key
+  Safe_ops.json_int ~default key json
 
 let string_field json key ~default =
-  Safe_parse.json_string ~context:"run_log" ~default json key
+  Safe_ops.json_string ~default key json
 
 let take_last n lst =
   if n <= 0 then []

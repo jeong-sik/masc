@@ -213,7 +213,6 @@ let test_estimate_conversation_tokens () =
 
 (* ═══ Safe_parse ═══ *)
 module SP = Masc_mcp.Safe_parse
-
 let test_sp_int_ok () =
   check int "parse" 42 (SP.int ~context:"test" ~default:0 "42")
 
@@ -244,41 +243,6 @@ let test_sp_bool () =
   check bool "0" false (SP.bool ~context:"t" ~default:true "0");
   check bool "no" false (SP.bool ~context:"t" ~default:true "no");
   check bool "fallback" true (SP.bool ~context:"t" ~default:true "maybe")
-
-let test_sp_json_string () =
-  let j = `Assoc [("k", `String "v")] in
-  check string "ok" "v" (SP.json_string ~context:"t" ~default:"d" j "k");
-  check string "missing" "d" (SP.json_string ~context:"t" ~default:"d" j "nope")
-
-let test_sp_json_string_opt () =
-  let j = `Assoc [("k", `String "v")] in
-  check (option string) "ok" (Some "v") (SP.json_string_opt j "k");
-  check (option string) "missing" None (SP.json_string_opt j "nope")
-
-let test_sp_json_int () =
-  let j = `Assoc [("n", `Int 10)] in
-  check int "ok" 10 (SP.json_int ~context:"t" ~default:0 j "n");
-  check int "missing" 0 (SP.json_int ~context:"t" ~default:0 j "nope")
-
-let test_sp_json_int_opt () =
-  let j = `Assoc [("n", `Int 10)] in
-  check (option int) "ok" (Some 10) (SP.json_int_opt j "n");
-  check (option int) "missing" None (SP.json_int_opt j "nope")
-
-let test_sp_json_float () =
-  let j = `Assoc [("f", `Float 1.5)] in
-  let v = SP.json_float ~context:"t" ~default:0.0 j "f" in
-  check bool "ok" true (Float.abs (v -. 1.5) < 0.001)
-
-let test_sp_json_bool () =
-  let j = `Assoc [("b", `Bool true)] in
-  check bool "ok" true (SP.json_bool ~context:"t" ~default:false j "b");
-  check bool "missing" false (SP.json_bool ~context:"t" ~default:false j "nope")
-
-let test_sp_json_list () =
-  let j = `Assoc [("l", `List [`Int 1; `Int 2])] in
-  check int "ok" 2 (List.length (SP.json_list ~context:"t" j "l"));
-  check int "missing" 0 (List.length (SP.json_list ~context:"t" j "nope"))
 
 let test_sp_json_of_string () =
   check (option string) "ok" (Some "ok") (match SP.json_of_string_opt {|"ok"|} with Some (`String s) -> Some s | _ -> None);
@@ -359,13 +323,6 @@ let () =
       test_case "bool" `Quick test_sp_bool;
     ];
     "safe_parse:json", [
-      test_case "json_string" `Quick test_sp_json_string;
-      test_case "json_string_opt" `Quick test_sp_json_string_opt;
-      test_case "json_int" `Quick test_sp_json_int;
-      test_case "json_int_opt" `Quick test_sp_json_int_opt;
-      test_case "json_float" `Quick test_sp_json_float;
-      test_case "json_bool" `Quick test_sp_json_bool;
-      test_case "json_list" `Quick test_sp_json_list;
       test_case "json_of_string" `Quick test_sp_json_of_string;
       test_case "json_of_string_default" `Quick test_sp_json_of_string_default;
     ];

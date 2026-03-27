@@ -16,7 +16,7 @@ let test name f =
 
 let test_counter = ref 0
 
-let make_test_ctx () =
+let with_test_ctx f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   incr test_counter;
@@ -29,16 +29,17 @@ let make_test_ctx () =
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:(Some "test-agent") in
-  { Tool_control.config; agent_name = "test-agent" }
+  let ctx = { Tool_control.config; agent_name = "test-agent" } in
+  f ctx
 
 let () =
   test "dispatch_unknown_tool" (fun () ->
-      let ctx = make_test_ctx () in
+      with_test_ctx @@ fun ctx ->
       assert (Tool_control.dispatch ctx ~name:"unknown_tool" ~args:(`Assoc []) = None))
 
 let () =
   test "dispatch_pause" (fun () ->
-      let ctx = make_test_ctx () in
+      with_test_ctx @@ fun ctx ->
       match
         Tool_control.dispatch ctx ~name:"masc_pause"
           ~args:(`Assoc [ ("reason", `String "Test pause") ])
@@ -50,7 +51,7 @@ let () =
 
 let () =
   test "dispatch_pause_status_paused" (fun () ->
-      let ctx = make_test_ctx () in
+      with_test_ctx @@ fun ctx ->
       let _ =
         Tool_control.handle_pause ctx
           (`Assoc [ ("reason", `String "For status test") ])
@@ -63,7 +64,7 @@ let () =
 
 let () =
   test "dispatch_resume" (fun () ->
-      let ctx = make_test_ctx () in
+      with_test_ctx @@ fun ctx ->
       let _ =
         Tool_control.handle_pause ctx
           (`Assoc [ ("reason", `String "For resume test") ])
@@ -76,7 +77,7 @@ let () =
 
 let () =
   test "dispatch_pause_status_running" (fun () ->
-      let ctx = make_test_ctx () in
+      with_test_ctx @@ fun ctx ->
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
       | Some (success, result) ->
           assert success;
@@ -85,7 +86,7 @@ let () =
 
 let () =
   test "removed_mode_tools_do_not_dispatch" (fun () ->
-      let ctx = make_test_ctx () in
+      with_test_ctx @@ fun ctx ->
       let args = `Assoc [] in
       assert (Tool_control.dispatch ctx ~name:"masc_switch_mode" ~args = None);
       assert (Tool_control.dispatch ctx ~name:"masc_get_config" ~args = None);

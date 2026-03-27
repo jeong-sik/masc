@@ -536,10 +536,17 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                            state.total_discards <- state.total_discards + 1;
                            state.baseline <- score_before;
                            if state.best_cycle = state.current_cycle then begin
-                             state.best_score <- score_before;
-                             state.best_cycle <- (match state.history with
-                               | _ :: prev :: _ -> prev.cycle
-                               | _ -> 0)
+                             (* Find actual best from history, excluding current cycle *)
+                             let prev_best =
+                               state.history
+                               |> List.filter (fun (r : Autoresearch.cycle_record) ->
+                                    r.decision = Autoresearch.Keep && r.cycle <> state.current_cycle)
+                               |> List.fold_left (fun (bs, bc) (r : Autoresearch.cycle_record) ->
+                                    if r.score_after > bs then (r.score_after, r.cycle) else (bs, bc))
+                                  (score_before, 0)
+                             in
+                             state.best_score <- fst prev_best;
+                             state.best_cycle <- snd prev_best
                            end;
                            Autoresearch.add_insight state
                              (Printf.sprintf "Cycle %d: %s build verification failed, downgraded to discard"

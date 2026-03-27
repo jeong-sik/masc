@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/check-version-truth.sh [--tag vX.Y.Z]
+EOF
+}
+
+tag_name=""
+while (($# > 0)); do
+  case "$1" in
+    --tag)
+      shift
+      (($# > 0)) || { usage >&2; exit 1; }
+      tag_name="${1#v}"
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+package_version="$(sed -n 's/^(version \([^)]*\)).*/\1/p' dune-project | head -n1)"
+opam_version="$(sed -n 's/^version: "\([^"]*\)"/\1/p' masc_mcp.opam | head -n1)"
+roadmap_package_version="$(sed -n 's/^> Current package version: v\([^ ]*\).*/\1/p' ROADMAP.md | head -n1)"
+roadmap_latest_release="$(sed -n 's/^> Latest release: v\([^ ]*\).*/\1/p' ROADMAP.md | head -n1)"
+changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
+
+fail() {
+  printf 'version truth check failed: %s\n' "$1" >&2
+  exit 1
+}
+
+[[ -n "$package_version" ]] || fail "missing package version in dune-project"
+[[ -n "$opam_version" ]] || fail "missing version in masc_mcp.opam"
+[[ -n "$roadmap_package_version" ]] || fail "missing current package version in ROADMAP.md"
+[[ -n "$roadmap_latest_release" ]] || fail "missing latest release in ROADMAP.md"
+[[ -n "$changelog_latest_release" ]] || fail "missing released version header in CHANGELOG.md"
+
+[[ "$package_version" == "$opam_version" ]] || fail "dune-project ($package_version) != masc_mcp.opam ($opam_version)"
+[[ "$package_version" == "$roadmap_package_version" ]] || fail "dune-project ($package_version) != ROADMAP current package version ($roadmap_package_version)"
+[[ "$roadmap_latest_release" == "$changelog_latest_release" ]] || fail "ROADMAP latest release ($roadmap_latest_release) != CHANGELOG latest release ($changelog_latest_release)"
+
+if [[ -n "$tag_name" ]]; then
+  [[ "$package_version" == "$tag_name" ]] || fail "tag v$tag_name != package version $package_version"
+  grep -q "^## \[$tag_name\]" CHANGELOG.md || fail "CHANGELOG.md has no release heading for $tag_name"
+fi
+
+printf 'Version truth OK: package=%s latest_release=%s\n' "$package_version" "$changelog_latest_release"

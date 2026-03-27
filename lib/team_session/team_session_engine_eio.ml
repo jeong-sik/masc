@@ -100,6 +100,8 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
         last_turn_at = None;
         stop_reason = None;
         generated_report = false;
+        delivery_contract = None;
+        latest_delivery_verdict = None;
         artifacts_dir = Team_session_store.session_dir config session_id;
         created_at_iso = now_iso ();
         updated_at_iso = now_iso ();
@@ -343,6 +345,14 @@ let generate_report ~(config : Room.config) ~(session_id : string)
               ("session_id", `String session_id);
               ("status", `String "ok");
               ("regenerated", `Bool false);
+              ( "delivery_contract",
+                Option.fold ~none:`Null
+                  ~some:Team_session_types.delivery_contract_to_yojson
+                  session.delivery_contract );
+              ( "latest_delivery_verdict",
+                Option.fold ~none:`Null
+                  ~some:Team_session_types.delivery_verdict_to_yojson
+                  session.latest_delivery_verdict );
               ( "markdown_path",
                 `String (Team_session_store.report_md_path config session_id) );
               ("json_path", `String (Team_session_store.report_json_path config session_id));
@@ -359,6 +369,14 @@ let generate_report ~(config : Room.config) ~(session_id : string)
                       ("session_id", `String session_id);
                       ("status", `String "ok");
                       ("regenerated", `Bool true);
+                      ( "delivery_contract",
+                        Option.fold ~none:`Null
+                          ~some:Team_session_types.delivery_contract_to_yojson
+                          session.delivery_contract );
+                      ( "latest_delivery_verdict",
+                        Option.fold ~none:`Null
+                          ~some:Team_session_types.delivery_verdict_to_yojson
+                          session.latest_delivery_verdict );
                       ( "summary",
                         `String
                           (if String.length markdown > 240 then

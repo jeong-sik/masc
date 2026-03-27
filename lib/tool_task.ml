@@ -248,7 +248,17 @@ let handle_cancel_task ctx args =
   result_to_response result
 
 let transition_known_args =
-  ["task_id"; "action"; "notes"; "reason"; "expected_version"; "agent_name"; "force"]
+  [
+    "task_id";
+    "action";
+    "notes";
+    "reason";
+    "expected_version";
+    "agent_name";
+    "force";
+    "completion_contract";
+    "evaluator_cascade";
+  ]
 
 let handle_transition ctx args =
   let unknown = match args with
@@ -271,6 +281,12 @@ let handle_transition ctx args =
   else
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in
+  let completion_contract =
+    match get_string_list args "completion_contract" with
+    | [] -> None
+    | items -> Some items
+  in
+  let evaluator_cascade = get_string_opt args "evaluator_cascade" in
   let expected_version = get_int_opt args "expected_version" in
   let action_lc = String.lowercase_ascii action in
   let force_raw = get_bool args "force" false in
@@ -334,6 +350,8 @@ let handle_transition ctx args =
             (Eval_calibration.select_examples ~max_examples:3) in
         (match (Anti_rationalization.review
            ?sw:ctx.sw
+           ?evaluator_cascade
+           ?completion_contract
            ~on_verdict ~few_shot_block ar_req).verdict with
          | Anti_rationalization.Reject reason -> Some reason
          | Anti_rationalization.Approve -> None)
@@ -705,6 +723,15 @@ After masc_add_task or masc_claim_next; pair with masc_deliver before action='do
         ("notes", `Assoc [
           ("type", `String "string");
           ("description", `String "Completion notes (used with action='done')");
+        ]);
+        ("completion_contract", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [ ("type", `String "string") ]);
+          ("description", `String "Optional acceptance checklist that completion notes must satisfy before action='done' is accepted");
+        ]);
+        ("evaluator_cascade", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional evaluator cascade override for anti-rationalization review. Default: cross_verifier");
         ]);
         ("reason", `Assoc [
           ("type", `String "string");

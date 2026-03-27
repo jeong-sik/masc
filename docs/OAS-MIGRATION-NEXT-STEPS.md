@@ -16,6 +16,13 @@ The important migrations are already in place:
 
 The remaining work is about **completeness and consolidation**, not broad adoption theater.
 
+## Done In This Pass
+
+- team-session state now persists a delivery contract and latest evaluator verdict
+- session status/report/prove surfaces expose the contract/verdict directly
+- worker verification consumes the persisted contract and records contract-aware verdicts
+- anti-rationalization now defaults to `cross_verifier`, and `masc_transition` accepts `completion_contract` plus `evaluator_cascade`
+
 ## Priority 1: Finish Team-Session Fidelity
 
 The biggest remaining product gap is not whether team sessions use OAS Swarm.
@@ -23,11 +30,14 @@ They do. The gap is that the bridge is still lossy.
 
 ### What remains
 
-- preserve more `planned_worker` metadata if the upstream swarm entry model grows beyond the current closure shape
+- preserve more `planned_worker` metadata in swarm entries
+- preserve richer telemetry semantics beyond the current `trace_ref`/usage/turn_count baseline when the swarm runner needs more operator-facing detail
+- decide whether the current single-pass success-ratio convergence policy should become a richer multi-iteration strategy driven by delivery verdicts
 - decide whether the current event-level telemetry detail is enough, or whether dashboard consumers need first-class swarm telemetry views
+- replace the current room-init `resource_check` with a broader runtime-health probe, then upstream the generic callback shape to OAS if a concrete failure mode appears
 - decide whether the current single-pass success-ratio convergence policy should become a richer multi-iteration strategy
 - broaden the runtime-health probe beyond room/session readiness only if a concrete failure mode appears
-- decide whether session-level budget needs token/cost enforcement beyond the current `duration_seconds` wall-clock budget
+ - decide whether session-level budget needs token/cost enforcement beyond the current `duration_seconds` wall-clock budget
 
 ### Success criteria
 
@@ -92,13 +102,21 @@ The following are now stale and should not reappear in migration docs:
 - “Event_bus bridge planned”
 - “team_session still pending OAS migration”
 
+## Upstream OAS Delegation Targets
+
+These are worth upstreaming because they are generic runtime/harness primitives rather than MASC semantics:
+
+- `Harness.case` / `Harness.result` / `Harness.repair_directive`
+- richer swarm entry metadata for telemetry and routing provenance
+- structured health-probe callback type
+
 ## Explicit Non-Priorities
 
 These are not the next best use of time unless a concrete product need appears:
 
 - broad “unused OAS modules” adoption
 - big-bang `Model_spec` retirement
-- upstream OAS issue work as part of this `masc-mcp` pass
+- moving MASC room/task/proof semantics into OAS
 
 ## Recommended Order
 

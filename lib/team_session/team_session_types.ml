@@ -297,6 +297,182 @@ let routing_reason_summary ?(max_items = 8) workers =
          | None -> None)
   |> take [] max_items
 
+let non_empty_strings_of_json json =
+  match json with
+  | `List xs ->
+      xs
+      |> List.filter_map (function
+             | `String value ->
+                 let trimmed = String.trim value in
+                 if trimmed = "" then None else Some trimmed
+             | _ -> None)
+      |> dedup_strings
+  | _ -> []
+
+let string_list_to_json values =
+  `List (List.map (fun value -> `String value) values)
+
+let delivery_contract_to_yojson (contract : delivery_contract) =
+  `Assoc
+    [
+      ("contract_id", `String contract.contract_id);
+      ("summary", `String contract.summary);
+      ("acceptance_checks", string_list_to_json contract.acceptance_checks);
+      ("required_artifacts", string_list_to_json contract.required_artifacts);
+      ("repair_budget", `Int contract.repair_budget);
+      ("generator_roles", string_list_to_json contract.generator_roles);
+      ( "evaluator_role",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          contract.evaluator_role );
+      ("evaluator_cascade", `String contract.evaluator_cascade);
+      ("evidence_refs", string_list_to_json contract.evidence_refs);
+      ("updated_by", `String contract.updated_by);
+      ("updated_at_iso", `String contract.updated_at_iso);
+    ]
+
+let delivery_contract_of_yojson (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc _ -> (
+      match Yojson.Safe.Util.member "contract_id" json with
+      | `String contract_id ->
+          let contract_id = String.trim contract_id in
+          if contract_id = "" then None
+          else
+            Some
+              {
+                contract_id;
+                summary =
+                  (match Yojson.Safe.Util.member "summary" json with
+                  | `String value -> String.trim value
+                  | _ -> "");
+                acceptance_checks =
+                  non_empty_strings_of_json
+                    (Yojson.Safe.Util.member "acceptance_checks" json);
+                required_artifacts =
+                  non_empty_strings_of_json
+                    (Yojson.Safe.Util.member "required_artifacts" json);
+                repair_budget =
+                  (match Yojson.Safe.Util.member "repair_budget" json with
+                  | `Int value -> max 0 value
+                  | `Intlit raw -> (
+                      try max 0 (int_of_string raw) with Failure _ -> 0)
+                  | _ -> 0);
+                generator_roles =
+                  non_empty_strings_of_json
+                    (Yojson.Safe.Util.member "generator_roles" json);
+                evaluator_role =
+                  (match
+                     Yojson.Safe.Util.member "evaluator_role" json
+                     |> Yojson.Safe.Util.to_string_option
+                     |> Option.map String.trim
+                   with
+                  | Some value when value <> "" -> Some value
+                  | _ -> None);
+                evaluator_cascade =
+                  (match Yojson.Safe.Util.member "evaluator_cascade" json with
+                  | `String value ->
+                      let trimmed = String.trim value in
+                      if trimmed = "" then "cross_verifier" else trimmed
+                  | _ -> "cross_verifier");
+                evidence_refs =
+                  non_empty_strings_of_json
+                    (Yojson.Safe.Util.member "evidence_refs" json);
+                updated_by =
+                  (match Yojson.Safe.Util.member "updated_by" json with
+                  | `String value ->
+                      let trimmed = String.trim value in
+                      if trimmed = "" then "unknown" else trimmed
+                  | _ -> "unknown");
+                updated_at_iso =
+                  (match Yojson.Safe.Util.member "updated_at_iso" json with
+                  | `String value ->
+                      let trimmed = String.trim value in
+                      if trimmed = "" then Types.now_iso () else trimmed
+                  | _ -> Types.now_iso ());
+              }
+      | _ -> None)
+  | _ -> None
+
+let delivery_verdict_to_yojson (verdict : delivery_verdict) =
+  `Assoc
+    [
+      ("contract_id", `String verdict.contract_id);
+      ("status", `String (delivery_verdict_status_to_string verdict.status));
+      ("summary", `String verdict.summary);
+      ("evaluator", `String verdict.evaluator);
+      ( "evaluator_role",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          verdict.evaluator_role );
+      ("evaluator_cascade", `String verdict.evaluator_cascade);
+      ( "repair_directive",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          verdict.repair_directive );
+      ("evidence_refs", string_list_to_json verdict.evidence_refs);
+      ("generated_at_iso", `String verdict.generated_at_iso);
+    ]
+
+let delivery_verdict_of_yojson (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc _ -> (
+      match Yojson.Safe.Util.member "contract_id" json with
+      | `String contract_id ->
+          let contract_id = String.trim contract_id in
+          if contract_id = "" then None
+          else
+            Some
+              {
+                contract_id;
+                status =
+                  (match Yojson.Safe.Util.member "status" json with
+                  | `String value ->
+                      delivery_verdict_status_of_string
+                        (String.lowercase_ascii (String.trim value))
+                  | _ -> Delivery_fail);
+                summary =
+                  (match Yojson.Safe.Util.member "summary" json with
+                  | `String value -> String.trim value
+                  | _ -> "");
+                evaluator =
+                  (match Yojson.Safe.Util.member "evaluator" json with
+                  | `String value ->
+                      let trimmed = String.trim value in
+                      if trimmed = "" then "unknown" else trimmed
+                  | _ -> "unknown");
+                evaluator_role =
+                  (match
+                     Yojson.Safe.Util.member "evaluator_role" json
+                     |> Yojson.Safe.Util.to_string_option
+                     |> Option.map String.trim
+                   with
+                  | Some value when value <> "" -> Some value
+                  | _ -> None);
+                evaluator_cascade =
+                  (match Yojson.Safe.Util.member "evaluator_cascade" json with
+                  | `String value ->
+                      let trimmed = String.trim value in
+                      if trimmed = "" then "cross_verifier" else trimmed
+                  | _ -> "cross_verifier");
+                repair_directive =
+                  (match
+                     Yojson.Safe.Util.member "repair_directive" json
+                     |> Yojson.Safe.Util.to_string_option
+                     |> Option.map String.trim
+                   with
+                  | Some value when value <> "" -> Some value
+                  | _ -> None);
+                evidence_refs =
+                  non_empty_strings_of_json
+                    (Yojson.Safe.Util.member "evidence_refs" json);
+                generated_at_iso =
+                  (match Yojson.Safe.Util.member "generated_at_iso" json with
+                  | `String value ->
+                      let trimmed = String.trim value in
+                      if trimmed = "" then Types.now_iso () else trimmed
+                  | _ -> Types.now_iso ());
+              }
+      | _ -> None)
+  | _ -> None
+
 let planned_worker_to_yojson (w : planned_worker) =
   `Assoc
     [
@@ -505,6 +681,12 @@ let session_to_yojson (s : session) =
       ("last_turn_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) s.last_turn_at);
       ("stop_reason", Option.fold ~none:`Null ~some:(fun v -> `String v) s.stop_reason);
       ("generated_report", `Bool s.generated_report);
+      ( "delivery_contract",
+        Option.fold ~none:`Null ~some:delivery_contract_to_yojson
+          s.delivery_contract );
+      ( "latest_delivery_verdict",
+        Option.fold ~none:`Null ~some:delivery_verdict_to_yojson
+          s.latest_delivery_verdict );
       ("artifacts_dir", `String s.artifacts_dir);
       ("created_at_iso", `String s.created_at_iso);
       ("updated_at_iso", `String s.updated_at_iso);
@@ -634,6 +816,11 @@ let session_of_yojson json =
         last_turn_at = json |> member "last_turn_at" |> to_float_option;
         stop_reason = json |> member "stop_reason" |> to_string_option;
         generated_report = json |> member "generated_report" |> to_bool_option |> Option.value ~default:false;
+        delivery_contract =
+          delivery_contract_of_yojson (member "delivery_contract" json);
+        latest_delivery_verdict =
+          delivery_verdict_of_yojson
+            (member "latest_delivery_verdict" json);
         artifacts_dir = json |> member "artifacts_dir" |> to_string_option |> Option.value ~default:"";
         created_at_iso = json |> member "created_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());
         updated_at_iso = json |> member "updated_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());

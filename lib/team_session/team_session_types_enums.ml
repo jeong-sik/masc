@@ -63,6 +63,11 @@ type proof_level =
   | Proof_standard
   | Proof_strong
 
+type delivery_verdict_status =
+  | Delivery_pass
+  | Delivery_repair
+  | Delivery_fail
+
 type turn_kind =
   | Turn_note
   | Turn_broadcast
@@ -144,6 +149,32 @@ type planned_worker = {
   routing_escalated : bool;
 }
 
+type delivery_contract = {
+  contract_id : string;
+  summary : string;
+  acceptance_checks : string list;
+  required_artifacts : string list;
+  repair_budget : int;
+  generator_roles : string list;
+  evaluator_role : string option;
+  evaluator_cascade : string;
+  evidence_refs : string list;
+  updated_by : string;
+  updated_at_iso : string;
+}
+
+type delivery_verdict = {
+  contract_id : string;
+  status : delivery_verdict_status;
+  summary : string;
+  evaluator : string;
+  evaluator_role : string option;
+  evaluator_cascade : string;
+  repair_directive : string option;
+  evidence_refs : string list;
+  generated_at_iso : string;
+}
+
 type session = {
   session_id : string;
   goal : string;
@@ -188,6 +219,8 @@ type session = {
   last_turn_at : float option;
   stop_reason : string option;
   generated_report : bool;
+  delivery_contract : delivery_contract option;
+  latest_delivery_verdict : delivery_verdict option;
   artifacts_dir : string;
   created_at_iso : string;
   updated_at_iso : string;
@@ -347,6 +380,17 @@ let proof_level_to_string = function
 let proof_level_of_string = function
   | "strong" -> Proof_strong
   | _ -> Proof_standard
+
+let delivery_verdict_status_to_string = function
+  | Delivery_pass -> "pass"
+  | Delivery_repair -> "repair"
+  | Delivery_fail -> "fail"
+
+let delivery_verdict_status_of_string = function
+  | "pass" -> Delivery_pass
+  | "repair" -> Delivery_repair
+  | "fail" -> Delivery_fail
+  | _ -> Delivery_fail
 
 let turn_kind_to_string = function
   | Turn_note -> "note"

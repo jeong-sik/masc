@@ -342,6 +342,47 @@ After masc_team_session_start; the primary write path for all session activity."
 	                  ("spawn_selection_note", `Assoc [ ("type", `String "string") ]);
 	                  ("spawn_prompt", `Assoc [ ("type", `String "string") ]);
 	                  ("spawn_timeout_seconds", `Assoc [ ("type", `String "integer") ]);
+                  ( "delivery_contract",
+                    `Assoc
+                      [
+                        ("type", `String "object");
+                        ( "description",
+                          `String
+                            "Create or update the persisted delivery contract for this session. Planner turns should write acceptance checks here so later worker verification, report, and proof use the same contract." );
+                        ( "properties",
+                          `Assoc
+                            [
+                              ("contract_id", `Assoc [ ("type", `String "string") ]);
+                              ("summary", `Assoc [ ("type", `String "string") ]);
+                              ( "acceptance_checks",
+                                `Assoc
+                                  [
+                                    ("type", `String "array");
+                                    ("items", `Assoc [ ("type", `String "string") ]);
+                                  ] );
+                              ( "required_artifacts",
+                                `Assoc
+                                  [
+                                    ("type", `String "array");
+                                    ("items", `Assoc [ ("type", `String "string") ]);
+                                  ] );
+                              ("repair_budget", `Assoc [ ("type", `String "integer") ]);
+                              ( "generator_roles",
+                                `Assoc
+                                  [
+                                    ("type", `String "array");
+                                    ("items", `Assoc [ ("type", `String "string") ]);
+                                  ] );
+                              ("evaluator_role", `Assoc [ ("type", `String "string") ]);
+                              ("evaluator_cascade", `Assoc [ ("type", `String "string") ]);
+                              ( "evidence_refs",
+                                `Assoc
+                                  [
+                                    ("type", `String "array");
+                                    ("items", `Assoc [ ("type", `String "string") ]);
+                                  ] );
+                            ] );
+                      ] );
                   ( "wait_mode",
                     `Assoc
                       [

@@ -55,6 +55,16 @@ let cascade_metrics_json (session : Team_session_types.session) =
       ("fallback_task_created", `Int (max 0 session.fallback_task_created));
     ]
 
+let delivery_contract_json (session : Team_session_types.session) =
+  Option.fold ~none:`Null
+    ~some:Team_session_types.delivery_contract_to_yojson
+    session.delivery_contract
+
+let latest_delivery_verdict_json (session : Team_session_types.session) =
+  Option.fold ~none:`Null
+    ~some:Team_session_types.delivery_verdict_to_yojson
+    session.latest_delivery_verdict
+
 let summary_metrics (session : Team_session_types.session) config =
   let live_delta_by_agent, live_done_delta_total =
     let backlog = Room.read_backlog config in
@@ -561,6 +571,73 @@ let markdown_of_report ~(session : Team_session_types.session)
         (Team_session_types.alert_channel_to_string session.alert_channel);
     ]
   in
+  let delivery_contract_lines =
+    match session.delivery_contract with
+    | None -> [ "- Delivery contract: (not recorded)" ]
+    | Some contract ->
+        let acceptance =
+          if contract.acceptance_checks = [] then
+            [ "- Acceptance checks: (not recorded)" ]
+          else
+            List.map
+              (fun item -> Printf.sprintf "- Acceptance: %s" item)
+              contract.acceptance_checks
+        in
+        let artifacts =
+          if contract.required_artifacts = [] then
+            [ "- Required artifacts: (not recorded)" ]
+          else
+            List.map
+              (fun item -> Printf.sprintf "- Artifact: %s" item)
+              contract.required_artifacts
+        in
+        let evidence =
+          if contract.evidence_refs = [] then
+            [ "- Evidence refs: (not recorded)" ]
+          else
+            List.map
+              (fun item -> Printf.sprintf "- Evidence ref: %s" item)
+              contract.evidence_refs
+        in
+        [
+          Printf.sprintf "- Contract ID: %s" contract.contract_id;
+          Printf.sprintf "- Summary: %s"
+            (if String.trim contract.summary = "" then "(not recorded)"
+             else contract.summary);
+          Printf.sprintf "- Repair budget: %d" contract.repair_budget;
+          Printf.sprintf "- Evaluator cascade: %s" contract.evaluator_cascade;
+          Printf.sprintf "- Evaluator role: %s"
+            (match contract.evaluator_role with
+            | Some value -> value
+            | None -> "(not recorded)");
+          Printf.sprintf "- Generator roles: %s"
+            (match contract.generator_roles with
+            | [] -> "(not recorded)"
+            | xs -> String.concat ", " xs);
+        ]
+        @ acceptance @ artifacts @ evidence
+  in
+  let latest_verdict_lines =
+    match session.latest_delivery_verdict with
+    | None -> [ "- Latest evaluator verdict: (not recorded)" ]
+    | Some verdict ->
+        [
+          Printf.sprintf "- Status: %s"
+            (Team_session_types.delivery_verdict_status_to_string
+               verdict.status);
+          Printf.sprintf "- Evaluator: %s" verdict.evaluator;
+          Printf.sprintf "- Evaluator cascade: %s"
+            verdict.evaluator_cascade;
+          Printf.sprintf "- Summary: %s"
+            (if String.trim verdict.summary = "" then "(not recorded)"
+             else verdict.summary);
+          Printf.sprintf "- Repair directive: %s"
+            (match verdict.repair_directive with
+            | Some value -> value
+            | None -> "(none)");
+          Printf.sprintf "- Generated at: %s" verdict.generated_at_iso;
+        ]
+  in
   let risks =
     if status = "interrupted" || status = "failed" then
       [ "- Session did not finish cleanly; inspect event timeline and stop_reason." ]
@@ -611,6 +688,12 @@ let markdown_of_report ~(session : Team_session_types.session)
       Printf.sprintf "- Empty note turns: %d" empty_note_turn_count;
       (if empty_note_turn_lines = [] then "- Empty note turn actors: (none)"
        else String.concat "\n" empty_note_turn_lines);
+      "";
+      "## Delivery Contract";
+      String.concat "\n" delivery_contract_lines;
+      "";
+      "## Evaluator Verdict";
+      String.concat "\n" latest_verdict_lines;
       "";
       "## Goal vs Outcome";
       Printf.sprintf "- Goal statement: %s" session.goal;
@@ -772,6 +855,8 @@ let generate config (session : Team_session_types.session) :
         [
           ("schema_version", `String report_schema_version);
           ("session", Team_session_types.session_to_yojson session);
+          ("delivery_contract", delivery_contract_json session);
+          ("latest_delivery_verdict", latest_delivery_verdict_json session);
           ("goal", `String session.goal);
           ("duration", `Int session.duration_seconds);
           ("summary", summary_json);

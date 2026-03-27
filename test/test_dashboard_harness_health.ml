@@ -123,6 +123,38 @@ let test_runtime_window_empty_reason () =
   check int "dna filtered empty" 0
     Yojson.Safe.Util.(dna_quality |> member "recent_events" |> to_list |> List.length)
 
+let test_runtime_stale_status () =
+  with_test_stores @@ fun () ->
+  let stale_timestamp = Time_compat.now () -. (31. *. 60.) in
+  ignore
+    (Harness.record_pre_compact_at ~timestamp:stale_timestamp
+       ~keeper_name:"keeper-a" ~context_ratio:0.91 ~message_count:88
+       ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
+       ~model_family:"verifier" ~trigger:"ratio(0.91>=0.85)");
+  ignore
+    (Harness.record_dna_quality_at ~timestamp:stale_timestamp
+       ~keeper_name:"keeper-a" ~score:0.82
+       ~dimensions:
+         (`Assoc
+           [
+             ("has_goal_anchor", `Bool true);
+             ("has_task_anchor", `Bool true);
+             ("has_recent_context", `Bool true);
+             ("truncation_artifacts", `Int 0);
+           ]));
+  let json = Harness.json () in
+  let overview = require_assoc "overview" json in
+  let pre_compact = require_assoc "pre_compact" json in
+  let dna_quality = require_assoc "dna_quality" json in
+  check string "pre stale" "stale"
+    Yojson.Safe.Util.(pre_compact |> member "status" |> to_string);
+  check string "dna stale" "stale"
+    Yojson.Safe.Util.(dna_quality |> member "status" |> to_string);
+  check string "overview pre stale" "stale"
+    Yojson.Safe.Util.(overview |> member "pre_compact_status" |> to_string);
+  check string "overview dna stale" "stale"
+    Yojson.Safe.Util.(overview |> member "dna_status" |> to_string)
+
 let test_overview_warns_when_evaluator_falls_back () =
   with_test_stores @@ fun () ->
   let req = make_req ~title:"Fallback task" () in
@@ -146,6 +178,8 @@ let () =
             test_runtime_signals_are_persisted;
           test_case "filtered windows explain empty runtime rails" `Quick
             test_runtime_window_empty_reason;
+          test_case "stale runtime signals surface as stale" `Quick
+            test_runtime_stale_status;
           test_case "fallback-heavy evaluator shows warning overview" `Quick
             test_overview_warns_when_evaluator_falls_back;
         ] );

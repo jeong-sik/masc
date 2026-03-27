@@ -230,7 +230,7 @@ let test_loops_json_orders_live_then_recent () =
       ~workdir:base_path
       ()
   in
-  active.updated_at <- 10.0;
+  let active = { active with updated_at = 10.0 } in
   Lib.Autoresearch.with_loops_rw (fun () ->
     Hashtbl.replace Lib.Autoresearch.active_loops active.loop_id active);
   let newer_persisted_path =
@@ -299,11 +299,12 @@ let test_retry_loop_json_restores_missing_worktree () =
       ~workdir:repo_root
       ()
   in
-  let state = { state with loop_id; source_workdir = repo_root } in
-  state.status <- Lib.Autoresearch.Error;
-  state.error_message <- Some "managed worktree missing";
-  state.workdir <- workdir;
-  state.warnings <- [ "source_workdir_dirty" ];
+  let state = { state with
+    loop_id; source_workdir = repo_root;
+    status = Lib.Autoresearch.Error;
+    error_message = Some "managed worktree missing";
+    workdir;
+    warnings = [ "source_workdir_dirty" ] } in
   Lib.Autoresearch.save_state ~base_path state;
   match
     Lib.Dashboard_http_autoresearch.retry_loop_json ~base_path ~loop_id
@@ -345,10 +346,11 @@ let test_delete_loop_json_removes_bundle_and_branch () =
       ~workdir:repo_root
       ()
   in
-  let state = { state with loop_id; source_workdir = repo_root } in
-  state.status <- Lib.Autoresearch.Error;
-  state.error_message <- Some "managed worktree missing";
-  state.workdir <- workdir;
+  let state = { state with
+    loop_id; source_workdir = repo_root;
+    status = Lib.Autoresearch.Error;
+    error_message = Some "managed worktree missing";
+    workdir } in
   Lib.Autoresearch.save_state ~base_path state;
   let link : Lib.Autoresearch.swarm_link =
     {

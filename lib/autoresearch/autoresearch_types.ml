@@ -25,27 +25,27 @@ type loop_state = {
   metric_fn : string;
   model_model : string;
   target_file : string;  (** File the MODEL reads and modifies, relative to workdir *)
-  mutable status : status;
-  mutable error_message : string option;
-  mutable current_cycle : int;
-  mutable baseline : float;
-  mutable best_score : float;
-  mutable best_cycle : int;
-  mutable queued_hypothesis : string option;
-  mutable history : cycle_record list;  (** Most recent first *)
-  mutable total_keeps : int;
-  mutable total_discards : int;
-  mutable insights : string list;  (** Accumulated experiment insights, FIFO max 10 *)
+  status : status;
+  error_message : string option;
+  current_cycle : int;
+  baseline : float;
+  best_score : float;
+  best_cycle : int;
+  queued_hypothesis : string option;
+  history : cycle_record list;  (** Most recent first *)
+  total_keeps : int;
+  total_discards : int;
+  insights : string list;  (** Accumulated experiment insights, FIFO max 10 *)
   start_time : float;
-  mutable updated_at : float;
+  updated_at : float;
   cycle_timeout_s : float;
   max_cycles : int;
-  mutable workdir : string;
+  workdir : string;
   source_workdir : string;
-  mutable program_note : string option;
-  mutable warnings : string list;
+  program_note : string option;
+  warnings : string list;
   patience : int;  (** Max consecutive discards before early stop *)
-  mutable consecutive_discards : int;  (** Counter for consecutive discards without improvement *)
+  consecutive_discards : int;  (** Counter for consecutive discards without improvement *)
   build_verify_fn : string option;  (** Optional shell command that must exit 0 for a Keep to succeed *)
 }
 

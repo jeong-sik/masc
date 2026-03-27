@@ -48,7 +48,6 @@ let append_cycle ~base_path loop_id record =
 let save_state ~base_path (state : Autoresearch_types.loop_state) =
   let dir = results_dir ~base_path state.loop_id in
   Fs_compat.mkdir_p dir;
-  state.updated_at <- Time_compat.now ();
   let path = state_file ~base_path state.loop_id in
   let json = Yojson.Safe.pretty_to_string (Autoresearch_serde.state_to_yojson state) in
   Fs_compat.save_file path json

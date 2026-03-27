@@ -13,8 +13,16 @@ import {
   refreshExecution,
   refreshBoard,
   refreshMdal,
+  serverStatus,
 } from './store'
-import { requestRoomTruth, requestRoomTruthNow, roomTruthError } from './room-truth-store'
+import {
+  requestRoomTruth,
+  requestRoomTruthNow,
+  roomTruth,
+  roomTruthError,
+  normalizeRoomTruth,
+} from './room-truth-store'
+import { mergeServerStatus } from './store-normalizers'
 import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 import { showToast } from './components/common/toast'
 import { route } from './router'
@@ -141,6 +149,20 @@ const AUTORESEARCH_EVENTS = new Set([
   'autoresearch_stopped',
 ])
 
+/** Hydrate room-truth signals directly from SSE payload — zero HTTP fetch. */
+function handleRoomTruthSnapshot(payload: unknown): void {
+  try {
+    const normalized = normalizeRoomTruth(payload)
+    roomTruth.value = normalized
+    serverStatus.value = mergeServerStatus(
+      serverStatus.value,
+      normalized.room.status ?? null,
+    )
+  } catch (err) {
+    console.debug('[SSE] room-truth snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
+  }
+}
+
 function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void {
   if (!event.name) return
   const newTs = event.ts_unix ? event.ts_unix * 1000 : Date.now()
@@ -246,6 +268,12 @@ export function setupSSEReaction(): () => void {
 
   const unsubscribe = lastEvent.subscribe((event) => {
     if (!event) return
+
+    // 0. Room-truth snapshot — server push, no HTTP fetch needed
+    if (event.type === 'room_truth_snapshot' && event.payload) {
+      handleRoomTruthSnapshot(event.payload)
+      return
+    }
 
     // 1. Keeper heartbeat — signal-only, zero network calls
     if (event.type === 'keeper_heartbeat') {

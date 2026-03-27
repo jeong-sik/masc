@@ -52,10 +52,12 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
                 | _ -> ())
             | _ -> ())
           events;
-        if events <> [] then
+        if events <> [] then begin
           Log.Dashboard.info
             "patched keeper-dependent dashboard caches (%d lifecycle event(s))"
-            (List.length events)
+            (List.length events);
+          Server_dashboard_http.broadcast_room_truth_snapshot state
+        end
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

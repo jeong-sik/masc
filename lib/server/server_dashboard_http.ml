@@ -457,10 +457,14 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
         mark_cached_surface_error _transport_health_cache exn;
         raise exn
   in
+  let interval_s =
+    float_of_env_default "MASC_DASHBOARD_TRANSPORT_HEALTH_INTERVAL_S"
+      ~default:30.0 ~min_v:5.0 ~max_v:120.0
+  in
   Proactive_refresh.start ~sw ~clock
     ~config:
       { (Proactive_refresh.default_config
-           ~label:"transport_health" ~interval_s:15.0)
+           ~label:"transport_health" ~interval_s)
         with timeout_s }
     ~compute
     ~on_result:(fun json ->
@@ -758,7 +762,10 @@ let dashboard_room_truth_http_json ~state ~sw:_ ~clock _request =
   let execution_json = !execution_ref in
   let command_summary_json = !command_ref in
   let parallel_ms = (Time_compat.now () -. t0) *. 1000.0 in
-  Log.Dashboard.info "room-truth fetch: %.0fms" parallel_ms;
+  if parallel_ms >= 100.0 then
+    Log.Dashboard.info "room-truth fetch: %.0fms" parallel_ms
+  else
+    Log.Dashboard.debug "room-truth fetch: %.0fms" parallel_ms;
   let execution_cache_state =
     json_assoc_field "projection_diagnostics" execution_json
     |> json_string_field_opt "cache_state"

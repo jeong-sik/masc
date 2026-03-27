@@ -96,7 +96,11 @@ let start ~sw ~clock ~config ~compute ~on_result =
              config.label !consecutive_failures;
          consecutive_failures := 0;
          current_interval := config.interval_s;
-         Log.Dashboard.info "%s refreshed (%.1fs)" config.label dt
+         (* Sub-second refreshes are cache hits — log at debug to reduce noise *)
+         if dt >= 1.0 then
+           Log.Dashboard.info "%s refreshed (%.1fs)" config.label dt
+         else
+           Log.Dashboard.debug "%s refreshed (%.1fs)" config.label dt
          | Error `Timeout ->
              let dt = Time_compat.now () -. t0 in
              let timeout_exn = Failure "timeout" in

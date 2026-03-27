@@ -256,7 +256,7 @@ let test_keeper_msg_rejects_legacy_model_args () =
       check bool "legacy model error surfaced" true
         (contains_substring body "legacy keeper model args removed"))
 
-(* write_persona_profile removed: persona concept deleted, see CLAUDE.md *)
+(* write_persona_profile removed: persona concept deleted *)
 
 (* write_reward_model removed: keeper policy tools removed *)
 
@@ -323,7 +323,7 @@ let write_jsonl_lines path lines =
         lines)
 
 (* test_persona_list_and_create_from_persona removed:
-   persona concept deleted (CLAUDE.md). Schema fields policy_voice_enabled,
+   persona concept deleted. Schema fields policy_voice_enabled,
    policy_shell_mode, initiative_* removed in #2607. *)
 
 let test_keeper_shell_tool_policy_gates () =
@@ -991,7 +991,7 @@ let test_persistent_agent_msg_rejects_missing_message () =
         (contains_substring body "message is required"))
 
 (* test_persistent_agent_create_from_persona_and_status removed:
-   persona concept deleted (CLAUDE.md). *)
+   persona concept deleted. *)
 
 let test_keeper_dispatch_auxiliary_surfaces_smoke () =
   Eio_main.run @@ fun env ->

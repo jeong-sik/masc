@@ -219,7 +219,7 @@ let create ~sw ~env ~url ~cluster_name ~node_id =
   let max_pool = configured_pool_size () in
   let pool_config = Caqti_pool_config.create
       ~max_size:max_pool ~max_idle_size:(min max_pool 3)
-      ~max_idle_age:(Some (Mtime.Span.of_uint64_ns 30_000_000_000L))
+      ~max_idle_age:(Some (Mtime.Span.of_uint64_ns 15_000_000_000L))
       ~max_use_count:(Some 50) () in
   let uri = uri_with_keepalive uri in
   Log.Backend.info "[EioPG] connecting pool (max_size=%d, max_idle_size=%d, keepalives=on)..."
@@ -270,7 +270,10 @@ let create_readonly ~sw ~env ~url ~cluster_name ~node_id =
      usage" when multiple Eio fibers within the same executor domain
      call Pool.use concurrently. Use 2/3 of the main pool size, minimum 4. *)
   let max_pool = max 4 (configured_pool_size () * 2 / 3) in
-  let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
+  let pool_config = Caqti_pool_config.create ~max_size:max_pool
+      ~max_idle_size:(min max_pool 2)
+      ~max_idle_age:(Some (Mtime.Span.of_uint64_ns 15_000_000_000L))
+      ~max_use_count:(Some 50) () in
   let uri = uri_with_keepalive uri in
   match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
   | Error err -> Error (caqti_error_to_masc err)

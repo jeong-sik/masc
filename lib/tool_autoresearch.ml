@@ -114,8 +114,7 @@ let setup_running_loop (ctx : context) (params : start_params) =
   with
   | Error message -> Error message
   | Ok (managed_workdir, source_workdir, warnings) -> (
-      state.workdir <- managed_workdir;
-      state.warnings <- warnings;
+      let state = { state with workdir = managed_workdir; warnings } in
       let baseline_result =
         match Autoresearch.validate_target_file ~workdir:managed_workdir params.target_file with
         | Error e ->
@@ -136,10 +135,8 @@ let setup_running_loop (ctx : context) (params : start_params) =
       match baseline_result with
       | Error message -> Error message
       | Ok baseline ->
-          state.baseline <- baseline;
-          state.best_score <- baseline;
           let state =
-            { state with source_workdir }
+            { state with baseline; best_score = baseline; source_workdir }
           in
           Ok (register_loop ctx state))
 
@@ -244,9 +241,10 @@ let handle_swarm_start (ctx : context) args =
             Progress.stop_tracking swarm_task_id;
             `Assoc [ ("error", `String message) ]
           | Ok state ->
-          state.program_note <- program_note;
+          let state = { state with program_note } in
+          Hashtbl.replace active_loops state.loop_id state;
           broadcast_loop_lifecycle "autoresearch_started" state;
-          let warnings = ref state.warnings in
+          let warnings_acc = ref state.warnings in
           let operation_id =
             match ctx.start_operation with
             | None -> None
@@ -256,10 +254,11 @@ let handle_swarm_start (ctx : context) args =
                 with
                 | Ok json -> parse_operation_id json
                 | Error message ->
-                    warnings := message :: !warnings;
+                    warnings_acc := message :: !warnings_acc;
                     None)
           in
-          state.warnings <- List.rev !warnings;
+          let state = { state with warnings = List.rev !warnings_acc } in
+          Hashtbl.replace active_loops state.loop_id state;
           Autoresearch.save_state ~base_path:ctx.base_path state;
           Progress.Tracker.step swarm_tracker ~message:"Launching team session" ();
           let session_goal =
@@ -271,8 +270,8 @@ let handle_swarm_start (ctx : context) args =
               ~loop_id:state.loop_id ~target_file:params.target_file ~program_note
           with
           | Error message ->
-              state.status <- Autoresearch.Error;
-              state.error_message <- Some message;
+              let state = { state with status = Autoresearch.Error; error_message = Some message } in
+              Hashtbl.replace active_loops state.loop_id state;
               Autoresearch.save_state ~base_path:ctx.base_path state;
               Progress.stop_tracking swarm_task_id;
               `Assoc
@@ -283,8 +282,8 @@ let handle_swarm_start (ctx : context) args =
           | Ok session_json -> (
               match parse_session_launch ctx session_json with
               | Error message ->
-                  state.status <- Autoresearch.Error;
-                  state.error_message <- Some message;
+                  let state = { state with status = Autoresearch.Error; error_message = Some message } in
+                  Hashtbl.replace active_loops state.loop_id state;
                   Autoresearch.save_state ~base_path:ctx.base_path state;
                   Progress.stop_tracking swarm_task_id;
                   `Assoc
@@ -318,7 +317,7 @@ let handle_swarm_start (ctx : context) args =
                       ("artifacts_dir", `String artifacts_dir);
                       ("linked_status", Autoresearch.linked_status_json ~base_path:ctx.base_path link);
                       ( "warnings",
-                        `List (List.rev_map (fun message -> `String message) !warnings) );
+                        `List (List.rev_map (fun message -> `String message) !warnings_acc) );
                       ("goal", `String params.goal);
                       ( "program_note",
                         match program_note with
@@ -395,7 +394,8 @@ let handle_inject (ctx : context) args =
           if state.status <> Autoresearch.Running then
             `Assoc [("error", `String "Loop is not running")]
           else begin
-            state.queued_hypothesis <- Some hypothesis;
+            let state = { state with queued_hypothesis = Some hypothesis } in
+            Hashtbl.replace active_loops id state;
             Autoresearch.save_state ~base_path:ctx.base_path state;
             with_hypotheses_rw (fun () ->
               Hashtbl.replace pending_hypotheses id hypothesis);

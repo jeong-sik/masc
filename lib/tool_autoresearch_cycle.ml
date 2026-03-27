@@ -160,20 +160,30 @@ let forced_discard_record
       timestamp = Time_compat.now ();
     }
   in
-  state.history <- record :: state.history;
-  state.total_discards <- state.total_discards + 1;
-  state.updated_at <- Time_compat.now ();
-  Autoresearch.add_insight state
-    (Printf.sprintf "Cycle %d: %s discarded (%s)"
-       state.current_cycle hypothesis reason);
-  record
+  let insight_msg =
+    Printf.sprintf "Cycle %d: %s discarded (%s)"
+      state.current_cycle hypothesis reason
+  in
+  let insights =
+    let raw = insight_msg :: state.insights in
+    if List.length raw > 10 then List.filteri (fun i _ -> i < 10) raw else raw
+  in
+  let state = { state with
+    history = record :: state.history;
+    total_discards = state.total_discards + 1;
+    updated_at = Time_compat.now ();
+    insights;
+  } in
+  Hashtbl.replace active_loops state.loop_id state;
+  (state, record)
 
 let persist_discard_record
     (ctx : Tool_autoresearch_repo_synthesis.context)
     (state : Autoresearch.loop_state)
     ~loop_id ~hypothesis ~reason record =
   Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
-  state.current_cycle <- state.current_cycle + 1;
+  let state = { state with current_cycle = state.current_cycle + 1 } in
+  Hashtbl.replace active_loops state.loop_id state;
   Autoresearch.save_state ~base_path:ctx.base_path state;
   broadcast_cycle_result state record;
   `Assoc
@@ -244,7 +254,8 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
             if state.status <> Autoresearch.Running then
               Error "Loop is not running"
             else if not (Autoresearch.should_continue state) then begin
-              state.status <- Autoresearch.Completed;
+              let state = { state with status = Autoresearch.Completed } in
+              Hashtbl.replace active_loops state.loop_id state;
               Autoresearch.save_state ~base_path:ctx.base_path state;
               Error "completed"
             end else
@@ -288,7 +299,8 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                     match Hashtbl.find_opt pending_hypotheses id with
                     | Some h ->
                       Hashtbl.remove pending_hypotheses id;
-                      state.queued_hypothesis <- None;
+                      let state = { state with queued_hypothesis = None } in
+                      Hashtbl.replace active_loops state.loop_id state;
                       Autoresearch.save_state ~base_path:ctx.base_path state;
                       Some h
                     | None -> get_string_opt args "hypothesis"))
@@ -392,7 +404,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                         | _ -> false)
                       report.issues
                  then
-                   let record =
+                   let state, record =
                      forced_discard_record state
                        ~hypothesis ~score_before ~elapsed_ms:0
                        ~reason:"no diff produced"
@@ -412,7 +424,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                      ~diff_summary:summary
                      ~tags:["diff-guard"]
                      ();
-                   let record =
+                   let state, record =
                      forced_discard_record state
                        ~hypothesis ~score_before ~elapsed_ms:0
                        ~reason:("diff guard rejected patch: " ^ summary)
@@ -449,7 +461,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                          ("cycle", `Int state.current_cycle);
                        ]
                    | Ok None ->
-                     let record =
+                     let state, record =
                        forced_discard_record state
                          ~hypothesis ~score_before ~elapsed_ms:0
                          ~reason:"no diff produced"
@@ -475,7 +487,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                          ~stderr:e
                          ~tags:["post-metric-failure"]
                          ();
-                       let record =
+                       let state, record =
                          forced_discard_record state
                            ~hypothesis ~score_before ~commit_hash:commit_hash
                            ~elapsed_ms:0
@@ -501,9 +513,14 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                             Autoresearch.git_tag_best ~workdir
                               ~cycle:state.current_cycle ~score:score_after);
                        Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
-                       if record.decision = Autoresearch.Keep then
-                         state.baseline <- score_after;
-                       state.current_cycle <- state.current_cycle + 1;
+                       let state = { state with
+                         baseline =
+                           (if record.decision = Autoresearch.Keep
+                            then score_after
+                            else state.baseline);
+                         current_cycle = state.current_cycle + 1;
+                       } in
+                       Hashtbl.replace active_loops state.loop_id state;
                        Autoresearch.save_state ~base_path:ctx.base_path state;
                        let config =
                          Room.default_config ctx.base_path

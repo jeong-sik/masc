@@ -164,10 +164,12 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     Eio.Time.sleep clock 5.0;
     let config = state.room_config in
     let names = Keeper_types.keepalive_keeper_names config in
-    Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
+    Log.Keeper.info "autoboot: %d keeper(s) to boot: [%s]"
+      (List.length names) (String.concat ", " names);
     let booted = ref 0 in
     List.iter (fun name ->
         try
+          Log.Keeper.info "autoboot: loading meta for %s" name;
           match Keeper_runtime.ensure_keeper_meta config name with
           | Error e ->
             Log.Keeper.error "autoboot: failed to load meta for %s: %s" name e
@@ -175,6 +177,7 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
             if not m.presence_keepalive then
               Log.Keeper.info "autoboot: skipping %s (presence_keepalive=false)" name
             else begin
+              Log.Keeper.info "autoboot: calling start_keepalive for %s" name;
               let ctx : _ Keeper_types.context = {
                 config;
                 agent_name = m.agent_name;

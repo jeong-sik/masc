@@ -42,17 +42,17 @@ let keeper_skill_selection_mode () : keeper_skill_selection_mode =
 
 let keeper_allowed_skills = [
   "masc-heartbeat";
-  "lodge-social";
   "masc-keeper-autonomy";
 ]
 
 let canonical_keeper_skill_token (raw : string) : string option =
   match String.lowercase_ascii (String.trim raw) with
   | "masc-heartbeat" | "masc_heartbeat" | "heartbeat" -> Some "masc-heartbeat"
-  | "lodge-social" | "lodge_social" | "lodge" | "social" -> Some "lodge-social"
   | "masc-keeper-autonomy"
   | "masc_keeper_autonomy"
   | "keeper-autonomy"
+  | "lodge"
+  | "social"
   | "keeper"
   | "autonomy" ->
       Some "masc-keeper-autonomy"
@@ -76,16 +76,12 @@ let keeper_skill_priority ~(soul_profile : string) (skill : string) : int =
   match profile, skill with
   | "safety", "masc-heartbeat" -> 0
   | "safety", "masc-keeper-autonomy" -> 1
-  | "safety", "lodge-social" -> 2
   | "delivery", "masc-keeper-autonomy" -> 0
   | "delivery", "masc-heartbeat" -> 1
-  | "delivery", "lodge-social" -> 2
-  | "research", "lodge-social" -> 0
-  | "research", "masc-keeper-autonomy" -> 1
-  | "research", "masc-heartbeat" -> 2
+  | "research", "masc-keeper-autonomy" -> 0
+  | "research", "masc-heartbeat" -> 1
   | _, "masc-keeper-autonomy" -> 0
   | _, "masc-heartbeat" -> 1
-  | _, "lodge-social" -> 2
   | _ -> 9
 
 let route_keeper_skill ~(soul_profile : string) ~(message : string) : keeper_skill_route =
@@ -93,32 +89,28 @@ let route_keeper_skill ~(soul_profile : string) ~(message : string) : keeper_ski
     "heartbeat"; "alive"; "status"; "health"; "diagnose"; "liveness";
     "하트비트"; "살아"; "상태"; "진단"; "헬스";
   ] in
-  let lodge_keywords = [
-    "board"; "post"; "comment"; "feed"; "social"; "lodge"; "k2k";
-    "보드"; "포스트"; "댓글"; "피드"; "활동"; "소셜";
-  ] in
-  let keeper_keywords = [
+  let autonomy_keywords = [
     "keeper"; "handoff"; "compaction"; "context"; "generation"; "trace"; "memory";
+    "board"; "post"; "comment"; "feed"; "social"; "lodge"; "k2k";
     "키퍼"; "승계"; "핸드오프"; "컴팩팅"; "컨텍스트"; "세대"; "메모리";
+    "보드"; "포스트"; "댓글"; "피드"; "활동"; "소셜";
   ] in
   let profile =
     canonical_soul_profile soul_profile |> Option.value ~default:default_soul_profile
   in
   let heartbeat_score = skill_match_count_ci ~text:message ~keywords:heartbeat_keywords in
-  let lodge_score = skill_match_count_ci ~text:message ~keywords:lodge_keywords in
-  let keeper_score = skill_match_count_ci ~text:message ~keywords:keeper_keywords in
-  let heartbeat_bonus, lodge_bonus, keeper_bonus =
+  let autonomy_score = skill_match_count_ci ~text:message ~keywords:autonomy_keywords in
+  let heartbeat_bonus, autonomy_bonus =
     match profile with
-    | "safety" -> (1, 0, 1)
-    | "delivery" -> (0, 0, 1)
-    | "research" -> (0, 1, 1)
-    | "relationship" -> (0, 1, 1)
-    | _ -> (0, 0, 1)
+    | "safety" -> (1, 1)
+    | "delivery" -> (0, 1)
+    | "research" -> (0, 1)
+    | "relationship" -> (0, 1)
+    | _ -> (0, 1)
   in
   let scored = [
     ("masc-heartbeat", heartbeat_score + heartbeat_bonus);
-    ("lodge-social", lodge_score + lodge_bonus);
-    ("masc-keeper-autonomy", keeper_score + keeper_bonus);
+    ("masc-keeper-autonomy", autonomy_score + autonomy_bonus);
   ] in
   let sorted =
     List.sort
@@ -144,11 +136,10 @@ let route_keeper_skill ~(soul_profile : string) ~(message : string) : keeper_ski
   in
   let reason =
     Printf.sprintf
-      "profile=%s; scores{heartbeat=%d,lodge=%d,keeper=%d}"
+      "profile=%s; scores{heartbeat=%d,autonomy=%d}"
       profile
       (heartbeat_score + heartbeat_bonus)
-      (lodge_score + lodge_bonus)
-      (keeper_score + keeper_bonus)
+      (autonomy_score + autonomy_bonus)
   in
   { primary_skill; secondary_skills; reason }
 

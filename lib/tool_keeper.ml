@@ -165,9 +165,6 @@ let keeper_list_row_json ~registered ~runtime_class config name =
             ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-            ("initiative_enabled", `Bool meta.initiative_enabled);
-            ("initiative_idle_sec", `Int meta.initiative_idle_sec);
-            ("initiative_cooldown_sec", `Int meta.initiative_cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
             ("cascade_name", `String meta.cascade_name);
             ("created_at", `String meta.created_at);

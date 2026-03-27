@@ -140,7 +140,6 @@ type session_context = {
 ### 3.4 Typed Coordination Enums (keeper_contract.ml)
 
 ```ocaml
-type policy_action_budget = Conversation | Board
 type scope_kind = Local | Global
 type room_scope = Current | All
 ```
@@ -505,7 +504,7 @@ type decision_record = {
 
 Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
-허용 skill 목록: `masc-heartbeat`, `lodge-social`, `masc-keeper-autonomy`, `trpg-roleplay`
+허용 skill 목록: `masc-heartbeat`, `masc-keeper-autonomy`
 
 선택 모드:
 - `SkillSelectHeuristic`: soul_profile + 메시지 내용 기반 규칙 매칭

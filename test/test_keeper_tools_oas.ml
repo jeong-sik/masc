@@ -273,8 +273,7 @@ let make_learned_meta () : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String "test-learned");
              ("agent_name", `String "test-learned");
-             ("trace_id", `String "test-trace-learned");
-             ("policy_mode", `String "learned_offline_v1")]) with
+             ("trace_id", `String "test-trace-learned")]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_learned_meta failed: %s" e)
 

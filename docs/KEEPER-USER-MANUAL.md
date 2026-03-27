@@ -203,7 +203,6 @@ spawn 시 인자로 직접 설정하는 필드.
 |------|------|--------|------|----------|
 | `name` | string | (필수) | keeper 고유 이름. `[A-Za-z0-9._-]`만 허용 | 재생성 필요 |
 | `goal` | string | (필수) | keeper의 현재 목표 | `masc_keeper_up` 재실행 시 `goal` 인자 |
-| `models` | string list | (필수) | MODEL cascade 목록. `provider:model_id` 형식 | `masc_keeper_up`의 `models` 인자 |
 | `instructions` | string | `""` | 커스텀 시스템 프롬프트 | `masc_keeper_up`의 `instructions` 인자 |
 | `presence_keepalive` | bool | `true` | keepalive fiber 활성화 여부 | `masc_keeper_up`의 `presence_keepalive` 인자 |
 | `presence_keepalive_sec` | int | `30` | heartbeat 주기 (초) | `masc_keeper_up`의 `presence_keepalive_sec` 인자 |

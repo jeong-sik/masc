@@ -44,6 +44,9 @@ let persisted_summary_json (summary : Autoresearch.persisted_summary) =
       ( "program_note",
         match summary.program_note with Some value -> `String value | None -> `Null );
       ("warnings", `List (List.map (fun value -> `String value) summary.warnings));
+      ("patience", `Int summary.patience);
+      ("consecutive_discards", `Int summary.consecutive_discards);
+      ("build_verify_fn", match summary.build_verify_fn with Some cmd -> `String cmd | None -> `Null);
       ("error", match summary.error_message with Some e -> `String e | None -> `Null);
     ]
 
@@ -61,6 +64,8 @@ type start_params = {
   cycle_timeout_s : float;
   model_model : string;
   baseline_override : float option;
+  patience : int option;
+  build_verify_fn : string option;
 }
 
 let prepare_start_params (ctx : context) args =
@@ -82,17 +87,40 @@ let prepare_start_params (ctx : context) args =
     match Autoresearch_metric.validate_metric_fn metric_fn with
     | Error e -> Error e
     | Ok metric_fn ->
-    Ok
-      {
-        goal;
-        metric_fn;
-        target_file;
-        source_workdir;
-        max_cycles;
-        cycle_timeout_s;
-        model_model;
-        baseline_override = get_float_opt args "baseline";
-      }
+    let build_verify_fn = get_string_opt args "build_verify_fn" in
+    (* Validate build_verify_fn for shell injection if provided *)
+    match build_verify_fn with
+    | Some cmd -> (
+      match Autoresearch_metric.validate_metric_fn cmd with
+      | Error e -> Error (Printf.sprintf "build_verify_fn: %s" e)
+      | Ok _ ->
+        Ok
+          {
+            goal;
+            metric_fn;
+            target_file;
+            source_workdir;
+            max_cycles;
+            cycle_timeout_s;
+            model_model;
+            baseline_override = get_float_opt args "baseline";
+            patience = get_int_opt args "patience";
+            build_verify_fn = Some cmd;
+          })
+    | None ->
+      Ok
+        {
+          goal;
+          metric_fn;
+          target_file;
+          source_workdir;
+          max_cycles;
+          cycle_timeout_s;
+          model_model;
+          baseline_override = get_float_opt args "baseline";
+          patience = get_int_opt args "patience";
+          build_verify_fn = None;
+        }
 
 let register_loop (ctx : context) state =
   Autoresearch.save_state ~base_path:ctx.base_path state;
@@ -106,6 +134,7 @@ let setup_running_loop (ctx : context) (params : start_params) =
     Autoresearch.create_state ~goal:params.goal ~metric_fn:params.metric_fn
       ~model_model:params.model_model ~target_file:params.target_file
       ~cycle_timeout_s:params.cycle_timeout_s ~max_cycles:params.max_cycles
+      ?patience:params.patience ?build_verify_fn:params.build_verify_fn
       ~workdir:params.source_workdir ()
   in
   match
@@ -213,6 +242,8 @@ let handle_start (ctx : context) args =
         ("workdir", `String state.workdir);
         ("source_workdir", `String state.source_workdir);
         ("queued_hypothesis", `Null);
+        ("patience", `Int state.patience);
+        ("build_verify_fn", match state.build_verify_fn with Some cmd -> `String cmd | None -> `Null);
         ("warnings", `List (List.map (fun value -> `String value) state.warnings));
       ])
 

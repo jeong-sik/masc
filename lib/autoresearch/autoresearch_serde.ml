@@ -88,6 +88,10 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
       | Some value -> `String value
       | None -> `Null );
     ("warnings", `List (List.map (fun value -> `String value) s.warnings));
+    ("patience", `Int s.patience);
+    ("consecutive_discards", `Int s.consecutive_discards);
+    ("build_verify_fn", match s.build_verify_fn with
+      | Some cmd -> `String cmd | None -> `Null);
     ("error", match s.error_message with
       | Some e -> `String e | None -> `Null);
   ]
@@ -131,7 +135,7 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
       |> Option.value ~default:(str "workdir" ~default:".");
     program_note = json |> member "program_note" |> to_string_option;
     warnings =
-      match json |> member "warnings" with
+      (match json |> member "warnings" with
       | `List items ->
           items
           |> List.filter_map (function
@@ -139,7 +143,10 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
                    let trimmed = String.trim value in
                    if trimmed = "" then None else Some trimmed
                | _ -> None)
-      | _ -> [];
+      | _ -> []);
+    patience = int_ "patience" ~default:(max 3 (int_ "max_cycles" ~default:10 / 3));
+    consecutive_discards = int_ "consecutive_discards" ~default:0;
+    build_verify_fn = json |> member "build_verify_fn" |> to_string_option;
   }
 
 let swarm_link_to_yojson (link : swarm_link) : Yojson.Safe.t =

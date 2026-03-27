@@ -370,7 +370,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                    ~surface_status:(Keeper_exec_status.keeper_surface_status
                                       ~agent_status:agent ~diagnostic)
                    ~now_ts));
-              ("runtime_class", `String "keeper");
+              ("runtime_class", `String "resident_keeper");
               ("registered", `Bool true);
               ("registry_state",
                 match registry_state with

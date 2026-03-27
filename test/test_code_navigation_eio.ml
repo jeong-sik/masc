@@ -10,11 +10,12 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 
 (* ===== Test Helpers ===== *)
 
-let init_eio env =
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  Eio_context.set_net (Eio.Stdenv.net env);
-  Eio_context.set_clock (Eio.Stdenv.clock env)
+let with_eio_context env sw f =
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw f
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -88,9 +89,9 @@ let prepare_code_surface ~clock:_ ~sw:_ _state = ()
 let test_code_search_basic () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
 
   (* Use current repo as base_path for real code search *)
   let base_path = Sys.getcwd () in
@@ -168,9 +169,9 @@ let test_code_search_basic () =
 let test_code_symbols_basic () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
 
   let base_path = Sys.getcwd () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
@@ -221,9 +222,9 @@ let test_code_symbols_basic () =
 let test_code_read_basic () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
 
   let base_path = Sys.getcwd () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
@@ -287,9 +288,9 @@ let test_code_read_basic () =
 let test_code_read_offset_limit () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
 
   let base_path = Sys.getcwd () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in

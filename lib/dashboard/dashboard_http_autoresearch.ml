@@ -334,6 +334,9 @@ let rehydrate_persisted_loop (persisted : Autoresearch_types.persisted_summary) 
     source_workdir = persisted.source_workdir;
     program_note = persisted.program_note;
     warnings = persisted.warnings;
+    patience = persisted.patience;
+    consecutive_discards = persisted.consecutive_discards;
+    build_verify_fn = persisted.build_verify_fn;
   }
 
 let load_loop_state ~base_path loop_id =

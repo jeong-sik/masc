@@ -138,8 +138,12 @@ let generate_code_change = Autoresearch_codegen.generate_code_change
 (* Loop State Management                                             *)
 (* ================================================================ *)
 
-let create_state ~goal ~metric_fn ?(model_model = "glm") ~target_file ~cycle_timeout_s ~max_cycles ~workdir () =
+let create_state ~goal ~metric_fn ?(model_model = "glm") ~target_file ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn ~workdir () =
   let now = Time_compat.now () in
+  let patience = match patience with
+    | Some p -> p
+    | None -> max 3 (max_cycles / 3)
+  in
   {
     loop_id = generate_loop_id ();
     goal;
@@ -165,6 +169,9 @@ let create_state ~goal ~metric_fn ?(model_model = "glm") ~target_file ~cycle_tim
     source_workdir = workdir;
     program_note = None;
     warnings = [];
+    patience;
+    consecutive_discards = 0;
+    build_verify_fn;
   }
 
 (** Append an insight, maintaining FIFO max 10 entries. *)
@@ -259,6 +266,9 @@ let stop_loop ~base_path ?reason loop_id =
                 source_workdir = persisted.source_workdir;
                 program_note = persisted.program_note;
                 warnings = persisted.warnings;
+                patience = persisted.patience;
+                consecutive_discards = persisted.consecutive_discards;
+                build_verify_fn = persisted.build_verify_fn;
               }
             in
             Some (stop_state state)))

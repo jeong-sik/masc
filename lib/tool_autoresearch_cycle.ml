@@ -162,10 +162,17 @@ let forced_discard_record
   in
   state.history <- record :: state.history;
   state.total_discards <- state.total_discards + 1;
+  state.consecutive_discards <- state.consecutive_discards + 1;
   state.updated_at <- Time_compat.now ();
   Autoresearch.add_insight state
     (Printf.sprintf "Cycle %d: %s discarded (%s)"
        state.current_cycle hypothesis reason);
+  if state.consecutive_discards >= state.patience then begin
+    state.status <- Autoresearch.Completed;
+    Autoresearch.add_insight state
+      (Printf.sprintf "Early stopped: %d consecutive discards without improvement"
+         state.patience)
+  end;
   record
 
 let persist_discard_record
@@ -493,15 +500,83 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                            ~commit_hash:(Some commit_hash)
                            ~elapsed_ms ~model_used:state.model_model
                        in
-                       (match record.decision with
+                       (* Build verification gate: if Keep and build_verify_fn is set,
+                          run the command and downgrade to Discard on non-zero exit.
+                          record_cycle already updated total_keeps/total_discards and
+                          baseline, so we fix up counters if overriding Keep -> Discard. *)
+                       let build_gate_override =
+                         match record.decision with
+                         | Autoresearch.Keep -> (
+                           match state.build_verify_fn with
+                           | None -> false
+                           | Some cmd ->
+                             match Autoresearch_metric.split_metric_fn_argv cmd with
+                             | Error e ->
+                               Log.Autoresearch.warn "build_verify_fn validation failed: %s" e;
+                               true
+                             | Ok argv ->
+                               match Autoresearch_metric.run_metric_argv ~workdir ~timeout_s argv with
+                               | Ok _ -> false  (* exit 0 = build passes *)
+                               | Error reason ->
+                                 Log.Autoresearch.info "build verification failed: %s" reason;
+                                 persist_failure_feedback ctx state
+                                   ~hypothesis
+                                   ~summary:(Printf.sprintf "Build verification failed: %s" reason)
+                                   ~action:"Fix the build before the metric can improve."
+                                   ~stderr:reason
+                                   ~tags:["build-verify-failure"]
+                                   ();
+                                 true)
+                         | Autoresearch.Discard -> false
+                       in
+                       let effective_decision =
+                         if build_gate_override then begin
+                           (* Undo record_cycle's Keep bookkeeping *)
+                           state.total_keeps <- state.total_keeps - 1;
+                           state.total_discards <- state.total_discards + 1;
+                           state.baseline <- score_before;
+                           if state.best_cycle = state.current_cycle then begin
+                             (* Find actual best from history, excluding current cycle *)
+                             let prev_best =
+                               state.history
+                               |> List.filter (fun (r : Autoresearch.cycle_record) ->
+                                    r.decision = Autoresearch.Keep && r.cycle <> state.current_cycle)
+                               |> List.fold_left (fun (bs, bc) (r : Autoresearch.cycle_record) ->
+                                    if r.score_after > bs then (r.score_after, r.cycle) else (bs, bc))
+                                  (score_before, 0)
+                             in
+                             state.best_score <- fst prev_best;
+                             state.best_cycle <- snd prev_best
+                           end;
+                           Autoresearch.add_insight state
+                             (Printf.sprintf "Cycle %d: %s build verification failed, downgraded to discard"
+                                state.current_cycle hypothesis);
+                           Autoresearch.Discard
+                         end else
+                           record.decision
+                       in
+                       (match effective_decision with
                         | Autoresearch.Discard ->
-                          Autoresearch.git_reset_last ~workdir
+                          Autoresearch.git_reset_last ~workdir;
+                          state.consecutive_discards <- state.consecutive_discards + 1;
+                          if state.consecutive_discards >= state.patience then begin
+                            state.status <- Autoresearch.Completed;
+                            Autoresearch.add_insight state
+                              (Printf.sprintf "Early stopped: %d consecutive discards without improvement"
+                                 state.patience)
+                          end
                         | Autoresearch.Keep ->
+                          state.consecutive_discards <- 0;
                           if score_after >= state.best_score then
                             Autoresearch.git_tag_best ~workdir
                               ~cycle:state.current_cycle ~score:score_after);
-                       Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
-                       if record.decision = Autoresearch.Keep then
+                       let effective_record =
+                         if build_gate_override then
+                           { record with decision = Autoresearch.Discard }
+                         else record
+                       in
+                       Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id effective_record;
+                       if effective_decision = Autoresearch.Keep then
                          state.baseline <- score_after;
                        state.current_cycle <- state.current_cycle + 1;
                        Autoresearch.save_state ~base_path:ctx.base_path state;
@@ -521,13 +596,13 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                                 (`Assoc
                                   [
                                     ("loop_id", `String id);
-                                    ("cycle", `Int record.cycle);
+                                    ("cycle", `Int effective_record.cycle);
                                     ("hypothesis", `String hypothesis);
                                     ( "decision",
                                       `String
                                         (Autoresearch.decision_to_string
-                                           record.decision) );
-                                    ("delta", `Float record.delta);
+                                           effective_record.decision) );
+                                    ("delta", `Float effective_record.delta);
                                     ("baseline", `Float state.baseline);
                                     ("best_score", `Float state.best_score);
                                   ])
@@ -537,18 +612,18 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                             Log.Autoresearch.warn "cycle event append failed: %s"
                               (Printexc.to_string exn))
                        | None -> ());
-                       broadcast_cycle_result state record;
+                       broadcast_cycle_result state effective_record;
                        `Assoc
                          [
                            ("loop_id", `String id);
-                           ("cycle", `Int record.cycle);
+                           ("cycle", `Int effective_record.cycle);
                            ("hypothesis", `String hypothesis);
                            ("score_before", `Float score_before);
                            ("score_after", `Float score_after);
-                           ("delta", `Float record.delta);
+                           ("delta", `Float effective_record.delta);
                            ( "decision",
                              `String
-                               (Autoresearch.decision_to_string record.decision) );
+                               (Autoresearch.decision_to_string effective_record.decision) );
                            ("commit_hash", `String commit_hash);
                            ("baseline", `Float state.baseline);
                            ("best_score", `Float state.best_score);

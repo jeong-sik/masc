@@ -44,6 +44,9 @@ type loop_state = {
   source_workdir : string;
   mutable program_note : string option;
   mutable warnings : string list;
+  patience : int;  (** Max consecutive discards before early stop *)
+  mutable consecutive_discards : int;  (** Counter for consecutive discards without improvement *)
+  build_verify_fn : string option;  (** Optional shell command that must exit 0 for a Keep to succeed *)
 }
 
 type swarm_link = {
@@ -79,4 +82,7 @@ type persisted_summary = {
   source_workdir : string;
   program_note : string option;
   warnings : string list;
+  patience : int;
+  consecutive_discards : int;
+  build_verify_fn : string option;
 }

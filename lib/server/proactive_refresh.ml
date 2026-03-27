@@ -12,6 +12,7 @@ type config = {
   failure_threshold : int;
   timeout_s : float;
   on_error : (exn -> unit) option;
+  health_check : (unit -> bool) option;
 }
 
 let default_config ~label ~interval_s =
@@ -22,6 +23,7 @@ let default_config ~label ~interval_s =
     failure_threshold = 5;
     timeout_s = 10.0;
     on_error = None;
+    health_check = None;
   }
 
 let is_internal_race_cancel exn =
@@ -83,6 +85,19 @@ let start ~sw ~clock ~config ~compute ~on_result =
     let rec loop () =
       let jitter = Random.float (!current_interval *. 0.25) in
       Eio.Time.sleep clock (!current_interval +. jitter);
+      let health_ok = match config.health_check with
+        | None -> true
+        | Some check -> (try check () with _ -> false)
+      in
+      if not health_ok then begin
+        incr consecutive_failures;
+        if !consecutive_failures >= config.failure_threshold then
+          current_interval :=
+            min config.max_backoff_s (!current_interval *. 2.0);
+        Log.Dashboard.warn
+          "%s skipped: health gate failed (%d consecutive, next in %.0fs)"
+          config.label !consecutive_failures !current_interval
+      end else
       let t0 = Time_compat.now () in
       (try
          match

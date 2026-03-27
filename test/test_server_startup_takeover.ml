@@ -114,15 +114,26 @@ let spawn_http_server ~status_code =
       end;
       (pid, port)
 
-let spawn_forever_process ~ignore_sigterm =
-  match Unix.fork () with
-  | 0 ->
-      if ignore_sigterm then
-        Sys.set_signal Sys.sigterm Sys.Signal_ignore;
-      while true do
-        ignore (Unix.select [] [] [] 1.0)
-      done
-  | pid -> pid
+let spawn_forever_process ?argv0 ~ignore_sigterm () =
+  match argv0 with
+  | Some name ->
+      let script =
+        if ignore_sigterm then
+          "trap '' TERM; while :; do sleep 1; done"
+        else
+          "while :; do sleep 1; done"
+      in
+      Unix.create_process "/bin/sh" [| name; "-c"; script |]
+        Unix.stdin Unix.stdout Unix.stderr
+  | None ->
+      match Unix.fork () with
+      | 0 ->
+          if ignore_sigterm then
+            Sys.set_signal Sys.sigterm Sys.Signal_ignore;
+          while true do
+            ignore (Unix.select [] [] [] 1.0)
+          done
+      | pid -> pid
 
 let stop_process pid =
   if process_alive pid then
@@ -133,8 +144,8 @@ let with_http_server ~status_code f =
   let pid, port = spawn_http_server ~status_code in
   Fun.protect ~finally:(fun () -> stop_process pid) (fun () -> f ~pid ~port)
 
-let with_forever_process ~ignore_sigterm f =
-  let pid = spawn_forever_process ~ignore_sigterm in
+let with_forever_process ?argv0 ~ignore_sigterm f =
+  let pid = spawn_forever_process ?argv0 ~ignore_sigterm () in
   Fun.protect ~finally:(fun () -> stop_process pid) (fun () -> f pid)
 
 let lock_path dir =
@@ -205,7 +216,7 @@ let test_tolerates_invalid_pid_file () =
 
 let test_escalates_sigkill_for_unresponsive_holder () =
   with_temp_dir "startup-takeover-unresponsive" (fun dir ->
-      with_forever_process ~ignore_sigterm:true (fun pid ->
+      with_forever_process ~argv0:"main_eio.exe" ~ignore_sigterm:true (fun pid ->
           let path = lock_path dir in
           write_file path (Printf.sprintf "%d\n" pid);
           let port = find_free_port () in

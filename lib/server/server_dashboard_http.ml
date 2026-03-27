@@ -373,6 +373,12 @@ let patch_keeper_dependent_caches ~keeper_name ~event =
       patch_execution_cache_for_keeper ~keeper_name ~keepalive_running;
       patch_operator_snapshot_cache_for_keeper ~keeper_name ~keepalive_running
 
+(** Late-bound broadcast hook. Set after [broadcast_room_truth_snapshot]
+    is defined below [dashboard_room_truth_focus_json]. The ref avoids
+    OCaml's top-to-bottom forward-reference restriction. *)
+let _broadcast_room_truth_ref : (Mcp_server.server_state -> unit) ref =
+  ref (fun (_state : Mcp_server.server_state) -> ())
+
 (** Start the proactive execution refresh loop.  When an Executor_pool
     is available, each refresh runs in a pool domain with a domain-local
     Caqti pool (the main domain's Caqti pool is domain-bound due to
@@ -410,7 +416,9 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~config:{ (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0)
               with timeout_s = execution_refresh_timeout_s }
     ~compute
-    ~on_result:(mark_cached_surface_success _execution_cache)
+    ~on_result:(fun json ->
+      mark_cached_surface_success _execution_cache json;
+      !_broadcast_room_truth_ref state)
 
 let start_transport_health_refresh_loop ~state ~sw ~clock =
   let timeout_s =
@@ -904,6 +912,230 @@ let dashboard_room_truth_http_json ~state ~sw:_ ~clock _request =
              | Some value -> `String value
              | None -> `Null );
          ])
+
+(** Assemble a lightweight room-truth snapshot from cached refs only.
+    No PG I/O — reads proactive caches for execution and command, and
+    the TTL-cached shell.  Returns None when the execution cache has not
+    produced its first successful result (cold start). *)
+let room_truth_snapshot_from_caches (state : Mcp_server.server_state) :
+    Yojson.Safe.t option =
+  if not (cached_surface_has_success _execution_cache) then None
+  else
+    let config = state.room_config in
+    let shell_json =
+      if !_shell_warmed then
+        try dashboard_shell_http_json config
+        with _ -> `Assoc []
+      else `Assoc []
+    in
+    let execution_json = cached_surface_json _execution_cache in
+    let command_summary_json =
+      Server_command_plane_http.command_plane_summary_http_json ~state
+    in
+    let session_briefs = json_list_field "session_briefs" execution_json in
+    let has_warn =
+      List.exists
+        (fun row ->
+          let h = json_string_field_opt "health" row in
+          h = Some "warn" || h = Some "bad")
+        session_briefs
+    in
+    let health = if has_warn then "warn" else "ok" in
+    let operator_digest_json =
+      `Assoc
+        [
+          ("health", `String health);
+          ( "attention_summary",
+            `Assoc
+              [
+                ("count", `Int (if has_warn then 1 else 0));
+                ("provenance", `String "derived");
+              ] );
+          ( "recommendation_summary",
+            `Assoc [ ("count", `Int 0); ("provenance", `String "derived") ] );
+          ( "pending_confirm_summary",
+            Dashboard_cache.get_or_compute "pending_confirm_summary" ~ttl:10.0
+              (fun () -> Operator_control.pending_confirm_summary_json config)
+          );
+        ]
+    in
+    let execution_queue =
+      match Yojson.Safe.Util.member "execution_queue" execution_json with
+      | `List items -> items
+      | _ -> []
+    in
+    let take_n n lst =
+      if List.length lst <= n then lst
+      else List.filteri (fun i _ -> i < n) lst
+    in
+    let execution_session_briefs = session_briefs |> take_n 20 in
+    let execution_operation_briefs =
+      json_list_field "operation_briefs" execution_json |> take_n 20
+    in
+    let execution_keepers =
+      json_list_field "keepers" execution_json |> take_n 20
+    in
+    let execution_worker_support =
+      json_list_field "worker_support_briefs" execution_json |> take_n 10
+    in
+    let execution_continuity =
+      json_list_field "continuity_briefs" execution_json |> take_n 10
+    in
+    let top_queue =
+      match execution_queue with head :: _ -> head | [] -> `Null
+    in
+    let has_text key json = json_string_field_opt key json |> Option.is_some in
+    let execution_summary =
+      let existing = json_assoc_field "summary" execution_json in
+      match Yojson.Safe.Util.member "blocked_sessions" existing with
+      | `Int _ | `Intlit _ -> existing
+      | _ ->
+          `Assoc
+            [
+              ("active_sessions", `Int (List.length execution_session_briefs));
+              ( "blocked_sessions",
+                `Int
+                  (count_where execution_session_briefs (fun row ->
+                       let health_v = json_string_field_opt "health" row in
+                       let status = json_string_field_opt "status" row in
+                       has_text "blocker_summary" row
+                       || health_v = Some "warn"
+                       || health_v = Some "bad"
+                       || status = Some "blocked")) );
+              ( "active_operations",
+                `Int (List.length execution_operation_briefs) );
+              ( "blocked_operations",
+                `Int
+                  (count_where execution_operation_briefs
+                     (has_text "blocker_summary")) );
+              ( "worker_alerts",
+                `Int
+                  (count_where execution_worker_support (fun row ->
+                       match json_string_field_opt "tone" row with
+                       | Some "warn" | Some "bad" -> true
+                       | _ -> false)) );
+              ( "continuity_alerts",
+                `Int
+                  (count_where execution_continuity (fun row ->
+                       match json_string_field_opt "tone" row with
+                       | Some "warn" | Some "bad" -> true
+                       | _ -> false)) );
+              ("priority_items", `Int (List.length execution_queue));
+              ("keepers", `Int (List.length execution_keepers));
+            ]
+    in
+    let command_ops = json_assoc_field "operations" command_summary_json in
+    let command_detachments =
+      json_assoc_field "detachments" command_summary_json
+    in
+    let command_alerts = json_assoc_field "alerts" command_summary_json in
+    let command_decisions = json_assoc_field "decisions" command_summary_json in
+    let swarm_status = json_assoc_field "swarm_status" command_summary_json in
+    let swarm_overview = json_assoc_field "overview" swarm_status in
+    let command_summary =
+      `Assoc
+        [
+          ( "active_operations",
+            `Int
+              (json_int_field "active"
+                 (json_assoc_field "summary" command_ops)
+                 ~default:0) );
+          ( "active_detachments",
+            `Int
+              (json_int_field "active"
+                 (json_assoc_field "summary" command_detachments)
+                 ~default:0) );
+          ( "pending_approvals",
+            `Int
+              (json_int_field "pending"
+                 (json_assoc_field "summary" command_decisions)
+                 ~default:0) );
+          ( "bad_alerts",
+            `Int
+              (json_int_field "bad"
+                 (json_assoc_field "summary" command_alerts)
+                 ~default:0) );
+          ( "warn_alerts",
+            `Int
+              (json_int_field "warn"
+                 (json_assoc_field "summary" command_alerts)
+                 ~default:0) );
+          ( "moving_lanes",
+            `Int (json_int_field "moving_lanes" swarm_overview ~default:0) );
+          ( "active_lanes",
+            `Int (json_int_field "active_lanes" swarm_overview ~default:0) );
+          ("provenance", `String "truth");
+        ]
+    in
+    let shell_counts = json_assoc_field "counts" shell_json in
+    let runtime_count =
+      json_int_field "agents" shell_counts ~default:0
+      + json_int_field "keepers" shell_counts ~default:0
+    in
+    let focus_json =
+      dashboard_room_truth_focus_json
+        ~initialized:(Room.is_initialized config)
+        ~runtime_count ~operator_digest_json ~top_queue
+    in
+    Some
+      (`Assoc
+        [
+          ("generated_at", `String (Types.now_iso ()));
+          ( "room",
+            `Assoc
+              [
+                ("status", json_assoc_field "status" shell_json);
+                ("counts", json_assoc_field "counts" shell_json);
+                ("provenance", `String "truth");
+              ] );
+          ( "execution",
+            `Assoc
+              [
+                ("summary", execution_summary);
+                ("top_queue", top_queue);
+                ("provenance", `String "derived");
+              ] );
+          ("command", command_summary);
+          ( "operator",
+            `Assoc
+              [
+                ( "health",
+                  Yojson.Safe.Util.member "health" operator_digest_json );
+                ( "attention_summary",
+                  json_assoc_field "attention_summary" operator_digest_json );
+                ( "recommendation_summary",
+                  json_assoc_field "recommendation_summary"
+                    operator_digest_json );
+                ( "pending_confirm_summary",
+                  json_assoc_field "pending_confirm_summary"
+                    operator_digest_json );
+                ("provenance", `String "derived");
+              ] );
+          ("focus", focus_json);
+        ])
+
+(** Broadcast current room-truth snapshot to all Observer SSE sessions.
+    Called after proactive cache refreshes and keeper lifecycle events.
+    Safe to call from any fiber — reads only from cached refs. *)
+let broadcast_room_truth_snapshot (state : Mcp_server.server_state) : unit =
+  match room_truth_snapshot_from_caches state with
+  | None -> ()
+  | Some snapshot ->
+      let sse_json =
+        `Assoc
+          [
+            ("type", `String "room_truth_snapshot");
+            ("payload", snapshot);
+            ("ts_unix", `Float (Time_compat.now ()));
+          ]
+      in
+      Sse.broadcast_to Observers sse_json;
+      Log.Dashboard.info "room-truth snapshot pushed via SSE"
+
+(* Wire up the late-bound broadcast ref now that both
+   [dashboard_room_truth_focus_json] and [broadcast_room_truth_snapshot]
+   are defined. *)
+let () = _broadcast_room_truth_ref := broadcast_room_truth_snapshot
 
 let dashboard_memory_http_json request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in

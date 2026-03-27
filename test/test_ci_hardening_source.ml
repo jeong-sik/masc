@@ -336,11 +336,11 @@ let test_keeper_oas_cleanup_contracts () =
        "OAS-backed compaction pipeline")
 
 let test_dashboard_executor_pool_contracts () =
-  check bool "dashboard core defines executor pool helper" true
-    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+  check bool "dashboard runtime support defines executor pool helper" true
+    (file_contains_pattern "lib/server/server_dashboard_http_runtime_support.ml"
        "let run_dashboard_compute");
-  check bool "dashboard core submits compute to executor pool" true
-    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+  check bool "dashboard runtime support submits compute to executor pool" true
+    (file_contains_pattern "lib/server/server_dashboard_http_runtime_support.ml"
        "Eio.Executor_pool.submit_exn");
   check bool "mission refresh loop uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"

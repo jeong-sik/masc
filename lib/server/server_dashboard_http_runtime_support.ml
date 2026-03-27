@@ -70,7 +70,8 @@ let pg_semaphore state () =
 
 let with_pg_guard state f =
   let sem = pg_semaphore state () in
-  Eio.Semaphore.use sem f
+  Eio.Semaphore.acquire sem;
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release sem) f
 
 let run_dashboard_compute state ?(mode = Offloaded_readonly) ~sw ~clock
     ~(config : Room.config) compute =

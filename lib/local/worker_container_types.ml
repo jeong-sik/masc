@@ -654,5 +654,3 @@ let worker_auth_token ~base_path ~worker_name =
     | Error err -> Error (Types.masc_error_to_string err)
   else
     Ok None
-
-

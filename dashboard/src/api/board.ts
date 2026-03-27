@@ -1,18 +1,14 @@
 import { get, post, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import type {
-  BoardPost, BoardComment, BoardSortMode,
+  BoardPost, BoardComment,
   GovernanceCaseBrief, GovernanceCaseBundle, GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute, GovernanceExecutionOrder,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
   GovernanceResolvedAction, GovernanceTimelineEvent, PendingConfirmation,
 } from '../types'
 
-// --- Board ---
-
-const SYSTEM_BOARD_AUTHORS = new Set(['team-session'])
-
-export function toIsoTimestamp(value: unknown): string | null {
+function toIsoTimestamp(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) return value
   if (typeof value !== 'number' || Number.isNaN(value)) return null
   const ms = value < 1_000_000_000_000 ? value * 1000 : value
@@ -283,14 +279,6 @@ export function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSu
   }
 }
 
-function isSystemBoardAuthor(author: string): boolean {
-  return SYSTEM_BOARD_AUTHORS.has(author.trim().toLowerCase())
-}
-
-function filterSystemBoardPosts(posts: BoardPost[]): BoardPost[] {
-  return posts.filter(post => !isSystemBoardAuthor(post.author))
-}
-
 function derivePostTitle(content: string): string {
   const trimmed = content.trim()
   const withoutFlair = trimmed.startsWith('[flair:') ? trimmed.replace(/^\[flair:[^\]]+\]\s*/i, '') : trimmed
@@ -390,25 +378,6 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     content: asString(raw.content, ''),
     created_at: toIsoTimestamp(raw.created_at) ?? '',
   }
-}
-
-export async function fetchBoard(
-  sortBy?: BoardSortMode,
-  options?: { excludeSystem?: boolean },
-): Promise<{ posts: BoardPost[] }> {
-  return withRetries('fetchBoard', async () => {
-    const params = new URLSearchParams()
-    if (sortBy) params.set('sort_by', sortBy)
-    if (options?.excludeSystem) params.set('exclude_system', 'true')
-    params.set('limit', options?.excludeSystem ? '150' : '100')
-    const qs = params.toString()
-    const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
-    const normalizedPosts = Array.isArray(raw.posts)
-      ? raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
-      : []
-    const posts = options?.excludeSystem ? filterSystemBoardPosts(normalizedPosts) : normalizedPosts
-    return { posts }
-  })
 }
 
 export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {

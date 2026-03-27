@@ -9,12 +9,30 @@ body:
       value: |
         Use this for net-new capability work.
         Human reporters, Codex, and internal agents may all file this form.
-        Every accepted feature should be assigned to exactly one `target:*` release train.
+        Choose exactly one target train below. Automation will keep `triage-required`
+        on the issue until it has exactly one `type:*` and one `target:*` label.
   - type: input
     id: outcome
     attributes:
       label: Desired outcome
       placeholder: What becomes possible if this exists?
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Target train
+      description: Choose the smallest plausible release lane. Triage can retarget later.
+      options:
+        - "target:v2.86.1"
+        - "target:v2.87.0"
+        - "target:v2.88.0"
+        - "target:v2.89.0"
+        - "target:v2.90.0"
+        - "target:v2.91.0"
+        - "target:v2.92.0"
+        - "target:v2.93+"
+        - "target:v2.148+"
     validations:
       required: true
   - type: textarea

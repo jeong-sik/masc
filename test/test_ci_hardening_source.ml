@@ -436,6 +436,17 @@ let test_mermaid_xss_contracts () =
        (file_contains_pattern "dashboard/src/components/command/helpers.ts"
           "securityLevel: 'loose'"))
 
+let test_http_client_fd_safety_contracts () =
+  check bool "masc http client forbids direct Cohttp client construction in docs" true
+    (file_contains_pattern "lib/masc_http_client/masc_http_client.ml"
+       "instead of [Cohttp_eio.Client.make] directly");
+  check bool "voice bridge builds clients through masc http client" true
+    (file_contains_pattern "lib/voice/voice_bridge_core.ml"
+       "Masc_http_client.make_closing_client");
+  check bool "council thread persistence uses closing client" true
+    (file_contains_pattern "lib/council/thread_persist.ml"
+       "Masc_http_client.make_closing_client")
+
 let () =
   run "ci_hardening_source"
     [
@@ -468,6 +479,8 @@ let () =
            test_case "dashboard timeout guard contracts" `Quick
              test_dashboard_timeout_guard_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
+           test_case "http client fd safety contracts" `Quick
+             test_http_client_fd_safety_contracts;
            test_case "room-truth adaptive timeout contracts" `Quick
              test_room_truth_adaptive_timeout_contracts;
          ]);

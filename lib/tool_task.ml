@@ -11,6 +11,7 @@ type result = bool * string
 type context = {
   config: Room.config;
   agent_name: string;
+  sw: Eio.Switch.t option;
 }
 
 open Tool_args
@@ -299,6 +300,7 @@ let handle_transition ctx args =
           Eval_calibration.format_few_shot_block
             (Eval_calibration.select_examples ~max_examples:3) in
         (match (Anti_rationalization.review
+           ?sw:ctx.sw
            ~on_verdict ~few_shot_block ar_req).verdict with
          | Anti_rationalization.Reject reason -> Some reason
          | Anti_rationalization.Approve -> None)

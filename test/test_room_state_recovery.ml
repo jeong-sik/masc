@@ -42,7 +42,7 @@ let test_read_state_repairs_empty_object () =
       check int "message_seq default" 0 state.message_seq;
       check (list string) "active_agents default" [] state.active_agents;
 
-      let repaired_json = Yojson.Safe.from_file (state_path base_dir) in
+      let repaired_json = Room.read_json config (state_path base_dir) in
       check string "repaired protocol" "0.1.0"
         (Safe_ops.json_string ~default:"" "protocol_version" repaired_json);
       check int "repaired message_seq" 0
@@ -83,7 +83,7 @@ let test_read_state_recovers_legacy_active_agent_entries () =
         state.active_agents;
 
       let open Yojson.Safe.Util in
-      let repaired_json = Yojson.Safe.from_file (state_path base_dir) in
+      let repaired_json = Room.read_json config (state_path base_dir) in
       let repaired_agents =
         repaired_json |> member "active_agents" |> to_list |> List.map to_string
       in

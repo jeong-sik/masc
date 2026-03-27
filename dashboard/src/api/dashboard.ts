@@ -148,6 +148,31 @@ export function fetchAgentRelations(agentName: string): Promise<AgentRelationsRe
   return get(`/api/v1/agent-relations?agent_name=${encodeURIComponent(agentName)}`)
 }
 
+export interface ConfigEntry {
+  env: string
+  description: string
+  value: string | null
+  default: string
+  source: 'env' | 'default'
+  sensitive: boolean
+}
+
+export interface DashboardConfigResponse {
+  generated_at: string
+  server: {
+    version: string
+    git_commit: string | null
+    ocaml_version: string
+    uptime_seconds: number
+    pid: number
+  }
+  categories: Record<string, ConfigEntry[]>
+}
+
+export function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
+  return get('/api/v1/dashboard/config')
+}
+
 export function fetchDashboardRoomTruth(): Promise<DashboardRoomTruthResponse> {
   return get('/api/v1/dashboard/room-truth', { timeoutMs: ROOM_TRUTH_GET_TIMEOUT_MS })
 }

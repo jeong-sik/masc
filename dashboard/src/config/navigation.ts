@@ -16,6 +16,7 @@ export type SurfaceSectionId =
   | 'experiments'
   | 'autoresearch'
   | 'harness'
+  | 'config'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 const OPERATIONS_COMMAND_SURFACES = new Set([
@@ -207,6 +208,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '세이프티 하네스',
       description: 'Evaluator, compaction, DNA safety rail이 실험을 어떻게 감시하는지 봅니다.',
       params: { section: 'harness' },
+    },
+    {
+      id: 'config',
+      label: '서버 설정',
+      description: '환경변수, 트랜스포트, 추론 모델 등 서버 설정을 확인합니다.',
+      params: { section: 'config' },
     },
   ],
 }

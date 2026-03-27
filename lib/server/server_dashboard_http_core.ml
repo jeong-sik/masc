@@ -65,19 +65,25 @@ let dashboard_session_list_timeout_s =
   float_of_env_default "MASC_DASHBOARD_SESSION_LIST_TIMEOUT_S"
     ~default:5.0 ~min_v:1.0 ~max_v:30.0
 
+let dashboard_session_list_limit =
+  int_of_env_default "MASC_DASHBOARD_SESSION_LIST_LIMIT"
+    ~default:200 ~min_v:20 ~max_v:1000
+
 let dashboard_active_or_recent_sessions ~clock config =
   let cutoff_unix = Time_compat.now () -. 86400.0 in
   let cutoff_iso = Dashboard_utils.iso_of_unix cutoff_unix in
   let sessions =
     match
       Eio.Time.with_timeout clock dashboard_session_list_timeout_s (fun () ->
-          Ok (Team_session_store.list_sessions ~since_unix:cutoff_unix config))
+          Ok
+            (Team_session_store.list_sessions ~since_unix:cutoff_unix
+               ~limit:dashboard_session_list_limit config))
     with
     | Ok rows -> rows
     | Error `Timeout ->
         Log.Dashboard.warn
-          "dashboard session list timed out after %.0fs; serving without session rows"
-          dashboard_session_list_timeout_s;
+          "dashboard session list timed out after %.0fs (limit=%d); serving without session rows"
+          dashboard_session_list_timeout_s dashboard_session_list_limit;
         []
   in
   sessions

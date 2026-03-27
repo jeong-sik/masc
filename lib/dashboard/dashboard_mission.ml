@@ -37,6 +37,10 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
   json : Yojson.Safe.t;
 }
 
+let dashboard_session_list_limit =
+  Dashboard_http_helpers.int_of_env_default "MASC_DASHBOARD_SESSION_LIST_LIMIT"
+    ~default:200 ~min_v:20 ~max_v:1000
+
 let active_or_recent_sessions config =
   let cutoff_unix = Time_compat.now () -. 86400.0 in
   let cutoff_iso = iso_of_unix cutoff_unix in
@@ -45,7 +49,8 @@ let active_or_recent_sessions config =
     | Running | Paused -> true
     | _ -> session.updated_at_iso >= cutoff_iso
   in
-  Team_session_store.list_sessions ~since_unix:cutoff_unix config
+  Team_session_store.list_sessions ~since_unix:cutoff_unix
+    ~limit:dashboard_session_list_limit config
   |> List.filter is_active_or_recent
 
 let room_scope_cache_segment (config : Room_utils.config) =

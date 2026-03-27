@@ -21,6 +21,11 @@ async function refreshAutoresearchLabSurface(): Promise<void> {
   await refreshAutoresearchSurface()
 }
 
+async function refreshHarnessLabSurface(): Promise<void> {
+  const { refreshHarnessSurface } = await import('./components/harness-health')
+  await refreshHarnessSurface()
+}
+
 async function refreshGovernanceSurface(): Promise<void> {
   const { refreshGovernance } = await import('./components/governance-store')
   await refreshGovernance()
@@ -34,6 +39,7 @@ export type RefreshTask =
   | 'board'
   | 'goals'
   | 'autoresearch'
+  | 'harness'
   | 'commandCurrentSurface'
   | 'commandChainSummary'
   | 'commandSwarm'
@@ -91,6 +97,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'autoresearch') {
         return ['autoresearch']
       }
+      if (routeState.params.section === 'harness') {
+        return ['harness']
+      }
       if (routeState.params.section === 'overview') {
         return ['roomTruth']
       }
@@ -109,6 +118,7 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
   board: () => { void refreshBoard() },
   goals: () => { void refreshGoals() },
   autoresearch: () => { void refreshAutoresearchLabSurface() },
+  harness: () => { void refreshHarnessLabSurface() },
   commandCurrentSurface: () => { void refreshCommandPlaneCurrentSurface({ force: true }) },
   commandChainSummary: () => { void refreshCommandPlaneChainSummary({ force: true }) },
   commandSwarm: () => { void refreshCommandPlaneSwarm(undefined, undefined, { force: true }) },

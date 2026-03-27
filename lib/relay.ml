@@ -62,10 +62,7 @@ let calibration_mutex = Eio.Mutex.create ()
 (** Record actual token count vs estimated for calibration.
     Keeps the last 10 samples and updates a moving-average correction factor. *)
 let record_actual_tokens ~estimated ~actual =
-  let enabled = match Sys.getenv_opt "MASC_RELAY_CALIBRATION_ENABLED" with
-    | Some "false" | Some "0" -> false
-    | _ -> true
-  in
+  let enabled = Env_config.Dashboard.Relay.calibration_enabled in
   if enabled then
     Eio.Mutex.use_rw ~protect:true calibration_mutex (fun () ->
       calibration.samples <- (estimated, actual) :: calibration.samples;
@@ -88,8 +85,7 @@ let get_calibration_info () =
     `Assoc [
       ("correction_factor", `Float calibration.correction_factor);
       ("sample_count", `Int (List.length calibration.samples));
-      ("enabled", `Bool (match Sys.getenv_opt "MASC_RELAY_CALIBRATION_ENABLED" with
-        | Some "false" | Some "0" -> false | _ -> true));
+      ("enabled", `Bool Env_config.Dashboard.Relay.calibration_enabled);
     ])
 
 (** Estimate context usage based on heuristics *)

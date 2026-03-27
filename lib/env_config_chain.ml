@@ -9,16 +9,16 @@ open Env_config_core
 
 module Limits = struct
   let max_nodes =
-    get_int ~default:100 "MASC_CHAIN_MAX_NODES"
+    max 1 (get_int ~default:100 "MASC_CHAIN_MAX_NODES")
 
   let max_depth =
-    get_int ~default:10 "MASC_CHAIN_MAX_DEPTH"
+    max 1 (get_int ~default:20 "MASC_CHAIN_MAX_DEPTH")
 
   let max_fanout =
-    get_int ~default:5 "MASC_CHAIN_MAX_FANOUT"
+    max 1 (get_int ~default:20 "MASC_CHAIN_MAX_FANOUT")
 
   let max_concurrency =
-    get_int ~default:4 "MASC_CHAIN_MAX_CONCURRENCY"
+    max 1 (get_int ~default:10 "MASC_CHAIN_MAX_CONCURRENCY")
 end
 
 (** {1 Chain Paths} *)

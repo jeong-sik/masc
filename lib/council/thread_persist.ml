@@ -236,12 +236,12 @@ let looks_like_localhost host =
 
 let neo4j_http_base_uri () : (Uri.t, string) result =
   (* Prefer explicit HTTP URI if provided to avoid bolt/http port mismatches. *)
-  match Sys.getenv_opt "NEO4J_HTTP_URI" with
-  | Some uri_str when String.trim uri_str <> "" ->
+  match Env_config.Server.External.neo4j_http_uri_opt () with
+  | Some uri_str ->
       Ok (Uri.of_string uri_str)
-  | _ ->
+  | None ->
       let uri_str =
-        Sys.getenv_opt "NEO4J_URI" |> Option.value ~default:"http://localhost:7474"
+        Env_config.Server.External.neo4j_uri_opt () |> Option.value ~default:"http://localhost:7474"
       in
       let uri = Uri.of_string uri_str in
       match Uri.scheme uri with
@@ -279,8 +279,8 @@ let neo4j_tx_commit_uri () : (Uri.t, string) result =
       Ok (Uri.of_string (base_str ^ "/db/neo4j/tx/commit"))
 
 let neo4j_auth_header () : (string * string, string) result =
-  let user = Sys.getenv_opt "NEO4J_USER" |> Option.value ~default:"neo4j" in
-  let password = Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"" in
+  let user = Env_config.Server.External.neo4j_user () in
+  let password = Env_config.Server.External.neo4j_password_opt () |> Option.value ~default:"" in
   if String.trim password = "" then
     Error "NEO4J_PASSWORD not set (Neo4j persistence disabled)"
   else

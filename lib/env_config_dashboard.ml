@@ -59,7 +59,7 @@ end
 
 module Relay = struct
   let calibration_enabled =
-    get_bool ~default:false "MASC_RELAY_CALIBRATION_ENABLED"
+    get_bool ~default:true "MASC_RELAY_CALIBRATION_ENABLED"
 end
 
 (** {1 Orchestrator} *)

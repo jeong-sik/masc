@@ -118,10 +118,10 @@ end
 
 module Rate = struct
   let limit =
-    get_int ~default:100 "MASC_RATE_LIMIT"
+    get_float ~default:60.0 "MASC_RATE_LIMIT"
 
   let burst =
-    get_int ~default:20 "MASC_RATE_BURST"
+    get_int ~default:150 "MASC_RATE_BURST"
 end
 
 (** {1 Agent Identity} *)
@@ -180,7 +180,7 @@ module Misc = struct
     get_string ~default:"filesystem" "MASC_BOARD_BACKEND"
 
   let board_flush_interval_sec =
-    get_float ~default:10.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"
+    get_float ~default:30.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"
 
   let circuit_threshold =
     get_int ~default:5 "MASC_CIRCUIT_THRESHOLD"

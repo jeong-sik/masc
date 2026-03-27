@@ -30,27 +30,16 @@ open Chain_types
 
 (** Maximum allowed chain depth to prevent stack overflow *)
 let security_max_depth =
-  match Sys.getenv_opt "MASC_CHAIN_MAX_DEPTH" with
-  | Some s -> (try max 1 (int_of_string s) with Failure _ -> 20)
-  | None -> 20
+  Env_config.Chain.Limits.max_depth
 
-(** Maximum allowed concurrency to prevent resource exhaustion *)
 let security_max_concurrency =
-  match Sys.getenv_opt "MASC_CHAIN_MAX_CONCURRENCY" with
-  | Some s -> (try max 1 (int_of_string s) with Failure _ -> 10)
-  | None -> 10
+  Env_config.Chain.Limits.max_concurrency
 
-(** Maximum total nodes in a chain to prevent memory exhaustion *)
 let security_max_nodes =
-  match Sys.getenv_opt "MASC_CHAIN_MAX_NODES" with
-  | Some s -> (try max 1 (int_of_string s) with Failure _ -> 100)
-  | None -> 100
+  Env_config.Chain.Limits.max_nodes
 
-(** Maximum nodes in a single fanout/parallel to prevent exponential explosion *)
 let security_max_fanout =
-  match Sys.getenv_opt "MASC_CHAIN_MAX_FANOUT" with
-  | Some s -> (try max 1 (int_of_string s) with Failure _ -> 20)
-  | None -> 20
+  Env_config.Chain.Limits.max_fanout
 
 (** {1 Safe JSON Parsing Helpers - Explicit Error Handling} *)
 

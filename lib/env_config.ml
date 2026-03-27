@@ -122,7 +122,7 @@ let to_json () : Yojson.Safe.t =
       "telemetry_enabled", bool_val Server.Runtime.telemetry_enabled;
       "openai_compat", bool_val Server.Runtime.openai_compat;
       "dispatch_v2", bool_val Server.Runtime.dispatch_v2;
-      "rate_limit", int_val Server.Rate.limit;
+      "rate_limit", float_val Server.Rate.limit;
       "rate_burst", int_val Server.Rate.burst;
       "build_git_commit", str (Server.Misc.build_git_commit ());
     ];

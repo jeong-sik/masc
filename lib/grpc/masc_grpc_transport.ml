@@ -8,7 +8,7 @@ type t =
   | Local
 
 let from_env () =
-  match Sys.getenv_opt "MASC_AGENT_TRANSPORT" with
+  match Env_config.Transport.agent_transport_opt () with
   | Some "grpc" -> Grpc
   | Some "http" -> Http
   | Some "ws" | Some "websocket" -> Ws

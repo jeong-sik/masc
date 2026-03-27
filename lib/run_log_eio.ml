@@ -9,14 +9,10 @@
 open Types
 
 let enabled () =
-  match Sys.getenv_opt "MASC_CHAIN_RUN_LOG" with
-  | Some "0" | Some "false" | Some "no" -> false
-  | _ -> true
+  Env_config.Chain.run_log_enabled ()
 
 let stream_enabled () =
-  match Sys.getenv_opt "MASC_CHAIN_RUN_LOG_STREAM" with
-  | Some "1" | Some "true" | Some "yes" | Some "on" -> true
-  | _ -> false
+  Env_config.Chain.run_log_stream ()
 
 let default_log_path () =
   let home =
@@ -41,9 +37,9 @@ let read_lines_tail ~max_bytes:_ ~max_lines path =
     all_lines |> List.to_seq |> Seq.drop (len - max_lines) |> List.of_seq
 
 let log_path () =
-  match Sys.getenv_opt "MASC_CHAIN_RUN_LOG_PATH" with
-  | Some p when String.length p > 0 -> p
-  | _ -> default_log_path ()
+  match Env_config.Chain.run_log_path_opt () with
+  | Some p -> p
+  | None -> default_log_path ()
 
 (** Write mutex - created lazily per-domain *)
 let write_mutex = Eio.Mutex.create ()

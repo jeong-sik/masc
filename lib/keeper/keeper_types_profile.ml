@@ -5,10 +5,7 @@
     Depends only on Keeper_config (no Keeper_types dependency). *)
 
 include Keeper_config
-let keeper_debug =
-  match Sys.getenv_opt "MASC_KEEPER_DEBUG" with
-  | Some "1" -> true
-  | _ -> false
+let keeper_debug = Env_config.KeeperRuntime.debug
 
 type 'a context = {
   config: Room.config;

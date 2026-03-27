@@ -28,15 +28,9 @@ type t = {
 let default_rate = 60.0  (* 12+ concurrent keepers need higher throughput *)
 let default_burst = 150
 
-let rate_from_env () =
-  Sys.getenv_opt "MASC_RATE_LIMIT"
-  |> Option.map float_of_string
-  |> Option.value ~default:default_rate
+let rate_from_env () = Env_config.Rate_bucket.rate
 
-let burst_from_env () =
-  Sys.getenv_opt "MASC_RATE_BURST"
-  |> Option.map int_of_string
-  |> Option.value ~default:default_burst
+let burst_from_env () = Env_config.Rate_bucket.burst
 
 (** {1 Limiter Creation} *)
 

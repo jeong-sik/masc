@@ -456,8 +456,7 @@ let model_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
           worker_class_text role_text spawn_prompt
       in
       (match
-        Oas_worker.run_named ~cascade_name:(match Sys.getenv_opt "MASC_ROUTING_CASCADE" with
-          | Some s when String.trim s <> "" -> String.trim s | _ -> "routing_judge")
+        Oas_worker.run_named ~cascade_name:(Env_config.Model_defaults.routing_cascade ())
           ~system_prompt:"You are a routing judge for a hybrid swarm. Output only JSON."
           ~goal:prompt ~max_turns:1
           ~temperature:0.0 ~max_tokens:220 ()

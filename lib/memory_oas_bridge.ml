@@ -15,10 +15,7 @@
 
 (** Default importance for memories stored via OAS Memory.store.
     Configurable via MASC_MEMORY_OAS_DEFAULT_IMPORTANCE. *)
-let default_importance () =
-  match Sys.getenv_opt "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE" with
-  | Some s -> (try max 1 (min 10 (int_of_string s)) with Failure _ -> 5)
-  | None -> 5
+let default_importance () = Env_config.Memory_oas.default_importance
 
 (** Extract importance from JSON value if present, else use default. *)
 let importance_of_json (json : Yojson.Safe.t) : int =

@@ -80,13 +80,7 @@ let quality_from_result ~success ~message ~attempts =
     ]
 
 let read_only_retry_limit () =
-  match Sys.getenv_opt "MASC_TOOL_READONLY_RETRY_LIMIT" with
-  | Some raw ->
-      (try
-         let parsed = int_of_string (String.trim raw) in
-         max 1 (min 5 parsed)
-       with Failure _ -> 2)
-  | None -> 2
+  Env_config.Tools.readonly_retry_limit
 
 let is_retryable_message message =
   (* Tool-level timeouts must not be retried — retrying a 30s timeout
@@ -279,11 +273,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       (Printf.sprintf "tool call failed: %s" name);
 
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
-  let telemetry_enabled =
-    match Sys.getenv_opt "MASC_TELEMETRY_ENABLED" with
-    | Some "false" | Some "0" -> false
-    | _ -> true  (* Default: enabled *)
-  in
+  let telemetry_enabled = Env_config_core.telemetry_enabled () in
   if telemetry_enabled then
     (match state.Mcp_server.fs with
      | Some fs ->

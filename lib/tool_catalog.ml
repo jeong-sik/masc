@@ -184,7 +184,7 @@ let public_mcp_set : (string, unit) Hashtbl.t =
   List.iter (fun name -> Hashtbl.replace tbl name ()) public_mcp_tools;
   (* MASC_PUBLIC_TOOLS_EXTRA: comma-separated tool names to add at runtime.
      Example: MASC_PUBLIC_TOOLS_EXTRA=masc_goal_upsert,masc_pause *)
-  (match Sys.getenv_opt "MASC_PUBLIC_TOOLS_EXTRA" with
+  (match Env_config.Tools.public_tools_extra_opt () with
    | Some raw ->
        String.split_on_char ',' raw
        |> List.iter (fun s ->
@@ -195,10 +195,7 @@ let public_mcp_set : (string, unit) Hashtbl.t =
 
 let is_public_mcp name = Hashtbl.mem public_mcp_set name
 
-let full_surface_override () =
-  match Sys.getenv_opt "MASC_FULL_SURFACE" with
-  | Some "1" | Some "true" -> true
-  | _ -> false
+let full_surface_override () = Env_config.Tools.full_surface_enabled ()
 
 let implementation_status_to_string = function
   | Real -> "real"

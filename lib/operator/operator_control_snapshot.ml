@@ -420,10 +420,7 @@ let parse_snapshot_view = function
    (dashboard SSE polling, multiple MCP clients). *)
 let _snapshot_cache : (string * Yojson.Safe.t * float) option ref = ref None
 
-let _snapshot_ttl_s =
-  match Sys.getenv_opt "MASC_OPERATOR_CACHE_TTL" with
-  | Some s -> (try Float.of_string s with Failure _ -> 30.0)
-  | None -> 30.0
+let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
 
 let invalidate_snapshot_cache () = _snapshot_cache := None
 

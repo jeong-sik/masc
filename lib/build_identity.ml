@@ -99,7 +99,7 @@ let started_at_iso = iso8601_of_unix started_at_unix
     Env var check + git probe are fast and side-effect-free. *)
 let commit =
   resolve_commit
-    ~env_value:(Sys.getenv_opt "MASC_BUILD_GIT_COMMIT")
+    ~env_value:(Env_config_core.build_git_commit_opt ())
     ~probe:probe_git_commit
 
 let current () =

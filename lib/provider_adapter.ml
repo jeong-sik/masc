@@ -469,7 +469,7 @@ let gemini_direct_available () =
   env_present google_cloud_project_env || env_present "GEMINI_API_KEY"
 
 let configured_default_model_label_result () =
-  match Sys.getenv_opt "MASC_DEFAULT_CASCADE" with
+  match Env_config.Model_defaults.default_cascade_opt () with
   | Some raw ->
       let labels = split_csv_nonempty raw in
       (match labels with

@@ -161,16 +161,12 @@ let record_outcome ~agent_name ~pattern ~evidence_id ~success =
     High-confidence patterns (100%) with fewer evidence may still qualify
     when adaptive thresholding is enabled. *)
 let min_evidence () =
-  match Sys.getenv_opt "MASC_PROC_MIN_EVIDENCE" with
-  | Some s -> (try max 1 (int_of_string s) with Failure _ -> 3)
-  | None -> 3
+  Env_config.ProcMemory.min_evidence
 
 (** Minimum confidence required for crystallization.
     Configurable via MASC_PROC_MIN_CONFIDENCE (default: 0.7). *)
 let min_confidence () =
-  match Sys.getenv_opt "MASC_PROC_MIN_CONFIDENCE" with
-  | Some s -> (try max 0.0 (min 1.0 (float_of_string s)) with Failure _ -> 0.7)
-  | None -> 0.7
+  Env_config.ProcMemory.min_confidence
 
 (** Adaptive crystallization check.
     Standard: evidence >= min_evidence AND confidence >= min_confidence.

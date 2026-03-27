@@ -93,8 +93,8 @@ let reset_for_test () =
 
 (** Check MASC_BOARD_BACKEND env var. Returns true if JSONL is explicitly forced. *)
 let jsonl_forced () =
-  match Sys.getenv_opt "MASC_BOARD_BACKEND" with
-  | Some s -> String.lowercase_ascii (String.trim s) = "jsonl"
+  match Env_config.Board.backend_opt () with
+  | Some s -> String.lowercase_ascii s = "jsonl"
   | None -> false
 
 (** Get backend or fail.

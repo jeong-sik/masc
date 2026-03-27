@@ -118,30 +118,6 @@ let read_json_file_opt path =
   else
     None
 
-let rec find_repo_root_with_script dir depth =
-  if depth < 0 then None
-  else
-    let script_path =
-      Filename.concat dir "scripts/harness/workload/agent_swarm_live.sh"
-    in
-    if Sys.file_exists script_path then Some script_path
-    else
-      let parent = Filename.dirname dir in
-      if String.equal parent dir then None
-      else find_repo_root_with_script parent (depth - 1)
-
-let resolve_swarm_live_script () =
-  match Sys.getenv_opt "MASC_SWARM_LIVE_SCRIPT" with
-  | Some value when String.trim value <> "" ->
-      let path = String.trim value in
-      if Sys.file_exists path then Some path else None
-  | _ ->
-      let seeds =
-        [ Sys.getcwd (); Filename.dirname Sys.executable_name ]
-        |> List.sort_uniq String.compare
-      in
-      List.find_map (fun seed -> find_repo_root_with_script seed 8) seeds
-
 type process_result = {
   exit_code : int;
   stdout : string;

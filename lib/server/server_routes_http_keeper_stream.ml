@@ -104,11 +104,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
             ("streaming", `Bool false);
           ])
       "keeper tool call failed: masc_keeper_msg";
-  let telemetry_enabled =
-    match Sys.getenv_opt "MASC_TELEMETRY_ENABLED" with
-    | Some "false" | Some "0" -> false
-    | _ -> true
-  in
+  let telemetry_enabled = Env_config_core.telemetry_enabled () in
   if telemetry_enabled then (
     match state.Mcp_server.fs with
     | Some fs ->
@@ -309,11 +305,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
             ("streaming", `Bool true);
           ])
       "keeper tool call failed: masc_keeper_msg";
-  let telemetry_enabled =
-    match Sys.getenv_opt "MASC_TELEMETRY_ENABLED" with
-    | Some "false" | Some "0" -> false
-    | _ -> true
-  in
+  let telemetry_enabled = Env_config_core.telemetry_enabled () in
   if telemetry_enabled then (
     match state.Mcp_server.fs with
     | Some fs ->

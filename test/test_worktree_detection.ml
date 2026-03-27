@@ -53,8 +53,17 @@ let test_resolve_masc_base_path () =
   let worktree_path = "/Users/dancer/me/.worktrees/masc-agent-meta" in
   if Sys.file_exists worktree_path then begin
     let result = Room_utils.resolve_masc_base_path worktree_path in
-    check string "worktree base resolves to main repo" "/Users/dancer/me" result
+    check string "worktree base stays explicit" worktree_path result
   end
+
+let test_default_config_preserves_explicit_worktree_path () =
+  let base_path = "/tmp/masc-repo/.worktrees/feature-a" in
+  let config = Room_utils.default_config base_path in
+  check string "config base path preserved" base_path config.base_path;
+  check string "workspace path preserved" base_path config.workspace_path;
+  check string "backend base path scoped to worktree"
+    (Filename.concat base_path ".masc")
+    config.backend_config.base_path
 
 (* ============================================ *)
 (* Test Suite                                   *)
@@ -73,6 +82,8 @@ let () =
       test_case "subdir of worktree" `Quick test_find_git_root_subdir;
     ];
     "resolve_base_path", [
-      test_case "worktree resolves to main" `Quick test_resolve_masc_base_path;
+      test_case "worktree path stays explicit" `Quick test_resolve_masc_base_path;
+      test_case "default_config preserves explicit worktree path" `Quick
+        test_default_config_preserves_explicit_worktree_path;
     ];
   ]

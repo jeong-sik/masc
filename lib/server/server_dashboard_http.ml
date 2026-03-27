@@ -214,9 +214,14 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     mark_cached_surface_attempt _execution_cache;
     let started_at = Unix.gettimeofday () in
     try
-      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
+      let command_plane_summary, swarm_status =
+        command_plane_summary_with_swarm_status ~allow_initializing:false ~state
+      in
+      let digest_json = operator_digest_json_if_ready () in
+      run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config:room_config
         (fun ~config ~sw ->
-          Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
+          Dashboard_execution.json ?digest_json ?command_plane_summary
+            ?swarm_status ~light:true ~config ~sw ~clock ~proc_mgr ()
           |> patch_surface_json_for_running_keepers config
           |> with_projection_diagnostics ~surface:"execution" ~started_at
                ~extra:
@@ -267,10 +272,18 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
   let light = not full_mode in
   let compute ?actor ?fixture ~light () =
     let started_at = Unix.gettimeofday () in
+    let command_plane_summary, swarm_status =
+      command_plane_summary_with_swarm_status ~allow_initializing:false ~state
+    in
+    let digest_json =
+      if default_dashboard_actor actor then operator_digest_json_if_ready ()
+      else None
+    in
     run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
       ~config:state.Mcp_server.room_config
       (fun ~config ~sw ->
-        Dashboard_execution.json ?actor ?fixture ~light
+        Dashboard_execution.json ?actor ?fixture ?digest_json
+          ?command_plane_summary ?swarm_status ~light
           ~config ~sw ~clock
           ~proc_mgr:state.Mcp_server.proc_mgr ()
         |> patch_surface_json_for_running_keepers config

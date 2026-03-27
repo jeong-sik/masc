@@ -209,7 +209,6 @@ let handle_set_room (ctx : context) : result option =
   if not (Sys.file_exists expanded && Sys.is_directory expanded) then
     Some (false, Printf.sprintf "Directory not found: %s" expanded)
   else
-    (* Resolve to git root so worktree paths find the shared .masc/ directory *)
     let resolved = Room_utils_backend_setup.resolve_masc_base_path expanded in
     let masc_dir = Filename.concat resolved ".masc" in
     if not (Sys.file_exists masc_dir && Sys.is_directory masc_dir) then

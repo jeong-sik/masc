@@ -16,6 +16,10 @@ val default_config : label:string -> interval_s:float -> config
 (** [default_config ~label ~interval_s] returns a config with
     [max_backoff_s = 600.0], [failure_threshold = 3], [timeout_s = 10.0]. *)
 
+exception Skip of string
+(** Raised by [compute] when prerequisites are missing but this should not
+    count as a refresh failure or trip backoff. *)
+
 val start :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

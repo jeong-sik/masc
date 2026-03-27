@@ -33,6 +33,38 @@ let contains str substr =
     true
   with Not_found -> false
 
+let reset_cached_surface
+    (surface : Lib.Server_dashboard_http_cache.cached_surface) json =
+  surface.json <- json;
+  Lib.Server_dashboard_http_cache.invalidate_cached_surface surface
+
+let reset_dashboard_mission_caches () =
+  Lib.Dashboard_cache.invalidate_all ();
+  Lib.Operator_control.invalidate_snapshot_cache ();
+  reset_cached_surface
+    Lib.Server_dashboard_http._operator_snapshot_cache
+    (`Assoc [ ("status", `String "initializing"); ("generated_at", `String (Types.now_iso ())) ]);
+  reset_cached_surface
+    Lib.Server_dashboard_http._operator_digest_cache
+    (`Assoc [ ("health", `String "initializing"); ("generated_at", `String (Types.now_iso ())) ]);
+  reset_cached_surface
+    Lib.Server_dashboard_http._mission_cache
+    (`Assoc
+      [
+        ("generated_at", `String (Types.now_iso ()));
+        ("summary", `Assoc [ ("room_health", `String "initializing") ]);
+        ("incidents", `List []);
+        ("recommended_actions", `List []);
+        ("command_focus", `Assoc []);
+        ("operator_targets", `Assoc []);
+        ("attention_queue", `List []);
+        ("sessions", `List []);
+        ("session_briefs", `List []);
+        ("agent_briefs", `List []);
+        ("keeper_briefs", `List []);
+        ("internal_signals", `List []);
+      ])
+
 let write_pending_confirm config session_id =
   let operator_dir = Filename.concat (Room_utils.masc_dir config) "operator" in
   Room_utils.mkdir_p operator_dir;
@@ -466,10 +498,9 @@ let test_dashboard_mission_http_full_contract () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       seed_room config session_id;
+      reset_dashboard_mission_caches ();
       (* Clear stale cache entries from prior tests to avoid cross-test pollution.
          Both dashboard-level and operator snapshot caches must be invalidated. *)
-      Lib.Dashboard_cache.invalidate_all ();
-      Lib.Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio.Switch.run (fun sw ->
         let json =
@@ -503,6 +534,7 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
       let config = Room_utils.default_config dir in
       let session_id = "ts-mission-http-default-001" in
       seed_room config session_id;
+      reset_dashboard_mission_caches ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio.Switch.run (fun sw ->
         let json =
@@ -538,8 +570,7 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       seed_room config session_id;
-      Lib.Dashboard_cache.invalidate_all ();
-      Lib.Operator_control.invalidate_snapshot_cache ();
+      reset_dashboard_mission_caches ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       Eio.Switch.run (fun sw ->
         let json =
@@ -564,6 +595,50 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
          |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));
       ))
 
+let test_dashboard_mission_http_default_waits_for_upstream_caches () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room_utils.default_config dir in
+      let session_id = "ts-mission-http-waiting-001" in
+      seed_room config session_id;
+      reset_dashboard_mission_caches ();
+      Lib.Server_dashboard_http_cache.mark_cached_surface_attempt
+        Lib.Server_dashboard_http._operator_snapshot_cache;
+      Lib.Server_dashboard_http_cache.mark_cached_surface_attempt
+        Lib.Server_dashboard_http._operator_digest_cache;
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_mission_http_json
+            ~state
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/mission")
+        in
+        let open Yojson.Safe.Util in
+        check string "waiting mission cache stays initializing" "initializing"
+          (json |> member "projection_diagnostics" |> member "cache_state"
+          |> to_string);
+        check bool "waiting mission does not record first success" true
+          (json |> member "projection_diagnostics" |> member "last_success_at"
+           = `Null);
+        check string "waiting mission keeps room health initializing"
+          "initializing"
+          (json |> member "summary" |> member "room_health" |> to_string);
+        let waiting_for =
+          json |> member "projection_diagnostics" |> member "waiting_for"
+          |> to_list |> List.map to_string
+        in
+        check bool "waiting mission reports snapshot dependency" true
+          (List.mem "operator_snapshot" waiting_for);
+        check bool "waiting mission reports digest dependency" true
+          (List.mem "operator_digest" waiting_for);
+      ))
+
 let test_dashboard_mission_http_cache_isolation () =
   let dir_a = test_dir () in
   let dir_b = test_dir () in
@@ -582,6 +657,7 @@ let test_dashboard_mission_http_cache_isolation () =
       let config_b = Room_utils.default_config dir_b in
       seed_room config_a session_a;
       seed_room config_b session_b;
+      reset_dashboard_mission_caches ();
       let state_a =
         Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir_a ()
       in
@@ -669,6 +745,9 @@ let () =
             test_dashboard_mission_http_full_contract;
           Alcotest.test_case "http mission default bootstraps first success"
             `Quick test_dashboard_mission_http_default_bootstraps_first_success;
+          Alcotest.test_case
+            "http mission waits for upstream caches without timeout"
+            `Quick test_dashboard_mission_http_default_waits_for_upstream_caches;
           Alcotest.test_case "keeper tool audit fallback" `Quick
             test_dashboard_mission_keeper_tool_audit_fallback;
           Alcotest.test_case "http mission cache stays room-scoped" `Quick

@@ -14,6 +14,8 @@ type config = {
   on_error : (exn -> unit) option;
 }
 
+exception Skip of string
+
 let default_config ~label ~interval_s =
   {
     label;
@@ -68,6 +70,9 @@ let start ~sw ~clock ~config ~compute ~on_result =
          Log.Dashboard.warn "%s warm cache skipped (%.1fs timeout)" config.label
            (Time_compat.now () -. t0)
      with
+     | Skip reason ->
+         Log.Dashboard.info "%s warm cache waiting: %s"
+           config.label reason
      | exn ->
        if should_reraise_cancel exn then
          raise exn
@@ -103,7 +108,11 @@ let start ~sw ~clock ~config ~compute ~on_result =
              notify_error config timeout_exn;
              log_refresh_failure ~config ~consecutive_failures ~current_interval
                ~dt timeout_exn
-       with exn ->
+       with
+       | Skip reason ->
+           Log.Dashboard.info "%s refresh skipped: %s"
+             config.label reason
+       | exn ->
          if should_reraise_cancel exn then raise exn;
          let dt = Time_compat.now () -. t0 in
          notify_error config exn;

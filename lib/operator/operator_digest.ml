@@ -5,6 +5,23 @@ include Operator_digest_types
 include Operator_digest_session
 open Operator_digest_guidance
 
+let slow_digest_phase_threshold_ms = 1000.0
+let slow_digest_total_threshold_ms = 5000.0
+
+let log_digest_phase_if_slow ~actor ~target_type ~phase started_at =
+  let finished_at = Time_compat.now () in
+  let phase_ms = (finished_at -. started_at) *. 1000.0 in
+  if phase_ms >= slow_digest_phase_threshold_ms then
+    Log.Dashboard.info
+      "[operator_digest] slow phase actor=%s target=%s phase=%s %.0fms"
+      actor target_type phase phase_ms;
+  finished_at
+
+let assoc_member key json =
+  match json with
+  | `Assoc _ -> U.member key json
+  | _ -> `Assoc []
+
 let build_room_attention_items ?command_plane_summary config =
   let command_plane_summary =
     match command_plane_summary with
@@ -13,14 +30,14 @@ let build_room_attention_items ?command_plane_summary config =
   in
   let microarch_signals =
     command_plane_summary
-    |> U.member "operations"
-    |> U.member "microarch"
-    |> U.member "signals"
+    |> assoc_member "operations"
+    |> assoc_member "microarch"
+    |> assoc_member "signals"
   in
   let intent_summary =
     command_plane_summary
-    |> U.member "intents"
-    |> U.member "summary"
+    |> assoc_member "intents"
+    |> assoc_member "summary"
   in
   let signal_items =
     [
@@ -136,14 +153,14 @@ let room_recommendations ?command_plane_summary config =
   in
   let microarch_signals =
     command_plane_summary
-    |> U.member "operations"
-    |> U.member "microarch"
-    |> U.member "signals"
+    |> assoc_member "operations"
+    |> assoc_member "microarch"
+    |> assoc_member "signals"
   in
   let intent_summary =
     command_plane_summary
-    |> U.member "intents"
-    |> U.member "summary"
+    |> assoc_member "intents"
+    |> assoc_member "summary"
   in
   let signal_recommendations =
     [
@@ -254,22 +271,35 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
   else
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let* target_type = normalize_digest_target_type target_type in
+    let t_start = Time_compat.now () in
     let now = Time_compat.now () in
     let tracked_sessions =
       match sessions with
       | Some s -> s
       | None -> Team_session_store.list_sessions config
     in
+    let t_sessions =
+      log_digest_phase_if_slow ~actor:actor_name ~target_type
+        ~phase:"session_list" t_start
+    in
     let command_plane_digest_json =
       match command_plane_summary with
       | Some summary -> summary
       | None -> Command_plane_v2.summary_json ~sessions:tracked_sessions config
+    in
+    let t_command =
+      log_digest_phase_if_slow ~actor:actor_name ~target_type
+        ~phase:"command_plane_summary" t_sessions
     in
     let swarm_status_json =
       match swarm_status with
       | Some json -> json
       | None ->
           Swarm_status.build_json ~timeline_limit_override:6 config
+    in
+    let t_swarm =
+      log_digest_phase_if_slow ~actor:actor_name ~target_type
+        ~phase:"swarm_status" t_command
     in
     match target_type with
     | "room" ->
@@ -281,10 +311,18 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
         let limited_sessions =
           sessions |> List.to_seq |> Seq.take room_digest_session_limit |> List.of_seq
         in
+        let t_session_digest =
+          log_digest_phase_if_slow ~actor:actor_name ~target_type
+            ~phase:"session_digest" t_swarm
+        in
         let attention_items =
           build_room_attention_items ~command_plane_summary:command_plane_digest_json config
           @ (limited_sessions |> List.concat_map (fun digest -> digest.attention_items))
           |> List.sort compare_attention
+        in
+        let t_attention =
+          log_digest_phase_if_slow ~actor:actor_name ~target_type
+            ~phase:"attention_items" t_session_digest
         in
         let recommended_actions =
           dedup_recommendations
@@ -292,14 +330,50 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
             @ (limited_sessions
               |> List.concat_map (fun digest -> digest.recommended_actions)))
         in
+        let t_recommendations =
+          log_digest_phase_if_slow ~actor:actor_name ~target_type
+            ~phase:"recommended_actions" t_attention
+        in
         let fallback_recommendation_summary =
           summary_of_recommendations ~actor:actor_name recommended_actions
+        in
+        let t_recommendation_summary =
+          log_digest_phase_if_slow ~actor:actor_name ~target_type
+            ~phase:"recommendation_summary" t_recommendations
+        in
+        let pending_confirm_summary = pending_confirm_summary_json ?actor config in
+        let t_pending_confirm =
+          log_digest_phase_if_slow ~actor:actor_name ~target_type
+            ~phase:"pending_confirm_summary" t_recommendation_summary
         in
         let active_guidance =
           active_guidance_fields ~config ~actor:actor_name ~target_type:"room"
             ~target_id:None ~fallback_recommendations:recommended_actions
             ~fallback_summary:fallback_recommendation_summary
         in
+        let t_active_guidance =
+          log_digest_phase_if_slow ~actor:actor_name ~target_type
+            ~phase:"active_guidance" t_pending_confirm
+        in
+        let session_cards_json =
+          `List
+            (List.map (session_card_to_yojson ~actor:actor_name) limited_sessions)
+        in
+        let t_session_cards =
+          log_digest_phase_if_slow ~actor:actor_name ~target_type
+            ~phase:"session_cards" t_active_guidance
+        in
+        let resident_judge_runtime = resident_judge_runtime_json config in
+        let t_resident_runtime =
+          log_digest_phase_if_slow ~actor:actor_name ~target_type
+            ~phase:"resident_judge_runtime" t_session_cards
+        in
+        let total_ms = (t_resident_runtime -. t_start) *. 1000.0 in
+        if total_ms >= slow_digest_total_threshold_ms then
+          Log.Dashboard.warn
+            "[operator_digest] slow digest actor=%s target=%s total=%.0fms tracked_sessions=%d visible_session_cards=%d"
+            actor_name target_type total_ms (List.length tracked_sessions)
+            (List.length limited_sessions);
         Ok
           (`Assoc
             ([
@@ -308,7 +382,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
               ("provenance_summary", operator_surface_contract_json);
-              ("resident_judge_runtime", resident_judge_runtime_json config);
+              ("resident_judge_runtime", resident_judge_runtime);
               ("command_plane", command_plane_digest_json);
               ("swarm_status", swarm_status_json);
               ("role_census", aggregate_worker_class_counts tracked_sessions);
@@ -322,16 +396,13 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
               ("local_runtime", aggregated_local_runtime_json tracked_sessions);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ("attention_summary", summary_of_attention_items attention_items);
-              ("pending_confirm_summary", pending_confirm_summary_json ?actor config);
+              ("pending_confirm_summary", pending_confirm_summary);
               ( "recommended_actions",
                 `List
                   (List.map (recommended_action_to_yojson ~actor:actor_name)
                      recommended_actions) );
               ("recommendation_summary", fallback_recommendation_summary);
-              ( "session_cards",
-                `List
-                  (List.map (session_card_to_yojson ~actor:actor_name) limited_sessions)
-              );
+              ("session_cards", session_cards_json);
               ("worker_cards", `List []);
             ]
             @ active_guidance))

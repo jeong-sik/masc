@@ -467,6 +467,34 @@ let _operator_refresh_interval_s =
 let _shared_sessions : Team_session_types.session list option ref = ref None
 let _shared_sessions_at : float ref = ref 0.0
 
+let command_plane_snapshot_swarm_status ~state =
+  match
+    Server_command_plane_http_support.command_plane_snapshot_http_json ~state
+    |> initialized_json_opt ~allow_initializing:false
+  with
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt "swarm_status" fields with
+      | Some (`Assoc _ as json) -> Some json
+      | _ -> None)
+  | _ -> None
+
+let command_plane_summary_with_swarm_status ~allow_initializing ~state =
+  let command_plane_summary, swarm_status =
+    command_plane_summary_cache_parts ~allow_initializing ~state
+  in
+  match swarm_status with
+  | Some _ -> (command_plane_summary, swarm_status)
+  | None -> (
+      match command_plane_snapshot_swarm_status ~state with
+      | Some _ as snapshot_swarm_status ->
+          Log.Dashboard.info
+            "[dashboard_inputs] swarm_status fallback=cp-snapshot";
+          (command_plane_summary, snapshot_swarm_status)
+      | None ->
+          Log.Dashboard.warn
+            "[dashboard_inputs] swarm_status unavailable from cp-summary and cp-snapshot";
+          (command_plane_summary, None))
+
 let dashboard_active_or_recent_sessions_cached ~clock config =
   let now = Time_compat.now () in
   match !_shared_sessions with
@@ -492,7 +520,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     mark_cached_surface_attempt _operator_snapshot_cache;
     let started_at = Unix.gettimeofday () in
     try
-      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config
+      run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config
         (fun ~config ~sw ->
           let sessions =
             if Room.is_initialized config then
@@ -542,9 +570,9 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     let started_at = Unix.gettimeofday () in
     try
       let command_plane_summary, swarm_status =
-        command_plane_summary_cache_parts ~allow_initializing:false ~state
+        command_plane_summary_with_swarm_status ~allow_initializing:false ~state
       in
-      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config
+      run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config
         (fun ~config ~sw ->
           let sessions =
             if Room.is_initialized config then
@@ -708,7 +736,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
              in
              let command_plane_summary, swarm_status =
                if String.equal effective_target_type "room" then
-                 command_plane_summary_cache_parts ~allow_initializing:false ~state
+                 command_plane_summary_with_swarm_status ~allow_initializing:false ~state
                else
                  (None, None)
              in
@@ -802,6 +830,129 @@ let default_dashboard_actor = function
   | None -> true
   | Some raw -> String.equal (String.trim raw) "dashboard"
 
+let mission_command_json ?command_plane_summary ?digest_json () =
+  match command_plane_summary with
+  | Some json -> Some json
+  | None -> (
+      match digest_json with
+      | Some json ->
+          let command_json = Dashboard_utils.member_assoc "command_plane" json in
+          Some command_json
+      | None -> None)
+
+let mission_cooldown_window_s = 30.0
+
+let in_mission_timeout_cooldown () =
+  match _mission_cache.last_error_unix with
+  | Some ts -> Unix.gettimeofday () -. ts < mission_cooldown_window_s
+  | None -> false
+
+let top_item_or_null = function
+  | item :: _ -> item
+  | [] -> `Null
+
+let mission_bootstrap_surface_json ~started_at ?command_plane_summary ?snapshot_json
+    ?digest_json ?swarm_status fallback_reason waiting_for =
+  let room_json =
+    match snapshot_json with
+    | Some json -> Dashboard_utils.member_assoc "room" json
+    | None -> `Null
+  in
+  let digest_json = Option.value ~default:(`Assoc []) digest_json in
+  let command_json =
+    mission_command_json ?command_plane_summary ?digest_json:(Some digest_json) ()
+    |> Option.value ~default:(`Assoc [])
+  in
+  let incidents = Dashboard_utils.list_field "attention_items" digest_json in
+  let recommended_actions =
+    Dashboard_utils.list_field "recommended_actions" digest_json
+  in
+  let session_cards =
+    Dashboard_utils.list_field "session_cards" digest_json
+    |> Dashboard_utils.take 3
+  in
+  let swarm_overview =
+    let digest_swarm =
+      Dashboard_utils.member_assoc "swarm_status" digest_json
+      |> Dashboard_utils.member_assoc "overview"
+    in
+    match digest_swarm with
+    | `Null -> (
+        match swarm_status with
+        | Some json -> Dashboard_utils.member_assoc "overview" json
+        | None -> `Null)
+    | json -> json
+  in
+  let json =
+    `Assoc
+      [
+        ("generated_at", `String (Types.now_iso ()));
+        ( "summary",
+          `Assoc
+            [
+              ( "room_health",
+                `String
+                  (Dashboard_utils.string_field ~default:"initializing"
+                     "health" digest_json) );
+              ("cluster", Dashboard_utils.member_assoc "cluster" room_json);
+              ("project", Dashboard_utils.member_assoc "project" room_json);
+              ("current_room", Dashboard_utils.member_assoc "current_room" room_json);
+            ] );
+        ("incidents", `List incidents);
+        ("recommended_actions", `List recommended_actions);
+        ( "command_focus",
+          `Assoc
+            [
+              ( "health",
+                `String
+                  (Dashboard_utils.string_field ~default:"initializing"
+                     "health" digest_json) );
+              ( "active_operations",
+                `Int
+                  (Dashboard_utils.int_field "active"
+                     (Dashboard_utils.member_assoc "summary"
+                        (Dashboard_utils.member_assoc "operations" command_json))) );
+              ( "pending_approvals",
+                `Int
+                  (Dashboard_utils.int_field "pending"
+                     (Dashboard_utils.member_assoc "summary"
+                        (Dashboard_utils.member_assoc "decisions" command_json))) );
+              ("swarm_overview", swarm_overview);
+              ("top_attention", top_item_or_null incidents);
+              ("top_action", top_item_or_null recommended_actions);
+              ("session_cards", `List session_cards);
+            ] );
+        ( "operator_targets",
+          `Assoc
+            [
+              ("sessions", `List []);
+              ("keepers", `List []);
+              ( "pending_confirms",
+                match snapshot_json with
+                | Some json -> Dashboard_utils.member_assoc "pending_confirms" json
+                | None -> `List [] );
+              ( "available_actions",
+                match snapshot_json with
+                | Some json -> Dashboard_utils.member_assoc "available_actions" json
+                | None -> `List [] );
+            ] );
+        ("attention_queue", `List []);
+        ("sessions", `List []);
+        ("session_briefs", `List []);
+        ("agent_briefs", `List []);
+        ("keeper_briefs", `List []);
+        ("internal_signals", `List []);
+      ]
+    |> with_projection_diagnostics ~surface:"mission" ~started_at
+         ~extra:
+           [
+             ("fallback_reason", `String fallback_reason);
+             ( "waiting_for",
+               `List (List.map (fun item -> `String item) waiting_for) );
+           ]
+  in
+  cached_surface_json { _mission_cache with json }
+
 let start_mission_refresh_loop ~state ~sw ~clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
@@ -813,14 +964,23 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     mark_cached_surface_attempt _mission_cache;
     try
       let command_plane_summary, swarm_status =
-        command_plane_summary_cache_parts ~allow_initializing:false ~state
+        command_plane_summary_with_swarm_status ~allow_initializing:true ~state
       in
       let snapshot_json = operator_snapshot_json_if_ready () in
       let digest_json = operator_digest_json_if_ready () in
-      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
+      let command_json =
+        mission_command_json ?command_plane_summary ?digest_json ()
+      in
+      if Option.is_none snapshot_json || Option.is_none digest_json then
+        raise
+          (Proactive_refresh.Skip
+             "waiting for operator_snapshot/operator_digest warm cache");
+      run_dashboard_compute ~mode:Inline_shared ~sw ~clock ~config:room_config
         (fun ~config ~sw ->
-          Dashboard_mission.json ?command_plane_summary ?snapshot_json
-            ?digest_json ?swarm_status ~config ~sw ~clock ~proc_mgr ())
+          Dashboard_mission.json ?command_plane_summary ?command_json
+            ?snapshot_json ?digest_json ?swarm_status
+            ~fallback_to_compute:false
+            ~config ~sw ~clock ~proc_mgr ())
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -835,21 +995,30 @@ let start_mission_refresh_loop ~state ~sw ~clock =
 
 let dashboard_mission_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
-  let compute ?actor () =
+  let compute ?actor ?command_plane_summary ?snapshot_json ?digest_json
+      ?swarm_status ?(fallback_to_compute = true) () =
+    let command_json =
+      mission_command_json ?command_plane_summary ?digest_json ()
+    in
+    run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
+      ~config:state.Mcp_server.room_config
+      (fun ~config ~sw ->
+        Dashboard_mission.json ?actor ?command_plane_summary ?command_json
+          ?snapshot_json ?digest_json ?swarm_status
+          ~fallback_to_compute
+          ~config ~sw ~clock
+          ~proc_mgr:state.Mcp_server.proc_mgr ())
+  in
+  let mission_inputs ~allow_initializing =
     let command_plane_summary, swarm_status =
-      command_plane_summary_cache_parts ~allow_initializing:false ~state
+      command_plane_summary_with_swarm_status ~allow_initializing ~state
     in
     let snapshot_json = operator_snapshot_json_if_ready () in
     let digest_json =
       if default_dashboard_actor actor then operator_digest_json_if_ready ()
       else None
     in
-    run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
-      ~config:state.Mcp_server.room_config
-      (fun ~config ~sw ->
-        Dashboard_mission.json ?actor ?command_plane_summary ?snapshot_json
-          ?digest_json ?swarm_status ~config ~sw ~clock
-          ~proc_mgr:state.Mcp_server.proc_mgr ())
+    (command_plane_summary, swarm_status, snapshot_json, digest_json)
   in
   let full_json =
     match actor with
@@ -863,9 +1032,69 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
           ~cache_key:"mission:default"
           request
           [ ("actor", "dashboard") ];
-        cached_surface_or_first_success_json _mission_cache
-          ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:25.0
-          (fun () -> compute ())
+        if cached_surface_has_success _mission_cache then
+          cached_surface_json _mission_cache
+        else
+          let upstream_attempted =
+            Option.is_some _operator_snapshot_cache.last_attempt_unix
+            || Option.is_some _operator_digest_cache.last_attempt_unix
+          in
+          if upstream_attempted then
+            let command_plane_summary, swarm_status, snapshot_json, digest_json =
+              mission_inputs ~allow_initializing:true
+            in
+            let waiting_for =
+              List.filter_map
+                (fun (name, ready) -> if ready then None else Some name)
+                [
+                  ("operator_snapshot", Option.is_some snapshot_json);
+                  ("operator_digest", Option.is_some digest_json);
+                ]
+            in
+            if waiting_for <> [] then
+              mission_bootstrap_surface_json
+                ~started_at:(Unix.gettimeofday ())
+                ?command_plane_summary ?snapshot_json ?digest_json ?swarm_status
+                "upstream_waiting" waiting_for
+            else if in_mission_timeout_cooldown () then
+              mission_bootstrap_surface_json
+                ~started_at:(Unix.gettimeofday ())
+                ?command_plane_summary ?snapshot_json ?digest_json ?swarm_status
+                "cooldown_after_timeout" []
+            else
+              let command_plane_summary, swarm_status, snapshot_json, digest_json =
+                mission_inputs ~allow_initializing:false
+              in
+              let result =
+                cached_surface_or_first_success_json _mission_cache
+                ~cache_key:"mission:default" ~ttl:120.0 ~clock
+                ~timeout_sec:25.0
+                (fun () ->
+                  compute ?command_plane_summary ?snapshot_json ?digest_json
+                    ?swarm_status ~fallback_to_compute:false ())
+              in
+              if
+                not (cached_surface_has_success _mission_cache)
+                && String.equal
+                     (Dashboard_utils.string_field ~default:"" "error" result)
+                     "computation_timeout"
+              then
+                mission_bootstrap_surface_json
+                  ~started_at:(Unix.gettimeofday ())
+                  ?command_plane_summary ?snapshot_json ?digest_json
+                  ?swarm_status "first_success_timeout" []
+              else
+                result
+          else
+            let command_plane_summary, swarm_status, snapshot_json, digest_json =
+              mission_inputs ~allow_initializing:false
+            in
+            cached_surface_or_first_success_json _mission_cache
+              ~cache_key:"mission:default" ~ttl:120.0 ~clock
+              ~timeout_sec:25.0
+              (fun () ->
+                compute ?command_plane_summary ?snapshot_json ?digest_json
+                  ?swarm_status ~fallback_to_compute:true ())
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
@@ -875,8 +1104,13 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
       remember_dashboard_request_context
         ~surface:"mission" ~cache_key request
         [ ("actor", Option.value ~default:"dashboard" actor) ];
+      let command_plane_summary, swarm_status, snapshot_json, digest_json =
+        mission_inputs ~allow_initializing:false
+      in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-        ~clock ~timeout_sec:25.0 (compute ?actor)
+        ~clock ~timeout_sec:25.0
+        (compute ?actor ?command_plane_summary ?snapshot_json ?digest_json
+           ?swarm_status)
   in
   full_json
 

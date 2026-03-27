@@ -70,6 +70,11 @@ val command_plane_summary_cache_parts :
   state:Mcp_server.server_state ->
   Yojson.Safe.t option * Yojson.Safe.t option
 
+val command_plane_summary_with_swarm_status :
+  allow_initializing:bool ->
+  state:Mcp_server.server_state ->
+  Yojson.Safe.t option * Yojson.Safe.t option
+
 (** {1 Sanitization and Request Helpers} *)
 
 val operator_actor_hint : Httpun.Request.t -> string option
@@ -116,6 +121,10 @@ val operator_digest_http_json :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Httpun.Request.t ->
   (Yojson.Safe.t, 'a) result
+
+val operator_digest_json_if_ready : unit -> Yojson.Safe.t option
+
+val default_dashboard_actor : string option -> bool
 
 (** {1 Mission} *)
 

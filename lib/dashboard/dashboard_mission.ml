@@ -573,8 +573,41 @@ type mission_projection = {
   internal_signals : Yojson.Safe.t list;
 }
 
-let build_projection ?actor ?command_plane_summary ?snapshot_json
-    ?digest_json ?swarm_status ~config ~sw ~clock ~proc_mgr () =
+let empty_snapshot_json () =
+  `Assoc
+    [
+      ("status", `String "initializing");
+      ("generated_at", `String (Types.now_iso ()));
+      ("room", `Assoc []);
+      ("sessions", `Assoc [ ("items", `List []) ]);
+      ("keepers", `Assoc [ ("items", `List []) ]);
+      ("pending_confirms", `List []);
+      ("available_actions", `List []);
+    ]
+
+let empty_command_json () =
+  `Assoc
+    [
+      ("operations", `Assoc [ ("summary", `Assoc []) ]);
+      ("decisions", `Assoc [ ("summary", `Assoc []) ]);
+    ]
+
+let empty_digest_json ?command_plane_summary ?swarm_status () =
+  `Assoc
+    [
+      ("health", `String "initializing");
+      ("attention_items", `List []);
+      ("recommended_actions", `List []);
+      ("session_cards", `List []);
+      ( "swarm_status",
+        Option.value ~default:Swarm_status.empty_json swarm_status );
+      ( "command_plane",
+        Option.value ~default:(`Assoc []) command_plane_summary );
+    ]
+
+let build_projection ?actor ?command_plane_summary ?command_json ?snapshot_json
+    ?digest_json ?swarm_status ?(fallback_to_compute = true)
+    ~config ~sw ~clock ~proc_mgr () =
   let actor_name =
     match actor with
     | Some value when String.trim value <> "" -> String.trim value
@@ -598,6 +631,7 @@ let build_projection ?actor ?command_plane_summary ?snapshot_json
   let snapshot_json =
     match snapshot_json with
     | Some json -> json
+    | None when not fallback_to_compute -> empty_snapshot_json ()
     | None ->
         Dashboard_cache.get_or_compute
           (room_scoped_cache_key config "snapshot" actor_name)
@@ -617,11 +651,16 @@ let build_projection ?actor ?command_plane_summary ?snapshot_json
   in
   let t_snapshot = log_phase_if_slow ~actor:actor_name ~phase:"snapshot" t_sessions in
   let command_json =
-    Dashboard_cache.get_or_compute
-      (room_scoped_cache_key config "command_projection" actor_name)
-      ~ttl:3.0
-      (fun () ->
-        Command_plane_v2.dashboard_projection_json ~sessions:tracked_sessions config)
+    match command_json with
+    | Some json -> json
+    | None when not fallback_to_compute ->
+        Option.value ~default:(empty_command_json ()) command_plane_summary
+    | None ->
+        Dashboard_cache.get_or_compute
+          (room_scoped_cache_key config "command_projection" actor_name)
+          ~ttl:3.0
+          (fun () ->
+            Command_plane_v2.dashboard_projection_json ~sessions:tracked_sessions config)
   in
   let t_command =
     log_phase_if_slow ~actor:actor_name ~phase:"command_projection" t_snapshot
@@ -629,6 +668,8 @@ let build_projection ?actor ?command_plane_summary ?snapshot_json
   let digest_json =
     match digest_json with
     | Some json -> json
+    | None when not fallback_to_compute ->
+        empty_digest_json ?command_plane_summary ?swarm_status ()
     | None ->
         Dashboard_cache.get_or_compute
           (room_scoped_cache_key config "digest" actor_name)
@@ -709,11 +750,13 @@ let build_projection ?actor ?command_plane_summary ?snapshot_json
     internal_signals;
   }
 
-let json ?actor ?command_plane_summary ?snapshot_json ?digest_json ?swarm_status
+let json ?actor ?command_plane_summary ?command_json ?snapshot_json ?digest_json
+    ?swarm_status ?(fallback_to_compute = true)
     ~config ~sw ~clock ~proc_mgr () =
   let projection =
-    build_projection ?actor ?command_plane_summary ?snapshot_json ?digest_json
-      ?swarm_status ~config ~sw ~clock ~proc_mgr ()
+    build_projection ?actor ?command_plane_summary ?command_json ?snapshot_json
+      ?digest_json ?swarm_status ~fallback_to_compute
+      ~config ~sw ~clock ~proc_mgr ()
   in
   let operations_summary =
     member_assoc "operations" projection.command_json |> member_assoc "summary"

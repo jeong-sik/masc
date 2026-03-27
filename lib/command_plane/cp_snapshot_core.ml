@@ -118,6 +118,12 @@ type section_cache = {
   mutable decisions_mtime : float;
   mutable decisions_operator_mtime : float;
   mutable decisions : policy_decision_record list;
+  (* non-filesystem static sections *)
+  mutable static_built : float;
+  (* explicit sessions override *)
+  mutable explicit_sessions_key : string option;
+  mutable explicit_sessions_built : float;
+  mutable explicit_sessions_state : snapshot_state option;
   (* full snapshot *)
   mutable last_built : float;
   mutable last_state : snapshot_state option;
@@ -126,6 +132,9 @@ type section_cache = {
 let _section_cache : section_cache option ref = ref None
 
 let _session_limit = 50
+let _non_filesystem_static_ttl_sec = 1.0
+let _explicit_sessions_ttl_sec = 1.0
+let _full_state_cache_ttl_sec = 5.0
 
 let _make_section_cache () =
   {
@@ -150,6 +159,10 @@ let _make_section_cache () =
     decisions_mtime = 0.0;
     decisions_operator_mtime = 0.0;
     decisions = [];
+    static_built = 0.0;
+    explicit_sessions_key = None;
+    explicit_sessions_built = 0.0;
+    explicit_sessions_state = None;
     last_built = 0.0;
     last_state = None;
   }
@@ -177,6 +190,71 @@ let snapshot_state_of_sections ~config ~agents ~managed_units ~units ~source
     unit_lookup;
   }
 
+let filesystem_static_cache_key (config : Room.config) =
+  let agents_dir = Filename.concat (Room.masc_dir config) "agents" in
+  let units_mt = _file_mtime (units_path config) in
+  let agents_mt = _file_mtime agents_dir in
+  let intents_mt = _file_mtime (intents_path config) in
+  let decisions_mt = _file_mtime (decisions_path config) in
+  let operator_mt = _file_mtime (operator_pending_confirms_path config) in
+  Printf.sprintf "%s|%.6f|%.6f|%.6f|%.6f|%.6f" config.base_path units_mt
+    agents_mt intents_mt decisions_mt operator_mt
+
+let explicit_sessions_cache_key (config : Room.config)
+    (sessions : Team_session_types.session list) =
+  let session_key =
+    sessions
+    |> List.map (fun (session : Team_session_types.session) ->
+           session.session_id ^ "|" ^ session.updated_at_iso)
+    |> String.concat ";"
+  in
+  match config.backend with
+  | FileSystem _ -> filesystem_static_cache_key config ^ "|" ^ session_key
+  | Memory _ | PostgresNative _ -> config.base_path ^ "|" ^ session_key
+
+let refresh_static_sections (config : Room.config) sc ~now =
+  match config.backend with
+  | FileSystem _ ->
+      let units_mt = _file_mtime (units_path config) in
+      let agents_dir = Filename.concat (Room.masc_dir config) "agents" in
+      let agents_mt = _file_mtime agents_dir in
+      let intents_mt = _file_mtime (intents_path config) in
+      let decisions_mt = _file_mtime (decisions_path config) in
+      let operator_mt = _file_mtime (operator_pending_confirms_path config) in
+      if units_mt <> sc.topo_units_mtime || agents_mt <> sc.topo_agents_mtime then begin
+        let agents, managed_units, units, source = topology_units config in
+        sc.agents <- agents;
+        sc.managed_units <- managed_units;
+        sc.units <- units;
+        sc.source <- source;
+        sc.topo_units_mtime <- units_mt;
+        sc.topo_agents_mtime <- agents_mt
+      end;
+      if intents_mt <> sc.intents_mtime then begin
+        sc.intents <- read_intents config;
+        sc.intents_mtime <- intents_mt
+      end;
+      if decisions_mt <> sc.decisions_mtime
+         || operator_mt <> sc.decisions_operator_mtime then begin
+        sc.decisions <- all_policy_decisions config;
+        sc.decisions_mtime <- decisions_mt;
+        sc.decisions_operator_mtime <- operator_mt
+      end;
+      sc.static_built <- now
+  | Memory _ | PostgresNative _ ->
+      if sc.static_built = 0.0
+         || now -. sc.static_built >= _non_filesystem_static_ttl_sec
+      then begin
+        let agents, managed_units, units, source = topology_units config in
+        sc.agents <- agents;
+        sc.managed_units <- managed_units;
+        sc.units <- units;
+        sc.source <- source;
+        sc.intents <- read_intents config;
+        sc.decisions <- all_policy_decisions config;
+        sc.static_built <- now
+      end
+
 let build_snapshot_state ?sessions config =
   let sc = match !_section_cache with
     | Some cache -> cache
@@ -185,16 +263,34 @@ let build_snapshot_state ?sessions config =
         _section_cache := Some cache;
         cache
   in
-  (* When caller provides explicit sessions, bypass cache entirely *)
   match sessions with
   | Some provided_sessions ->
-      let agents, managed_units, units, source = topology_units config in
-      let intents = read_intents config in
-      let operations = all_operations ~sessions:provided_sessions config units in
-      let detachments = all_detachments ~sessions:provided_sessions config units operations in
-      let decisions = all_policy_decisions config in
-      snapshot_state_of_sections ~config ~agents ~managed_units ~units ~source
-        ~sessions:provided_sessions ~intents ~operations ~detachments ~decisions
+      let now = Time_compat.now () in
+      let cache_key = explicit_sessions_cache_key config provided_sessions in
+      begin match sc.explicit_sessions_key, sc.explicit_sessions_state with
+      | Some cached_key, Some state
+        when String.equal cached_key cache_key
+             && now -. sc.explicit_sessions_built < _explicit_sessions_ttl_sec ->
+          state
+      | _ ->
+          refresh_static_sections config sc ~now;
+          let operations =
+            all_operations ~sessions:provided_sessions config sc.units
+          in
+          let detachments =
+            all_detachments ~sessions:provided_sessions config sc.units operations
+          in
+          let state =
+            snapshot_state_of_sections ~config ~agents:sc.agents
+              ~managed_units:sc.managed_units ~units:sc.units ~source:sc.source
+              ~sessions:provided_sessions ~intents:sc.intents ~operations
+              ~detachments ~decisions:sc.decisions
+          in
+          sc.explicit_sessions_key <- Some cache_key;
+          sc.explicit_sessions_built <- now;
+          sc.explicit_sessions_state <- Some state;
+          state
+      end
   | None ->
       (match config.backend with
       | FileSystem _ ->
@@ -265,14 +361,23 @@ let build_snapshot_state ?sessions config =
           sc.last_state <- Some state;
           state
       | Memory _ | PostgresNative _ ->
-          let agents, managed_units, units, source = topology_units config in
-          let sessions = Team_session_store.list_sessions ~limit:_session_limit config in
-          let intents = read_intents config in
-          let operations = all_operations ~sessions config units in
-          let detachments = all_detachments ~sessions config units operations in
-          let decisions = all_policy_decisions config in
-          snapshot_state_of_sections ~config ~agents ~managed_units ~units
-            ~source ~sessions ~intents ~operations ~detachments ~decisions)
+          let now = Time_compat.now () in
+          match sc.last_state with
+          | Some state when now -. sc.last_built < _full_state_cache_ttl_sec -> state
+          | _ ->
+              let agents, managed_units, units, source = topology_units config in
+              let sessions = Team_session_store.list_sessions ~limit:_session_limit config in
+              let intents = read_intents config in
+              let operations = all_operations ~sessions config units in
+              let detachments = all_detachments ~sessions config units operations in
+              let decisions = all_policy_decisions config in
+              let state =
+                snapshot_state_of_sections ~config ~agents ~managed_units ~units
+                  ~source ~sessions ~intents ~operations ~detachments ~decisions
+              in
+              sc.last_built <- now;
+              sc.last_state <- Some state;
+              state)
 
 let topology_json_from_state (state : snapshot_state) =
   let agents = state.agents in

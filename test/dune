@@ -121,6 +121,11 @@
  (modules test_dashboard_mission)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
+(test
+ (name test_base_path_resolution)
+ (modules test_base_path_resolution)
+ (libraries masc_mcp alcotest unix))
+
 ; Dashboard mission briefing normalization tests
 (test
  (name test_dashboard_mission_briefing)

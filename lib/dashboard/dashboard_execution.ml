@@ -111,7 +111,8 @@ let log_phase_if_slow ~actor ~phase started_at =
       actor phase phase_ms;
   finished_at
 
-let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
+let json_render ?digest_json ?command_plane_summary ?swarm_status
+    ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let ctx : _ Operator_control.context =
         {
           config;
@@ -184,19 +185,25 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let session_cards =
         if light then []
         else
-          let digest_json =
-            match Operator_control.digest_json ~actor:effective_actor ~sessions ctx with
-            | Ok json -> json
-            | Error _message ->
-                `Assoc
-                  [
-                    ("health", `String "warn");
-                    ("attention_items", `List []);
-                    ("recommended_actions", `List []);
-                    ("session_cards", `List []);
-                  ]
+          let execution_digest_json =
+            match digest_json with
+            | Some json -> json
+            | None ->
+                match
+                  Operator_control.digest_json ~actor:effective_actor ~sessions
+                    ?command_plane_summary ?swarm_status ctx
+                with
+                | Ok json -> json
+                | Error _message ->
+                    `Assoc
+                      [
+                        ("health", `String "warn");
+                        ("attention_items", `List []);
+                        ("recommended_actions", `List []);
+                        ("session_cards", `List []);
+                      ]
           in
-          list_field "session_cards" digest_json
+          list_field "session_cards" execution_digest_json
       in
       let session_seeds =
         member_assoc "sessions" snapshot_json |> member_assoc "items"
@@ -335,7 +342,8 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
             ("messages", `List (List.map message_json messages));
           ])
 
-let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
+let json ?actor ?fixture ?digest_json ?command_plane_summary ?swarm_status
+    ?(light = true) ~config ~sw ~clock ~proc_mgr () =
   let effective_actor = Option.value ~default:"dashboard" actor in
   match dashboard_fixture_name ?fixture () with
   | Some "execution_smoke" -> execution_smoke_fixture_json ()
@@ -344,7 +352,9 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
        PG connection failures during render can block fibers for hours
        (observed: 11,018s render on 2026-03-21). *)
     match Eio.Time.with_timeout clock render_timeout_s (fun () ->
-      Ok (json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ())
+      Ok
+        (json_render ?digest_json ?command_plane_summary ?swarm_status
+           ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ())
     ) with
     | Ok result -> result
     | Error `Timeout ->

@@ -138,13 +138,18 @@ let rec find_git_root path =
     else find_git_root parent
   end
 
-(** Resolve base_path: if in worktree, use main repo's path for .masc/
-    This ensures all worktrees share the same MASC coordination space *)
+(** Preserve the explicit base_path passed by the caller.
+    Worktree-aware features can still discover git root separately via
+    [find_git_root], but room state should stay scoped to the path the
+    server/tool was started with. *)
 let resolve_masc_base_path path =
   match find_git_root path with
-  | Some git_root ->
-      Log.Room.info "MASC base resolved: %s → %s (git root)" path git_root;
-      git_root
+  | Some git_root when not (String.equal git_root path) ->
+      Log.Room.info "MASC base preserved: %s (git root: %s)" path git_root;
+      path
+  | Some _ ->
+      Log.Room.info "MASC base: %s" path;
+      path
   | None ->
       Log.Room.info "MASC base: %s (no git root found)" path;
       path
@@ -307,7 +312,6 @@ let create_backend_eio ~sw ~env cfg =
       create_backend cfg
 
 let default_config base_path =
-  (* Resolve to git root for worktree support - all worktrees share same .masc/ *)
   let resolved_path = resolve_masc_base_path base_path in
   let backend_config = backend_config_for resolved_path in
   Log.Backend.info "MASC Backend: type=%s, postgres_url=%s"
@@ -335,7 +339,7 @@ let default_config base_path =
              Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
   in
   {
-    base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
+    base_path = resolved_path;
     workspace_path = base_path;
     lock_expiry_minutes = 2;
     backend_config;

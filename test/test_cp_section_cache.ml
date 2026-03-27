@@ -36,6 +36,31 @@ let write_text_file path content =
 let reset_section_cache () =
   Command_plane_v2._section_cache := None
 
+let with_memory_test_env f =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  reset_section_cache ();
+  let backend_config : Backend_types.config = {
+    backend_type = Backend_types.Memory;
+    base_path = Filename.concat base ".masc";
+    postgres_url = None;
+    node_id = "test-node";
+    cluster_name = "default";
+    pubsub_max_messages = 1000;
+  } in
+  let config : Room_utils.config = {
+    base_path = base;
+    workspace_path = base;
+    lock_expiry_minutes = 30;
+    backend_config;
+    backend = Room_utils.Memory (Backend.Memory.create ());
+    scope = Default;
+  } in
+  let _ = Room.init config ~agent_name:None in
+  f config
+
 (** build_snapshot_state returns data from the same config without error. *)
 let test_basic_snapshot () =
   let base = temp_dir () in
@@ -97,8 +122,9 @@ let test_partial_invalidation () =
   Alcotest.(check bool) "intents list is fresh object" true
     (not (_state1.intents == state2.intents) || _state1.intents = [])
 
-(** Explicit sessions parameter bypasses cache entirely. *)
-let test_explicit_sessions_bypass () =
+(** Explicit sessions should still reuse static topology sections and
+    short-lived full-state cache when the session fingerprint is unchanged. *)
+let test_explicit_sessions_reuse_cache () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -106,13 +132,21 @@ let test_explicit_sessions_bypass () =
   reset_section_cache ();
   let config = Room.default_config base in
   let _ = Room.init config ~agent_name:None in
-  let _state1 = Command_plane_v2.build_snapshot_state config in
-  (* Pass explicit empty sessions — should NOT use section cache *)
+  let state1 = Command_plane_v2.build_snapshot_state config in
   let state2 = Command_plane_v2.build_snapshot_state ~sessions:[] config in
-  (* With explicit sessions, agents are freshly read (not from cache) *)
-  Alcotest.(check bool) "agents freshly read with explicit sessions" true
-    (not (_state1.agents == state2.agents)
-     || List.length _state1.agents = 0)
+  let state3 = Command_plane_v2.build_snapshot_state ~sessions:[] config in
+  Alcotest.(check bool) "agents reused with explicit sessions" true
+    (state1.agents == state2.agents);
+  Alcotest.(check bool) "units reused with explicit sessions" true
+    (state1.units == state2.units);
+  Alcotest.(check bool) "explicit sessions full state cached" true
+    (state2 == state3)
+
+let test_memory_backend_full_state_cache () =
+  with_memory_test_env @@ fun config ->
+  let state1 = Command_plane_v2.build_snapshot_state config in
+  let state2 = Command_plane_v2.build_snapshot_state config in
+  Alcotest.(check bool) "memory full state reused" true (state1 == state2)
 
 let () =
   Alcotest.run "Cp_section_cache"
@@ -124,7 +158,9 @@ let () =
             test_cache_hit_no_change;
           Alcotest.test_case "partial invalidation" `Quick
             test_partial_invalidation;
-          Alcotest.test_case "explicit sessions bypass" `Quick
-            test_explicit_sessions_bypass;
+          Alcotest.test_case "explicit sessions reuse cache" `Quick
+            test_explicit_sessions_reuse_cache;
+          Alcotest.test_case "memory backend full-state cache" `Quick
+            test_memory_backend_full_state_cache;
         ] );
     ]

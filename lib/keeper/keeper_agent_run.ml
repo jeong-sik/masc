@@ -215,6 +215,27 @@ let run_turn
   with
   | Error e -> Error e
   | Ok result ->
+    (* CDAL: decode proof manifest if captured *)
+    (match result.proof_manifest_json with
+     | Some json ->
+       (match Cdal_proof_decoder.of_json json with
+        | Ok proof ->
+          Log.Keeper.info "keeper:%s CDAL proof captured: run_id=%s mode=%s→%s duration=%.1fs"
+            meta.name proof.run_id
+            (match proof.requested_execution_mode with
+             | Cdal_proof_decoder.Diagnose -> "diagnose"
+             | Draft -> "draft" | Execute -> "execute")
+            (match proof.effective_execution_mode with
+             | Cdal_proof_decoder.Diagnose -> "diagnose"
+             | Draft -> "draft" | Execute -> "execute")
+            (Cdal_proof_decoder.duration_s proof)
+        | Error e ->
+          let gap = Cdal_proof_decoder.evidence_gap_of_error ~json e in
+          Log.Keeper.warn "keeper:%s CDAL proof decode failed: %s (gap: %d missing, %d invalid)"
+            meta.name (Cdal_proof_decoder.decode_error_to_string e)
+            (List.length gap.missing_fields)
+            (List.length gap.invalid_fields))
+     | None -> ());
     (match result.checkpoint with
      | Some checkpoint -> (
          try

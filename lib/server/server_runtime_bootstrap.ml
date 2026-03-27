@@ -367,6 +367,17 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       Masc_grpc_server.start ~sw ~env ~room_config:state.room_config
         ~tool_dispatcher;
+      (* Initialize gRPC client for keeper heartbeat when transport is gRPC *)
+      (match Masc_grpc_transport.from_env () with
+       | Masc_grpc_transport.Grpc ->
+           (try
+              let client = Masc_grpc_client.create_from_env ~sw ~env in
+              Keeper_keepalive.set_grpc_client ~env client;
+              Log.Server.info "gRPC keeper client initialized"
+            with exn ->
+              Log.Server.warn "gRPC keeper client init failed: %s"
+                (Printexc.to_string exn))
+       | _ -> ());
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
       Server_ws_standalone.start ~sw ~env
         ~on_message:(fun ws_session_id body_str ->

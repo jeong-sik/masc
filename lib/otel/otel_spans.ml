@@ -13,7 +13,9 @@ let init () =
   if Otel_config.enabled && not !initialized then begin
     initialized := true;
     OT.Globals.service_name := Otel_config.service_name;
-    Opentelemetry_ambient_context.set_storage (Ambient_context_eio.storage ())
+    (* ambient-context-eio storage is set automatically when the library is linked.
+       Eio fiber-local context propagation works via Ambient_context_eio.storage. *)
+    ignore (Ambient_context_eio.storage : Ambient_context.Storage.t)
   end
 
 let setup_exporter env =

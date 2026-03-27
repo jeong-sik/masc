@@ -58,5 +58,10 @@ describe('refreshPlanForRoute', () => {
       tab: 'lab',
       params: { section: 'tools' },
     })).toEqual([])
+
+    expect(refreshPlanForRoute({
+      tab: 'lab',
+      params: { section: 'experiments' },
+    })).toEqual([])
   })
 })

@@ -1335,6 +1335,190 @@ let test_keeper_up_update_preserves_proactive_when_omitted () =
       in
       check bool "proactive preserved when omitted" true updated_meta.proactive.enabled)
 
+let test_keeper_up_persists_explicit_goal_horizons () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "goal-horizon-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "goal-horizon-demo");
+              ("goal", `String "Keep the resident loop healthy");
+              ("short_goal", `String "Close the current keeper blocker");
+              ("mid_goal", `String "Stabilize keeper cleanup coverage");
+              ("long_goal", `String "Continuously improve keeper maintenance");
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "goal-horizon-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after create"
+        | Error e -> fail e
+      in
+      check string "goal persisted" "Keep the resident loop healthy" meta.goal;
+      check string "short goal persisted" "Close the current keeper blocker"
+        meta.short_goal;
+      check string "mid goal persisted" "Stabilize keeper cleanup coverage"
+        meta.mid_goal;
+      check string "long goal persisted"
+        "Continuously improve keeper maintenance" meta.long_goal)
+
+let test_apply_settings_update_defaults_goal_horizons_when_new_goal_only () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "goal-default-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "goal-default-demo");
+              ("goal", `String "Initial goal");
+              ("short_goal", `String "Initial short");
+              ("mid_goal", `String "Initial mid");
+              ("long_goal", `String "Initial long");
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "initial keeper up ok" true ok;
+      let meta0 =
+        match Masc_mcp.Keeper_types.read_meta config "goal-default-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta before settings update"
+        | Error e -> fail e
+      in
+      let updated =
+        Masc_mcp.Keeper_turn_setup.apply_settings_update
+          ~args:(`Assoc [ ("new_goal", `String "Refined goal") ])
+          ~meta0
+          ~new_short_goal:None
+          ~new_mid_goal:None
+          ~new_long_goal:None
+          ~new_soul_profile:None
+          ~new_will:None
+          ~new_needs:None
+          ~new_desires:None
+          ~config
+      in
+      check string "goal updated" "Refined goal" updated.goal;
+      check string "short goal defaulted to new goal" "Refined goal"
+        updated.short_goal;
+      check string "mid goal defaulted to new goal" "Refined goal"
+        updated.mid_goal;
+      check string "long goal defaulted to new goal" "Refined goal"
+        updated.long_goal;
+      let persisted =
+        match Masc_mcp.Keeper_types.read_meta config "goal-default-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after settings update"
+        | Error e -> fail e
+      in
+      check string "persisted short goal" "Refined goal" persisted.short_goal;
+      check string "persisted mid goal" "Refined goal" persisted.mid_goal;
+      check string "persisted long goal" "Refined goal" persisted.long_goal)
+
+let test_keeper_msg_persists_goal_horizon_updates_before_runtime () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "goal-msg-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "goal-msg-demo");
+              ("goal", `String "Original goal");
+              ("short_goal", `String "Original short");
+              ("mid_goal", `String "Original mid");
+              ("long_goal", `String "Original long");
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "initial keeper up ok" true ok;
+      let ok, body =
+        dispatch "masc_keeper_msg"
+          (`Assoc
+            [
+              ("name", `String "goal-msg-demo");
+              ("message", `String "Align your horizons to the latest cleanup plan.");
+              ("new_short_goal", `String "Close keeper goal coverage gaps");
+              ("new_mid_goal", `String "Lock the cleanup slice with focused tests");
+              ("new_long_goal", `String "Keep goal horizon behavior maintainable");
+              ("no_skill_route", `Bool true);
+              ("no_state_block", `Bool true);
+            ])
+      in
+      if not ok then begin
+        let body_lc = String.lowercase_ascii body in
+        check bool "keeper msg only allowed to fail at runtime boundary" true
+          (contains_substring body_lc "agent.run failed"
+           || contains_substring body_lc "api key"
+           || contains_substring body_lc "provider"
+           || contains_substring body_lc "runtime")
+      end;
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "goal-msg-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after keeper msg update"
+        | Error e -> fail e
+      in
+      check string "goal unchanged" "Original goal" meta.goal;
+      check string "short goal updated" "Close keeper goal coverage gaps"
+        meta.short_goal;
+      check string "mid goal updated"
+        "Lock the cleanup slice with focused tests" meta.mid_goal;
+      check string "long goal updated"
+        "Keep goal horizon behavior maintainable" meta.long_goal)
+
 let test_write_meta_syncs_registered_resident_seed () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1729,6 +1913,12 @@ let () =
            test_keeper_fs_edit_enforces_allowed_paths_and_modes;
          test_case "sangsu defaults explicit voice policy" `Quick
            test_keeper_up_defaults_sangsu_to_explicit_voice_policy;
+         test_case "keeper up persists explicit goal horizons" `Quick
+           test_keeper_up_persists_explicit_goal_horizons;
+         test_case "settings update defaults goal horizons when new goal only" `Quick
+           test_apply_settings_update_defaults_goal_horizons_when_new_goal_only;
+         test_case "keeper msg persists goal horizon updates before runtime" `Quick
+           test_keeper_msg_persists_goal_horizon_updates_before_runtime;
          test_case "keeper up update preserves proactive when omitted" `Quick
            test_keeper_up_update_preserves_proactive_when_omitted;
          test_case "write_meta syncs registered resident seed" `Quick

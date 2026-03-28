@@ -170,9 +170,6 @@ let start_supervisor_sweep ctx =
 
 let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
   Hashtbl.create 4
-let bootstrap_done_mu = Eio.Mutex.create ()
-
-let with_bootstrap_rw f = Eio_guard.with_mutex bootstrap_done_mu f
 
 let has_boot_entries config =
   keepalive_keeper_names config <> []
@@ -188,12 +185,11 @@ let start_existing_keepalives ctx =
   let base_path = ctx.config.base_path in
   (* Atomic check-and-set: eliminates TOCTOU race on the gate. *)
   let should_run =
-    with_bootstrap_rw (fun () ->
-      if Hashtbl.mem existing_keepalive_bootstrap_done base_path then false
-      else begin
-        Hashtbl.replace existing_keepalive_bootstrap_done base_path ();
-        true
-      end)
+    if Hashtbl.mem existing_keepalive_bootstrap_done base_path then false
+    else begin
+      Hashtbl.replace existing_keepalive_bootstrap_done base_path ();
+      true
+    end
   in
   if not should_run then ()
   else begin
@@ -206,8 +202,7 @@ let start_existing_keepalives ctx =
       maybe_start_supervisor_sweep ctx stats
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       (* Retry bootstrap on next keeper tool call if this attempt failed. *)
-      with_bootstrap_rw (fun () ->
-        Hashtbl.remove existing_keepalive_bootstrap_done base_path);
+      Hashtbl.remove existing_keepalive_bootstrap_done base_path;
       raise exn
   end
 
@@ -216,5 +211,4 @@ let stop_keepalive name =
 
 let reset_test_state base_path =
   stop_supervisor_sweep base_path;
-  with_bootstrap_rw (fun () ->
-    Hashtbl.remove existing_keepalive_bootstrap_done base_path)
+  Hashtbl.remove existing_keepalive_bootstrap_done base_path

@@ -16,18 +16,13 @@
 (** Global registry instance - must be initialized within Eio context.
     All reads and writes go through [registry_lock] to prevent races. *)
 let global_registry : Agent_identity.Registry.registry option ref = ref None
-let registry_lock = Eio.Mutex.create ()
 
-let with_registry_lock f = Eio.Mutex.use_rw ~protect:true registry_lock (fun () -> f ())
-
-(** Initialize the global registry. Must be called within Eio context.
-    Idempotent: checks [global_registry] under lock. *)
+(** Initialize the global registry.
+    Idempotent: non-yielding ref check. *)
 let init () =
-  with_registry_lock (fun () ->
-    match !global_registry with
-    | Some _ -> ()
-    | None -> global_registry := Some (Agent_identity.Registry.create ())
-  )
+  match !global_registry with
+  | Some _ -> ()
+  | None -> global_registry := Some (Agent_identity.Registry.create ())
 
 (** Raised when the agent registry cannot be initialized.
     Contains the step name and detail of the failure. *)
@@ -36,17 +31,15 @@ exception Registry_init_failed of string
 (** Get the global registry. Initializes if needed (must be in Eio context).
     Returns [Error msg] if initialization fails instead of raising. *)
 let get_registry () : (Agent_identity.Registry.registry, string) result =
-  with_registry_lock (fun () ->
-    match !global_registry with
-    | Some reg -> Ok reg
-    | None ->
-        global_registry := Some (Agent_identity.Registry.create ());
-        match !global_registry with
-        | Some reg -> Ok reg
-        | None ->
-            Error "agent registry initialization failed: \
-                   global_registry is None after creation"
-  )
+  match !global_registry with
+  | Some reg -> Ok reg
+  | None ->
+      global_registry := Some (Agent_identity.Registry.create ());
+      (match !global_registry with
+      | Some reg -> Ok reg
+      | None ->
+          Error "agent registry initialization failed: \
+                 global_registry is None after creation")
 
 (** Get the registry, raising [Registry_init_failed] on failure.
     Used by internal callers that cannot change their return type. *)
@@ -57,17 +50,12 @@ let get_registry_exn () =
 
 (** Reset registry for testing *)
 let reset_for_testing () =
-  with_registry_lock (fun () ->
-    global_registry := Some (Agent_identity.Registry.create ())
-  )
+  global_registry := Some (Agent_identity.Registry.create ())
 
 (** {1 Identity Resolution} *)
 
 (** MCP session to identity mapping for fast lookup *)
 let session_identity_map : (string, string) Hashtbl.t = Hashtbl.create 64
-let session_map_lock = Eio.Mutex.create ()
-
-let with_session_lock f = Eio.Mutex.use_rw ~protect:true session_map_lock (fun () -> f ())
 
 (** Get or create identity for an MCP request.
 
@@ -88,11 +76,9 @@ let get_or_create_identity ?mcp_session_id params =
     match mcp_session_id with
     | None -> None
     | Some sid ->
-        with_session_lock (fun () ->
-          match Hashtbl.find_opt session_identity_map sid with
-          | Some session_key -> Agent_identity.Registry.find_by_session reg session_key
-          | None -> None
-        )
+        (match Hashtbl.find_opt session_identity_map sid with
+        | Some session_key -> Agent_identity.Registry.find_by_session reg session_key
+        | None -> None)
   in
 
   match existing_by_session with
@@ -115,9 +101,7 @@ let get_or_create_identity ?mcp_session_id params =
       (* Link MCP session ID to identity session key *)
       (match mcp_session_id with
        | Some sid ->
-           with_session_lock (fun () ->
-             Hashtbl.replace session_identity_map sid registered.session_key
-           )
+           Hashtbl.replace session_identity_map sid registered.session_key
        | None -> ());
 
       Log.Session.info "[AgentRegistry] New identity: %s (session=%s, mcp=%s)"
@@ -149,15 +133,12 @@ let get_by_session session_key =
     ~180 lines of identity resolution on 2nd+ calls. *)
 
 let resolved_names : (string, string) Hashtbl.t = Hashtbl.create 64
-let resolved_names_lock = Eio.Mutex.create ()
 
 let get_resolved_name sid =
-  Eio.Mutex.use_rw ~protect:true resolved_names_lock (fun () ->
-    Hashtbl.find_opt resolved_names sid)
+  Hashtbl.find_opt resolved_names sid
 
 let set_resolved_name sid name =
-  Eio.Mutex.use_rw ~protect:true resolved_names_lock (fun () ->
-    Hashtbl.replace resolved_names sid name)
+  Hashtbl.replace resolved_names sid name
 
 (** {1 Statistics} *)
 
@@ -194,21 +175,17 @@ let cleanup_stale_sessions () =
       Log.Identity.warn "cleanup_stale_sessions: registry unavailable: %s" e;
       0
   | Ok reg ->
-    with_session_lock (fun () ->
-      let to_remove = ref [] in
-      Hashtbl.iter (fun sid session_key ->
-        match Agent_identity.Registry.find_by_session reg session_key with
-        | None -> to_remove := sid :: !to_remove
-        | Some _ -> ()
-      ) session_identity_map;
-      List.iter (fun sid ->
-        Hashtbl.remove session_identity_map sid;
-        (* P2 fix: evict resolved-name cache for stale sessions *)
-        Eio.Mutex.use_rw ~protect:true resolved_names_lock (fun () ->
-          Hashtbl.remove resolved_names sid)
-      ) !to_remove;
-      List.length !to_remove
-    )
+    let to_remove = ref [] in
+    Hashtbl.iter (fun sid session_key ->
+      match Agent_identity.Registry.find_by_session reg session_key with
+      | None -> to_remove := sid :: !to_remove
+      | Some _ -> ()
+    ) session_identity_map;
+    List.iter (fun sid ->
+      Hashtbl.remove session_identity_map sid;
+      Hashtbl.remove resolved_names sid
+    ) !to_remove;
+    List.length !to_remove
 
 (** Unregister an identity *)
 let unregister session_key =
@@ -218,16 +195,11 @@ let unregister session_key =
         (String.sub session_key 0 (min 8 (String.length session_key))) e
   | Ok reg ->
     Agent_identity.Registry.unregister reg session_key;
-    (* Also clean up session map *)
-    with_session_lock (fun () ->
-      let to_remove = ref [] in
-      Hashtbl.iter (fun sid sk ->
-        if sk = session_key then to_remove := sid :: !to_remove
-      ) session_identity_map;
-      List.iter (fun sid ->
-        Hashtbl.remove session_identity_map sid;
-        (* P2 fix: evict resolved-name cache *)
-        Eio.Mutex.use_rw ~protect:true resolved_names_lock (fun () ->
-          Hashtbl.remove resolved_names sid)
-      ) !to_remove
-    )
+    let to_remove = ref [] in
+    Hashtbl.iter (fun sid sk ->
+      if sk = session_key then to_remove := sid :: !to_remove
+    ) session_identity_map;
+    List.iter (fun sid ->
+      Hashtbl.remove session_identity_map sid;
+      Hashtbl.remove resolved_names sid
+    ) !to_remove

@@ -1,6 +1,7 @@
 # Contract-Driven Agent Loop Labeling Protocol
 
-**Status**: Draft
+**Version**: v0
+**Status**: v0-frozen (2026-03-29)
 **Related RFC**: [Contract-Driven Agent Loop RFC](./contract-driven-agent-loop-rfc.md)
 
 이 문서는 `evidence_precision`, `unsupported_claim_penalty`, `false_positive_risk_flag_rate`, `false_negative_escape_rate`를 일관되게 계산하기 위한 최소 labeling / judging 운영 규칙을 정의한다.

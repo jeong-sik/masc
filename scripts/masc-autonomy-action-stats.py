@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize Lodge decision/action stats from trace JSONL files."""
+"""Summarize Autonomy decision/action stats from trace JSONL files."""
 
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def pct(n: int, d: int) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Lodge action/decision stats from traces")
+    parser = argparse.ArgumentParser(description="Autonomy action/decision stats from traces")
     parser.add_argument("--days", type=int, default=1, help="Look back N days (default: 1)")
     parser.add_argument("--since", type=str, default=None, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--until", type=str, default=None, help="End date (YYYY-MM-DD, inclusive)")
@@ -183,7 +183,7 @@ def main() -> int:
     start_s = dt.datetime.fromtimestamp(start_ts).strftime("%Y-%m-%d %H:%M")
     end_s = dt.datetime.fromtimestamp(end_ts).strftime("%Y-%m-%d %H:%M")
 
-    print("Lodge Decision Stats")
+    print("Autonomy Decision Stats")
     print(f"Period: {start_s} ~ {end_s}")
     if args.agent:
         print(f"Agent: {args.agent}")

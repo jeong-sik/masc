@@ -623,7 +623,7 @@ let load_and_format_for_welcome ~fs:_ (config : config) : string =
 (** {1 Lightweight JSONL Episode Recording (No Eio Required)}
 
     Append-only episode log for contexts that don't have Eio fs.
-    Used by Lodge heartbeat, keeper decisions, etc.
+    Used by Keeper heartbeat, keeper decisions, etc.
     Storage: .masc/institution_episodes.jsonl *)
 
 let episodes_jsonl_path () =
@@ -631,7 +631,7 @@ let episodes_jsonl_path () =
   Filename.concat me_root ".masc/institution_episodes.jsonl"
 
 (** Record an episode to JSONL without Eio context.
-    This is the primary entry point for Lodge/Keeper integration. *)
+    This is the primary entry point for Keeper autonomy integration. *)
 let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings =
   let episode : episode = {
     id = Printf.sprintf "ep-%d-%06d"

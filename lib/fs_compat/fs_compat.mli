@@ -1,6 +1,6 @@
 (** Filesystem Compatibility Layer - Eio-native I/O with fallback
 
-    @since 2026-02 - Lodge Emergent Identity v2.0
+    @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
 val set_fs : Eio.Fs.dir_ty Eio.Path.t -> unit

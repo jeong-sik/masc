@@ -140,7 +140,7 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc
 | `MASC_CLAUDE_DEFAULT_MODEL` | string | `"claude-sonnet-4-6"` | Claude 기본 모델 |
 | `MASC_OPENAI_DEFAULT_MODEL` | string | `"gpt-4.1"` | OpenAI 기본 모델 |
 
-**Keeper Autonomy (자율 에이전트)**: `MASC_AUTONOMY_*` prefix (deprecated: `MASC_LODGE_*`).
+**Keeper Autonomy (자율 에이전트)**: `MASC_AUTONOMY_*` prefix.
 
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
@@ -156,7 +156,7 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc
 | `MASC_AUTONOMY_QUIET_END` | int | 7 | 조용한 시간대 종료 (KST) |
 | `MASC_DELEGATE_INFERENCE` | bool | false | Worker 위임 모드 (Soul+Body) |
 
-> **Deprecated**: `MASC_LODGE_*` env vars are still accepted as fallback but will be removed in a future release.
+> `MASC_LODGE_*` env vars are no longer supported. Use `MASC_AUTONOMY_*` exclusively.
 
 **Thompson Sampling** (`MASC_AUTONOMY_*` prefix):
 

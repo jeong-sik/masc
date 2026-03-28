@@ -51,7 +51,6 @@ let canonical_keeper_skill_token (raw : string) : string option =
   | "masc-keeper-autonomy"
   | "masc_keeper_autonomy"
   | "keeper-autonomy"
-  | "lodge"  (* backward compat *)
   | "social"
   | "keeper"
   | "autonomy" ->
@@ -91,7 +90,7 @@ let route_keeper_skill ~(soul_profile : string) ~(message : string) : keeper_ski
   ] in
   let autonomy_keywords = [
     "keeper"; "handoff"; "compaction"; "context"; "generation"; "trace"; "memory";
-    "board"; "post"; "comment"; "feed"; "social"; "lodge"; "k2k";
+    "board"; "post"; "comment"; "feed"; "social"; "k2k";
     "키퍼"; "승계"; "핸드오프"; "컴팩팅"; "컨텍스트"; "세대"; "메모리";
     "보드"; "포스트"; "댓글"; "피드"; "활동"; "소셜";
   ] in

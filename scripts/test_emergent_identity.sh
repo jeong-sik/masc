@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lodge Emergent Identity System - Integration Test
+# Keeper Emergent Identity System - Integration Test
 #
 # Runs 3 agents for a specified duration and measures:
 # - Upvote ratio (target: >20% vs current ~0%)
@@ -20,7 +20,7 @@ METRICS_FILE="$LOG_DIR/metrics_$(date +%Y%m%d_%H%M%S).json"
 mkdir -p "$LOG_DIR"
 
 echo "=============================================="
-echo "Lodge Emergent Identity System - Integration Test"
+echo "Keeper Emergent Identity System - Integration Test"
 echo "=============================================="
 echo "Duration: ${DURATION_HOURS}h (${DURATION_SECS}s)"
 echo "Agents: ${TEST_AGENTS[*]}"

@@ -276,11 +276,16 @@ run_once() {
 TAIL_PID=""
 TAIL_PIPE_DIR=""
 TAIL_PIPE_PATH=""
+DATE_WATCH_PID=""
 
 cleanup() {
   if [ -n "${TAIL_PID:-}" ]; then
     kill "$TAIL_PID" 2>/dev/null || true
     wait "$TAIL_PID" 2>/dev/null || true
+  fi
+  if [ -n "${DATE_WATCH_PID:-}" ]; then
+    kill "$DATE_WATCH_PID" 2>/dev/null || true
+    wait "$DATE_WATCH_PID" 2>/dev/null || true
   fi
   if [ -n "${TAIL_PIPE_DIR:-}" ] && [ -d "$TAIL_PIPE_DIR" ]; then
     rm -rf "$TAIL_PIPE_DIR"
@@ -305,16 +310,29 @@ follow_for_date() {
   tail -n "$TAIL_LINES" -F "$log_path" >"$TAIL_PIPE_PATH" &
   TAIL_PID="$!"
 
+  if [ "$rotate_daily" = "1" ]; then
+    (
+      while [ "$(date +%F)" = "$date_key" ]; do
+        sleep 1
+      done
+      kill "$TAIL_PID" 2>/dev/null || true
+    ) &
+    DATE_WATCH_PID="$!"
+  fi
+
   while IFS= read -r line; do
     process_line "$line"
-    if [ "$rotate_daily" = "1" ] && [ "$(date +%F)" != "$date_key" ]; then
-      break
-    fi
   done < "$TAIL_PIPE_PATH"
 
   kill "$TAIL_PID" 2>/dev/null || true
   wait "$TAIL_PID" 2>/dev/null || true
   TAIL_PID=""
+
+  if [ -n "${DATE_WATCH_PID:-}" ]; then
+    kill "$DATE_WATCH_PID" 2>/dev/null || true
+    wait "$DATE_WATCH_PID" 2>/dev/null || true
+    DATE_WATCH_PID=""
+  fi
 
   rm -rf "$TAIL_PIPE_DIR"
   TAIL_PIPE_DIR=""

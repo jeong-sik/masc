@@ -124,7 +124,12 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             let meta_current =
               try
                 let synced = ensure_keeper_room_presence ctx.config meta_current in
-                consecutive_failures := 0;
+                if synced.joined_room_ids = [] then (
+                  incr consecutive_failures;
+                  Log.Keeper.warn "room presence returned empty rooms (%d/%d)"
+                    !consecutive_failures max_consecutive_heartbeat_failures)
+                else
+                  consecutive_failures := 0;
                 (match write_meta ctx.config synced with
                  | Ok () -> synced  (* use written value directly, no second read_meta *)
                  | Error e ->
@@ -137,13 +142,13 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                 Log.Keeper.error "room heartbeat failed (%d/%d): %s"
                   !consecutive_failures max_consecutive_heartbeat_failures
                   (Printexc.to_string exn);
-                if !consecutive_failures >= max_consecutive_heartbeat_failures then (
-                  Log.Keeper.error
-                    "keeper %s: %d consecutive heartbeat failures, stopping keepalive"
-                    m.name max_consecutive_heartbeat_failures;
-                  Atomic.set stop true);
                 meta_current
             in
+            if !consecutive_failures >= max_consecutive_heartbeat_failures then (
+              Log.Keeper.error
+                "keeper %s: %d consecutive heartbeat failures, stopping keepalive"
+                m.name max_consecutive_heartbeat_failures;
+              Atomic.set stop true);
             let now_ts = Time_compat.now () in
             if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
             then (

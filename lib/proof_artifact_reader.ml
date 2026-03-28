@@ -2,27 +2,13 @@
 
     @since CDAL eval content-based redesign *)
 
-let prefix = "proof-store://"
-let prefix_len = String.length prefix
-
 let resolve_path (config : Agent_sdk.Proof_store.config)
     (ref_ : Agent_sdk.Cdal_proof.artifact_ref) : (string, string) result =
-  if String.length ref_ > prefix_len
-     && String.sub ref_ 0 prefix_len = prefix then
-    let rel = String.sub ref_ prefix_len (String.length ref_ - prefix_len) in
-    Ok (Filename.concat (Filename.concat config.root "proofs") rel)
-  else
-    Error (Printf.sprintf "invalid artifact ref: %s" ref_)
+  match Agent_sdk.Proof_store.resolve_ref config ref_ with
+  | Ok resolved -> Ok resolved.path
+  | Error e -> Error e
 
 let read_json (config : Agent_sdk.Proof_store.config)
     (ref_ : Agent_sdk.Cdal_proof.artifact_ref)
     : (Yojson.Safe.t, string) result =
-  match resolve_path config ref_ with
-  | Error e -> Error e
-  | Ok path ->
-    if Sys.file_exists path then
-      (try Ok (Yojson.Safe.from_file path)
-       with exn -> Error (Printf.sprintf "JSON parse error in %s: %s"
-                            path (Printexc.to_string exn)))
-    else
-      Error (Printf.sprintf "artifact not found: %s" path)
+  Agent_sdk.Proof_store.read_json config ref_

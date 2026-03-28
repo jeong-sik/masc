@@ -1,7 +1,8 @@
 (** Cdal_loader -- Load and validate a CDAL proof bundle from disk.
 
-    Reads manifest.json and contract.json from the proof store,
-    verifies schema version, parses with Agent_sdk decoders,
+    Uses OAS-owned [Agent_sdk.Proof_store] read-side APIs for
+    manifest/contract loading so MASC does not hardcode proof-store layout.
+    The loader verifies schema version, decodes with Agent_sdk types,
     and recomputes the content-addressed contract_id.
 
     @since CDAL Phase 1A *)

@@ -34,61 +34,37 @@ let load_error_to_string = function
     Printf.sprintf "ref resolution error: %s" msg
 
 (* ================================================================ *)
-(* File I/O helpers                                                  *)
-(* ================================================================ *)
-
-let read_json_file path =
-  if Sys.file_exists path then
-    (try Ok (Yojson.Safe.from_file path)
-     with exn -> Error (Printexc.to_string exn))
-  else
-    Error "not found"
-
-(* ================================================================ *)
 (* Load pipeline                                                     *)
 (* ================================================================ *)
+
+let contract_path_of_run store ~run_id =
+  let ref_ = Agent_sdk.Proof_store.make_ref ~run_id ~subpath:"contract.json" in
+  match Agent_sdk.Proof_store.resolve_ref store ref_ with
+  | Ok resolved -> Ok resolved.path
+  | Error e -> Error (Ref_resolution_error e)
 
 let load ~(store : Agent_sdk.Proof_store.config)
     (proof : Agent_sdk.Cdal_proof.t)
     : (loaded_bundle, load_error) result =
   let ( let* ) = Result.bind in
-  (* 1. Compute manifest path and read *)
   let manifest_path =
     Agent_sdk.Proof_store.manifest_path store ~run_id:proof.run_id in
-  let* manifest_json =
-    read_json_file manifest_path
+  let* contract_path = contract_path_of_run store ~run_id:proof.run_id in
+  let* (manifest_proof, manifest_json) =
+    Agent_sdk.Proof_store.load_manifest store ~run_id:proof.run_id
     |> Result.map_error (fun msg ->
-      if msg = "not found" then Manifest_not_found manifest_path
-      else Manifest_parse_error msg)
+         if Sys.file_exists manifest_path then Manifest_parse_error msg
+         else Manifest_not_found manifest_path)
   in
-  let* manifest_proof =
-    Agent_sdk.Cdal_proof.of_json manifest_json
-    |> Result.map_error (fun msg -> Manifest_parse_error msg)
-  in
-  (* 2. Check schema version from stored manifest *)
   if manifest_proof.schema_version <> Agent_sdk.Cdal_proof.schema_version_current then
     Error (Schema_unsupported manifest_proof.schema_version)
   else
-  (* 3. Compute contract path and read *)
-  let contract_path =
-    Filename.concat
-      (Filename.concat
-         (Filename.concat store.root "proofs")
-         proof.run_id)
-      "contract.json"
-  in
-  let* contract_json =
-    read_json_file contract_path
+  let* (contract, contract_json) =
+    Agent_sdk.Proof_store.load_contract store ~run_id:proof.run_id
     |> Result.map_error (fun msg ->
-      if msg = "not found" then Contract_not_found contract_path
-      else Contract_parse_error msg)
+         if Sys.file_exists contract_path then Contract_parse_error msg
+         else Contract_not_found contract_path)
   in
-  (* 4. Decode contract with Agent_sdk *)
-  let* contract =
-    Agent_sdk.Risk_contract.of_yojson contract_json
-    |> Result.map_error (fun msg -> Contract_parse_error msg)
-  in
-  (* 5. Recompute contract_id *)
   let recomputed_contract_id = Agent_sdk.Risk_contract.contract_id contract in
   Ok {
     proof = manifest_proof;

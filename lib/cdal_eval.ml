@@ -120,6 +120,12 @@ let evaluate_content ~(violations : Violation_record.t list)
 (* Artifact-reading evaluation                                       *)
 (* ================================================================ *)
 
+let has_exact_subpath (store : Agent_sdk.Proof_store.config) expected
+    (ref_ : Agent_sdk.Cdal_proof.artifact_ref) =
+  match Agent_sdk.Proof_store.resolve_ref store ref_ with
+  | Ok resolved -> String.equal resolved.subpath expected
+  | Error _ -> false
+
 let read_violations (store : Agent_sdk.Proof_store.config)
     (refs : Agent_sdk.Cdal_proof.artifact_ref list) : Violation_record.t list =
   List.concat_map (fun ref_ ->
@@ -129,13 +135,7 @@ let read_violations (store : Agent_sdk.Proof_store.config)
        | Ok vs -> vs
        | Error _ -> [])
     | Error _ -> []
-  ) (List.filter (fun r ->
-    let len = String.length r in
-    len >= 20 && (
-      let suffix = String.sub r (len - 20) 20 in
-      suffix = "mode_violations.json"
-    )
-  ) refs)
+  ) (List.filter (has_exact_subpath store "evidence/mode_violations.json") refs)
 
 let read_token_usage (store : Agent_sdk.Proof_store.config)
     (refs : Agent_sdk.Cdal_proof.artifact_ref list) : Token_usage_record.t list =
@@ -146,13 +146,7 @@ let read_token_usage (store : Agent_sdk.Proof_store.config)
        | Ok ts -> ts
        | Error _ -> [])
     | Error _ -> []
-  ) (List.filter (fun r ->
-    let len = String.length r in
-    len >= 16 && (
-      let suffix = String.sub r (len - 16) 16 in
-      suffix = "token_usage.json"
-    )
-  ) refs)
+  ) (List.filter (has_exact_subpath store "evidence/token_usage.json") refs)
 
 let evaluate ~(store : Agent_sdk.Proof_store.config)
     (p : Agent_sdk.Cdal_proof.t) : eval_result =

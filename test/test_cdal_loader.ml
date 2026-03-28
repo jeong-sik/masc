@@ -165,10 +165,13 @@ let test_malformed_contract () =
   Agent_sdk.Proof_store.init_run store ~run_id;
   Agent_sdk.Proof_store.write_manifest store ~run_id proof;
   (* Write invalid contract JSON *)
-  let contract_path = Filename.concat
-    (Filename.concat
-       (Filename.concat store.root "proofs") run_id)
-    "contract.json" in
+  let contract_ref =
+    Agent_sdk.Proof_store.make_ref ~run_id ~subpath:"contract.json" in
+  let contract_path =
+    match Agent_sdk.Proof_store.resolve_ref store contract_ref with
+    | Ok resolved -> resolved.path
+    | Error e -> Alcotest.fail e
+  in
   let oc = open_out contract_path in
   output_string oc "{not valid contract json}}}";
   close_out oc;

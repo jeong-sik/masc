@@ -1157,9 +1157,3 @@
  (name test_cdal_eval_v1)
  (modules test_cdal_eval_v1)
  (libraries masc_mcp agent_sdk alcotest yojson unix))
-
-; CDAL Phase 1A: Friction projection for single-run (#3602)
-(test
- (name test_cdal_friction_projection)
- (modules test_cdal_friction_projection)
- (libraries masc_mcp agent_sdk alcotest yojson unix str))

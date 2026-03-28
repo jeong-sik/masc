@@ -177,17 +177,7 @@ let test_integration_read_violations () =
     (Printf.sprintf "cdal_eval_int_%d" (Unix.getpid ())) in
   let store : Agent_sdk.Proof_store.config = { root = tmp_dir } in
   let run_id = "int-test-001" in
-  let run_dir = Filename.concat (Filename.concat tmp_dir "proofs") run_id in
-  let () =
-    let rec mkdirp path =
-      if not (Sys.file_exists path) then begin
-        mkdirp (Filename.dirname path);
-        Unix.mkdir path 0o755
-      end
-    in
-    mkdirp (Filename.concat run_dir "tool_traces");
-    mkdirp (Filename.concat run_dir "evidence")
-  in
+  Agent_sdk.Proof_store.init_run store ~run_id;
   (* Write synthetic violation evidence *)
   let violation_json = `List [
     `Assoc [
@@ -249,6 +239,32 @@ let test_integration_missing_artifact () =
   Alcotest.(check string) "ok (no violations read)" "ok"
     (CE.severity_to_string result.overall)
 
+let test_integration_ignores_suffix_lookalike_refs () =
+  Eio_main.run @@ fun _env ->
+  let tmp_dir = Filename.concat
+    (Filename.get_temp_dir_name ())
+    (Printf.sprintf "cdal_eval_suffix_%d" (Unix.getpid ())) in
+  let store : Agent_sdk.Proof_store.config = { root = tmp_dir } in
+  let run_id = "int-test-lookalike-001" in
+  Agent_sdk.Proof_store.init_run store ~run_id;
+  Agent_sdk.Proof_store.write_evidence store ~run_id
+    ~ref_id:"archive_mode_violations"
+    (`List [`Assoc [
+      ("ts", `Float 1000.5);
+      ("tool_name", `String "bash");
+      ("input_summary", `String "rm -rf /tmp/x");
+      ("effective_mode", `String "draft");
+      ("violation_kind", `String "external_in_draft");
+    ]]);
+  let proof = make_proof ~run_id ~effective:Draft
+    ~raw_evidence_refs:[
+      Agent_sdk.Proof_store.make_ref ~run_id
+        ~subpath:"evidence/archive_mode_violations.json";
+    ] () in
+  let result = CE.evaluate ~store proof in
+  Alcotest.(check int) "lookalike ref ignored" 0
+    (List.length result.evidence.violations)
+
 (* ================================================================ *)
 (* Violation_record unit tests                                       *)
 (* ================================================================ *)
@@ -309,6 +325,8 @@ let () =
     ("integration", [
       Alcotest.test_case "read violations from store" `Quick test_integration_read_violations;
       Alcotest.test_case "missing artifact graceful" `Quick test_integration_missing_artifact;
+      Alcotest.test_case "ignore suffix lookalike refs" `Quick
+        test_integration_ignores_suffix_lookalike_refs;
     ]);
     ("violation_record", [
       Alcotest.test_case "parse" `Quick test_violation_parse;

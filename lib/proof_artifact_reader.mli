@@ -1,7 +1,8 @@
 (** Proof_artifact_reader — Dereference proof-store:// artifact refs.
 
-    Resolves [proof-store://{run_id}/{subpath}] references to filesystem
-    paths under [{config.root}/proofs/] and reads their JSON content.
+    Delegates ref resolution and JSON parsing to OAS-owned
+    [Agent_sdk.Proof_store] read-side APIs so MASC does not hardcode
+    proof-store layout.
 
     @since CDAL eval content-based redesign *)
 

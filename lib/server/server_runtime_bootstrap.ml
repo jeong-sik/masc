@@ -6,7 +6,7 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
 let pg_env_var_names =
-  [| "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" |]
+  [| "MASC_POSTGRES_URL" |]
 
 let force_jsonl_fallback_env () =
   Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
@@ -327,15 +327,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
            with Eio.Time.Timeout ->
              let reason =
                Printf.sprintf
-                 "PG init timed out after %.0fs, retrying with JSONL fallback"
+                 "PG init timed out after %.0fs with MASC_STORAGE_TYPE=postgres"
                  pg_init_timeout
              in
-             Log.Server.error
-               "%s" reason;
-             Server_startup_state.note_fallback reason;
-             force_jsonl_fallback_env ();
-             Server_startup_state.mark_blocking ~backend_mode:"filesystem";
-             init_state_blocking ())
+             Log.Server.error "%s" reason;
+             raise (Invalid_argument reason))
         else
           init_state_blocking ()
       in
@@ -368,6 +364,17 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       Masc_grpc_server.start ~sw ~env ~room_config:state.room_config
         ~tool_dispatcher;
+      (* Initialize gRPC client for keeper heartbeat when transport is gRPC *)
+      (match Masc_grpc_transport.from_env () with
+       | Masc_grpc_transport.Grpc ->
+           (try
+              let client = Masc_grpc_client.create_from_env ~sw ~env in
+              Keeper_keepalive.set_grpc_client ~env client;
+              Log.Server.info "gRPC keeper client initialized"
+            with exn ->
+              Log.Server.warn "gRPC keeper client init failed: %s"
+                (Printexc.to_string exn))
+       | _ -> ());
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
       Server_ws_standalone.start ~sw ~env
         ~on_message:(fun ws_session_id body_str ->
@@ -406,23 +413,16 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         Server_webrtc_transport.set_connection_starter
           (fun peer_id ->
             Server_webrtc_transport.start_webrtc_connection ~sw ~env peer_id));
-      (* Stagger PG-heavy refresh loop warm-cache runs at startup.
-         Each Proactive_refresh.start forks a fiber that immediately calls
-         compute(), so starting all 7 loops at once creates 7+ concurrent PG
-         queries — exceeding pool capacity on Supabase session pooler.
-         A short sleep between PG-heavy launches spreads the initial burst. *)
+      (* Cold-start warm-cache stagger is handled by warm_delay_s in each
+         Proactive_refresh config. Heavy surfaces delay their initial warm
+         compute to avoid concurrent CPU/PG contention.  Lightweight surfaces
+         (cp-summary, execution, transport_health) start immediately. *)
       Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 2.0;
       Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 2.0;
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
-      (* transport_health is light (no PG), start immediately. *)
       Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 2.0;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 2.0;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
-      Eio.Time.sleep clock 2.0;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
       (* Pre-warm shell cache in a separate fiber so it cannot block
          keeper loop startup or lazy tasks (#keeper-bootstrap-stuck). *)
@@ -447,7 +447,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     | exn ->
       Server_startup_state.mark_degraded ~error:(Printexc.to_string exn);
       Log.Server.error "Background init failed (HTTP still serving): %s"
-        (Printexc.to_string exn));
+        (Printexc.to_string exn);
+      if String.equal initial_backend_mode "postgres-native" then
+        exit 1);
 
   (* 2b. Startup watchdog: if init does not reach state_ready within timeout,
      log and exit so external process managers can restart the server.

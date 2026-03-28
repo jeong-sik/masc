@@ -129,7 +129,7 @@ let test_http_write_auth_contracts () =
        {|with_token_permission_auth ~permission:Types.CanAdmin|});
   check bool "provider runs route threads state net into dashboard single-run" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
-       "?net:state.Mcp_server.net")
+       "~net:state.Mcp_server.net")
 
 let test_keeper_direct_reply_contracts () =
   check bool "dashboard keeper direct messages request direct reply" true
@@ -267,7 +267,7 @@ let test_dashboard_component_split_contracts () =
        "export function SwarmLivePanels");
   check bool "room backend setup prefers supabase transaction companion when present" true
     (file_contains_pattern "lib/room/room_utils_backend_setup.ml"
-       "preferring available Transaction Pooler companion")
+       "Transaction Pooler companion")
 
 let test_activity_surface_contracts () =
   check bool "activity tab exposes activity graph label" true

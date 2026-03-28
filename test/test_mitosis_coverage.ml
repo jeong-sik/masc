@@ -856,10 +856,11 @@ let test_record_activity_updates_timestamp () =
    prepare_for_division + DNA validation Tests (#3164)
    ============================================================ *)
 
-let test_prepare_good_dna () =
-  (* Context with goal and task anchors produces high-quality DNA *)
+let test_prepare_high_quality_dna_ready_for_handoff () =
+  (* Context with goal and task anchors produces high-quality DNA that
+     should transition into Prepared + ReadyForHandoff. *)
   let full_context =
-    "[MASC_GOAL] Monitor CI pipeline and fix failures\n\
+    "Goal: Monitor CI pipeline and fix failures\n\
      Current task: Fix flaky test in test_board_api_e2e\n\
      I investigated the root cause and found a race condition in the board listener.\n\
      The fix involves adding a mutex guard around the notification handler.\n\
@@ -870,32 +871,55 @@ let test_prepare_good_dna () =
     phase = Mitosis.Idle } in
   let result = Mitosis.prepare_for_division
     ~config:Mitosis.default_config ~cell ~full_context in
+  let dna =
+    match result.Mitosis.phase with
+    | Mitosis.ReadyForHandoff dna -> dna
+    | Mitosis.Idle -> fail "expected ReadyForHandoff"
+  in
+  let quality =
+    Masc_mcp.Mitosis_dna.validate_dna
+      ~dna
+      ~anchors:(Masc_mcp.Mitosis_dna.build_continuity_anchors full_context)
+  in
   check bool "good DNA -> Prepared state" true
-    (result.Mitosis.state = Mitosis.Prepared)
+    (result.Mitosis.state = Mitosis.Prepared);
+  check bool "good DNA -> ReadyForHandoff phase" true
+    (match result.Mitosis.phase with Mitosis.ReadyForHandoff _ -> true | _ -> false);
+  check (option string) "prepared_dna stored" (Some dna) result.Mitosis.prepared_dna;
+  check int "prepare_context_len preserved" (String.length full_context)
+    result.Mitosis.prepare_context_len;
+  check bool "good DNA quality above handoff fallback threshold" true
+    (quality.score >= 0.6)
 
-let test_prepare_bad_dna () =
-  (* Directly test validate_dna with truncated DNA — score < 0.3 *)
-  let bad_dna = "x" in
-  let no_anchors = "" in
-  let quality = Masc_mcp.Mitosis_dna.validate_dna ~dna:bad_dna ~anchors:no_anchors in
-  (* score = 0*0.30 + 0*0.20 + 1.0*0.25 + 0*0.15 + 0*0.10 = 0.25 *)
-  check bool "short DNA low score" true (quality.score < 0.3);
-  (* Also test that prepare_for_division with empty context still works
-     (extract_dna generates a header even from empty context, which
-     gives coherence=1.0 + some length, so score may exceed 0.3.
-     This is correct behavior — the header IS valid DNA.) *)
-  let full_context = "" in
+let test_prepare_low_quality_dna_stays_active () =
+  let full_context =
+    String.concat "\n"
+      [
+        String.make 300 '(';
+        String.make 300 '[';
+        "unfinished trailing context without punctuation";
+      ]
+  in
   let cell = { (Mitosis.create_stem_cell ~generation:1) with
     Mitosis.state = Mitosis.Active;
     phase = Mitosis.Idle } in
+  let dna =
+    Mitosis.extract_dna
+      ~config:Mitosis.default_config ~parent_cell:cell ~full_context
+  in
+  let quality =
+    Masc_mcp.Mitosis_dna.validate_dna
+      ~dna
+      ~anchors:(Masc_mcp.Mitosis_dna.build_continuity_anchors full_context)
+  in
+  check bool "low-quality DNA score" true (quality.score < 0.3);
   let result = Mitosis.prepare_for_division
     ~config:Mitosis.default_config ~cell ~full_context in
-  (* With empty context, extract_dna still generates header+wisdom,
-     which is coherent (no truncation) — may pass quality gate.
-     We verify the flow completes without crash. *)
-  check bool "empty context division completes" true
-    (result.Mitosis.state = Mitosis.Active
-     || result.Mitosis.state = Mitosis.Prepared)
+  check bool "low-quality DNA stays Active" true
+    (result.Mitosis.state = Mitosis.Active);
+  check bool "low-quality DNA stays Idle" true
+    (result.Mitosis.phase = Mitosis.Idle);
+  check (option string) "no prepared_dna stored" None result.Mitosis.prepared_dna
 
 (* ============================================================
    Test Runners
@@ -904,6 +928,7 @@ let test_prepare_bad_dna () =
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio_guard.enable ();
   run "Mitosis Coverage" [
     "cell_state", [
@@ -1087,7 +1112,7 @@ let () =
       test_case "updates timestamp" `Quick test_record_activity_updates_timestamp;
     ];
     "prepare_for_division", [
-      test_case "good DNA proceeds to Prepared" `Quick test_prepare_good_dna;
-      test_case "bad DNA reverts to Active" `Quick test_prepare_bad_dna;
+      test_case "high quality DNA prepares handoff" `Quick test_prepare_high_quality_dna_ready_for_handoff;
+      test_case "low quality DNA stays active" `Quick test_prepare_low_quality_dna_stays_active;
     ];
   ]

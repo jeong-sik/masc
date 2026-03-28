@@ -873,11 +873,6 @@
  (modules test_lamport)
  (libraries masc_mcp alcotest))
 
-(test
- (name test_trace)
- (modules test_trace)
- (libraries masc_mcp alcotest yojson))
-
 ; Pulse module tests (Space heartbeat engine — Eio real clock)
 (test
  (name test_pulse)

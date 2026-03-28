@@ -41,7 +41,7 @@ let test_mcp_session_get_updates_activity () =
   let session = Session.McpSessionStore.create () in
   let old_activity = session.last_activity in
   (* Increase sleep time for more tolerance on slow systems *)
-  Time_compat.sleep 0.1;
+  Unix.sleepf 0.1;
   let _ = Session.McpSessionStore.get session.id in  (* get updates activity *)
   check bool "activity updated" true (session.last_activity >= old_activity)
 

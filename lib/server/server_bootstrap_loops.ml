@@ -164,6 +164,7 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     Eio.Time.sleep clock 5.0;
     let config = state.room_config in
     let names = Keeper_types.keepalive_keeper_names config in
+    Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
     let booted = ref 0 in
     List.iter (fun name ->
         try
@@ -216,6 +217,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Tool_metrics_persist.start_flush_fiber ~sw ~clock
     ~base_path:state.room_config.base_path;
   Otel_dispatch_hook.install ();
+  Otel_chain_subscriber.install ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
   (match Board_dispatch.get_pg_pool () with

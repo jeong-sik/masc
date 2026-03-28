@@ -46,6 +46,7 @@ let file_contains_pattern file_rel pattern =
 let with_test_config name f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "walph_eio_%s_%d_%d" name (Unix.getpid ())
       (int_of_float (Unix.gettimeofday () *. 1000.))) in

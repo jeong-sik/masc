@@ -121,7 +121,11 @@ let start_cp_snapshot_refresh_loop ~state ~sw ~clock =
     ~config:{ (Proactive_refresh.default_config
                  ~label:"cp-snapshot"
                  ~interval_s:_cp_snapshot_refresh_interval_s)
-              with timeout_s = 30.0 }
+              with timeout_s = 30.0;
+                   warm_delay_s =
+                     Dashboard_http_helpers.float_of_env_default
+                       "MASC_WARM_DELAY_CP_SNAPSHOT_S"
+                       ~default:60.0 ~min_v:0.0 ~max_v:300.0 }
     ~compute:(fun () -> compute_cp_snapshot ~state)
     ~on_result:(fun snapshot -> _cp_snapshot_ref := snapshot)
 

@@ -561,13 +561,6 @@ let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Agent_sdk.Types.api
     cache_read_input_tokens = 0;
     cost_usd = None }
 
-let merge_cost_usd (a : float option) (b : float option) : float option =
-  match a, b with
-  | Some x, Some y -> Some (x +. y)
-  | Some _, None -> a
-  | None, Some _ -> b
-  | None, None -> None
-
 let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
   { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
@@ -575,7 +568,11 @@ let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) 
       a.cache_creation_input_tokens + b.cache_creation_input_tokens;
     cache_read_input_tokens =
       a.cache_read_input_tokens + b.cache_read_input_tokens;
-    cost_usd = merge_cost_usd a.cost_usd b.cost_usd }
+    cost_usd =
+      (match a.cost_usd, b.cost_usd with
+       | Some x, Some y -> Some (x +. y)
+       | Some x, None | None, Some x -> Some x
+       | None, None -> None) }
 
 let estimate_cost_usd ~(model_id : string)
     (usage : Agent_sdk.Types.api_usage) : float option =

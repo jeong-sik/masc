@@ -19,11 +19,14 @@ let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
 let set_bus bus = bus_ref := Some bus
 let get_bus () = !bus_ref
 
-(** Optional gRPC client — set at server bootstrap when
-    [MASC_AGENT_TRANSPORT=grpc]. When set, heartbeat also sends
-    pings over the gRPC bidirectional stream. *)
+(** Optional gRPC client + env — set at server bootstrap when
+    [MASC_AGENT_TRANSPORT=grpc]. When set, heartbeat sends
+    status pings over gRPC unary RPC. *)
 let grpc_client_ref : Masc_grpc_client.t option ref = ref None
-let set_grpc_client c = grpc_client_ref := Some c
+let grpc_env_ref : Eio_unix.Stdenv.base option ref = ref None
+let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
+  grpc_client_ref := Some c;
+  grpc_env_ref := env
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~2 s instead of waiting for the full 30-300 s interval. *)
@@ -512,30 +515,33 @@ let run_grpc_heartbeat_fiber ~sw ~stop
     ~(grpc_client : Masc_grpc_client.t)
     ~(agent_name : string) ~(session_id : string)
     ~(interval_sec : float) ~(clock : _ Eio.Time.clock) =
-  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+  match Eio_context.get_switch_opt (), !grpc_env_ref with
   | None, _ | _, None ->
-    Log.Keeper.warn "gRPC heartbeat: Eio context not available";
+    Log.Keeper.warn "gRPC heartbeat: Eio context or env not available";
     None
-  | Some grpc_sw, Some _net ->
-  (* Use periodic unary gRPC calls instead of a bidi stream, since the
-     bidi stream requires Eio_unix.Stdenv.base which is not stored
-     globally. The server processes individual heartbeats. *)
-  ignore grpc_sw;
-  ignore grpc_client;
+  | Some grpc_sw, Some env ->
+  (* Periodic unary gRPC get_status as heartbeat signal.
+     Bidi streaming deferred to P2 (requires env threading). *)
+  ignore session_id;
   let close_ref = ref false in
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       if Atomic.get stop || !close_ref then ()
       else (
         (try
-          Log.Keeper.info "grpc heartbeat tick: agent=%s session=%s"
-            agent_name session_id;
           let no_wakeup = Atomic.make false in
-          interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec
+          interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec;
+          if not (Atomic.get stop || !close_ref) then
+            match Masc_grpc_client.get_status grpc_client ~sw:grpc_sw ~env with
+            | Ok status ->
+                Log.Keeper.debug "gRPC heartbeat: agent=%s agents=%d tasks=%d"
+                  agent_name (List.length status.agents) (List.length status.tasks)
+            | Error err ->
+                Log.Keeper.warn "gRPC heartbeat failed: %s" err
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-          Log.Keeper.error "grpc heartbeat tick failed: %s"
+          Log.Keeper.error "gRPC heartbeat tick error: %s"
             (Printexc.to_string exn));
         if not (Atomic.get stop) then loop ())
     in
@@ -545,8 +551,10 @@ let run_grpc_heartbeat_fiber ~sw ~stop
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     (m : keeper_meta) : unit =
   if not m.presence_keepalive then ()
-  else if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name then ()
-  else if not (Keeper_registry.spawn_slots_available ()) then ()
+  else if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name then
+    Log.Keeper.info "start_keepalive: skipped %s (already running)" m.name
+  else if not (Keeper_registry.spawn_slots_available ()) then
+    Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name
   else (
     (* Register in Keeper_registry first — single source of truth. *)
     let reg = Keeper_registry.register ~base_path:ctx.config.base_path m.name m in

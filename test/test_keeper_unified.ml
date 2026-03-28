@@ -358,13 +358,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     model_used = model;
     turn_count = 1;
     tool_calls_made = List.length tools;
-    usage = {
-      input_tokens = input_tok;
-      output_tokens = output_tok;
-      cache_creation_input_tokens = 0;
-      cache_read_input_tokens = 0;
-      cost_usd = None;
-    };
+    usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = None };
     tools_used = tools;
     checkpoint = None;
   }

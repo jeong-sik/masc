@@ -177,11 +177,8 @@ let test_force_jsonl_fallback_env () =
       Server_runtime_bootstrap.force_jsonl_fallback_env ();
       Alcotest.(check string) "storage type forced to filesystem" "filesystem"
         (Sys.getenv "MASC_STORAGE_TYPE");
-      List.iter
-        (fun name ->
-          Alcotest.(check string)
-            (Printf.sprintf "%s cleared" name) "" (Sys.getenv name))
-        [ "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" ])
+      Alcotest.(check string)
+        "MASC_POSTGRES_URL cleared" "" (Sys.getenv "MASC_POSTGRES_URL"))
 
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->

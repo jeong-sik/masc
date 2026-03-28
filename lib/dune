@@ -251,7 +251,6 @@
    adaptive_thresholds
    mdal_store
    verification
-   trace
    mitosis
    mitosis_defaults
    mitosis_dna
@@ -268,6 +267,7 @@
    operator_judgment
    notify
    orchestrator
+   otel_chain_subscriber
    otel_config
    otel_dispatch_hook
    otel_spans

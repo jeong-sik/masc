@@ -357,12 +357,14 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
       run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
         ~clock ~config
         (fun ~config ~sw ->
+          let t_sessions = Unix.gettimeofday () in
           let sessions =
             if Room.is_initialized config then
               dashboard_active_or_recent_sessions_cached ~clock config
             else
               []
           in
+          let dt_sessions = Unix.gettimeofday () -. t_sessions in
           let ctx : _ Operator_control.context =
             {
               config;
@@ -373,11 +375,21 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
               mcp_session_id = None;
             }
           in
-          Operator_control.snapshot_json ~actor:"dashboard" ~view:"summary"
-            ~include_messages:true ~include_sessions:true ~include_keepers:true
-            ~include_summary_fields:false
-            ~lightweight_summary:true
-            ~include_command_plane:false ~sessions ctx
+          let t_snapshot = Unix.gettimeofday () in
+          let json =
+            Operator_control.snapshot_json ~actor:"dashboard" ~view:"summary"
+              ~include_messages:true ~include_sessions:true ~include_keepers:true
+              ~include_summary_fields:false
+              ~lightweight_summary:true
+              ~include_command_plane:false ~sessions ctx
+          in
+          let dt_snapshot = Unix.gettimeofday () -. t_snapshot in
+          let dt_total = Unix.gettimeofday () -. started_at in
+          if dt_total >= 5.0 then
+            Log.Dashboard.warn
+              "[operator_snapshot profile] total=%.1fs sessions=%.1fs(%d) snapshot=%.1fs"
+              dt_total dt_sessions (List.length sessions) dt_snapshot;
+          json
           |> with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
                ~extra:(operator_snapshot_extra sessions))
     with
@@ -393,7 +405,11 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
               with timeout_s =
                      float_of_env_default
                        "MASC_DASHBOARD_OPERATOR_SNAPSHOT_TIMEOUT_S"
-                       ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
+                       ~default:45.0 ~min_v:10.0 ~max_v:120.0;
+                   warm_delay_s =
+                     float_of_env_default
+                       "MASC_WARM_DELAY_OPERATOR_SNAPSHOT_S"
+                       ~default:120.0 ~min_v:0.0 ~max_v:300.0 }
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _operator_snapshot_cache json;
@@ -450,7 +466,11 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
               with timeout_s =
                      float_of_env_default
                        "MASC_DASHBOARD_OPERATOR_DIGEST_TIMEOUT_S"
-                       ~default:45.0 ~min_v:10.0 ~max_v:120.0 }
+                       ~default:45.0 ~min_v:10.0 ~max_v:120.0;
+                   warm_delay_s =
+                     float_of_env_default
+                       "MASC_WARM_DELAY_OPERATOR_DIGEST_S"
+                       ~default:150.0 ~min_v:0.0 ~max_v:300.0 }
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _operator_digest_cache json;
@@ -660,15 +680,28 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   in
   let compute () =
     mark_cached_surface_attempt _mission_cache;
+    let t0_mission = Unix.gettimeofday () in
     try
+      let t_cp = Unix.gettimeofday () in
       let command_plane_summary, swarm_status =
         command_plane_summary_cache_parts ~allow_initializing:false ~state
       in
       run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
         ~clock ~config:room_config
-        (fun ~config ~sw ->
-          Dashboard_mission.json ?command_plane_summary ?swarm_status ~config ~sw
-            ~clock ~proc_mgr ())
+        |> fun run_compute ->
+        let dt_cp = Unix.gettimeofday () -. t_cp in
+        let result =
+          run_compute
+          (fun ~config ~sw ->
+            Dashboard_mission.json ?command_plane_summary ?swarm_status ~config ~sw
+              ~clock ~proc_mgr ())
+        in
+      let dt_total = Unix.gettimeofday () -. t0_mission in
+      if dt_total >= 5.0 then
+        Log.Dashboard.warn
+          "[mission profile] total=%.1fs cp_summary=%.1fs compute=%.1fs"
+          dt_total dt_cp (dt_total -. dt_cp);
+      result
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -677,7 +710,11 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   in
   Proactive_refresh.start ~sw ~clock
     ~config:{ (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0)
-              with timeout_s = mission_refresh_timeout_s }
+              with timeout_s = mission_refresh_timeout_s;
+                   warm_delay_s =
+                     float_of_env_default
+                       "MASC_WARM_DELAY_MISSION_S"
+                       ~default:90.0 ~min_v:0.0 ~max_v:300.0 }
     ~compute
     ~on_result:(mark_cached_surface_success _mission_cache)
 

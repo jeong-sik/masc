@@ -3,13 +3,25 @@
 
 ## [Unreleased]
 
+## [2.159.0] - 2026-03-28
+
 ### Added
 - **OpenTelemetry foundation** — spans, histogram, trace_id linkage (#3487).
+- **OTLP exporter** — enable via opentelemetry-client-cohttp-eio (#3506).
+- **Server config introspection** — dashboard view for runtime configuration (#3496).
+- **Delta push** — skip unchanged SSE broadcasts via SHA256 payload hash (#3508).
+
+### Changed
+- **Transport health interval** — 15s to 30s default, configurable via env var, sub-second refreshes logged at debug (#3499).
+- **Refresh loop jitter** — widened from 10% (5s cap) to 25% to prevent cascade timeout (#3500).
+- **Dead modules removed** — 9 modules, -4,034 lines (#3497).
 
 ### Fixed
 - **API usage cost_usd regressions** — restore cost tracking after OAS update (#3493).
 - **Resident terminology removal** — replace remaining resident keeper references (#3491).
 - **Mission cache timeout** — extract to env var `MASC_DASHBOARD_MISSION_CACHE_TIMEOUT_S` (#3484).
+- **Graceful shutdown timeout** — configurable instead of hardcoded 5s (#3504).
+- **Release truth drift** — sync CHANGELOG and ROADMAP to v2.158.0 (#3503).
 
 ## [2.158.0] - 2026-03-28
 

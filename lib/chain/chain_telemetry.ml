@@ -6,7 +6,7 @@
     - 비동기 이벤트 발행 (emit)
     - 다중 구독자 지원 (subscribe/unsubscribe)
     - 구조화된 이벤트 타입 (ChainStart, NodeComplete, Error 등)
-    - Fiber-safe 구독자 관리 (Eio.Mutex 사용)
+    - 구독자 관리 (non-yielding ops, single-domain Eio atomic)
 
     @author Chain Engine
     @since 2026-01
@@ -14,11 +14,6 @@
 
 
 open Chain_category
-
-(** {1 Eio-aware Mutex Guard}
-
-    Delegates to {!Eio_guard.with_mutex} for dual-mode locking. *)
-let with_mutex mutex f = Eio_guard.with_mutex mutex f
 
 (** {1 History Persistence} *)
 
@@ -108,7 +103,6 @@ type event_handler = chain_event -> unit
 (** Global subscription registry *)
 let next_sub_id = ref 0
 let subscribers : (subscription_id, event_handler) Hashtbl.t = Hashtbl.create 16
-let subscribers_mutex = Eio.Mutex.create ()
 
 (** {1 Running Chains Tracking} *)
 
@@ -122,46 +116,37 @@ type running_chain_info = {
 }
 
 let running_chains : (string, running_chain_info) Hashtbl.t = Hashtbl.create 16
-let running_chains_mutex = Eio.Mutex.create ()
 
 (** Register a chain as running *)
 let register_running_chain ~chain_id ~total_nodes =
-  with_mutex running_chains_mutex (fun () ->
-    let info = {
-      chain_id;
-      started_at = Unix.gettimeofday ();
-      progress = 0.0;
-      _nodes_completed = 0;
-      total_nodes;
-    } in
-    Hashtbl.replace running_chains chain_id info
-  )
+  let info = {
+    chain_id;
+    started_at = Unix.gettimeofday ();
+    progress = 0.0;
+    _nodes_completed = 0;
+    total_nodes;
+  } in
+  Hashtbl.replace running_chains chain_id info
 
 (** Update chain progress *)
 let update_chain_progress ~chain_id ~nodes_completed =
-  with_mutex running_chains_mutex (fun () ->
-    match Hashtbl.find_opt running_chains chain_id with
-    | Some info ->
-        info._nodes_completed <- nodes_completed;
-        info.progress <- if info.total_nodes > 0
-          then float_of_int nodes_completed /. float_of_int info.total_nodes
-          else 0.0
-    | None -> ()
-  )
+  match Hashtbl.find_opt running_chains chain_id with
+  | Some info ->
+      info._nodes_completed <- nodes_completed;
+      info.progress <- if info.total_nodes > 0
+        then float_of_int nodes_completed /. float_of_int info.total_nodes
+        else 0.0
+  | None -> ()
 
 (** Unregister a completed chain *)
 let unregister_running_chain ~chain_id =
-  with_mutex running_chains_mutex (fun () ->
-    Hashtbl.remove running_chains chain_id
-  )
+  Hashtbl.remove running_chains chain_id
 
 (** Get all running chains *)
 let get_running_chains () : (string * float * float) list =
-  with_mutex running_chains_mutex (fun () ->
-    Hashtbl.fold (fun _id info acc ->
-      (info.chain_id, info.started_at, info.progress) :: acc
-    ) running_chains []
-  )
+  Hashtbl.fold (fun _id info acc ->
+    (info.chain_id, info.started_at, info.progress) :: acc
+  ) running_chains []
 
 (** Generate next subscription ID *)
 let gen_sub_id () =
@@ -209,10 +194,9 @@ let save_to_history event =
 let emit event =
   (* Save to history file (chain_start, chain_complete, chain_error only) *)
   save_to_history event;
-  (* Get handlers snapshot under lock *)
-  let handlers = with_mutex subscribers_mutex (fun () ->
+  let handlers =
     Hashtbl.fold (fun _ handler acc -> handler :: acc) subscribers []
-  ) in
+  in
   (* Call handlers outside of lock to avoid deadlocks *)
   List.iter (fun handler ->
     try handler event
@@ -223,28 +207,23 @@ let emit event =
 
 (** Subscribe to chain events *)
 let subscribe handler =
-  with_mutex subscribers_mutex (fun () ->
-    let id = gen_sub_id () in
-    Hashtbl.add subscribers id handler;
-    { sub_id = id; active = true }
-  )
+  let id = gen_sub_id () in
+  Hashtbl.add subscribers id handler;
+  { sub_id = id; active = true }
 
 (** Unsubscribe from chain events *)
 let unsubscribe sub =
-  if sub.active then
-    with_mutex subscribers_mutex (fun () ->
-      Hashtbl.remove subscribers sub.sub_id;
-      sub.active <- false
-    )
+  if sub.active then begin
+    Hashtbl.remove subscribers sub.sub_id;
+    sub.active <- false
+  end
 
 (** Check if subscription is active *)
 let is_active sub = sub.active
 
 (** Get number of active subscribers *)
 let subscriber_count () =
-  with_mutex subscribers_mutex (fun () ->
-    Hashtbl.length subscribers
-  )
+  Hashtbl.length subscribers
 
 (** {1 Event Constructors} *)
 
@@ -299,17 +278,13 @@ let error ~node_id ~message ~retries =
 
 (** Event log buffer for persistence *)
 let event_log : chain_event list ref = ref []
-let event_log_mutex = Eio.Mutex.create ()
 let max_log_size = ref 10000
 
 (** Logging subscriber that buffers events *)
 let logging_handler event =
-  with_mutex event_log_mutex (fun () ->
-    event_log := event :: !event_log;
-    (* Trim if exceeds max size *)
-    if List.length !event_log > !max_log_size then
-      event_log := List.filteri (fun i _ -> i < !max_log_size) !event_log
-  )
+  event_log := event :: !event_log;
+  if List.length !event_log > !max_log_size then
+    event_log := List.filteri (fun i _ -> i < !max_log_size) !event_log
 
 (** Initialize logging subscriber *)
 let logging_subscription = ref None
@@ -330,16 +305,12 @@ let disable_logging () =
 
 (** Get recent events from log *)
 let get_recent_events ?(limit=100) () =
-  with_mutex event_log_mutex (fun () ->
-    let events = List.filteri (fun i _ -> i < limit) !event_log in
-    List.rev events  (* Return in chronological order *)
-  )
+  let events = List.filteri (fun i _ -> i < limit) !event_log in
+  List.rev events
 
 (** Clear event log *)
 let clear_log () =
-  with_mutex event_log_mutex (fun () ->
-    event_log := []
-  )
+  event_log := []
 
 (** {1 Filtering} *)
 

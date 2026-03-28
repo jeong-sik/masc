@@ -26,8 +26,6 @@ type snapshot = {
   updated_at: float;
 }
 
-let state_mutex = Eio.Mutex.create ()
-let with_lock f = Eio.Mutex.use_rw ~protect:true state_mutex f
 
 let parse_int value =
   try Some (int_of_string value) with Failure _ -> None
@@ -40,7 +38,7 @@ let env_int ~name ~default =
 let max_inflight = env_int ~name:"MASC_SPAWN_MAX_INFLIGHT" ~default:16
 let max_age_sec = env_int ~name:"MASC_SPAWN_MAX_AGE_SEC" ~default:900
 
-(** Consolidated mutable state — all fields accessed only under [state_mutex]. *)
+(** Consolidated mutable state — all fields are non-yielding ops (single-domain Eio atomic). *)
 type registry_state = {
   mutable next_id: int;
   mutable total: int;
@@ -113,69 +111,63 @@ let cleanup_stale now_sec =
 
 let try_start ~label =
   let now_sec = Time_compat.now () in
-  with_lock (fun () ->
-    let removed = cleanup_stale now_sec in
-    if removed > 0 then begin
-      st.failed <- st.failed + removed;
-      st.last_error <- Some "spawn_timeout"
-    end;
-    let inflight = Hashtbl.length active in
-    if max_inflight > 0 && inflight >= max_inflight then begin
-      st.last_error <- Some "spawn_inflight_limit";
-      Error (sprintf "spawn inflight limit reached (%d)" max_inflight)
-    end else begin
-      st.next_id <- st.next_id + 1;
-      let id = st.next_id in
-      Hashtbl.add active id { label; started_at = now_sec };
-      st.total <- st.total + 1;
-      let inflight' = inflight + 1 in
-      if inflight' > st.max_inflight_seen then
-        st.max_inflight_seen <- inflight';
-      Ok id
-    end
-  )
+  let removed = cleanup_stale now_sec in
+  if removed > 0 then begin
+    st.failed <- st.failed + removed;
+    st.last_error <- Some "spawn_timeout"
+  end;
+  let inflight = Hashtbl.length active in
+  if max_inflight > 0 && inflight >= max_inflight then begin
+    st.last_error <- Some "spawn_inflight_limit";
+    Error (sprintf "spawn inflight limit reached (%d)" max_inflight)
+  end else begin
+    st.next_id <- st.next_id + 1;
+    let id = st.next_id in
+    Hashtbl.add active id { label; started_at = now_sec };
+    st.total <- st.total + 1;
+    let inflight' = inflight + 1 in
+    if inflight' > st.max_inflight_seen then
+      st.max_inflight_seen <- inflight';
+    Ok id
+  end
 
 let finish ~id ~ok ~error =
   let now_sec = Time_compat.now () in
-  with_lock (fun () ->
-    (match Hashtbl.find_opt active id with
-     | Some info ->
-         Hashtbl.remove active id;
-         record_latency ((now_sec -. info.started_at) *. 1000.0)
-     | None -> ());
-    if not ok then begin
-      st.failed <- st.failed + 1;
-      st.last_error <- (match error with Some e -> Some e | None -> Some "spawn_failed")
-    end
-  )
+  (match Hashtbl.find_opt active id with
+   | Some info ->
+       Hashtbl.remove active id;
+       record_latency ((now_sec -. info.started_at) *. 1000.0)
+   | None -> ());
+  if not ok then begin
+    st.failed <- st.failed + 1;
+    st.last_error <- (match error with Some e -> Some e | None -> Some "spawn_failed")
+  end
 
 let snapshot () =
   let now_sec = Time_compat.now () in
-  with_lock (fun () ->
-    let removed = cleanup_stale now_sec in
-    if removed > 0 then begin
-      st.failed <- st.failed + removed;
-      st.last_error <- Some "spawn_timeout"
-    end;
-    let oldest =
-      Hashtbl.fold (fun _ info acc ->
-        let age = now_sec -. info.started_at in
-        match acc with
-        | None -> Some age
-        | Some v -> Some (max v age)
-      ) active None
-    in
-    {
-      inflight = Hashtbl.length active;
-      total = st.total;
-      failed = st.failed;
-      max_inflight = st.max_inflight_seen;
-      oldest_inflight_sec = oldest;
-      latency = latency_snapshot ();
-      last_error = st.last_error;
-      updated_at = now_sec;
-    }
-  )
+  let removed = cleanup_stale now_sec in
+  if removed > 0 then begin
+    st.failed <- st.failed + removed;
+    st.last_error <- Some "spawn_timeout"
+  end;
+  let oldest =
+    Hashtbl.fold (fun _ info acc ->
+      let age = now_sec -. info.started_at in
+      match acc with
+      | None -> Some age
+      | Some v -> Some (max v age)
+    ) active None
+  in
+  {
+    inflight = Hashtbl.length active;
+    total = st.total;
+    failed = st.failed;
+    max_inflight = st.max_inflight_seen;
+    oldest_inflight_sec = oldest;
+    latency = latency_snapshot ();
+    last_error = st.last_error;
+    updated_at = now_sec;
+  }
 
 let to_json () =
   let s = snapshot () in

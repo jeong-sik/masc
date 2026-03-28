@@ -504,13 +504,57 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
   in
   loop ()
 
+(** Process a single directive received from a gRPC HeartbeatAck.
+    Directives are string commands: "pause", "resume", "wakeup",
+    "claim:<task_id>". Unknown directives are logged and ignored. *)
+let process_directive ~agent_name directive =
+  match directive with
+  | "pause" ->
+    Log.Keeper.info "directive: pausing keeper %s" agent_name;
+    (match Keeper_registry.find_by_agent_name agent_name with
+     | Some entry ->
+       Keeper_registry.update_meta ~base_path:entry.base_path entry.name
+         { entry.meta with paused = true }
+     | None ->
+       Log.Keeper.warn "directive pause: agent %s not in registry" agent_name)
+  | "resume" ->
+    Log.Keeper.info "directive: resuming keeper %s" agent_name;
+    (match Keeper_registry.find_by_agent_name agent_name with
+     | Some entry ->
+       Keeper_registry.update_meta ~base_path:entry.base_path entry.name
+         { entry.meta with paused = false }
+     | None ->
+       Log.Keeper.warn "directive resume: agent %s not in registry" agent_name)
+  | "wakeup" ->
+    Log.Keeper.debug "directive: waking up %s" agent_name;
+    (match Keeper_registry.find_by_agent_name agent_name with
+     | Some entry -> wakeup_keeper entry.name
+     | None ->
+       Log.Keeper.warn "directive wakeup: agent %s not in registry" agent_name)
+  | s when String.length s > 6 && String.sub s 0 6 = "claim:" ->
+    let task_id = String.sub s 6 (String.length s - 6) in
+    Log.Keeper.info "directive: server assigned task %s to %s" task_id agent_name;
+    (match Keeper_registry.find_by_agent_name agent_name with
+     | Some entry ->
+       Keeper_registry.update_meta ~base_path:entry.base_path entry.name
+         { entry.meta with current_task_id = Some task_id };
+       wakeup_keeper entry.name
+     | None ->
+       Log.Keeper.warn "directive claim: agent %s not in registry" agent_name)
+  | unknown ->
+    Log.Keeper.warn "unknown gRPC directive for %s: %s" agent_name unknown
+
 (** Run a gRPC heartbeat sender in a background fiber.
-    Sends [HeartbeatPing] messages at the same interval as the
-    file-based loop. Reads [HeartbeatAck] responses and logs
-    agent/task counts. Stops when [stop] is set.
+    Opens a bidirectional [Heartbeat] stream and sends [HeartbeatPing]
+    messages at the configured interval. Reads [HeartbeatAck] responses,
+    logs agent/task counts, and dispatches directives. Reconnects on
+    stream failure up to 5 times. Stops when [stop] is set.
 
     Requires [grpc_client_ref] to be set (via [set_grpc_client])
     and Eio switch/env to be available in [Eio_context]. *)
+let max_reconnect_attempts = 5
+let reconnect_backoff_sec = 5.0
+
 let run_grpc_heartbeat_fiber ~sw ~stop
     ~(grpc_client : Masc_grpc_client.t)
     ~(agent_name : string) ~(session_id : string)
@@ -520,32 +564,80 @@ let run_grpc_heartbeat_fiber ~sw ~stop
     Log.Keeper.warn "gRPC heartbeat: Eio context or env not available";
     None
   | Some grpc_sw, Some env ->
-  (* Periodic unary gRPC get_status as heartbeat signal.
-     Bidi streaming deferred to P2 (requires env threading). *)
-  ignore session_id;
   let close_ref = ref false in
   Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      if Atomic.get stop || !close_ref then ()
-      else (
-        (try
-          let no_wakeup = Atomic.make false in
-          interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec;
-          if not (Atomic.get stop || !close_ref) then
-            match Masc_grpc_client.get_status grpc_client ~sw:grpc_sw ~env with
-            | Ok status ->
-                Log.Keeper.debug "gRPC heartbeat: agent=%s agents=%d tasks=%d"
-                  agent_name (List.length status.agents) (List.length status.tasks)
-            | Error err ->
-                Log.Keeper.warn "gRPC heartbeat failed: %s" err
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Keeper.error "gRPC heartbeat tick error: %s"
-            (Printexc.to_string exn));
-        if not (Atomic.get stop) then loop ())
+    let make_ping () =
+      let current_task_id =
+        match Keeper_registry.find_by_agent_name agent_name with
+        | Some e -> Option.value ~default:"" e.meta.current_task_id
+        | None -> ""
+      in
+      Masc_grpc_types.HeartbeatPing.{
+        agent_name;
+        session_id;
+        timestamp_ms = Int64.of_float (Time_compat.now () *. 1000.0);
+        current_task_id;
+      }
     in
-    loop ());
+    (* Inner loop: send ping → recv ack → sleep → repeat on one stream *)
+    let run_stream send recv =
+      let rec tick () =
+        if Atomic.get stop || !close_ref then ()
+        else (
+          (try
+            send (make_ping ());
+            (match recv () with
+             | Ok (ack : Masc_grpc_types.HeartbeatAck.t) ->
+               Log.Keeper.debug
+                 "gRPC bidi heartbeat: agent=%s agents=%d tasks=%d directives=%d"
+                 agent_name ack.active_agent_count ack.pending_task_count
+                 (List.length ack.directives);
+               List.iter (process_directive ~agent_name) ack.directives
+             | Error err ->
+               Log.Keeper.warn "gRPC heartbeat recv: %s" err)
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | End_of_file -> raise End_of_file
+          | exn ->
+            Log.Keeper.error "gRPC heartbeat tick error: %s"
+              (Printexc.to_string exn));
+          if not (Atomic.get stop || !close_ref) then (
+            let no_wakeup = Atomic.make false in
+            interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec;
+            tick ()))
+      in
+      tick ()
+    in
+    (* Outer loop: reconnect on stream failure *)
+    let rec connect_loop attempts =
+      if Atomic.get stop || !close_ref then ()
+      else if attempts >= max_reconnect_attempts then
+        Log.Keeper.error
+          "gRPC heartbeat: exceeded %d reconnect attempts for %s, stopping"
+          max_reconnect_attempts agent_name
+      else (
+        let send, recv, close_stream =
+          Masc_grpc_client.heartbeat_stream grpc_client ~sw:grpc_sw ~env
+        in
+        (try run_stream send recv
+         with
+         | Eio.Cancel.Cancelled _ as e -> close_stream (); raise e
+         | End_of_file ->
+           Log.Keeper.warn
+             "gRPC heartbeat stream closed for %s (attempt %d/%d)"
+             agent_name (attempts + 1) max_reconnect_attempts;
+           close_stream ()
+         | exn ->
+           Log.Keeper.warn
+             "gRPC heartbeat stream error for %s: %s (attempt %d/%d)"
+             agent_name (Printexc.to_string exn)
+             (attempts + 1) max_reconnect_attempts;
+           close_stream ());
+        if not (Atomic.get stop || !close_ref) then (
+          Eio.Time.sleep clock reconnect_backoff_sec;
+          connect_loop (attempts + 1)))
+    in
+    connect_loop 0);
   Some (fun () -> close_ref := true)
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)

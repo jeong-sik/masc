@@ -220,6 +220,49 @@ let active_heartbeat_streams = Atomic.make 0
 (** Active subscribe stream count (atomic for signal safety). *)
 let active_subscribe_streams = Atomic.make 0
 
+(** Compute directives for a keeper based on current room state.
+    Returns a list of string directives to include in HeartbeatAck.
+    Reads agent paused state and unclaimed tasks from the filesystem. *)
+let compute_directives
+    ~(room_config : Room_utils_backend_setup.config)
+    ~(agent_name : string) : string list =
+  let masc_dir = Filename.concat room_config.base_path ".masc" in
+  let directives = ref [] in
+  (* 1. Pause directive: check if agent is marked paused *)
+  let agent_file =
+    Filename.concat
+      (Filename.concat masc_dir "agents")
+      (safe_filename agent_name ^ ".json")
+  in
+  (if Sys.file_exists agent_file then
+    try
+      let json = Yojson.Safe.from_string (read_file_safe agent_file) in
+      (match Yojson.Safe.Util.member "paused" json with
+       | `Bool true -> directives := "pause" :: !directives
+       | _ -> ())
+    with _ -> ());
+  (* 2. Task assignment: find first unclaimed task for idle agent *)
+  let tasks_dir = Filename.concat masc_dir "tasks" in
+  (if Sys.file_exists tasks_dir then
+    let unclaimed =
+      Sys.readdir tasks_dir
+      |> Array.to_list
+      |> List.filter_map (fun f ->
+          if Filename.check_suffix f ".json" then
+            try
+              let path = Filename.concat tasks_dir f in
+              let task_json = Yojson.Safe.from_string (read_file_safe path) in
+              (match Yojson.Safe.Util.member "status" task_json with
+               | `String "todo" -> Some (Filename.chop_suffix f ".json")
+               | _ -> None)
+            with _ -> None
+          else None)
+    in
+    match unclaimed with
+    | task_id :: _ -> directives := ("claim:" ^ task_id) :: !directives
+    | [] -> ());
+  List.rev !directives
+
 (** Heartbeat bidi handler: receive pings, respond with acks. *)
 let handle_heartbeat
     (room_config : Room_utils_backend_setup.config)
@@ -280,11 +323,14 @@ let handle_heartbeat
             |> List.length
           else 0
         in
+        let directives =
+          compute_directives ~room_config ~agent_name:ping.agent_name
+        in
         let ack = T.HeartbeatAck.{
           timestamp_ms = now_ms ();
           active_agent_count = agent_count;
           pending_task_count = pending_count;
-          directives = [];
+          directives;
         } in
         Grpc_eio.Stream.add response_stream (T.HeartbeatAck.to_bytes ack);
         (* Record heartbeat latency *)

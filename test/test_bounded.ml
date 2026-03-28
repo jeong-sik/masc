@@ -3,13 +3,6 @@
 open Alcotest
 module Bounded = Masc_mcp.Bounded
 
-let with_eio_clock f =
-  Eio_main.run @@ fun env ->
-  Time_compat.set_clock (Eio.Stdenv.clock env);
-  Fun.protect
-    ~finally:Time_compat.clear_clock
-    f
-
 (* ============================================ *)
 (* Constraint checking tests                    *)
 (* ============================================ *)
@@ -248,7 +241,9 @@ let test_retry_config_parsing () =
   check (float 0.01) "retry jitter_factor" 0.3 c.retry.jitter_factor
 
 let test_retry_success_after_failures () =
-  let retry_cfg = { Bounded.default_retry_config with max_retries = 3; base_delay_ms = 1 } in
+  (* base_delay_ms >= 10 to tolerate CI scheduling jitter (GitHub Actions
+     runners exhibit 10-100ms jitter; 1ms caused deterministic failures). *)
+  let retry_cfg = { Bounded.default_retry_config with max_retries = 3; base_delay_ms = 10 } in
   let constraints = { Bounded.default_constraints with
     max_turns = Some 5;
     retry = retry_cfg;
@@ -258,34 +253,32 @@ let test_retry_success_after_failures () =
   let spawn_fn _ _ =
     incr call_count;
     if !call_count <= 2 then
-      (* First 2 calls fail with retryable error *)
       mock_spawn_result ~success:false ~output:"Connection timeout" ()
     else
-      (* Third call succeeds *)
       mock_spawn_result ~success:true ~output:{|{"done": true}|} ()
   in
+  (* Outer Eio_main.run (line 371) already sets the clock — no need
+     for with_eio_clock which nests a second Eio_main.run and clears
+     the clock on exit, destabilising subsequent tests on CI. *)
   let result =
-    with_eio_clock (fun () ->
-      Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn)
+    Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn
   in
   check bool "should reach goal after retries" true (result.status = `Goal_reached);
   check int "total retries recorded" 2 result.stats.total_retries;
   check int "history entry retries" 2 (List.hd result.history).retries
 
 let test_retry_exhausted () =
-  let retry_cfg = { Bounded.default_retry_config with max_retries = 2; base_delay_ms = 1 } in
+  let retry_cfg = { Bounded.default_retry_config with max_retries = 2; base_delay_ms = 10 } in
   let constraints = { Bounded.default_constraints with
     max_turns = Some 5;
     retry = retry_cfg;
   } in
   let goal = { Bounded.path = "$.done"; condition = Bounded.Eq (`Bool true) } in
   let spawn_fn _ _ =
-    (* Always fail with retryable error *)
     mock_spawn_result ~success:false ~output:"Connection timeout" ()
   in
   let result =
-    with_eio_clock (fun () ->
-      Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn)
+    Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn
   in
   check bool "should be error after exhausted retries" true (result.status = `Error);
   check bool "reason mentions attempts" true

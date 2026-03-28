@@ -149,6 +149,10 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        + prune_dir (Filename.concat masc "telemetry")
        + prune_dir (Filename.concat (Filename.concat masc "governance") "judgments")
        + prune_dir tool_metrics_dir
+       + prune_dir (Filename.concat masc "messages")
+       + prune_dir (Filename.concat masc "events")
+       + prune_dir (Filename.concat masc "activity-events")
+       + prune_dir (Filename.concat masc "voice_sessions")
        + (let keepers = Filename.concat masc "perpetual-keepers" in
           if not (Sys.file_exists keepers) then 0
           else

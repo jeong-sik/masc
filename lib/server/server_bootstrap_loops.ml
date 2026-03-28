@@ -237,6 +237,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   | None ->
       Log.BoardListener.info "Skipped (not using PostgreSQL backend)");
   Eio.Fiber.fork ~sw (fun () ->
+      let last_prune = ref (Unix.gettimeofday ()) in
       let rec loop () =
         Eio.Time.sleep clock 60.0;
         (try
@@ -296,7 +297,39 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           (* A2A: remove event buffers for dead subscriptions *)
           let buf_reaped = A2a_tools.cleanup_orphan_buffers () in
           if buf_reaped > 0 then
-            Log.Server.info "Reaped %d orphan event buffers" buf_reaped
+            Log.Server.info "Reaped %d orphan event buffers" buf_reaped;
+          (* Periodic JSONL prune: every 24h, clean dated JSONL files *)
+          let now = Unix.gettimeofday () in
+          if now -. !last_prune >= 86400.0 then begin
+            last_prune := now;
+            (try
+               let days =
+                 Safe_ops.get_env_int_logged "MASC_JSONL_RETENTION_DAYS" ~default:30
+               in
+               let masc = Room.masc_dir state.room_config in
+               let prune_dir dir =
+                 if Sys.file_exists dir then
+                   Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
+                 else 0
+               in
+               let total =
+                 prune_dir (Filename.concat masc "audit")
+                 + prune_dir (Filename.concat masc "telemetry")
+                 + prune_dir (Filename.concat (Filename.concat masc "governance") "judgments")
+                 + prune_dir (Filename.concat masc "messages")
+                 + prune_dir (Filename.concat masc "events")
+                 + prune_dir (Filename.concat masc "activity-events")
+                 + prune_dir (Filename.concat masc "voice_sessions")
+               in
+               if total > 0 then
+                 Log.Server.info "periodic JSONL prune: deleted %d day-files (retention=%dd)"
+                   total days
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Server.error "periodic JSONL prune failed: %s"
+                 (Printexc.to_string exn))
+          end
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

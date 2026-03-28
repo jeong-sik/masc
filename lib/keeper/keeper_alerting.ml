@@ -106,28 +106,25 @@ let dedup_strings = Dashboard_utils.dedup_strings
 let alert_dedup_window_sec = Env_config.AlertDedup.window_sec
 
 let alert_dedup_table : (string, float) Hashtbl.t = Hashtbl.create 32
-let alert_dedup_mutex = Eio.Mutex.create ()
 
 let alert_dedup_key ~(keeper_name : string) ~(reasons : string list) : string =
   let sorted = List.sort String.compare reasons in
   keeper_name ^ ":" ^ String.concat "," sorted
 
 let is_alert_deduplicated ~(keeper_name : string) ~(reasons : string list) : bool =
-  Eio.Mutex.use_rw ~protect:true alert_dedup_mutex (fun () ->
-    let key = alert_dedup_key ~keeper_name ~reasons in
-    let now = Time_compat.now () in
-    (* Prune stale entries only when table is large enough to matter *)
-    if Hashtbl.length alert_dedup_table > 64 then begin
-      let stale_threshold = alert_dedup_window_sec *. 2.0 in
-      Hashtbl.filter_map_inplace (fun _k ts ->
-        if now -. ts > stale_threshold then None else Some ts
-      ) alert_dedup_table
-    end;
-    match Hashtbl.find_opt alert_dedup_table key with
-    | Some last_ts when now -. last_ts < alert_dedup_window_sec -> true
-    | _ ->
-      Hashtbl.replace alert_dedup_table key now;
-      false)
+  let key = alert_dedup_key ~keeper_name ~reasons in
+  let now = Time_compat.now () in
+  if Hashtbl.length alert_dedup_table > 64 then begin
+    let stale_threshold = alert_dedup_window_sec *. 2.0 in
+    Hashtbl.filter_map_inplace (fun _k ts ->
+      if now -. ts > stale_threshold then None else Some ts
+    ) alert_dedup_table
+  end;
+  match Hashtbl.find_opt alert_dedup_table key with
+  | Some last_ts when now -. last_ts < alert_dedup_window_sec -> true
+  | _ ->
+    Hashtbl.replace alert_dedup_table key now;
+    false
 
 let keeper_alert_signal
     ~(message : string)

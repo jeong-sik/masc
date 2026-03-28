@@ -172,8 +172,7 @@ let status_json (ctx : context) ~loop_id json_fields =
   let link =
     Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path loop_id
   in
-  let queued_hypothesis = with_hypotheses_ro (fun () ->
-    Hashtbl.find_opt pending_hypotheses loop_id) in
+  let queued_hypothesis = Hashtbl.find_opt pending_hypotheses loop_id in
   let link_fields =
     match link with
     | Some link ->
@@ -424,8 +423,7 @@ let handle_inject (ctx : context) args =
             let state = { state with queued_hypothesis = Some hypothesis } in
             Hashtbl.replace active_loops id state;
             Autoresearch.save_state ~base_path:ctx.base_path state;
-            with_hypotheses_rw (fun () ->
-              Hashtbl.replace pending_hypotheses id hypothesis);
+            Hashtbl.replace pending_hypotheses id hypothesis;
             `Assoc [
               ("loop_id", `String id);
               ("status", `String "hypothesis_queued");

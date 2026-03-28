@@ -301,15 +301,14 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
         let code_result =
           let forced_hypothesis =
             Autoresearch.with_loops_rw (fun () ->
-                with_hypotheses_rw (fun () ->
-                    match Hashtbl.find_opt pending_hypotheses id with
-                    | Some h ->
-                      Hashtbl.remove pending_hypotheses id;
-                      let state = { state with queued_hypothesis = None } in
-                      Hashtbl.replace active_loops id state;
-                      Autoresearch.save_state ~base_path:ctx.base_path state;
-                      Some h
-                    | None -> get_string_opt args "hypothesis"))
+                match Hashtbl.find_opt pending_hypotheses id with
+                | Some h ->
+                  Hashtbl.remove pending_hypotheses id;
+                  let state = { state with queued_hypothesis = None } in
+                  Hashtbl.replace active_loops id state;
+                  Autoresearch.save_state ~base_path:ctx.base_path state;
+                  Some h
+                | None -> get_string_opt args "hypothesis")
           in
           let generate = get_generator id in
           match forced_hypothesis with

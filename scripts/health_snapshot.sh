@@ -92,6 +92,17 @@ count_pattern() {
   printf '%s' "${total:-0}"
 }
 
+count_pattern_without_quotes() {
+  local dir="$1"
+  local pattern="$2"
+  local total
+  total="$(
+    rg -n "$pattern" "$dir" -g '*.{ml,mli}' 2>/dev/null \
+      | awk 'index($0, "\"") == 0 {count++} END {print count+0}'
+  )"
+  printf '%s' "${total:-0}"
+}
+
 extract_baseline_value() {
   local content="$1"
   local key="$2"
@@ -189,13 +200,13 @@ lib_failwith="$(count_pattern lib 'failwith')"
 lib_list_hd="$(count_pattern lib 'List\.hd')"
 lib_list_tl="$(count_pattern lib 'List\.tl')"
 lib_option_get="$(count_pattern lib 'Option\.get')"
-lib_obj_magic="$(count_pattern lib 'Obj\.magic')"
+lib_obj_magic="$(count_pattern_without_quotes lib 'Obj\.magic([[:space:]]|\()')"
 
 test_failwith="$(count_pattern test 'failwith')"
 test_list_hd="$(count_pattern test 'List\.hd')"
 test_list_tl="$(count_pattern test 'List\.tl')"
 test_option_get="$(count_pattern test 'Option\.get')"
-test_obj_magic="$(count_pattern test 'Obj\.magic')"
+test_obj_magic="$(count_pattern_without_quotes test 'Obj\.magic([[:space:]]|\()')"
 
 ml_line_cap_json="$(mktemp)"
 ml_line_cap_cmd=(

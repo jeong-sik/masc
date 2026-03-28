@@ -291,6 +291,7 @@ let planned_worker_to_entry_with_state
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~(success_by_agent : (string, bool) Hashtbl.t)
+    ?(delivery_contract : Team_session_types.delivery_contract option)
     (pw : Team_session_types.planned_worker)
   : Swarm.Swarm_types.agent_entry =
   let name = pw.spawn_agent in
@@ -312,6 +313,10 @@ let planned_worker_to_entry_with_state
       dispatch ~name:tool_name
         ~args:(normalize_tool_args ~tool_name ~agent_name:name args)
     in
+    let contract = Option.map (fun dc ->
+      let tool_names = List.map (fun (t : Types.tool_schema) -> t.name) masc_tools in
+      Contract_composer.compose ~delivery_contract:dc ~tool_names
+    ) delivery_contract in
     match
       Oas_worker.run_named_with_masc_tools
         ~cascade_name ~goal:prompt ~system_prompt
@@ -320,7 +325,7 @@ let planned_worker_to_entry_with_state
           ~cascade_name ~fallback:(fun () -> 0.3))
         ~max_tokens:(Cascade_inference.resolve_max_tokens
           ~cascade_name ~fallback:(fun () -> 4096))
-        ?raw_trace ~sw ()
+        ?raw_trace ?contract ~sw ()
     with
     | Ok result ->
         Hashtbl.replace success_by_agent name true;
@@ -346,7 +351,7 @@ let planned_worker_to_entry
   : Swarm.Swarm_types.agent_entry =
   let success_by_agent = Hashtbl.create 1 in
   planned_worker_to_entry_with_state ~config ~session_id ~session_cascade ~masc_tools
-    ~dispatch ~success_by_agent pw
+    ~dispatch ~success_by_agent ?delivery_contract:None pw
 
 (* ── session -> swarm_config ───────────────────────────────────── *)
 
@@ -361,7 +366,7 @@ let session_to_swarm_config
     List.map
       (planned_worker_to_entry_with_state ~config ~session_id:session.session_id
          ~session_cascade:session.model_cascade ~masc_tools ~dispatch
-         ~success_by_agent)
+         ~success_by_agent ?delivery_contract:session.delivery_contract)
       session.planned_workers
   in
   List.iter

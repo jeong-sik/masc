@@ -606,6 +606,7 @@ let run_named_with_masc_tools
     ?memory
     ?raw_trace
     ?on_event
+    ?contract
     ?transport
     ?sw
     ?net
@@ -621,7 +622,7 @@ let run_named_with_masc_tools
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
-    ?raw_trace ?on_event ?transport ?sw ?net ()
+    ?raw_trace ?on_event ?contract ?transport ?sw ?net ()
 
 let run_model_with_masc_tools
     ~(model_label : string)

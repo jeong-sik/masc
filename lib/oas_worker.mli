@@ -101,6 +101,7 @@ val run_named_with_masc_tools :
   ?memory:Oas.Memory.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

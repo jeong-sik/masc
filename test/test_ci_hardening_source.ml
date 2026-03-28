@@ -52,6 +52,57 @@ let test_health_and_ci_runner_diagnostics () =
   check bool "ci runner tracks active build dir for diagnostics" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "ACTIVE_TEST_BUILD_DIR")
 
+let test_ci_contract_harness_topology () =
+  check bool "ci runner defaults contract harness post hook to opt in" true
+    (file_contains_pattern "scripts/ci-run-tests.sh"
+       {|CI_CONTRACT_HARNESS_ENABLED="${CI_CONTRACT_HARNESS_ENABLED:-0}"|});
+  check bool "ci workflow disables implicit contract post hook" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       {|CI_CONTRACT_HARNESS_ENABLED: "0"|});
+  check bool "build summary points at dedicated contract job" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "Dedicated required CI job: contract harness suite");
+  check bool "contract summary documents single explicit wrapped run" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "Contract harness runs once here via an explicit wrapped command")
+
+let test_ci_dashboard_validation_topology () =
+  check bool "ci workflow detects changed paths with dorny filter" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "uses: dorny/paths-filter@v3");
+  check bool "ci workflow defines dashboard validation job" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "name: Dashboard Validation");
+  check bool "ci workflow typechecks dashboard in required job" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "pnpm --dir dashboard exec tsc --noEmit --pretty false");
+  check bool "ci workflow runs dashboard unit tests in required job" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "pnpm --dir dashboard exec vitest run");
+  check bool "ci workflow skips ocaml jobs for dashboard only changes" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "Dashboard-only changes skip OCaml transport jobs unless shared CI files changed")
+
+let test_ci_bootstrap_and_isolated_build_dir_topology () =
+  check bool "shared ocaml bootstrap action exists" true
+    (file_contains_pattern ".github/actions/setup-ocaml-env/action.yml"
+       "uses: ocaml/setup-ocaml@v3");
+  check bool "ci workflow consumes shared ocaml bootstrap action" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "uses: ./.github/actions/setup-ocaml-env");
+  check bool "release workflow consumes shared ocaml bootstrap action" true
+    (file_contains_pattern ".github/workflows/release.yml"
+       "uses: ./.github/actions/setup-ocaml-env");
+  check bool "deploy workflow consumes shared ocaml bootstrap action" true
+    (file_contains_pattern ".github/workflows/deploy-railway.yml"
+       "uses: ./.github/actions/setup-ocaml-env");
+  check bool "build job defaults dune build dir to ci_build" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       {|DUNE_BUILD_DIR: .ci_build|});
+  check bool "build job summary preserves dedicated contract topology" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "Dedicated required CI job: contract harness suite")
+
 let test_contract_harness_and_team_session_authz_contracts () =
   check bool "contract harness exposes extract_text helper" true
     (file_contains_pattern "scripts/harness/lib/test_framework.sh"
@@ -530,6 +581,12 @@ let () =
            test_case "contract harness and team session authz contracts" `Quick
              test_contract_harness_and_team_session_authz_contracts;
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
+           test_case "ci contract harness topology" `Quick
+             test_ci_contract_harness_topology;
+           test_case "ci dashboard validation topology" `Quick
+             test_ci_dashboard_validation_topology;
+           test_case "ci bootstrap and isolated build dir topology" `Quick
+             test_ci_bootstrap_and_isolated_build_dir_topology;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
            test_case "keeper direct reply contracts" `Quick

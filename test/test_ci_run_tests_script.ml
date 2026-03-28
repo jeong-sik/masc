@@ -98,6 +98,81 @@ exit 0
   Unix.chmod dune_path 0o755;
   bin_dir
 
+let make_fake_script path body =
+  write_file path
+    (Printf.sprintf {|#!/bin/sh
+set -eu
+%s
+|} body);
+  Unix.chmod path 0o755
+
+let test_contract_harness_is_opt_in_by_default () =
+  with_temp_dir "ci-run-tests-contract-default" (fun dir ->
+      let test_log = Filename.concat dir "test.log" in
+      let contract_log = Filename.concat dir "contract.log" in
+      let test_script = Filename.concat dir "test.sh" in
+      let contract_script = Filename.concat dir "contract.sh" in
+      make_fake_script test_script {|printf 'test\n' >> "${FAKE_TEST_LOG:?}"|};
+      make_fake_script contract_script
+        {|printf 'contract\n' >> "${FAKE_CONTRACT_LOG:?}"|};
+      let env =
+        [
+          ("FAKE_TEST_LOG", test_log);
+          ("FAKE_CONTRACT_LOG", contract_log);
+          ("CI_TEST_HEARTBEAT_SEC", "1");
+          ("CI_TEST_TIMEOUT_SEC", "30");
+          ("CI_CONTRACT_HARNESS_CMD", contract_script);
+        ]
+      in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir ~env
+          (Printf.sprintf "%s %s" (quote (script_path ())) (quote test_script))
+      in
+      if code <> 0 then
+        failf "ci-run-tests failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      check string "test command ran once" "test\n" (read_file test_log);
+      check bool "contract harness skipped by default" false
+        (Sys.file_exists contract_log);
+      let observed_output = String.concat "\n" [ stdout; stderr ] in
+      check bool "default skip logged" true
+        (contains_substring observed_output
+           "contract harness skipped (CI_CONTRACT_HARNESS_ENABLED=0)"))
+
+let test_contract_harness_runs_once_when_explicitly_enabled () =
+  with_temp_dir "ci-run-tests-contract-enabled" (fun dir ->
+      let test_log = Filename.concat dir "test.log" in
+      let contract_log = Filename.concat dir "contract.log" in
+      let test_script = Filename.concat dir "test.sh" in
+      let contract_script = Filename.concat dir "contract.sh" in
+      make_fake_script test_script {|printf 'test\n' >> "${FAKE_TEST_LOG:?}"|};
+      make_fake_script contract_script
+        {|printf 'contract\n' >> "${FAKE_CONTRACT_LOG:?}"|};
+      let env =
+        [
+          ("FAKE_TEST_LOG", test_log);
+          ("FAKE_CONTRACT_LOG", contract_log);
+          ("CI_TEST_HEARTBEAT_SEC", "1");
+          ("CI_TEST_TIMEOUT_SEC", "30");
+          ("CI_CONTRACT_HARNESS_ENABLED", "1");
+          ("CI_CONTRACT_HARNESS_CMD", contract_script);
+        ]
+      in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir ~env
+          (Printf.sprintf "%s %s" (quote (script_path ())) (quote test_script))
+      in
+      if code <> 0 then
+        failf "ci-run-tests failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      check string "test command ran once" "test\n" (read_file test_log);
+      check string "contract harness ran once" "contract\n"
+        (read_file contract_log);
+      let observed_output = String.concat "\n" [ stdout; stderr ] in
+      check bool "explicit contract completion logged" true
+        (contains_substring observed_output
+           "contract harness completed successfully"))
+
 let test_rpc_retry_uses_isolated_build_dir () =
   with_temp_dir "ci-run-tests-retry" (fun dir ->
       let fake_log = Filename.concat dir "fake-dune.log" in
@@ -158,6 +233,10 @@ let () =
     [
       ( "script",
         [
+          test_case "contract harness is opt-in by default" `Quick
+            test_contract_harness_is_opt_in_by_default;
+          test_case "contract harness runs once when explicitly enabled" `Quick
+            test_contract_harness_runs_once_when_explicitly_enabled;
           test_case "rpc retry uses isolated build dir" `Quick
             test_rpc_retry_uses_isolated_build_dir;
         ] );

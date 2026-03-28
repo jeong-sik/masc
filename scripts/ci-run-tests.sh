@@ -28,7 +28,10 @@ CI_TEST_RPC_RETRY_DONE=0
 CI_TEST_ALLOW_FLAKY_RETRY="${CI_TEST_ALLOW_FLAKY_RETRY:-1}"
 CI_TEST_FLAKY_RETRY_DONE=0
 CI_TEST_ISOLATED_BUILD_DIR="${CI_TEST_ISOLATED_BUILD_DIR:-.ci_build}"
-CI_CONTRACT_HARNESS_ENABLED="${CI_CONTRACT_HARNESS_ENABLED:-1}"
+# Post-test contract harness execution is opt-in. Required CI runs the
+# dedicated contract harness suite explicitly instead of relying on this
+# wrapper's implicit post-hook.
+CI_CONTRACT_HARNESS_ENABLED="${CI_CONTRACT_HARNESS_ENABLED:-0}"
 CI_CONTRACT_HARNESS_CMD="${CI_CONTRACT_HARNESS_CMD:-scripts/harness/contract/run_all.sh}"
 CI_CONTRACT_HARNESS_TIMEOUT_SEC="${CI_CONTRACT_HARNESS_TIMEOUT_SEC:-900}"
 ACTIVE_TEST_BUILD_DIR="${DUNE_BUILD_DIR:-_build}"

@@ -16,9 +16,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Changed Paths
+    runs-on: ubuntu-latest
+    outputs:
+      ci_shared: ${{ steps.filter.outputs.ci_shared }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
+      ocaml_ci: ${{ steps.filter.outputs.ocaml_ci }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ci_shared:
+              - '.github/workflows/**'
+              - '.github/actions/**'
+            dashboard:
+              - 'dashboard/**'
+            ocaml_ci:
+              - '**/*'
+              - '!dashboard/**'
+              - '!docs/**'
+              - '!**/*.md'
+
   health:
     name: Health
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.ocaml_ci == 'true'
     timeout-minutes: 20
 
     steps:
@@ -45,35 +77,13 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3
+      - name: Setup OCaml environment
+        uses: ./.github/actions/setup-ocaml-env
         with:
-          ocaml-compiler: 5.4.x
-          dune-cache: true
           cache-prefix: oas-otel-02
-
-      - name: Pin external dependencies
-        run: |
-          chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh --with-bisect
-
-      - name: Refresh system package index
-        run: sudo apt-get update -qq
-
-      - name: Install OS dependencies
-        run: sudo apt-get install -y ripgrep bc
-
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            opam install . --deps-only --with-test --yes && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "opam install failed after ${attempt} attempts"
-              exit 1
-            fi
-            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
-            sleep 15
-          done
+          pin-extra-args: --with-bisect
+          apt-packages: ripgrep bc
+          opam-install-args: --deps-only --with-test --yes
 
       - name: Fetch base branch for health ratchet
         if: github.event_name == 'pull_request'
@@ -142,7 +152,12 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.ocaml_ci == 'true'
     timeout-minutes: 60
+    env:
+      CI_CONTRACT_HARNESS_ENABLED: "0"
+      DUNE_BUILD_DIR: .ci_build
 
     steps:
       - name: Checkout
@@ -161,45 +176,23 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3
+      - name: Setup OCaml environment
+        uses: ./.github/actions/setup-ocaml-env
         with:
-          ocaml-compiler: 5.4.x
-          dune-cache: true
           cache-prefix: oas-otel-02
-
-      - name: Pin external dependencies
-        run: |
-          chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh --with-bisect
-
-      - name: Refresh system package index
-        run: sudo apt-get update -qq
+          pin-extra-args: --with-bisect
+          apt-packages: jq
+          opam-install-args: --deps-only --with-test --yes
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
 
-      - name: Install transport harness OS dependencies
-        run: sudo apt-get install -y jq
-
       - name: Install grpcurl
         run: |
           GOBIN="$HOME/go/bin" go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
-
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            opam install . --deps-only --with-test --yes && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "opam install failed after ${attempt} attempts"
-              exit 1
-            fi
-            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
-            sleep 15
-          done
 
       - name: Build
         run: |
@@ -252,13 +245,19 @@ jobs:
 
       - name: Verification matrix summary
         run: |
-          echo "::notice::Required CI gates: dune test, test_sse_storm_e2e, transport harness suite, contract harness suite"
+          echo "::notice::Required CI gates in this job: dune test, test_sse_storm_e2e, transport harness suite"
+          echo "::notice::Dedicated required CI job: contract harness suite"
           echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN/TURN/browser interop, viewer-local-e2e-check, swarm/team-session workload harnesses"
 
   contract:
     name: Contract Harness
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.ocaml_ci == 'true'
     timeout-minutes: 30
+    env:
+      CI_CONTRACT_HARNESS_ENABLED: "0"
+      DUNE_BUILD_DIR: .ci_build
 
     steps:
       - name: Checkout
@@ -277,32 +276,11 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3
+      - name: Setup OCaml environment
+        uses: ./.github/actions/setup-ocaml-env
         with:
-          ocaml-compiler: 5.4.x
-          dune-cache: true
           cache-prefix: oas-otel-02
-
-      - name: Pin external dependencies
-        run: |
-          chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh
-
-      - name: Refresh system package index
-        run: sudo apt-get update -qq
-
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            opam install . --deps-only --yes && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "opam install failed after ${attempt} attempts"
-              exit 1
-            fi
-            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
-            sleep 15
-          done
+          opam-install-args: --deps-only --yes
 
       - name: Build server executable
         run: |
@@ -322,12 +300,15 @@ jobs:
 
       - name: Verification matrix summary
         run: |
-          echo "::notice::Required CI gates: contract harness suite"
+          echo "::notice::Required CI gate in this job: contract harness suite"
+          echo "::notice::Contract harness runs once here via an explicit wrapped command"
           echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN, viewer-local-e2e-check, swarm/team-session workload harnesses"
 
-  lint:
-    name: Lint
+  dashboard:
+    name: Dashboard Validation
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.ci_shared == 'true'
     timeout-minutes: 20
 
     steps:
@@ -347,35 +328,62 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          ocaml-compiler: 5.4.x
-          dune-cache: true
+          version: 10.31.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: dashboard/pnpm-lock.yaml
+
+      - name: Install dashboard dependencies
+        run: pnpm --dir dashboard install --frozen-lockfile
+
+      - name: Typecheck dashboard
+        run: pnpm --dir dashboard exec tsc --noEmit --pretty false
+
+      - name: Run dashboard unit tests
+        run: pnpm --dir dashboard exec vitest run
+
+      - name: Verification matrix summary
+        run: |
+          echo "::notice::Required CI gates in this job: dashboard typecheck, dashboard unit tests"
+          echo "::notice::Dashboard-only changes skip OCaml transport jobs unless shared CI files changed"
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.ocaml_ci == 'true'
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify PR sync
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          chmod +x scripts/check-pr-sync.sh
+          scripts/check-pr-sync.sh \
+            --head-branch "$PR_HEAD_REF" \
+            --pr-number "$PR_NUMBER" \
+            --expected-head-sha "$PR_HEAD_SHA"
+
+      - name: Setup OCaml environment
+        uses: ./.github/actions/setup-ocaml-env
+        with:
           cache-prefix: oas-otel-02
-
-      - name: Pin external dependencies
-        run: |
-          chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh
-
-      - name: Refresh system package index
-        run: sudo apt-get update -qq
-
-      - name: Install OS dependencies
-        run: sudo apt-get install -y ripgrep
-
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            opam install . --deps-only --yes && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "opam install failed after ${attempt} attempts"
-              exit 1
-            fi
-            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
-            sleep 15
-          done
+          apt-packages: ripgrep
+          opam-install-args: --deps-only --yes
 
       - name: Check Eio conventions
         run: |
@@ -404,32 +412,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3
+      - name: Setup OCaml environment
+        uses: ./.github/actions/setup-ocaml-env
         with:
-          ocaml-compiler: 5.4.x
-          dune-cache: true
           cache-prefix: oas-otel-02
+          opam-install-args: --deps-only --with-doc --yes
 
-      - name: Pin external dependencies
+      - name: Install odoc
         run: |
-          chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh
-
-      - name: Refresh system package index
-        run: sudo apt-get update -qq
-
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            opam install . --deps-only --with-doc --yes && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "opam install --with-doc failed after ${attempt} attempts"
-              exit 1
-            fi
-            echo "opam install --with-doc failed (attempt ${attempt}); retrying in 15s..."
-            sleep 15
-          done
           for attempt in 1 2 3; do
             opam install odoc --yes && break
             if [ "$attempt" -eq 3 ]; then

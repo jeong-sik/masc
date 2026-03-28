@@ -38,17 +38,6 @@ jobs:
             scripts/check-version-truth.sh
           fi
 
-      - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: 5.4.x
-
-      - name: Pin private dependencies
-        run: |
-          chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh --with-compact-protocol
-
-
       - name: Install libpq (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -56,21 +45,12 @@ jobs:
           echo "$(brew --prefix libpq)/bin" >> "$GITHUB_PATH"
           echo "PKG_CONFIG_PATH=$(brew --prefix libpq)/lib/pkgconfig" >> "$GITHUB_ENV"
 
-      - name: Refresh apt index
-        if: runner.os == 'Linux'
-        run: sudo apt-get update -qq
-
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            opam install . --deps-only -y && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "opam install failed after ${attempt} attempts"
-              exit 1
-            fi
-            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
-            sleep 15
-          done
+      - name: Setup OCaml environment
+        uses: ./.github/actions/setup-ocaml-env
+        with:
+          dune-cache: "false"
+          pin-extra-args: --with-compact-protocol
+          opam-install-args: --deps-only --yes
 
       - name: Build
         run: opam exec -- dune build --release bin/main_eio.exe

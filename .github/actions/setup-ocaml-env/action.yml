@@ -1,0 +1,83 @@
+name: Setup OCaml Environment
+description: Setup OCaml, pin external opam deps, optionally install apt packages, and install opam dependencies with retries.
+
+inputs:
+  ocaml-compiler:
+    description: OCaml compiler version for ocaml/setup-ocaml
+    required: false
+    default: 5.4.x
+  dune-cache:
+    description: Whether dune cache should be enabled
+    required: false
+    default: "true"
+  cache-prefix:
+    description: Optional ocaml/setup-ocaml cache prefix
+    required: false
+    default: ""
+  pin-extra-args:
+    description: Extra arguments forwarded to scripts/opam-pin-external-deps.sh
+    required: false
+    default: ""
+  apt-packages:
+    description: Space-delimited apt packages to install on Linux runners
+    required: false
+    default: ""
+  opam-install-args:
+    description: Extra arguments appended after `opam install .`
+    required: false
+    default: "--deps-only --yes"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup OCaml
+      uses: ocaml/setup-ocaml@v3
+      with:
+        ocaml-compiler: ${{ inputs.ocaml-compiler }}
+        dune-cache: ${{ inputs.dune-cache }}
+        cache-prefix: ${{ inputs.cache-prefix }}
+
+    - name: Pin external dependencies
+      shell: bash
+      env:
+        PIN_EXTRA_ARGS: ${{ inputs.pin-extra-args }}
+      run: |
+        set -euo pipefail
+        chmod +x scripts/opam-pin-external-deps.sh
+        if [ -n "${PIN_EXTRA_ARGS}" ]; then
+          set -- ${PIN_EXTRA_ARGS}
+          scripts/opam-pin-external-deps.sh "$@"
+        else
+          scripts/opam-pin-external-deps.sh
+        fi
+
+    - name: Refresh system package index
+      if: runner.os == 'Linux' && inputs.apt-packages != ''
+      shell: bash
+      run: sudo apt-get update -qq
+
+    - name: Install OS dependencies
+      if: runner.os == 'Linux' && inputs.apt-packages != ''
+      shell: bash
+      env:
+        APT_PACKAGES: ${{ inputs.apt-packages }}
+      run: |
+        set -euo pipefail
+        sudo apt-get install -y ${APT_PACKAGES}
+
+    - name: Install dependencies
+      shell: bash
+      env:
+        OPAM_INSTALL_ARGS: ${{ inputs.opam-install-args }}
+      run: |
+        set -euo pipefail
+        for attempt in 1 2 3; do
+          set -- ${OPAM_INSTALL_ARGS}
+          opam install . "$@" && break
+          if [ "$attempt" -eq 3 ]; then
+            echo "opam install failed after ${attempt} attempts"
+            exit 1
+          fi
+          echo "opam install failed (attempt ${attempt}); retrying in 15s..."
+          sleep 15
+        done

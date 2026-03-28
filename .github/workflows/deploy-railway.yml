@@ -15,31 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3
+      - name: Setup OCaml environment
+        uses: ./.github/actions/setup-ocaml-env
         with:
-          ocaml-compiler: 5.4.x
-
-      - name: Pin private dependencies
-        run: |
-          chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh --with-compact-protocol
-
-
-      - name: Refresh apt index
-        run: sudo apt-get update
-
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            opam install . --deps-only -y && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "opam install failed after ${attempt} attempts"
-              exit 1
-            fi
-            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
-            sleep 15
-          done
+          dune-cache: "false"
+          pin-extra-args: --with-compact-protocol
+          opam-install-args: --deps-only --yes
 
       - name: Build release binary
         run: opam exec -- dune build --release bin/main_eio.exe

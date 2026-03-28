@@ -1173,7 +1173,6 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
             ])
       in
       check bool "keeper up ok" true ok;
-      Masc_mcp.Keeper_keepalive.stop_keepalive "detail-demo";
       let meta =
         match Masc_mcp.Keeper_types.read_meta config "detail-demo" with
         | Ok (Some meta) -> meta
@@ -1622,7 +1621,9 @@ let test_keeper_up_persists_allowed_paths_to_status_policy () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> rm_rf base_dir)
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));

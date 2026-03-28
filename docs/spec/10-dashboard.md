@@ -456,9 +456,9 @@ const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
 1. `location.hash`에서 path + query params 파싱
 2. segment 정규화 (`/dashboard/` prefix 제거)
 3. canonical tab ID 해석 (`VALID_TABS` 확인)
-4. Command surface 하위 경로: `intervene`, `warroom`, `governance`, `orchestra`, `swarm`, `operations`, `chains`, `control`
-5. Lab section: `overview`, `autoresearch`, `tools`, `harness`
-6. Deep link: `/chains/operation/:id` -> `command` tab의 `warroom` surface
+4. Command surface 하위 경로: `intervene`, `governance`
+5. Legacy command deep link (`/chains/operation/:id`, `warroom`)은 `intervene`로 canonical redirect
+6. Lab section: `tools`, `autoresearch`, `harness`, `config`
 
 ### 4.4. SSE Integration
 

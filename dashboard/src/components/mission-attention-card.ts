@@ -105,11 +105,11 @@ export function AttentionCard({
         ${action
           ? html`
               <${ActionBtn} label="이 액션으로 개입 열기" onClick=${() => openActionIntervene(action, incident, '상황판 주의 신호')} />
-              <${ActionBtn} label="원인 보기" onClick=${() => openActionCommand(action, incident, '상황판 주의 신호')} />
+              <${ActionBtn} label="개입 준비 열기" onClick=${() => openActionCommand(action, incident, '상황판 주의 신호')} />
             `
           : html`
               <${ActionBtn} label="이 이슈로 개입 열기" onClick=${() => openIncidentIntervene(incident)} />
-              <${ActionBtn} label="이 이슈의 원인 보기" onClick=${() => openIncidentCommand(incident)} />
+              <${ActionBtn} label="개입 준비 열기" onClick=${() => openIncidentCommand(incident)} />
             `}
       <//>
     </article>

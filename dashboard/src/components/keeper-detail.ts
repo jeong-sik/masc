@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useRef } from 'preact/hooks'
 import { runOperatorAction } from '../api'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
@@ -29,6 +30,7 @@ import {
 } from './keeper-detail-runtime'
 import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
+import { DialogOverlay } from './common/dialog'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -139,7 +141,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
 function SectionCard({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return html`
-    <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:border-accent/30 hover:shadow-md transition-all duration-200">
+    <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-md">
       <div class="text-[11px] font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
         <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
         ${title}
@@ -154,18 +156,17 @@ function SectionCard({ title, children }: { title: string; children: preact.Comp
 export function KeeperDetailOverlay() {
   const keeper = selectedKeeper.value
   if (!keeper) return null
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const titleId = `keeper-detail-title-${keeper.name}`
 
   return html`
-    <div
-      class="keeper-detail-overlay fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
-      data-testid="keeper-detail-overlay"
-      onClick=${(e: Event) => {
-        if ((e.target as HTMLElement).classList.contains('keeper-detail-overlay')) {
-          closeKeeperDetail()
-        }
-      }}
+    <${DialogOverlay}
+      labelledBy=${titleId}
+      onClose=${closeKeeperDetail}
+      initialFocusRef=${closeButtonRef}
+      overlayClass="keeper-detail-overlay fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
+      panelClass="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded-2xl border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
     >
-      <div class="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded-2xl border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
 
         ${'' /* ── Sticky Header ── */}
         <div class="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-md rounded-t-2xl">
@@ -173,7 +174,7 @@ export function KeeperDetailOverlay() {
             <div class="size-12 rounded-xl bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
             <div class="flex flex-col gap-0.5">
               <div class="flex items-center gap-2.5">
-                <h2 class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
+                <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
                 <${KeeperStatusPill} status=${keeper.status} />
                 ${(() => {
                   const series = keeper.metrics_series ?? []
@@ -189,10 +190,12 @@ export function KeeperDetailOverlay() {
               ${keeper.koreanName ? html`<span class="text-xs text-[var(--text-muted)]">${keeper.koreanName}</span>` : null}
             </div>
           </div>
-          <button type="button"
+          <button
+            ref=${closeButtonRef}
+            type="button"
             onClick=${() => closeKeeperDetail()}
-            class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm"
-            aria-label="Close"
+            class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
+            aria-label="키퍼 상세 닫기"
           >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
           </button>
@@ -290,7 +293,6 @@ export function KeeperDetailOverlay() {
         </details>
 
         </div>
-      </div>
-    </div>
+    <//>
   `
 }

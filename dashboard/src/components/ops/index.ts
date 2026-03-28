@@ -2,6 +2,8 @@
 
 import { html } from 'htm/preact'
 import { CARD_STANDARD } from '../common/card'
+import { ActionButton } from '../common/button'
+import { TextInput } from '../common/input'
 import { useEffect } from 'preact/hooks'
 import { refreshRoomTruth } from '../../room-truth-store'
 import { RoomTruthStrip } from '../common/room-truth-strip'
@@ -152,17 +154,19 @@ export function Ops() {
       <div class="${CARD_STANDARD} flex justify-end items-center gap-4 flex-wrap">
         <div class="flex items-center gap-3 flex-wrap max-[880px]:w-full">
           <div class="flex items-center gap-1.5">
-            <input
-              type="text"
-              class="bg-transparent border-b border-transparent text-[13px] text-[var(--text-strong)] font-semibold px-1 py-0.5 outline-none hover:border-[var(--white-8)] focus:border-[var(--accent)] transition-colors w-[140px]"
+            <${TextInput}
+              class="w-[140px] border-transparent bg-transparent px-1 py-0.5 text-[13px] font-semibold text-[var(--text-strong)] hover:border-[var(--white-8)]"
               value=${currentActor}
+              name="operator_actor"
+              ariaLabel="메시지 발신자 이름"
               onInput=${(event: Event) => { persistActorName((event.target as HTMLInputElement).value) }}
               disabled=${operatorActionBusy.value}
-              title="메시지 발신자 이름"
+              autoComplete="off"
             />
           </div>
-          <button type="button"
-            class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
+          <${ActionButton}
+            variant="ghost"
+            size="lg"
             onClick=${() => {
               void refreshRoomTruth({ force: true })
               void refreshOperatorSnapshot({ force: true })
@@ -172,7 +176,7 @@ export function Ops() {
             disabled=${operatorLoading.value || operatorActionBusy.value}
           >
             ${operatorLoading.value ? '새로고침 중...' : '새로고침'}
-          </button>
+          <//>
         </div>
       </div>
 

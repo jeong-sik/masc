@@ -90,7 +90,9 @@ async function loadComponentWithApi(api: {
     retryAutoresearchLoop: api.retryAutoresearchLoop ?? vi.fn().mockResolvedValue({ ok: true, action: 'retry' }),
     deleteAutoresearchLoop: api.deleteAutoresearchLoop ?? vi.fn().mockResolvedValue({ ok: true, action: 'delete' }),
   }))
-  return import('./autoresearch')
+  const module = await import('./autoresearch')
+  module.resetAutoresearchState()
+  return module
 }
 
 describe('Autoresearch surface refresh', () => {
@@ -104,7 +106,9 @@ describe('Autoresearch surface refresh', () => {
     vi.stubGlobal('confirm', confirmMock)
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    const { resetAutoresearchState } = await import('./autoresearch')
+    resetAutoresearchState()
     render(null, container)
     container.remove()
     vi.resetModules()

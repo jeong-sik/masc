@@ -5,6 +5,8 @@ import { KpiCard } from './common/stat-row'
 import { TimeAgo } from './common/time-ago'
 import { EmptyState } from './common/empty-state'
 import { FilterChips } from './common/filter-chips'
+import { ActionButton } from './common/button'
+import { TextInput } from './common/input'
 import { governanceToneClass } from '../lib/tone'
 import {
   governanceData,
@@ -78,12 +80,11 @@ function GovernanceToolbar() {
       <${Card} title="청원 콘솔" variant="compact">
         <div class="mt-1.5 flex flex-col gap-3.5">
           <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-center">
-            <input
-              class="w-full rounded-xl border border-card-border bg-card/48 px-3.5 py-2 text-[13px] font-sans text-text-strong placeholder:text-text-dim transition-all duration-200 focus:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50"
-              type="text"
+            <${TextInput}
+              class="rounded-xl bg-card/48 px-3.5 py-2 text-[13px] font-sans text-text-strong placeholder:text-text-dim shadow-inner"
               name="petition_topic"
-              aria-label="청원 제목"
-              autocomplete="off"
+              ariaLabel="청원 제목"
+              autoComplete="off"
               placeholder="청원 제목을 입력하세요..."
               value=${governanceTopicInput.value}
               onInput=${(event: Event) => {
@@ -94,24 +95,24 @@ function GovernanceToolbar() {
               }}
               disabled=${governanceStarting.value}
             />
-            <button type="button"
-              class="rounded-xl border px-4 py-2 text-[13px] font-semibold cursor-pointer transition-all duration-200
-                ${governanceStarting.value || governanceTopicInput.value.trim() === ''
-                  ? 'bg-card/40 text-text-muted border-card-border opacity-50 cursor-not-allowed'
-                  : 'bg-accent/10 text-accent border-accent/20 hover:bg-accent/18'
-                }"
+            <${ActionButton}
+              variant="primary"
+              size="lg"
+              class="rounded-xl border-transparent bg-accent/12 text-accent hover:bg-accent/20 disabled:bg-card/40 disabled:border-card-border disabled:text-text-muted"
               onClick=${submitPetition}
               disabled=${governanceStarting.value || governanceTopicInput.value.trim() === ''}
             >
               ${governanceStarting.value ? '접수 중...' : '청원 접수'}
-            </button>
-            <button type="button"
-              class="rounded-xl border border-transparent bg-white/5 px-3.5 py-2 text-[13px] font-semibold text-text-muted transition-all duration-200 cursor-pointer hover:bg-white/10 hover:text-text-strong disabled:cursor-not-allowed disabled:opacity-50"
-            onClick=${refreshGovernance}
-            disabled=${governanceLoading.value}
-          >
-            ${governanceLoading.value ? '새로고침 중...' : '새로고침'}
-          </button>
+            <//>
+            <${ActionButton}
+              variant="ghost"
+              size="lg"
+              class="rounded-xl border-transparent bg-white/5 px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
+              onClick=${refreshGovernance}
+              disabled=${governanceLoading.value}
+            >
+              ${governanceLoading.value ? '새로고침 중...' : '새로고침'}
+            <//>
         </div>
         <${FilterChips}
           chips=${[
@@ -160,7 +161,7 @@ function DecisionInbox() {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`
                 <button type="button"
-                  class="group flex w-full gap-3 rounded-xl border p-4 text-left cursor-pointer transition-all duration-200 shadow-sm shadow-black/8 hover:-translate-y-0.5 hover:shadow-md
+                  class="group flex w-full gap-3 rounded-xl border p-4 text-left cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]
                     ${selected
                       ? 'border-accent/40 bg-accent/10 shadow-[0_0_12px_rgba(71,184,255,0.12)]'
                       : 'border-card-border bg-card/34 hover:border-accent/30 hover:bg-card/52'

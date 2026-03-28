@@ -9,16 +9,16 @@ import { missionLoading, missionSnapshot, refreshMissionSnapshot } from '../../m
 import { topActiveAgents } from '../../observatory-store'
 import { roomTruth, roomTruthLoading, refreshRoomTruth } from '../../room-truth-store'
 import { journal } from '../../sse'
-import { navigate } from '../../router'
 import { formatDuration, statusLabel } from '../mission-utils'
 import { SituationBanner } from './situation-banner'
 import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
 import { AgentAvatar } from './agent-avatar'
 import { TransportHealthPanel } from '../transport-health'
-import { DataFreshnessBar } from './data-freshness'
+import { RouteLink } from '../common/route-link'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type { DashboardMissionSessionBrief } from '../../types'
+import type { ReadonlySignal } from '@preact/signals'
 
 const OVERVIEW_STALE_MS = 300_000
 
@@ -131,12 +131,14 @@ function HomeSectionHeader({
   label,
   count,
   linkLabel,
-  onLink,
+  linkTab,
+  linkParams,
 }: {
   label: string
   count?: number
   linkLabel?: string
-  onLink?: () => void
+  linkTab?: 'monitoring' | 'workspace' | 'command' | 'lab' | 'overview' | 'logs'
+  linkParams?: Record<string, string>
 }) {
   return html`
     <div class="mb-2.5 flex items-center justify-between">
@@ -144,8 +146,8 @@ function HomeSectionHeader({
         <span class="text-xs font-semibold text-[var(--text-strong)] uppercase tracking-wider">${label}</span>
         ${count != null ? html`<${CountBadge}>${count}<//>` : null}
       </div>
-      ${linkLabel && onLink
-        ? html`<button type="button" class="text-[10px] text-[var(--accent)] cursor-pointer bg-transparent border-0 p-0 hover:underline" onClick=${onLink}>${linkLabel}</button>`
+      ${linkLabel && linkTab
+        ? html`<${RouteLink} tab=${linkTab} params=${linkParams} class="text-[10px] text-[var(--accent)] hover:underline">${linkLabel}<//>`
         : null}
     </div>
   `
@@ -158,10 +160,11 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
   const hasBlocker = Boolean(s.blocker_summary)
 
   return html`
-    <div
-      class="rounded-xl border bg-card/55 p-4 cursor-pointer transition-all duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/45' : 'border-card-border hover:border-accent/32'}"
-      key=${s.session_id}
-      onClick=${() => navigate('monitoring', { section: 'sessions', session_id: s.session_id })}
+    <${RouteLink}
+      tab="monitoring"
+      params=${{ section: 'sessions', session_id: s.session_id }}
+      class="rounded-xl border bg-card/55 p-4 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/45' : 'border-card-border hover:border-accent/32'}"
+      title=${primary}
     >
       <div class="mb-2.5 flex items-start gap-3">
         <span class="w-2.5 h-2.5 rounded-full shrink-0 mt-1 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${statusDotColor(s.status)}"></span>
@@ -179,7 +182,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
       ${hasBlocker ? html`
         <div class="mt-3 truncate rounded-lg border border-bad/20 bg-bad/10 px-3 py-1.5 pl-5 text-[11px] font-medium text-bad-light">${s.blocker_summary}</div>
       ` : null}
-    </div>
+    <//>
   `
 }
 
@@ -205,7 +208,8 @@ function HotSessions() {
         label="세션"
         count=${userSessions.length}
         linkLabel="전체 보기 ->"
-        onLink=${() => navigate('monitoring', { section: 'sessions' })}
+        linkTab="monitoring"
+        linkParams=${{ section: 'sessions' }}
       />
       ${userSessions.length > 0
         ? html`<div class="grid grid-cols-2 gap-3 max-[960px]:grid-cols-1">${userSessions.map(renderSessionCard)}</div>`
@@ -233,14 +237,16 @@ function AgentPulse() {
         label="에이전트"
         count=${agents.length}
         linkLabel="전체 보기 ->"
-        onLink=${() => navigate('monitoring', { section: 'agents' })}
+        linkTab="monitoring"
+        linkParams=${{ section: 'agents' }}
       />
       <div class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
         ${agents.map((a: ObservatoryAgent) => html`
-          <div
-            class="flex items-start gap-3 p-4 rounded-xl border border-card-border bg-card/55 cursor-pointer transition-all duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 hover:border-accent/32 group"
-            key=${a.name}
-            onClick=${() => navigate('monitoring', { section: 'agents', agent: a.name })}
+          <${RouteLink}
+            tab="monitoring"
+            params=${{ section: 'agents', agent: a.name }}
+            class="flex items-start gap-3 p-4 rounded-xl border border-card-border bg-card/55 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 hover:border-accent/32 group"
+            title=${a.koreanName ?? a.name}
           >
             <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${40} />
             <div class="flex flex-col min-w-0 flex-1 gap-1.5">
@@ -255,7 +261,7 @@ function AgentPulse() {
                 ${a.focus ?? a.currentTask ?? a.status}
               </span>
             </div>
-          </div>
+          <//>
         `)}
       </div>
     </div>
@@ -267,30 +273,49 @@ function AgentPulse() {
 export function Overview() {
   const snap = missionSnapshot.value
   const roomHealth = snap?.summary?.room_health ?? null
+  const hotSessions = HotSessions()
+  const agentPulse = AgentPulse()
+  const journalEntries = (
+    Array.isArray(journal as unknown)
+      ? { value: journal as unknown as unknown[] }
+      : journal
+  ) as ReadonlySignal<unknown[]>
+  const hasJournal = journalEntries.value.length > 0
 
   return html`
     <div class="flex flex-col gap-5">
       <${OverviewFreshnessStrip} />
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
-      <${DataFreshnessBar} />
       <${AttentionSpotlight} snap=${snap} />
 
-      <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
-        <${HotSessions} />
-      </div>
+      ${hotSessions
+        ? html`
+            <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
+              ${hotSessions}
+            </div>
+          `
+        : null}
 
-      <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
-        <${AgentPulse} />
-      </div>
+      ${agentPulse
+        ? html`
+            <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
+              ${agentPulse}
+            </div>
+          `
+        : null}
 
       <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
         <${TransportHealthPanel} />
       </div>
 
-      <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
-        <${HomeSectionHeader} label="최근 활동" />
-        <${NarrativeTimeline} entries=${journal} maxItems=${8} />
-      </div>
+      ${hasJournal
+        ? html`
+            <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
+              <${HomeSectionHeader} label="최근 활동" />
+              <${NarrativeTimeline} entries=${journalEntries} maxItems=${8} />
+            </div>
+          `
+        : null}
     </div>
   `
 }

@@ -117,7 +117,7 @@ Common entrypoints:
 
 - Monitoring: `http://127.0.0.1:<PORT>/dashboard#monitoring?section=sessions`
 - Intervention: `http://127.0.0.1:<PORT>/dashboard#command?section=intervene`
-- War room: `http://127.0.0.1:<PORT>/dashboard#command?section=warroom`
+- Governance: `http://127.0.0.1:<PORT>/dashboard#command?section=governance`
 
 The dashboard is a read / operate UI. Canonical write and control paths remain MCP tools.
 

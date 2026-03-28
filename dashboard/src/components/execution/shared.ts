@@ -7,7 +7,6 @@ import { navigate } from '../../router'
 import { keepers } from '../../store'
 import {
   createExecutionWorkflowContext,
-  workflowCommandParams,
   workflowInterveneParams,
   persistWorkflowContext,
 } from '../../workflow-context'
@@ -111,16 +110,13 @@ export function openHandoff(handoff: DashboardExecutionHandoff | null | undefine
     targetId: handoff.target_id,
     focusKind: handoff.focus_kind,
     operationId: handoff.operation_id ?? null,
-    commandSurface: handoff.command_surface ?? null,
     sourceLabel: '실행 진단',
     summary: handoff.label,
   })
   persistWorkflowContext(context)
   navigate(
     'command',
-    handoff.surface === 'intervene'
-      ? workflowInterveneParams(context)
-      : workflowCommandParams(context),
+    workflowInterveneParams(context),
   )
 }
 

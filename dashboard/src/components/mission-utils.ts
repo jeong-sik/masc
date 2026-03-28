@@ -14,7 +14,6 @@ import type {
 } from '../types'
 import {
   createMissionWorkflowContext,
-  missionCommandParams,
   missionInterveneParams,
   persistWorkflowContext,
   workflowTargetLabel,
@@ -99,15 +98,13 @@ export function actionTargetLabel(action?: OperatorRecommendedAction | null): st
 }
 
 function navigateWithContext(
-  mode: 'intervene' | 'command',
+  _mode: 'intervene' | 'command',
   context = createMissionWorkflowContext(),
 ): void {
   persistWorkflowContext(context)
   navigate(
     'command',
-    mode === 'intervene'
-      ? { section: 'intervene', ...missionInterveneParams(context) }
-      : { section: 'warroom', ...missionCommandParams(context) },
+    { section: 'intervene', ...missionInterveneParams(context) },
   )
 }
 
@@ -135,16 +132,15 @@ export function openActionCommand(
   navigateWithContext('command', createMissionWorkflowContext(action, incident, sourceLabel))
 }
 
-export function openSession(mode: 'intervene' | 'command', sessionId: string): void {
+export function openSession(_mode: 'intervene' | 'command', sessionId: string): void {
   const params: Record<string, string> = {
     source: 'mission',
     target_type: 'team_session',
     target_id: sessionId,
     focus_kind: 'team_session',
   }
-  if (mode === 'command') params.surface = 'swarm'
   navigate('command', {
-    section: mode === 'command' ? 'warroom' : 'intervene',
+    section: 'intervene',
     ...params,
   })
 }

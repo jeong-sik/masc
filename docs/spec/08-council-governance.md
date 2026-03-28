@@ -294,7 +294,7 @@ masc_operator_action(action_type=X) ->
 
 운영자 또는 keeper가 작성하는 지속적 판단 기록.
 
-- surface: `command.warroom`, `command.swarm`, `intervene`
+- surface: `command.intervene`, `command.governance`
 - target_type: `room`, `team_session`
 - 신선도(freshness) TTL, 신뢰도(confidence), 증거 참조 포함
 - `masc_operator_judgment_write` / `masc_operator_judgment_latest` 도구로 접근

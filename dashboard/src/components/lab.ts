@@ -6,17 +6,23 @@ import { Autoresearch } from './autoresearch'
 import { HarnessHealth } from './harness-health'
 import { ServerConfig } from './server-config'
 
+type LabSection = 'tools' | 'autoresearch' | 'harness' | 'config'
+
+function currentSection(): LabSection {
+  const section = route.value.params.section
+  if (section === 'autoresearch' || section === 'harness' || section === 'config') {
+    return section
+  }
+  return 'tools'
+}
+
 export function Lab() {
-  const section = route.value.params.section ?? 'tools'
+  const section = currentSection()
 
   return html`
     <div>
       ${section === 'tools' ? html`
-        <${Tools} mode="tools" />
-      ` : null}
-
-      ${section === 'experiments' ? html`
-        <${Tools} mode="experiments" />
+        <${Tools} />
       ` : null}
 
       ${section === 'autoresearch' ? html`

@@ -5,6 +5,7 @@
 import { html } from 'htm/preact'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
+import { TextInput } from '../common/input'
 import {
   operatorActionBusy,
   operatorSnapshot,
@@ -57,8 +58,9 @@ export function QuickIntervene() {
     <section class="${CARD_STANDARD} flex flex-col gap-3">
       <div class="flex gap-2 items-stretch flex-wrap">
         <select
-          class="shrink-0 rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] text-[13px] text-[var(--text-body)] px-3 py-2 outline-none focus:border-[var(--accent)] transition-colors cursor-pointer min-w-[120px]"
+          class="shrink-0 rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[13px] text-[var(--text-body)] transition-colors cursor-pointer min-w-[120px] focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
           value=${quickTarget.value}
+          aria-label="개입 대상"
           onChange=${(e: Event) => { quickTarget.value = (e.target as HTMLSelectElement).value }}
           disabled=${busy}
         >
@@ -74,11 +76,13 @@ export function QuickIntervene() {
             </option>
           `)}
         </select>
-        <input
-          type="text"
-          class="flex-1 min-w-[200px] rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] text-[13px] text-[var(--text-body)] px-3 py-2 outline-none focus:border-[var(--accent)] transition-colors"
+        <${TextInput}
+          class="min-w-[200px] flex-1 border-[var(--white-8)] bg-[var(--white-3)]"
           placeholder="메시지"
           value=${quickMessage.value}
+          name="quick_intervene_message"
+          ariaLabel="빠른 개입 메시지"
+          autoComplete="off"
           onInput=${(e: Event) => { quickMessage.value = (e.target as HTMLInputElement).value }}
           onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitQuickMessage() }}
           disabled=${busy}

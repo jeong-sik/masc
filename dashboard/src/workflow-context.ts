@@ -35,7 +35,6 @@ export interface DashboardWorkflowContext {
   target_id: string | null
   focus_kind: string | null
   operation_id: string | null
-  command_surface: string | null
   summary: string
   payload_preview: string | null
   suggested_payload: Record<string, unknown> | null
@@ -78,7 +77,6 @@ function parseStoredContext(raw: string | null): DashboardWorkflowContext | null
       target_id: asString(parsed.target_id),
       focus_kind: asString(parsed.focus_kind),
       operation_id: asString(parsed.operation_id),
-      command_surface: asString(parsed.command_surface),
       summary,
       payload_preview: asString(parsed.payload_preview),
       suggested_payload: normalizePayload(parsed.suggested_payload),
@@ -194,7 +192,6 @@ export function createMissionWorkflowContext(
     target_id: targetId,
     focus_kind: focusKind,
     operation_id: null,
-    command_surface: null,
     summary,
     payload_preview: summarizePayloadPreview(payload),
     suggested_payload: payload,
@@ -211,7 +208,6 @@ export function createExecutionWorkflowContext({
   sourceLabel = 'Execution 진단',
   summary,
   operationId = null,
-  commandSurface = null,
 }: {
   targetType: string
   targetId: string
@@ -219,7 +215,6 @@ export function createExecutionWorkflowContext({
   sourceLabel?: string
   summary: string
   operationId?: string | null
-  commandSurface?: string | null
 }): DashboardWorkflowContext {
   const createdAt = new Date().toISOString()
   return {
@@ -231,7 +226,6 @@ export function createExecutionWorkflowContext({
     target_id: targetId,
     focus_kind: focusKind,
     operation_id: operationId,
-    command_surface: commandSurface,
     summary,
     payload_preview: null,
     suggested_payload: null,
@@ -280,7 +274,6 @@ export function workflowContextForRoute(routeState: Pick<RouteState, 'params'>):
     target_id: params.target_id ?? null,
     focus_kind: params.focus_kind ?? params.action_type ?? null,
     operation_id: params.operation_id ?? null,
-    command_surface: params.surface ?? null,
     summary:
       sourceSurface === 'execution'
         ? (params.focus_kind
@@ -308,51 +301,8 @@ export function workflowInterveneParams(context: DashboardWorkflowContext): Reco
   }
 }
 
-export function commandSurfaceForContext(context: DashboardWorkflowContext): string {
-  if (context.command_surface) return context.command_surface
-  const focus = [context.focus_kind, context.summary, context.action_type]
-    .filter((value): value is string => typeof value === 'string' && value.trim() !== '')
-    .join(' ')
-    .toLowerCase()
-
-  if (
-    focus.includes('artifact_scope')
-    || focus.includes('routing_confidence')
-    || focus.includes('cache_contention')
-  ) {
-    return 'summary'
-  }
-  if (
-    focus.includes('stale_data')
-    || focus.includes('leader_offline')
-    || focus.includes('roster_offline')
-    || focus.includes('managed')
-    || focus.includes('swarm')
-  ) {
-    return 'swarm'
-  }
-  if (context.focus_kind === 'operation' || context.target_type === 'operation') return 'operations'
-  return context.target_type === 'room' ? 'orchestra' : 'swarm'
-}
-
-export function workflowCommandParams(context: DashboardWorkflowContext): Record<string, string> {
-  return {
-    source: context.source_surface,
-    surface: commandSurfaceForContext(context),
-    ...(context.action_type ? { action_type: context.action_type } : {}),
-    ...(context.target_type ? { target_type: context.target_type } : {}),
-    ...(context.target_id ? { target_id: context.target_id } : {}),
-    ...(context.focus_kind ? { focus_kind: context.focus_kind } : {}),
-    ...(context.operation_id ? { operation_id: context.operation_id } : {}),
-  }
-}
-
 export function missionInterveneParams(context: DashboardWorkflowContext): Record<string, string> {
   return workflowInterveneParams(context)
-}
-
-export function missionCommandParams(context: DashboardWorkflowContext): Record<string, string> {
-  return workflowCommandParams(context)
 }
 
 export function workflowTargetLabel(context?: DashboardWorkflowContext | null): string {

@@ -14,7 +14,9 @@ vi.mock('./dashboard', () => ({
   reportToolHostFailure,
 }))
 
-afterEach(() => {
+afterEach(async () => {
+  const { resetMcpClientState } = await import('./mcp')
+  resetMcpClientState()
   vi.clearAllMocks()
   vi.resetModules()
 })

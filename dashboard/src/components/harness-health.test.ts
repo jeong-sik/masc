@@ -108,7 +108,9 @@ async function loadComponentWithApi(api: {
   vi.doMock('../router', () => ({
     navigate: api.navigate ?? vi.fn(),
   }))
-  return import('./harness-health')
+  const module = await import('./harness-health')
+  module.resetHarnessHealthState()
+  return module
 }
 
 describe('HarnessHealth', () => {
@@ -119,7 +121,9 @@ describe('HarnessHealth', () => {
     document.body.appendChild(container)
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    const { resetHarnessHealthState } = await import('./harness-health')
+    resetHarnessHealthState()
     render(null, container)
     container.remove()
     vi.useRealTimers()

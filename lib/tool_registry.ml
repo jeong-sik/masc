@@ -21,8 +21,6 @@ type call_stats = {
 
 (** Global registry - process-lifetime, protected by mutex for fiber safety *)
 let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
-let registry_mutex = Eio.Mutex.create ()
-
 let known_tool_names : (string, unit) Hashtbl.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let tbl = Hashtbl.create 256 in
@@ -36,28 +34,27 @@ let is_known_tool tool_name =
 
 (** Record a tool call. Called from handle_call_tool_eio after execution. *)
 let record_call ~tool_name ~success ~duration_ms =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      let stats =
-        match Hashtbl.find_opt registry tool_name with
-        | Some s -> s
-        | None ->
-            let s = {
-              call_count = 0;
-              success_count = 0;
-              failure_count = 0;
-              last_called_at = 0.0;
-              total_duration_ms = 0;
-            } in
-            Hashtbl.replace registry tool_name s;
-            s
-      in
-      stats.call_count <- stats.call_count + 1;
-      if success then
-        stats.success_count <- stats.success_count + 1
-      else
-        stats.failure_count <- stats.failure_count + 1;
-      stats.last_called_at <- Time_compat.now ();
-      stats.total_duration_ms <- stats.total_duration_ms + duration_ms)
+  let stats =
+    match Hashtbl.find_opt registry tool_name with
+    | Some s -> s
+    | None ->
+        let s = {
+          call_count = 0;
+          success_count = 0;
+          failure_count = 0;
+          last_called_at = 0.0;
+          total_duration_ms = 0;
+        } in
+        Hashtbl.replace registry tool_name s;
+        s
+  in
+  stats.call_count <- stats.call_count + 1;
+  if success then
+    stats.success_count <- stats.success_count + 1
+  else
+    stats.failure_count <- stats.failure_count + 1;
+  stats.last_called_at <- Time_compat.now ();
+  stats.total_duration_ms <- stats.total_duration_ms + duration_ms
 
 let record_call_if_known ~tool_name ~success ~duration_ms =
   if is_known_tool tool_name then
@@ -65,9 +62,8 @@ let record_call_if_known ~tool_name ~success ~duration_ms =
 
 (** Get all stats as a sorted list (by call_count descending) *)
 let get_stats () : (string * call_stats) list =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      Hashtbl.fold (fun name stats acc -> (name, stats) :: acc) registry []
-      |> List.sort (fun (_, a) (_, b) -> compare b.call_count a.call_count))
+  Hashtbl.fold (fun name stats acc -> (name, stats) :: acc) registry []
+  |> List.sort (fun (_, a) (_, b) -> compare b.call_count a.call_count)
 
 (** Get top N tools by call count *)
 let get_top_n n : (string * call_stats) list =
@@ -83,30 +79,27 @@ let get_top_n n : (string * call_stats) list =
     Only includes tools that are registered (have been called at least once)
     but not recently. *)
 let get_unused_since (cutoff : float) : string list =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      Hashtbl.fold
-        (fun name stats acc ->
-          if stats.last_called_at < cutoff then name :: acc else acc)
-        registry []
-      |> List.sort String.compare)
+  Hashtbl.fold
+    (fun name stats acc ->
+      if stats.last_called_at < cutoff then name :: acc else acc)
+    registry []
+  |> List.sort String.compare
 
 (** Get tools that have never been called (not in registry at all)
     compared against a list of all known tool names *)
 let get_never_called (all_tool_names : string list) : string list =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      List.filter
-        (fun name -> not (Hashtbl.mem registry name))
-        all_tool_names
-      |> List.sort String.compare)
+  List.filter
+    (fun name -> not (Hashtbl.mem registry name))
+    all_tool_names
+  |> List.sort String.compare
 
 (** Total calls across all tools *)
 let total_calls () : int =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      Hashtbl.fold (fun _ stats acc -> acc + stats.call_count) registry 0)
+  Hashtbl.fold (fun _ stats acc -> acc + stats.call_count) registry 0
 
 (** Number of distinct tools that have been called *)
 let distinct_tools_called () : int =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () -> Hashtbl.length registry)
+  Hashtbl.length registry
 
 (** Convert call_stats to JSON *)
 let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
@@ -145,26 +138,24 @@ let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
 (** Warm up registry from telemetry summary.
     Called once at server startup to restore persistent metrics. *)
 let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      let count = ref 0 in
-      Hashtbl.iter
-        (fun tool_name (stats : Telemetry_eio.tool_usage_stats) ->
-          if not (Hashtbl.mem registry tool_name) then (
-            Hashtbl.replace registry tool_name
-              {
-                call_count = stats.count;
-                success_count = stats.success_count;
-                failure_count = stats.failure_count;
-                last_called_at =
-                  (match stats.last_used_at with
-                  | Some t -> t
-                  | None -> 0.0);
-                total_duration_ms = 0;
-              };
-            incr count))
-        summary.stats_by_tool;
-      !count)
+  let count = ref 0 in
+  Hashtbl.iter
+    (fun tool_name (stats : Telemetry_eio.tool_usage_stats) ->
+      if not (Hashtbl.mem registry tool_name) then (
+        Hashtbl.replace registry tool_name
+          {
+            call_count = stats.count;
+            success_count = stats.success_count;
+            failure_count = stats.failure_count;
+            last_called_at =
+              (match stats.last_used_at with
+              | Some t -> t
+              | None -> 0.0);
+            total_duration_ms = 0;
+          };
+        incr count))
+    summary.stats_by_tool;
+  !count
 
 (** Reset all counters (for testing) *)
-let reset () =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () -> Hashtbl.clear registry)
+let reset () = Hashtbl.clear registry

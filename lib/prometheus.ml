@@ -32,79 +32,64 @@ type metric = {
 (** {1 Global Metrics Store} *)
 
 let metrics : (string, metric) Hashtbl.t = Hashtbl.create 64
-let metrics_mutex = Eio.Mutex.create ()
-
-let with_lock f = Eio_guard.with_mutex metrics_mutex f
 
 (** {1 Metric Registration} *)
 
 let register_counter ~name ~help ?(labels=[]) () =
-  with_lock (fun () ->
-    let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-    if not (Hashtbl.mem metrics key) then
-      Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels }
-  )
+  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  if not (Hashtbl.mem metrics key) then
+    Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels }
 
 let register_gauge ~name ~help ?(labels=[]) () =
-  with_lock (fun () ->
-    let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-    if not (Hashtbl.mem metrics key) then
-      Hashtbl.add metrics key { name; help; metric_type = Gauge; value = 0.0; labels }
-  )
+  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  if not (Hashtbl.mem metrics key) then
+    Hashtbl.add metrics key { name; help; metric_type = Gauge; value = 0.0; labels }
 
 let register_histogram ~name ~help ?(labels=[]) () =
-  with_lock (fun () ->
-    let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-    if not (Hashtbl.mem metrics key) then
-      Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels }
-  )
+  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  if not (Hashtbl.mem metrics key) then
+    Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels }
 
 (** {1 Metric Updates} *)
 
 let inc_counter name ?(labels=[]) ?(delta=1.0) () =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  with_lock (fun () ->
-    match Hashtbl.find_opt metrics key with
-    | Some m -> m.value <- m.value +. delta
-    | None ->
-        Hashtbl.add metrics key {
-          name;
-          help = name;
-          metric_type = Counter;
-          value = delta;
-          labels;
-        }
-  )
+  match Hashtbl.find_opt metrics key with
+  | Some m -> m.value <- m.value +. delta
+  | None ->
+      Hashtbl.add metrics key {
+        name;
+        help = name;
+        metric_type = Counter;
+        value = delta;
+        labels;
+      }
 
 let set_gauge name ?(labels=[]) value =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  with_lock (fun () ->
-    match Hashtbl.find_opt metrics key with
-    | Some m -> m.value <- value
-    | None ->
-        Hashtbl.add metrics key {
-          name;
-          help = name;
-          metric_type = Gauge;
-          value;
-          labels;
-        }
-  )
+  match Hashtbl.find_opt metrics key with
+  | Some m -> m.value <- value
+  | None ->
+      Hashtbl.add metrics key {
+        name;
+        help = name;
+        metric_type = Gauge;
+        value;
+        labels;
+      }
 
 let inc_gauge name ?(labels=[]) ?(delta=1.0) () =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  with_lock (fun () ->
-    match Hashtbl.find_opt metrics key with
-    | Some m -> m.value <- m.value +. delta
-    | None ->
-        Hashtbl.add metrics key {
-          name;
-          help = name;
-          metric_type = Gauge;
-          value = delta;
-          labels;
-        }
-  )
+  match Hashtbl.find_opt metrics key with
+  | Some m -> m.value <- m.value +. delta
+  | None ->
+      Hashtbl.add metrics key {
+        name;
+        help = name;
+        metric_type = Gauge;
+        value = delta;
+        labels;
+      }
 
 let dec_gauge name ?(labels=[]) ?(delta=1.0) () =
   inc_gauge name ~labels ~delta:(-.delta) ()
@@ -112,9 +97,7 @@ let dec_gauge name ?(labels=[]) ?(delta=1.0) () =
 (** Get current metric value by name + labels (if any). *)
 let get_metric_value name ?(labels=[]) () =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  with_lock (fun () ->
-    Hashtbl.find_opt metrics key |> Option.map (fun m -> m.value)
-  )
+  Hashtbl.find_opt metrics key |> Option.map (fun m -> m.value)
 
 let metric_value_or_zero name ?(labels=[]) () =
   get_metric_value name ~labels () |> Option.value ~default:0.0
@@ -125,21 +108,19 @@ let metric_value_or_zero name ?(labels=[]) () =
 let observe_histogram name ?(labels=[]) value =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
   let count_key = name ^ "_count" ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  with_lock (fun () ->
-    (match Hashtbl.find_opt metrics key with
-    | Some m -> m.value <- m.value +. value
-    | None ->
-        Hashtbl.add metrics key {
-          name; help = name; metric_type = Histogram; value; labels;
-        });
-    (match Hashtbl.find_opt metrics count_key with
-    | Some m -> m.value <- m.value +. 1.0
-    | None ->
-        Hashtbl.add metrics count_key {
-          name = name ^ "_count"; help = name ^ " observation count";
-          metric_type = Counter; value = 1.0; labels;
-        })
-  )
+  (match Hashtbl.find_opt metrics key with
+  | Some m -> m.value <- m.value +. value
+  | None ->
+      Hashtbl.add metrics key {
+        name; help = name; metric_type = Histogram; value; labels;
+      });
+  (match Hashtbl.find_opt metrics count_key with
+  | Some m -> m.value <- m.value +. 1.0
+  | None ->
+      Hashtbl.add metrics count_key {
+        name = name ^ "_count"; help = name ^ " observation count";
+        metric_type = Counter; value = 1.0; labels;
+      })
 
 (** {1 Built-in Metrics} *)
 
@@ -195,12 +176,10 @@ let to_prometheus_text () =
   update_uptime ();
   let buf = Buffer.create 1024 in
   let by_name = Hashtbl.create 32 in
-  with_lock (fun () ->
-    Hashtbl.iter (fun _ m ->
-      let existing = Hashtbl.find_opt by_name m.name |> Option.value ~default:[] in
-      Hashtbl.replace by_name m.name (m :: existing)
-    ) metrics
-  );
+  Hashtbl.iter (fun _ m ->
+    let existing = Hashtbl.find_opt by_name m.name |> Option.value ~default:[] in
+    Hashtbl.replace by_name m.name (m :: existing)
+  ) metrics;
   Hashtbl.iter (fun name ms ->
     match ms with
     | [] -> ()

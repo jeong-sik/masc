@@ -440,24 +440,19 @@ type cached_card = {
 
 let _cache : cached_card option ref = ref None
 let _cache_generation : int ref = ref 0
-let card_mu = Eio.Mutex.create ()
-
-let with_card_rw f = Eio_guard.with_mutex card_mu f
-
 (** Get cached agent card, generating if needed.
     [schemas] is used only on first generation or after invalidation.
     Returns [(card, json_string)] for direct HTTP response. *)
 let get_cached ?(port=8935) ?(host="127.0.0.1") ~schemas () : agent_card * string =
-  with_card_rw (fun () ->
-    let gen = !_cache_generation in
-    match !_cache with
-    | Some c when c.generation = gen -> (c.card, c.card_json)
-    | _ ->
-      let card = generate_default ~port ~host ~schemas () in
-      let json_str = to_json card |> Yojson.Safe.to_string in
-      _cache := Some { card; card_json = json_str; generation = gen };
-      (card, json_str))
+  let gen = !_cache_generation in
+  match !_cache with
+  | Some c when c.generation = gen -> (c.card, c.card_json)
+  | _ ->
+    let card = generate_default ~port ~host ~schemas () in
+    let json_str = to_json card |> Yojson.Safe.to_string in
+    _cache := Some { card; card_json = json_str; generation = gen };
+    (card, json_str)
 
 (** Invalidate the cached agent card. Call when tools are added/removed. *)
 let invalidate_cache () =
-  with_card_rw (fun () -> incr _cache_generation)
+  incr _cache_generation

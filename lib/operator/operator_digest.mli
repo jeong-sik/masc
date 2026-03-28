@@ -72,6 +72,7 @@ type session_digest = {
   attention_items : attention_item list;
   recommended_actions : recommended_action list;
   worker_cards : worker_card list;
+  risk_digest : Yojson.Safe.t;
 }
 
 val stalled_session_threshold_sec : float

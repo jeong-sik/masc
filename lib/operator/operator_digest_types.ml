@@ -75,6 +75,7 @@ type session_digest = {
   attention_items : attention_item list;
   recommended_actions : recommended_action list;
   worker_cards : worker_card list;
+  risk_digest : Yojson.Safe.t;
 }
 
 let stalled_session_threshold_sec = 300.0
@@ -394,6 +395,7 @@ let session_card_to_yojson ~actor (digest : session_digest) =
       ("context_pressure_by_lane", digest.context_pressure_by_lane);
       ("intervention_counters", digest.intervention_counters);
       ("local_runtime", digest.local_runtime);
+      ("risk_digest", digest.risk_digest);
       ("attention_count", `Int (List.length digest.attention_items));
       ("top_attention", option_to_json attention_item_to_yojson top_attention);
       ("recommended_action_count", `Int (List.length digest.recommended_actions));

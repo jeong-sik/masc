@@ -20,58 +20,48 @@ type backend_state =
 (** Current backend state. Single ref avoids contradictory initialized/backend pairs. *)
 let backend_state : backend_state ref = ref Uninitialized
 
-let task_mu = Eio.Mutex.create ()
-let with_task_rw f = Eio_guard.with_mutex task_mu f
-let with_task_ro f = Eio_guard.with_mutex_ro task_mu f
-
 let is_initialized () =
-  with_task_ro (fun () ->
-    match !backend_state with
-    | Active _ -> true
-    | Uninitialized -> false)
+  match !backend_state with
+  | Active _ -> true
+  | Uninitialized -> false
 
 (** Initialize PostgreSQL backend if URL is available *)
 let init_pg pool =
-  with_task_rw (fun () ->
-    if match !backend_state with Active _ -> true | Uninitialized -> false then begin
-      Log.Task.warn "WARNING: already initialized, ignoring init_pg";
+  if match !backend_state with Active _ -> true | Uninitialized -> false then begin
+    Log.Task.warn "WARNING: already initialized, ignoring init_pg";
+    Ok ()
+  end else
+  match Task_pg.create pool with
+  | Ok t ->
+      backend_state := Active (Postgres t);
+      Log.Task.info "PostgreSQL backend initialized.";
       Ok ()
-    end else
-    match Task_pg.create pool with
-    | Ok t ->
-        backend_state := Active (Postgres t);
-        Log.Task.info "PostgreSQL backend initialized.";
-        Ok ()
-    | Error e ->
-        Log.Task.error "PG init failed, falling back to JSONL: %s"
-          (show_masc_error e);
-        Error e)
+  | Error e ->
+      Log.Task.error "PG init failed, falling back to JSONL: %s"
+        (show_masc_error e);
+      Error e
 
 (** Initialize JSONL backend. Default fallback. *)
 let init_jsonl () =
-  with_task_rw (fun () ->
-    if match !backend_state with Active _ -> true | Uninitialized -> false then
-      Log.Task.warn "WARNING: already initialized, ignoring init_jsonl"
-    else begin
-      backend_state := Active Jsonl;
-      Log.Task.info "JSONL backend initialized (using Room.* functions)."
-    end)
+  if match !backend_state with Active _ -> true | Uninitialized -> false then
+    Log.Task.warn "WARNING: already initialized, ignoring init_jsonl"
+  else begin
+    backend_state := Active Jsonl;
+    Log.Task.info "JSONL backend initialized (using Room.* functions)."
+  end
 
 (** Reset for testing *)
 let reset_for_test () =
-  with_task_rw (fun () -> backend_state := Uninitialized)
+  backend_state := Uninitialized
 
 (** Get current backend, auto-init JSONL if not set *)
 let backend () =
-  with_task_rw (fun () ->
-    match !backend_state with
-    | Active backend -> backend
-    | Uninitialized ->
-        backend_state := Active Jsonl;
-        Log.Task.info "JSONL backend initialized (using Room.* functions).";
-        (match !backend_state with
-         | Active backend -> backend
-         | Uninitialized -> Jsonl))
+  match !backend_state with
+  | Active backend -> backend
+  | Uninitialized ->
+      backend_state := Active Jsonl;
+      Log.Task.info "JSONL backend initialized (using Room.* functions).";
+      Jsonl
 
 (** Check if PostgreSQL backend is active *)
 let is_postgres () =
@@ -81,10 +71,9 @@ let is_postgres () =
 
 (** Get PostgreSQL pool if available *)
 let get_pg_pool () =
-  with_task_ro (fun () ->
-    match !backend_state with
-    | Active (Postgres t) -> Some (Task_pg.get_pool t)
-    | _ -> None)
+  match !backend_state with
+  | Active (Postgres t) -> Some (Task_pg.get_pool t)
+  | _ -> None
 
 (** {1 Dispatch Functions} *)
 

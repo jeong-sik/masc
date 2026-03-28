@@ -7,32 +7,21 @@
 open Result_syntax
 
 (** Global state for Mitosis cell lifecycle.
-    Protected by [mitosis_mutex]. Use [get_cell]/[set_cell]/[with_cell_rw]
-    instead of direct ref access. *)
+    Non-yielding ref operations — atomic in single-domain Eio. *)
 let current_cell = ref (Mitosis.create_stem_cell ~generation:0)
 let stem_pool = ref (Mitosis.init_pool ~config:Mitosis.default_config)
-let mitosis_mutex = Eio.Mutex.create ()
 
-let with_ro f = Eio_guard.with_mutex_ro mitosis_mutex f
-let with_rw f = Eio_guard.with_mutex mitosis_mutex f
+let get_cell () = !current_cell
+let get_pool () = !stem_pool
 
-let get_cell () = with_ro (fun () -> !current_cell)
-let get_pool () = with_ro (fun () -> !stem_pool)
-
-let set_cell cell =
-  with_rw (fun () ->
-    current_cell := cell)
-
-let set_pool pool =
-  with_rw (fun () ->
-    stem_pool := pool)
+let set_cell cell = current_cell := cell
+let set_pool pool = stem_pool := pool
 
 let with_cell_rw f =
-  with_rw (fun () ->
-    let cell, pool, result = f !current_cell !stem_pool in
-    current_cell := cell;
-    stem_pool := pool;
-    result)
+  let cell, pool, result = f !current_cell !stem_pool in
+  current_cell := cell;
+  stem_pool := pool;
+  result
 
 (** JSON-RPC request *)
 type jsonrpc_request = {

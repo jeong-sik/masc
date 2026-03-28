@@ -253,7 +253,7 @@ let compute_judgment_hash (v : contract_verdict) : string =
   let canonical =
     zeroed
     |> contract_verdict_to_json
-    |> Yojson.Safe.sort
+    (* contract_verdict_to_json already sorts all keys recursively *)
     |> Yojson.Safe.to_string
   in
   let hash = Digest.string canonical |> Digest.to_hex in

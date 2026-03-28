@@ -40,11 +40,10 @@ let load_error_to_string = function
 type read_error = File_not_found | Parse_error of string
 
 let read_json_file path =
-  if Sys.file_exists path then
-    (try Ok (Yojson.Safe.from_file path)
-     with exn -> Error (Parse_error (Printexc.to_string exn)))
-  else
-    Error File_not_found
+  try Ok (Yojson.Safe.from_file path)
+  with
+  | Sys_error _ -> Error File_not_found
+  | exn -> Error (Parse_error (Printexc.to_string exn))
 
 (* ================================================================ *)
 (* Load pipeline                                                     *)
@@ -71,12 +70,14 @@ let load ~(store : Agent_sdk.Proof_store.config)
   if manifest_proof.schema_version <> Agent_sdk.Cdal_proof.schema_version_current then
     Error (Schema_unsupported manifest_proof.schema_version)
   else
-  (* 3. Compute contract path and read *)
+  (* 3. Compute contract path and read.
+     Note: Proof_store.contract_path exists in OAS but is not exposed
+     in the .mli. Using the same convention directly as adapter. *)
   let contract_path =
     Filename.concat
       (Filename.concat
          (Filename.concat store.root "proofs")
-         proof.run_id)
+         manifest_proof.run_id)
       "contract.json"
   in
   let* contract_json =

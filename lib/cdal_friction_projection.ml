@@ -34,11 +34,7 @@ let mode_violations_suffix = "evidence/mode_violations.json"
 (** Find the first raw_evidence_ref that ends with mode_violations.json. *)
 let find_violations_ref (proof : Agent_sdk.Cdal_proof.t) : string option =
   List.find_opt
-    (fun ref_ ->
-       let len = String.length ref_ in
-       let suf_len = String.length mode_violations_suffix in
-       len >= suf_len
-       && String.sub ref_ (len - suf_len) suf_len = mode_violations_suffix)
+    (fun ref_ -> String.ends_with ~suffix:mode_violations_suffix ref_)
     proof.raw_evidence_refs
 
 (** Convert a Violation_record.t to its v1 grouping key. *)
@@ -58,26 +54,23 @@ let compare_key (a : blocked_attempt_key) (b : blocked_attempt_key) : int =
     if c <> 0 then c
     else String.compare a.effective_mode b.effective_mode
 
-(** Group violations by key, returning sorted groups. *)
+(** Group violations by key using Hashtbl, returning sorted groups. *)
 let group_violations (violations : Violation_record.t list)
     : blocked_attempt_group list =
-  (* Build an association list of (key, count) via linear scan.
-     Acceptable for small violation lists (typical: < 100 items). *)
-  let tbl : (blocked_attempt_key * int) list ref = ref [] in
-  List.iter
-    (fun v ->
-       let k = key_of_violation v in
-       let found = ref false in
-       tbl := List.map
-         (fun (k2, c) ->
-            if compare_key k k2 = 0 then (found := true; (k2, c + 1))
-            else (k2, c))
-         !tbl;
-       if not !found then tbl := !tbl @ [(k, 1)])
-    violations;
-  (* Sort groups by key for deterministic output. *)
-  let sorted = List.sort (fun (a, _) (b, _) -> compare_key a b) !tbl in
-  List.map (fun (key, count) -> { key; count }) sorted
+  let module H = Hashtbl.Make(struct
+    type t = blocked_attempt_key
+    let equal a b = compare_key a b = 0
+    let hash k =
+      Hashtbl.hash (k.tool_name, k.violation_kind, k.effective_mode)
+  end) in
+  let tbl = H.create 16 in
+  List.iter (fun v ->
+    let k = key_of_violation v in
+    let prev = try H.find tbl k with Not_found -> 0 in
+    H.replace tbl k (prev + 1)
+  ) violations;
+  H.fold (fun key count acc -> { key; count } :: acc) tbl []
+  |> List.sort (fun a b -> compare_key a.key b.key)
 
 (** Compute MD5 basis_hash from run_id + "|friction_v1". *)
 let compute_basis_hash (run_id : string) : string =

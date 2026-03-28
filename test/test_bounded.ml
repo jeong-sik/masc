@@ -2,6 +2,14 @@
 
 open Alcotest
 module Bounded = Masc_mcp.Bounded
+module Time_compat = Masc_mcp.Time_compat
+
+let with_eio_clock f =
+  Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Fun.protect
+    ~finally:Time_compat.clear_clock
+    f
 
 (* ============================================ *)
 (* Constraint checking tests                    *)
@@ -257,7 +265,10 @@ let test_retry_success_after_failures () =
       (* Third call succeeds *)
       mock_spawn_result ~success:true ~output:{|{"done": true}|} ()
   in
-  let result = Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn in
+  let result =
+    with_eio_clock (fun () ->
+      Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn)
+  in
   check bool "should reach goal after retries" true (result.status = `Goal_reached);
   check int "total retries recorded" 2 result.stats.total_retries;
   check int "history entry retries" 2 (List.hd result.history).retries
@@ -273,7 +284,10 @@ let test_retry_exhausted () =
     (* Always fail with retryable error *)
     mock_spawn_result ~success:false ~output:"Connection timeout" ()
   in
-  let result = Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn in
+  let result =
+    with_eio_clock (fun () ->
+      Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn)
+  in
   check bool "should be error after exhausted retries" true (result.status = `Error);
   check bool "reason mentions attempts" true
     (try let _ = Str.search_forward (Str.regexp "3 attempts") result.reason 0 in true

@@ -246,26 +246,27 @@ let run_turn
            session assistant_msg;
          ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
          (match result.proof with
-          | Some p ->
+         | Some p ->
             Log.Keeper.info "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
               meta.name p.run_id
               (Agent_sdk.Execution_mode.to_string p.effective_execution_mode)
               (Agent_sdk.Cdal_proof.show_result_status p.result_status)
               (List.length p.raw_evidence_refs);
             let store = Agent_sdk.Proof_store.default_config in
-            let eval = Cdal_eval.evaluate ~store p in
-            Cdal_eval.persist eval;
-            Log.Keeper.info "keeper:%s cdal_eval: %s"
-              meta.name (Cdal_eval.severity_to_string eval.overall);
-            (match eval.recommendation with
-             | Some r ->
-               Log.Keeper.warn
-                 "keeper:%s cdal: %d violation(s) from [%s]; mode %s needed (current: %s)"
-                 meta.name (List.length eval.evidence.violations)
-                 (String.concat ", " r.offending_tools)
-                 (Agent_sdk.Execution_mode.to_string r.minimum_required)
-                 (Agent_sdk.Execution_mode.to_string r.current_mode)
-             | None -> ())
+            let outcome = Cdal_eval_v1.evaluate ~store p in
+            let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
+            Cdal_eval_v1.persist verdict;
+            Log.Keeper.info
+              "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
+              meta.name
+              (Cdal_types.contract_status_to_string verdict.status)
+              verdict.claim_scope
+              verdict.judgment_hash;
+            (match outcome with
+             | Cdal_eval_v1.Load_failure (err, _) ->
+               Log.Keeper.warn "keeper:%s contract_verdict load failure: %s"
+                 meta.name (Cdal_loader.load_error_to_string err)
+             | Cdal_eval_v1.Verdict _ -> ())
           | None -> ());
          Ok {
            response_text;

@@ -1173,6 +1173,11 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
             ])
       in
       check bool "keeper up ok" true ok;
+      (* Stop the heartbeat fiber but keep registry entry so
+         masc_keeper_status can still read keeper data. *)
+      (match Masc_mcp.Keeper_registry.find_by_name "detail-demo" with
+       | Some entry -> Atomic.set entry.fiber_stop true
+       | None -> ());
       let meta =
         match Masc_mcp.Keeper_types.read_meta config "detail-demo" with
         | Ok (Some meta) -> meta

@@ -107,6 +107,9 @@ jobs:
             const selectedTarget = targetMap[extractHeadingValue(body, "Target lane").toLowerCase()];
             const hasProductGap = headingHasCheckedBox(body, "Product gap");
 
+            const existingAreas = [...labelNames].filter((n) => n.startsWith("area:"));
+            const existingTargets = [...labelNames].filter((n) => n.startsWith("target:"));
+
             const nextLabels = new Set(
               [...labelNames].filter((name) =>
                 !name.startsWith("area:") &&
@@ -116,8 +119,16 @@ jobs:
               )
             );
 
-            if (selectedArea) nextLabels.add(selectedArea);
-            if (selectedTarget) nextLabels.add(selectedTarget);
+            if (selectedArea) {
+              nextLabels.add(selectedArea);
+            } else {
+              existingAreas.forEach((a) => nextLabels.add(a));
+            }
+            if (selectedTarget) {
+              nextLabels.add(selectedTarget);
+            } else {
+              existingTargets.forEach((t) => nextLabels.add(t));
+            }
             if (hasProductGap) nextLabels.add("product-gap");
 
             const typeMatches = [...nextLabels].filter((name) => name.startsWith("type:"));

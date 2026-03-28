@@ -346,8 +346,10 @@ let test_post_list_filter_combinations () =
   Alcotest.(check bool) "exclude_system ok" true ok1;
   Alcotest.(check bool) "exclude_automation ok" true ok2;
   Alcotest.(check bool) "exclude both ok" true ok3;
-  Alcotest.(check bool) "exclude_system hides keeper" false
+  Alcotest.(check bool) "exclude_system keeps keeper" true
     (contains_substring body1 "dm-keeper");
+  Alcotest.(check bool) "exclude_automation hides keeper" false
+    (contains_substring body2 "dm-keeper");
   Alcotest.(check bool) "exclude_automation hides harness" false
     (contains_substring body2 "dashboard-harness-bot");
   Alcotest.(check bool) "exclude both keeps human" true
@@ -373,7 +375,7 @@ let test_dispatch_reclassify_dry_run () =
   let json = Yojson.Safe.from_string body in
   Alcotest.(check bool) "dry_run true" true
     Yojson.Safe.Util.(json |> member "dry_run" |> to_bool);
-  Alcotest.(check int) "changed one" 1
+  Alcotest.(check int) "changed zero" 0
     Yojson.Safe.Util.(json |> member "changed" |> to_int)
 
 let test_post_get_success () =

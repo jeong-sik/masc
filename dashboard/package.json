@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:serial": "vitest run --no-file-parallelism --maxWorkers=1",
     "test:watch": "vitest"
   },
   "dependencies": {

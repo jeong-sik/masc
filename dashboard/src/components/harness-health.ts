@@ -102,7 +102,6 @@ const HARNESS_RELOAD_DEBOUNCE_MS = 700
 const harnessData = signal<HarnessHealthData | null>(null)
 const harnessLoading = signal(false)
 const harnessError = signal<string | null>(null)
-
 let harnessRequest: Promise<void> | null = null
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -119,7 +118,13 @@ function scheduleHarnessReload(): void {
     void loadHarnessHealth()
   }, HARNESS_RELOAD_DEBOUNCE_MS)
 }
-
+export function resetHarnessHealthState(): void {
+  harnessData.value = null
+  harnessLoading.value = false
+  harnessError.value = null
+  harnessRequest = null
+  clearHarnessReloadTimer()
+}
 async function loadHarnessHealth(): Promise<void> {
   if (harnessRequest) return harnessRequest
 

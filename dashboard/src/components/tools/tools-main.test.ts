@@ -43,10 +43,6 @@ vi.mock('./prompt-registry-panel', () => ({
   PromptRegistryPanel: () => html`<div>PromptRegistryPanel</div>`,
 }))
 
-vi.mock('./surface-readiness-panel', () => ({
-  SurfaceReadinessPanel: () => html`<div>SurfaceReadinessPanel</div>`,
-}))
-
 vi.mock('./config-resolution-panel', () => ({
   ConfigResolutionPanel: () => html`<div>ConfigResolutionPanel</div>`,
 }))
@@ -78,23 +74,8 @@ describe('Tools', () => {
     container.remove()
   })
 
-  it('renders the experiments mode without tool inventory panels', async () => {
-    render(html`<${Tools} mode="experiments" />`, container)
-    await flush()
-
-    expect(mocks.loadTools).not.toHaveBeenCalled()
-    expect(container.textContent).toContain('운영 화면 안내')
-    expect(container.textContent).toContain('SurfaceReadinessPanel')
-    expect(container.textContent).toContain('PromptRegistryPanel')
-    expect(container.textContent).not.toContain('시스템 도구 목록')
-    expect(container.textContent).not.toContain('도구 사용 현황')
-  })
-
-  it('loads tool data when switching from experiments to tools mode', async () => {
-    render(html`<${Tools} mode="experiments" />`, container)
-    await flush()
-
-    render(html`<${Tools} mode="tools" />`, container)
+  it('loads tool data and keeps prompt registry inside the tools surface', async () => {
+    render(html`<${Tools} />`, container)
     await flush()
 
     expect(mocks.loadTools).toHaveBeenCalledTimes(1)
@@ -103,6 +84,6 @@ describe('Tools', () => {
     expect(container.textContent).toContain('ToolSummaryView')
     expect(container.textContent).toContain('도구 사용 현황')
     expect(container.textContent).toContain('ToolMetrics')
-    expect(container.textContent).not.toContain('PromptRegistryPanel')
+    expect(container.textContent).toContain('PromptRegistryPanel')
   })
 })

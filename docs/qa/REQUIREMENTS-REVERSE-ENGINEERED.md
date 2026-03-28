@@ -157,17 +157,17 @@
 |----|------|-----|------|------|
 | 5.1.1 | CP 스냅샷 | `GET /api/v1/command-plane` | PASS | |
 | 5.1.2 | Summary | `GET /api/v1/command-plane/summary` | PASS | |
-| 5.1.3 | Warroom | `GET /api/v1/command-plane/warroom` | PASS | |
+| 5.1.3 | Warroom (legacy backend) | `GET /api/v1/command-plane/warroom` | PASS | dashboard surface는 retired, legacy deep link는 `intervene`로 redirect |
 | 5.1.4 | Swarm | `GET /api/v1/command-plane/swarm` | PASS | |
 | 5.1.5 | Orchestra | `GET /api/v1/command-plane/orchestra` | PASS | `?summary_only=true`로 경량 응답 지원 (task-052) |
 | 5.1.6 | Help | `GET /api/v1/command-plane/help` | PASS | |
 | 5.1.7 | Chains | `GET /api/v1/chains/summary` | PASS | |
 
-**10 Sub-surfaces**: warroom, summary, topology, orchestra, swarm, operations, trace, chains, control, alerts
+**현재 Dashboard sub-surfaces**: intervene, governance
 
-**3 그룹**: status (warroom/summary/topology), history (orchestra/swarm/operations/trace/chains), control (control/alerts)
+**Legacy command-plane backend views**: warroom, summary, topology, orchestra, swarm, operations, trace, chains, control, alerts
 
-**UI 컴포넌트**: `command/index.ts`, `command/helpers.ts`, `command/topology.ts`, `command/operations.ts`, `command/war-room.ts`, `command/control.ts`, `command/swarm.ts`, `command/orchestra.ts`
+**UI 컴포넌트**: `components/control.ts`, `components/ops/index.ts`, `components/governance.ts`
 
 ### 5.2 실험 (Lab/TRPG)
 

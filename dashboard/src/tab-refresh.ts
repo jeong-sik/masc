@@ -3,13 +3,6 @@ import { refreshExecution, refreshBoard, refreshGoals } from './store'
 import { requestRoomTruth } from './room-truth-store'
 import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionSnapshot } from './mission-store'
-import {
-  commandPlaneSurface,
-  refreshCommandPlaneChainSummary,
-  refreshCommandPlaneCurrentSurface,
-  refreshCommandPlaneOrchestra,
-  refreshCommandPlaneSwarm,
-} from './command-store'
 
 async function refreshActivityGraphSurface(): Promise<void> {
   const { refreshActivityGraph } = await import('./components/activity-graph')
@@ -40,10 +33,6 @@ export type RefreshTask =
   | 'goals'
   | 'autoresearch'
   | 'harness'
-  | 'commandCurrentSurface'
-  | 'commandChainSummary'
-  | 'commandSwarm'
-  | 'commandOrchestra'
   | 'operatorSnapshot'
   | 'operatorRoomDigest'
   | 'governance'
@@ -61,23 +50,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       return ['roomTruth', 'missionSnapshot']
     case 'command':
-      if (routeState.params.section === 'warroom') {
-        const tasks: RefreshTask[] = [
-          'roomTruth',
-          'commandCurrentSurface',
-          'commandChainSummary',
-        ]
-        if (
-          commandPlaneSurface.value === 'swarm'
-          || commandPlaneSurface.value === 'orchestra'
-        ) {
-          tasks.push('commandSwarm')
-        }
-        if (commandPlaneSurface.value === 'orchestra') {
-          tasks.push('commandOrchestra')
-        }
-        return tasks
-      }
       if (routeState.params.section === 'intervene') {
         return ['roomTruth', 'operatorSnapshot', 'operatorRoomDigest']
       }
@@ -100,9 +72,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'harness') {
         return ['harness']
       }
-      if (routeState.params.section === 'overview') {
-        return ['roomTruth']
-      }
       return []
     case 'logs':
     default:
@@ -119,10 +88,6 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
   goals: () => { void refreshGoals() },
   autoresearch: () => { void refreshAutoresearchLabSurface() },
   harness: () => { void refreshHarnessLabSurface() },
-  commandCurrentSurface: () => { void refreshCommandPlaneCurrentSurface({ force: true }) },
-  commandChainSummary: () => { void refreshCommandPlaneChainSummary({ force: true }) },
-  commandSwarm: () => { void refreshCommandPlaneSwarm(undefined, undefined, { force: true }) },
-  commandOrchestra: () => { void refreshCommandPlaneOrchestra(undefined, undefined, { force: true }) },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },
   governance: () => { void refreshGovernanceSurface() },

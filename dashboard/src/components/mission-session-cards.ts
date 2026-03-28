@@ -96,7 +96,7 @@ export function SessionBriefCard({
 
       <${ActionBar}>
         <${ActionBtn} label="세션 개입 열기" onClick=${() => openSession('intervene', brief.session_id)} />
-        <${ActionBtn} label="세션 원인 보기" onClick=${() => openSession('command', brief.session_id)} />
+        <${ActionBtn} label="세션 개입 준비" onClick=${() => openSession('command', brief.session_id)} />
         ${action
           ? html`<${ActionBtn} label="추천 액션 열기" onClick=${() => openActionIntervene(action, incident, '상황판 세션 요약')} />`
           : null}

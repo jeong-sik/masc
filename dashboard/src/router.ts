@@ -7,13 +7,6 @@ import { VALID_TABS } from './types'
 import { normalizeRouteParams } from './config/navigation'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
-const COMMAND_SURFACE_SEGMENTS = new Set([
-  'orchestra',
-  'swarm',
-  'operations',
-  'chains',
-  'control',
-])
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
@@ -49,15 +42,17 @@ function parseSegments(
   segments: string[],
   params: Record<string, string>,
 ): RouteState {
-  // Deep-link: /chains/operation/:id -> warroom chains surface
+  // Legacy deep-link: /chains/operation/:id -> intervene surface
   if (segments[0] === 'chains') {
     const nextParams: Record<string, string> = {
       ...params,
-      section: 'warroom',
-      surface: 'chains',
+      section: 'intervene',
+      source: params.source ?? 'execution',
     }
     if (segments[1] === 'operation' && segments[2]) {
-      nextParams.operation = decodeSafe(segments[2])
+      nextParams.target_type = params.target_type ?? 'operation'
+      nextParams.target_id = decodeSafe(segments[2])
+      nextParams.focus_kind = params.focus_kind ?? 'operation'
     }
     return {
       tab: 'command',
@@ -69,11 +64,10 @@ function parseSegments(
   if (segments[0] === 'command' && segments[1]) {
     const nextParams = { ...params }
     const second = decodeSafe(segments[1])
-    if (second === 'intervene' || second === 'warroom' || second === 'governance') {
+    if (second === 'intervene' || second === 'governance') {
       nextParams.section = second
-    } else if (COMMAND_SURFACE_SEGMENTS.has(second)) {
-      nextParams.section = 'warroom'
-      nextParams.surface = second
+    } else {
+      nextParams.section = 'intervene'
     }
     return {
       tab: 'command',
@@ -145,6 +139,14 @@ function parsePathname(pathname: string, search: string): RouteState | null {
   return parseSegments(sub, params)
 }
 
+export function hashForRoute(tab: TabId, params?: Record<string, string>): string {
+  return toHash({
+    tab,
+    params: normalizeRouteParams(tab, params ?? {}),
+    postId: null,
+  })
+}
+
 function toHash(r: RouteState): string {
   const path = r.tab
   const paramEntries = Object.entries(r.params).filter(([key]) => {
@@ -182,7 +184,7 @@ export function navigate(tab: TabId, params?: Record<string, string>): void {
     params: normalizeRouteParams(tab, params ?? {}),
     postId: null,
   } satisfies RouteState
-  const nextHash = toHash(next)
+  const nextHash = hashForRoute(tab, params)
   // Update signal synchronously so Preact re-renders immediately.
   // Without this, clicking the same surface twice is needed because
   // hashchange fires asynchronously and may be skipped if the hash

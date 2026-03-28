@@ -36,6 +36,21 @@ let loopsRequest: Promise<void> | null = null
 let pendingRefreshDetail = false
 let detailRequestSeq = 0
 
+export function resetAutoresearchState(): void {
+  loopsData.value = null
+  loopsLoading.value = false
+  loopsError.value = null
+  selectedLoopId.value = null
+  loopDetail.value = null
+  detailLoading.value = false
+  detailError.value = null
+  loopActionBusy.value = false
+  loopActionError.value = null
+  loopsRequest = null
+  pendingRefreshDetail = false
+  detailRequestSeq = 0
+}
+
 const selectedLoop = computed<AutoresearchLoopSummary | null>(() => {
   const id = selectedLoopId.value
   if (!id || !loopsData.value) return null

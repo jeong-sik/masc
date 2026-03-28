@@ -12,6 +12,7 @@ import { reportToolHostFailure } from './dashboard'
 
 let mcpSessionId: string | null = null
 let initPromise: Promise<void> | null = null
+let initCooldownTimer: ReturnType<typeof setTimeout> | null = null
 
 async function bestEffortReportToolHostFailure(payload: {
   toolName: string
@@ -122,11 +123,26 @@ async function ensureSession(): Promise<void> {
         mcpSessionId = '__blocked__'
       }
       // Keep initPromise alive briefly to prevent retry storms
-      setTimeout(() => { initPromise = null }, MCP_INIT_COOLDOWN_MS)
+      if (initCooldownTimer) {
+        clearTimeout(initCooldownTimer)
+      }
+      initCooldownTimer = setTimeout(() => {
+        initPromise = null
+        initCooldownTimer = null
+      }, MCP_INIT_COOLDOWN_MS)
       throw err
     }
   })()
   return initPromise
+}
+
+export function resetMcpClientState(): void {
+  mcpSessionId = null
+  initPromise = null
+  if (initCooldownTimer) {
+    clearTimeout(initCooldownTimer)
+    initCooldownTimer = null
+  }
 }
 
 // --- MCP over HTTP helper ---

@@ -14,13 +14,10 @@ import {
 import { ToolSummaryView } from './tool-summary-view'
 import { FullInventoryView } from './tool-full-inventory'
 import { PromptRegistryPanel } from './prompt-registry-panel'
-import { SurfaceReadinessPanel } from './surface-readiness-panel'
 import { ConfigResolutionPanel } from './config-resolution-panel'
+import { ActionButton } from '../common/button'
 
-export type ToolsMode = 'tools' | 'experiments'
-
-export function Tools({ mode = 'tools' }: { mode?: ToolsMode }) {
-  const isToolsMode = mode === 'tools'
+export function Tools() {
   const data = toolsData.value
   const loading = toolsLoading.value
   const error = toolsError.value
@@ -28,22 +25,10 @@ export function Tools({ mode = 'tools' }: { mode?: ToolsMode }) {
   const usage = data?.tool_usage ?? null
 
   useEffect(() => {
-    if (isToolsMode && !toolsData.value && !toolsLoading.value) {
+    if (!toolsData.value && !toolsLoading.value) {
       void loadTools()
     }
-  }, [isToolsMode])
-
-  if (!isToolsMode) {
-    return html`
-      <div>
-        <${Card} title="운영 화면 안내" class="section mb-4">
-          <${SurfaceReadinessPanel} />
-        <//>
-
-        <${PromptRegistryPanel} />
-      </div>
-    `
-  }
+  }, [])
 
   return html`
     <div>
@@ -59,12 +44,14 @@ export function Tools({ mode = 'tools' }: { mode?: ToolsMode }) {
               ? 'hidden/deprecated 포함 전체 도구 surface를 봅니다.'
               : '필수 도구와 사용 현황 요약입니다.'}
           </p>
-          <button type="button"
-            class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)] mt-2"
+          <${ActionButton}
+            variant="ghost"
+            size="lg"
+            class="mt-2"
             onClick=${() => { showFullInventory.value = !showFullInventory.value }}
           >
             ${showFullInventory.value ? '요약 보기' : '전체 인벤토리 보기'}
-          </button>
+          <//>
         </div>
 
         ${showFullInventory.value
@@ -93,6 +80,8 @@ export function Tools({ mode = 'tools' }: { mode?: ToolsMode }) {
             <span>metrics 기준: 최근 1시간</span>
           </div>`
         : null}
+
+      <${PromptRegistryPanel} />
     </div>
   `
 }

@@ -281,33 +281,6 @@ export interface DashboardVerificationRef {
   value: string
 }
 
-export interface DashboardSurfaceReadinessItem {
-  id: string
-  label: string
-  exposure_status: 'main' | 'lab' | 'hidden' | string
-  hidden_from_nav: boolean
-  meets_main_gate: boolean
-  proof_bar: string
-  rationale: string
-  route_hash: string | null
-  verification_refs: DashboardVerificationRef[]
-}
-
-export interface DashboardSurfaceReadinessResponse {
-  generated_at: string
-  proof_bar: string
-  surfaces: DashboardSurfaceReadinessItem[]
-}
-
-export function fetchDashboardSurfaceReadiness(
-  surfaceId?: string | null,
-): Promise<DashboardSurfaceReadinessResponse> {
-  const query = surfaceId
-    ? `?surface_id=${encodeURIComponent(surfaceId)}`
-    : ''
-  return get(`/api/v1/dashboard/surface-readiness${query}`)
-}
-
 export interface DashboardCollaborationEvidenceArtifactRef {
   kind: string
   path: string

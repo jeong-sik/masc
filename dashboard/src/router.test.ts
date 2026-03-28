@@ -15,10 +15,10 @@ describe('navigate', () => {
     expect(route.value.params.section).toBe('board')
   })
 
-  it('navigates to warroom surface with canonical section', () => {
+  it('redirects removed warroom params to intervene', () => {
     navigate('command', { section: 'warroom', surface: 'swarm' })
     expect(route.value.tab).toBe('command')
-    expect(route.value.params.section).toBe('warroom')
-    expect(route.value.params.surface).toBe('swarm')
+    expect(route.value.params.section).toBe('intervene')
+    expect(route.value.params.surface).toBeUndefined()
   })
 })

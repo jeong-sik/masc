@@ -57,11 +57,6 @@ describe('refreshPlanForRoute', () => {
 
     expect(refreshPlanForRoute({
       tab: 'command',
-      params: { section: 'warroom' },
-    })).toEqual(['roomTruth', 'commandCurrentSurface', 'commandChainSummary'])
-
-    expect(refreshPlanForRoute({
-      tab: 'command',
       params: { section: 'governance' },
     })).toEqual(['roomTruth', 'governance'])
   })
@@ -90,11 +85,6 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'lab',
       params: { section: 'tools' },
-    })).toEqual([])
-
-    expect(refreshPlanForRoute({
-      tab: 'lab',
-      params: { section: 'experiments' },
     })).toEqual([])
   })
 })

@@ -11,21 +11,12 @@ export type SurfaceSectionId =
   | 'planning'
   | 'worktrees'
   | 'intervene'
-  | 'warroom'
   | 'tools'
-  | 'experiments'
   | 'autoresearch'
   | 'harness'
   | 'config'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
-const OPERATIONS_COMMAND_SURFACES = new Set([
-  'orchestra',
-  'swarm',
-  'operations',
-  'chains',
-  'control',
-])
 
 export interface DashboardNavGroup {
   id: SurfaceId
@@ -145,13 +136,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'intervene' },
     },
     {
-      id: 'warroom',
-      label: '관제면',
-      description: '오케스트라, 스웜, 체인, 제어 실험 표면입니다.',
-      params: { section: 'warroom' },
-      hidden: true,
-    },
-    {
       id: 'governance',
       label: '거버넌스',
       description: '의사결정 기록 및 판결 흐름 제어입니다.',
@@ -190,12 +174,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '도구',
       description: '도구 인벤토리, 사용량, 경로 진단을 봅니다.',
       params: { section: 'tools' },
-    },
-    {
-      id: 'experiments',
-      label: '실험',
-      description: '운영 화면 readiness와 runtime override를 다룹니다.',
-      params: { section: 'experiments' },
     },
     {
       id: 'autoresearch',
@@ -250,17 +228,10 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
     next.section = defaultParamsForTab(tabId).section ?? ''
   }
 
-  if (tabId === 'command') {
-    if (next.section === 'warroom') {
-      if (next.surface && !OPERATIONS_COMMAND_SURFACES.has(next.surface)) {
-        delete next.surface
-      }
-    } else {
-      delete next.surface
-    }
-  } else {
-    delete next.surface
-  }
+  delete next.surface
+  delete next.operation
+  delete next.operation_id
+  delete next.run_id
 
   return next
 }

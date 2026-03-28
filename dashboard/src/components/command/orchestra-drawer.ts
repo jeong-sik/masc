@@ -64,14 +64,14 @@ function jumpTo(tab: string, surface: CommandPlaneSurface | string | null | unde
       navigate('command', { ...surfaceRouteParams(surface as CommandPlaneSurface), ...nextParams })
       return
     }
-    navigate('command', { section: 'warroom', ...nextParams })
+    navigate('command', { section: 'intervene', ...nextParams })
     return
   }
   if (tab === 'intervene') {
     navigate('command', { section: 'intervene', ...nextParams })
     return
   }
-  navigate('command', { section: 'warroom', ...nextParams })
+  navigate('command', { section: 'intervene', ...nextParams })
 }
 
 // ── Node rendering helpers ──────────────────────────────

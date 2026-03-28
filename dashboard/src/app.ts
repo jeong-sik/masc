@@ -61,7 +61,7 @@ export function App() {
     // to prevent stale fetch results arriving after navigation (C-4/M-12).
     cancelPendingSSERefreshes()
     refreshForRoute(route.value)
-  }, [route.value.tab, route.value.params.section, route.value.params.surface, route.value.params.q])
+  }, [route.value.tab, route.value.params.section, route.value.params.q])
 
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
@@ -75,9 +75,10 @@ export function App() {
           <div class="min-w-0">
             <div class="flex items-center gap-4">
               <button type="button"
-                class="hidden max-[768px]:flex size-10 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] text-[var(--text-body)] cursor-pointer hover:bg-[rgba(255,255,255,0.1)]"
+                class="hidden max-[768px]:flex size-10 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] text-[var(--text-body)] cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
                 aria-expanded=${mobileMenuOpen.value}
                 aria-label=${mobileMenuOpen.value ? '탐색 메뉴 닫기' : '탐색 메뉴 열기'}
+                aria-controls="dashboard-side-rail"
                 onClick=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }}
               >
                 ${mobileMenuOpen.value ? '\u2715' : '\u2630'}

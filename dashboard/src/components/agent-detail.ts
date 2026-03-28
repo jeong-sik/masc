@@ -2,10 +2,13 @@
 // Sub-components: agent-detail-state, agent-detail-timeline, agent-detail-journal, agent-detail-worker
 
 import { html } from 'htm/preact'
+import { useRef } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
+import { ActionButton } from './common/button'
+import { TextInput } from './common/input'
 import { keeperIdentityHint } from './common/keeper-identity'
 import { AgentJournalStream } from './agent-detail-journal'
 import { AgentTimelineSection } from './agent-detail-timeline'
@@ -32,6 +35,7 @@ import {
 import { openKeeperDetail } from './keeper-detail'
 import { trimText } from '../lib/truncate'
 import type { Task } from '../types'
+import { DialogOverlay } from './common/dialog'
 
 // Re-export public API for external consumers
 export { selectedAgentName, openAgentDetail, closeAgentDetail } from './agent-detail-state'
@@ -70,6 +74,7 @@ function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
 export function AgentDetailOverlay() {
   const agentName = selectedAgentName.value
   if (!agentName) return null
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
 
   const agent = selectedAgent()
   const keeper = keeperForAgent(agentName)
@@ -108,22 +113,22 @@ export function AgentDetailOverlay() {
   const keeperIdentity = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   // Skip secondaryLabel when keeperIdentity already shows the agent runtime name
   const showSecondaryLabel = secondaryLabel && !keeperIdentity
+  const titleId = `agent-detail-title-${agentName}`
 
   return html`
-    <div
-      class="agent-detail-overlay fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
-      data-testid="agent-detail-overlay"
-      onClick=${(e: Event) => {
-        if ((e.target as HTMLElement).classList.contains('agent-detail-overlay')) closeAgentDetail()
-      }}
+    <${DialogOverlay}
+      labelledBy=${titleId}
+      onClose=${closeAgentDetail}
+      initialFocusRef=${closeButtonRef}
+      overlayClass="agent-detail-overlay fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
+      panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded-2xl border border-card-border bg-bg-1/95 backdrop-blur-2xl p-6 shadow-2xl shadow-black/50 ring-1 ring-white/5"
     >
-      <div class="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded-2xl border border-card-border bg-bg-1/95 backdrop-blur-2xl p-6 shadow-2xl shadow-black/50 ring-1 ring-white/5">
         <div class="flex justify-between items-start gap-4 mb-6">
           <div class="flex flex-col gap-3 flex-1">
             <div class="flex items-center gap-4">
               ${agentEmoji ? html`<div class="size-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
               <div>
-                <h2 class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
+                <h2 id=${titleId} class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
                   ${displayName}
                   ${koreanName ? html`<span class="text-sm text-text-dim font-medium tracking-normal">(${koreanName})</span>` : ''}
                   ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-white/5 px-2 py-0.5 rounded-md">${secondaryLabel}</span>` : ''}
@@ -159,10 +164,23 @@ export function AgentDetailOverlay() {
               : null}
           </div>
           <div class="flex gap-2 shrink-0">
-            <button type="button" class="px-4 py-2 text-[13px] font-semibold rounded-xl border border-card-border bg-card/60 text-text-body hover:bg-white/10 hover:text-text-strong transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed" onClick=${() => { void refreshAgentDetail() }} disabled=${loading.value}>
+            <${ActionButton}
+              variant="ghost"
+              size="lg"
+              class="px-4 py-2 text-[13px] rounded-xl bg-card/60 shadow-sm"
+              onClick=${() => { void refreshAgentDetail() }}
+              disabled=${loading.value}
+            >
               ${loading.value ? '새로고침 중...' : '새로고침'}
+            <//>
+            <button
+              ref=${closeButtonRef}
+              type="button"
+              class="px-4 py-2 text-[13px] font-semibold rounded-xl border border-transparent bg-white/10 text-text-strong hover:bg-white/20 transition-colors duration-200 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
+              onClick=${closeAgentDetail}
+            >
+              닫기
             </button>
-            <button type="button" class="px-4 py-2 text-[13px] font-semibold rounded-xl border border-transparent bg-white/10 text-text-strong hover:bg-white/20 transition-all duration-200 shadow-sm" onClick=${closeAgentDetail}>닫기</button>
           </div>
         </div>
 
@@ -194,29 +212,29 @@ export function AgentDetailOverlay() {
 
           <${Card} title="직접 멘션">
             <div class="grid grid-cols-[1fr_auto] gap-3">
-              <input
-                class="w-full px-4 py-2.5 rounded-xl border border-card-border bg-card/60 text-text-strong text-[13px] placeholder:text-text-dim focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-200 shadow-inner"
-                type="text"
-                name="agent_direct_mention"
-                aria-label="직접 멘션 메시지"
-                autocomplete="off"
-                placeholder="@멘션 메시지 입력..."
+              <${TextInput}
+                class="px-4 py-2.5 rounded-xl bg-card/60 text-text-strong text-[13px] placeholder:text-text-dim shadow-inner"
                 value=${mentionText.value}
+                name="agent_direct_mention"
+                ariaLabel="직접 멘션 메시지"
+                autoComplete="off"
+                placeholder="@멘션 메시지 입력…"
                 onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
                 onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention() }}
                 disabled=${sendingMention.value}
               />
-              <button type="button"
-                class="px-5 py-2.5 text-[13px] font-semibold rounded-xl border border-transparent bg-accent text-bg-0 hover:bg-accent/90 transition-all duration-200 shadow-md shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              <${ActionButton}
+                variant="primary"
+                size="lg"
+                class="px-5 py-2.5 text-[13px] shadow-md shadow-accent/20"
                 onClick=${() => { void submitMention() }}
                 disabled=${sendingMention.value || mentionText.value.trim() === ''}
               >
                 ${sendingMention.value ? '전송 중...' : '전송하기'}
-              </button>
+              <//>
             </div>
           <//>
         </div>
-      </div>
-    </div>
+    <//>
   `
 }

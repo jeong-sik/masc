@@ -4,6 +4,7 @@
 
 type eval_outcome =
   | Verdict of Cdal_types.contract_verdict
+      * Cdal_friction_projection.friction_projection option
   | Load_failure of Cdal_loader.load_error * Cdal_types.contract_verdict
 
 (* ================================================================ *)
@@ -57,14 +58,20 @@ let evaluate ~(store : Agent_sdk.Proof_store.config)
   match Cdal_loader.load ~store proof with
   | Ok bundle ->
     let verdict = Cdal_judge.judge bundle in
-    Verdict verdict
+    let friction = Cdal_friction_projection.project_single_run
+      ~store ~completeness_gaps:verdict.completeness_gaps proof in
+    Verdict (verdict, friction)
   | Error err ->
     let verdict = synthesize_inconclusive ~proof err in
     Load_failure (err, verdict)
 
 let verdict_of_outcome = function
-  | Verdict v -> v
+  | Verdict (v, _) -> v
   | Load_failure (_, v) -> v
+
+let friction_of_outcome = function
+  | Verdict (_, f) -> f
+  | Load_failure _ -> None
 
 (* ================================================================ *)
 (* JSONL persistence                                                *)

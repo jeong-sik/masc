@@ -266,7 +266,15 @@ let run_turn
              | Cdal_eval_v1.Load_failure (err, _) ->
                Log.Keeper.warn "keeper:%s contract_verdict load failure: %s"
                  meta.name (Cdal_loader.load_error_to_string err)
-             | Cdal_eval_v1.Verdict _ -> ())
+             | Cdal_eval_v1.Verdict (_, _) -> ());
+            (match Cdal_eval_v1.friction_of_outcome outcome with
+             | Some fp ->
+               Log.Keeper.info
+                 "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+                 meta.name fp.blocked_attempt_count
+                 (List.length fp.blocked_attempt_groups)
+                 (List.length fp.review_tripwires)
+             | None -> ())
           | None -> ());
          Ok {
            response_text;

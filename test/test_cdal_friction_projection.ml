@@ -261,6 +261,113 @@ let test_multiple_groups () =
     Alcotest.(check int) "g2 count" 1 g2.count
 
 (* ================================================================ *)
+(* Phase-1B tests: new fields                                        *)
+(* ================================================================ *)
+
+let test_blocked_tool_counts () =
+  let (store, _tmp) = setup_store () in
+  let run_id = "btc-test-001" in
+  let ref_ = Printf.sprintf "proof-store://%s/evidence/mode_violations.json" run_id in
+  let proof = make_proof ~run_id ~raw_evidence_refs:[ref_] () in
+  let dir = Filename.concat (Filename.concat store.root "proofs")
+    (Filename.concat run_id "evidence") in
+  ignore (Sys.command (Printf.sprintf "mkdir -p %s" dir));
+  let violations = `List [
+    `Assoc [("ts", `Float 1.0); ("tool_name", `String "write");
+            ("input_summary", `String ""); ("effective_mode", `String "diagnose");
+            ("violation_kind", `String "mutating_in_diagnose")];
+    `Assoc [("ts", `Float 2.0); ("tool_name", `String "write");
+            ("input_summary", `String ""); ("effective_mode", `String "diagnose");
+            ("violation_kind", `String "mutating_in_diagnose")];
+    `Assoc [("ts", `Float 3.0); ("tool_name", `String "bash");
+            ("input_summary", `String ""); ("effective_mode", `String "diagnose");
+            ("violation_kind", `String "mutating_in_diagnose")];
+  ] in
+  let path = Filename.concat dir "mode_violations.json" in
+  Yojson.Safe.to_file path violations;
+  match CFP.project_single_run ~store proof with
+  | None -> Alcotest.fail "expected Some"
+  | Some fp ->
+    Alcotest.(check int) "blocked_attempt_count" 3 fp.blocked_attempt_count;
+    let tool_counts = fp.blocked_tool_counts in
+    Alcotest.(check int) "2 tools" 2 (List.length tool_counts);
+    let bash_count = List.assoc "bash" tool_counts in
+    let write_count = List.assoc "write" tool_counts in
+    Alcotest.(check int) "bash count" 1 bash_count;
+    Alcotest.(check int) "write count" 2 write_count
+
+let test_evidence_gap_groups () =
+  let (store, _tmp) = setup_store () in
+  let proof = make_proof ~run_id:"gap-test-001" () in
+  let gaps : Masc_mcp.Cdal_types.completeness_gap list = [
+    { artifact = "manifest.json"; reason = "not found";
+      impact = Blocks_verdict };
+    { artifact = "contract.json"; reason = "parse error";
+      impact = Annotation_only };
+  ] in
+  match CFP.project_single_run ~store ~completeness_gaps:gaps proof with
+  | None -> Alcotest.fail "expected Some (has gaps)"
+  | Some fp ->
+    Alcotest.(check int) "2 gap groups" 2 (List.length fp.evidence_gap_groups);
+    let g0 = List.hd fp.evidence_gap_groups in
+    Alcotest.(check string) "gap artifact" "manifest.json" g0.artifact;
+    Alcotest.(check string) "gap impact" "blocks_verdict" g0.impact
+
+let test_tripwire_fires () =
+  let (store, _tmp) = setup_store () in
+  let run_id = "tw-test-001" in
+  let ref_ = Printf.sprintf "proof-store://%s/evidence/mode_violations.json" run_id in
+  let proof = make_proof ~run_id ~raw_evidence_refs:[ref_] () in
+  let dir = Filename.concat (Filename.concat store.root "proofs")
+    (Filename.concat run_id "evidence") in
+  ignore (Sys.command (Printf.sprintf "mkdir -p %s" dir));
+  (* 3 identical violations for "write" — threshold=2 should fire *)
+  let v = `Assoc [("ts", `Float 1.0); ("tool_name", `String "write");
+                   ("input_summary", `String ""); ("effective_mode", `String "diagnose");
+                   ("violation_kind", `String "mutating_in_diagnose")] in
+  Yojson.Safe.to_file
+    (Filename.concat dir "mode_violations.json")
+    (`List [v; v; v]);
+  match CFP.project_single_run ~store ~tripwire_threshold:2 proof with
+  | None -> Alcotest.fail "expected Some"
+  | Some fp ->
+    Alcotest.(check bool) "has tripwire" true
+      (List.length fp.review_tripwires > 0);
+    let tw = List.hd fp.review_tripwires in
+    Alcotest.(check bool) "contains write" true
+      (String.length tw > 0 && String.sub tw 0 18 = "blocked_attempts:w")
+
+let test_tripwire_below_threshold () =
+  let (store, _tmp) = setup_store () in
+  let run_id = "tw-below-001" in
+  let ref_ = Printf.sprintf "proof-store://%s/evidence/mode_violations.json" run_id in
+  let proof = make_proof ~run_id ~raw_evidence_refs:[ref_] () in
+  let dir = Filename.concat (Filename.concat store.root "proofs")
+    (Filename.concat run_id "evidence") in
+  ignore (Sys.command (Printf.sprintf "mkdir -p %s" dir));
+  let v = `Assoc [("ts", `Float 1.0); ("tool_name", `String "write");
+                   ("input_summary", `String ""); ("effective_mode", `String "diagnose");
+                   ("violation_kind", `String "mutating_in_diagnose")] in
+  Yojson.Safe.to_file
+    (Filename.concat dir "mode_violations.json")
+    (`List [v; v]);
+  match CFP.project_single_run ~store ~tripwire_threshold:5 proof with
+  | None -> Alcotest.fail "expected Some"
+  | Some fp ->
+    Alcotest.(check int) "no tripwires" 0 (List.length fp.review_tripwires)
+
+let test_path_traversal_rejected () =
+  let store : Agent_sdk.Proof_store.config = { root = "/tmp/test-store" } in
+  let result = Masc_mcp.Proof_artifact_reader.resolve_path store
+    "proof-store://../../../etc/passwd" in
+  match result with
+  | Error msg ->
+    Alcotest.(check bool) "contains rejected" true
+      (String.length msg > 0)
+  | Ok path ->
+    Alcotest.fail (Printf.sprintf "should reject, got Ok: %s" path)
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -279,5 +386,17 @@ let () =
          test_deterministic_output;
        Alcotest.test_case "multiple groups" `Quick
          test_multiple_groups;
+     ]);
+    ("phase1b", [
+       Alcotest.test_case "blocked tool counts" `Quick
+         test_blocked_tool_counts;
+       Alcotest.test_case "evidence gap groups" `Quick
+         test_evidence_gap_groups;
+       Alcotest.test_case "tripwire fires" `Quick
+         test_tripwire_fires;
+       Alcotest.test_case "tripwire below threshold" `Quick
+         test_tripwire_below_threshold;
+       Alcotest.test_case "path traversal rejected" `Quick
+         test_path_traversal_rejected;
      ]);
   ]

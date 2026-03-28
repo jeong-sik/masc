@@ -81,7 +81,7 @@ let test_full_pipeline () =
   Agent_sdk.Proof_store.write_manifest store ~run_id proof;
   Agent_sdk.Proof_store.write_contract store ~run_id contract;
   match CE.evaluate ~store proof with
-  | Verdict v ->
+  | Verdict (v, _) ->
     Alcotest.(check string) "status" "satisfied"
       (CT.contract_status_to_string v.status);
     Alcotest.(check string) "run_id" run_id v.run_id;
@@ -125,7 +125,7 @@ let test_load_failure_inconclusive () =
     Alcotest.fail
       (Printf.sprintf "expected Manifest_not_found, got: %s"
          (CL.load_error_to_string err))
-  | Verdict _ ->
+  | Verdict (_, _) ->
     Alcotest.fail "expected Load_failure, got Verdict"
 
 (* ================================================================ *)

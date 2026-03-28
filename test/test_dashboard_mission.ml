@@ -75,7 +75,7 @@ let seed_room config session_id =
        ~content:"Spawned worker recovered partial role coverage and runtime visibility.");
 
   let now = Unix.gettimeofday () in
-  let open Lib.Team_session_types in
+  let open Team_session_types in
   let session =
     {
       session_id;

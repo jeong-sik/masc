@@ -254,7 +254,7 @@ let test_default_configs_claude_command () =
 
 (* P2 #19: Test that default_configs use Env_config.Spawn.timeout_seconds *)
 let test_default_configs_timeout_from_env_config () =
-  let expected = Masc_mcp.Env_config.Spawn.timeout_seconds in
+  let expected = Env_config.Spawn.timeout_seconds in
   List.iter (fun (name, cfg) ->
     check int (Printf.sprintf "%s timeout uses Env_config" name) expected cfg.Spawn.timeout_seconds
   ) Spawn.default_configs

@@ -7,7 +7,7 @@
 
 open Alcotest
 
-module Env_config = Masc_mcp.Env_config
+module Env_config = Env_config
 
 let with_env name value fn =
   let previous = Sys.getenv_opt name in

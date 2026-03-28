@@ -42,19 +42,19 @@ let test_repo_synthesis_swarm_start_creates_operation_session_and_run () =
       ~created_by:"owner"
       ~goal
       ~duration_seconds:300
-      ~execution_scope:Lib.Team_session_types.Limited_code_change
+      ~execution_scope:Team_session_types.Limited_code_change
       ~checkpoint_interval_sec:30
       ~min_agents:1
-      ~scale_profile:Lib.Team_session_types.Scale_standard
-      ~control_profile:Lib.Team_session_types.Control_hierarchical_quality_v1
-      ~orchestration_mode:Lib.Team_session_types.Assist
-      ~communication_mode:Lib.Team_session_types.Comm_broadcast
+      ~scale_profile:Team_session_types.Scale_standard
+      ~control_profile:Team_session_types.Control_hierarchical_quality_v1
+      ~orchestration_mode:Team_session_types.Assist
+      ~communication_mode:Team_session_types.Comm_broadcast
       ~model_cascade:[]
-      ~fallback_policy:Lib.Team_session_types.Fallback_cascade_then_task
-      ~instruction_profile:Lib.Team_session_types.Profile_strict
-      ~alert_channel:Lib.Team_session_types.Alert_broadcast
+      ~fallback_policy:Team_session_types.Fallback_cascade_then_task
+      ~instruction_profile:Team_session_types.Profile_strict
+      ~alert_channel:Team_session_types.Alert_broadcast
       ~auto_resume:true
-      ~report_formats:[ Lib.Team_session_types.Markdown; Lib.Team_session_types.Json ]
+      ~report_formats:[ Team_session_types.Markdown; Team_session_types.Json ]
       ~agent_names:[]
       ~operation_id
   in

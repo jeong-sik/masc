@@ -51,7 +51,7 @@ let with_test_env f =
         (fun () -> f ~env ~sw ~config))
 
 let with_pg_test_env f =
-  match Masc_mcp.Env_config_core.postgres_url_opt () with
+  match Env_config_core.postgres_url_opt () with
   | None -> ()
   | Some url ->
       let dir = test_dir () in

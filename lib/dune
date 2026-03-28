@@ -28,7 +28,6 @@
    bounded
    cache_eio
    cascade_inference
-   env_config
    cancellation
    command_plane_v2
    command_plane_orchestra
@@ -60,7 +59,6 @@
    dashboard_governance_judge
    dashboard_operator_judge
    dashboard_surface_readiness
-   dashboard_utils
    dashboard_execution
    dashboard_execution_helpers
    dashboard_execution_fixture
@@ -287,7 +285,6 @@
    room
    run_eio
    team_context
-   team_session_types
    team_session_store
    team_session_report
    team_session_report_core
@@ -541,13 +538,7 @@
    oas_worker
    tool_council_oas
    oas_sse_bridge
-   env_config_core
-   env_config_runtime
-   env_config_governance
-   env_config_keeper
    env_config_introspect
-   env_config_server
-   env_config_dashboard
    runtime_params
    governance_registry
    governance_pipeline
@@ -567,7 +558,6 @@
    ;; Code Research Loop — tool_research adapter (core logic in masc_research library)
    tool_research
    ;; godsplit-phase1: type/schema sub-modules
-   team_session_types_enums
    tool_schemas_room_core
    tool_schemas_room_extra
    tool_schemas_inline_room
@@ -652,10 +642,6 @@
  tool_command_plane_dispatch
  tool_command_plane_schemas_01
  tool_command_plane_schemas_02
- env_config_core
- env_config_runtime
- env_config_governance
- env_config_keeper
   keeper_exec_tools
   keeper_exec_status_metrics
   keeper_exec_status
@@ -694,7 +680,6 @@
   team_session_report_proof_helpers
   team_session_report_proof
   ;; godsplit-phase1: type/schema sub-modules
-  team_session_types_enums
   tool_schemas_room_core
   ;; godsplit-phase1: chain_executor sub-modules
   chain_executor_complex
@@ -833,6 +818,12 @@
    masc_board
    ;; Room coordination (extracted sub-library)
    masc_room
+   ;; Environment configuration (extracted sub-library)
+   masc_mcp.config
+   ;; Dashboard utilities (extracted sub-library)
+   masc_mcp.dashboard_utils
+   ;; Team session types (extracted sub-library)
+   masc_mcp.team_session_types
    ;; OpenTelemetry (spans + OTLP exporter + metrics)
    opentelemetry
    opentelemetry-client-cohttp-eio

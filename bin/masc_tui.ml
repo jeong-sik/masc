@@ -1416,7 +1416,7 @@ let parse_args () =
 
   (* Resolve room *)
   let r = if !room <> "" then !room
-    else match Masc_mcp.Env_config_core.cluster_name_opt () with
+    else match Env_config_core.cluster_name_opt () with
       | Some name -> name
       | None -> Filename.basename base
   in

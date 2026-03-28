@@ -78,15 +78,12 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc
 | `MASC_ORCHESTRATOR_AGENT` | string | `"orchestrator"` | Orchestrator 에이전트명 |
 | `MASC_MITOSIS_INTERVAL_SEC` | float | 300.0 | Mitosis 트리거 주기 |
 | `MASC_MITOSIS_HANDOFF_COOLDOWN_SEC` | float | 60.0 | 핸드오프 쿨다운 |
-| `MASC_MITOSIS_EXPERIMENT_ENABLED` | bool | false | 실험적 mitosis 경로 |
-| `MASC_ADAPTIVE_THRESHOLDS_ENABLED` | bool | false | 적응형 임계값 학습 |
 | `MASC_SPAWN_TIMEOUT_SEC` | float | 600.0 | 스폰 기본 타임아웃 (10분) |
 | `MASC_SPAWN_CODING_TIMEOUT_SEC` | float | 7200.0 | 코딩 모드 타임아웃 (2시간) |
 | `MASC_SPAWN_GRACE_PERIOD_SEC` | float | 60.0 | SIGTERM 유예 기간 |
 | `LLAMA_SERVER_URL` | string | `http://127.0.0.1:8085` | 로컬 LLM 서버 URL |
 | `LLAMA_DEFAULT_MODEL` | string | `explicit-model-required` | 로컬 기본 모델 |
 | `MASC_LLAMA_MAX_TOKENS` | int | 32768 | 로컬 LLM max_tokens 상한 |
-| `MASC_FEDERATION_TIMEOUT_SEC` | float | 3600.0 | Federation 요청 타임아웃 |
 | `MASC_CANCELLATION_TOKEN_MAX_AGE_SEC` | float | 3600.0 | 취소 토큰 최대 수명 |
 | `NEO4J_URI` | string | `bolt://turntable.proxy.rlwy.net:11490` | Neo4j 접속 URI |
 | `NEO4J_HTTP_URI` | string | `""` | Neo4j HTTP API URI |
@@ -94,7 +91,6 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc
 | `NEO4J_PASSWORD` | string | (필수) | Neo4j 비밀번호 |
 | `VOICE_MCP_HOST` | string | `"127.0.0.1"` | Voice MCP 호스트 |
 | `VOICE_MCP_PORT` | int | 8936 | Voice MCP 포트 |
-| `CUSTOM_MODEL_SERVER_URL` | string | `http://127.0.0.1:8080` | 커스텀 모델 서버 URL |
 
 **Timeout 모듈** (통합 타임아웃):
 
@@ -144,19 +140,10 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc
 
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
-| `MASC_AUTONOMY_TICK_INTERVAL_SEC` | float | 2700.0 | Tick 주기 (45분) |
-| `MASC_AUTONOMY_AGENTS_PER_TICK` | int | 3 | Tick당 활성화 에이전트 수 |
-| `MASC_AUTONOMY_MAX_POSTS_PER_TICK` | int | 1 | Tick당 게시물 상한 |
-| `MASC_AUTONOMY_MAX_COMMENTS_PER_TICK` | int | 3 | Tick당 댓글 상한 |
-| `MASC_AUTONOMY_MAX_DAILY_ACTIONS` | int | 10 | 일일 총 행동 상한 |
-| `MASC_AUTONOMY_REFLECTION_THRESHOLD` | int | 100 | 회고 트리거 임계값 |
-| `MASC_AUTONOMY_USE_PLANNER` | bool | true | Planner 기반 선택 |
-| `MASC_AUTONOMY_ENABLED` | bool | true | 하트비트 활성화 |
 | `MASC_AUTONOMY_QUIET_START` | int | 3 | 조용한 시간대 시작 (KST) |
 | `MASC_AUTONOMY_QUIET_END` | int | 7 | 조용한 시간대 종료 (KST) |
-| `MASC_DELEGATE_INFERENCE` | bool | false | Worker 위임 모드 (Soul+Body) |
 
-> `MASC_LODGE_*` env vars are no longer supported. Use `MASC_AUTONOMY_*` exclusively.
+> 이전에 존재하던 `MASC_AUTONOMY_TICK_INTERVAL_SEC`, `MASC_AUTONOMY_AGENTS_PER_TICK` 등 13개 Autonomy 변수는 v2.161.0에서 소비자 0 확인 후 제거됨. `MASC_LODGE_*`도 지원 중단.
 
 **Thompson Sampling** (`MASC_AUTONOMY_*` prefix):
 

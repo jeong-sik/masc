@@ -469,6 +469,11 @@ let generate_proof ?(proof_level = default_proof_level) config
                 ("report_md_exists", `Bool report_md_exists);
               ] );
           ("generated_at_iso", `String generated_at_iso);
+          ("oas_cdal_integration", `Assoc [
+            ("contract_wired", `Bool (Option.is_some session.delivery_contract));
+            ("proof_schema_version", `Int 1);
+            ("note", `String "Per-worker OAS proof bundles are captured by Contract_runner when delivery_contract is present. Aggregation into session-level proof is tracked in #3515.");
+          ]);
         ]
     in
     let markdown =

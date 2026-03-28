@@ -1140,3 +1140,9 @@
  (modules test_cdal_proof_decoder)
  (deps (glob_files fixtures/cdal/*.json))
  (libraries masc_mcp alcotest yojson))
+
+; CDAL E2E: OAS proof capture → filesystem → MASC decoder
+(test
+ (name test_cdal_e2e)
+ (modules test_cdal_e2e)
+ (libraries masc_mcp agent_sdk alcotest yojson unix))

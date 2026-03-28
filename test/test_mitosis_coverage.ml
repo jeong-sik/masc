@@ -928,6 +928,7 @@ let test_prepare_low_quality_dna_stays_active () =
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio_guard.enable ();
   run "Mitosis Coverage" [
     "cell_state", [

@@ -107,6 +107,7 @@ let () =
   Mirage_crypto_rng_unix.use_default ();
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Alcotest.run "Streamable HTTP" [
     "Session", [
       Alcotest.test_case "create" `Quick test_session_create;

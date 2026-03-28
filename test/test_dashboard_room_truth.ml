@@ -166,26 +166,29 @@ let test_dashboard_room_truth_keeper_only_room_not_reported_empty () =
            ~capabilities:["keeper"]
            ());
       Eio.Switch.run (fun sw ->
-        create_keeper env sw config "sangsu";
-        warm_execution_cache ();
-        let json =
-          Lib.Server_dashboard_http.dashboard_room_truth_http_json
-            ~state ~sw ~clock:(Eio.Stdenv.clock env)
-            (request "/api/v1/dashboard/room-truth")
-        in
-        let open Yojson.Safe.Util in
-        let focus_label = json |> member "focus" |> member "label" |> to_string in
-        check int "keeper-only room counts general agents as zero"
-          0
-          (json |> member "room" |> member "counts" |> member "agents" |> to_int);
-        check int "keeper-only room still counts keeper meta"
-          1
-          (json |> member "room" |> member "counts" |> member "keepers" |> to_int);
-        check bool "keeper-only room does not report empty room focus"
-          false
-          (String.equal focus_label
-             "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.");
-      ))
+        Fun.protect
+          ~finally:(fun () ->
+            Lib.Keeper_keepalive.stop_keepalive "sangsu")
+          (fun () ->
+            create_keeper env sw config "sangsu";
+            warm_execution_cache ();
+            let json =
+              Lib.Server_dashboard_http.dashboard_room_truth_http_json
+                ~state ~sw ~clock:(Eio.Stdenv.clock env)
+                (request "/api/v1/dashboard/room-truth")
+            in
+            let open Yojson.Safe.Util in
+            let focus_label = json |> member "focus" |> member "label" |> to_string in
+            check int "keeper-only room counts general agents as zero"
+              0
+              (json |> member "room" |> member "counts" |> member "agents" |> to_int);
+            check int "keeper-only room still counts keeper meta"
+              1
+              (json |> member "room" |> member "counts" |> member "keepers" |> to_int);
+            check bool "keeper-only room does not report empty room focus"
+              false
+              (String.equal focus_label
+                 "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다."))))
 
 let test_dashboard_room_truth_mixed_runtime_counts () =
   let dir = test_dir () in
@@ -211,26 +214,29 @@ let test_dashboard_room_truth_mixed_runtime_counts () =
            ~capabilities:["keeper"]
            ());
       Eio.Switch.run (fun sw ->
-        create_keeper env sw config "sangsu";
-        warm_execution_cache ();
-        let json =
-          Lib.Server_dashboard_http.dashboard_room_truth_http_json
-            ~state ~sw ~clock:(Eio.Stdenv.clock env)
-            (request "/api/v1/dashboard/room-truth")
-        in
-        let open Yojson.Safe.Util in
-        let focus_label = json |> member "focus" |> member "label" |> to_string in
-        check int "mixed room counts one general agent"
-          1
-          (json |> member "room" |> member "counts" |> member "agents" |> to_int);
-        check int "mixed room counts one keeper"
-          1
-          (json |> member "room" |> member "counts" |> member "keepers" |> to_int);
-        check bool "mixed room avoids empty runtime fallback"
-          false
-          (String.equal focus_label
-             "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.");
-      ))
+        Fun.protect
+          ~finally:(fun () ->
+            Lib.Keeper_keepalive.stop_keepalive "sangsu")
+          (fun () ->
+            create_keeper env sw config "sangsu";
+            warm_execution_cache ();
+            let json =
+              Lib.Server_dashboard_http.dashboard_room_truth_http_json
+                ~state ~sw ~clock:(Eio.Stdenv.clock env)
+                (request "/api/v1/dashboard/room-truth")
+            in
+            let open Yojson.Safe.Util in
+            let focus_label = json |> member "focus" |> member "label" |> to_string in
+            check int "mixed room counts one general agent"
+              1
+              (json |> member "room" |> member "counts" |> member "agents" |> to_int);
+            check int "mixed room counts one keeper"
+              1
+              (json |> member "room" |> member "counts" |> member "keepers" |> to_int);
+            check bool "mixed room avoids empty runtime fallback"
+              false
+              (String.equal focus_label
+                 "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다."))))
 
 let test_operator_digest_shape_matches_room_truth () =
   let dir = test_dir () in

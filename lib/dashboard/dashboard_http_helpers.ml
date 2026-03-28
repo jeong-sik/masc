@@ -26,6 +26,10 @@ let int_of_env_default name ~default ~min_v ~max_v =
   in
   max min_v (min max_v v)
 
+let dashboard_session_list_limit () =
+  int_of_env_default "MASC_DASHBOARD_SESSION_LIST_LIMIT"
+    ~default:200 ~min_v:20 ~max_v:1000
+
 let float_of_env_default name ~default ~min_v ~max_v =
   let v =
     match Sys.getenv_opt name with

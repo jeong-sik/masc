@@ -156,9 +156,17 @@ let create_pubsub_table_q =
      created_at TIMESTAMP DEFAULT NOW() \
    )"
 
-let create_index_q =
+let create_expires_index_q =
   (Caqti_type.unit ->. Caqti_type.unit)
   "CREATE INDEX IF NOT EXISTS idx_masc_kv_expires ON masc_kv(expires_at)"
+
+let create_updated_at_index_q =
+  (Caqti_type.unit ->. Caqti_type.unit)
+  "CREATE INDEX IF NOT EXISTS idx_masc_kv_updated_at_desc ON masc_kv(updated_at DESC)"
+
+let create_key_prefix_index_q =
+  (Caqti_type.unit ->. Caqti_type.unit)
+  "CREATE INDEX IF NOT EXISTS idx_masc_kv_key_prefix ON masc_kv(key text_pattern_ops)"
 
 let create_pubsub_index_q =
   (Caqti_type.unit ->. Caqti_type.unit)
@@ -249,7 +257,9 @@ let create ~sw ~env ~url ~cluster_name ~node_id =
         ];
         (* Phase 2: create indexes in parallel (tables must exist) *)
         Eio.Fiber.all [
-          exec_ddl create_index_q;
+          exec_ddl create_expires_index_q;
+          exec_ddl create_updated_at_index_q;
+          exec_ddl create_key_prefix_index_q;
           exec_ddl create_pubsub_index_q;
           exec_ddl create_pubsub_created_at_index_q;
         ];

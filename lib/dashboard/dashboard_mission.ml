@@ -45,7 +45,8 @@ let active_or_recent_sessions config =
     | Running | Paused -> true
     | _ -> session.updated_at_iso >= cutoff_iso
   in
-  Team_session_store.list_sessions ~since_unix:cutoff_unix config
+  Team_session_store.list_sessions ~since_unix:cutoff_unix
+    ~limit:(Dashboard_http_helpers.dashboard_session_list_limit ()) config
   |> List.filter is_active_or_recent
 
 let room_scope_cache_segment (config : Room_utils.config) =

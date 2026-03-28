@@ -6,7 +6,7 @@ Field-by-field mapping for the two lossy projections in `team_session_oas_bridge
 `Collaboration.t.metadata` as JSON, losing compile-time type safety but
 retaining the values at runtime.
 
-## planned_worker (24 fields) -> agent_entry (4 fields)
+## planned_worker (23 fields) -> agent_entry (4 fields)
 
 | # | Source Field | Type | Target | Disposition |
 |---|-------------|------|--------|-------------|
@@ -34,7 +34,9 @@ retaining the values at runtime.
 | 22 | routing_reason | string option | metadata | worker_specs JSON |
 | 23 | routing_escalated | bool | metadata | worker_specs JSON |
 
-Summary: 2 direct, 2 closure-captured, 18 in metadata JSON, 0 truly dropped.
+Summary: 5 fields participate directly in agent_entry construction
+(`spawn_agent`, `spawn_role`, `worker_class`, `max_turns`, `spawn_model`);
+the remaining 18 are metadata-only in `worker_specs`, and 0 are truly dropped.
 
 ## session (47 fields) -> swarm_config (12 fields)
 

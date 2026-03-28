@@ -2,13 +2,13 @@
 
     Two lossy projections:
 
-    {b planned_worker (24 fields) -> agent_entry (4 fields)}
+    {b planned_worker (23 fields) -> agent_entry (4 fields)}
 
     Direct: [spawn_agent] -> [name], [spawn_role]/[worker_class] -> [role].
     Closure-captured: [max_turns], [spawn_model] (cascade selection).
-    Preserved in Collaboration.t.metadata["worker_specs"]: all 24 fields
-    as JSON objects per worker.
-    Structurally dropped from agent_entry: 20 fields (runtime_actor,
+    Preserved in Collaboration.t.metadata["worker_specs"]: the full
+    [planned_worker] record as JSON per worker.
+    Metadata-only at the OAS boundary: 18 fields (runtime_actor,
     thinking_enabled/budget, timeout_seconds, capsule_mode, lane_id,
     controller_level, control_domain, supervisor_actor, model_tier,
     task_profile, risk_level, routing_confidence/reason/escalated, etc.).

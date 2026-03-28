@@ -355,6 +355,8 @@ let serialization_tests = [
 ]
 
 let () =
+  Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   run "Bounded" [
     "constraints", constraint_tests;
     "goal_parsing", goal_parsing_tests;

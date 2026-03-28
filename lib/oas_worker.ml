@@ -167,8 +167,10 @@ let cdal_setup_proof_capture (config : config) (user_hooks : Oas.Hooks.hooks)
               ~risk_class:Oas.Risk_class.Low
               ~capabilities:caps with
       | Ok d -> d
-      | Error _ -> { effective_mode = Oas.Execution_mode.Diagnose;
-                     source = "fallback" }
+      | Error e ->
+        Log.Misc.warn "oas_worker: CDAL mode_resolver failed: %s, using diagnose fallback" e;
+        { effective_mode = Oas.Execution_mode.Diagnose;
+          source = "fallback" }
     in
     let state = Oas.Proof_capture.create ~store ~contract
         ~mode_decision ~capability_snapshot:caps in

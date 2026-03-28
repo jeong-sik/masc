@@ -379,4 +379,4 @@ let was_downgraded m =
   execution_mode_to_int m.effective_execution_mode
   < execution_mode_to_int m.requested_execution_mode
 
-let duration_s m = m.ended_at -. m.started_at
+let duration_s m = Float.max 0.0 (m.ended_at -. m.started_at)

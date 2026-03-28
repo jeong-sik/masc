@@ -220,14 +220,15 @@ let run_turn
      | Some json ->
        (match Cdal_proof_decoder.of_json json with
         | Ok proof ->
+          let show_mode = function
+            | Cdal_proof_decoder.Diagnose -> "diagnose"
+            | Cdal_proof_decoder.Draft -> "draft"
+            | Cdal_proof_decoder.Execute -> "execute"
+          in
           Log.Keeper.info "keeper:%s CDAL proof captured: run_id=%s mode=%s→%s duration=%.1fs"
             meta.name proof.run_id
-            (match proof.requested_execution_mode with
-             | Cdal_proof_decoder.Diagnose -> "diagnose"
-             | Draft -> "draft" | Execute -> "execute")
-            (match proof.effective_execution_mode with
-             | Cdal_proof_decoder.Diagnose -> "diagnose"
-             | Draft -> "draft" | Execute -> "execute")
+            (show_mode proof.requested_execution_mode)
+            (show_mode proof.effective_execution_mode)
             (Cdal_proof_decoder.duration_s proof)
         | Error e ->
           let gap = Cdal_proof_decoder.evidence_gap_of_error ~json e in

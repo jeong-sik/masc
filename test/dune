@@ -1133,3 +1133,15 @@
  (name test_keeper_recurring)
  (modules test_keeper_recurring)
  (libraries masc_mcp alcotest yojson unix))
+
+; CDAL Phase 1A: Typed verdict and check-result types (#3597)
+(test
+ (name test_cdal_types)
+ (modules test_cdal_types)
+ (libraries masc_mcp alcotest yojson))
+
+; CDAL Phase 1A: Proof bundle loader (#3598)
+(test
+ (name test_cdal_loader)
+ (modules test_cdal_loader)
+ (libraries masc_mcp agent_sdk alcotest yojson unix))

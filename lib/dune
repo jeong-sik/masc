@@ -465,6 +465,7 @@
    keeper_config
    keeper_toml_loader
    keeper_contract
+   keeper_cdal_contract
    keeper_deliberation
    keeper_types_profile
    keeper_types_support

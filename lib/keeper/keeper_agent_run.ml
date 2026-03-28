@@ -189,6 +189,7 @@ let run_turn
     { strategy = Agent_sdk.Context_reducer.Merge_contiguous };
   ] in
   (* 8. Run Agent *)
+  let contract = Keeper_cdal_contract.of_keeper_meta meta in
   match
     Oas_worker.run_named
       ~cascade_name
@@ -206,6 +207,7 @@ let run_turn
       ?guardrails
       ?on_event
       ~agent_ref
+      ?contract
       ~allowed_paths:meta.allowed_paths
       ~working_context:checkpoint_sidecar
       ()

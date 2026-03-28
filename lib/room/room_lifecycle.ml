@@ -55,13 +55,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
 
   (* Dedup: if agent already joined, update last_seen and return early *)
   let agent_file_dedup = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
-  let already_joined =
-    if is_pg_backend config then
-      let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
-      backend_exists config ~key:agent_key || Sys.file_exists agent_file_dedup
-    else
-      Sys.file_exists agent_file_dedup
-  in
+  let already_joined = Sys.file_exists agent_file_dedup in
   if already_joined then begin
     (match read_agent_with_repair config agent_file_dedup with
      | Ok existing_agent ->
@@ -296,38 +290,15 @@ let leave config ~agent_name =
 
   let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
   let in_fs = Sys.file_exists agent_file in
-  (* For PostgreSQL backend: also check masc_kv for HTTP state persistence *)
-  let in_backend =
-    if is_pg_backend config then
-      let agent_key = Printf.sprintf "agents:%s" (safe_filename actual_name) in
-      backend_exists config ~key:agent_key
-    else
-      false
-  in
-  if in_fs || in_backend then begin
+  if in_fs then begin
     (* Mark agent as Inactive instead of deleting, so re-join can restore identity.
        This prevents orphan state when the same agent_type re-joins later. *)
-    (if in_fs then
-      match read_agent_with_repair config agent_file with
-      | Ok existing_agent ->
-        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
-        write_json config agent_file (agent_to_yojson updated)
-      | Error e ->
-          Log.Room.warn "agent leave: invalid agent JSON for %s: %s" actual_name e);
-    if is_pg_backend config then begin
-      let agent_key = Printf.sprintf "agents:%s" (safe_filename actual_name) in
-      (* Update backend entry to Inactive as well *)
-      (if in_fs then
-        let updated_json = read_json config agent_file in
-        (match backend_set config ~key:agent_key
-                  ~value:(Yojson.Safe.to_string updated_json) with
-         | Ok () -> ()
-         | Error e -> Log.Room.warn "leave backend_set failed for %s: %s" agent_key (Backend_types.show_error e))
-      else
-        (match backend_delete config ~key:agent_key with
-         | Ok _ -> ()
-         | Error e -> Log.Room.warn "leave backend_delete failed for %s: %s" agent_key (Backend_types.show_error e)))
-    end;
+    (match read_agent_with_repair config agent_file with
+     | Ok existing_agent ->
+       let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
+       write_json config agent_file (agent_to_yojson updated)
+     | Error e ->
+         Log.Room.warn "agent leave: invalid agent JSON for %s: %s" actual_name e);
 
     (* Capture active agents before removal for relationship materialization *)
     let peers_before_leave = (read_state config).active_agents in

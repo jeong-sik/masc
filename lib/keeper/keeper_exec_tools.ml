@@ -89,25 +89,19 @@ let keeper_passthrough_masc_tool_names =
 
 let masc_schemas_ref : Types.tool_schema list ref = ref []
 
-let masc_schemas_mu = Eio.Mutex.create ()
-let with_schemas_rw f = Eio_guard.with_mutex masc_schemas_mu f
-let with_schemas_ro f = Eio_guard.with_mutex_ro masc_schemas_mu f
-
 let inject_masc_schemas (schemas : Types.tool_schema list) =
-  with_schemas_rw (fun () ->
-    masc_schemas_ref :=
-      List.filter (fun (s : Types.tool_schema) ->
-        String.starts_with ~prefix:"masc_" s.name
-        && List.mem s.name keeper_passthrough_masc_tool_names)
-        schemas)
+  masc_schemas_ref :=
+    List.filter (fun (s : Types.tool_schema) ->
+      String.starts_with ~prefix:"masc_" s.name
+      && List.mem s.name keeper_passthrough_masc_tool_names)
+      schemas
 
 let keeper_masc_tool_names (_meta : keeper_meta) : string list =
-  with_schemas_ro (fun () ->
-    !masc_schemas_ref
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name))
+  !masc_schemas_ref
+  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
 
 let keeper_masc_tool_schemas (_meta : keeper_meta) : Types.tool_schema list =
-  with_schemas_ro (fun () -> !masc_schemas_ref)
+  !masc_schemas_ref
 
 let dedupe_tool_names names =
   dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)

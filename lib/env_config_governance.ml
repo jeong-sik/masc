@@ -192,11 +192,6 @@ end
 (** {1 Timeouts & Buffer Sizes} *)
 
 module Timeouts = struct
-  (** GraphQL API call timeout (seconds).
-      Used by keeper autonomy operations (curl to GraphQL endpoint). *)
-  let graphql_timeout_sec =
-    get_float ~default:30.0 "MASC_GRAPHQL_TIMEOUT_SEC"
-
   (** Neo4j / zombie-cleanup interval (seconds).
       Controls the zero-zombie Pulse rhythm in the orchestrator.
       Clamped to >= 1.0 to prevent tight-loop when misconfigured. *)

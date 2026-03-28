@@ -498,9 +498,8 @@ let delete_loop_json ~(base_path : string) ~(loop_id : string) :
       match state_or_persisted with
       | Error _ as error -> error
       | Ok state ->
-          Tool_autoresearch_registry.with_hypotheses_rw (fun () ->
-            Hashtbl.remove Tool_autoresearch_registry.pending_hypotheses loop_id;
-            Hashtbl.remove Tool_autoresearch_registry.custom_generators loop_id);
+          Hashtbl.remove Tool_autoresearch_registry.pending_hypotheses loop_id;
+          Hashtbl.remove Tool_autoresearch_registry.custom_generators loop_id;
           delete_session_link ~base_path loop_id;
           (match
              Autoresearch.git_top_level ~workdir:state.source_workdir

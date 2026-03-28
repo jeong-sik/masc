@@ -26,11 +26,7 @@ type recurring_task = {
 (* Storage                                                           *)
 (* ================================================================ *)
 
-let mu = Eio.Mutex.create ()
 let tasks : (string, recurring_task) Hashtbl.t = Hashtbl.create 16
-
-let with_lock f =
-  Eio_guard.with_mutex mu f
 
 (* ================================================================ *)
 (* ID generation                                                     *)
@@ -54,54 +50,49 @@ let add ~keeper_name ~label ~interval_sec ?(max_failures = 5) action =
     last_run_ts = 0.0; run_count = 0; failure_count = 0;
     max_failures; enabled = true;
   } in
-  with_lock (fun () -> Hashtbl.replace tasks id task);
+  Hashtbl.replace tasks id task;
   task
 
 let remove ~id =
-  with_lock (fun () ->
-    if Hashtbl.mem tasks id then begin
-      Hashtbl.remove tasks id; true
-    end else false)
+  if Hashtbl.mem tasks id then begin
+    Hashtbl.remove tasks id; true
+  end else false
 
 let list ~keeper_name =
-  with_lock (fun () ->
-    Hashtbl.fold (fun _id task acc ->
-      if task.keeper_name = keeper_name then task :: acc else acc
-    ) tasks [])
+  Hashtbl.fold (fun _id task acc ->
+    if task.keeper_name = keeper_name then task :: acc else acc
+  ) tasks []
 
 let list_all () =
-  with_lock (fun () ->
-    Hashtbl.fold (fun _id task acc -> task :: acc) tasks [])
+  Hashtbl.fold (fun _id task acc -> task :: acc) tasks []
 
 (* ================================================================ *)
 (* Dispatch                                                          *)
 (* ================================================================ *)
 
 let dispatch_due ~keeper_name ~now_ts ~dispatch =
-  let due_tasks = with_lock (fun () ->
+  let due_tasks =
     Hashtbl.fold (fun _id task acc ->
       if task.keeper_name = keeper_name
          && task.enabled
          && now_ts -. task.last_run_ts >= float_of_int task.interval_sec
       then task :: acc
       else acc
-    ) tasks [])
+    ) tasks []
   in
   let count = ref 0 in
   List.iter (fun task ->
     match dispatch task task.action with
     | Ok () ->
-      with_lock (fun () ->
-        task.last_run_ts <- now_ts;
-        task.run_count <- task.run_count + 1;
-        task.failure_count <- 0);
+      task.last_run_ts <- now_ts;
+      task.run_count <- task.run_count + 1;
+      task.failure_count <- 0;
       incr count
     | Error _msg ->
-      with_lock (fun () ->
-        task.failure_count <- task.failure_count + 1;
-        if task.max_failures > 0
-           && task.failure_count >= task.max_failures
-        then task.enabled <- false)
+      task.failure_count <- task.failure_count + 1;
+      if task.max_failures > 0
+         && task.failure_count >= task.max_failures
+      then task.enabled <- false
   ) due_tasks;
   !count
 
@@ -131,4 +122,4 @@ let task_to_json (t : recurring_task) : Yojson.Safe.t =
 (* ================================================================ *)
 
 let clear () =
-  with_lock (fun () -> Hashtbl.clear tasks)
+  Hashtbl.clear tasks

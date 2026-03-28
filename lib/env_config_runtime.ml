@@ -93,6 +93,41 @@ module Orchestrator = struct
   (** Orchestrator agent name *)
   let agent_name =
     get_string ~default:"orchestrator" "MASC_ORCHESTRATOR_AGENT"
+
+  let min_priority =
+    max 0 (min 10 (get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY"))
+
+  let timeout_seconds =
+    max 10 (min 3600 (get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT"))
+
+  let enabled =
+    get_bool ~default:false "MASC_ORCHESTRATOR_ENABLED"
+end
+
+(** {1 Team Session Configuration} *)
+
+module TeamSession = struct
+  let model_35b_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_35B" |> trim_opt
+
+  let model_27b_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_27B" |> trim_opt
+
+  let model_9b_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_9B" |> trim_opt
+
+  let router_judge_enabled =
+    get_bool ~default:true "MASC_TEAM_SESSION_ROUTER_JUDGE"
+
+  let router_judge_timeout_sec =
+    max 5 (get_int ~default:15 "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC")
+
+  let router_judge_confidence_threshold =
+    let v = get_float ~default:0.72 "MASC_TEAM_SESSION_ROUTER_CONFIDENCE_THRESHOLD" in
+    Float.max 0.0 (Float.min 1.0 v)
+
+  let router_judge_model_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL" |> trim_opt
 end
 
 (** {1 Mitosis (Cell Division) Configuration} *)
@@ -250,10 +285,6 @@ module Timeout = struct
   (** Grace period added on top of MODEL timeouts for curl/network overhead *)
   let model_grace_sec =
     get_float ~default:5.0 "MASC_TIMEOUT_MODEL_GRACE_SEC"
-
-  (** GraphQL query timeout (agent loading, etc.) *)
-  let graphql_query_sec =
-    get_float ~default:5.0 "MASC_TIMEOUT_GRAPHQL_SEC"
 
   (** Keeper status check timeout *)
   let keeper_status_sec =

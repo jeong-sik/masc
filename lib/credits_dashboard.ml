@@ -15,7 +15,7 @@
 
 (** Get ME_ROOT path *)
 let me_root () =
-  match Sys.getenv_opt "ME_ROOT" with
+  match Env_config_core.me_root_opt () with
   | Some path -> path
   | None ->
       let home = Option.value ~default:"/tmp" (Sys.getenv_opt "HOME") in

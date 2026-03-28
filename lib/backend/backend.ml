@@ -33,6 +33,7 @@ module FileSystem = struct
     config: config;
     fs: Eio.Fs.dir_ty Eio.Path.t;
     mutex: Eio.Mutex.t;
+    key_index: (string, unit) Hashtbl.t;
   }
 
   (** Create a new FileSystem backend *)
@@ -49,6 +50,7 @@ module FileSystem = struct
       config;
       fs = path;
       mutex = Eio.Mutex.create ();
+      key_index = Hashtbl.create 256;
     }
 
   (** {2 Key Validation} *)
@@ -178,23 +180,13 @@ module FileSystem = struct
             let compressed = _compress value in
             (* Write file *)
             Eio.Path.save ~create:(`Or_truncate 0o644) path compressed;
+            Hashtbl.replace t.key_index key ();
             Ok ()
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
             Error (IOError (Printexc.to_string exn))
     )
-
-  (** Check if key exists *)
-  let exists t key =
-    match key_to_path t key with
-    | Error _ -> false
-    | Ok path ->
-        try
-          match Eio.Path.kind ~follow:true path with
-          | `Regular_file -> true
-          | _ -> false
-        with Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> false
 
   (** Delete key *)
   let delete t key =
@@ -204,6 +196,7 @@ module FileSystem = struct
       | Ok path ->
           try
             Eio.Path.unlink path;
+            Hashtbl.remove t.key_index key;
             Ok ()
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
@@ -219,12 +212,6 @@ module FileSystem = struct
     String.length value >= prefix_len
     && String.sub value 0 prefix_len = prefix
 
-  let normalize_prefix_for_scan prefix =
-    let len = String.length prefix in
-    if len > 0 && prefix.[len - 1] = ':' then
-      String.sub prefix 0 (len - 1)
-    else
-      prefix
 
   let rec collect_keys_under ~requested_prefix ~logical_prefix path acc =
     match Eio.Path.kind ~follow:true path with
@@ -247,29 +234,37 @@ module FileSystem = struct
           acc
     | _ -> acc
 
+  let ensure_key_index t =
+    if Hashtbl.length t.key_index = 0 then begin
+      (try
+         let keys =
+           collect_keys_under ~requested_prefix:"" ~logical_prefix:"" t.fs []
+         in
+         List.iter (fun k -> Hashtbl.replace t.key_index k ()) keys;
+         if Hashtbl.length t.key_index > 0 then
+           Log.legacy_traceln ~level:Log.Info ~module_name:"Backend"
+             (Printf.sprintf "key_index populated: %d keys" (Hashtbl.length t.key_index))
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | _ -> ())
+    end
+
+  (** Check if key exists (in-memory index lookup, O(1)) *)
+  let exists t key =
+    match validate_key key with
+    | Error _ -> false
+    | Ok _ ->
+      ensure_key_index t;
+      Hashtbl.mem t.key_index key
+
   let list_keys t ~prefix =
-    let scan_prefix = normalize_prefix_for_scan prefix in
-    let scan_root =
-      if scan_prefix = "" then
-        Ok (scan_prefix, t.fs)
-      else
-        match key_to_path t scan_prefix with
-        | Ok path -> Ok (scan_prefix, path)
-        | Error e -> Error e
-    in
-    match scan_root with
-    | Error e -> Error e
-    | Ok (logical_prefix, dir_path) ->
-        try
-          Ok
-            (collect_keys_under ~requested_prefix:prefix ~logical_prefix dir_path []
-             |> List.sort_uniq String.compare)
-        with
-        | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
-            Ok []  (* Directory doesn't exist = no keys *)
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-            Error (IOError (Printexc.to_string exn))
+    ensure_key_index t;
+    let result = ref [] in
+    Hashtbl.iter (fun k () ->
+      if prefix = "" || starts_with ~prefix k then
+        result := k :: !result
+    ) t.key_index;
+    Ok (List.sort_uniq String.compare !result)
 
   (** Set if not exists (atomic, auto-compresses) *)
   let set_if_not_exists t key value =
@@ -287,12 +282,14 @@ module FileSystem = struct
                 _ensure_parent_dir ~log_errors:true path;
                 (* Write with exclusive create *)
                 Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
+                Hashtbl.replace t.key_index key ();
                 Ok true
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
               (* Parent doesn't exist, create it *)
               _ensure_parent_dir path;
               Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
+              Hashtbl.replace t.key_index key ();
               Ok true
           | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
               Error (AlreadyExists key)

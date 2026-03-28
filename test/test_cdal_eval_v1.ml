@@ -87,6 +87,10 @@ let test_full_pipeline () =
     Alcotest.(check string) "run_id" run_id v.run_id;
     Alcotest.(check string) "claim_scope"
       "phase1_scoped_runtime_audit" v.claim_scope;
+    Alcotest.(check string) "loader_semantics_version"
+      CT.loader_semantics_version_phase1 v.loader_semantics_version;
+    Alcotest.(check string) "schema_compat_mode"
+      CT.schema_compat_mode_v1 v.schema_compat_mode;
     Alcotest.(check int) "4 check results" 4
       (List.length v.check_results)
   | Load_failure (err, _) ->
@@ -107,6 +111,10 @@ let test_load_failure_inconclusive () =
       (CT.contract_status_to_string v.status);
     Alcotest.(check string) "claim_scope"
       "phase1_scoped_runtime_audit" v.claim_scope;
+    Alcotest.(check string) "loader_semantics_version"
+      CT.loader_semantics_version_phase1 v.loader_semantics_version;
+    Alcotest.(check string) "schema_compat_mode"
+      CT.schema_compat_mode_v1 v.schema_compat_mode;
     Alcotest.(check bool) "has completeness_gaps" true
       (List.length v.completeness_gaps > 0);
     let gap = List.hd v.completeness_gaps in

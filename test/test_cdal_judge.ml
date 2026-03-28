@@ -222,6 +222,14 @@ let test_claim_scope_always_set () =
   Alcotest.(check string) "claim_scope violated"
     "phase1_scoped_runtime_audit" verdict_bad.claim_scope
 
+let test_loader_metadata_set () =
+  let bundle = make_bundle () in
+  let verdict = CJ.judge bundle in
+  Alcotest.(check string) "loader semantics version"
+    CT.loader_semantics_version_phase1 verdict.loader_semantics_version;
+  Alcotest.(check string) "schema compat mode"
+    CT.schema_compat_mode_v1 verdict.schema_compat_mode
+
 (* ================================================================ *)
 (* test_replay_determinism                                           *)
 (* ================================================================ *)
@@ -279,6 +287,8 @@ let () =
         test_verdict_priority_inconclusive;
       Alcotest.test_case "claim scope always set" `Quick
         test_claim_scope_always_set;
+      Alcotest.test_case "loader metadata set" `Quick
+        test_loader_metadata_set;
       Alcotest.test_case "replay determinism" `Quick
         test_replay_determinism;
       Alcotest.test_case "findings populated" `Quick

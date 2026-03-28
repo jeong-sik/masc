@@ -36,6 +36,12 @@ type keeper_board_signal = {
   hearth : string option;
 }
 
+type board_sse_event =
+  | Post_created of { post_id : string; author : string; title : string; hearth : string option }
+  | Comment_added of { post_id : string; comment_id : string; author : string }
+  | Post_voted of { post_id : string; voter : string; direction : Board.vote_direction }
+  | Comment_voted of { comment_id : string; voter : string; direction : Board.vote_direction }
+
 (** Current backend state. Single ref avoids contradictory initialized/backend pairs. *)
 let backend_state : backend_state ref = ref Uninitialized
 
@@ -52,6 +58,17 @@ let emit_keeper_board_signal signal =
   let hook_opt = with_board_ro (fun () -> !keeper_board_signal_hook) in
   match hook_opt with
   | Some hook -> hook signal
+  | None -> ()
+
+let board_sse_hook : (board_sse_event -> unit) option ref = ref None
+
+let set_board_sse_hook hook =
+  with_board_rw (fun () -> board_sse_hook := Some hook)
+
+let emit_board_sse_event event =
+  let hook_opt = with_board_ro (fun () -> !board_sse_hook) in
+  match hook_opt with
+  | Some hook -> (try hook event with _ -> ())
   | None -> ()
 
 let is_initialized () =
@@ -162,15 +179,20 @@ let create_post ~author ~content ?title ?body ?post_kind ?meta_json
            ~visibility ~ttl_hours ?hearth ?thread_id ()
        with
        | Ok post as ok ->
+           let pid = Board.Post_id.to_string post.id in
+           let auth = Board.Agent_id.to_string post.author in
            emit_keeper_board_signal
              {
                kind = Board_post_created;
-               post_id = Board.Post_id.to_string post.id;
-               author = Board.Agent_id.to_string post.author;
+               post_id = pid;
+               author = auth;
                title = post.title;
                content = post.content;
                hearth = post.hearth;
              };
+           emit_board_sse_event
+             (Post_created { post_id = pid; author = auth;
+                             title = post.title; hearth = post.hearth });
            ok
        | Error _ as err -> err)
   | Postgres t ->
@@ -179,15 +201,20 @@ let create_post ~author ~content ?title ?body ?post_kind ?meta_json
            ~visibility ~ttl_hours ?hearth ?thread_id ()
        with
        | Ok post as ok ->
+           let pid = Board.Post_id.to_string post.id in
+           let auth = Board.Agent_id.to_string post.author in
            emit_keeper_board_signal
              {
                kind = Board_post_created;
-               post_id = Board.Post_id.to_string post.id;
-               author = Board.Agent_id.to_string post.author;
+               post_id = pid;
+               author = auth;
                title = post.title;
                content = post.content;
                hearth = post.hearth;
              };
+           emit_board_sse_event
+             (Post_created { post_id = pid; author = auth;
+                             title = post.title; hearth = post.hearth });
            ok
        | Error _ as err -> err)
 
@@ -243,47 +270,69 @@ let add_comment ~post_id ~author ~content ?parent_id
   | Jsonl store ->
       (match Board.add_comment store ~post_id ~author ~content ?parent_id ~ttl_hours () with
        | Ok comment as ok ->
+           let cid = Board.Comment_id.to_string comment.id in
+           let auth = Board.Agent_id.to_string comment.author in
            (match Board.get_post store ~post_id with
             | Ok post ->
                 emit_keeper_board_signal
                   {
                     kind = Board_comment_added;
                     post_id;
-                    author = Board.Agent_id.to_string comment.author;
+                    author = auth;
                     title = post.title;
                     content;
                     hearth = post.hearth;
                   }
             | Error e -> Log.BoardLog.warn "board signal skipped: get_post failed for %s: %s" post_id (Board_types.show_board_error e));
+           emit_board_sse_event
+             (Comment_added { post_id; comment_id = cid; author = auth });
            ok
        | Error _ as err -> err)
   | Postgres t ->
       (match Board_pg.add_comment t ~post_id ~author ~content ?parent_id ~ttl_hours () with
        | Ok comment as ok ->
+           let cid = Board.Comment_id.to_string comment.id in
+           let auth = Board.Agent_id.to_string comment.author in
            (match Board_pg.get_post t ~post_id with
             | Ok post ->
                 emit_keeper_board_signal
                   {
                     kind = Board_comment_added;
                     post_id;
-                    author = Board.Agent_id.to_string comment.author;
+                    author = auth;
                     title = post.title;
                     content;
                     hearth = post.hearth;
                   }
             | Error e -> Log.BoardLog.warn "board signal skipped: pg get_post failed for %s: %s" post_id (Board_types.show_board_error e));
+           emit_board_sse_event
+             (Comment_added { post_id; comment_id = cid; author = auth });
            ok
        | Error _ as err -> err)
 
 let vote ~voter ~post_id ~direction =
-  match backend () with
-  | Jsonl store -> Board.vote store ~voter ~post_id ~direction
-  | Postgres t -> Board_pg.vote_post t ~voter ~post_id ~direction
+  let result = match backend () with
+    | Jsonl store -> Board.vote store ~voter ~post_id ~direction
+    | Postgres t -> Board_pg.vote_post t ~voter ~post_id ~direction
+  in
+  (match result with
+   | Ok _score ->
+       emit_board_sse_event
+         (Post_voted { post_id; voter; direction })
+   | Error _ -> ());
+  result
 
 let vote_comment ~voter ~comment_id ~direction =
-  match backend () with
-  | Jsonl store -> Board.vote_comment store ~voter ~comment_id ~direction
-  | Postgres t -> Board_pg.vote_comment t ~voter ~comment_id ~direction
+  let result = match backend () with
+    | Jsonl store -> Board.vote_comment store ~voter ~comment_id ~direction
+    | Postgres t -> Board_pg.vote_comment t ~voter ~comment_id ~direction
+  in
+  (match result with
+   | Ok _score ->
+       emit_board_sse_event
+         (Comment_voted { comment_id; voter; direction })
+   | Error _ -> ());
+  result
 
 let stats () =
   match backend () with

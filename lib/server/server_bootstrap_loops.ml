@@ -73,6 +73,39 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
       ~config:state.room_config
       signal);
+  Board_dispatch.set_board_sse_hook (fun event ->
+    let params = match event with
+      | Board_dispatch.Post_created { post_id; author; title; hearth } ->
+          let base = [("type", `String "post_created");
+                      ("post_id", `String post_id);
+                      ("author", `String author);
+                      ("title", `String title)] in
+          `Assoc (match hearth with
+                  | Some h -> ("hearth", `String h) :: base
+                  | None -> base)
+      | Board_dispatch.Comment_added { post_id; comment_id; author } ->
+          `Assoc [("type", `String "comment_added");
+                  ("post_id", `String post_id);
+                  ("comment_id", `String comment_id);
+                  ("author", `String author)]
+      | Board_dispatch.Post_voted { post_id; voter; direction } ->
+          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          `Assoc [("type", `String "post_voted");
+                  ("post_id", `String post_id);
+                  ("voter", `String voter);
+                  ("direction", `String dir)]
+      | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
+          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          `Assoc [("type", `String "comment_voted");
+                  ("comment_id", `String comment_id);
+                  ("voter", `String voter);
+                  ("direction", `String dir)]
+    in
+    Sse.broadcast (`Assoc [
+      ("jsonrpc", `String "2.0");
+      ("method", `String "notifications/board");
+      ("params", params)
+    ]));
   (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
      can react to new tasks, mentions, or room activity immediately. *)
   Room_eio.on_broadcast_mention := (fun mention ->

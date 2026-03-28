@@ -249,13 +249,25 @@ module FileSystem = struct
        | _ -> ())
     end
 
-  (** Check if key exists (in-memory index lookup, O(1)) *)
+  (** Check if key exists (in-memory index first, filesystem fallback) *)
   let exists t key =
     match validate_key key with
     | Error _ -> false
     | Ok _ ->
       ensure_key_index t;
-      Hashtbl.mem t.key_index key
+      if Hashtbl.mem t.key_index key then true
+      else
+        (* Fallback: file may have been written outside the backend
+           (e.g. Fs_compat.append_jsonl, raw write_text_file in tests).
+           Check the actual filesystem and update the index on hit. *)
+        match key_to_path t key with
+        | Error _ -> false
+        | Ok path ->
+            (try
+               ignore (Eio.Path.load path : string);
+               Hashtbl.replace t.key_index key ();
+               true
+             with _ -> false)
 
   let list_keys t ~prefix =
     ensure_key_index t;

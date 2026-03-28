@@ -166,6 +166,22 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
          match handoff_json with
          | Some value -> value
          | None -> `Assoc [ ("performed", `Bool false) ]);
+        ("cdal_proof",
+         match result.proof with
+         | Some p ->
+           `Assoc [
+             ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+             ("effective_mode",
+              Agent_sdk.Execution_mode.to_yojson p.effective_execution_mode);
+             ("result_status",
+              Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status);
+             ("violation_count",
+              `Int (List.length p.raw_evidence_refs));
+             ("tool_trace_count",
+              `Int (List.length p.tool_trace_refs));
+             ("mode_source", `String p.mode_decision_source);
+           ]
+         | None -> `Null);
       ]
   in
   Dated_jsonl.append metrics_store snapshot

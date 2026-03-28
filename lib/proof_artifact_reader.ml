@@ -10,7 +10,17 @@ let resolve_path (config : Agent_sdk.Proof_store.config)
   if String.length ref_ > prefix_len
      && String.sub ref_ 0 prefix_len = prefix then
     let rel = String.sub ref_ prefix_len (String.length ref_ - prefix_len) in
-    Ok (Filename.concat (Filename.concat config.root "proofs") rel)
+    (* Reject path traversal: no ".." components or null bytes. *)
+    let segments = String.split_on_char '/' rel in
+    let has_traversal =
+      String.contains rel '\000'
+      || List.exists (fun s -> s = "..") segments
+    in
+    if has_traversal then
+      Error (Printf.sprintf "path traversal rejected: %s" ref_)
+    else
+      let proofs_root = Filename.concat config.root "proofs" in
+      Ok (Filename.concat proofs_root rel)
   else
     Error (Printf.sprintf "invalid artifact ref: %s" ref_)
 

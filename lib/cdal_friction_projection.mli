@@ -21,27 +21,37 @@ type blocked_attempt_group = {
   count : int;
 }
 
+(** A group of evidence completeness gaps sharing the same artifact/impact. *)
+type evidence_gap_group = {
+  artifact : string;
+  reason : string;
+  impact : string;
+  count : int;
+}
+
 (** Friction projection for a single run. *)
 type friction_projection = {
   window : string;  (** Always ["single_run"]. *)
   based_on_run_ids : string list;
   basis_hash : string;
   blocked_attempt_count : int;
+  blocked_tool_counts : (string * int) list;
   blocked_attempt_groups : blocked_attempt_group list;
+  evidence_gap_groups : evidence_gap_group list;
+  review_tripwires : string list;
 }
 
-(** [project_single_run ~store proof] reads [mode_violations.json]
-    from [proof.raw_evidence_refs], parses v1 violation records,
-    groups by [(tool_name, violation_kind, effective_mode)], and
-    returns [Some projection] if violations exist, [None] otherwise.
+(** [project_single_run ~store ?completeness_gaps ?tripwire_threshold proof]
+    reads [mode_violations.json], parses v1 violation records, groups by
+    [(tool_name, violation_kind, effective_mode)], derives tool counts and
+    evidence gap groups, and fires review tripwires when any group count
+    exceeds [tripwire_threshold] (default 3).
 
-    Returns [None] when:
-    - no [mode_violations.json] ref exists in [raw_evidence_refs]
-    - the file is missing on disk
-    - the file parses to an empty array
-    - a parse error occurs (treated as missing evidence) *)
+    Returns [None] when no violations and no completeness gaps exist. *)
 val project_single_run :
   store:Agent_sdk.Proof_store.config ->
+  ?completeness_gaps:Cdal_types.completeness_gap list ->
+  ?tripwire_threshold:int ->
   Agent_sdk.Cdal_proof.t ->
   friction_projection option
 

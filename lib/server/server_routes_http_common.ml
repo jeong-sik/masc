@@ -87,23 +87,53 @@ let get_protocol_version = Server_mcp_transport_http.get_protocol_version
 let get_protocol_version_for_session =
   Server_mcp_transport_http.get_protocol_version_for_session
 
-(** Shared runtime access for MCP handlers.
-    main_eio delegates to the shared Eio_context instead of storing another
-    copy of switch/clock/net state. *)
-let get_switch () = Eio_context.get_switch ()
-let get_clock () = Eio_context.get_clock ()
-let get_net () = Eio_context.get_net ()
+(** Prefer runtime capabilities captured in [server_state] and only fall back to
+    the legacy global Eio context for compatibility with older test helpers. *)
+let current_server_state_opt () = !server_state
 
-let command_plane_http_deps : Server_command_plane_http.deps =
+let state_switch_opt = function
+  | Some state -> (
+      match state.Mcp_server.sw with
+      | Some sw -> Some sw
+      | None -> Eio_context.get_switch_opt ())
+  | None -> Eio_context.get_switch_opt ()
+
+let state_clock_opt = function
+  | Some state -> (
+      match state.Mcp_server.clock with
+      | Some clock -> Some clock
+      | None -> Eio_context.get_clock_opt ())
+  | None -> Eio_context.get_clock_opt ()
+
+let state_net_opt = function
+  | Some state -> (
+      match state.Mcp_server.net with
+      | Some net -> Some net
+      | None -> Eio_context.get_net_opt ())
+  | None -> Eio_context.get_net_opt ()
+
+let require_runtime label = function
+  | Some value -> value
+  | None -> invalid_arg (label ^ " not available")
+
+let command_plane_http_deps ?state () : Server_command_plane_http.deps =
+  let state_opt =
+    match state with
+    | Some state -> Some state
+    | None -> current_server_state_opt ()
+  in
   {
     query_param;
     int_query_param;
     operator_actor_hint;
     get_session_id_any;
     auth_token_from_request;
-    get_switch;
-    get_clock;
-    get_net;
+    get_switch = (fun () ->
+      require_runtime "command-plane switch" (state_switch_opt state_opt));
+    get_clock = (fun () ->
+      require_runtime "command-plane clock" (state_clock_opt state_opt));
+    get_net = (fun () ->
+      require_runtime "command-plane net" (state_net_opt state_opt));
     get_origin;
     cors_headers;
   }
@@ -122,19 +152,19 @@ let command_plane_units_http_json ~state =
 
 let command_plane_operations_http_json ~state request =
   Server_command_plane_http.command_plane_operations_http_json
-    ~deps:command_plane_http_deps ~state request
+    ~deps:(command_plane_http_deps ~state ()) ~state request
 
 let command_plane_detachments_http_json ~state request =
   Server_command_plane_http.command_plane_detachments_http_json
-    ~deps:command_plane_http_deps ~state request
+    ~deps:(command_plane_http_deps ~state ()) ~state request
 
 let command_plane_detachment_status_http_json ~state request =
   Server_command_plane_http.command_plane_detachment_status_http_json
-    ~deps:command_plane_http_deps ~state request
+    ~deps:(command_plane_http_deps ~state ()) ~state request
 
 let command_plane_decisions_http_json ~state request =
   Server_command_plane_http.command_plane_decisions_http_json
-    ~deps:command_plane_http_deps ~state request
+    ~deps:(command_plane_http_deps ~state ()) ~state request
 
 let command_plane_capacity_http_json ~state =
   Server_command_plane_http.command_plane_capacity_http_json ~state
@@ -144,70 +174,70 @@ let command_plane_alerts_http_json ~state =
 
 let command_plane_traces_http_json ~state request =
   Server_command_plane_http.command_plane_traces_http_json
-    ~deps:command_plane_http_deps ~state request
+    ~deps:(command_plane_http_deps ~state ()) ~state request
 
 let command_plane_swarm_http_json ~state request =
   Server_command_plane_http.command_plane_swarm_http_json
-    ~deps:command_plane_http_deps ~state request
+    ~deps:(command_plane_http_deps ~state ()) ~state request
 
 let command_plane_orchestra_http_json ~state request =
   Server_command_plane_http.command_plane_orchestra_http_json
-    ~deps:command_plane_http_deps ~state request
+    ~deps:(command_plane_http_deps ~state ()) ~state request
 
 let command_plane_unit_define_http_json ~state request ~args =
   Server_command_plane_http.command_plane_unit_define_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_operation_start_http_json ~state request ~args =
   Server_command_plane_http.command_plane_operation_start_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_chain_summary_http_json ~state request =
   Server_command_plane_http.command_plane_chain_summary_http_json
-    ~deps:command_plane_http_deps ~state request
+    ~deps:(command_plane_http_deps ~state ()) ~state request
 
 let command_plane_chain_run_http_json ~state request run_id =
   Server_command_plane_http.command_plane_chain_run_http_json
-    ~deps:command_plane_http_deps ~state request run_id
+    ~deps:(command_plane_http_deps ~state ()) ~state request run_id
 
 let chain_http_error_status message =
   Server_command_plane_http.chain_http_error_status message
 
 let command_plane_chain_events_http ~request reqd =
   Server_command_plane_http.command_plane_chain_events_http
-    ~deps:command_plane_http_deps ~request reqd
+    ~deps:(command_plane_http_deps ()) ~request reqd
 
 let command_plane_chain_events_h2 ~request h2_reqd =
   Server_command_plane_http.command_plane_chain_events_h2
-    ~deps:command_plane_http_deps ~request h2_reqd
+    ~deps:(command_plane_http_deps ()) ~request h2_reqd
 
 let command_plane_operation_checkpoint_http_json ~state request ~args =
   Server_command_plane_http.command_plane_operation_checkpoint_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_unit_reparent_http_json ~state request ~args =
   Server_command_plane_http.command_plane_unit_reparent_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_unit_reassign_http_json ~state request ~args =
   Server_command_plane_http.command_plane_unit_reassign_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_operation_pause_http_json ~state request ~args =
   Server_command_plane_http.command_plane_operation_pause_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_operation_resume_http_json ~state request ~args =
   Server_command_plane_http.command_plane_operation_resume_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_operation_stop_http_json ~state request ~args =
   Server_command_plane_http.command_plane_operation_stop_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_operation_finalize_http_json ~state request ~args =
   Server_command_plane_http.command_plane_operation_finalize_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_dispatch_plan_http_json ~state request ~args =
   Server_command_plane_http.command_plane_dispatch_plan_http_json ~state request
@@ -215,46 +245,46 @@ let command_plane_dispatch_plan_http_json ~state request ~args =
 
 let command_plane_dispatch_assign_http_json ~state request ~args =
   Server_command_plane_http.command_plane_dispatch_assign_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_dispatch_rebalance_http_json ~state request ~args =
   Server_command_plane_http.command_plane_dispatch_rebalance_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_dispatch_escalate_http_json ~state request ~args =
   Server_command_plane_http.command_plane_dispatch_escalate_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_dispatch_recall_http_json ~state request ~args =
   Server_command_plane_http.command_plane_dispatch_recall_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_dispatch_tick_http_json ~state request ~args =
   Server_command_plane_http.command_plane_dispatch_tick_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_policy_status_http_json ~state =
   Server_command_plane_http.command_plane_policy_status_http_json ~state
 
 let command_plane_policy_approve_http_json ~state request ~args =
   Server_command_plane_http.command_plane_policy_approve_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_policy_deny_http_json ~state request ~args =
   Server_command_plane_http.command_plane_policy_deny_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_policy_update_http_json ~state request ~args =
   Server_command_plane_http.command_plane_policy_update_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_policy_freeze_http_json ~state request ~args =
   Server_command_plane_http.command_plane_policy_freeze_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_policy_kill_switch_http_json ~state request ~args =
   Server_command_plane_http.command_plane_policy_kill_switch_http_json
-    ~deps:command_plane_http_deps ~state request ~args
+    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
 let command_plane_help_http_json () =
   Server_command_plane_http.command_plane_help_http_json ()
@@ -322,38 +352,14 @@ let force_json_response = Server_mcp_transport_http.force_json_response
 
 let get_last_event_id = Server_mcp_transport_http.get_last_event_id
 
-let mcp_transport_json_headers session_id protocol_version origin =
-  Server_mcp_transport_http.json_headers
-    ~deps:
-      {
-        get_origin = get_origin;
-        cors_headers = cors_headers;
-        auth_token_from_request = auth_token_from_request;
-        get_server_state_opt = (fun () -> !server_state);
-        get_sw = Eio_context.get_switch_opt;
-        get_clock = Eio_context.get_clock_opt;
-        verify_mcp_auth =
-          (fun ~base_path request ->
-            Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));
-        verify_operator_mcp_auth =
-          (fun ~base_path request ->
-            Result.map (fun _ -> ())
-              (verify_operator_mcp_auth ~base_path request));
-      }
-    session_id protocol_version origin
-
-let mcp_headers = Server_mcp_transport_http.mcp_headers
-
-let json_headers = mcp_transport_json_headers
-
-let mcp_transport_http_deps : Server_mcp_transport_http.deps =
+let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
   {
     get_origin;
     cors_headers;
     auth_token_from_request;
-    get_server_state_opt = (fun () -> !server_state);
-    get_sw = Eio_context.get_switch_opt;
-    get_clock = Eio_context.get_clock_opt;
+    get_server_state_opt = current_server_state_opt;
+    get_sw = (fun () -> state_switch_opt (current_server_state_opt ()));
+    get_clock = (fun () -> state_clock_opt (current_server_state_opt ()));
     verify_mcp_auth =
       (fun ~base_path request ->
         Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));
@@ -361,6 +367,15 @@ let mcp_transport_http_deps : Server_mcp_transport_http.deps =
       (fun ~base_path request ->
         Result.map (fun _ -> ()) (verify_operator_mcp_auth ~base_path request));
   }
+
+let mcp_transport_json_headers session_id protocol_version origin =
+  Server_mcp_transport_http.json_headers
+    ~deps:(mcp_transport_http_deps ())
+    session_id protocol_version origin
+
+let mcp_headers = Server_mcp_transport_http.mcp_headers
+
+let json_headers = mcp_transport_json_headers
 
 let check_sse_connect_guard = Server_mcp_transport_http.check_sse_connect_guard
 
@@ -370,29 +385,29 @@ let close_all_sse_connections =
   Server_mcp_transport_http.close_all_sse_connections
 
 let handle_get_mcp ?legacy_messages_endpoint ?(profile = Mcp_eio.Full) ?sse_kind request reqd =
-  Server_mcp_transport_http.handle_get_mcp ~deps:mcp_transport_http_deps
+  Server_mcp_transport_http.handle_get_mcp ~deps:(mcp_transport_http_deps ())
     ?legacy_messages_endpoint ~profile ?sse_kind request reqd
 
 let sse_simple_handler request reqd =
-  Server_mcp_transport_http.sse_simple_handler ~deps:mcp_transport_http_deps
+  Server_mcp_transport_http.sse_simple_handler ~deps:(mcp_transport_http_deps ())
     request reqd
 
 let handle_get_operator_mcp request reqd =
   Server_mcp_transport_http.handle_get_operator_mcp
-    ~deps:mcp_transport_http_deps request reqd
+    ~deps:(mcp_transport_http_deps ()) request reqd
 
 let handle_post_messages request reqd =
-  Server_mcp_transport_http.handle_post_messages ~deps:mcp_transport_http_deps
+  Server_mcp_transport_http.handle_post_messages ~deps:(mcp_transport_http_deps ())
     request reqd
 
 let handle_post_mcp ?(profile = Mcp_eio.Full) request reqd =
-  Server_mcp_transport_http.handle_post_mcp ~deps:mcp_transport_http_deps
+  Server_mcp_transport_http.handle_post_mcp ~deps:(mcp_transport_http_deps ())
     ~profile request reqd
 
 let handle_delete_mcp ?(profile = Mcp_eio.Full) request reqd =
-  Server_mcp_transport_http.handle_delete_mcp ~deps:mcp_transport_http_deps
+  Server_mcp_transport_http.handle_delete_mcp ~deps:(mcp_transport_http_deps ())
     ~profile request reqd
 
 let handle_ag_ui_events request reqd =
-  Server_mcp_transport_http.handle_ag_ui_events ~deps:mcp_transport_http_deps
+  Server_mcp_transport_http.handle_ag_ui_events ~deps:(mcp_transport_http_deps ())
     request reqd

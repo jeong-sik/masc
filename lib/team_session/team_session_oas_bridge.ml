@@ -303,7 +303,7 @@ let planned_worker_to_entry_with_state
       name config.base_path
       (match pw.spawn_role with Some r -> r | None -> "execute")
   in
-  let run ~sw:_ prompt =
+  let run ~sw prompt =
     let raw_trace =
       create_team_session_raw_trace ~config ~session_id ~agent_name:name
     in
@@ -320,7 +320,7 @@ let planned_worker_to_entry_with_state
           ~cascade_name ~fallback:(fun () -> 0.3))
         ~max_tokens:(Cascade_inference.resolve_max_tokens
           ~cascade_name ~fallback:(fun () -> 4096))
-        ?raw_trace ()
+        ?raw_trace ~sw ()
     with
     | Ok result ->
         Hashtbl.replace success_by_agent name true;

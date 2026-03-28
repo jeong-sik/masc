@@ -242,7 +242,7 @@ let _shell_warmed = ref false
 let warm_shell_cache (state : Mcp_server.server_state) =
   let t0 = Time_compat.now () in
   (try
-     ignore (dashboard_shell_http_json state.room_config);
+     ignore (dashboard_shell_http_json ?clock:state.Mcp_server.clock state.room_config);
      _shell_warmed := true;
      Log.Dashboard.info "shell cache pre-warmed (%.1fms)"
        ((Time_compat.now () -. t0) *. 1000.0)
@@ -426,13 +426,12 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     float_of_env_default "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
       ~default:75.0 ~min_v:30.0 ~max_v:300.0
   in
-  ignore net;
-  ignore mono_clock;
   let compute () =
     mark_cached_surface_attempt _execution_cache;
     let started_at = Unix.gettimeofday () in
     try
-      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
+      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~net
+        ~mono_clock ~config:room_config
         (fun ~config ~sw ->
           Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
           |> patch_surface_json_for_running_keepers config
@@ -490,13 +489,16 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
       broadcast_cached_surface ~event_type:"transport_health_snapshot" json)
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
+  let net = state.Mcp_server.net in
+  let mono_clock = state.Mcp_server.mono_clock in
   let fixture = query_param request "fixture" in
   let actor = operator_actor_hint request in
   let full_mode = bool_query_param request "full" ~default:false in
   let light = not full_mode in
   let compute ?actor ?fixture ~light () =
     let started_at = Unix.gettimeofday () in
-    run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
+    run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
+      ~clock
       ~config:state.Mcp_server.room_config
       (fun ~config ~sw ->
         Dashboard_execution.json ?actor ?fixture ~light
@@ -768,7 +770,7 @@ let dashboard_room_truth_http_json ~state ~sw:_ ~clock _request =
      Each component has its own timeout guard and cache fallback,
      so sequential execution adds minimal latency on cache hit. *)
   shell_ref := fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
-    (fun () -> dashboard_shell_http_json config) (`Assoc []);
+    (fun () -> dashboard_shell_http_json ~clock config) (`Assoc []);
   execution_ref := cached_surface_json _execution_cache;
   (* command_plane_summary_http_json reads from a proactive cache ref —
      no PG I/O needed.  Skip the Room.is_initialized guard (which does a
@@ -972,7 +974,7 @@ let room_truth_snapshot_from_caches (state : Mcp_server.server_state) :
     let config = state.room_config in
     let shell_json =
       if !_shell_warmed then
-        try dashboard_shell_http_json config
+        try dashboard_shell_http_json ?clock:state.Mcp_server.clock config
         with _ -> `Assoc []
       else `Assoc []
     in

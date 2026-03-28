@@ -17,10 +17,23 @@ let runtime_support = Server_dashboard_http_runtime_support.default ()
     Pool reference is shared via [Executor_pool_ref] in masc_core. *)
 let set_executor_pool = Server_dashboard_http_runtime_support.set_executor_pool
 
-let run_dashboard_compute ?(mode = Offloaded_readonly) ~sw ~clock
+let dashboard_runtime ?net ?mono_clock (config : Room.config) :
+    Server_dashboard_http_runtime_support.runtime option =
+  match config.backend_config.Backend.backend_type with
+  | Backend.PostgresNative -> (
+      match net, mono_clock with
+      | Some net, Some mono_clock -> Some { net; mono_clock }
+      | _ -> None)
+  | Backend.Memory | Backend.FileSystem -> None
+
+let run_dashboard_compute ?(mode = Offloaded_readonly) ?net ?mono_clock ~sw ~clock
     ~(config : Room.config) compute =
+  let runtime = dashboard_runtime ?net ?mono_clock config in
   Server_dashboard_http_runtime_support.run_dashboard_compute runtime_support
-    ~mode ~sw ~clock ~config compute
+    ~mode ?runtime ~sw ~clock ~config compute
+
+let state_dashboard_runtime_caps (state : Mcp_server.server_state) =
+  (state.Mcp_server.net, state.Mcp_server.mono_clock)
 
 (* ================================================================ *)
 (* Dashboard Data (Batch API)                                       *)
@@ -336,11 +349,13 @@ let operator_snapshot_extra sessions =
 let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
+  let net, mono_clock = state_dashboard_runtime_caps state in
   let compute () =
     mark_cached_surface_attempt _operator_snapshot_cache;
     let started_at = Unix.gettimeofday () in
     try
-      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config
+      run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
+        ~clock ~config
         (fun ~config ~sw ->
           let t_sessions = Unix.gettimeofday () in
           let sessions =
@@ -403,6 +418,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
 let start_operator_digest_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
+  let net, mono_clock = state_dashboard_runtime_caps state in
   let compute () =
     mark_cached_surface_attempt _operator_digest_cache;
     let started_at = Unix.gettimeofday () in
@@ -410,7 +426,8 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
       let command_plane_summary, swarm_status =
         command_plane_summary_cache_parts ~allow_initializing:false ~state
       in
-      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config
+      run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
+        ~clock ~config
         (fun ~config ~sw ->
           let sessions =
             if Room.is_initialized config then
@@ -460,6 +477,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
       !_operator_digest_broadcast_ref json)
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
+  let net, mono_clock = state_dashboard_runtime_caps state in
   let actor = operator_actor_hint request in
   let view = query_param request "view" in
   let default_summary_request =
@@ -501,7 +519,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     in
     match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
       Ok
-        (run_dashboard_compute ~mode ~sw ~clock
+        (run_dashboard_compute ~mode ?net ?mono_clock ~sw ~clock
            ~config:state.Mcp_server.room_config
            (fun ~config ~sw ->
              let ctx : _ Operator_control.context =
@@ -538,6 +556,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
   end
 
 let operator_digest_http_json ~state ~sw ~clock request =
+  let net, mono_clock = state_dashboard_runtime_caps state in
   let actor = operator_actor_hint request in
   let target_type = query_param request "target_type" in
   let target_id = query_param request "target_id" in
@@ -565,7 +584,8 @@ let operator_digest_http_json ~state ~sw ~clock request =
     in
     match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
       Ok
-        (run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
+        (run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
+           ~clock
            ~config:state.Mcp_server.room_config
            (fun ~config ~sw ->
              let ctx : _ Operator_control.context =
@@ -653,6 +673,7 @@ let _mission_cache =
 let start_mission_refresh_loop ~state ~sw ~clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
+  let net, mono_clock = state_dashboard_runtime_caps state in
   let mission_refresh_timeout_s =
     float_of_env_default "MASC_DASHBOARD_MISSION_REFRESH_TIMEOUT_S"
       ~default:60.0 ~min_v:30.0 ~max_v:300.0
@@ -665,13 +686,16 @@ let start_mission_refresh_loop ~state ~sw ~clock =
       let command_plane_summary, swarm_status =
         command_plane_summary_cache_parts ~allow_initializing:false ~state
       in
-      let dt_cp = Unix.gettimeofday () -. t_cp in
-      let result =
-        run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~config:room_config
+      run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
+        ~clock ~config:room_config
+        |> fun run_compute ->
+        let dt_cp = Unix.gettimeofday () -. t_cp in
+        let result =
+          run_compute
           (fun ~config ~sw ->
             Dashboard_mission.json ?command_plane_summary ?swarm_status ~config ~sw
               ~clock ~proc_mgr ())
-      in
+        in
       let dt_total = Unix.gettimeofday () -. t0_mission in
       if dt_total >= 5.0 then
         Log.Dashboard.warn
@@ -695,6 +719,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     ~on_result:(mark_cached_surface_success _mission_cache)
 
 let dashboard_mission_http_json ~state ~sw ~clock request =
+  let net, mono_clock = state_dashboard_runtime_caps state in
   let actor = operator_actor_hint request in
   let compute ?actor () =
     let started_at = Unix.gettimeofday () in
@@ -706,7 +731,8 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
       int_of_float
         ((Unix.gettimeofday () -. command_plane_started_at) *. 1000.0)
     in
-    run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock
+    run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
+      ~clock
       ~config:state.Mcp_server.room_config
       (fun ~config ~sw ->
         Dashboard_mission.json ?actor ?command_plane_summary ?swarm_status
@@ -923,7 +949,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
            ("keepers_ms", `Int keepers_ms);
          ]
 
-let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
+let dashboard_shell_http_json ?clock (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in
   let cache_key =
     Printf.sprintf "shell:%s:%s" config.base_path current_room
@@ -933,7 +959,12 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
        since state is not available in this context. *)
     dashboard_shell_payload_json config
   in
-  match Eio_context.get_clock_opt () with
+  let clock_opt =
+    match clock with
+    | Some clock -> Some clock
+    | None -> Eio_context.get_clock_opt ()
+  in
+  match clock_opt with
   | Some clock ->
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0 ~clock
         ~timeout_sec:dashboard_shell_timeout_s compute

@@ -2,6 +2,11 @@ type dashboard_compute_mode =
   | Inline_shared
   | Offloaded_readonly
 
+type runtime = {
+  net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
+  mono_clock : Eio.Time.Mono.ty Eio.Resource.t;
+}
+
 type t = {
   mutable cached_readonly_pg_config : Room.config option;
   readonly_config_mu : Eio.Mutex.t;
@@ -25,16 +30,14 @@ let default () = Lazy.force default_state
 
 let set_executor_pool pool = Executor_pool_ref.set pool
 
-let isolated_readonly_dashboard_config ~sw ~clock ~(config : Room.config) =
+let isolated_readonly_dashboard_config ~runtime ~sw ~clock ~(config : Room.config) =
   match config.backend_config.Backend.backend_type with
   | Backend.PostgresNative ->
-      let net = Eio_context.get_net () in
-      let mono_clock = Eio_context.get_mono_clock () in
       Room_utils_backend_setup.with_domain_local_pg_backend
-        ~sw ~net ~clock ~mono_clock config
+        ~sw ~net:runtime.net ~clock ~mono_clock:runtime.mono_clock config
   | Backend.Memory | Backend.FileSystem -> Some config
 
-let cached_isolated_readonly_config state ~sw ~clock ~config =
+let cached_isolated_readonly_config state ~runtime ~sw ~clock ~config =
   match state.cached_readonly_pg_config with
   | Some c -> Some c
   | None ->
@@ -43,7 +46,7 @@ let cached_isolated_readonly_config state ~sw ~clock ~config =
           | Some c -> Some c
           | None ->
               let result =
-                isolated_readonly_dashboard_config ~sw ~clock ~config
+                isolated_readonly_dashboard_config ~runtime ~sw ~clock ~config
               in
               (match result with
               | Some config ->
@@ -68,11 +71,18 @@ let with_pg_guard state f =
   Eio.Semaphore.acquire sem;
   Fun.protect ~finally:(fun () -> Eio.Semaphore.release sem) f
 
-let run_dashboard_compute state ?(mode = Offloaded_readonly) ~sw ~clock
+let require_runtime = function
+  | Some runtime -> runtime
+  | None ->
+      invalid_arg
+        "dashboard readonly Postgres compute requires threaded net and mono_clock"
+
+let run_dashboard_compute state ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
     ~(config : Room.config) compute =
   let fallback () = compute ~config ~sw in
   let fallback_isolated_pg () =
-    match cached_isolated_readonly_config state ~sw ~clock ~config with
+    let runtime = require_runtime runtime in
+    match cached_isolated_readonly_config state ~runtime ~sw ~clock ~config with
     | Some isolated -> compute ~config:isolated ~sw
     | None ->
         Log.Dashboard.warn
@@ -82,11 +92,11 @@ let run_dashboard_compute state ?(mode = Offloaded_readonly) ~sw ~clock
   let run_in_pool pool_sw =
     match config.backend_config.Backend_types.backend_type with
     | Backend_types.PostgresNative ->
-        let net = Eio_context.get_net () in
-        let mono_clock = Eio_context.get_mono_clock () in
+        let runtime = require_runtime runtime in
         (match
            Room_utils_backend_setup.with_domain_local_pg_backend
-             ~sw:pool_sw ~net ~clock ~mono_clock config
+             ~sw:pool_sw ~net:runtime.net ~clock
+             ~mono_clock:runtime.mono_clock config
          with
         | Some domain_config -> `Done (compute ~config:domain_config ~sw:pool_sw)
         | None -> `Fallback)

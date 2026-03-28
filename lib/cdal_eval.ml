@@ -120,6 +120,9 @@ let evaluate_content ~(violations : Violation_record.t list)
 (* Artifact-reading evaluation                                       *)
 (* ================================================================ *)
 
+(* OAS resolve_ref preserves the full run-relative subpath such as
+   [evidence/mode_violations.json]. We rely on exact matches here to avoid
+   suffix-based false positives from lookalike artifact names. *)
 let has_exact_subpath (store : Agent_sdk.Proof_store.config) expected
     (ref_ : Agent_sdk.Cdal_proof.artifact_ref) =
   match Agent_sdk.Proof_store.resolve_ref store ref_ with

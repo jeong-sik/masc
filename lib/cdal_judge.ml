@@ -119,13 +119,18 @@ let derive_status (checks : Cdal_types.check_result list) : Cdal_types.contract_
     if has_blocking_inconclusive then Inconclusive
     else Satisfied
 
-let judgment_basis_hash ~contract_id ~schema_version : string =
+let canonical_json_string json =
+  json |> Yojson.Safe.sort |> Yojson.Safe.to_string
+
+let judgment_basis_hash (b : Cdal_loader.loaded_bundle) : string =
   let input =
-    Printf.sprintf "%s|%s|%s|manifest.json|contract.json|%d"
-      contract_id
+    Printf.sprintf "%s|%s|%s|%s|%s|%d"
+      b.proof.contract_id
       Cdal_types.loader_semantics_version_phase1
       Cdal_types.schema_compat_mode_v1
-      schema_version in
+      (canonical_json_string b.manifest_json)
+      (canonical_json_string b.contract_json)
+      b.proof.schema_version in
   let hash = Digest.string input |> Digest.to_hex in
   "md5:" ^ hash
 
@@ -142,10 +147,7 @@ let judge (b : Cdal_loader.loaded_bundle) : Cdal_types.contract_verdict =
   let completeness_gaps =
     List.concat_map (fun (c : Cdal_types.check_result) ->
       c.completeness_gaps) checks in
-  let basis_hash =
-    judgment_basis_hash
-      ~contract_id:b.proof.contract_id
-      ~schema_version:b.proof.schema_version in
+  let basis_hash = judgment_basis_hash b in
   let verdict_without_hash : Cdal_types.contract_verdict = {
     run_id = b.proof.run_id;
     contract_id = b.proof.contract_id;

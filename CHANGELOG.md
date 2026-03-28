@@ -1,10 +1,12 @@
 # Changelog
 
 
-## [Unreleased]
+## [2.159.1] - 2026-03-28
 
 ### Changed
 - **MCP SDK pin** — `scripts/opam-pin-external-deps.sh` now pins `mcp_protocol` to `jeong-sik/mcp-protocol-sdk#v1.2.0` instead of floating on `#main`.
+
+## [Unreleased]
 
 ## [2.159.0] - 2026-03-28
 

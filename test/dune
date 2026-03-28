@@ -47,7 +47,6 @@
         test_worktree_live_context
         test_tool_input_validation
         test_autoresearch_oas_primitives
-        test_cdal_eval
         test_contract_risk
         test_contract_composer
         test_cdal_conformance
@@ -84,7 +83,6 @@
           test_worktree_live_context
           test_tool_input_validation
           test_autoresearch_oas_primitives
-          test_cdal_eval
           test_contract_risk
           test_contract_composer
           test_cdal_conformance

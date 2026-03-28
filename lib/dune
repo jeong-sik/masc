@@ -470,7 +470,6 @@
    proof_artifact_reader
    violation_record
    token_usage_record
-   cdal_eval
    cdal_types
    cdal_loader
    cdal_judge

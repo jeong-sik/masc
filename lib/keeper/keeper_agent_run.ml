@@ -247,11 +247,17 @@ let run_turn
          ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
          (match result.proof with
           | Some p ->
-            Log.Keeper.info "keeper:%s proof: run_id=%s mode=%s status=%s violations=%d"
+            Log.Keeper.info "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
               meta.name p.run_id
               (Agent_sdk.Execution_mode.to_string p.effective_execution_mode)
               (Agent_sdk.Cdal_proof.show_result_status p.result_status)
-              (List.length p.raw_evidence_refs)
+              (List.length p.raw_evidence_refs);
+            let eval = Cdal_eval.evaluate p in
+            Log.Keeper.info "keeper:%s cdal_eval: %s"
+              meta.name (Cdal_eval.severity_to_string eval.overall);
+            if not (Cdal_eval.is_acceptable eval) then
+              Log.Keeper.warn "keeper:%s cdal verdict NOT acceptable: %s"
+                meta.name (Cdal_eval.severity_to_string eval.overall)
           | None -> ());
          Ok {
            response_text;

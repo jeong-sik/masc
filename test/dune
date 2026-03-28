@@ -47,6 +47,7 @@
         test_worktree_live_context
         test_tool_input_validation
         test_autoresearch_oas_primitives
+        test_cdal_eval
 )
  (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
           test_sse test_encryption test_cancellation test_graphql_api
@@ -75,6 +76,7 @@
           test_worktree_live_context
           test_tool_input_validation
           test_autoresearch_oas_primitives
+          test_cdal_eval
   )
  (libraries masc_mcp agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))

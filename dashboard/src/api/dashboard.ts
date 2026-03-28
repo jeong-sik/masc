@@ -482,7 +482,7 @@ export interface DashboardBuildIdentity {
 export interface DashboardRuntimeResolution {
   status: 'ready' | 'warn' | string
   warnings: string[]
-  base_path_input: DashboardConfigResolutionItem
+  base_path: DashboardConfigResolutionItem
   workspace_path: DashboardConfigResolutionItem
   resolved_base_path: DashboardConfigResolutionItem
   data_root: DashboardConfigResolutionItem

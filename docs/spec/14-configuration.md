@@ -46,8 +46,7 @@
 | `DUNE_SOURCEROOT` | string | - | 테스트 환경 fallback (3순위) |
 | `MASC_CONFIG_DIR` | string | 자동 탐색 | repo-managed config root (`config/cascade.json`, `config/prompts`, `config/keepers`, `config/personas`) |
 | `MASC_PERSONAS_DIR` | string | unset | persona root override. 설정 시 `config/personas` 대신 이 디렉토리를 사용 |
-| `MASC_SB_PATH` | string | `{root}/scripts/sb` | sb CLI 경로 |
-| `MASC_HTTP_PORT` / `MASC_PORT` | string | `"8935"` | HTTP 서버 포트 |
+| `MASC_HTTP_PORT` | string | `"8935"` | HTTP 서버 포트 |
 | `MASC_HTTP_BASE_URL` | string | - | 전체 base URL (설정 시 host/port 무시) |
 | `MASC_HOST` | string | - | 바인드 호스트 (base URL 미설정 시 필수) |
 | `LIBDATACHANNEL_PATH` | string | 자동 탐색 | WebRTC 라이브러리 경로 |

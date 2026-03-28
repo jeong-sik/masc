@@ -293,7 +293,7 @@ export function ConfigResolutionPanel({
               </div>
 
               <div class="grid gap-3 md:grid-cols-2">
-                <${ConfigRow} label="base path input" item=${runtimeResolution.base_path_input} />
+                <${ConfigRow} label="base path" item=${runtimeResolution.base_path} />
                 <${ConfigRow} label="workspace path" item=${runtimeResolution.workspace_path} />
                 <${ConfigRow} label="resolved base path" item=${runtimeResolution.resolved_base_path} />
                 <${ConfigRow} label="data root" item=${runtimeResolution.data_root} />

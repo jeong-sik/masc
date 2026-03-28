@@ -41,7 +41,7 @@ let project_root () =
             | None -> Sys.getcwd ()))
 
 let () =
-  if Sys.getenv_opt "MASC_ASSETS_DIR" = None && Sys.getenv_opt "MASC_ASSETS_ROOT" = None then
+  if Sys.getenv_opt "MASC_ASSETS_DIR" = None then
     let assets = Filename.concat (project_root ()) "assets" in
     if Sys.file_exists assets then Unix.putenv "MASC_ASSETS_DIR" assets
 
@@ -212,8 +212,6 @@ let test_fallback_on_missing_asset () =
       with_env
         [
           ("MASC_ASSETS_DIR", missing_assets_root);
-          ("MASC_ASSETS_ROOT", "");
-          ("MASC_BASE_PATH_INPUT", "");
           ("MASC_BASE_PATH", "");
         ]
         (fun () ->
@@ -224,43 +222,35 @@ let test_fallback_on_missing_asset () =
           check string "fallback etag is none" "none" etag))
     ~finally:(fun () -> Unix.rmdir missing_assets_root)
 
-let test_html_ignores_invalid_explicit_assets_root () =
-  let input_root = make_temp_dashboard_root "input-invalid-env" "dashboard-from-base-path-input" in
+let test_html_ignores_invalid_explicit_assets_dir () =
+  let base_root = make_temp_dashboard_root "base-fallback" "dashboard-from-base-path" in
   Fun.protect
     (fun () ->
       with_env
         [
-          ("MASC_ASSETS_ROOT", "/tmp/nonexistent_masc_assets_67890");
-          ("MASC_ASSETS_DIR", "");
-          ("MASC_BASE_PATH_INPUT", input_root);
-          ("MASC_BASE_PATH", "");
+          ("MASC_ASSETS_DIR", "/tmp/nonexistent_masc_assets_67890");
+          ("MASC_BASE_PATH", base_root);
         ]
         (fun () ->
           let html = Web_dashboard.html () in
-          check bool "falls back to base_path_input assets" true
-            (contains_substr "dashboard-from-base-path-input" html)))
-    ~finally:(fun () -> cleanup_temp_dashboard_root input_root)
+          check bool "falls back to base_path assets" true
+            (contains_substr "dashboard-from-base-path" html)))
+    ~finally:(fun () -> cleanup_temp_dashboard_root base_root)
 
-let test_html_uses_base_path_input_assets () =
-  let input_root = make_temp_dashboard_root "input" "dashboard-from-base-path-input" in
+let test_html_uses_base_path_assets () =
   let base_root = make_temp_dashboard_root "base" "dashboard-from-base-path" in
   Fun.protect
     (fun () ->
       with_env
         [
-          ("MASC_ASSETS_ROOT", "");
           ("MASC_ASSETS_DIR", "");
-          ("MASC_BASE_PATH_INPUT", input_root);
           ("MASC_BASE_PATH", base_root);
         ]
         (fun () ->
           let html = Web_dashboard.html () in
-          check bool "uses base_path_input assets first" true
-            (contains_substr "dashboard-from-base-path-input" html);
-          check bool "does not fall back to base_path assets" false
-            (contains_substr "dashboard-from-base-path</body>" html)))
+          check bool "uses base_path assets" true
+            (contains_substr "dashboard-from-base-path" html)))
     ~finally:(fun () ->
-      cleanup_temp_dashboard_root input_root;
       cleanup_temp_dashboard_root base_root)
 
 (* ============================================================
@@ -312,8 +302,8 @@ let () =
     ];
     "fallback", [
       test_case "missing asset dir" `Quick test_fallback_on_missing_asset;
-      test_case "invalid explicit assets root falls back" `Quick test_html_ignores_invalid_explicit_assets_root;
-      test_case "base_path_input assets" `Quick test_html_uses_base_path_input_assets;
+      test_case "invalid explicit assets dir falls back" `Quick test_html_ignores_invalid_explicit_assets_dir;
+      test_case "base_path assets" `Quick test_html_uses_base_path_assets;
     ];
     "asset_path_safety", [
       test_case "accept normal" `Quick test_safe_asset_relative_path_accepts_normal;

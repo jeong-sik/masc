@@ -1,59 +1,62 @@
-(** MCP Protocol Utilities
-    HTTP content negotiation for MCP Streamable HTTP transport *)
+(** MCP Protocol Utilities.
+    HTTP content negotiation for MCP Streamable HTTP transport.
+    Delegates parsing to {!Mcp_protocol.Http_negotiation} (SDK);
+    adds [accept_mode] with [Legacy_accepted] for backward-compat gating.
+
+    SDK workarounds (case + quality):
+    - SDK [parse_accept_header] preserves original case; HTTP media types
+      are case-insensitive (RFC 7231 §3.1.1.1).  Wrappers lowercase
+      type/subtype before comparison.
+    - SDK [accepts_sse] / [accepts_json] do not filter [q=0]
+      (mcp-protocol-sdk#80).  Wrappers enforce [q > 0] per §5.3.1. *)
 
 module Http_negotiation = struct
+  (** MASC-specific accept classification.
+      [Legacy_accepted] has no SDK equivalent — it gates on
+      [MASC_ALLOW_LEGACY_ACCEPT] to accept requests that lack both
+      JSON and SSE in the Accept header. *)
   type accept_mode =
     | Streamable
     | Legacy_accepted
     | Rejected
 
-  let sse_content_type = "text/event-stream"
-  let json_content_type = "application/json"
+  (* Re-export SDK constants so callers' [Http_negotiation.sse_content_type]
+     keeps compiling without an extra open. *)
+  let sse_content_type = Mcp_protocol.Http_negotiation.sse_content_type
+  let json_content_type = Mcp_protocol.Http_negotiation.json_content_type
 
-  let parse_accept_header accept_header =
-    match accept_header with
-    | None -> []
-    | Some header ->
-        header
-        |> String.split_on_char ','
-        |> List.map String.trim
-        |> List.filter_map (fun part ->
-               let lowered = String.lowercase_ascii part in
-               let parts = String.split_on_char ';' lowered in
-               match parts with
-               | [] -> None
-               | media_type :: params ->
-                   let q_value =
-                     List.find_map
-                       (fun param ->
-                         let param = String.trim param in
-                         if String.length param >= 2 && param.[0] = 'q'
-                            && param.[1] = '='
-                         then
-                           let q_str =
-                             String.sub param 2 (String.length param - 2)
-                           in
-                           try Some (float_of_string q_str) with Failure _ -> None
-                         else None)
-                       params
-                     |> Option.value ~default:1.0
-                   in
-                   Some (String.trim media_type, q_value))
-
-  let is_media_type_accepted media_types target =
-    let target = String.lowercase_ascii target in
+  (** Quality-aware, case-insensitive predicate using SDK's parser.
+      [check ~type_ ~subtype] receives lowercased values. *)
+  let exists_accepted h ~check =
+    let media_types = Mcp_protocol.Http_negotiation.parse_accept_header h in
     List.exists
-      (fun (media_type, q) -> q > 0.0 && String.equal media_type target)
+      (fun (mt : Mcp_protocol.Http_negotiation.media_type) ->
+        mt.quality > 0.0
+        && check
+             ~type_:(String.lowercase_ascii mt.type_)
+             ~subtype:(String.lowercase_ascii mt.subtype))
       media_types
 
-  let accepts_sse_header accept_header =
-    let media_types = parse_accept_header accept_header in
-    is_media_type_accepted media_types sse_content_type
+  let accepts_sse_header = function
+    | None -> false
+    | Some h ->
+        exists_accepted h ~check:(fun ~type_ ~subtype ->
+            type_ = "text" && subtype = "event-stream")
 
-  let accepts_streamable_mcp accept_header =
-    let media_types = parse_accept_header accept_header in
-    is_media_type_accepted media_types json_content_type
-    && is_media_type_accepted media_types sse_content_type
+  let accepts_json = function
+    | None -> false
+    | Some h ->
+        exists_accepted h ~check:(fun ~type_ ~subtype ->
+            (type_ = "application" && subtype = "json")
+            || (type_ = "*" && subtype = "*"))
+
+  let accepts_streamable_mcp = function
+    | None -> false
+    | Some h ->
+        exists_accepted h ~check:(fun ~type_ ~subtype ->
+            type_ = "application" && subtype = "json")
+        && exists_accepted h ~check:(fun ~type_ ~subtype ->
+               type_ = "text" && subtype = "event-stream")
 
   let classify_mcp_accept ~allow_legacy accept_header =
     if accepts_streamable_mcp accept_header then Streamable

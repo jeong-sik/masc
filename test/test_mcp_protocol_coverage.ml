@@ -1,12 +1,8 @@
-(** Mcp_protocol Module Coverage Tests
+(** Mcp_transport_protocol wrapper tests.
 
-    Tests for MCP Streamable HTTP Protocol:
-    - Http_negotiation.parse_accept_header: Accept header parsing
-    - Http_negotiation.is_media_type_accepted: media type matching
-    - Http_negotiation.accepts_sse_header: SSE acceptance
-    - Http_negotiation.accepts_streamable_mcp: streamable MCP acceptance
-    - Content type constants
-*)
+    Parsing/matching logic is delegated to Mcp_protocol.Http_negotiation (SDK).
+    These tests verify the string-option wrapper, accept_mode classification,
+    and wildcard handling via SDK. *)
 
 open Alcotest
 
@@ -23,98 +19,27 @@ let test_json_content_type () =
   check string "json content type" "application/json" Http_negotiation.json_content_type
 
 (* ============================================================
-   parse_accept_header Tests
+   accepts_json Tests (new: delegates to SDK with wildcard support)
    ============================================================ *)
 
-let test_parse_accept_header_none () =
-  let result = Http_negotiation.parse_accept_header None in
-  check int "empty list for None" 0 (List.length result)
+let test_accepts_json_none () =
+  check bool "None" false (Http_negotiation.accepts_json None)
 
-let test_parse_accept_header_empty () =
-  (* Empty string splits to [""] which yields one filter_map entry,
-     but the trimmed empty string doesn't match the pattern *)
-  let result = Http_negotiation.parse_accept_header (Some "") in
-  check int "empty list for empty string" 1 (List.length result)
+let test_accepts_json_exact () =
+  check bool "exact" true
+    (Http_negotiation.accepts_json (Some "application/json"))
 
-let test_parse_accept_header_single () =
-  let result = Http_negotiation.parse_accept_header (Some "application/json") in
-  check int "one entry" 1 (List.length result);
-  match result with
-  | [(media, q)] ->
-    check string "media type" "application/json" media;
-    check bool "q default 1.0" true (q = 1.0)
-  | _ -> fail "expected single entry"
+let test_accepts_json_not_found () =
+  check bool "xml" false
+    (Http_negotiation.accepts_json (Some "text/html"))
 
-let test_parse_accept_header_multiple () =
-  let result = Http_negotiation.parse_accept_header (Some "text/html, application/json") in
-  check int "two entries" 2 (List.length result)
+let test_accepts_json_wildcard () =
+  check bool "*/* matches json" true
+    (Http_negotiation.accepts_json (Some "*/*"))
 
-let test_parse_accept_header_with_q () =
-  let result = Http_negotiation.parse_accept_header (Some "text/html;q=0.9") in
-  match result with
-  | [(media, q)] ->
-    check string "media type" "text/html" media;
-    check bool "q = 0.9" true (abs_float (q -. 0.9) < 0.001)
-  | _ -> fail "expected single entry"
-
-let test_parse_accept_header_q_zero () =
-  let result = Http_negotiation.parse_accept_header (Some "text/html;q=0") in
-  match result with
-  | [(_, q)] -> check bool "q = 0" true (q = 0.0)
-  | _ -> fail "expected single entry"
-
-let test_parse_accept_header_case_insensitive () =
-  let result = Http_negotiation.parse_accept_header (Some "TEXT/HTML") in
-  match result with
-  | [(media, _)] -> check string "lowercase" "text/html" media
-  | _ -> fail "expected single entry"
-
-let test_parse_accept_header_complex () =
-  let result = Http_negotiation.parse_accept_header
-    (Some "text/html, application/json;q=0.9, */*;q=0.1") in
-  check int "three entries" 3 (List.length result)
-
-let test_parse_accept_header_with_charset () =
-  let result = Http_negotiation.parse_accept_header
-    (Some "text/html; charset=utf-8; q=0.8") in
-  match result with
-  | [(media, q)] ->
-    check string "media type" "text/html" media;
-    check bool "q = 0.8" true (abs_float (q -. 0.8) < 0.001)
-  | _ -> fail "expected single entry"
-
-let test_parse_accept_header_whitespace () =
-  let result = Http_negotiation.parse_accept_header
-    (Some "  text/html  ,  application/json  ") in
-  check int "two entries" 2 (List.length result)
-
-(* ============================================================
-   is_media_type_accepted Tests
-   ============================================================ *)
-
-let test_is_media_type_accepted_found () =
-  let media_types = [("application/json", 1.0); ("text/html", 0.5)] in
-  check bool "json found" true
-    (Http_negotiation.is_media_type_accepted media_types "application/json")
-
-let test_is_media_type_accepted_not_found () =
-  let media_types = [("application/json", 1.0)] in
-  check bool "xml not found" false
-    (Http_negotiation.is_media_type_accepted media_types "application/xml")
-
-let test_is_media_type_accepted_q_zero () =
-  let media_types = [("text/html", 0.0)] in
-  check bool "q=0 not accepted" false
-    (Http_negotiation.is_media_type_accepted media_types "text/html")
-
-let test_is_media_type_accepted_case_insensitive () =
-  let media_types = [("application/json", 1.0)] in
-  check bool "case insensitive" true
-    (Http_negotiation.is_media_type_accepted media_types "Application/JSON")
-
-let test_is_media_type_accepted_empty_list () =
-  check bool "empty list" false
-    (Http_negotiation.is_media_type_accepted [] "text/html")
+let test_accepts_json_in_list () =
+  check bool "json in list" true
+    (Http_negotiation.accepts_json (Some "text/html, application/json"))
 
 (* ============================================================
    accepts_sse_header Tests
@@ -128,6 +53,7 @@ let test_accepts_sse_json_only () =
     (Http_negotiation.accepts_sse_header (Some "application/json"))
 
 let test_accepts_sse_wildcard () =
+  (* SSE requires explicit opt-in; */* does not imply SSE readiness *)
   check bool "wildcard" false
     (Http_negotiation.accepts_sse_header (Some "*/*"))
 
@@ -178,6 +104,10 @@ let test_streamable_sse_q_zero () =
     (Http_negotiation.accepts_streamable_mcp
       (Some "application/json, text/event-stream;q=0"))
 
+(* ============================================================
+   classify_mcp_accept Tests
+   ============================================================ *)
+
 let test_classify_streamable () =
   let mode =
     Http_negotiation.classify_mcp_accept ~allow_legacy:false
@@ -202,34 +132,45 @@ let test_classify_rejected () =
   check bool "rejected mode" true
     (match mode with Http_negotiation.Rejected -> true | _ -> false)
 
+let test_classify_none_rejected () =
+  let mode =
+    Http_negotiation.classify_mcp_accept ~allow_legacy:false None
+  in
+  check bool "none rejected" true
+    (match mode with Http_negotiation.Rejected -> true | _ -> false)
+
+let test_classify_none_legacy () =
+  let mode =
+    Http_negotiation.classify_mcp_accept ~allow_legacy:true None
+  in
+  check bool "none legacy" true
+    (match mode with Http_negotiation.Legacy_accepted -> true | _ -> false)
+
+let test_classify_wildcard_legacy () =
+  (* */* alone: json=true but sse=false, so not Streamable *)
+  let mode =
+    Http_negotiation.classify_mcp_accept ~allow_legacy:true
+      (Some "*/*")
+  in
+  check bool "wildcard falls to legacy" true
+    (match mode with Http_negotiation.Legacy_accepted -> true | _ -> false)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
 
 let () =
-  run "Mcp_protocol Coverage" [
+  run "Mcp_transport_protocol Coverage" [
     "constants", [
       test_case "sse_content_type" `Quick test_sse_content_type;
       test_case "json_content_type" `Quick test_json_content_type;
     ];
-    "parse_accept_header", [
-      test_case "none" `Quick test_parse_accept_header_none;
-      test_case "empty" `Quick test_parse_accept_header_empty;
-      test_case "single" `Quick test_parse_accept_header_single;
-      test_case "multiple" `Quick test_parse_accept_header_multiple;
-      test_case "with q" `Quick test_parse_accept_header_with_q;
-      test_case "q zero" `Quick test_parse_accept_header_q_zero;
-      test_case "case insensitive" `Quick test_parse_accept_header_case_insensitive;
-      test_case "complex" `Quick test_parse_accept_header_complex;
-      test_case "with charset" `Quick test_parse_accept_header_with_charset;
-      test_case "whitespace" `Quick test_parse_accept_header_whitespace;
-    ];
-    "is_media_type_accepted", [
-      test_case "found" `Quick test_is_media_type_accepted_found;
-      test_case "not found" `Quick test_is_media_type_accepted_not_found;
-      test_case "q zero" `Quick test_is_media_type_accepted_q_zero;
-      test_case "case insensitive" `Quick test_is_media_type_accepted_case_insensitive;
-      test_case "empty list" `Quick test_is_media_type_accepted_empty_list;
+    "accepts_json", [
+      test_case "none" `Quick test_accepts_json_none;
+      test_case "exact" `Quick test_accepts_json_exact;
+      test_case "not found" `Quick test_accepts_json_not_found;
+      test_case "wildcard */*" `Quick test_accepts_json_wildcard;
+      test_case "in list" `Quick test_accepts_json_in_list;
     ];
     "accepts_sse_header", [
       test_case "none" `Quick test_accepts_sse_none;
@@ -252,5 +193,8 @@ let () =
       test_case "streamable" `Quick test_classify_streamable;
       test_case "legacy accepted" `Quick test_classify_legacy_accepted;
       test_case "rejected" `Quick test_classify_rejected;
+      test_case "none rejected" `Quick test_classify_none_rejected;
+      test_case "none legacy" `Quick test_classify_none_legacy;
+      test_case "wildcard legacy" `Quick test_classify_wildcard_legacy;
     ];
   ]

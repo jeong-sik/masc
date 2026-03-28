@@ -11,11 +11,13 @@
     fibers and the resource is only accessed from one domain, then no
     mutex is needed at all."
 
-    Implementation: registry_entry records are immutable (except embedded
-    Hashtbl fields board_wakeups and tool_usage which remain mutable
-    containers -- Phase 2 target).  Inter-fiber signaling uses [Atomic.t]
-    instead of [ref] for lock-free visibility.  The global registry is a
-    persistent [StringMap] behind a single [ref]. *)
+    Caveat: board_wakeups and tool_usage are mutable Hashtbl fields
+    mutated in-place.  The fiber-atomicity argument still holds because
+    each keeper has exactly one owning fiber (the keepalive loop), so
+    concurrent mutation of the same entry does not occur.
+
+    Implementation: [Atomic.t] for inter-fiber signaling (lock-free
+    visibility); persistent [StringMap] behind a single [ref]. *)
 
 open Keeper_types
 
@@ -58,9 +60,15 @@ let running_count_atomic = Atomic.make 0
 let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 
-(** Write an entry back to the registry map. *)
 let put_entry key entry =
   registry := StringMap.add key entry !registry
+
+(** Apply [f entry] and write back.  No-op if key absent. *)
+let update_entry ~base_path name f =
+  let key = registry_key ~base_path name in
+  match StringMap.find_opt key !registry with
+  | Some entry -> put_entry key (f entry)
+  | None -> ()
 
 let max_crash_log_entries = 5
 
@@ -120,10 +128,7 @@ let all ?base_path () =
     !registry []
 
 let update_meta ~base_path name meta =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
-  | Some entry -> put_entry key { entry with meta }
-  | None -> ()
+  update_entry ~base_path name (fun e -> { e with meta })
 
 let () =
   register_runtime_meta_write_sync (fun config meta ->
@@ -146,19 +151,12 @@ let set_state ~base_path name state =
   | None -> ()
 
 let record_restart ~base_path name =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
-  | Some entry ->
-      put_entry key { entry with
-        restart_count = entry.restart_count + 1;
-        last_restart_ts = Time_compat.now () }
-  | None -> ()
+  update_entry ~base_path name (fun e ->
+    { e with restart_count = e.restart_count + 1;
+             last_restart_ts = Time_compat.now () })
 
 let record_error ~base_path name err =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
-  | Some entry -> put_entry key { entry with last_error = Some err }
-  | None -> ()
+  update_entry ~base_path name (fun e -> { e with last_error = Some err })
 
 let is_running ~base_path name =
   match get ~base_path name with
@@ -176,14 +174,10 @@ let count_running ?base_path () =
         !registry 0
 
 let record_crash ~base_path name ts msg =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
-  | Some entry ->
-      put_entry key { entry with
-        crash_log =
-          List.filteri (fun i _ -> i < max_crash_log_entries)
-            ((ts, msg) :: entry.crash_log) }
-  | None -> ()
+  update_entry ~base_path name (fun e ->
+    { e with crash_log =
+        List.filteri (fun i _ -> i < max_crash_log_entries)
+          ((ts, msg) :: e.crash_log) })
 
 let set_grpc_close ~base_path name close_fn =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
@@ -232,11 +226,8 @@ let crash_log_of ~base_path name =
 
 let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts
     ~crash_log =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
-  | Some entry ->
-      put_entry key { entry with restart_count; last_restart_ts; crash_log }
-  | None -> ()
+  update_entry ~base_path name (fun e ->
+    { e with restart_count; last_restart_ts; crash_log })
 
 let get_last_agent_count ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
@@ -244,10 +235,7 @@ let get_last_agent_count ~base_path name =
   | None -> 0
 
 let set_last_agent_count ~base_path name count =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
-  | Some entry -> put_entry key { entry with last_agent_count = count }
-  | None -> ()
+  update_entry ~base_path name (fun e -> { e with last_agent_count = count })
 
 let board_wakeup_allowed ~base_path name ~post_id ~debounce_sec =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
@@ -286,13 +274,13 @@ let get_board_cursor_ts ~base_path name =
   | None -> 0.0
 
 let set_board_cursor_ts ~base_path name ts =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
-  | Some entry -> put_entry key { entry with board_cursor_ts = ts }
-  | None -> ()
+  update_entry ~base_path name (fun e -> { e with board_cursor_ts = ts })
 
 (* -- Tool usage tracking ------------------------------------------- *)
 
+(* Safe without mutex: each keeper has exactly one fiber calling
+   record_tool_use for a given (base_path, name) pair.  See module
+   docstring for thread-safety reasoning. *)
 let record_tool_use ~base_path name ~tool_name ~success =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
   | None -> ()

@@ -135,7 +135,7 @@ type post = {
   votes_up: int;
   votes_down: int;
   reply_count: int;
-  hearth: string option;     (* Topic category within the Lodge *)
+  hearth: string option;     (* Topic category within the Board *)
   thread_id: string option;  (* Linked Conversation thread *)
 }
 

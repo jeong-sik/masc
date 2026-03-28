@@ -91,7 +91,7 @@ for ml_file in "$LIB_DIR"/*.ml; do
     *_types*|*_enums*) category="types" ;;
     masc_pb) category="generated" ;;
     cp_*) category="command_plane" ;;
-    lodge_*) category="autonomy" ;;
+    autonomy_*) category="autonomy" ;;
     voice_*) category="voice" ;;
     trpg_*) category="trpg" ;;
     a2a_*) category="a2a" ;;

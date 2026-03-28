@@ -1,7 +1,7 @@
 (** Pulse — the beating heart of any Space.
 
     A Space is an abstracted environment where agents exist and act.
-    Lodge (perpetual, no end) and TRPG (bounded, session ends) are both Spaces.
+    Keeper Autonomy (perpetual, no end) and TRPG (bounded, session ends) are both Spaces.
     The only axis of variation is lifecycle: when does the heart stop?
 
     The Pulse is a tick engine driven by two forces:
@@ -41,7 +41,7 @@ type rhythm = {
 
 (** Space lifecycle. The only difference between spaces. *)
 type lifecycle =
-  | Perpetual             (** Never stops (Lodge). Runs until explicit shutdown. *)
+  | Perpetual             (** Never stops (Keeper Autonomy). Runs until explicit shutdown. *)
   | Bounded of (beat -> bool)
     (** Stops when predicate returns true (TRPG session end, time limit, etc.) *)
 

@@ -74,13 +74,6 @@ let stats_path () =
   in
   let masc_dir = Filename.concat base ".masc" in
   Fs_compat.mkdir_p masc_dir;
-  (* Migrate legacy file name; ignore race if another process already renamed *)
-  let () =
-    let legacy = Filename.concat masc_dir "lodge_stats.jsonl" in
-    let current = Filename.concat masc_dir "autonomy_stats.jsonl" in
-    if (not (Sys.file_exists current)) && Sys.file_exists legacy then
-      (try Sys.rename legacy current with Sys_error _ -> ())
-  in
   Filename.concat masc_dir "autonomy_stats.jsonl"
 
 (** {1 Beta Distribution Sampling} *)

@@ -1,6 +1,6 @@
-(** Agent Health — Lodge-specific health gate over Circuit Breaker.
+(** Agent Health — Autonomy-specific health gate over Circuit Breaker.
 
-    Wraps Circuit_breaker with agent-name semantics for Lodge Heartbeat.
+    Wraps Circuit_breaker with agent-name semantics for Keeper Heartbeat.
     Agents with open circuit breakers are skipped during tick selection,
     preventing cascading failures from repeatedly invoking failing agents.
 

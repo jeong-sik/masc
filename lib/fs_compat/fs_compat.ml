@@ -10,7 +10,7 @@
     When fs is not set (non-Eio contexts), falls back to blocking Unix I/O.
     This allows incremental migration without changing all call sites at once.
 
-    @since 2026-02 - Lodge Emergent Identity v2.0
+    @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
 (** Global fs reference - set at Eio_main.run startup *)

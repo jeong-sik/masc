@@ -120,7 +120,7 @@ val record_quality_signal :
 
 (** {1 Persistence} *)
 
-(** Load stats from persistent storage (.masc/lodge_stats.jsonl for backward compat) *)
+(** Load stats from persistent storage (.masc/autonomy_stats.jsonl) *)
 val load_stats : unit -> unit
 
 (** Save stats to persistent storage *)

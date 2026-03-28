@@ -585,7 +585,7 @@ let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Sa
 
 (** {1 Heartbeat Task Events — Soul + Tool Loop Pattern}
 
-    MASC emits heartbeat_task events when an external worker should act as a Lodge
+    MASC emits heartbeat_task events when an external worker should act as a Keeper
     agent through the MCP tool loop. The payload carries the goal, context, and
     allowed tools. The worker performs tools directly, then reports completion
     evidence back to MASC.

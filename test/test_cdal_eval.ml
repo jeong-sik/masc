@@ -1,7 +1,11 @@
-(** test_cdal_eval — Phase 0 CDAL eval unit tests.
+(** test_cdal_eval — Content-based CDAL eval tests.
 
-    Verifies that Masc_mcp.Cdal_eval.evaluate produces correct verdicts
-    for each result_status, violation state, and evidence state. *)
+    Tests both pure evaluation (evaluate_content) and artifact-reading
+    evaluation (evaluate ~store) with synthetic proof bundles. *)
+
+module CE = Masc_mcp.Cdal_eval
+module VR = Masc_mcp.Violation_record
+module TU = Masc_mcp.Token_usage_record
 
 let make_proof
     ?(run_id = "test-run-001")
@@ -43,204 +47,245 @@ let make_proof
     ended_at = 1001.0;
   }
 
+let make_violation ?(ts = 1000.5) ?(tool_name = "write")
+    ?(input_summary = "{}") ?(effective_mode = Agent_sdk.Execution_mode.Diagnose)
+    ?(violation_kind = VR.Mutating_in_diagnose)
+    () : VR.t =
+  { ts; tool_name; input_summary; effective_mode; violation_kind }
+
 (* ================================================================ *)
-(* Test: Completed run with traces → Ok                              *)
+(* Pure evaluate_content tests                                       *)
 (* ================================================================ *)
 
-let test_completed_with_traces () =
+let test_completed_no_violations () =
   let proof = make_proof () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  Alcotest.(check bool) "has_tool_traces" true result.evidence.has_tool_traces;
-  Alcotest.(check bool) "completed_normally" true result.evidence.completed_normally;
-  Alcotest.(check bool) "is_acceptable" true (Masc_mcp.Cdal_eval.is_acceptable result);
-  Alcotest.(check string) "overall is ok"
-    "ok" (Masc_mcp.Cdal_eval.severity_to_string result.overall)
-
-(* ================================================================ *)
-(* Test: Cancelled run → Fail                                        *)
-(* ================================================================ *)
+  let result = CE.evaluate_content ~violations:[] ~token_usage:[] ~trace_count:1 proof in
+  Alcotest.(check string) "ok" "ok" (CE.severity_to_string result.overall);
+  Alcotest.(check bool) "acceptable" true (CE.is_acceptable result);
+  Alcotest.(check bool) "no recommendation" true (result.recommendation = None)
 
 let test_cancelled () =
   let proof = make_proof ~result_status:Cancelled () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  Alcotest.(check bool) "completed_normally" false result.evidence.completed_normally;
-  Alcotest.(check bool) "is_acceptable" false (Masc_mcp.Cdal_eval.is_acceptable result);
-  Alcotest.(check string) "overall is fail"
-    "fail: cancelled by contract" (Masc_mcp.Cdal_eval.severity_to_string result.overall)
-
-(* ================================================================ *)
-(* Test: Errored run → Warn                                          *)
-(* ================================================================ *)
+  let result = CE.evaluate_content ~violations:[] ~token_usage:[] ~trace_count:0 proof in
+  Alcotest.(check string) "fail" "fail: cancelled by contract"
+    (CE.severity_to_string result.overall);
+  Alcotest.(check bool) "not acceptable" false (CE.is_acceptable result)
 
 let test_errored () =
   let proof = make_proof ~result_status:Errored () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  Alcotest.(check bool) "is_acceptable" true (Masc_mcp.Cdal_eval.is_acceptable result);
-  Alcotest.(check string) "overall is warn"
-    "warn: execution error" (Masc_mcp.Cdal_eval.severity_to_string result.overall)
-
-(* ================================================================ *)
-(* Test: Timed out run → Warn                                        *)
-(* ================================================================ *)
+  let result = CE.evaluate_content ~violations:[] ~token_usage:[] ~trace_count:0 proof in
+  Alcotest.(check string) "warn" "warn: execution error"
+    (CE.severity_to_string result.overall)
 
 let test_timed_out () =
   let proof = make_proof ~result_status:Timed_out () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  Alcotest.(check bool) "is_acceptable" true (Masc_mcp.Cdal_eval.is_acceptable result);
-  Alcotest.(check string) "overall is warn"
-    "warn: execution timed out" (Masc_mcp.Cdal_eval.severity_to_string result.overall)
+  let result = CE.evaluate_content ~violations:[] ~token_usage:[] ~trace_count:0 proof in
+  Alcotest.(check string) "warn" "warn: execution timed out"
+    (CE.severity_to_string result.overall)
 
-(* ================================================================ *)
-(* Test: Mode violations detected → Warn                             *)
-(* ================================================================ *)
+let test_mutating_in_diagnose () =
+  let v = make_violation ~tool_name:"fs_edit"
+    ~effective_mode:Diagnose ~violation_kind:Mutating_in_diagnose () in
+  let proof = make_proof ~effective:Diagnose () in
+  let result = CE.evaluate_content ~violations:[v] ~token_usage:[] ~trace_count:1 proof in
+  (match result.recommendation with
+   | Some r ->
+     Alcotest.(check string) "min required = Draft"
+       "draft" (Agent_sdk.Execution_mode.to_string r.minimum_required);
+     Alcotest.(check int) "gap = 1" 1 r.gap;
+     Alcotest.(check (list string)) "offending tools"
+       ["fs_edit"] r.offending_tools
+   | None -> Alcotest.fail "expected recommendation for violation")
 
-let test_violations () =
-  let proof = make_proof
-    ~raw_evidence_refs:[
-      "proof-store://r1/evidence/mode_violations.json";
-      "proof-store://r1/evidence/token_usage.json";
-    ] () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  Alcotest.(check int) "violation_ref_count" 1 result.violations.violation_ref_count;
-  Alcotest.(check bool) "has_raw_evidence" true result.evidence.has_raw_evidence;
-  Alcotest.(check string) "overall is warn"
-    "warn: 1 mode violation(s) detected"
-    (Masc_mcp.Cdal_eval.severity_to_string result.overall)
+let test_external_in_draft () =
+  let v = make_violation ~tool_name:"mcp__slack_send"
+    ~effective_mode:Draft ~violation_kind:External_in_draft () in
+  let proof = make_proof ~effective:Draft () in
+  let result = CE.evaluate_content ~violations:[v] ~token_usage:[] ~trace_count:1 proof in
+  (match result.recommendation with
+   | Some r ->
+     Alcotest.(check string) "min required = Execute"
+       "execute" (Agent_sdk.Execution_mode.to_string r.minimum_required);
+     Alcotest.(check int) "gap = 1" 1 r.gap
+   | None -> Alcotest.fail "expected recommendation")
 
-(* ================================================================ *)
-(* Test: No evidence at all → Warn                                   *)
-(* ================================================================ *)
+let test_multiple_violations_max_mode () =
+  let v1 = make_violation ~tool_name:"write"
+    ~effective_mode:Diagnose ~violation_kind:Mutating_in_diagnose () in
+  let v2 = make_violation ~tool_name:"bash"
+    ~effective_mode:Diagnose ~violation_kind:External_in_draft () in
+  let proof = make_proof ~effective:Diagnose () in
+  let result = CE.evaluate_content ~violations:[v1; v2] ~token_usage:[] ~trace_count:1 proof in
+  (match result.recommendation with
+   | Some r ->
+     Alcotest.(check string) "max = Execute"
+       "execute" (Agent_sdk.Execution_mode.to_string r.minimum_required);
+     Alcotest.(check int) "gap = 2" 2 r.gap;
+     Alcotest.(check int) "2 offending tools" 2 (List.length r.offending_tools)
+   | None -> Alcotest.fail "expected recommendation")
 
 let test_no_evidence () =
-  let proof = make_proof
-    ~tool_trace_refs:[]
-    ~raw_evidence_refs:[] () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  Alcotest.(check bool) "has_tool_traces" false result.evidence.has_tool_traces;
-  Alcotest.(check bool) "has_raw_evidence" false result.evidence.has_raw_evidence;
-  Alcotest.(check string) "overall is warn"
-    "warn: no evidence produced" (Masc_mcp.Cdal_eval.severity_to_string result.overall)
+  let proof = make_proof ~tool_trace_refs:[] () in
+  let result = CE.evaluate_content ~violations:[] ~token_usage:[] ~trace_count:0 proof in
+  Alcotest.(check string) "warn" "warn: no evidence produced"
+    (CE.severity_to_string result.overall)
 
-(* ================================================================ *)
-(* Test: Mode downgrade detected                                     *)
-(* ================================================================ *)
-
-let test_mode_downgrade () =
-  let proof = make_proof
-    ~requested:Execute
-    ~effective:Draft
-    ~mode_decision_source:"risk_class_downgrade" () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  Alcotest.(check bool) "mode_was_downgraded" true
-    result.violations.mode_was_downgraded;
-  Alcotest.(check string) "downgrade_reason"
-    "risk_class_downgrade"
-    (Option.get result.violations.downgrade_reason);
-  (* Downgrade alone does not produce a violation ref, so overall is Ok *)
-  Alcotest.(check string) "overall is ok"
-    "ok" (Masc_mcp.Cdal_eval.severity_to_string result.overall)
-
-(* ================================================================ *)
-(* Test: Checkpoint present                                          *)
-(* ================================================================ *)
-
-let test_checkpoint_present () =
-  let proof = make_proof
-    ~checkpoint_ref:(Some "proof-store://r1/checkpoint.json") () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  Alcotest.(check bool) "has_checkpoint" true result.evidence.has_checkpoint
-
-(* ================================================================ *)
-(* Test: JSON round-trip                                             *)
-(* ================================================================ *)
-
-let test_json_output () =
+let test_token_usage_in_evidence () =
+  let usage = [
+    { TU.turn = 0; input_tokens = 100; output_tokens = 50; cost_usd = Some 0.01 };
+    { TU.turn = 1; input_tokens = 200; output_tokens = 100; cost_usd = Some 0.02 };
+  ] in
   let proof = make_proof () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  let json = Masc_mcp.Cdal_eval.to_json result in
-  let json_str = Yojson.Safe.to_string json in
-  (* Verify it is valid JSON with expected fields *)
-  Alcotest.(check bool) "has run_id"
-    true (String.length json_str > 0);
+  let result = CE.evaluate_content ~violations:[] ~token_usage:usage ~trace_count:1 proof in
+  Alcotest.(check int) "total tokens" 450
+    (TU.total_tokens result.evidence.token_usage)
+
+let test_json_has_violations_detail () =
+  let v = make_violation ~tool_name:"bash" ~violation_kind:External_in_draft () in
+  let proof = make_proof ~effective:Draft () in
+  let result = CE.evaluate_content ~violations:[v] ~token_usage:[] ~trace_count:1 proof in
+  let json = CE.to_json result in
   match json with
   | `Assoc fields ->
-    Alcotest.(check bool) "has run_id field"
-      true (List.mem_assoc "run_id" fields);
-    Alcotest.(check bool) "has evidence field"
-      true (List.mem_assoc "evidence" fields);
-    Alcotest.(check bool) "has violations field"
+    Alcotest.(check bool) "has violations"
       true (List.mem_assoc "violations" fields);
-    Alcotest.(check bool) "has overall field"
-      true (List.mem_assoc "overall" fields)
+    Alcotest.(check bool) "has recommendation"
+      true (List.mem_assoc "recommendation" fields);
+    (match List.assoc "violations" fields with
+     | `List [_v] -> ()
+     | _ -> Alcotest.fail "expected 1 violation in JSON")
   | _ -> Alcotest.fail "expected JSON object"
 
-(* ================================================================ *)
-(* Test: Recommendation for Ok → None                                *)
-(* ================================================================ *)
-
-let test_recommendation_ok () =
+let test_json_no_recommendation_when_ok () =
   let proof = make_proof () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  Alcotest.(check bool) "no recommendation for Ok"
-    true (Masc_mcp.Cdal_eval.recommendation result = None)
-
-(* ================================================================ *)
-(* Test: Recommendation for violations → actionable text             *)
-(* ================================================================ *)
-
-let test_recommendation_violations () =
-  let proof = make_proof
-    ~raw_evidence_refs:["proof-store://r1/evidence/mode_violations.json"] () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  match Masc_mcp.Cdal_eval.recommendation result with
-  | Some text ->
-    Alcotest.(check bool) "mentions scope_kind or tools"
-      true (String.length text > 10)
-  | None -> Alcotest.fail "expected recommendation for violations"
-
-(* ================================================================ *)
-(* Test: Recommendation for cancelled → mentions scope_kind          *)
-(* ================================================================ *)
-
-let test_recommendation_cancelled () =
-  let proof = make_proof ~result_status:Cancelled () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  match Masc_mcp.Cdal_eval.recommendation result with
-  | Some text ->
-    Alcotest.(check bool) "mentions scope_kind"
-      true (String.length text > 10)
-  | None -> Alcotest.fail "expected recommendation for cancelled"
-
-(* ================================================================ *)
-(* Test: JSON includes recommendation field when not Ok              *)
-(* ================================================================ *)
-
-let test_json_has_recommendation () =
-  let proof = make_proof ~result_status:Errored () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  let json = Masc_mcp.Cdal_eval.to_json result in
+  let result = CE.evaluate_content ~violations:[] ~token_usage:[] ~trace_count:1 proof in
+  let json = CE.to_json result in
   match json with
   | `Assoc fields ->
-    Alcotest.(check bool) "has recommendation"
-      true (List.mem_assoc "recommendation" fields)
+    Alcotest.(check bool) "no recommendation"
+      false (List.mem_assoc "recommendation" fields)
   | _ -> Alcotest.fail "expected JSON object"
 
 (* ================================================================ *)
-(* Test: Persist writes to JSONL store                               *)
+(* Integration test: write proof artifacts, then evaluate             *)
 (* ================================================================ *)
 
-let test_persist () =
+let test_integration_read_violations () =
   Eio_main.run @@ fun _env ->
   let tmp_dir = Filename.concat
     (Filename.get_temp_dir_name ())
-    (Printf.sprintf "cdal_eval_test_%d" (Unix.getpid ())) in
-  Masc_mcp.Cdal_eval.set_store_for_testing ~base_dir:tmp_dir;
-  let proof = make_proof () in
-  let result = Masc_mcp.Cdal_eval.evaluate proof in
-  Masc_mcp.Cdal_eval.persist result;
-  Alcotest.(check bool) "store dir exists"
-    true (Sys.file_exists tmp_dir);
-  Masc_mcp.Cdal_eval.reset_store_for_testing ()
+    (Printf.sprintf "cdal_eval_int_%d" (Unix.getpid ())) in
+  let store : Agent_sdk.Proof_store.config = { root = tmp_dir } in
+  let run_id = "int-test-001" in
+  let run_dir = Filename.concat (Filename.concat tmp_dir "proofs") run_id in
+  let () =
+    let rec mkdirp path =
+      if not (Sys.file_exists path) then begin
+        mkdirp (Filename.dirname path);
+        Unix.mkdir path 0o755
+      end
+    in
+    mkdirp (Filename.concat run_dir "tool_traces");
+    mkdirp (Filename.concat run_dir "evidence")
+  in
+  (* Write synthetic violation evidence *)
+  let violation_json = `List [
+    `Assoc [
+      ("ts", `Float 1000.5);
+      ("tool_name", `String "bash");
+      ("input_summary", `String "rm -rf /tmp/x");
+      ("effective_mode", `String "draft");
+      ("violation_kind", `String "external_in_draft");
+    ]
+  ] in
+  Agent_sdk.Proof_store.write_evidence store ~run_id
+    ~ref_id:"mode_violations" violation_json;
+  (* Write synthetic token usage *)
+  let token_json = `List [
+    `Assoc [
+      ("turn", `Int 0);
+      ("input_tokens", `Int 500);
+      ("output_tokens", `Int 100);
+      ("cost_usd", `Float 0.005);
+    ]
+  ] in
+  Agent_sdk.Proof_store.write_evidence store ~run_id
+    ~ref_id:"token_usage" token_json;
+  (* Build proof manifest with refs *)
+  let proof = make_proof ~run_id ~effective:Draft
+    ~raw_evidence_refs:[
+      Agent_sdk.Proof_store.make_ref ~run_id ~subpath:"evidence/mode_violations.json";
+      Agent_sdk.Proof_store.make_ref ~run_id ~subpath:"evidence/token_usage.json";
+    ] () in
+  (* Evaluate with artifact reading *)
+  let result = CE.evaluate ~store proof in
+  Alcotest.(check int) "1 violation read" 1
+    (List.length result.evidence.violations);
+  Alcotest.(check int) "1 token record read" 1
+    (List.length result.evidence.token_usage);
+  (match result.recommendation with
+   | Some r ->
+     Alcotest.(check string) "min = execute"
+       "execute" (Agent_sdk.Execution_mode.to_string r.minimum_required);
+     Alcotest.(check (list string)) "offending = [bash]"
+       ["bash"] r.offending_tools
+   | None -> Alcotest.fail "expected recommendation from read violations");
+  (* Verify JSONL persistence *)
+  let jsonl_dir = Filename.concat tmp_dir "cdal_evals_test" in
+  CE.set_store_for_testing ~base_dir:jsonl_dir;
+  CE.persist result;
+  Alcotest.(check bool) "jsonl dir exists" true (Sys.file_exists jsonl_dir);
+  CE.reset_store_for_testing ()
+
+let test_integration_missing_artifact () =
+  let store : Agent_sdk.Proof_store.config =
+    { root = "/nonexistent/path" } in
+  let proof = make_proof
+    ~raw_evidence_refs:["proof-store://missing/evidence/mode_violations.json"]
+    () in
+  let result = CE.evaluate ~store proof in
+  Alcotest.(check int) "0 violations (graceful)" 0
+    (List.length result.evidence.violations);
+  Alcotest.(check string) "ok (no violations read)" "ok"
+    (CE.severity_to_string result.overall)
+
+(* ================================================================ *)
+(* Violation_record unit tests                                       *)
+(* ================================================================ *)
+
+let test_violation_parse () =
+  let json = `Assoc [
+    ("ts", `Float 1.0);
+    ("tool_name", `String "write");
+    ("input_summary", `String "content");
+    ("effective_mode", `String "diagnose");
+    ("violation_kind", `String "mutating_in_diagnose");
+  ] in
+  match VR.of_json json with
+  | Ok v ->
+    Alcotest.(check string) "tool" "write" v.tool_name;
+    Alcotest.(check string) "kind" "mutating_in_diagnose"
+      (VR.violation_kind_to_string v.violation_kind);
+    Alcotest.(check string) "min mode" "draft"
+      (Agent_sdk.Execution_mode.to_string (VR.minimum_required_mode v))
+  | Error e -> Alcotest.fail e
+
+let test_violation_unknown_kind () =
+  let json = `Assoc [
+    ("ts", `Float 1.0);
+    ("tool_name", `String "x");
+    ("input_summary", `String "");
+    ("effective_mode", `String "execute");
+    ("violation_kind", `String "new_kind_v2");
+  ] in
+  match VR.of_json json with
+  | Ok v ->
+    (match v.violation_kind with
+     | VR.Unknown "new_kind_v2" -> ()
+     | _ -> Alcotest.fail "expected Unknown");
+    Alcotest.(check string) "min mode unchanged" "execute"
+      (Agent_sdk.Execution_mode.to_string (VR.minimum_required_mode v))
+  | Error e -> Alcotest.fail e
 
 (* ================================================================ *)
 (* Runner                                                            *)
@@ -248,20 +293,25 @@ let test_persist () =
 
 let () =
   Alcotest.run "Cdal_eval" [
-    ("evaluate", [
-      Alcotest.test_case "completed with traces" `Quick test_completed_with_traces;
+    ("pure_eval", [
+      Alcotest.test_case "completed no violations" `Quick test_completed_no_violations;
       Alcotest.test_case "cancelled" `Quick test_cancelled;
       Alcotest.test_case "errored" `Quick test_errored;
       Alcotest.test_case "timed out" `Quick test_timed_out;
-      Alcotest.test_case "violations" `Quick test_violations;
+      Alcotest.test_case "mutating in diagnose" `Quick test_mutating_in_diagnose;
+      Alcotest.test_case "external in draft" `Quick test_external_in_draft;
+      Alcotest.test_case "multiple violations max mode" `Quick test_multiple_violations_max_mode;
       Alcotest.test_case "no evidence" `Quick test_no_evidence;
-      Alcotest.test_case "mode downgrade" `Quick test_mode_downgrade;
-      Alcotest.test_case "checkpoint present" `Quick test_checkpoint_present;
-      Alcotest.test_case "json output" `Quick test_json_output;
-      Alcotest.test_case "recommendation ok" `Quick test_recommendation_ok;
-      Alcotest.test_case "recommendation violations" `Quick test_recommendation_violations;
-      Alcotest.test_case "recommendation cancelled" `Quick test_recommendation_cancelled;
-      Alcotest.test_case "json has recommendation" `Quick test_json_has_recommendation;
-      Alcotest.test_case "persist" `Quick test_persist;
+      Alcotest.test_case "token usage" `Quick test_token_usage_in_evidence;
+      Alcotest.test_case "json violations detail" `Quick test_json_has_violations_detail;
+      Alcotest.test_case "json no recommendation when ok" `Quick test_json_no_recommendation_when_ok;
+    ]);
+    ("integration", [
+      Alcotest.test_case "read violations from store" `Quick test_integration_read_violations;
+      Alcotest.test_case "missing artifact graceful" `Quick test_integration_missing_artifact;
+    ]);
+    ("violation_record", [
+      Alcotest.test_case "parse" `Quick test_violation_parse;
+      Alcotest.test_case "unknown kind" `Quick test_violation_unknown_kind;
     ]);
   ]

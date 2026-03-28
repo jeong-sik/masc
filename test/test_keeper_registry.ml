@@ -284,6 +284,60 @@ let test_cleanup_tracking () =
   let allowed = R.board_wakeup_allowed ~base_path:bp "ct1" ~post_id:"x" ~debounce_sec:60.0 in
   check bool "wakeup allowed after cleanup" true allowed
 
+let test_find_by_agent_name () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "fn1" (make_meta "fn1") in
+  let _entry2 = R.register ~base_path:bp "fn2" (make_meta "fn2") in
+  (match R.find_by_agent_name "agent-fn2" with
+   | Some e -> check string "found by agent_name" "fn2" e.name
+   | None -> fail "expected fn2 via agent_name");
+  check bool "not found returns None" true
+    (Option.is_none (R.find_by_agent_name "agent-nonexistent"))
+
+(* ── Directive processing tests ─────────────────────────── *)
+
+module KK = Masc_mcp.Keeper_keepalive
+
+let test_directive_pause () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "dp1" (make_meta "dp1") in
+  KK.process_directive ~agent_name:"agent-dp1" "pause";
+  match R.get ~base_path:bp "dp1" with
+  | Some e -> check bool "paused after directive" true e.meta.paused
+  | None -> fail "expected dp1"
+
+let test_directive_resume () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "dr1" (make_meta "dr1") in
+  KK.process_directive ~agent_name:"agent-dr1" "pause";
+  KK.process_directive ~agent_name:"agent-dr1" "resume";
+  match R.get ~base_path:bp "dr1" with
+  | Some e -> check bool "resumed after directive" false e.meta.paused
+  | None -> fail "expected dr1"
+
+let test_directive_claim () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "dc1" (make_meta "dc1") in
+  KK.process_directive ~agent_name:"agent-dc1" "claim:T-42";
+  match R.get ~base_path:bp "dc1" with
+  | Some e ->
+    (match e.meta.current_task_id with
+     | Some tid -> check string "task assigned" "T-42" tid
+     | None -> fail "expected current_task_id set")
+  | None -> fail "expected dc1"
+
+let test_directive_unknown_no_crash () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "du1" (make_meta "du1") in
+  KK.process_directive ~agent_name:"agent-du1" "unknown-directive";
+  check bool "still running after unknown directive" true
+    (R.is_running ~base_path:bp "du1")
+
+let test_directive_nonexistent_agent () =
+  R.clear ();
+  KK.process_directive ~agent_name:"ghost-agent" "pause";
+  check bool "no crash on missing agent" true true
+
 let () =
   run "Keeper_registry"
     [
@@ -323,5 +377,17 @@ let () =
           eio_test "board wakeup debounce" test_board_wakeup_debounce;
           eio_test "board wakeup different post" test_board_wakeup_different_post;
           eio_test "cleanup_tracking resets" test_cleanup_tracking;
+        ] );
+      ( "agent_name_lookup",
+        [
+          eio_test "find_by_agent_name" test_find_by_agent_name;
+        ] );
+      ( "directives",
+        [
+          eio_test "pause directive" test_directive_pause;
+          eio_test "resume directive" test_directive_resume;
+          eio_test "claim directive" test_directive_claim;
+          eio_test "unknown directive no crash" test_directive_unknown_no_crash;
+          eio_test "nonexistent agent no crash" test_directive_nonexistent_agent;
         ] );
     ]

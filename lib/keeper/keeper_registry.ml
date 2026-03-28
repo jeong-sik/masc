@@ -360,6 +360,16 @@ let find_by_name name =
         | None -> if String.equal v.name name then Some v else None)
       !registry None)
 
+let find_by_agent_name agent_name =
+  with_lock_ro (fun () ->
+    StringMap.fold
+      (fun _k v acc ->
+        match acc with
+        | Some _ -> acc
+        | None ->
+          if String.equal v.meta.agent_name agent_name then Some v else None)
+      !registry None)
+
 let tool_usage_of_by_name name =
   with_lock (fun () ->
     match find_by_name name with

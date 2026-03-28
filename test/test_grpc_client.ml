@@ -186,6 +186,29 @@ let test_subscribe_request_serde () =
   Alcotest.(check (list string)) "types" req.event_types decoded.event_types;
   Alcotest.(check int64) "seq" req.since_seq decoded.since_seq
 
+let test_heartbeat_ack_directive_types () =
+  let ack = T.HeartbeatAck.{
+    timestamp_ms = 1700000002000L;
+    active_agent_count = 2;
+    pending_task_count = 1;
+    directives = ["pause"; "claim:T-42"; "wakeup"; "resume"];
+  } in
+  let bytes = T.HeartbeatAck.to_bytes ack in
+  let decoded = T.HeartbeatAck.of_bytes bytes in
+  Alcotest.(check (list string)) "P3 directives roundtrip"
+    ["pause"; "claim:T-42"; "wakeup"; "resume"] decoded.directives
+
+let test_heartbeat_ack_empty_directives () =
+  let ack = T.HeartbeatAck.{
+    timestamp_ms = 1700000003000L;
+    active_agent_count = 0;
+    pending_task_count = 0;
+    directives = [];
+  } in
+  let bytes = T.HeartbeatAck.to_bytes ack in
+  let decoded = T.HeartbeatAck.of_bytes bytes in
+  Alcotest.(check (list string)) "empty directives" [] decoded.directives
+
 (* ====== Test runner ====== *)
 
 let () =
@@ -202,6 +225,10 @@ let () =
       Alcotest.test_case "event roundtrip" `Quick test_event_roundtrip;
       Alcotest.test_case "status response roundtrip" `Quick test_status_response_roundtrip;
       Alcotest.test_case "subscribe request serde" `Quick test_subscribe_request_serde;
+    ];
+    "directives", [
+      Alcotest.test_case "P3 directive types roundtrip" `Quick test_heartbeat_ack_directive_types;
+      Alcotest.test_case "empty directives roundtrip" `Quick test_heartbeat_ack_empty_directives;
     ];
     "transport", [
       Alcotest.test_case "default is local" `Quick test_transport_from_env_default;

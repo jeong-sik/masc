@@ -198,11 +198,11 @@ let inputs_from_env () =
   {
     cwd = Sys.getcwd ();
     executable_name = Sys.executable_name;
-    env_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR";
-    env_personas_dir = Sys.getenv_opt "MASC_PERSONAS_DIR";
+    env_config_dir = Env_config.Server.Dirs.config_dir_opt ();
+    env_personas_dir = Env_config.Server.Dirs.personas_dir_opt ();
     env_home = Sys.getenv_opt "HOME";
     env_me_root = Sys.getenv_opt "ME_ROOT";
-    env_workspace_root = Sys.getenv_opt "MASC_WORKSPACE_ROOT";
+    env_workspace_root = Env_config_core.workspace_root_opt ();
     env_dune_sourceroot = Sys.getenv_opt "DUNE_SOURCEROOT";
   }
 

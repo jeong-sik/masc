@@ -93,9 +93,7 @@ let reset_for_test () =
 
 (** Check MASC_BOARD_BACKEND env var. Returns true if JSONL is explicitly forced. *)
 let jsonl_forced () =
-  match Sys.getenv_opt "MASC_BOARD_BACKEND" with
-  | Some s -> String.lowercase_ascii (String.trim s) = "jsonl"
-  | None -> false
+  String.lowercase_ascii (String.trim Env_config.Server.Misc.board_backend) = "jsonl"
 
 (** Get backend or fail.
     Normal path: Board is initialized by room_utils_backend_setup during server startup.

@@ -66,13 +66,10 @@ let config = {
 }
 
 let init () =
-  (* Read from environment *)
-  (match Sys.getenv_opt "MASC_CHAIN_LOG_LEVEL" with
-   | Some s -> Atomic.set config.min_level (level_of_string (String.lowercase_ascii s))
-   | None -> ());
-  (match Sys.getenv_opt "MASC_CHAIN_LOG_FORMAT" with
-   | Some "json" -> Atomic.set config.format Json
-   | _ -> Atomic.set config.format Text)
+  Atomic.set config.min_level
+    (level_of_string (String.lowercase_ascii Env_config.Chain.Log.level));
+  Atomic.set config.format
+    (if Env_config.Chain.Log.format = "json" then Json else Text)
 
 let set_level level = Atomic.set config.min_level level
 let set_format fmt = Atomic.set config.format fmt

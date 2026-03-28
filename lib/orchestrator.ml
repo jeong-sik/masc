@@ -21,28 +21,12 @@ let default_config = {
 
 (** Load config from environment or use defaults *)
 let load_config () =
-  let get_env_float name default =
-    match Sys.getenv_opt name with
-    | Some v -> Safe_ops.float_of_string_with_default ~default v
-    | None -> default
-  in
-  let get_env_int name default =
-    match Sys.getenv_opt name with
-    | Some v -> Safe_ops.int_of_string_with_default ~default v
-    | None -> default
-  in
-  let get_env_bool name default =
-    match Sys.getenv_opt name with
-    | Some "1" | Some "true" | Some "yes" -> true
-    | Some "0" | Some "false" | Some "no" -> false
-    | _ -> default
-  in
   {
-    check_interval_s = get_env_float "MASC_ORCHESTRATOR_INTERVAL" 300.0;
-    min_priority = get_env_int "MASC_ORCHESTRATOR_MIN_PRIORITY" 2;
-    agent_timeout_s = get_env_int "MASC_ORCHESTRATOR_TIMEOUT" 300;
-    orchestrator_agent = Env_config.Server.Agent.orchestrator_agent;
-    enabled = get_env_bool "MASC_ORCHESTRATOR_ENABLED" false;
+    check_interval_s = Env_config.Orchestrator.check_interval_seconds;
+    min_priority = Env_config.Orchestrator.min_priority;
+    agent_timeout_s = Env_config.Orchestrator.timeout_seconds;
+    orchestrator_agent = Env_config.Orchestrator.agent_name;
+    enabled = Env_config.Orchestrator.enabled;
     port = Env_config_core.masc_http_port_int ();
   }
 

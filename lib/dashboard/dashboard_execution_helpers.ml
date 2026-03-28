@@ -275,10 +275,8 @@ let extract_persona_name (agent_name : string) : string =
 let load_persona_profile (persona_name : string) : agent_profile option =
   let me_root =
     try Env_config.me_root ()
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> (
-      match Sys.getenv_opt "HOME" with
-      | Some home -> Filename.concat home "me"
-      | None -> "/tmp")
+    with Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> Env_config_core.me_root_or_home ()
   in
   let path =
     Filename.concat

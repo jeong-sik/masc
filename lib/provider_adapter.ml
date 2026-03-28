@@ -438,12 +438,12 @@ let is_bare_ollama_label label =
   String.equal (normalize_label label) "ollama"
 
 let explicit_llama_model_id_result () =
-  match nonempty_env "LLAMA_DEFAULT_MODEL" with
+  match Some Env_config.Llama.default_model with
   | Some model_id -> Ok model_id
   | None -> (
       match
-        ( nonempty_env "MASC_DEFAULT_PROVIDER",
-          nonempty_env "MASC_DEFAULT_MODEL" )
+        ( Env_config.Chain.Model.default_provider_opt (),
+          Env_config.Chain.Model.default_model_opt () )
       with
       | Some provider, Some model_id
         when String.equal (String.lowercase_ascii provider) "llama" ->
@@ -490,7 +490,7 @@ let configured_default_model_label_result () =
       | None, None -> Error "No explicit default model configured")
 
 let configured_verifier_model_label_result () =
-  match nonempty_env "MASC_DEFAULT_VERIFIER_MODEL" with
+  match Env_config.Chain.Model.verifier_model_opt () with
   | Some label -> Ok label
   | None -> configured_default_model_label_result ()
 

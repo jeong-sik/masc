@@ -13,23 +13,24 @@ let force_jsonl_fallback_env () =
   Array.iter (fun name -> Unix.putenv name "") pg_env_var_names
 
 let requested_backend_mode () =
-  match Sys.getenv_opt "MASC_STORAGE_TYPE" with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "postgres" | "postgresql" | "postgres-native" -> "postgres-native"
-      | "filesystem" | "file" | "jsonl" -> "filesystem"
-      | "memory" -> "memory"
-      | other -> other)
-  | None ->
-      let has_pg =
-        Array.exists
-          (fun name ->
-            match Sys.getenv_opt name with
-            | Some value -> String.trim value <> ""
-            | None -> false)
-          pg_env_var_names
-      in
-      if has_pg then "postgres-native" else "filesystem"
+  let raw = String.lowercase_ascii (String.trim Env_config.Server.Storage.storage_type) in
+  if raw = "" then
+    (* No explicit type set — auto-detect from PG env vars *)
+    let has_pg =
+      Array.exists
+        (fun name ->
+          match Sys.getenv_opt name with
+          | Some value -> String.trim value <> ""
+          | None -> false)
+        pg_env_var_names
+    in
+    if has_pg then "postgres-native" else "filesystem"
+  else
+    match raw with
+    | "postgres" | "postgresql" | "postgres-native" -> "postgres-native"
+    | "filesystem" | "file" | "jsonl" -> "filesystem"
+    | "memory" -> "memory"
+    | other -> other
 
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in

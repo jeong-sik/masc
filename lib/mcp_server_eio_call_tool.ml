@@ -142,15 +142,7 @@ let tool_timeout_sec_opt ~(tool_name : string) ~(arguments : Yojson.Safe.t) : fl
          A fixed external timeout conflicts with multi-turn tool-use loops. *)
       None
   | _ ->
-      let global_default_sec =
-        float_of_int
-          (int_of_env_default
-             "MASC_TOOL_TIMEOUT_DEFAULT_SEC"
-             ~default:30
-             ~min_v:5
-             ~max_v:300)
-      in
-      Some global_default_sec
+      Some (float_of_int Env_config.Server.Tools.timeout_default_sec)
 
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =

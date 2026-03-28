@@ -95,6 +95,9 @@ module Model = struct
   let goal_models_opt () =
     Sys.getenv_opt "MASC_GOAL_MODELS" |> trim_opt
 
+  let verifier_model_opt () =
+    Sys.getenv_opt "MASC_DEFAULT_VERIFIER_MODEL" |> trim_opt
+
   let goal_dispatch_runtime =
     get_string ~default:"task" "MASC_GOAL_DISPATCH_RUNTIME"
 end

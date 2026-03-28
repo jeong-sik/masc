@@ -98,10 +98,7 @@ let run_alert_channel_with_retry
 let dedup_strings = Dashboard_utils.dedup_strings
 
 (** Alert dedup: suppress identical alerts within a time window (default 60s). *)
-let alert_dedup_window_sec =
-  match Sys.getenv_opt "MASC_ALERT_DEDUP_WINDOW_SEC" with
-  | Some s -> (try max 5.0 (float_of_string (String.trim s)) with Failure _ -> 60.0)
-  | None -> 60.0
+let alert_dedup_window_sec = Env_config_dashboard.Alert.dedup_window_sec
 
 let alert_dedup_table : (string, float) Hashtbl.t = Hashtbl.create 32
 let alert_dedup_mutex = Eio.Mutex.create ()

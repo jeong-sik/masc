@@ -173,15 +173,15 @@ let runtime_inventory_models () =
          trim_opt runtime.model)
   |> Team_session_types.dedup_strings
 
-let explicit_lead_model () = env_trim_opt "MASC_TEAM_SESSION_MODEL_35B"
-let explicit_middle_model () = env_trim_opt "MASC_TEAM_SESSION_MODEL_27B"
-let explicit_worker_model () = env_trim_opt "MASC_TEAM_SESSION_MODEL_9B"
+let explicit_lead_model () = Env_config.TeamSession.model_35b_opt ()
+let explicit_middle_model () = Env_config.TeamSession.model_27b_opt ()
+let explicit_worker_model () = Env_config.TeamSession.model_9b_opt ()
 
 let inferred_lead_model () =
   match explicit_lead_model () with
   | Some _ as explicit -> explicit
   | None -> (
-      match env_trim_opt "LLAMA_SWARM_MODEL" with
+      match Env_config.Chain.Model.llama_swarm_model_opt () with
       | Some _ as env_model -> env_model
       | None ->
           runtime_inventory_models ()
@@ -286,20 +286,16 @@ let high_risk_keywords =
   [ "security"; "policy"; "final"; "merge"; "customer"; "public"; "external"; "production"; "critical"; "architecture"; "decision" ]
 
 let router_judge_enabled () =
-  bool_env_default "MASC_TEAM_SESSION_ROUTER_JUDGE" ~default:true
+  Env_config.TeamSession.router_judge_enabled
 
 let router_judge_timeout_sec () =
-  max 5 (int_env_default "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC" ~default:15)
+  Env_config.TeamSession.router_judge_timeout_sec
 
 let router_judge_confidence_threshold () =
-  let value =
-    float_env_default "MASC_TEAM_SESSION_ROUTER_CONFIDENCE_THRESHOLD"
-      ~default:0.72
-  in
-  if value < 0.0 then 0.0 else if value > 1.0 then 1.0 else value
+  Env_config.TeamSession.router_judge_confidence_threshold
 
 let router_judge_model () =
-  match env_trim_opt "MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL" with
+  match Env_config.TeamSession.router_judge_model_opt () with
   | Some _ as explicit -> explicit
   | None -> inferred_lead_model ()
 

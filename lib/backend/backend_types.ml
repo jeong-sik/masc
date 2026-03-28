@@ -56,7 +56,9 @@ type config = {
 
 (** Get pubsub max messages from env or default *)
 let pubsub_max_messages_from_env () =
-  Env_config.Server.Misc.pubsub_max_messages
+  match Sys.getenv_opt "MASC_PUBSUB_MAX_MESSAGES" with
+  | Some s -> Safe_ops.int_of_string_with_default ~default:1000 s
+  | None -> 1000
 
 let generate_node_id () =
   let hostname = try Unix.gethostname () with Unix.Unix_error _ -> "unknown" in
@@ -105,7 +107,9 @@ let pool_stats_to_yojson (s : pool_stats) : Yojson.Safe.t =
   ]
 
 let configured_max_pool_size () =
-  Env_config.Server.Storage.pg_pool_size
+  match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
+  | Some s -> (try int_of_string s with Failure _ -> 5)
+  | None -> 5
 
 (* ============================================ *)
 (* Safety Utilities                             *)

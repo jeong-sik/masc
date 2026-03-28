@@ -50,14 +50,16 @@ let default_tiny_model_opt () =
     |> List.filter (fun s -> s <> "")
   in
   let label_opt =
-    match Env_config.Chain.Model.default_cascade_opt () with
+    match Sys.getenv_opt "MASC_DEFAULT_CASCADE" with
     | Some raw -> (
         match split_csv_nonempty raw with
         | first :: _ -> Some first
         | [] -> None)
     | None -> (
-        match (Env_config.Chain.Model.default_provider_opt (), Env_config.Chain.Model.default_model_opt ()) with
+        match (Sys.getenv_opt "MASC_DEFAULT_PROVIDER", Sys.getenv_opt "MASC_DEFAULT_MODEL") with
         | Some provider, Some model_id ->
+            let provider = String.trim provider in
+            let model_id = String.trim model_id in
             if provider = "" || model_id = "" then None else Some (provider ^ ":" ^ model_id)
         | _ -> None)
   in

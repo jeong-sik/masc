@@ -82,7 +82,9 @@ let set_level_from_string s =
 
 (** Initialize from MASC_LOG_LEVEL env var *)
 let init_from_env () =
-  set_level_from_string Env_config.Server.Misc.log_level
+  match Sys.getenv_opt "MASC_LOG_LEVEL" with
+  | Some s -> set_level_from_string s
+  | None -> ()
 
 (** Get current timestamp *)
 let timestamp () =

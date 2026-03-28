@@ -55,7 +55,7 @@ let is_unspecified_host host =
   | Error _ -> false
 
 let http_auth_strict_enabled () =
-  env_flag_enabled "MASC_HTTP_AUTH_STRICT"
+  Env_config.Server.Auth.http_auth_strict
   || not (is_loopback_host (configured_bind_host ()))
 
 let strict_http_auth_error endpoint =

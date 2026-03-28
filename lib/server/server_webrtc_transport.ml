@@ -69,13 +69,13 @@ let parse_ice_servers_json raw =
   with Yojson.Json_error _ -> []
 
 let configured_ice_servers () =
-  match getenv_nonempty "MASC_WEBRTC_ICE_SERVERS_JSON" with
+  match Env_config.Server.Webrtc.ice_servers_json_opt () with
   | Some raw -> (
       match parse_ice_servers_json raw with
       | [] -> Webrtc.Webrtc_eio.default_ice_config.Webrtc.Ice.ice_servers
       | servers -> servers)
   | None -> (
-      match getenv_nonempty "MASC_WEBRTC_ICE_URLS" with
+      match Env_config.Server.Webrtc.ice_urls_opt () with
       | Some raw ->
         let urls = split_csv raw in
         if urls = [] then
@@ -84,9 +84,9 @@ let configured_ice_servers () =
           [
             {
               Webrtc.Ice.urls;
-              username = getenv_nonempty "MASC_WEBRTC_ICE_USERNAME";
-              credential = getenv_nonempty "MASC_WEBRTC_ICE_CREDENTIAL";
-              tls_ca = getenv_nonempty "MASC_WEBRTC_ICE_TLS_CA";
+              username = Env_config.Server.Webrtc.ice_username_opt ();
+              credential = Env_config.Server.Webrtc.ice_credential_opt ();
+              tls_ca = Env_config.Server.Webrtc.ice_tls_ca_opt ();
             };
           ]
       | None -> Webrtc.Webrtc_eio.default_ice_config.Webrtc.Ice.ice_servers)

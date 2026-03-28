@@ -47,11 +47,29 @@ end
 module Webrtc = struct
   let enabled =
     get_bool ~default:false "MASC_WEBRTC_ENABLED"
+
+  let ice_servers_json_opt () =
+    Sys.getenv_opt "MASC_WEBRTC_ICE_SERVERS_JSON" |> trim_opt
+
+  let ice_urls_opt () =
+    Sys.getenv_opt "MASC_WEBRTC_ICE_URLS" |> trim_opt
+
+  let ice_username_opt () =
+    Sys.getenv_opt "MASC_WEBRTC_ICE_USERNAME" |> trim_opt
+
+  let ice_credential_opt () =
+    Sys.getenv_opt "MASC_WEBRTC_ICE_CREDENTIAL" |> trim_opt
+
+  let ice_tls_ca_opt () =
+    Sys.getenv_opt "MASC_WEBRTC_ICE_TLS_CA" |> trim_opt
 end
 
 (** {1 Auth & Tools} *)
 
 module Auth = struct
+  let http_auth_strict =
+    get_bool ~default:false "MASC_HTTP_AUTH_STRICT"
+
   let admin_token_opt () =
     Sys.getenv_opt "MASC_ADMIN_TOKEN" |> trim_opt
 
@@ -60,6 +78,9 @@ module Auth = struct
 end
 
 module Tools = struct
+  let timeout_default_sec =
+    max 5 (min 600 (get_int ~default:30 "MASC_TOOL_TIMEOUT_DEFAULT_SEC"))
+
   let readonly_retry_limit =
     min 5 (max 1 (get_int ~default:2 "MASC_TOOL_READONLY_RETRY_LIMIT"))
 
@@ -77,7 +98,7 @@ end
 
 module Storage = struct
   let storage_type =
-    get_string ~default:"filesystem" "MASC_STORAGE_TYPE"
+    get_string ~default:"" "MASC_STORAGE_TYPE"
 
   let pg_pool_size =
     max 1 (min 50 (get_int ~default:10 "MASC_PG_POOL_SIZE"))

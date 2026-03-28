@@ -3,8 +3,31 @@
 
 ## [Unreleased]
 
+## [2.160.0] - 2026-03-28
+
+### Added
+- **Keeper DM persistence** — chat history saved to `.masc/keeper_chat/<name>.jsonl`, loaded on dialog open (#3584).
+- **gRPC heartbeat** — bidirectional streaming + directive dispatch for keeper (P1-P3) (#3532, #3558).
+- **CDAL (Contract-Driven Audit Layer)** — Phase 0 eval with proof tap, JSONL persistence, actionable recommendations (#3565, #3572).
+- **Env_config sub-modules** — `Env_config_server`, `Env_config_chain`, `Env_config_dashboard` + `to_json()` introspection (#3568).
+- **In-memory key index** — FileSystem backend accelerated with hash-based key lookup (#3570).
+- **OTel chain linking** — span linking across chain nodes + governance trace_id unification (#3511).
+
 ### Changed
-- **MCP SDK pin** — `scripts/opam-pin-external-deps.sh` now pins `mcp_protocol` to `jeong-sik/mcp-protocol-sdk#v1.2.0` instead of floating on `#main`.
+- **Memory-tier Phase 1** — filesystem-first storage, PG room state removed (#3505).
+- **Lodge renamed to Autonomy/Keeper** — codebase-wide terminology update (#3544, #3557).
+- **Eio.Mutex cleanup** — Phase 3 batches 1-3b, removed unnecessary locks from 20+ modules (#3533, #3540, #3546, #3560).
+- **Backend filesystem-first** — removed PG-first code paths, hardened backend selection (#3513, #3581).
+- **MCP SDK pinned** to v1.2.0 (#3566).
+- **Dead code removed** — deprecated env var fallbacks, SSE_legacy, dead cascade keys, unused functions (#3543, #3545, #3561, #3571).
+
+### Fixed
+- **Keeper EDEADLK** — Stdlib.Mutex for cross-domain registry, autoboot deadlock resolved (#3541, #3564, #3580).
+- **Backend PG resilience** — connection retry, health gate, filesystem fallback for exists (#3535, #3582).
+- **Dashboard PG hot path timeouts** — compute profiling, reduced pool idle age (#3529, #3530).
+- **Cold-start cache cascade** — staged warm cache prevents concurrent timeout (#3536).
+- **JSONL prune** — periodic cleanup with expanded targets (#3567).
+- **CI** — deduplicated bootstrap, dashboard gate, harness dedup (#3574).
 
 ## [2.159.0] - 2026-03-28
 

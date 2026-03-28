@@ -1864,6 +1864,67 @@ let test_keeper_supervisor_recovers_missing_desired_keeper () =
       check bool "diagnostic removed from status" true
         Yojson.Safe.Util.(status_json |> member "diagnostic" = `Null))
 
+let test_legacy_presence_keepalive_false_migrates_to_paused () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "legacy-paused-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "legacy-paused-demo");
+              ("goal", `String "Preserve paused migration semantics");
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let meta_path =
+        Masc_mcp.Keeper_types.keeper_meta_path config "legacy-paused-demo"
+      in
+      let original_json = Yojson.Safe.from_file meta_path in
+      let legacy_json =
+        match original_json with
+        | `Assoc fields ->
+            `Assoc
+              (("presence_keepalive", `Bool false)
+               :: ("presence_keepalive_sec", `Int 5)
+               :: List.remove_assoc "paused" fields)
+        | _ -> fail "expected keeper meta object"
+      in
+      let oc = open_out meta_path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc (Yojson.Safe.pretty_to_string legacy_json));
+      let migrated =
+        match Masc_mcp.Keeper_types.read_meta config "legacy-paused-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after legacy migration"
+        | Error e -> fail e
+      in
+      check bool "legacy disabled keepalive becomes paused" true migrated.paused;
+      let scrubbed_json = Yojson.Safe.from_file meta_path in
+      check bool "scrubbed presence_keepalive removed" true
+        Yojson.Safe.Util.(scrubbed_json |> member "presence_keepalive" = `Null);
+      check bool "scrubbed presence_keepalive_sec removed" true
+        Yojson.Safe.Util.(scrubbed_json |> member "presence_keepalive_sec" = `Null);
+      check bool "paused persisted after scrub" true
+        Yojson.Safe.Util.(scrubbed_json |> member "paused" = `Bool true))
+
 let () =
   run "Tool_keeper" [
     ("read_file_tail_lines", [
@@ -1941,6 +2002,8 @@ let () =
            test_keeper_bootstrap_marks_stale_explicit_keeper;
          test_case "keeper supervisor recovers missing desired keeper" `Quick
            test_keeper_supervisor_recovers_missing_desired_keeper;
+         test_case "legacy presence_keepalive false migrates to paused" `Quick
+           test_legacy_presence_keepalive_false_migrates_to_paused;
          test_case "session dir mkdir_p creates full tree from scratch (issue #3019)" `Quick
            test_session_dir_mkdir_p_creates_full_tree;
        ]);

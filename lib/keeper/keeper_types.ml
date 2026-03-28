@@ -157,14 +157,30 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) :
       in
       if present = [] then (json, false)
       else
-        let scrubbed = drop_assoc_keys removed_keeper_meta_key_names json in
+        let migrate_legacy_disabled_keepalive =
+          (match List.assoc_opt "presence_keepalive" fields with
+          | Some (`Bool false) -> true
+          | _ -> false)
+          && not (List.mem_assoc "paused" fields)
+        in
+        let scrubbed =
+          let base = drop_assoc_keys removed_keeper_meta_key_names json in
+          match base with
+          | `Assoc base_fields when migrate_legacy_disabled_keepalive ->
+              `Assoc (("paused", `Bool true) :: List.remove_assoc "paused" base_fields)
+          | _ -> base
+        in
         let content = Yojson.Safe.pretty_to_string scrubbed in
         (try
            Fs_compat.save_file path content;
            Log.Keeper.info
-             "scrubbed removed keeper meta fields for %s: %s"
+             "scrubbed removed keeper meta fields for %s: %s%s"
              path
              (String.concat ", " present)
+             (if migrate_legacy_disabled_keepalive then
+                " (migrated presence_keepalive=false to paused=true)"
+              else
+                "")
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->

@@ -37,12 +37,14 @@ let load_error_to_string = function
 (* File I/O helpers                                                  *)
 (* ================================================================ *)
 
+type read_error = File_not_found | Parse_error of string
+
 let read_json_file path =
   if Sys.file_exists path then
     (try Ok (Yojson.Safe.from_file path)
-     with exn -> Error (Printexc.to_string exn))
+     with exn -> Error (Parse_error (Printexc.to_string exn)))
   else
-    Error "not found"
+    Error File_not_found
 
 (* ================================================================ *)
 (* Load pipeline                                                     *)
@@ -57,9 +59,9 @@ let load ~(store : Agent_sdk.Proof_store.config)
     Agent_sdk.Proof_store.manifest_path store ~run_id:proof.run_id in
   let* manifest_json =
     read_json_file manifest_path
-    |> Result.map_error (fun msg ->
-      if msg = "not found" then Manifest_not_found manifest_path
-      else Manifest_parse_error msg)
+    |> Result.map_error (function
+      | File_not_found -> Manifest_not_found manifest_path
+      | Parse_error msg -> Manifest_parse_error msg)
   in
   let* manifest_proof =
     Agent_sdk.Cdal_proof.of_json manifest_json
@@ -79,9 +81,9 @@ let load ~(store : Agent_sdk.Proof_store.config)
   in
   let* contract_json =
     read_json_file contract_path
-    |> Result.map_error (fun msg ->
-      if msg = "not found" then Contract_not_found contract_path
-      else Contract_parse_error msg)
+    |> Result.map_error (function
+      | File_not_found -> Contract_not_found contract_path
+      | Parse_error msg -> Contract_parse_error msg)
   in
   (* 4. Decode contract with Agent_sdk *)
   let* contract =

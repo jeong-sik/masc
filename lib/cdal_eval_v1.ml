@@ -70,9 +70,7 @@ let verdict_of_outcome = function
 (* JSONL persistence                                                *)
 (* ================================================================ *)
 
-let store_ref : Dated_jsonl.t option ref = ref None
-
-let base_path () =
+let default_base_path () =
   let root = try Sys.getenv "MASC_DATA_DIR"
     with Not_found ->
       try Filename.concat (Sys.getenv "ME_ROOT") "data"
@@ -80,18 +78,7 @@ let base_path () =
   in
   Filename.concat root "cdal_verdicts"
 
-let get_store () =
-  match !store_ref with
-  | Some s -> s
-  | None ->
-    let s = Dated_jsonl.create ~base_dir:(base_path ()) () in
-    store_ref := Some s;
-    s
-
-let reset_store_for_testing () = store_ref := None
-
-let set_store_for_testing ~base_dir =
-  store_ref := Some (Dated_jsonl.create ~base_dir ())
-
-let persist (verdict : Cdal_types.contract_verdict) : unit =
-  Dated_jsonl.append (get_store ()) (Cdal_types.contract_verdict_to_json verdict)
+let persist ?(base_dir = default_base_path ())
+    (verdict : Cdal_types.contract_verdict) : unit =
+  let store = Dated_jsonl.create ~base_dir () in
+  Dated_jsonl.append store (Cdal_types.contract_verdict_to_json verdict)

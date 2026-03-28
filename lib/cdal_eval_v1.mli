@@ -20,13 +20,6 @@ val evaluate :
 (** Extract the verdict from either outcome branch. *)
 val verdict_of_outcome : eval_outcome -> Cdal_types.contract_verdict
 
-(** Persist a verdict to date-split JSONL under data/cdal_verdicts. *)
-val persist : Cdal_types.contract_verdict -> unit
-
-(** {2 Testing helpers} *)
-
-(** Reset the internal JSONL store (for test isolation). *)
-val reset_store_for_testing : unit -> unit
-
-(** Override the JSONL store base directory (for test isolation). *)
-val set_store_for_testing : base_dir:string -> unit
+(** Persist a verdict to date-split JSONL.
+    Defaults to data/cdal_verdicts. Pass [~base_dir] for test isolation. *)
+val persist : ?base_dir:string -> Cdal_types.contract_verdict -> unit

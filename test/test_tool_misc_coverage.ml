@@ -409,7 +409,6 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           [
             ("name", `String "admin-keeper");
             ("goal", `String "Admin tool policy test");
-            ("presence_keepalive", `Bool false);
             ("proactive_enabled", `Bool false);
           ])
   with

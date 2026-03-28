@@ -195,7 +195,6 @@ let create_keeper env sw config name =
           [
             ("name", `String name);
             ("goal", `String "Dashboard keeper fixture");
-            ("presence_keepalive", `Bool false);
             ("proactive_enabled", `Bool false);
           ])
   with

@@ -118,7 +118,6 @@ let test_keeper_status_exposes_summary_and_recoverable () =
               [
                 ("name", `String keeper_name);
                 ("goal", `String "Probe keeper runtime");
-                ("presence_keepalive", `Bool false);
                 ("proactive_enabled", `Bool false);
               ])
       in
@@ -215,7 +214,6 @@ proactive_enabled = true
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("presence_keepalive", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -343,22 +341,31 @@ let test_snapshot_keeper_tool_audit_fallback () =
               [
                 ("name", `String keeper_name);
                 ("goal", `String "Expose dashboard fallback keeper audit");
-                ("presence_keepalive", `Bool false);
                 ("proactive_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
-      let snapshot =
-        Operator_control.snapshot_json ~include_messages:false ~include_sessions:false
-          ~include_keepers:true (operator_ctx env sw config "operator")
-      in
       let open Yojson.Safe.Util in
-      let keeper =
-        snapshot
-        |> member "keepers" |> member "items" |> to_list
-        |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
+      let rec load_keeper_snapshot attempts_left =
+        let snapshot =
+          Operator_control.snapshot_json ~include_messages:false ~include_sessions:false
+            ~include_keepers:true (operator_ctx env sw config "operator")
+        in
+        match
+          snapshot
+          |> member "keepers" |> member "items" |> to_list
+          |> List.find_opt (fun row -> row |> member "name" |> to_string = keeper_name)
+        with
+        | Some keeper -> keeper
+        | None when attempts_left > 0 ->
+            Unix.sleepf 0.05;
+            load_keeper_snapshot (attempts_left - 1)
+        | None ->
+            Alcotest.failf "keeper %s missing from snapshot: %s" keeper_name
+              (Yojson.Safe.to_string snapshot)
       in
-      Alcotest.(check string) "offline when no agent runtime" "offline"
+      let keeper = load_keeper_snapshot 10 in
+      Alcotest.(check string) "durable keeper is active after keeper_up" "active"
         (keeper |> member "status" |> to_string);
       Alcotest.(check bool) "allowed tool fallback present" true
         ((keeper |> member "allowed_tool_names" |> to_list) <> []);
@@ -420,7 +427,6 @@ let test_keeper_msg_auto_team_session_bridge () =
               [
                 ("name", `String keeper_name);
                 ("goal", `String "Start projected team sessions from explicit keeper messages");
-                ("presence_keepalive", `Bool false);
                 ("proactive_enabled", `Bool false);
               ])
       in

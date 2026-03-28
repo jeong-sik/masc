@@ -37,7 +37,7 @@ let resolved_keeper_args_to_json
     ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~soul_profile ~will ~needs ~desires ~policy_voice_enabled
     ~room_scope ~scope_kind ~mention_targets
-    ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
+    ~proactive_enabled
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
   `Assoc
     [
@@ -56,8 +56,6 @@ let resolved_keeper_args_to_json
       ("room_scope", `String room_scope);
       ("scope_kind", `String scope_kind);
       ("mention_targets", string_list_to_json mention_targets);
-      ("presence_keepalive", `Bool presence_keepalive);
-      ("presence_keepalive_sec", `Int presence_keepalive_sec);
       ("proactive_enabled", `Bool proactive_enabled);
       ("auto_handoff", `Bool auto_handoff);
       ("handoff_threshold", `Float handoff_threshold);
@@ -185,16 +183,6 @@ let resolved_keeper_args_from_persona args :
               |> List.filter (fun value -> String.trim value <> "")
               |> dedupe_keep_order
             in
-            let presence_keepalive =
-              get_bool_opt args "presence_keepalive"
-              |> first_some defaults.presence_keepalive
-              |> Option.value ~default:true
-            in
-            let presence_keepalive_sec =
-              Safe_ops.json_int_opt "presence_keepalive_sec" args
-              |> first_some defaults.presence_keepalive_sec
-              |> Option.value ~default:30
-            in
             let proactive_enabled =
               get_bool_opt args "proactive_enabled"
               |> first_some defaults.proactive_enabled
@@ -217,7 +205,7 @@ let resolved_keeper_args_from_persona args :
                 ~instructions ~soul_profile ~will ~needs ~desires
                 ~policy_voice_enabled
                 ~room_scope ~scope_kind ~mention_targets
-                ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
+                ~proactive_enabled
                 ~auto_handoff ~handoff_threshold
                 ~handoff_cooldown_sec
             in

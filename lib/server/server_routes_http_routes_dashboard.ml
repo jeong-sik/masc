@@ -351,10 +351,11 @@ let add_routes ~sw ~clock router =
              {|{"error":"not found"}|} reqd
        ) request reqd)
 
-  (* Keeper config update — POST (PATCH semantic) to update prompt/drift fields *)
+  (* Keeper config update — POST (PATCH semantic) to update an existing keeper
+     with the same durable fields accepted by masc_keeper_up. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
        with_token_permission_auth ~permission:Types.CanAdmin
-         (fun state _agent_name req reqd ->
+         (fun state agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            let req_path = Http.Request.path req in
            let prefix = "/api/v1/keepers/" in
@@ -388,44 +389,68 @@ let add_routes ~sw ~clock router =
                | Ok (Some meta0) ->
                    (try
                       let args = Yojson.Safe.from_string body_str in
-                      let new_soul_profile_res =
-                        Keeper_config.parse_soul_profile_opt args "new_soul_profile"
+                      let fields_opt =
+                        match args with
+                        | `Assoc fields -> Some fields
+                        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+                        | `String _ | `List _ ->
+                            None
                       in
-                      match new_soul_profile_res with
-                      | Error e ->
+                      match fields_opt with
+                      | Some fields ->
+                          let body_name =
+                            match List.assoc_opt "name" fields with
+                            | Some (`String value) ->
+                                let trimmed = String.trim value in
+                                if trimmed = "" then None else Some trimmed
+                            | _ -> None
+                          in
+                          if Option.is_some body_name
+                             && body_name <> Some name
+                          then
+                            Http.Response.json ~status:`Bad_request
+                              (Printf.sprintf
+                                 {|{"error":"keeper name mismatch: route=%S body=%S"}|}
+                                 name (Option.value ~default:"" body_name))
+                              reqd
+                          else
+                            let args_with_name =
+                              `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
+                            in
+                            let keeper_ctx : _ Tool_keeper.context =
+                              {
+                                config;
+                                agent_name;
+                                sw;
+                                clock;
+                                proc_mgr = state.Mcp_server.proc_mgr;
+                              }
+                            in
+                            (match Keeper_turn_up_args.parse keeper_ctx args_with_name with
+                            | Error (_ok, msg) ->
+                                Http.Response.json ~status:`Bad_request
+                                  (Printf.sprintf {|{"error":"%s"}|}
+                                     (String.escaped msg))
+                                  reqd
+                            | Ok parsed ->
+                                let ok, msg =
+                                  Keeper_turn_up_update.update_keeper keeper_ctx parsed meta0
+                                in
+                                if not ok then
+                                  Http.Response.json ~status:`Bad_request
+                                    (Printf.sprintf {|{"error":"%s"}|}
+                                       (String.escaped msg))
+                                    reqd
+                                else
+                                  let (_st, json) =
+                                    Dashboard_http_keeper.keeper_config_json config name
+                                  in
+                                  Http.Response.json ~compress:true ~request:req
+                                    (Yojson.Safe.to_string json) reqd)
+                      | None ->
                           Http.Response.json ~status:`Bad_request
-                            (Printf.sprintf {|{"error":"%s"}|} (String.escaped e))
+                            {|{"error":"request body must be a JSON object"}|}
                             reqd
-                      | Ok new_soul_profile ->
-                          let new_short_goal =
-                            Keeper_config.parse_goal_horizon_opt args "new_short_goal"
-                          in
-                          let new_mid_goal =
-                            Keeper_config.parse_goal_horizon_opt args "new_mid_goal"
-                          in
-                          let new_long_goal =
-                            Keeper_config.parse_goal_horizon_opt args "new_long_goal"
-                          in
-                          let new_will =
-                            Keeper_config.parse_self_model_opt args "new_will"
-                          in
-                          let new_needs =
-                            Keeper_config.parse_self_model_opt args "new_needs"
-                          in
-                          let new_desires =
-                            Keeper_config.parse_self_model_opt args "new_desires"
-                          in
-                          let _updated =
-                            Keeper_turn_setup.apply_settings_update
-                              ~args ~meta0 ~new_short_goal ~new_mid_goal
-                              ~new_long_goal ~new_soul_profile ~new_will
-                              ~new_needs ~new_desires ~config
-                          in
-                          let (_st, json) =
-                            Dashboard_http_keeper.keeper_config_json config name
-                          in
-                          Http.Response.json ~compress:true ~request:req
-                            (Yojson.Safe.to_string json) reqd
                     with Yojson.Json_error e ->
                       Http.Response.json ~status:`Bad_request
                         (Printf.sprintf {|{"error":"invalid json: %s"}|}

@@ -709,7 +709,6 @@ let test_keeper_and_persistent_agent_lists_split () =
             [
               ("name", `String "keeper-demo");
               ("goal", `String "Stay available");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -721,7 +720,6 @@ let test_keeper_and_persistent_agent_lists_split () =
             [
               ("name", `String "persistent-demo");
               ("goal", `String "Stay on demand");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -776,7 +774,6 @@ let test_keeper_and_persistent_detailed_lists_annotate_runtime_class () =
             [
               ("name", `String "keeper-demo");
               ("goal", `String "Stay available");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -787,7 +784,6 @@ let test_keeper_and_persistent_detailed_lists_annotate_runtime_class () =
             [
               ("name", `String "persistent-demo");
               ("goal", `String "Stay on demand");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -804,8 +800,8 @@ let test_keeper_and_persistent_detailed_lists_annotate_runtime_class () =
       in
       check string "keeper runtime_class" "keeper"
         Yojson.Safe.Util.(keeper_row |> member "runtime_class" |> to_string);
-      check bool "keeper desired_keepalive false" false
-        Yojson.Safe.Util.(keeper_row |> member "desired_keepalive" |> to_bool);
+      check bool "keeper omits desired_keepalive" true
+        Yojson.Safe.Util.(keeper_row |> member "desired_keepalive" = `Null);
       let ok, persistent_body =
         dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool true) ])
       in
@@ -818,8 +814,8 @@ let test_keeper_and_persistent_detailed_lists_annotate_runtime_class () =
       in
       check string "persistent runtime_class" "keeper"
         Yojson.Safe.Util.(persistent_row |> member "runtime_class" |> to_string);
-      check bool "persistent desired_keepalive false" false
-        Yojson.Safe.Util.(persistent_row |> member "desired_keepalive" |> to_bool))
+      check bool "persistent omits desired_keepalive" true
+        Yojson.Safe.Util.(persistent_row |> member "desired_keepalive" = `Null))
 
 let test_keeper_list_items_expose_runtime_config_summary () =
   Eio_main.run @@ fun env ->
@@ -854,7 +850,6 @@ let test_keeper_list_items_expose_runtime_config_summary () =
               ("goal", `String "Stay available");
               ("room_scope", `String "all");
               ("scope_kind", `String "global");
-              ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool true);
             ])
       in
@@ -871,14 +866,12 @@ let test_keeper_list_items_expose_runtime_config_summary () =
       in
       check string "runtime class" "keeper"
         Yojson.Safe.Util.(row |> member "runtime_class" |> to_string);
-      check bool "desired keepalive true" true
-        Yojson.Safe.Util.(row |> member "desired_keepalive" |> to_bool);
       check string "scope kind" "global"
         Yojson.Safe.Util.(row |> member "scope_kind" |> to_string);
       check string "room scope" "all"
         Yojson.Safe.Util.(row |> member "room_scope" |> to_string);
-      check bool "presence keepalive true" true
-        Yojson.Safe.Util.(row |> member "presence_keepalive" |> to_bool);
+      check bool "presence keepalive removed" true
+        Yojson.Safe.Util.(row |> member "presence_keepalive" = `Null);
       check bool "proactive enabled true" true
         Yojson.Safe.Util.(row |> member "proactive_enabled" |> to_bool);
       check bool "initiative enabled removed" true
@@ -919,7 +912,6 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
             [
               ("name", `String "keeper-demo");
               ("goal", `String "Stay available");
-              ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool true);
             ])
       in
@@ -958,7 +950,7 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
       check string "registry state paused" "paused"
         (Masc_mcp.Keeper_registry.state_to_string entry.state))
 
-let test_keeper_msg_bootstraps_then_requires_message () =
+let test_keeper_msg_missing_keeper_fails_without_bootstrap () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -983,14 +975,13 @@ let test_keeper_msg_bootstraps_then_requires_message () =
             [
               ("name", `String "bootstrap-demo");
               ("goal", `String "Bootstrap keeper");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
-      check bool "missing message rejected" false ok;
-      check bool "error mentions message" true
-        (contains_substring body "message is required");
-      check bool "keeper bootstrap created keeper meta" true
+      check bool "missing keeper rejected" false ok;
+      check bool "error mentions keeper not found" true
+        (contains_substring body "keeper not found");
+      check bool "keeper msg no longer bootstraps keeper meta" false
         (match Masc_mcp.Keeper_types.read_meta config "bootstrap-demo" with
          | Ok (Some _) -> true
          | _ -> false))
@@ -1020,7 +1011,6 @@ let test_persistent_agent_msg_rejects_missing_message () =
             [
               ("name", `String "persistent-demo");
               ("goal", `String "Stay on demand");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1062,7 +1052,6 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
             [
               ("name", `String "keeper-demo");
               ("goal", `String "Stay available");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1073,7 +1062,6 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
             [
               ("name", `String "persistent-demo");
               ("goal", `String "Stay on demand");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1138,8 +1126,8 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
       let persistent_status_json = parse_json_exn persistent_status_body in
       check string "persistent alias runtime_class" "keeper"
         Yojson.Safe.Util.(persistent_status_json |> member "runtime_class" |> to_string);
-      check bool "persistent alias carries desired_keepalive false" false
-        Yojson.Safe.Util.(persistent_status_json |> member "desired_keepalive" |> to_bool);
+      check bool "persistent alias omits desired_keepalive" true
+        Yojson.Safe.Util.(persistent_status_json |> member "desired_keepalive" = `Null);
       let ok, _ =
         dispatch "masc_keeper_down" (`Assoc [ ("name", `String "keeper-demo") ])
       in
@@ -1172,7 +1160,6 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
             [
               ("name", `String "detail-demo");
               ("goal", `String "Inspect detailed status");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1274,7 +1261,6 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Maintain Sangsu persona");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1324,7 +1310,6 @@ let test_keeper_up_update_preserves_proactive_when_omitted () =
           [
             ("name", `String "buddy");
             ("goal", `String "Stay focused");
-            ("presence_keepalive", `Bool false);
             ("proactive_enabled", `Bool true);
           ]
       in
@@ -1406,7 +1391,6 @@ let test_keeper_up_persists_explicit_goal_horizons () =
               ("short_goal", `String "Close the current keeper blocker");
               ("mid_goal", `String "Stabilize keeper cleanup coverage");
               ("long_goal", `String "Continuously improve keeper maintenance");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1425,7 +1409,7 @@ let test_keeper_up_persists_explicit_goal_horizons () =
       check string "long goal persisted"
         "Continuously improve keeper maintenance" meta.long_goal)
 
-let test_apply_settings_update_defaults_goal_horizons_when_new_goal_only () =
+let test_keeper_up_update_defaults_goal_horizons_when_goal_only () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -1453,7 +1437,6 @@ let test_apply_settings_update_defaults_goal_horizons_when_new_goal_only () =
               ("short_goal", `String "Initial short");
               ("mid_goal", `String "Initial mid");
               ("long_goal", `String "Initial long");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1461,40 +1444,39 @@ let test_apply_settings_update_defaults_goal_horizons_when_new_goal_only () =
       let meta0 =
         match Masc_mcp.Keeper_types.read_meta config "goal-default-demo" with
         | Ok (Some meta) -> meta
-        | Ok None -> fail "missing keeper meta before settings update"
+        | Ok None -> fail "missing keeper meta before keeper_up update"
         | Error e -> fail e
       in
-      let updated =
-        Masc_mcp.Keeper_turn_setup.apply_settings_update
-          ~args:(`Assoc [ ("new_goal", `String "Refined goal") ])
-          ~meta0
-          ~new_short_goal:None
-          ~new_mid_goal:None
-          ~new_long_goal:None
-          ~new_soul_profile:None
-          ~new_will:None
-          ~new_needs:None
-          ~new_desires:None
-          ~config
+      let ok, body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "goal-default-demo");
+              ("goal", `String "Refined goal");
+            ])
       in
-      check string "goal updated" "Refined goal" updated.goal;
+      check bool "keeper_up update ok" true ok;
+      let updated = parse_json_exn body in
+      check string "goal updated" "Refined goal"
+        Yojson.Safe.Util.(updated |> member "goal" |> to_string);
       check string "short goal defaulted to new goal" "Refined goal"
-        updated.short_goal;
+        Yojson.Safe.Util.(updated |> member "short_goal" |> to_string);
       check string "mid goal defaulted to new goal" "Refined goal"
-        updated.mid_goal;
+        Yojson.Safe.Util.(updated |> member "mid_goal" |> to_string);
       check string "long goal defaulted to new goal" "Refined goal"
-        updated.long_goal;
+        Yojson.Safe.Util.(updated |> member "long_goal" |> to_string);
       let persisted =
         match Masc_mcp.Keeper_types.read_meta config "goal-default-demo" with
         | Ok (Some meta) -> meta
-        | Ok None -> fail "missing keeper meta after settings update"
+        | Ok None -> fail "missing keeper meta after keeper_up update"
         | Error e -> fail e
       in
+      check string "initial goal preserved before update" "Initial goal" meta0.goal;
       check string "persisted short goal" "Refined goal" persisted.short_goal;
       check string "persisted mid goal" "Refined goal" persisted.mid_goal;
       check string "persisted long goal" "Refined goal" persisted.long_goal)
 
-let test_keeper_msg_persists_goal_horizon_updates_before_runtime () =
+let test_keeper_msg_rejects_goal_horizon_updates () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -1522,7 +1504,6 @@ let test_keeper_msg_persists_goal_horizon_updates_before_runtime () =
               ("short_goal", `String "Original short");
               ("mid_goal", `String "Original mid");
               ("long_goal", `String "Original long");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1540,14 +1521,9 @@ let test_keeper_msg_persists_goal_horizon_updates_before_runtime () =
               ("no_state_block", `Bool true);
             ])
       in
-      if not ok then begin
-        let body_lc = String.lowercase_ascii body in
-        check bool "keeper msg only allowed to fail at runtime boundary" true
-          (contains_substring body_lc "agent.run failed"
-           || contains_substring body_lc "api key"
-           || contains_substring body_lc "provider"
-           || contains_substring body_lc "runtime")
-      end;
+      check bool "keeper msg rejects persisted update args" false ok;
+      check bool "error mentions keeper_up" true
+        (contains_substring (String.lowercase_ascii body) "masc_keeper_up");
       let meta =
         match Masc_mcp.Keeper_types.read_meta config "goal-msg-demo" with
         | Ok (Some meta) -> meta
@@ -1555,12 +1531,10 @@ let test_keeper_msg_persists_goal_horizon_updates_before_runtime () =
         | Error e -> fail e
       in
       check string "goal unchanged" "Original goal" meta.goal;
-      check string "short goal updated" "Close keeper goal coverage gaps"
+      check string "short goal unchanged" "Original short"
         meta.short_goal;
-      check string "mid goal updated"
-        "Lock the cleanup slice with focused tests" meta.mid_goal;
-      check string "long goal updated"
-        "Keep goal horizon behavior maintainable" meta.long_goal)
+      check string "mid goal unchanged" "Original mid" meta.mid_goal;
+      check string "long goal unchanged" "Original long" meta.long_goal)
 
 let test_write_meta_syncs_registry_meta () =
   Eio_main.run @@ fun env ->
@@ -1587,7 +1561,6 @@ let test_write_meta_syncs_registry_meta () =
             [
               ("name", `String "buddy");
               ("goal", `String "Stay available");
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool true);
             ])
       in
@@ -1656,7 +1629,6 @@ let test_keeper_up_persists_allowed_paths_to_status_policy () =
               ("name", `String "sangsu");
               ("goal", `String "Stay available");
               ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
-              ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1793,7 +1765,6 @@ let test_keeper_bootstrap_marks_stale_explicit_keeper () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Stay available");
-              ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1808,7 +1779,6 @@ let test_keeper_bootstrap_marks_stale_explicit_keeper () =
       let stale_meta =
         {
           meta with
-          presence_keepalive = true;
           proactive = { meta.proactive with enabled = false };
           usage = { meta.usage with last_turn_ts = 0.0 };
         }
@@ -1865,7 +1835,6 @@ let test_keeper_supervisor_recovers_missing_desired_keeper () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Stay available");
-              ("presence_keepalive", `Bool true);
               ("proactive_enabled", `Bool false);
             ])
       in
@@ -1930,8 +1899,8 @@ let () =
            test_keeper_list_items_expose_runtime_config_summary;
          test_case "keepalive gap reports not_running instead of disabled" `Quick
            test_keepalive_gap_reports_not_running_instead_of_disabled;
-         test_case "keeper msg bootstraps then requires message" `Quick
-           test_keeper_msg_bootstraps_then_requires_message;
+         test_case "keeper msg missing keeper fails without bootstrap" `Quick
+           test_keeper_msg_missing_keeper_fails_without_bootstrap;
          test_case "persistent agent msg rejects missing message" `Quick
            test_persistent_agent_msg_rejects_missing_message;
          test_case "keeper dispatch auxiliary surfaces smoke" `Quick
@@ -1956,10 +1925,10 @@ let () =
            test_keeper_up_defaults_sangsu_to_explicit_voice_policy;
          test_case "keeper up persists explicit goal horizons" `Quick
            test_keeper_up_persists_explicit_goal_horizons;
-         test_case "settings update defaults goal horizons when new goal only" `Quick
-           test_apply_settings_update_defaults_goal_horizons_when_new_goal_only;
-         test_case "keeper msg persists goal horizon updates before runtime" `Quick
-           test_keeper_msg_persists_goal_horizon_updates_before_runtime;
+         test_case "keeper up update defaults goal horizons when goal only" `Quick
+           test_keeper_up_update_defaults_goal_horizons_when_goal_only;
+         test_case "keeper msg rejects goal horizon updates" `Quick
+           test_keeper_msg_rejects_goal_horizon_updates;
          test_case "keeper up update preserves proactive when omitted" `Quick
            test_keeper_up_update_preserves_proactive_when_omitted;
          test_case "write_meta syncs registry meta" `Quick

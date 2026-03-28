@@ -1037,8 +1037,6 @@ let field_value fixture ~tool_name field_name schema =
   | "param" -> `String "volume"
   | "value" when tool_name = "masc_cache_set" -> `String "cached value"
   | "value" -> `Float 0.5
-  | "require_existing" when List.mem tool_name [ "masc_keeper_msg"; "masc_persistent_agent_msg" ] ->
-      `Bool true
   | "replace_all" | "create_dirs" | "dry_run" | "force" | "clear" ->
       `Bool true
   | "time" | "step" -> `Int 1
@@ -1066,7 +1064,7 @@ let tool_arguments fixture (schema : Types.tool_schema) =
       | "masc_listen" -> [ "timeout" ]
       | "masc_verify_request" -> [ "verifier" ]
       | "masc_keeper_msg" | "masc_persistent_agent_msg" ->
-          [ "require_existing"; "timeout_sec" ]
+          [ "timeout_sec" ]
       | "masc_relay_now" -> [ "target_agent" ]
       | _ -> []
     in

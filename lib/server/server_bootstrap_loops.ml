@@ -207,21 +207,17 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
           | Error e ->
             Log.Keeper.error "autoboot: failed to load meta for %s: %s" name e
           | Ok m ->
-            if not m.presence_keepalive then
-              Log.Keeper.info "autoboot: skipping %s (presence_keepalive=false)" name
-            else begin
-              Log.Keeper.info "autoboot: calling start_keepalive for %s" name;
-              let ctx : _ Keeper_types.context = {
-                config;
-                agent_name = m.agent_name;
-                sw;
-                clock;
-                proc_mgr = Some proc_mgr;
-              } in
-              Keeper_keepalive.start_keepalive ~proactive_warmup_sec:60 ctx m;
-              incr booted;
-              Log.Keeper.info "autoboot: started keepalive for %s" m.name
-            end
+            Log.Keeper.info "autoboot: calling start_keepalive for %s" name;
+            let ctx : _ Keeper_types.context = {
+              config;
+              agent_name = m.agent_name;
+              sw;
+              clock;
+              proc_mgr = Some proc_mgr;
+            } in
+            Keeper_keepalive.start_keepalive ~proactive_warmup_sec:60 ctx m;
+            incr booted;
+            Log.Keeper.info "autoboot: started keepalive for %s" m.name
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

@@ -179,7 +179,7 @@ Keepalive는 Eio fiber로 구현되어 주기적으로 실행된다.
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
-| `presence_keepalive_sec` | 30초 | heartbeat 주기 (권장 범위: 30~300초, 코드 강제는 아님) |
+| heartbeat interval | 30초 | durable keeper의 내부 heartbeat 주기. keeper별 설정값은 없다. |
 | jitter | base * 20% | 주기에 추가되는 랜덤 지연 |
 | snapshot_interval_sec | 60초 | JSONL 메트릭 스냅샷 간격 (환경변수 `MASC_KEEPER_SNAPSHOT_SEC`) |
 
@@ -204,8 +204,6 @@ spawn 시 인자로 직접 설정하는 필드.
 | `name` | string | (필수) | keeper 고유 이름. `[A-Za-z0-9._-]`만 허용 | 재생성 필요 |
 | `goal` | string | (필수) | keeper의 현재 목표 | `masc_keeper_up` 재실행 시 `goal` 인자 |
 | `instructions` | string | `""` | 커스텀 시스템 프롬프트 | `masc_keeper_up`의 `instructions` 인자 |
-| `presence_keepalive` | bool | `true` | keepalive fiber 활성화 여부 | `masc_keeper_up`의 `presence_keepalive` 인자 |
-| `presence_keepalive_sec` | int | `30` | heartbeat 주기 (초) | `masc_keeper_up`의 `presence_keepalive_sec` 인자 |
 | `proactive_enabled` | bool | 기본 `false` | 자발적 메시지 생성 활성화 | `masc_keeper_up`의 `proactive_enabled` 인자 |
 | `auto_handoff` | bool | `true` | context 초과 시 자동 handoff | `masc_keeper_up`의 `auto_handoff` 인자 |
 | `handoff_threshold` | float | `0.85` | handoff 트리거 context_ratio | `masc_keeper_up`의 `handoff_threshold` 인자 |
@@ -548,7 +546,7 @@ flowchart TD
 
 | 증상 | 원인 | 대응 |
 |------|------|------|
-| `last_seen_ago_s`가 `keepalive_sec * 4` 초과 | heartbeat fiber 중단 | `masc_keeper_up`으로 재시작 |
+| `last_seen_ago_s`가 내부 heartbeat window를 크게 초과 | heartbeat fiber 중단 | `masc_keeper_up`으로 재시작 |
 | health_state = `stale` | 네트워크 또는 Room 접근 문제 | MASC 서버 상태 확인 (`curl /health`) |
 | `is_zombie = true` | agent의 last_seen이 너무 오래됨 | keeper 재생성 또는 `masc_cleanup_zombies` |
 
@@ -592,7 +590,7 @@ Keeper가 응답하지 않을 때, `diagnostic.quiet_reason`을 확인:
 
 | quiet_reason | 의미 | 대응 |
 |-------------|------|------|
-| `disabled` | keepalive 미실행 또는 agent offline | `masc_keeper_up`으로 재시작 |
+| `disabled` | proactive autonomy 비활성 | 직접 메시지 전송 또는 `proactive_enabled` 재설정 |
 | `startup` | 생성 직후 (120초 이내) | 대기 |
 | `never_started` | 메타데이터만 있고 turn 없음 | 직접 메시지 전송 |
 | `quiet_hours` | Autonomy quiet hours 활성 | 직접 메시지는 여전히 동작 |
@@ -615,7 +613,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는 `docs/
 | TOML declaration | `<CONFIG_ROOT>/keepers/<name>.toml` | Persona 없이 선언적 정의 |
 | Persistent meta | `.masc/perpetual-keepers/<name>.json` | 런타임 상태 (turn 카운트, context ratio 등) |
 
-별도 keepalive 등록 레지스트리는 없다. keeper의 선언과 런타임 상태는 `.masc/perpetual-keepers/<name>.json`에 함께 저장되고, 자동 상주 여부는 `presence_keepalive`로 표현한다.
+별도 keepalive 등록 레지스트리는 없다. keeper의 선언과 런타임 상태는 `.masc/perpetual-keepers/<name>.json`에 함께 저장되고, keeper는 durable always-on으로 취급된다. 멈춤은 설정값이 아니라 `paused` 또는 `keeper_down` 상태 전이로 표현한다.
 
 repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `~/.masc/config`를 먼저 본 뒤 repo `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다. 즉 웹/대시보드는 파일을 직접 읽지 않고, 서버가 해석한 config root와 persona root를 사용한다.
 

@@ -62,13 +62,10 @@ let cached_text_by_key cache ~key ~ttl_s compute =
       cache.expires_at <- now +. ttl_s;
       value
 
-let annotate_keeper_json ~desired_keepalive ~runtime_class json =
+let annotate_keeper_json ~runtime_class json =
   match json with
   | `Assoc fields ->
-      `Assoc
-        (("runtime_class", `String runtime_class)
-        :: ("desired_keepalive", `Bool desired_keepalive)
-        :: fields)
+      `Assoc (("runtime_class", `String runtime_class) :: fields)
   | other -> other
 
 let keeper_brief_meta_json (meta : keeper_meta) =
@@ -135,7 +132,7 @@ let keeper_list_row_json ~runtime_class config name =
           ~agent_status
           ~keepalive_running ~history_items:[] ~now_ts
         |> Keeper_exec_status.augment_keeper_diagnostic_json
-             ~registered:meta.presence_keepalive ~meta ~keepalive_running
+             ~meta ~keepalive_running
              ~keepalive_started_at:
                (Keeper_status_bridge.runtime_keepalive_started_at config meta)
              ~now_ts
@@ -147,14 +144,11 @@ let keeper_list_row_json ~runtime_class config name =
         (`Assoc
           [
             ("runtime_class", `String runtime_class);
-            ("desired_keepalive", `Bool meta.presence_keepalive);
             ("name", `String meta.name);
             ("meta", keeper_brief_meta_json meta);
             ("agent_name", `String meta.agent_name);
             ("status", `String status);
             ("keepalive_running", `Bool keepalive_running);
-            ("presence_keepalive", `Bool meta.presence_keepalive);
-            ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
             ("scope_kind", `String meta.scope_kind);
             ("room_scope", `String meta.room_scope);
             ("proactive_enabled", `Bool meta.proactive.enabled);
@@ -189,16 +183,12 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           let created_json =
             try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
           in
-          let desired_keepalive = get_bool resolved_args "presence_keepalive" true in
           let json =
             `Assoc
               [
                 ("persona", Keeper_exec_persona.persona_summary_to_json persona);
                 ("created", `Bool true);
-                ( "result",
-                  annotate_keeper_json
-                    ~desired_keepalive
-                    ~runtime_class:"keeper" created_json );
+                ("result", annotate_keeper_json ~runtime_class:"keeper" created_json);
                 ("resolved_args", resolved_args);
               ]
           in
@@ -212,52 +202,28 @@ let handle_keeper_up ctx args : tool_result =
     let json =
       try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
     in
-    let desired_keepalive = get_bool args "presence_keepalive" true in
     invalidate_keeper_list_cache ();
     (true,
      Yojson.Safe.pretty_to_string
-       (annotate_keeper_json
-          ~desired_keepalive
-          ~runtime_class:"keeper" json))
+       (annotate_keeper_json ~runtime_class:"keeper" json))
 
 let handle_keeper_status ctx args : tool_result =
   let ok, body = Status.handle_keeper_status ctx args in
   if not ok then (ok, body)
   else
-    let name = get_string args "name" "" in
-    let desired_keepalive =
-      match read_meta ctx.config name with
-      | Ok (Some meta) -> meta.presence_keepalive
-      | _ -> false
-    in
     let json =
       try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
     in
     (true,
      Yojson.Safe.pretty_to_string
-       (annotate_keeper_json
-          ~desired_keepalive
-          ~runtime_class:"keeper" json))
-
-let inject_goal_from_message args =
-  match Safe_ops.json_string_opt "goal" args with
-  | Some _ -> args
-  | None ->
-    let message = get_string args "message" "" in
-    if message = "" then args
-    else
-      match args with
-      | `Assoc fields -> `Assoc (("goal", `String message) :: fields)
-      | _ -> args
+       (annotate_keeper_json ~runtime_class:"keeper" json))
 
 let ensure_keeper_exists ctx args =
   let name = get_string args "name" "" in
   match read_meta ctx.config name with
   | Ok (Some _) -> Ok ()
-  | _ ->
-      let args_enriched = args |> inject_goal_from_message in
-      let ok, body = handle_keeper_up ctx args_enriched in
-      if ok then Ok () else Error body
+  | Ok None -> Error (Printf.sprintf "❌ keeper not found: %s" name)
+  | Error err -> Error (Printf.sprintf "❌ %s" err)
 
 let handle_keeper_msg ctx args : tool_result =
   match ensure_keeper_exists ctx args with
@@ -266,21 +232,13 @@ let handle_keeper_msg ctx args : tool_result =
       let ok, body = Turn.handle_keeper_msg ctx args in
       if not ok then (ok, body)
       else begin
-        let name = get_string args "name" "" in
-        let desired_keepalive =
-          match read_meta ctx.config name with
-          | Ok (Some meta) -> meta.presence_keepalive
-          | _ -> get_bool args "presence_keepalive" true
-        in
         invalidate_keeper_list_cache ();
         let json =
           try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
         in
         (true,
          Yojson.Safe.pretty_to_string
-           (annotate_keeper_json
-              ~desired_keepalive
-              ~runtime_class:"keeper" json))
+           (annotate_keeper_json ~runtime_class:"keeper" json))
       end
 
 let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
@@ -290,21 +248,13 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
       let ok, body = Turn.handle_keeper_msg ~on_text_delta ctx args in
       if not ok then (ok, body)
       else begin
-        let name = get_string args "name" "" in
-        let desired_keepalive =
-          match read_meta ctx.config name with
-          | Ok (Some meta) -> meta.presence_keepalive
-          | _ -> get_bool args "presence_keepalive" true
-        in
         invalidate_keeper_list_cache ();
         let json =
           try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
         in
         (true,
          Yojson.Safe.pretty_to_string
-           (annotate_keeper_json
-              ~desired_keepalive
-              ~runtime_class:"keeper" json))
+           (annotate_keeper_json ~runtime_class:"keeper" json))
       end
 
 let handle_keeper_down ctx args : tool_result =

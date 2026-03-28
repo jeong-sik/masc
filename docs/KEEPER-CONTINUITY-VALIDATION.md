@@ -93,8 +93,6 @@ scripts/harness_keeper_continuity_validation.sh
 
 The harness intentionally uses aggressive test-only keeper settings:
 
-- `presence_keepalive=true`
-- `presence_keepalive_sec=5`
 - `proactive_enabled=false`
 - `auto_handoff=true`
 - `compaction_profile=custom`
@@ -106,6 +104,7 @@ The harness intentionally uses aggressive test-only keeper settings:
 - `drift_enabled=false`
 
 These values are for validation only. They are not production keeper policy.
+Keeper는 durable always-on이므로 keepalive 자체는 개별 설정이 아니라 내부 런타임 동작으로 취급한다.
 
 ## Output artifacts
 

@@ -112,14 +112,6 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
         | None -> false)
   |> add_if "coordination.mention_targets"
        (defaults.mention_targets <> [] && defaults.mention_targets <> meta.mention_targets)
-  |> add_if "runtime.presence_keepalive"
-       (match defaults.presence_keepalive with
-        | Some value -> value <> meta.presence_keepalive
-        | None -> false)
-  |> add_if "runtime.presence_keepalive_sec"
-       (match defaults.presence_keepalive_sec with
-        | Some value -> value <> meta.presence_keepalive_sec
-        | None -> false)
   |> add_if "proactive.enabled"
        (match defaults.proactive_enabled with
         | Some value -> value <> meta.proactive.enabled
@@ -153,7 +145,6 @@ let runtime_surface_json config (meta : keeper_meta) =
   `Assoc
     [
       ("paused", `Bool meta.paused);
-      ("desired_keepalive", `Bool meta.presence_keepalive);
       ("keepalive_running", `Bool keepalive_running);
       ("registry_state",
        match registry_state with
@@ -161,8 +152,6 @@ let runtime_surface_json config (meta : keeper_meta) =
        | None -> `Null);
       ( "fiber_health",
         `String (Keeper_exec_status.string_of_fiber_health fiber_health) );
-      ("presence_keepalive", `Bool meta.presence_keepalive);
-      ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
     ]
 
 let source_provenance_json config (meta : keeper_meta) =

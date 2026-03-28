@@ -203,7 +203,6 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
                 ~agent_status:agent_json ~keepalive_running ~history_items:[]
                 ~now_ts
               |> Keeper_exec_status.augment_keeper_diagnostic_json
-                   ~registered:meta.presence_keepalive
                    ~meta ~keepalive_running ~keepalive_started_at ~now_ts
             in
             let allowed_tool_names, latest_tool_names, latest_tool_call_count,
@@ -222,7 +221,6 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
               (`Assoc
                 [
                   ("runtime_class", `String "keeper");
-                  ("desired_keepalive", `Bool meta.presence_keepalive);
                   ("pipeline_stage", `String pipeline_stage);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
@@ -303,7 +301,6 @@ let persistent_agents_json ?keeper_names config =
               (`Assoc
                 [
                   ("runtime_class", `String "keeper");
-                  ("desired_keepalive", `Bool meta.presence_keepalive);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
                   ("trace_id", `String meta.trace_id);

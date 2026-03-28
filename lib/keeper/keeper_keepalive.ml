@@ -9,6 +9,8 @@ open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
+let keepalive_interval_sec = 30
+
 (* ── Board-reactive policy constants ── *)
 
 let board_reactive_debounce_sec = 60.0
@@ -378,7 +380,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             in
             let base =
               float_of_int
-                (max 30 (min 300 meta_after_proactive.presence_keepalive_sec))
+                keepalive_interval_sec
             in
             (try
                Tool_improve_loop.maybe_tick_from_keepalive ~config:ctx.config
@@ -535,8 +537,7 @@ let run_grpc_heartbeat_fiber ~sw ~stop
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     (m : keeper_meta) : unit =
-  if not m.presence_keepalive then ()
-  else if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name then
+  if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name then
     Log.Keeper.info "start_keepalive: skipped %s (already running)" m.name
   else if not (Keeper_registry.spawn_slots_available ()) then
     Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name
@@ -550,9 +551,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
       match Masc_grpc_transport.from_env (), !grpc_client_ref with
       | Masc_grpc_transport.Grpc, Some client ->
         Log.Keeper.info "keeper %s: starting gRPC heartbeat fiber" m.name;
-        let interval =
-          float_of_int (max 30 (min 300 m.presence_keepalive_sec))
-        in
+        let interval = float_of_int keepalive_interval_sec in
         let session_id =
           Printf.sprintf "keeper-%s-%Ld" m.name
             (Int64.of_float (Time_compat.now () *. 1000.0))

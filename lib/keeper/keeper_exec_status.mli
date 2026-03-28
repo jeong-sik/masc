@@ -16,7 +16,6 @@ val keeper_diagnostic_json :
   Yojson.Safe.t
 
 val augment_keeper_diagnostic_json :
-  registered:bool ->
   meta:keeper_meta ->
   keepalive_running:bool ->
   keepalive_started_at:float option ->

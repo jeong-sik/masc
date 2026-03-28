@@ -568,6 +568,8 @@ Vite 설정:
 | `/api/v1/keepers/:name/config` | PATCH | Keeper config 수정 |
 | `/api/v1/keepers/chat/stream` | POST | Keeper streaming chat |
 
+`/api/v1/keepers/:name/config` 수정 경로는 기존 keeper만 대상으로 하며, `masc_keeper_up`과 같은 durable 필드 계약을 따른다. `new_*`, `require_existing`, `presence_keepalive*` 같은 legacy field는 허용하지 않는다.
+
 ### Operator
 
 | Endpoint | Method | 용도 |

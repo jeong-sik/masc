@@ -31,9 +31,8 @@
 - keeper list `items`에 다음 필드가 존재한다.
   - `scope_kind`
   - `room_scope`
-  - `presence_keepalive`
   - `proactive_enabled`
-- `keepalive_running=false` 이고 `presence_keepalive=true` 이고 `proactive_enabled=true` 인 keeper는 `diagnostic.quiet_reason="disabled"`로 분류되지 않는다.
+- `keepalive_running=false` 이고 `proactive_enabled=true` 인 keeper는 `diagnostic.quiet_reason="disabled"`로 분류되지 않는다.
 
 ## Output
 

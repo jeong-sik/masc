@@ -422,7 +422,7 @@ Destructive check 대상 도구: `keeper_bash`, `keeper_fs_edit`, `keeper_edit`,
 
 ### 9.3 Keeper Runtime Spec
 
-keeper 선언과 런타임 상태는 `.masc/perpetual-keepers/{name}.json`에 영속화된다. 자동 상주/heartbeat 유지 여부는 `presence_keepalive: bool`이 결정한다. `keeper_up`은 inline args, TOML, persona defaults를 합쳐 초기 `keeper_meta`를 생성한다.
+keeper 선언과 런타임 상태는 `.masc/perpetual-keepers/{name}.json`에 영속화된다. keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, persona defaults를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
 
 ---
 

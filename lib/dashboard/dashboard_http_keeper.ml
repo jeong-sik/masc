@@ -317,7 +317,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 	                  ~history_items:conversation_items
 	                  ~now_ts
 	                |> Keeper_exec_status.augment_keeper_diagnostic_json
-	                     ~registered:m.presence_keepalive
 	                     ~meta:m
 	                     ~keepalive_running
 	                     ~keepalive_started_at:(runtime_keepalive_started_at config m)
@@ -343,7 +342,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                                       ~agent_status:agent ~diagnostic)
                    ~now_ts));
               ("runtime_class", `String "keeper");
-              ("desired_keepalive", `Bool m.presence_keepalive);
               ("registry_state",
                 match registry_state with
                 | Some state -> `String state
@@ -385,8 +383,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("next_model_hint", match next_model_hint with Some s -> `String s | None -> `Null);
               ("scope_kind", `String m.scope_kind);
               ("room_scope", `String m.room_scope);
-              ("presence_keepalive", `Bool m.presence_keepalive);
-              ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
               ("keepalive_running", `Bool keepalive_running);
               ("auto_handoff", `Bool m.auto_handoff);
               ("handoff_threshold", `Float m.handoff_threshold);

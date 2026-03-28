@@ -127,18 +127,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     voice_agent_id =
       Option.value ~default:old.voice_agent_id p.voice_agent_id_opt;
     mention_targets;
-    presence_keepalive =
-      Option.value
-        ~default:
-          (Option.value ~default:old.presence_keepalive p.profile_defaults.presence_keepalive)
-        p.presence_keepalive_opt;
-    presence_keepalive_sec =
-      Option.value
-        ~default:
-          (Option.value
-             ~default:old.presence_keepalive_sec
-             p.profile_defaults.presence_keepalive_sec)
-        p.presence_keepalive_sec_opt;
     proactive = { old.proactive with
       enabled =
         Option.value

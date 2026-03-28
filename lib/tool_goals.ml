@@ -466,21 +466,7 @@ let run_keeper_call ctx ~models:_models_ignored ~keeper_prefix ?(fallback_to_tas
         `Assoc
           [
             ("name", `String keeper_name);
-            ("goal", `String node.title);
-            ("short_goal", `String node.title);
-            ("mid_goal", `String node.title);
-            ("long_goal", `String node.title);
             ("message", `String message);
-            ("models", `List []);
-            ("new_soul_profile", `String "delivery");
-            ("presence_keepalive", `Bool true);
-            ("auto_handoff", `Bool true);
-            ("handoff_threshold", `Float 0.85);
-            ("instructions", `String "Respond concise and execution-first.");
-            ("new_short_goal", `String node.title);
-            ("new_mid_goal", `String node.title);
-            ("new_long_goal", `String node.title);
-            ("soul_profile", `String "delivery");
             ("priority_hint", `Int node.priority);
             ("dispatch_horizon", `String horizon);
           ]

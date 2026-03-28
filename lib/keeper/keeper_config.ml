@@ -50,6 +50,8 @@ let removed_keeper_input_key_names =
     "models";
     "allowed_models";
     "active_model";
+    "presence_keepalive";
+    "presence_keepalive_sec";
     "trigger_mode";
     "policy_action_budget";
     "initiative_scope";
@@ -58,6 +60,29 @@ let removed_keeper_input_key_names =
     "initiative_cooldown_sec";
     "policy_mode";
     "policy_shell_mode";
+  ]
+
+let removed_keeper_msg_input_key_names =
+  [
+    "goal";
+    "short_goal";
+    "mid_goal";
+    "long_goal";
+    "instructions";
+    "soul_profile";
+    "will";
+    "needs";
+    "desires";
+    "require_existing";
+    "new_goal";
+    "new_short_goal";
+    "new_mid_goal";
+    "new_long_goal";
+    "new_instructions";
+    "new_soul_profile";
+    "new_will";
+    "new_needs";
+    "new_desires";
   ]
 
 let removed_keeper_meta_key_names =
@@ -77,7 +102,18 @@ let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
   | fields ->
       Error
         (Printf.sprintf
-           "removed keeper args for %s: %s"
+           "removed keeper args for %s: %s. Keepers are always-on by definition."
+           tool_name
+           (String.concat ", " fields))
+
+let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
+  let present = present_json_keys removed_keeper_msg_input_key_names args in
+  match present with
+  | [] -> Ok ()
+  | fields ->
+      Error
+        (Printf.sprintf
+           "removed keeper message args for %s: %s. Use masc_keeper_up for keeper creation or persisted updates."
            tool_name
            (String.concat ", " fields))
 

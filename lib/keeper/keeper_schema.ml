@@ -19,7 +19,7 @@ let keeper_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_create_from_persona";
-    description = "Create or dry-run a keeper configuration from a persona profile.json. Keepers with keepalive enabled auto-start on server boot.";
+    description = "Create or dry-run a keeper configuration from a persona profile.json. Keepers are durable and auto-start on server boot.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -56,8 +56,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);
-        ("presence_keepalive", `Assoc [("type", `String "boolean")]);
-        ("presence_keepalive_sec", `Assoc [("type", `String "integer")]);
         ("proactive_enabled", `Assoc [("type", `String "boolean")]);
         ("auto_handoff", `Assoc [("type", `String "boolean")]);
         ("handoff_threshold", `Assoc [("type", `String "number")]);
@@ -69,7 +67,7 @@ let keeper_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_up";
-    description = "Create or update a keeper. Keepers with keepalive enabled auto-start on server boot and are reconciled back into live presence.";
+    description = "Create or update a durable keeper. Keepers auto-start on server boot and are reconciled back into live presence.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -127,14 +125,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Exact direct-mention tokens that can wake the keeper in room traffic (for example ['sangsu']).");
-        ]);
-        ("presence_keepalive", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, periodically refresh Room.heartbeat for the keeper agent (default: true).");
-        ]);
-        ("presence_keepalive_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Presence keepalive interval seconds (default: 30).");
         ]);
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");
@@ -242,7 +232,7 @@ let keeper_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_msg";
-    description = "Send a message to a keeper and get a reply. Keepers keep durable context and can be created inline if missing.";
+    description = "Send a message to an existing keeper and get a reply. Use masc_keeper_up for keeper creation or persisted updates.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -253,42 +243,6 @@ let keeper_schemas : tool_schema list = [
         ("message", `Assoc [
           ("type", `String "string");
           ("description", `String "User message");
-        ]);
-        ("goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set goal when creating keeper inline");
-        ]);
-        ("short_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set short-term goal horizon when creating keeper inline");
-        ]);
-        ("mid_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set mid-term goal horizon when creating keeper inline");
-        ]);
-        ("long_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set long-term goal horizon when creating keeper inline");
-        ]);
-        ("instructions", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set instructions when creating keeper inline");
-        ]);
-        ("soul_profile", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set memory priority preset when creating keeper inline");
-        ]);
-        ("will", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set keeper will (의지) when creating keeper inline");
-        ]);
-        ("needs", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set keeper needs (니즈) when creating keeper inline");
-        ]);
-        ("desires", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set keeper desires (욕구) when creating keeper inline");
         ]);
         ("timeout_sec", `Assoc [
           ("type", `String "number");
@@ -301,46 +255,6 @@ let keeper_schemas : tool_schema list = [
         ("no_state_block", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Optional: do not emit [STATE]...[/STATE] block in reply");
-        ]);
-        ("require_existing", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: fail if keeper does not already exist");
-        ]);
-        ("new_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper goal (persisted)");
-        ]);
-        ("new_short_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper short-term goal horizon (persisted)");
-        ]);
-        ("new_mid_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper mid-term goal horizon (persisted)");
-        ]);
-        ("new_long_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper long-term goal horizon (persisted)");
-        ]);
-        ("new_instructions", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper instructions (persisted)");
-        ]);
-        ("new_soul_profile", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper memory priority preset (persisted)");
-        ]);
-        ("new_will", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper will (persisted)");
-        ]);
-        ("new_needs", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper needs (persisted)");
-        ]);
-        ("new_desires", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper desires (persisted)");
         ]);
       ]);
       ("required", `List [`String "name"; `String "message"]);

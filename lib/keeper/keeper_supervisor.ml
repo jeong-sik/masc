@@ -64,8 +64,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (meta : keeper_meta) =
-  if not meta.presence_keepalive then ()
-  else if Keeper_registry.is_running ~base_path:ctx.config.base_path meta.name
+  if Keeper_registry.is_running ~base_path:ctx.config.base_path meta.name
   then ()
   else if not (Keeper_registry.spawn_slots_available ()) then ()
   else begin
@@ -105,12 +104,11 @@ let reconcile_keepalive_keepers (ctx : _ context) =
          match read_meta ctx.config name with
          | Ok (Some meta)
            when not meta.paused
-                && meta.presence_keepalive
                 && not (Keeper_registry.is_running ~base_path meta.name) ->
              supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
              if Keeper_registry.is_running ~base_path meta.name then begin
-               publish_lifecycle "reconciled" meta.name "keepalive desired";
-               Log.Keeper.info "%s: reconciled desired keepalive" meta.name
+               publish_lifecycle "reconciled" meta.name "durable keeper";
+               Log.Keeper.info "%s: reconciled durable keeper" meta.name
              end
          | _ -> ())
 let sweep_and_recover (ctx : _ context) =

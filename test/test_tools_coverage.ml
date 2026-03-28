@@ -694,7 +694,7 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "allowed_models" props);
           Alcotest.(check bool) "omits active_model" false
             (List.mem_assoc "active_model" props);
-          Alcotest.(check bool) "has presence_keepalive" true
+          Alcotest.(check bool) "omits presence_keepalive" false
             (List.mem_assoc "presence_keepalive" props)
       | None -> Alcotest.fail "masc_keeper_up missing properties"
 
@@ -704,13 +704,13 @@ let test_masc_keeper_msg_schema () =
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          Alcotest.(check bool) "has new_goal" true
+          Alcotest.(check bool) "omits new_goal" false
             (List.mem_assoc "new_goal" props);
-          Alcotest.(check bool) "has new_short_goal" true
+          Alcotest.(check bool) "omits new_short_goal" false
             (List.mem_assoc "new_short_goal" props);
-          Alcotest.(check bool) "has new_mid_goal" true
+          Alcotest.(check bool) "omits new_mid_goal" false
             (List.mem_assoc "new_mid_goal" props);
-          Alcotest.(check bool) "has new_long_goal" true
+          Alcotest.(check bool) "omits new_long_goal" false
             (List.mem_assoc "new_long_goal" props)
       | None -> Alcotest.fail "masc_keeper_msg missing properties"
 

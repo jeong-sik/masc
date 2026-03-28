@@ -23,8 +23,6 @@ type parsed_args = {
   voice_channel_opt : string option;
   voice_agent_id_opt : string option;
   mention_targets_in : string list;
-  presence_keepalive_opt : bool option;
-  presence_keepalive_sec_opt : int option;
   proactive_enabled_opt : bool option;
   proactive_idle_sec_opt : int option;
   proactive_cooldown_sec_opt : int option;
@@ -76,8 +74,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let voice_channel_opt = get_string_opt args "voice_channel" in
     let voice_agent_id_opt = get_string_opt args "voice_agent_id" in
     let mention_targets_in = get_string_list args "mention_targets" in
-    let presence_keepalive_opt = get_bool_opt args "presence_keepalive" in
-    let presence_keepalive_sec_opt = Safe_ops.json_int_opt "presence_keepalive_sec" args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let proactive_idle_sec_opt = Safe_ops.json_int_opt "proactive_idle_sec" args in
     let proactive_cooldown_sec_opt = Safe_ops.json_int_opt "proactive_cooldown_sec" args in
@@ -102,11 +98,15 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
         "SOUL.md"
     in
     let soul_content =
-      match Safe_ops.read_file_safe soul_path with
-      | Ok c -> c
-      | Error e ->
-          Log.Keeper.warn "SOUL.md read failed for %s (%s): %s" name soul_path e;
-          ""
+      if not (Sys.file_exists soul_path) then (
+        Log.Keeper.info "SOUL.md not found for %s (%s)" name soul_path;
+        "")
+      else
+        match Safe_ops.read_file_safe soul_path with
+        | Ok c -> c
+        | Error e ->
+            Log.Keeper.warn "SOUL.md read failed for %s (%s): %s" name soul_path e;
+            ""
     in
     let base_instructions_opt =
       match instructions_arg with
@@ -139,8 +139,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       voice_channel_opt;
       voice_agent_id_opt;
       mention_targets_in;
-      presence_keepalive_opt;
-      presence_keepalive_sec_opt;
       proactive_enabled_opt;
       proactive_idle_sec_opt;
       proactive_cooldown_sec_opt;

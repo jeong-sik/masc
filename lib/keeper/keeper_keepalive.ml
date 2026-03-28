@@ -9,6 +9,8 @@ open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
+let keepalive_interval_sec = 30
+
 (* ── Board-reactive policy constants ── *)
 
 let board_reactive_debounce_sec = 60.0
@@ -103,11 +105,14 @@ let wakeup_relevant_keeper_for_board_signal
       |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
   | [] -> ()
 
+let max_consecutive_heartbeat_failures = 5
+
 let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
     (m : keeper_meta) (stop : bool Atomic.t) ~(wakeup : bool Atomic.t) : unit =
   let keepalive_started_ts = Time_compat.now () in
   let snapshot_interval_sec = Env_config.KeeperRuntime.snapshot_sec in
   let last_snapshot_ts = ref 0.0 in
+  let consecutive_failures = ref 0 in
   let rec loop () =
     if Atomic.get stop then ()
     else (
@@ -119,6 +124,12 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             let meta_current =
               try
                 let synced = ensure_keeper_room_presence ctx.config meta_current in
+                if synced.joined_room_ids = [] then (
+                  incr consecutive_failures;
+                  Log.Keeper.warn "room presence returned empty rooms (%d/%d)"
+                    !consecutive_failures max_consecutive_heartbeat_failures)
+                else
+                  consecutive_failures := 0;
                 (match write_meta ctx.config synced with
                  | Ok () -> synced  (* use written value directly, no second read_meta *)
                  | Error e ->
@@ -127,10 +138,17 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->
-                Log.Keeper.error "room heartbeat failed: %s"
+                incr consecutive_failures;
+                Log.Keeper.error "room heartbeat failed (%d/%d): %s"
+                  !consecutive_failures max_consecutive_heartbeat_failures
                   (Printexc.to_string exn);
                 meta_current
             in
+            if !consecutive_failures >= max_consecutive_heartbeat_failures then (
+              Log.Keeper.error
+                "keeper %s: %d consecutive heartbeat failures, stopping keepalive"
+                m.name max_consecutive_heartbeat_failures;
+              Atomic.set stop true);
             let now_ts = Time_compat.now () in
             if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
             then (
@@ -378,7 +396,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             in
             let base =
               float_of_int
-                (max 30 (min 300 meta_after_proactive.presence_keepalive_sec))
+                keepalive_interval_sec
             in
             (try
                Tool_improve_loop.maybe_tick_from_keepalive ~config:ctx.config
@@ -535,8 +553,7 @@ let run_grpc_heartbeat_fiber ~sw ~stop
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     (m : keeper_meta) : unit =
-  if not m.presence_keepalive then ()
-  else if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name then
+  if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name then
     Log.Keeper.info "start_keepalive: skipped %s (already running)" m.name
   else if not (Keeper_registry.spawn_slots_available ()) then
     Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name
@@ -550,9 +567,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
       match Masc_grpc_transport.from_env (), !grpc_client_ref with
       | Masc_grpc_transport.Grpc, Some client ->
         Log.Keeper.info "keeper %s: starting gRPC heartbeat fiber" m.name;
-        let interval =
-          float_of_int (max 30 (min 300 m.presence_keepalive_sec))
-        in
+        let interval = float_of_int keepalive_interval_sec in
         let session_id =
           Printf.sprintf "keeper-%s-%Ld" m.name
             (Int64.of_float (Time_compat.now () *. 1000.0))

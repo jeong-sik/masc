@@ -198,7 +198,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     |> String.lowercase_ascii
   in
   let error_hint = keeper_error_hint ~agent_status ~meta in
-  if not meta.presence_keepalive || not meta.proactive.enabled then
+  if not meta.proactive.enabled then
     Some "disabled"
   else if not keepalive_running then
     Some "not_running"
@@ -263,9 +263,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
   in
   let is_zombie = json_bool "is_zombie" agent_status false in
-  let stale_threshold_s =
-    float_of_int (max 120 (meta.presence_keepalive_sec * 4))
-  in
+  let stale_threshold_s = 120.0 in
   let last_turn_ago_s =
     if meta.usage.last_turn_ts <= 0.0 then max_float
     else max 0.0 (now_ts -. meta.usage.last_turn_ts)
@@ -320,7 +318,7 @@ let keeper_diagnostic_summary ~health_state ~quiet_reason =
   | _ -> (
       match quiet_reason with
       | Some "disabled" ->
-          "Keeper keepalive is disabled by configuration. Direct messages still work, but scheduled automation will stay quiet."
+          "Keeper proactive automation is disabled. Direct messages still work, but scheduled social ticks will stay quiet."
       | Some "not_running" ->
           "Keeper keepalive is enabled, but its loop is not running."
       | Some "agent_missing" ->
@@ -334,47 +332,37 @@ let keeper_diagnostic_summary ~health_state ~quiet_reason =
       | _ -> "Keeper is reachable. Send a direct message for an immediate response.")
 
 let keeper_continuity_state
-    ~(registered : bool)
     ~(meta : keeper_meta)
     ~(keepalive_running : bool)
     ~(keepalive_started_at : float option)
     ~(health_state : string)
     ~(now_ts : float) =
+  let _ = meta in
   let healthy_like =
     String.equal health_state "healthy" || String.equal health_state "idle"
   in
   let recently_started =
     match keepalive_started_at with
     | Some started_at ->
-        let recovery_window_s =
-          float_of_int (max 60 (min 600 (meta.presence_keepalive_sec * 2)))
-        in
+        let recovery_window_s = 60.0 in
         now_ts -. started_at < recovery_window_s
     | None -> false
   in
-  if registered && meta.presence_keepalive then
-    if not keepalive_running then "not_running"
-    else if recently_started || not healthy_like then "recovering"
-    else "healthy"
-  else if registered then "disabled"
-  else if keepalive_running && healthy_like then "healthy"
-  else if keepalive_running then "recovering"
-  else "offline"
+  if not keepalive_running then "not_running"
+  else if recently_started || not healthy_like then "recovering"
+  else "healthy"
 
 let keeper_continuity_summary continuity_state =
   match continuity_state with
   | "not_running" ->
-      "Keeper keepalive is desired but not running. The runtime should reconcile it."
+      "Keeper runtime is not running. The runtime should reconcile it."
   | "recovering" ->
       "Keeper runtime is reconciling back into live presence."
   | "healthy" ->
-      "Keeper runtime is aligned with the desired keepalive state."
-  | "disabled" ->
-      "Keeper keepalive is disabled by configuration."
+      "Keeper runtime is aligned with the durable keeper state."
   | _ -> "Keeper runtime is offline."
 
 let augment_keeper_diagnostic_json
-    ~(registered : bool)
     ~(meta : keeper_meta)
     ~(keepalive_running : bool)
     ~(keepalive_started_at : float option)
@@ -384,7 +372,7 @@ let augment_keeper_diagnostic_json
     json_string_opt "health_state" diagnostic |> Option.value ~default:"offline"
   in
   let continuity_state =
-    keeper_continuity_state ~registered ~meta ~keepalive_running
+    keeper_continuity_state ~meta ~keepalive_running
       ~keepalive_started_at ~health_state ~now_ts
   in
   let continuity_summary = keeper_continuity_summary continuity_state in

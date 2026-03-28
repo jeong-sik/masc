@@ -77,8 +77,6 @@ type keeper_meta = {
   joined_room_ids: string list;
   last_seen_seq_by_room: (string * int) list;
   generation: int;
-  presence_keepalive: bool;
-  presence_keepalive_sec: int;
   proactive: proactive_config;
   compaction: compaction_state;
   auto_handoff: bool;

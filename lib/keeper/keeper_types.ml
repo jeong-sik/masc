@@ -68,8 +68,6 @@ type keeper_meta = {
   joined_room_ids: string list;
   last_seen_seq_by_room: (string * int) list;
   generation: int;
-  presence_keepalive: bool;
-  presence_keepalive_sec: int;
   proactive: proactive_config;
   compaction: compaction_state;
   auto_handoff: bool;
@@ -159,14 +157,30 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) :
       in
       if present = [] then (json, false)
       else
-        let scrubbed = drop_assoc_keys removed_keeper_meta_key_names json in
+        let migrate_legacy_disabled_keepalive =
+          (match List.assoc_opt "presence_keepalive" fields with
+          | Some (`Bool false) -> true
+          | _ -> false)
+          && not (List.mem_assoc "paused" fields)
+        in
+        let scrubbed =
+          let base = drop_assoc_keys removed_keeper_meta_key_names json in
+          match base with
+          | `Assoc base_fields when migrate_legacy_disabled_keepalive ->
+              `Assoc (("paused", `Bool true) :: List.remove_assoc "paused" base_fields)
+          | _ -> base
+        in
         let content = Yojson.Safe.pretty_to_string scrubbed in
         (try
            Fs_compat.save_file path content;
            Log.Keeper.info
-             "scrubbed removed keeper meta fields for %s: %s"
+             "scrubbed removed keeper meta fields for %s: %s%s"
              path
              (String.concat ", " present)
+             (if migrate_legacy_disabled_keepalive then
+                " (migrated presence_keepalive=false to paused=true)"
+              else
+                "")
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -203,8 +217,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("joined_room_ids", `List (List.map (fun s -> `String s) m.joined_room_ids));
       ("last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room);
       ("generation", `Int m.generation);
-      ("presence_keepalive", `Bool m.presence_keepalive);
-      ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
       ("proactive_enabled", `Bool m.proactive.enabled);
       ("proactive_idle_sec", `Int m.proactive.idle_sec);
       ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
@@ -343,10 +355,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Yojson.Safe.Util.member "last_seen_seq_by_room" json |> room_seq_map_of_json
     in
     let generation = Safe_ops.json_int ~default:0 "generation" json in
-    let presence_keepalive = Safe_ops.json_bool ~default:true "presence_keepalive" json in
-    let presence_keepalive_sec =
-      Safe_ops.json_int ~default:30 "presence_keepalive_sec" json
-    in
     let proactive_enabled =
       Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
     in
@@ -501,8 +509,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           joined_room_ids;
           last_seen_seq_by_room;
           generation;
-          presence_keepalive;
-          presence_keepalive_sec;
           proactive = {
             enabled = proactive_enabled;
             idle_sec = proactive_idle_sec;
@@ -596,7 +602,7 @@ let keepalive_keeper_names config =
   keeper_names config
   |> List.filter_map (fun name ->
          match read_meta_file_path (keeper_meta_path config name) with
-         | Ok (Some meta) when meta.presence_keepalive -> Some meta.name
+         | Ok (Some meta) when not meta.paused -> Some meta.name
          | _ -> None)
 
 let persistent_agent_names _config =

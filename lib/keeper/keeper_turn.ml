@@ -8,7 +8,7 @@
     Sub-modules:
     - Keeper_turn_up: start/reconfigure
     - Keeper_turn_session: team-session helpers
-    - Keeper_turn_setup: ensure_keeper_exists, apply_settings_update
+    - Keeper_turn_setup: ensure_keeper_exists
     - Keeper_turn_lifecycle: shutdown *)
 
 open Tool_args
@@ -42,42 +42,21 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
   else if message = "" then
     (false, "❌ message is required")
   else
-    let profile_defaults = load_keeper_profile_defaults name in
-    let inline_goal = get_string_opt args "goal" in
-    let inline_short_goal = parse_goal_horizon_opt args "short_goal" in
-    let inline_mid_goal = parse_goal_horizon_opt args "mid_goal" in
-    let inline_long_goal = parse_goal_horizon_opt args "long_goal" in
-    let inline_instructions = get_string_opt args "instructions" in
     let turn_instructions = get_string_opt args "turn_instructions" in
     let no_skill_route = get_bool args "no_skill_route" false in
     let no_state_block = get_bool args "no_state_block" false in
-    let inline_will = parse_self_model_opt args "will" in
-    let inline_needs = parse_self_model_opt args "needs" in
-    let inline_desires = parse_self_model_opt args "desires" in
     let _direct_reply = get_bool args "direct_reply" false in
-    let inline_soul_profile_res = parse_soul_profile_opt args "soul_profile" in
-    let new_soul_profile_res = parse_soul_profile_opt args "new_soul_profile" in
-    let new_short_goal = parse_goal_horizon_opt args "new_short_goal" in
-    let new_mid_goal = parse_goal_horizon_opt args "new_mid_goal" in
-    let new_long_goal = parse_goal_horizon_opt args "new_long_goal" in
-    let new_will = parse_self_model_opt args "new_will" in
-    let new_needs = parse_self_model_opt args "new_needs" in
-    let new_desires = parse_self_model_opt args "new_desires" in
-    let require_existing = get_bool args "require_existing" false in
-    match inline_soul_profile_res, new_soul_profile_res with
-    | Error e, _ | _, Error e -> (false, "❌ " ^ e)
-    | Ok inline_soul_profile, Ok new_soul_profile ->
     (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> (false, "❌ " ^ e)
     | Ok () ->
     (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
     | Error e -> (false, "❌ " ^ e)
     | Ok () ->
+    (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
+    | Error e -> (false, "❌ " ^ e)
+    | Ok () ->
     match ensure_keeper_exists
-      ~ctx ~name ~require_existing ~profile_defaults
-      ~inline_goal ~inline_short_goal ~inline_mid_goal ~inline_long_goal
-      ~inline_instructions ~inline_will ~inline_needs ~inline_desires
-      ~inline_soul_profile
+      ~ctx ~name
     with
     | Error e -> (false, "❌ " ^ e)
     | Ok meta0 ->
@@ -85,12 +64,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
         name (int_of_float (Time_compat.now () *. 1000.0)) in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
-      let meta =
-        apply_settings_update
-          ~args ~meta0 ~new_short_goal ~new_mid_goal ~new_long_goal
-          ~new_soul_profile ~new_will ~new_needs ~new_desires
-          ~config:ctx.config
-      in
+      let meta = meta0 in
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
          slots, starving the synchronous run_turn call (Issue #2610). *)
@@ -230,4 +204,4 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               ] in
               (true, Yojson.Safe.to_string reply_json)
 
-)))
+))))

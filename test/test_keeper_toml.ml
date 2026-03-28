@@ -174,8 +174,6 @@ room_scope = "all"
 scope_kind = "global"
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
-presence_keepalive = true
-presence_keepalive_sec = 30
 policy_voice_enabled = false
 |} in
   match TL.parse_toml input with
@@ -190,8 +188,6 @@ policy_voice_enabled = false
       check (option string) "room_scope" (Some "all") d.room_scope;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
-      check (option bool) "keepalive" (Some true) d.presence_keepalive;
-      check (option int) "keepalive_sec" (Some 30) d.presence_keepalive_sec;
       check (option bool) "policy_voice" (Some false) d.policy_voice_enabled
 
 let test_profile_invalid_soul_profile () =

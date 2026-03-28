@@ -81,7 +81,6 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
               if m.paused then
                 (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
               else
-              let wants_keepalive = m.presence_keepalive in
               let stale_now =
                 stale_turn_sec > 0.0
                 && (m.usage.last_turn_ts <= 0.0
@@ -91,8 +90,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
               in
               let started_here =
-                if not wants_keepalive then false
-                else if already_running then false
+                if already_running then false
                 else if max_keepers > 0 && !remaining_slots <= 0 then false
                 else (
                   Keeper_supervisor.supervise_keepalive
@@ -101,7 +99,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                   true
                 )
               in
-              ( enabled_acc || wants_keepalive,
+              ( true,
                 scanned_acc + 1,
                 started_acc + (if started_here then 1 else 0),
                 stale_acc + (if stale_now then 1 else 0),

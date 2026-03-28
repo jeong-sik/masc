@@ -62,22 +62,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   if goal = "" then
     (false, "goal is required when creating a keeper")
   else
-    let presence_keepalive =
-      Option.value
-        ~default:(Option.value ~default:true p.profile_defaults.presence_keepalive)
-        p.presence_keepalive_opt
-    in
-    let presence_keepalive_sec =
-      Option.value
-        ~default:(Option.value ~default:30 p.profile_defaults.presence_keepalive_sec)
-        p.presence_keepalive_sec_opt
-    in
     let max_active_keepers = Env_config.KeeperBootstrap.max_active_keepers in
     let active_keepers = Keeper_registry.count_running () in
-    if presence_keepalive && max_active_keepers > 0 && active_keepers >= max_active_keepers then
+    if max_active_keepers > 0 && active_keepers >= max_active_keepers then
       (false,
         Printf.sprintf
-          "keeper keepalive max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
+          "keeper max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
           active_keepers max_active_keepers)
     else
     let proactive_enabled =
@@ -205,8 +195,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            joined_room_ids = [];
            last_seen_seq_by_room = [];
            generation = 0;
-           presence_keepalive;
-           presence_keepalive_sec;
            proactive = {
              enabled = proactive_enabled;
              idle_sec = proactive_idle_sec;
@@ -306,8 +294,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              ("voice_enabled", `Bool meta.voice_enabled);
              ("voice_channel", `String meta.voice_channel);
              ("voice_agent_id", `String meta.voice_agent_id);
-             ("presence_keepalive", `Bool meta.presence_keepalive);
-             ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
              ("proactive_enabled", `Bool meta.proactive.enabled);
              ("proactive_idle_sec", `Int meta.proactive.idle_sec);
              ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);

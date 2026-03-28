@@ -402,33 +402,36 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
       proc_mgr = Some (Eio.Stdenv.process_mgr env);
     }
   in
-  match
-    Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
-      ~args:
-        (`Assoc
-          [
-            ("name", `String "admin-keeper");
-            ("goal", `String "Admin tool policy test");
-            ("presence_keepalive", `Bool false);
-            ("proactive_enabled", `Bool false);
-          ])
-  with
-  | Some (true, _) -> (
-      (* keeper_policy section removed with policy_mode purge —
-         admin_update should reject the section *)
-      let args =
-        `Assoc
-          [
-            ("section", `String "keeper_policy");
-            ("name", `String "admin-keeper");
-          ]
-      in
-      match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
-      | Some (false, _msg) -> () (* expected: section no longer supported *)
-      | Some (true, _) -> failwith "keeper_policy section should be rejected"
-      | None -> failwith "dispatch returned None")
-  | Some (false, err) -> failwith err
-  | None -> failwith "keeper up dispatch returned None"
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive "admin-keeper")
+    (fun () ->
+      match
+        Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String "admin-keeper");
+                ("goal", `String "Admin tool policy test");
+                ("proactive_enabled", `Bool false);
+              ])
+      with
+      | Some (true, _) -> (
+          (* keeper_policy section removed with policy_mode purge —
+             admin_update should reject the section *)
+          let args =
+            `Assoc
+              [
+                ("section", `String "keeper_policy");
+                ("name", `String "admin-keeper");
+              ]
+          in
+          match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
+          | Some (false, _msg) -> () (* expected: section no longer supported *)
+          | Some (true, _) -> failwith "keeper_policy section should be rejected"
+          | None -> failwith "dispatch returned None")
+      | Some (false, err) -> failwith err
+      | None -> failwith "keeper up dispatch returned None")
 )
 
 (* Test helper functions *)

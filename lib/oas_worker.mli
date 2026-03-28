@@ -24,6 +24,7 @@ type run_result = {
   session_id : string;
   turns : int;
   trace_ref : Oas.Raw_trace.run_ref option;
+  proof : Oas.Cdal_proof.t option;
 }
 
 (** Cascade call/error metrics as JSON array, sorted by call count. *)
@@ -54,6 +55,7 @@ val run_named :
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?agent_ref:Oas.Agent.t option ref ->
+  ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?allowed_paths:string list ->
   ?working_context:Yojson.Safe.t ->

@@ -36,7 +36,7 @@
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (cohttp-eio (and (>= 6.0) (< 6.2)))
-  (agent_sdk (>= 0.92.1))
+  (agent_sdk (>= 0.93.0))
   (uri (>= 4.4))
   (tls (>= 0.16))
   (tls-eio (>= 0.16))

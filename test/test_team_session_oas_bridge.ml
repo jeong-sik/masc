@@ -282,6 +282,7 @@ let test_telemetry_of_run_result_carries_trace_ref () =
       session_id = "session-1";
       turns = 3;
       trace_ref = Some trace_ref;
+      proof = None;
     }
   in
   let telemetry = Team_session_oas_bridge.telemetry_of_run_result result in

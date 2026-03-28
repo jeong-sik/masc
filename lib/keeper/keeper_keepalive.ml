@@ -105,11 +105,14 @@ let wakeup_relevant_keeper_for_board_signal
       |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
   | [] -> ()
 
+let max_consecutive_heartbeat_failures = 5
+
 let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
     (m : keeper_meta) (stop : bool Atomic.t) ~(wakeup : bool Atomic.t) : unit =
   let keepalive_started_ts = Time_compat.now () in
   let snapshot_interval_sec = Env_config.KeeperRuntime.snapshot_sec in
   let last_snapshot_ts = ref 0.0 in
+  let consecutive_failures = ref 0 in
   let rec loop () =
     if Atomic.get stop then ()
     else (
@@ -121,6 +124,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             let meta_current =
               try
                 let synced = ensure_keeper_room_presence ctx.config meta_current in
+                consecutive_failures := 0;
                 (match write_meta ctx.config synced with
                  | Ok () -> synced  (* use written value directly, no second read_meta *)
                  | Error e ->
@@ -129,8 +133,15 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->
-                Log.Keeper.error "room heartbeat failed: %s"
+                incr consecutive_failures;
+                Log.Keeper.error "room heartbeat failed (%d/%d): %s"
+                  !consecutive_failures max_consecutive_heartbeat_failures
                   (Printexc.to_string exn);
+                if !consecutive_failures >= max_consecutive_heartbeat_failures then (
+                  Log.Keeper.error
+                    "keeper %s: %d consecutive heartbeat failures, stopping keepalive"
+                    m.name max_consecutive_heartbeat_failures;
+                  Atomic.set stop true);
                 meta_current
             in
             let now_ts = Time_compat.now () in

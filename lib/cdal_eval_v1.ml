@@ -26,7 +26,10 @@ let synthesize_inconclusive ~(proof : Agent_sdk.Cdal_proof.t)
     impact = Blocks_verdict;
   } in
   let basis_input =
-    Printf.sprintf "%s|phase1a_v1_load_failure" proof.contract_id in
+    Printf.sprintf "%s|%s|%s|load_failure"
+      proof.contract_id
+      Cdal_types.loader_semantics_version_phase1
+      Cdal_types.schema_compat_mode_v1 in
   let basis_hash =
     "md5:" ^ (Digest.string basis_input |> Digest.to_hex) in
   let verdict_without_hash : Cdal_types.contract_verdict = {
@@ -35,6 +38,8 @@ let synthesize_inconclusive ~(proof : Agent_sdk.Cdal_proof.t)
     claim_scope = Cdal_types.claim_scope_phase1;
     judgment_basis_hash = basis_hash;
     judgment_hash = "";
+    loader_semantics_version = Cdal_types.loader_semantics_version_phase1;
+    schema_compat_mode = Cdal_types.schema_compat_mode_v1;
     status = Inconclusive;
     findings = [];
     completeness_gaps = [gap];

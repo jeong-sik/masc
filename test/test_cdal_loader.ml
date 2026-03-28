@@ -188,12 +188,10 @@ let test_schema_unsupported () =
   let run_id = "bad-schema" in
   let contract = make_contract () in
   let contract_id = Agent_sdk.Risk_contract.contract_id contract in
-  (* Create proof with wrong schema version *)
+  (* Create manifest proof with wrong schema version *)
   let proof = make_proof ~run_id ~contract_id ~schema_version:99 () in
   Agent_sdk.Proof_store.init_run store ~run_id;
-  (* Write manifest with correct schema for file, but proof object has v99 *)
-  let correct_proof = { proof with schema_version = 1 } in
-  Agent_sdk.Proof_store.write_manifest store ~run_id correct_proof;
+  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
   Agent_sdk.Proof_store.write_contract store ~run_id contract;
   match CL.load ~store proof with
   | Error (Schema_unsupported 99) -> ()
@@ -224,6 +222,36 @@ let test_contract_id_roundtrip () =
       Agent_sdk.Risk_contract.contract_id bundle.contract in
     Alcotest.(check string) "recomputed from loaded contract"
       original_id recomputed_again
+  | Error e -> Alcotest.fail (CL.load_error_to_string e)
+
+(* ================================================================ *)
+(* test_manifest_is_truth_source                                     *)
+(* ================================================================ *)
+
+let test_manifest_is_truth_source () =
+  let (store, _tmp) = setup_store () in
+  let run_id = "manifest-truth-001" in
+  let contract = make_contract () in
+  let contract_id = Agent_sdk.Risk_contract.contract_id contract in
+  let manifest_proof =
+    make_proof ~run_id ~contract_id
+      ~requested:Agent_sdk.Execution_mode.Execute
+      ~effective:Agent_sdk.Execution_mode.Draft () in
+  let input_proof =
+    make_proof ~run_id ~contract_id
+      ~requested:Agent_sdk.Execution_mode.Diagnose
+      ~effective:Agent_sdk.Execution_mode.Diagnose () in
+  Agent_sdk.Proof_store.init_run store ~run_id;
+  Agent_sdk.Proof_store.write_manifest store ~run_id manifest_proof;
+  Agent_sdk.Proof_store.write_contract store ~run_id contract;
+  match CL.load ~store input_proof with
+  | Ok bundle ->
+    Alcotest.(check string) "requested from manifest"
+      "execute"
+      (Agent_sdk.Execution_mode.to_string bundle.proof.requested_execution_mode);
+    Alcotest.(check string) "effective from manifest"
+      "draft"
+      (Agent_sdk.Execution_mode.to_string bundle.proof.effective_execution_mode)
   | Error e -> Alcotest.fail (CL.load_error_to_string e)
 
 (* ================================================================ *)
@@ -260,6 +288,7 @@ let () =
       Alcotest.test_case "malformed contract" `Quick test_malformed_contract;
       Alcotest.test_case "schema unsupported" `Quick test_schema_unsupported;
       Alcotest.test_case "contract_id roundtrip" `Quick test_contract_id_roundtrip;
+      Alcotest.test_case "manifest is truth source" `Quick test_manifest_is_truth_source;
     ]);
     ("error_string", [
       Alcotest.test_case "all variants" `Quick test_load_error_to_string;

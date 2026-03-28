@@ -25,23 +25,23 @@ let check_execution_mode (b : Cdal_loader.loaded_bundle) : Cdal_types.check_resu
   else
     let findings = ref [] in
     if not propagation_ok then
-      findings := {
-        Cdal_types.check_id;
+      findings := ({ Cdal_types.
+        check_id;
         event_id = None;
         observed = `String (Agent_sdk.Execution_mode.to_string proof_requested);
         expected = `String (Agent_sdk.Execution_mode.to_string contract_mode);
         trace_ref = None;
-      } :: !findings;
+      } : Cdal_types.contract_finding) :: !findings;
     if not escalation_ok then
-      findings := {
-        Cdal_types.check_id;
+      findings := ({ Cdal_types.
+        check_id;
         event_id = Some "escalation";
         observed = `String (Agent_sdk.Execution_mode.to_string proof_effective);
         expected = `String
           (Printf.sprintf "<= %s"
              (Agent_sdk.Execution_mode.to_string proof_requested));
         trace_ref = None;
-      } :: !findings;
+      } : Cdal_types.contract_finding) :: !findings;
     { check_id; status = Violated;
       findings = List.rev !findings;
       completeness_gaps = [] }
@@ -121,7 +121,11 @@ let derive_status (checks : Cdal_types.check_result list) : Cdal_types.contract_
 
 let judgment_basis_hash ~contract_id ~schema_version : string =
   let input =
-    Printf.sprintf "%s|phase1a_v1|%d" contract_id schema_version in
+    Printf.sprintf "%s|%s|%s|manifest.json|contract.json|%d"
+      contract_id
+      Cdal_types.loader_semantics_version_phase1
+      Cdal_types.schema_compat_mode_v1
+      schema_version in
   let hash = Digest.string input |> Digest.to_hex in
   "md5:" ^ hash
 
@@ -148,6 +152,8 @@ let judge (b : Cdal_loader.loaded_bundle) : Cdal_types.contract_verdict =
     claim_scope = Cdal_types.claim_scope_phase1;
     judgment_basis_hash = basis_hash;
     judgment_hash = "";
+    loader_semantics_version = Cdal_types.loader_semantics_version_phase1;
+    schema_compat_mode = Cdal_types.schema_compat_mode_v1;
     status;
     findings;
     completeness_gaps;

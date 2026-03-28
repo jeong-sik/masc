@@ -42,6 +42,8 @@ type contract_verdict = {
   claim_scope : string;
   judgment_basis_hash : string;
   judgment_hash : string;
+  loader_semantics_version : string;
+  schema_compat_mode : string;
   status : contract_status;
   findings : contract_finding list;
   completeness_gaps : completeness_gap list;
@@ -53,6 +55,8 @@ type contract_verdict = {
 (* ================================================================ *)
 
 let claim_scope_phase1 = "phase1_scoped_runtime_audit"
+let loader_semantics_version_phase1 = "phase1a_v1"
+let schema_compat_mode_v1 = "proof_bundle_v1"
 
 (* ================================================================ *)
 (* String conversions                                                *)
@@ -207,7 +211,9 @@ let contract_verdict_to_json (v : contract_verdict) : Yojson.Safe.t =
     ("findings", `List (List.map contract_finding_to_json v.findings));
     ("judgment_basis_hash", `String v.judgment_basis_hash);
     ("judgment_hash", `String v.judgment_hash);
+    ("loader_semantics_version", `String v.loader_semantics_version);
     ("run_id", `String v.run_id);
+    ("schema_compat_mode", `String v.schema_compat_mode);
     ("status", `String (contract_status_to_string v.status));
   ])
 
@@ -219,6 +225,9 @@ let contract_verdict_of_json = function
     let* claim_scope = string_field "claim_scope" fields in
     let* judgment_basis_hash = string_field "judgment_basis_hash" fields in
     let* judgment_hash = string_field "judgment_hash" fields in
+    let* loader_semantics_version =
+      string_field "loader_semantics_version" fields in
+    let* schema_compat_mode = string_field "schema_compat_mode" fields in
     let* status_str = string_field "status" fields in
     let* status = contract_status_of_string status_str in
     let* findings = list_field "findings" contract_finding_of_json fields in
@@ -229,6 +238,7 @@ let contract_verdict_of_json = function
     Ok {
       run_id; contract_id; claim_scope;
       judgment_basis_hash; judgment_hash;
+      loader_semantics_version; schema_compat_mode;
       status; findings; completeness_gaps; check_results;
     }
   | j -> Error (Printf.sprintf "contract_verdict: expected object, got %s"

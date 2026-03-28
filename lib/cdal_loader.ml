@@ -61,12 +61,13 @@ let load ~(store : Agent_sdk.Proof_store.config)
       if msg = "not found" then Manifest_not_found manifest_path
       else Manifest_parse_error msg)
   in
-  (* 2. Check schema version *)
-  let () =
-    ignore manifest_json  (* manifest was already loaded; proof carries version *)
+  let* manifest_proof =
+    Agent_sdk.Cdal_proof.of_json manifest_json
+    |> Result.map_error (fun msg -> Manifest_parse_error msg)
   in
-  if proof.schema_version <> Agent_sdk.Cdal_proof.schema_version_current then
-    Error (Schema_unsupported proof.schema_version)
+  (* 2. Check schema version from stored manifest *)
+  if manifest_proof.schema_version <> Agent_sdk.Cdal_proof.schema_version_current then
+    Error (Schema_unsupported manifest_proof.schema_version)
   else
   (* 3. Compute contract path and read *)
   let contract_path =
@@ -90,7 +91,7 @@ let load ~(store : Agent_sdk.Proof_store.config)
   (* 5. Recompute contract_id *)
   let recomputed_contract_id = Agent_sdk.Risk_contract.contract_id contract in
   Ok {
-    proof;
+    proof = manifest_proof;
     manifest_json;
     contract;
     contract_json;

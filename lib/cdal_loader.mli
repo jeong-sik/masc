@@ -6,7 +6,9 @@
 
     @since CDAL Phase 1A *)
 
-(** Successfully loaded and validated bundle. *)
+(** Successfully loaded and validated bundle.
+    [proof] is the decoded manifest proof, which is treated as the
+    stored truth source for phase-1A replay. *)
 type loaded_bundle = {
   proof : Agent_sdk.Cdal_proof.t;
   manifest_json : Yojson.Safe.t;

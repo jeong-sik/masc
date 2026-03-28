@@ -49,6 +49,8 @@ type contract_verdict = {
   claim_scope : string;
   judgment_basis_hash : string;
   judgment_hash : string;
+  loader_semantics_version : string;
+  schema_compat_mode : string;
   status : contract_status;
   findings : contract_finding list;
   completeness_gaps : completeness_gap list;
@@ -58,6 +60,8 @@ type contract_verdict = {
 (** {2 Claim scope constant} *)
 
 val claim_scope_phase1 : string
+val loader_semantics_version_phase1 : string
+val schema_compat_mode_v1 : string
 
 (** {2 String conversions} *)
 

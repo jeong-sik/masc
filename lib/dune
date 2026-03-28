@@ -532,6 +532,9 @@
    env_config_governance
    env_config_keeper
    env_config_introspect
+   env_config_server
+   env_config_chain
+   env_config_dashboard
    runtime_params
    governance_registry
    governance_pipeline

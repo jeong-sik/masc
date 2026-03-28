@@ -4,8 +4,9 @@
     keeper_supervisor Hashtbl, and file-based meta lookups.
     All keeper state queries and mutations go through this module.
 
-    Thread-safe: all operations protected by Eio.Mutex when available,
-    falls back to Stdlib.Mutex for test contexts without Eio. *)
+    Thread-safety: all operations are non-yielding (in-memory map/ref
+    ops only).  In single-domain Eio, non-yielding code runs atomically
+    w.r.t. other fibers, so no mutex is needed. *)
 
 open Keeper_types
 

@@ -470,6 +470,8 @@
    violation_record
    token_usage_record
    cdal_eval
+   cdal_types
+   cdal_loader
    contract_risk
    contract_composer
    keeper_deliberation

@@ -8,10 +8,7 @@ open Masc_mcp
 let () = Mirage_crypto_rng_unix.use_default ()
 
 (** Check if PG is available (empty string treated as absent) *)
-let pg_url () =
-  match Sys.getenv_opt "MASC_POSTGRES_URL" with
-  | Some s when String.trim s <> "" -> Some s
-  | _ -> None
+let pg_url () = Masc_mcp.Env_config_core.postgres_url_opt ()
 
 (** Delete all pg-test-* rows from board tables (votes -> comments -> posts).
     Uses a single connection for all three DELETEs.

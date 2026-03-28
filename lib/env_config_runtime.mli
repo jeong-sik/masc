@@ -43,6 +43,19 @@ end
 module Orchestrator : sig
   val check_interval_seconds : float
   val agent_name : string
+  val min_priority : int
+  val timeout_seconds : int
+  val enabled : bool
+end
+
+module TeamSession : sig
+  val model_35b_opt : unit -> string option
+  val model_27b_opt : unit -> string option
+  val model_9b_opt : unit -> string option
+  val router_judge_enabled : bool
+  val router_judge_timeout_sec : int
+  val router_judge_confidence_threshold : float
+  val router_judge_model_opt : unit -> string option
 end
 
 module Mitosis : sig

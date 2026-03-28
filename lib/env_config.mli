@@ -11,5 +11,11 @@ include module type of Env_config_runtime
 include module type of Env_config_governance
 include module type of Env_config_keeper
 
+module Server = Env_config_server
+module Dashboard = Env_config_dashboard
+
 val print_summary : unit -> unit
 (** Print configuration summary for debugging. *)
+
+val to_json : unit -> Yojson.Safe.t
+(** Serialize all known configuration as JSON for dashboard introspection. *)

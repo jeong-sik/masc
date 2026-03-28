@@ -74,12 +74,8 @@ let is_notification_method method_ =
 let is_initialize_method method_ = String.equal method_ "initialize"
 
 let request_accepts_json (request : Httpun.Request.t) =
-  let media_types =
-    Http_negotiation.parse_accept_header
-      (Httpun.Headers.get request.headers "accept")
-  in
-  Http_negotiation.is_media_type_accepted media_types
-    Http_negotiation.json_content_type
+  Http_negotiation.accepts_json
+    (Httpun.Headers.get request.headers "accept")
 
 let classify_mcp_accept_for_body (request : Httpun.Request.t) body_str =
   match classify_mcp_accept request with

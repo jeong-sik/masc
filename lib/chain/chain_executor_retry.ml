@@ -169,7 +169,6 @@ type circuit_breaker = {
   mutable last_failure : float;
   failure_threshold : int;
   reset_timeout : float;
-  lock : Eio.Mutex.t;
 }
 
 (** Create a circuit breaker *)
@@ -179,38 +178,31 @@ let create_breaker ?(failure_threshold = 5) ?(reset_timeout = 30.0) () = {
   last_failure = 0.0;
   failure_threshold;
   reset_timeout;
-  lock = Eio.Mutex.create ();
 }
 
 (** Check if circuit allows execution *)
 let circuit_allows breaker =
-  Eio.Mutex.use_rw ~protect:true breaker.lock (fun () ->
-    match breaker.state with
-    | Closed -> true
-    | Open ->
-        let now = Unix.gettimeofday () in
-        if now -. breaker.last_failure > breaker.reset_timeout then begin
-          breaker.state <- HalfOpen;
-          true
-        end else false
-    | HalfOpen -> true
-  )
+  match breaker.state with
+  | Closed -> true
+  | Open ->
+      let now = Unix.gettimeofday () in
+      if now -. breaker.last_failure > breaker.reset_timeout then begin
+        breaker.state <- HalfOpen;
+        true
+      end else false
+  | HalfOpen -> true
 
 (** Record success *)
 let circuit_success breaker =
-  Eio.Mutex.use_rw ~protect:true breaker.lock (fun () ->
-    breaker.failure_count <- 0;
-    breaker.state <- Closed
-  )
+  breaker.failure_count <- 0;
+  breaker.state <- Closed
 
 (** Record failure *)
 let circuit_failure breaker =
-  Eio.Mutex.use_rw ~protect:true breaker.lock (fun () ->
-    breaker.failure_count <- breaker.failure_count + 1;
-    breaker.last_failure <- Unix.gettimeofday ();
-    if breaker.failure_count >= breaker.failure_threshold then
-      breaker.state <- Open
-  )
+  breaker.failure_count <- breaker.failure_count + 1;
+  breaker.last_failure <- Unix.gettimeofday ();
+  if breaker.failure_count >= breaker.failure_threshold then
+    breaker.state <- Open
 
 (** Execute with circuit breaker and retry *)
 let execute_with_breaker ~clock ~breaker ~node_id f =

@@ -226,20 +226,16 @@ let build_nodes ~(chain : chain) ~(outputs : (string, string) Hashtbl.t)
   ) nodes
 
 let store : run_record list ref = ref []
-let mutex = Eio.Mutex.create ()
 
 let append_persistent_json json =
   let path = store_path () in
   Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.append_jsonl path json
 
-let list_runs () : run_record list =
-  Eio.Mutex.use_rw ~protect:true mutex (fun () -> !store)
+let list_runs () : run_record list = !store
 
 let get_run ~(run_id : string) : run_record option =
-  Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-    List.find_opt (fun r -> String.equal r.run_id run_id) !store
-  )
+  List.find_opt (fun r -> String.equal r.run_id run_id) !store
 
 let output_entry_to_json (o : output_entry) : Yojson.Safe.t =
   `Assoc [
@@ -325,14 +321,12 @@ let record ~(run_id : string) ~(chain : chain) ~(plan : execution_plan)
       outputs = outputs_entries;
       chain_json = chain_to_yojson chain;
     } in
-    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-      store := record :: !store;
-      let rec take n xs =
-        if n <= 0 then []
-        else match xs with [] -> [] | h :: t -> h :: take (n - 1) t
-      in
-      store := take max_keep !store
-    );
+    store := record :: !store;
+    let rec take n xs =
+      if n <= 0 then []
+      else match xs with [] -> [] | h :: t -> h :: take (n - 1) t
+    in
+    store := take max_keep !store;
     persist_run_record record
   end
 

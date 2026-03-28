@@ -6,7 +6,7 @@
     Features:
     - In-memory storage using Hashtbl (fast lookup)
     - Optional file-based persistence (JSON files in registry directory)
-    - Thread-safe operations via Mutex
+    - Non-yielding ops (single-domain Eio atomic)
     - Support for versioning and metadata
 
     Usage:
@@ -43,10 +43,6 @@ type registry_stats = {
 (** In-memory registry storage *)
 let registry : (string, registry_entry) Hashtbl.t = Hashtbl.create 64
 
-let registry_mutex = Eio.Mutex.create ()
-
-let with_mutex f =
-  Eio.Mutex.use_rw ~protect:true registry_mutex f
 
 (** File-based persistence directory *)
 let registry_dir = ref None
@@ -93,29 +89,25 @@ let init ?persist_dir () =
 
 (** Register a chain in the registry *)
 let register ?(description : string option) (chain : chain) : unit =
-  with_mutex (fun () ->
-    let version = match Hashtbl.find_opt registry chain.id with
-      | Some entry -> entry.version + 1
-      | None -> 1
-    in
-    let entry = {
-      chain;
-      registered_at = Unix.gettimeofday ();
-      version;
-      description;
-    } in
-    Hashtbl.replace registry chain.id entry;
-
-    (* Persist to file if enabled *)
-    match !registry_dir with
-    | Some dir ->
-        let path = Filename.concat dir (chain.id ^ ".json") in
-        let json = chain_to_yojson chain in
-        Out_channel.with_open_text path (fun oc ->
-          Out_channel.output_string oc (Yojson.Safe.pretty_to_string json)
-        )
-    | None -> ()
-  )
+  let version = match Hashtbl.find_opt registry chain.id with
+    | Some entry -> entry.version + 1
+    | None -> 1
+  in
+  let entry = {
+    chain;
+    registered_at = Unix.gettimeofday ();
+    version;
+    description;
+  } in
+  Hashtbl.replace registry chain.id entry;
+  match !registry_dir with
+  | Some dir ->
+      let path = Filename.concat dir (chain.id ^ ".json") in
+      let json = chain_to_yojson chain in
+      Out_channel.with_open_text path (fun oc ->
+        Out_channel.output_string oc (Yojson.Safe.pretty_to_string json)
+      )
+  | None -> ()
 
 (** Load chain JSON files from a directory into the in-memory registry (no persistence).
 
@@ -157,11 +149,9 @@ let load_from_dir (dir : string) : (int * (string * string) list) =
 
 (** Look up a chain by ID *)
 let lookup (id : string) : chain option =
-  with_mutex (fun () ->
-    match Hashtbl.find_opt registry id with
-    | Some entry -> Some entry.chain
-    | None -> None
-  )
+  match Hashtbl.find_opt registry id with
+  | Some entry -> Some entry.chain
+  | None -> None
 
 (** Look up a chain by ID, raising Not_found if missing *)
 let lookup_exn (id : string) : chain =
@@ -171,147 +161,123 @@ let lookup_exn (id : string) : chain =
 
 (** Look up with full entry metadata *)
 let lookup_entry (id : string) : registry_entry option =
-  with_mutex (fun () ->
-    Hashtbl.find_opt registry id
-  )
+  Hashtbl.find_opt registry id
 
 (** Check if a chain is registered *)
 let exists (id : string) : bool =
-  with_mutex (fun () ->
-    Hashtbl.mem registry id
-  )
+  Hashtbl.mem registry id
 
 (** Unregister a chain by ID *)
 let unregister (id : string) : bool =
-  with_mutex (fun () ->
-    if Hashtbl.mem registry id then begin
-      Hashtbl.remove registry id;
-      (* Remove file if persistence enabled *)
-      (match !registry_dir with
-       | Some dir ->
-           let path = Filename.concat dir (id ^ ".json") in
-           if Sys.file_exists path then Sys.remove path
-       | None -> ());
-      true
-    end else
-      false
-  )
+  if Hashtbl.mem registry id then begin
+    Hashtbl.remove registry id;
+    (match !registry_dir with
+     | Some dir ->
+         let path = Filename.concat dir (id ^ ".json") in
+         if Sys.file_exists path then Sys.remove path
+     | None -> ());
+    true
+  end else
+    false
 
 (** List all registered chain IDs *)
 let list_ids () : string list =
-  with_mutex (fun () ->
-    Hashtbl.fold (fun id _ acc -> id :: acc) registry []
-  )
+  Hashtbl.fold (fun id _ acc -> id :: acc) registry []
 
 (** List all registered chains *)
 let list_all () : chain list =
-  with_mutex (fun () ->
-    Hashtbl.fold (fun _ entry acc -> entry.chain :: acc) registry []
-  )
+  Hashtbl.fold (fun _ entry acc -> entry.chain :: acc) registry []
 
 (** List all entries with metadata *)
 let list_entries () : (string * registry_entry) list =
-  with_mutex (fun () ->
-    Hashtbl.fold (fun id entry acc -> (id, entry) :: acc) registry []
-  )
+  Hashtbl.fold (fun id entry acc -> (id, entry) :: acc) registry []
 
 (** Get registry statistics *)
 let stats () : registry_stats =
-  with_mutex (fun () ->
-    let total_chains = Hashtbl.length registry in
-    let total_nodes = Hashtbl.fold (fun _ entry acc ->
-      acc + List.length entry.chain.nodes
-    ) registry 0 in
-    let oldest, newest =
-      Hashtbl.fold (fun id entry (oldest, newest) ->
-        let oldest' = match oldest with
-          | None -> Some (id, entry.registered_at)
-          | Some (_, t) when entry.registered_at < t -> Some (id, entry.registered_at)
-          | _ -> oldest
-        in
-        let newest' = match newest with
-          | None -> Some (id, entry.registered_at)
-          | Some (_, t) when entry.registered_at > t -> Some (id, entry.registered_at)
-          | _ -> newest
-        in
-        (oldest', newest')
-      ) registry (None, None)
-    in
-    {
-      total_chains;
-      total_nodes;
-      oldest_chain = Option.map fst oldest;
-      newest_chain = Option.map fst newest;
-    }
-  )
+  let total_chains = Hashtbl.length registry in
+  let total_nodes = Hashtbl.fold (fun _ entry acc ->
+    acc + List.length entry.chain.nodes
+  ) registry 0 in
+  let oldest, newest =
+    Hashtbl.fold (fun id entry (oldest, newest) ->
+      let oldest' = match oldest with
+        | None -> Some (id, entry.registered_at)
+        | Some (_, t) when entry.registered_at < t -> Some (id, entry.registered_at)
+        | _ -> oldest
+      in
+      let newest' = match newest with
+        | None -> Some (id, entry.registered_at)
+        | Some (_, t) when entry.registered_at > t -> Some (id, entry.registered_at)
+        | _ -> newest
+      in
+      (oldest', newest')
+    ) registry (None, None)
+  in
+  {
+    total_chains;
+    total_nodes;
+    oldest_chain = Option.map fst oldest;
+    newest_chain = Option.map fst newest;
+  }
 
 (** Clear all registered chains *)
 let clear () : unit =
-  with_mutex (fun () ->
-    Hashtbl.clear registry;
-    (* Clear files if persistence enabled *)
-    match !registry_dir with
-    | Some dir when Sys.file_exists dir && Sys.is_directory dir ->
-        let files = Sys.readdir dir in
-        Array.iter (fun file ->
-          if Filename.check_suffix file ".json" then
-            Sys.remove (Filename.concat dir file)
-        ) files
-    | _ -> ()
-  )
+  Hashtbl.clear registry;
+  match !registry_dir with
+  | Some dir when Sys.file_exists dir && Sys.is_directory dir ->
+      let files = Sys.readdir dir in
+      Array.iter (fun file ->
+        if Filename.check_suffix file ".json" then
+          Sys.remove (Filename.concat dir file)
+      ) files
+  | _ -> ()
 
 (** Count of registered chains *)
 let count () : int =
-  with_mutex (fun () ->
-    Hashtbl.length registry
-  )
+  Hashtbl.length registry
 
 (** Export registry to JSON *)
 let to_json () : Yojson.Safe.t =
-  with_mutex (fun () ->
-    let chains = Hashtbl.fold (fun id entry acc ->
-      let entry_json = `Assoc [
-        ("id", `String id);
-        ("chain", chain_to_yojson entry.chain);
-        ("registered_at", `Float entry.registered_at);
-        ("version", `Int entry.version);
-        ("description", match entry.description with
-          | Some d -> `String d
-          | None -> `Null);
-      ] in
-      entry_json :: acc
-    ) registry [] in
-    `List chains
-  )
+  let chains = Hashtbl.fold (fun id entry acc ->
+    let entry_json = `Assoc [
+      ("id", `String id);
+      ("chain", chain_to_yojson entry.chain);
+      ("registered_at", `Float entry.registered_at);
+      ("version", `Int entry.version);
+      ("description", match entry.description with
+        | Some d -> `String d
+        | None -> `Null);
+    ] in
+    entry_json :: acc
+  ) registry [] in
+  `List chains
 
 (** Import registry from JSON *)
 let of_json (json : Yojson.Safe.t) : (int, string) result =
-  with_mutex (fun () ->
-    try
-      let open Yojson.Safe.Util in
-      let entries = to_list json in
-      let count = ref 0 in
-      List.iter (fun entry_json ->
-        let chain_json = entry_json |> member "chain" in
-        match chain_of_yojson chain_json with
-        | Ok chain ->
-            let description = entry_json |> member "description" |> to_string_option in
-            let version = entry_json |> member "version" |> to_int_option |> Option.value ~default:1 in
-            let registered_at = entry_json |> member "registered_at" |> to_float_option
-              |> Option.value ~default:(Unix.gettimeofday ()) in
-            Hashtbl.replace registry chain.id {
-              chain;
-              registered_at;
-              version;
-              description;
-            };
-            incr count
-        | Error msg ->
-            Log.Chain.error "Failed to load entry: %s" msg
-      ) entries;
-      Ok !count
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Error (Printexc.to_string e)
-  )
+  try
+    let open Yojson.Safe.Util in
+    let entries = to_list json in
+    let count = ref 0 in
+    List.iter (fun entry_json ->
+      let chain_json = entry_json |> member "chain" in
+      match chain_of_yojson chain_json with
+      | Ok chain ->
+          let description = entry_json |> member "description" |> to_string_option in
+          let version = entry_json |> member "version" |> to_int_option |> Option.value ~default:1 in
+          let registered_at = entry_json |> member "registered_at" |> to_float_option
+            |> Option.value ~default:(Unix.gettimeofday ()) in
+          Hashtbl.replace registry chain.id {
+            chain;
+            registered_at;
+            version;
+            description;
+          };
+          incr count
+      | Error msg ->
+          Log.Chain.error "Failed to load entry: %s" msg
+    ) entries;
+    Ok !count
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
+    Error (Printexc.to_string e)

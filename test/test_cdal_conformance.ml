@@ -9,27 +9,59 @@ module Proof = Agent_sdk.Cdal_proof
 module EM = Agent_sdk.Execution_mode
 module RK = Agent_sdk.Risk_class
 
-let fixture_dir =
-  let candidates = [
-    "fixtures/cdal";
-    "../fixtures/cdal";
-    "../../fixtures/cdal";
-  ] in
-  match List.find_opt Sys.file_exists candidates with
-  | Some d -> d
-  | None -> "fixtures/cdal"
+(* Inline fixtures — avoids CWD issues in CI where dune runs tests
+   from _build/default/test/ rather than the repo root. Canonical
+   copies live in fixtures/cdal/ for external tooling. *)
 
-let read_fixture name =
-  let path = Filename.concat fixture_dir name in
-  let ic = open_in path in
-  let content = really_input_string ic (in_channel_length ic) in
-  close_in ic;
-  Yojson.Safe.from_string content
+let risk_contract_v1_json = {|{
+  "runtime_constraints": {
+    "requested_execution_mode": "draft",
+    "risk_class": "medium",
+    "allowed_mutations": ["keeper_fs_edit", "keeper_write"],
+    "review_requirement": null
+  },
+  "eval_criteria": {
+    "success_criteria": ["tests pass", "no lint errors"],
+    "required_evidence": ["src/main.ml", "test/test_main.ml"],
+    "contract_id": "dc-fixture-001",
+    "evaluator_cascade": "cross_verifier"
+  }
+}|}
+
+let cdal_proof_v1_json = {|{
+  "schema_version": 1,
+  "run_id": "cdal-fixture-abc123",
+  "contract_id": "md5:a1b2c3d4e5f6",
+  "requested_execution_mode": "execute",
+  "effective_execution_mode": "draft",
+  "mode_decision_source": "risk_class_downgrade",
+  "risk_class": "high",
+  "provider_snapshot": {
+    "provider_name": "glm",
+    "model_id": "glm-4-plus",
+    "api_version": null
+  },
+  "capability_snapshot": {
+    "tools": ["keeper_read", "keeper_fs_edit", "keeper_bash"],
+    "mcp_servers": [],
+    "max_turns": 20,
+    "max_tokens": null,
+    "thinking_enabled": null
+  },
+  "tool_trace_refs": [
+    "proof-store://cdal-fixture-abc123/tool_traces/trace-001"
+  ],
+  "raw_evidence_refs": [],
+  "checkpoint_ref": null,
+  "result_status": "completed",
+  "started_at": 1711900000.0,
+  "ended_at": 1711900120.0
+}|}
 
 (* --- Risk Contract Fixture --- *)
 
 let test_risk_contract_fixture () =
-  let json = read_fixture "risk_contract_v1.json" in
+  let json = Yojson.Safe.from_string risk_contract_v1_json in
   match RC.of_yojson json with
   | Ok rc ->
     check string "requested_mode" "draft"
@@ -53,7 +85,7 @@ let test_risk_contract_fixture () =
 (* --- Cdal Proof Fixture --- *)
 
 let test_cdal_proof_fixture () =
-  let json = read_fixture "cdal_proof_v1.json" in
+  let json = Yojson.Safe.from_string cdal_proof_v1_json in
   match Proof.of_json json with
   | Ok proof ->
     check int "schema_version" 1 proof.schema_version;

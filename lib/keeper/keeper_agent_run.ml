@@ -232,7 +232,7 @@ let run_turn
             (Cdal_proof_decoder.duration_s proof)
         | Error e ->
           let gap = Cdal_proof_decoder.evidence_gap_of_error ~json e in
-          Log.Keeper.warn "keeper:%s CDAL proof decode failed: %s (gap: %d missing, %d invalid)"
+          Log.Keeper.error "keeper:%s CDAL proof decode failed: %s (gap: %d missing, %d invalid)"
             meta.name (Cdal_proof_decoder.decode_error_to_string e)
             (List.length gap.missing_fields)
             (List.length gap.invalid_fields))

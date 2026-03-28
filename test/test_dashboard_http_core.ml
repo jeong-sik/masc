@@ -100,6 +100,9 @@ let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
     (result_domain = caller_domain)
 
 let test_run_dashboard_compute_with_pool_uses_executor_domain () =
+  (* Non-PG backends (FileSystem, Memory) run inline even when a pool is
+     available, to avoid cross-domain Eio.Mutex deadlock.  Only PG backends
+     offload to the executor pool.  This test verifies the inline path. *)
   with_test_env @@ fun ~env ~sw ~config ->
   let exec_pool =
     Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
@@ -113,8 +116,8 @@ let test_run_dashboard_compute_with_pool_uses_executor_domain () =
       ~config
       (fun ~config:_ ~sw:_ -> Domain.self ())
   in
-  check bool "executor pool runs compute off the caller domain" true
-    (result_domain <> caller_domain)
+  check bool "non-PG backend stays on caller domain (inline)" true
+    (result_domain = caller_domain)
 
 let test_run_dashboard_compute_without_pool_uses_isolated_pg_backend () =
   with_pg_test_env @@ fun ~env ~sw ~config ->

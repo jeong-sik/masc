@@ -49,14 +49,19 @@ let state_to_string = function
   | Stopped -> "stopped"
 
 let registry : registry_entry StringMap.t ref = ref StringMap.empty
-let mu = Eio.Mutex.create ()
+(* Stdlib.Mutex: all critical sections are non-yielding (in-memory map ops
+   only), and the registry is accessed from both the main Eio domain and
+   Executor_pool domains.  Eio.Mutex causes cross-domain deadlock because
+   its fiber-based waiters do not interoperate across OCaml domains. *)
+let mu = Mutex.create ()
 let running_count_atomic = Atomic.make 0
 
 let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 
-let with_lock_rw f = Eio_guard.with_mutex mu f
-let with_lock_ro f = Eio_guard.with_mutex_ro mu f
+let with_lock f =
+  Mutex.lock mu;
+  Fun.protect ~finally:(fun () -> Mutex.unlock mu) f
 
 (** Write an entry back to the registry map. *)
 let put_entry key entry =
@@ -65,7 +70,7 @@ let put_entry key entry =
 let max_crash_log_entries = 5
 
 let register ~base_path name meta =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let done_p, done_r = Eio.Promise.create () in
     let key = registry_key ~base_path name in
     (match StringMap.find_opt key !registry with
@@ -97,7 +102,7 @@ let register ~base_path name meta =
     entry)
 
 let unregister ~base_path name =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let key = registry_key ~base_path name in
     (match StringMap.find_opt key !registry with
      | Some entry when entry.state = Running ->
@@ -106,7 +111,7 @@ let unregister ~base_path name =
     registry := StringMap.remove key !registry)
 
 let get ~base_path name =
-  with_lock_ro (fun () -> StringMap.find_opt (registry_key ~base_path name) !registry)
+  with_lock (fun () -> StringMap.find_opt (registry_key ~base_path name) !registry)
 
 let get_exn ~base_path name =
   match get ~base_path name with
@@ -114,7 +119,7 @@ let get_exn ~base_path name =
   | None -> raise Not_found
 
 let all ?base_path () =
-  with_lock_ro (fun () ->
+  with_lock (fun () ->
     StringMap.fold
       (fun _k v acc ->
         match base_path with
@@ -123,7 +128,7 @@ let all ?base_path () =
       !registry [])
 
 let update_meta ~base_path name meta =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let key = registry_key ~base_path name in
     match StringMap.find_opt key !registry with
     | Some entry -> put_entry key { entry with meta }
@@ -134,7 +139,7 @@ let () =
       update_meta ~base_path:config.base_path meta.name meta)
 
 let set_state ~base_path name state =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let key = registry_key ~base_path name in
     match StringMap.find_opt key !registry with
     | Some entry ->
@@ -151,7 +156,7 @@ let set_state ~base_path name state =
     | None -> ())
 
 let record_restart ~base_path name =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let key = registry_key ~base_path name in
     match StringMap.find_opt key !registry with
     | Some entry ->
@@ -161,7 +166,7 @@ let record_restart ~base_path name =
     | None -> ())
 
 let record_error ~base_path name err =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let key = registry_key ~base_path name in
     match StringMap.find_opt key !registry with
     | Some entry -> put_entry key { entry with last_error = Some err }
@@ -180,7 +185,7 @@ let count_running ?base_path () =
   match base_path with
   | None -> Atomic.get running_count_atomic
   | Some expected ->
-      with_lock_ro (fun () ->
+      with_lock (fun () ->
         StringMap.fold
           (fun _k v acc ->
             if String.equal expected v.base_path && v.state = Running then acc + 1
@@ -188,7 +193,7 @@ let count_running ?base_path () =
           !registry 0)
 
 let record_crash ~base_path name ts msg =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let key = registry_key ~base_path name in
     match StringMap.find_opt key !registry with
     | Some entry ->
@@ -199,7 +204,7 @@ let record_crash ~base_path name ts msg =
     | None -> ())
 
 let set_grpc_close ~base_path name close_fn =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | Some entry -> Atomic.set entry.grpc_close close_fn
     | None -> ())
@@ -212,16 +217,16 @@ let started_at ~base_path name =
 let spawn_slots_available () =
   let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
   max_keepers <= 0
-  || with_lock_ro (fun () -> StringMap.cardinal !registry < max_keepers)
+  || with_lock (fun () -> StringMap.cardinal !registry < max_keepers)
 
 let wakeup ~base_path name =
-  with_lock_ro (fun () ->
+  with_lock (fun () ->
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | Some entry -> Atomic.set entry.fiber_wakeup true
     | None -> ())
 
 let wakeup_all ?base_path () =
-  with_lock_ro (fun () ->
+  with_lock (fun () ->
     StringMap.iter (fun _k entry ->
       (match base_path with
        | Some expected when not (String.equal expected entry.base_path) -> ()
@@ -229,7 +234,7 @@ let wakeup_all ?base_path () =
     ) !registry)
 
 let fiber_health_of ~base_path name =
-  with_lock_ro (fun () ->
+  with_lock (fun () ->
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | None -> Fiber_unknown
     | Some entry ->
@@ -249,7 +254,7 @@ let crash_log_of ~base_path name =
 
 let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts
     ~crash_log =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let key = registry_key ~base_path name in
     match StringMap.find_opt key !registry with
     | Some entry ->
@@ -257,20 +262,20 @@ let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts
     | None -> ())
 
 let get_last_agent_count ~base_path name =
-  with_lock_ro (fun () ->
+  with_lock (fun () ->
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | Some entry -> entry.last_agent_count
     | None -> 0)
 
 let set_last_agent_count ~base_path name count =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let key = registry_key ~base_path name in
     match StringMap.find_opt key !registry with
     | Some entry -> put_entry key { entry with last_agent_count = count }
     | None -> ())
 
 let board_wakeup_allowed ~base_path name ~post_id ~debounce_sec =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | None -> true
     | Some entry ->
@@ -282,13 +287,13 @@ let board_wakeup_allowed ~base_path name ~post_id ~debounce_sec =
             true)
 
 let clear_board_wakeups ~base_path name =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | Some entry -> Hashtbl.reset entry.board_wakeups
     | None -> ())
 
 let cleanup_tracking ~base_path name =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let key = registry_key ~base_path name in
     match StringMap.find_opt key !registry with
     | Some entry ->
@@ -298,20 +303,20 @@ let cleanup_tracking ~base_path name =
     | None -> ())
 
 let clear () =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     registry := StringMap.empty;
     Atomic.set running_count_atomic 0)
 
 (* -- Board cursor -------------------------------------------------- *)
 
 let get_board_cursor_ts ~base_path name =
-  with_lock_ro (fun () ->
+  with_lock (fun () ->
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | Some entry -> entry.board_cursor_ts
     | None -> 0.0)
 
 let set_board_cursor_ts ~base_path name ts =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     let key = registry_key ~base_path name in
     match StringMap.find_opt key !registry with
     | Some entry -> put_entry key { entry with board_cursor_ts = ts }
@@ -320,7 +325,7 @@ let set_board_cursor_ts ~base_path name ts =
 (* -- Tool usage tracking ------------------------------------------- *)
 
 let record_tool_use ~base_path name ~tool_name ~success =
-  with_lock_rw (fun () ->
+  with_lock (fun () ->
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | None -> ()
     | Some entry ->
@@ -338,7 +343,7 @@ let record_tool_use ~base_path name ~tool_name ~success =
       e.last_used_at <- Time_compat.now ())
 
 let tool_usage_of ~base_path name =
-  with_lock_ro (fun () ->
+  with_lock (fun () ->
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | None -> []
     | Some entry ->
@@ -347,7 +352,7 @@ let tool_usage_of ~base_path name =
 
 (** Look up a keeper by name across all base_paths (O(n) scan). *)
 let find_by_name name =
-  with_lock_ro (fun () ->
+  with_lock (fun () ->
     StringMap.fold
       (fun _k v acc ->
         match acc with
@@ -356,7 +361,7 @@ let find_by_name name =
       !registry None)
 
 let tool_usage_of_by_name name =
-  with_lock_ro (fun () ->
+  with_lock (fun () ->
     match find_by_name name with
     | None -> []
     | Some entry ->

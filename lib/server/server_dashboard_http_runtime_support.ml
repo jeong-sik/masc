@@ -131,7 +131,12 @@ let run_dashboard_compute state ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
   in
   match mode with
   | Inline_shared -> fallback ()
-  | Offloaded_readonly -> offloaded ()
+  | Offloaded_readonly ->
+      (* Non-PG backends (FileSystem, Memory) run inline to avoid cross-domain
+         Eio.Mutex access.  The executor pool exists for PG connection isolation;
+         filesystem ops are already lightweight and sharing in-process mutexes
+         across domains causes deadlock (Keeper_registry.mu). *)
+      if is_pg then offloaded () else fallback ()
 
 let dashboard_active_or_recent_sessions_cached state ~clock
     ~refresh_interval_s config load_sessions =

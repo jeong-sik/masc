@@ -35,7 +35,6 @@ let run_cmd base_path =
      Keeper_runtime.start_existing_keepalives if needed *)
   Server_bootstrap_pg.init_task_backend ();
   Server_bootstrap_pg.inject_shared_pg_pool ();
-  Server_bootstrap_pg.init_memory_pg_schema ();
   ignore (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);
   Fun.protect
     ~finally:(fun () ->

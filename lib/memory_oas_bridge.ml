@@ -1,17 +1,19 @@
 (** Memory_oas_bridge — Connect MASC memory systems to OAS Memory.t 5-tier.
 
     Tier mapping:
-    - {b Long_term} — PostgreSQL via [Memory_pg] when MASC_POSTGRES_URL is set;
-                        no-op stubs otherwise
+    - {b Long_term} — JSONL files under [.masc/memory/<agent>/<session>.jsonl]
     - {b Episodic}  — [seed_episodes] loads recent [Institution_eio] JSONL
                        episodes and [flush_episodes] writes new OAS episodes back
     - {b Procedural} — [seed_procedures_as_oas] loads [Procedural_memory] entries;
                         [flush_procedures] writes back
     - {b Working/Scratchpad} — managed by OAS in-memory; no backend needed
 
+    Filesystem-first policy: Long_term always uses JSONL, regardless of
+    whether a PG pool is available.  PG long_term was removed in 2.140.0.
+
     @since 2.122.0 (long_term only)
     @since 2.124.0 (5-tier: episodic + procedural seeding/flushing)
-    @since 2.130.0 (PostgreSQL long_term_backend via Memory_pg) *)
+    @since 2.140.0 (filesystem-first: JSONL long_term_backend always) *)
 
 (** Default importance for memories stored via OAS Memory.store.
     Configurable via MASC_MEMORY_OAS_DEFAULT_IMPORTANCE. *)
@@ -54,23 +56,17 @@ let resolve_base_dir ?(base_dir : string option) ?(config : Room_utils.config op
 
 (** Create an OAS [long_term_backend].
 
-    If a PG pool is available (via [Board_dispatch.get_pg_pool]),
-    uses [Memory_pg] for persistent storage scoped by [agent_name].
-    Otherwise falls back to session-based JSONL files under
-    [.masc/memory/<agent_name>/<session_id>.jsonl]. *)
+    Always uses session-based JSONL files under
+    [.masc/memory/<agent_name>/<session_id>.jsonl].
+    Filesystem-first: PG pool availability is not checked. *)
 let make_backend ?base_dir ~(agent_name : string) ~(session_id : string) ()
   : Agent_sdk.Memory.long_term_backend =
-  match Board_dispatch.get_pg_pool () with
-  | Some pool -> Memory_pg.make_backend ~pool ~agent_name
-  | None ->
-    let base_dir = resolve_base_dir ?base_dir () in
-    Log.MemoryJsonl.info "Using JSONL fallback for %s (session=%s)"
-      agent_name session_id;
-    Memory_jsonl.make_backend ~base_dir ~agent_name ~session_id
+  let base_dir = resolve_base_dir ?base_dir () in
+  Memory_jsonl.make_backend ~base_dir ~agent_name ~session_id
 
 (** Create an OAS [Memory.t] instance.
 
-    Uses PostgreSQL long_term_backend when available, JSONL fallback otherwise.
+    Uses JSONL long_term_backend (filesystem-first).
     @param session_id Session identifier; defaults to timestamp-based ID. *)
 let create_memory ~(agent_name : string) ?(base_dir : string option)
     ?(session_id : string option)
@@ -427,7 +423,7 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
 (** Create an OAS [Memory.t] with all 5 tiers populated.
 
     Seeds:
-    - Long_term: PostgreSQL via [Memory_pg] when available, no-op stubs otherwise
+    - Long_term: JSONL files (filesystem-first, PG not used)
     - Episodic: recent institution episodes from JSONL
     - Procedural: top [procedure_limit] crystallized procedures
     - Working/Scratchpad: empty (managed by OAS at runtime)

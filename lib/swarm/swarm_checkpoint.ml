@@ -137,43 +137,19 @@ let save config =
   let json = swarm_snapshot_to_yojson snapshot in
   let path = checkpoint_path config in
   Room_utils.write_json_local path json;
-  (* Dual persistence: also write to PostgreSQL backend if available *)
-  if Room_utils.is_pg_backend config then begin
-    let json_str = Yojson.Safe.to_string json in
-    (match Room_utils.backend_set config ~key:"swarm:checkpoint" ~value:json_str with
-     | Ok () -> ()
-     | Error e -> Log.Misc.warn "swarm checkpoint backend_set failed: %s" (Backend_types.show_error e))
-  end;
   Ok snapshot
 
 let restore config : (swarm_snapshot, string) result =
-  (* Try PostgreSQL first for distributed environments *)
-  let pg_snapshot =
-    if Room_utils.is_pg_backend config then
-      match Room_utils.backend_get config ~key:"swarm:checkpoint" with
-      | Ok (Some json_str) ->
-          (try
-             let json = Yojson.Safe.from_string json_str in
-             (match swarm_snapshot_of_yojson json with
-              | Ok snap -> Some snap
-              | Error _ -> None)
-           with Yojson.Json_error _ -> None)
-      | Ok None | Error _ -> None
-    else None
-  in
-  match pg_snapshot with
-  | Some snap -> Ok snap
-  | None ->
-      let path = checkpoint_path config in
-      if not (Sys.file_exists path) then
-        Error "No swarm checkpoint found"
-      else
-        match Safe_ops.read_json_file_safe path with
-        | Ok json ->
-            (match swarm_snapshot_of_yojson json with
-             | Ok snap -> Ok snap
-             | Error e -> Error (Printf.sprintf "Checkpoint parse error: %s" e))
-        | Error e -> Error (Printf.sprintf "Checkpoint read error: %s" e)
+  let path = checkpoint_path config in
+  if not (Sys.file_exists path) then
+    Error "No swarm checkpoint found"
+  else
+    match Safe_ops.read_json_file_safe path with
+    | Ok json ->
+        (match swarm_snapshot_of_yojson json with
+         | Ok snap -> Ok snap
+         | Error e -> Error (Printf.sprintf "Checkpoint parse error: %s" e))
+    | Error e -> Error (Printf.sprintf "Checkpoint read error: %s" e)
 
 (* ================================================================ *)
 (* Periodic save daemon (Eio fiber)                                 *)

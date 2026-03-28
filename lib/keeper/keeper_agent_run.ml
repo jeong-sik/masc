@@ -19,6 +19,7 @@ type run_result = {
   usage : Agent_sdk.Types.api_usage;
   tools_used : string list;
   checkpoint : Agent_sdk.Checkpoint.t option;
+  proof : Agent_sdk.Cdal_proof.t option;
 }
 
 let normalize_response_text ~(text : string) ~(tool_names : string list) :
@@ -244,6 +245,14 @@ let run_turn
            ~source:history_assistant_source
            session assistant_msg;
          ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
+         (match result.proof with
+          | Some p ->
+            Log.Keeper.info "keeper:%s proof: run_id=%s mode=%s status=%s violations=%d"
+              meta.name p.run_id
+              (Agent_sdk.Execution_mode.to_string p.effective_execution_mode)
+              (Agent_sdk.Cdal_proof.show_result_status p.result_status)
+              (List.length p.raw_evidence_refs)
+          | None -> ());
          Ok {
            response_text;
            model_used = model;
@@ -252,4 +261,5 @@ let run_turn
            usage;
            tools_used = tool_names;
            checkpoint = result.checkpoint;
+           proof = result.proof;
          })

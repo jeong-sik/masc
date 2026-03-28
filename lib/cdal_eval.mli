@@ -55,3 +55,17 @@ val to_json : eval_result -> Yojson.Safe.t
 
 (** Severity to short string for logging. *)
 val severity_to_string : severity -> string
+
+(** Actionable recommendation based on the eval result.
+    Returns [None] when overall is [Ok]. *)
+val recommendation : eval_result -> string option
+
+(** Persist eval result to date-partitioned JSONL store.
+    Writes to [data/cdal_evals/YYYY-MM/DD.jsonl]. *)
+val persist : eval_result -> unit
+
+(** Reset the store reference.  For testing only. *)
+val reset_store_for_testing : unit -> unit
+
+(** Set a custom store base directory.  For testing only. *)
+val set_store_for_testing : base_dir:string -> unit

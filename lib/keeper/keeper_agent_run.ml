@@ -253,11 +253,14 @@ let run_turn
               (Agent_sdk.Cdal_proof.show_result_status p.result_status)
               (List.length p.raw_evidence_refs);
             let eval = Cdal_eval.evaluate p in
+            Cdal_eval.persist eval;
             Log.Keeper.info "keeper:%s cdal_eval: %s"
               meta.name (Cdal_eval.severity_to_string eval.overall);
-            if not (Cdal_eval.is_acceptable eval) then
-              Log.Keeper.warn "keeper:%s cdal verdict NOT acceptable: %s"
-                meta.name (Cdal_eval.severity_to_string eval.overall)
+            (match Cdal_eval.recommendation eval with
+             | Some rec_text ->
+               Log.Keeper.warn "keeper:%s cdal recommendation: %s"
+                 meta.name rec_text
+             | None -> ())
           | None -> ());
          Ok {
            response_text;

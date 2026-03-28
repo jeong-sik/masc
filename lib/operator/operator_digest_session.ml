@@ -688,5 +688,6 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
     attention_items;
     recommended_actions;
     worker_cards;
+    risk_digest = Risk_digest.(compute ~session ~worker_cards |> to_yojson);
   }
 

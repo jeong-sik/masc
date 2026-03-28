@@ -260,6 +260,7 @@
    operator_digest_event
    operator_digest_guidance
    operator_digest_types
+   risk_digest
    operator_digest_session
    operator_control
    operator_control_snapshot

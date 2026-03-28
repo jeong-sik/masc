@@ -136,11 +136,26 @@ let find_main_eio_exe () =
     match env_override with
     | Some p -> [p]
     | None ->
+        let build_dir =
+          match Sys.getenv_opt "DUNE_BUILD_DIR" with
+          | Some d -> d
+          | None -> "_build"
+        in
         let build_roots = [ "."; ".."; "../.."; "../../.."; "../../../.." ] in
         let build_candidates =
           List.map
-            (fun root -> Filename.concat root "_build/default/bin/main_eio.exe")
+            (fun root ->
+              Filename.concat root
+                (Filename.concat build_dir "default/bin/main_eio.exe"))
             build_roots
+        in
+        let fallback_candidates =
+          if build_dir <> "_build" then
+            List.map
+              (fun root ->
+                Filename.concat root "_build/default/bin/main_eio.exe")
+              build_roots
+          else []
         in
         [
           "./bin/main_eio.exe";
@@ -148,7 +163,8 @@ let find_main_eio_exe () =
           "../../bin/main_eio.exe";
           "../../../bin/main_eio.exe";
           "../../../../bin/main_eio.exe";
-        ] @ build_candidates
+        ]
+        @ build_candidates @ fallback_candidates
   in
   match List.find_opt Sys.file_exists candidates with
   | Some path -> path

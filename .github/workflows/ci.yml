@@ -216,6 +216,7 @@ jobs:
           ME_ROOT: /tmp/me
           CI_TEST_TIMEOUT_SEC: 900
           CI_TEST_HEARTBEAT_SEC: 15
+          MASC_MAIN_EIO_EXE: .ci_build/default/bin/main_eio.exe
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh

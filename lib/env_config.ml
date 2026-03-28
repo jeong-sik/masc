@@ -37,11 +37,9 @@ let print_summary () =
   Log.Env.info "RateLimit: cleanup_interval=%.0fs entry_max_age=%.0fs"
     Env_config_governance.RateLimit.cleanup_interval_seconds
     Env_config_governance.RateLimit.entry_max_age_seconds;
-  Log.Env.info "Autonomy: tick=%.0fs agents_per_tick=%d planner=%b reflection_thresh=%d"
-    Env_config_governance.Autonomy.tick_interval_seconds
-    Env_config_governance.Autonomy.agents_per_tick
-    Env_config_governance.Autonomy.use_planner
-    Env_config_governance.Autonomy.reflection_threshold;
+  Log.Env.info "Autonomy: quiet_hours=%d-%d"
+    Env_config_governance.Autonomy.quiet_start
+    Env_config_governance.Autonomy.quiet_end;
   Log.Env.info "AgentSelection: max_starvation=%d thompson_weight=%.2f decay=%.2f"
     Env_config_governance.AgentSelection.max_starvation_ticks
     Env_config_governance.AgentSelection.thompson_weight
@@ -98,8 +96,8 @@ let to_json () : Yojson.Safe.t =
       "inference_timeout_sec", float_val Env_config_governance.Inference.timeout_seconds;
       "inference_cache_enabled", bool_val Env_config_governance.Inference.cache_enabled;
       "inference_cache_ttl_sec", int_val Env_config_governance.Inference.cache_ttl_seconds;
-      "autonomy_tick_sec", float_val Env_config_governance.Autonomy.tick_interval_seconds;
-      "autonomy_agents_per_tick", int_val Env_config_governance.Autonomy.agents_per_tick;
+      "autonomy_quiet_start", int_val Env_config_governance.Autonomy.quiet_start;
+      "autonomy_quiet_end", int_val Env_config_governance.Autonomy.quiet_end;
     ];
     "keeper", `Assoc [
       "bootstrap_enabled", bool_val Env_config_keeper.KeeperBootstrap.enabled;
@@ -110,19 +108,19 @@ let to_json () : Yojson.Safe.t =
       "alert_slack_enabled", bool_val Env_config_keeper.KeeperAlert.slack_enabled;
     ];
     "server", `Assoc [
-      "grpc_enabled", bool_val Server.Grpc.enabled;
-      "grpc_port", int_val Server.Grpc.port;
-      "ws_enabled", bool_val Server.Ws.enabled;
-      "ws_port", int_val Server.Ws.port;
-      "h2_mode", str Server.H2.mode;
-      "webrtc_enabled", bool_val Server.Webrtc.enabled;
+      "grpc_enabled", bool_val (Env_config_runtime.Transport.grpc_enabled ());
+      "grpc_port", int_val Env_config_runtime.Transport.grpc_port;
+      "ws_enabled", bool_val (Env_config_runtime.Transport.ws_enabled ());
+      "ws_port", int_val Env_config_runtime.Transport.ws_port;
+      "h2_mode", str (Env_config_runtime.Transport.use_h2 ());
+      "webrtc_enabled", bool_val (Env_config_runtime.Transport.webrtc_enabled ());
       "storage_type", str Server.Storage.storage_type;
       "pg_pool_size", int_val Server.Storage.pg_pool_size;
       "telemetry_enabled", bool_val Server.Runtime.telemetry_enabled;
-      "openai_compat", bool_val Server.Runtime.openai_compat;
-      "dispatch_v2", bool_val Server.Runtime.dispatch_v2;
-      "rate_limit", float_val Server.Rate.limit;
-      "rate_burst", int_val Server.Rate.burst;
+      "openai_compat", bool_val Env_config_runtime.Transport.openai_compat_enabled;
+      "dispatch_v2", bool_val Env_config_runtime.Tools.dispatch_v2_enabled;
+      "rate_limit", float_val Env_config_runtime.Rate_bucket.rate;
+      "rate_burst", int_val Env_config_runtime.Rate_bucket.burst;
       "build_git_commit", str_opt build_git_commit_opt;
     ];
     "chain", `Assoc [
@@ -130,10 +128,10 @@ let to_json () : Yojson.Safe.t =
       "max_depth", int_val Env_config_runtime.Chain.max_depth;
       "max_fanout", int_val Env_config_runtime.Chain.max_fanout;
       "max_concurrency", int_val Env_config_runtime.Chain.max_concurrency;
-      "default_cascade", str_opt Env_config_chain.Model.default_cascade_opt;
-      "default_provider", str_opt Env_config_chain.Model.default_provider_opt;
-      "default_model", str_opt Env_config_chain.Model.default_model_opt;
-      "llama_swarm_model", str_opt Env_config_chain.Model.llama_swarm_model_opt;
+      "default_cascade", str_opt Env_config_governance.Model_defaults.default_cascade_opt;
+      "default_provider", str_opt Env_config_governance.Model_defaults.default_provider_opt;
+      "default_model", str_opt Env_config_governance.Model_defaults.default_model_opt;
+      "llama_swarm_model", str_opt Env_config_runtime.Chain.llama_swarm_model_opt;
     ];
     "dashboard", `Assoc [
       "fixtures_enabled", bool_val Env_config_dashboard.Fixtures.enabled;

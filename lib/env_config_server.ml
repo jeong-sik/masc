@@ -105,9 +105,6 @@ module Storage = struct
 
   let base_path_opt () =
     Sys.getenv_opt "MASC_BASE_PATH" |> trim_opt
-
-  let base_path_input_opt () =
-    Sys.getenv_opt "MASC_BASE_PATH_INPUT" |> trim_opt
 end
 
 (** {1 Server Runtime} *)
@@ -197,40 +194,3 @@ module External = struct
     Sys.getenv_opt "GEMINI_API_KEY" |> trim_opt
 end
 
-(** {1 Miscellaneous} *)
-
-module Misc = struct
-  let board_backend =
-    get_string ~default:"filesystem" "MASC_BOARD_BACKEND"
-
-  let board_flush_interval_sec =
-    get_float ~default:30.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"
-
-  let circuit_threshold =
-    get_int ~default:5 "MASC_CIRCUIT_THRESHOLD"
-
-  let circuit_cooldown =
-    get_float ~default:300.0 "MASC_CIRCUIT_COOLDOWN"
-
-  let pulse_max_consumer_failures =
-    get_int ~default:3 "MASC_PULSE_MAX_CONSUMER_FAILURES"
-
-  let pubsub_max_messages =
-    get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"
-
-  let build_git_commit () =
-    get_string ~default:"unknown" "MASC_BUILD_GIT_COMMIT"
-
-  let mcp_url_opt () =
-    Sys.getenv_opt "MASC_MCP_URL" |> trim_opt
-
-  let oas_sse_drain_interval_sec =
-    Float.min 5.0 (Float.max 0.05 (get_float ~default:0.25 "MASC_OAS_SSE_DRAIN_INTERVAL_SEC"))
-
-  let log_level =
-    get_string ~default:"info" "MASC_LOG_LEVEL"
-
-  let list_page_size =
-    let v = get_int ~default:512 "MASC_LIST_PAGE_SIZE" in
-    max 10 (min 1024 v)
-end

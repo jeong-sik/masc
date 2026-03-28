@@ -4,7 +4,11 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { streamKeeperMessage, type KeeperChatStreamEvent } from '../api/keeper'
+import {
+  streamKeeperMessage,
+  fetchKeeperChatHistory,
+  type KeeperChatStreamEvent,
+} from '../api/keeper'
 import { asString, isRecord } from './common/normalize'
 import { showToast } from './common/toast'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
@@ -119,10 +123,22 @@ async function sendChat(keeperName: string): Promise<void> {
 export function KeeperChatPanel({ name }: { name: string }) {
   useEffect(() => {
     cancelStream()
-    chatMessages.value = []
     chatInput.value = ''
     streamBuffer.value = ''
     chatError.value = ''
+    chatMessages.value = []
+    let stale = false
+    void fetchKeeperChatHistory(name).then((history) => {
+      if (stale) return
+      if (history.length > 0) {
+        chatMessages.value = history.map((m) => ({
+          role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
+          content: m.content,
+          timestamp: m.ts * 1000,
+        }))
+      }
+    })
+    return () => { stale = true }
   }, [name])
 
   const messages = chatMessages.value

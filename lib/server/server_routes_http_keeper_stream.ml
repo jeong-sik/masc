@@ -510,6 +510,12 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                               ~custom_name:(Some "KEEPER_REPLY_DETAILS")
                               ~custom_value:(Some payload_json) Custom))
                  | None -> ());
+                (* Persist user + assistant messages in a single write *)
+                Keeper_chat_store.append_pair
+                  ~base_dir:state.Mcp_server.room_config.base_path
+                  ~keeper_name:payload.name
+                  ~user_content:payload.message
+                  ~assistant_content:visible_reply;
                 send_keeper_stream_finish writer mutex closed ~thread_id
                   ~run_id ~message_id
               with

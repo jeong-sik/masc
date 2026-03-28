@@ -199,3 +199,34 @@ export async function streamKeeperMessage(
     reader.releaseLock()
   }
 }
+
+// --- Chat history ---
+
+export interface KeeperChatHistoryMessage {
+  role: string
+  content: string
+  ts: number
+}
+
+export async function fetchKeeperChatHistory(
+  name: string,
+): Promise<KeeperChatHistoryMessage[]> {
+  try {
+    const resp = await fetch(
+      `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,
+      { headers: jsonHeaders() },
+    )
+    if (!resp.ok) return []
+    const data: unknown = await resp.json()
+    if (!Array.isArray(data)) return []
+    return data.filter(
+      (m): m is KeeperChatHistoryMessage =>
+        isRecord(m) &&
+        typeof m.role === 'string' &&
+        typeof m.content === 'string' &&
+        typeof m.ts === 'number',
+    )
+  } catch {
+    return []
+  }
+}

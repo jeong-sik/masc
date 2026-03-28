@@ -303,23 +303,36 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
-  (* Keeper config — structured read-only config view for a single keeper *)
+  (* Keeper GET sub-routes: /config and /chat/history *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let req_path = Http.Request.path req in
          let prefix = "/api/v1/keepers/" in
-         let suffix = "/config" in
          let plen = String.length prefix in
-         let slen = String.length suffix in
          let tlen = String.length req_path in
-         if tlen > plen + slen
-            && String.sub req_path 0 plen = prefix
-            && String.sub req_path (tlen - slen) slen = suffix
-         then
-           let name =
-             String.trim
-               (String.sub req_path plen (tlen - plen - slen))
-           in
+         let ends_with suffix =
+           let slen = String.length suffix in
+           tlen > plen + slen
+           && String.sub req_path (tlen - slen) slen = suffix
+         in
+         let extract_name suffix =
+           let slen = String.length suffix in
+           String.trim (String.sub req_path plen (tlen - plen - slen))
+         in
+         if ends_with "/chat/history" then
+           let name = extract_name "/chat/history" in
+           if name = "" then
+             respond_json_with_cors ~status:`Bad_request request reqd
+               {|{"error":"missing keeper name"}|}
+           else
+             let base_dir = state.Mcp_server.room_config.base_path in
+             let messages =
+               Keeper_chat_store.load ~base_dir ~keeper_name:name
+             in
+             respond_json_with_cors ~status:`OK request reqd
+               (Yojson.Safe.to_string (Keeper_chat_store.to_json_array messages))
+         else if ends_with "/config" then
+           let name = extract_name "/config" in
            if String.length name = 0 then
              Http.Response.json ~status:`Bad_request
                {|{"error":"keeper name is required"}|} reqd

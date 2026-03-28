@@ -66,19 +66,19 @@ let server_entries = [
   entry ~default:"(derived)" "MASC_HTTP_BASE_URL" "Public HTTP base URL";
   entry ~default:"" "MASC_CLUSTER_NAME" "Cluster name for multi-instance";
   entry ~sensitive:true ~default:"(none)" "MASC_ADMIN_TOKEN" "Admin authentication token";
-  entry ~default:"false" "MASC_TOOL_AUTH_STRICT" "Require auth for all tool calls";
+  entry ~default:"true" "MASC_TOOL_AUTH_STRICT" "Require auth for all tool calls";
   entry ~default:"(auto)" "MASC_LOG_LEVEL" "Log level override";
   entry ~default:"true" "MASC_TELEMETRY_ENABLED" "Enable telemetry collection";
-  entry ~default:"true" "MASC_PARSE_WARN_ENABLED" "Enable JSON parse warnings";
-  entry ~default:"standard" "MASC_GOVERNANCE_LEVEL" "Governance enforcement level";
+  entry ~default:"false" "MASC_PARSE_WARN" "Enable JSON parse warnings";
+  entry ~default:"production" "MASC_GOVERNANCE_LEVEL" "Governance enforcement level";
   entry ~default:"(none)" "MASC_BUILD_GIT_COMMIT" "Build git commit hash";
   entry ~default:"(none)" "MASC_AUTO_RESPOND" "Auto-respond mode";
 ]
 
 let storage_entries = [
   entry ~sensitive:true ~default:"(none)" "MASC_POSTGRES_URL" "PostgreSQL connection URL";
-  entry ~default:"4" "MASC_PG_POOL_SIZE" "PostgreSQL connection pool size";
-  entry ~default:"100" "MASC_PUBSUB_MAX_MESSAGES" "Max pubsub messages per batch";
+  entry ~default:"10" "MASC_PG_POOL_SIZE" "PostgreSQL connection pool size";
+  entry ~default:"1000" "MASC_PUBSUB_MAX_MESSAGES" "Max pubsub messages per batch";
 ]
 
 let transport_entries = [
@@ -91,21 +91,24 @@ let transport_entries = [
   entry ~default:"auto" "MASC_USE_H2" "HTTP mode (auto|h2_only|h1_only)";
   entry ~default:"240" "MASC_STARTUP_WATCHDOG_SEC" "Startup watchdog timeout (seconds)";
   entry ~default:"(none)" "MASC_AGENT_TRANSPORT" "Agent transport preference";
-  entry ~default:"false" "MASC_OPENAI_COMPAT_ENABLED" "Enable OpenAI-compatible endpoint";
+  entry ~default:"false" "MASC_OPENAI_COMPAT" "Enable OpenAI-compatible endpoint";
 ]
 
 let chain_entries = [
-  entry ~default:"5.0" "MASC_CHAIN_TIMEOUT_S" "Chain step timeout (seconds)";
+  entry ~default:"gemini" "MASC_CHAIN_JUDGE_MODEL" "Chain evaluator/judge model";
+  entry ~default:"20" "MASC_CHAIN_MAX_DEPTH" "Chain max execution depth";
+  entry ~default:"10" "MASC_CHAIN_MAX_CONCURRENCY" "Chain max concurrent nodes";
+  entry ~default:"(derived)" "MASC_MCP_URL" "MCP endpoint URL for chain";
 ]
 
 let inference_entries = [
-  entry ~default:"30" "MASC_INFERENCE_TIMEOUT_S" "Inference call timeout (seconds)";
+  entry ~default:"30" "MASC_INFERENCE_TIMEOUT_SEC" "Inference call timeout (seconds)";
   entry ~default:"true" "MASC_INFERENCE_CACHE_ENABLED" "Enable inference result cache";
-  entry ~default:"glm-4-plus" "MASC_GLM_DEFAULT_MODEL" "Default GLM model";
-  entry ~default:"glm-4-flash" "MASC_GLM_FLASH_MODEL" "GLM flash model";
-  entry ~default:"gemini-2.5-flash" "MASC_GEMINI_DEFAULT_MODEL" "Default Gemini model";
-  entry ~default:"claude-sonnet-4-20250514" "MASC_CLAUDE_DEFAULT_MODEL" "Default Claude model";
-  entry ~default:"gpt-4o" "MASC_OPENAI_DEFAULT_MODEL" "Default OpenAI model";
+  entry ~default:"auto" "MASC_GLM_DEFAULT_MODEL" "Default GLM model";
+  entry ~default:"auto" "MASC_GLM_FLASH_MODEL" "GLM flash model";
+  entry ~default:"gemini-2.5-pro" "MASC_GEMINI_DEFAULT_MODEL" "Default Gemini model";
+  entry ~default:"claude-sonnet-4-6" "MASC_CLAUDE_DEFAULT_MODEL" "Default Claude model";
+  entry ~default:"gpt-4.1" "MASC_OPENAI_DEFAULT_MODEL" "Default OpenAI model";
 ]
 
 let keeper_entries = [

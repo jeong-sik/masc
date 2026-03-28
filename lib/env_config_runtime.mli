@@ -103,7 +103,6 @@ module Timeout : sig
   val anthropic_api_sec : int
   val openai_compat_api_sec : int
   val model_grace_sec : float
-  val graphql_query_sec : float
   val keeper_status_sec : float
 end
 

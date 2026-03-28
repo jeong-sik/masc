@@ -251,10 +251,6 @@ module Timeout = struct
   let model_grace_sec =
     get_float ~default:5.0 "MASC_TIMEOUT_MODEL_GRACE_SEC"
 
-  (** GraphQL query timeout (agent loading, etc.) *)
-  let graphql_query_sec =
-    get_float ~default:5.0 "MASC_TIMEOUT_GRAPHQL_SEC"
-
   (** Keeper status check timeout *)
   let keeper_status_sec =
     get_float ~default:5.0 "MASC_TIMEOUT_KEEPER_STATUS_SEC"

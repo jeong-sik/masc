@@ -1184,14 +1184,17 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         | Ok None -> fail "missing keeper meta"
         | Error e -> fail e
       in
-      let metrics_path = Masc_mcp.Keeper_types.keeper_metrics_path config meta.name in
+      let metrics_store = Masc_mcp.Keeper_types.keeper_metrics_store config meta.name in
       let history_path = Masc_mcp.Keeper_types.keeper_history_path config meta.trace_id in
       let memory_bank_path = Masc_mcp.Keeper_types.keeper_memory_bank_path config meta.name in
-      write_jsonl_lines metrics_path
-        [
-          {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment"}|};
-          {|{"channel":"proactive","generation":0,"trace_id":"trace-1","compacted":true,"compaction_before_tokens":180,"compaction_after_tokens":120,"memory_compaction_performed":true,"memory_compaction_before_notes":4,"memory_compaction_after_notes":2,"memory_compaction_dropped_notes":2,"memory_compaction_invalid_dropped":1,"memory_compaction_reason":"dedupe"}|};
-        ];
+      let turn_json = Yojson.Safe.from_string
+          {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment"}|}
+      in
+      let compaction_json = Yojson.Safe.from_string
+          {|{"channel":"proactive","generation":0,"trace_id":"trace-1","compacted":true,"compaction_before_tokens":180,"compaction_after_tokens":120,"memory_compaction_performed":true,"memory_compaction_before_notes":4,"memory_compaction_after_notes":2,"memory_compaction_dropped_notes":2,"memory_compaction_invalid_dropped":1,"memory_compaction_reason":"dedupe"}|}
+      in
+      Dated_jsonl.append metrics_store turn_json;
+      Dated_jsonl.append metrics_store compaction_json;
       write_jsonl_lines history_path
         [
           {|{"role":"user","source":"direct_user","content":"Can you summarize the plan?","ts_unix":10.0}|};

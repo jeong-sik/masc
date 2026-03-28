@@ -3,7 +3,7 @@
 open Alcotest
 
 let make_dc ?(acceptance_checks = []) ?(required_artifacts = [])
-    ?(repair_budget = 3) () : Masc_mcp.Team_session_types.delivery_contract =
+    ?(repair_budget = 3) () : Team_session_types.delivery_contract =
   { contract_id = "test-dc-001";
     summary = "test contract";
     acceptance_checks;

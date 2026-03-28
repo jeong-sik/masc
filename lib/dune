@@ -59,7 +59,6 @@
    dashboard_governance_judge
    dashboard_operator_judge
    dashboard_surface_readiness
-   dashboard_utils
    dashboard_execution
    dashboard_execution_helpers
    dashboard_execution_fixture
@@ -286,7 +285,6 @@
    room
    run_eio
    team_context
-   team_session_types
    team_session_store
    team_session_report
    team_session_report_core
@@ -560,7 +558,6 @@
    ;; Code Research Loop — tool_research adapter (core logic in masc_research library)
    tool_research
    ;; godsplit-phase1: type/schema sub-modules
-   team_session_types_enums
    tool_schemas_room_core
    tool_schemas_room_extra
    tool_schemas_inline_room
@@ -683,7 +680,6 @@
   team_session_report_proof_helpers
   team_session_report_proof
   ;; godsplit-phase1: type/schema sub-modules
-  team_session_types_enums
   tool_schemas_room_core
   ;; godsplit-phase1: chain_executor sub-modules
   chain_executor_complex
@@ -824,6 +820,10 @@
    masc_room
    ;; Environment configuration (extracted sub-library)
    masc_mcp.config
+   ;; Dashboard utilities (extracted sub-library)
+   masc_mcp.dashboard_utils
+   ;; Team session types (extracted sub-library)
+   masc_mcp.team_session_types
    ;; OpenTelemetry (spans + OTLP exporter + metrics)
    opentelemetry
    opentelemetry-client-cohttp-eio

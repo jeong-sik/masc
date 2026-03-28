@@ -6,7 +6,7 @@ module RC = Agent_sdk.Risk_contract
 module EM = Agent_sdk.Execution_mode
 
 let make_dc ?(acceptance_checks = ["tests pass"]) ?(required_artifacts = ["main.ml"])
-    ?(repair_budget = 3) () : Masc_mcp.Team_session_types.delivery_contract =
+    ?(repair_budget = 3) () : Team_session_types.delivery_contract =
   { contract_id = "dc-test";
     summary = "test";
     acceptance_checks;

@@ -92,7 +92,7 @@
           test_golden_set
           test_adversarial_eval
   )
- (libraries masc_mcp agent_sdk alcotest str yojson mirage-crypto
+ (libraries masc_mcp masc_mcp.team_session_types agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))
 
 ; ============================================================
@@ -137,7 +137,7 @@
 (test
  (name test_dashboard_mission)
  (modules test_dashboard_mission)
- (libraries masc_mcp alcotest eio eio_main yojson unix))
+ (libraries masc_mcp masc_mcp.team_session_types alcotest eio eio_main yojson unix))
 
 ; Dashboard mission briefing normalization tests
 (test
@@ -153,7 +153,7 @@
 (test
  (name test_dashboard_proof)
  (modules test_dashboard_proof)
- (libraries masc_mcp alcotest eio eio_main yojson unix))
+ (libraries masc_mcp masc_mcp.team_session_types alcotest eio eio_main yojson unix))
 
 ; Dashboard cache deadlock regression + stampede tests (requires Eio)
 (test
@@ -538,7 +538,7 @@
 (test
  (name test_tool_repo_synthesis)
  (modules test_tool_repo_synthesis)
- (libraries masc_mcp alcotest yojson unix eio eio_main mirage-crypto-rng.unix))
+ (libraries masc_mcp masc_mcp.team_session_types alcotest yojson unix eio eio_main mirage-crypto-rng.unix))
 
 (test
  (name test_operator_control)
@@ -784,7 +784,7 @@
 (test
  (name test_task_sandbox)
  (modules test_task_sandbox)
- (libraries masc_mcp masc_process alcotest eio eio_main unix yojson str mirage-crypto-rng mirage-crypto-rng.unix))
+ (libraries masc_mcp masc_mcp.team_session_types masc_process alcotest eio eio_main unix yojson str mirage-crypto-rng mirage-crypto-rng.unix))
 
 ; ppx_deriving_yojson roundtrip tests (#2964 migration)
 (test

@@ -23,7 +23,7 @@ let cleanup_dir dir =
   rm dir
 
 let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ]) now session_id =
-  let open Lib.Team_session_types in
+  let open Team_session_types in
   {
     session_id;
     goal = "Prove multi-actor collaboration on MCP help cleanup";
@@ -142,9 +142,9 @@ let seed_session_artifacts ?(session = None) ?events config session_id =
     events;
   Lib.Team_session_store.write_checkpoint config session_id
     {
-      Lib.Team_session_types.ts = now -. 25.0;
+      Team_session_types.ts = now -. 25.0;
       ts_iso = Types.now_iso ();
-      status = Lib.Team_session_types.Running;
+      status = Team_session_types.Running;
       elapsed_sec = 95;
       remaining_sec = 505;
       progress_pct = 16.0;

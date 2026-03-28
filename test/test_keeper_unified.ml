@@ -60,9 +60,6 @@ let base_observation : WO.world_observation =
     unclaimed_task_count = 0;
     failed_task_count = 0;
     active_agent_count = 0;
-    triage_triggers = "";
-    autonomy_trigger = None;
-    allow_noop = true;
   }
 
 let test_observation_defaults () =
@@ -141,8 +138,37 @@ let test_observe_uses_precollected_board_events () =
       in
       check int "precollected board events preserved" (List.length events)
         (List.length obs.pending_board_events);
-      check (option string) "board reactive trigger" (Some "board_reactive")
-        obs.autonomy_trigger)
+      check bool "board event schedules turn" true
+        (WO.should_run_unified_turn ~meta:minimal_meta obs))
+
+let test_scheduled_turn_uses_cooldown_only () =
+  let meta =
+    { minimal_meta with
+      proactive =
+        { minimal_meta.proactive with
+          enabled = true;
+          cooldown_sec = 60;
+          last_ts = Time_compat.now () -. 120.0;
+        };
+    }
+  in
+  let obs = { base_observation with idle_seconds = 0 } in
+  check bool "cooldown opens scheduled turn without idle heuristic" true
+    (WO.should_run_unified_turn ~meta obs)
+
+let test_scheduled_turn_respects_cooldown () =
+  let meta =
+    { minimal_meta with
+      proactive =
+        { minimal_meta.proactive with
+          enabled = true;
+          cooldown_sec = 300;
+          last_ts = Time_compat.now () -. 30.0;
+        };
+    }
+  in
+  check bool "cooldown blocks scheduled turn" false
+    (WO.should_run_unified_turn ~meta base_observation)
 
 let test_prompt_contains_identity () =
   let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
@@ -260,19 +286,6 @@ let test_prompt_hustle_economy () =
        with Not_found -> false
      in found)
 
-let test_prompt_includes_triage_triggers () =
-  let obs =
-    { base_observation with
-      triage_triggers = "direct_mention,idle_timeout"
-    }
-  in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
-  check bool "has triage section" true
-    (let found =
-       try ignore (Str.search_forward (Str.regexp_string "Action Triggers (triage)") user 0); true
-       with Not_found -> false
-     in found)
-
 let test_prompt_includes_worktree_delta () =
   let obs =
     { base_observation with
@@ -302,15 +315,6 @@ let test_prompt_includes_worktree_delta () =
          true
        with Not_found -> false
      in found)
-
-let test_prompt_skips_skip_triage () =
-  let obs = { base_observation with triage_triggers = "skip:no_triggers" } in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
-  check bool "no triage section for skip" true
-    (not (let found =
-       try ignore (Str.search_forward (Str.regexp_string "Triage Triggers") user 0); true
-       with Not_found -> false
-     in found))
 
 let test_prompt_room_state_section () =
   let obs =
@@ -517,6 +521,10 @@ let () =
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "uses precollected board events" `Quick
             test_observe_uses_precollected_board_events;
+          test_case "scheduled turn uses cooldown only" `Quick
+            test_scheduled_turn_uses_cooldown_only;
+          test_case "scheduled turn respects cooldown" `Quick
+            test_scheduled_turn_respects_cooldown;
           test_case "with goals" `Quick test_observation_with_goals;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );
@@ -533,9 +541,7 @@ let () =
           test_case "includes idle" `Quick test_prompt_includes_idle;
           test_case "frugal economy" `Quick test_prompt_frugal_economy;
           test_case "hustle economy" `Quick test_prompt_hustle_economy;
-          test_case "includes triage triggers" `Quick test_prompt_includes_triage_triggers;
           test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta;
-          test_case "skips skip triage" `Quick test_prompt_skips_skip_triage;
           test_case "room state section" `Quick test_prompt_room_state_section;
         ] );
       ( "config",

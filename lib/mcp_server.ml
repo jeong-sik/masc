@@ -608,17 +608,23 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     Room.default_config_eio ~sw ~env
       ~on_backend_ready:(fun backend ->
         let open Room_utils_backend_setup in
-        if Board_dispatch.jsonl_forced () then begin
-          Log.Backend.info "Board: JSONL forced by MASC_BOARD_BACKEND=jsonl";
-          Board_dispatch.init_jsonl ()
-        end else
+        if Board_dispatch.pg_forced () then begin
+          Log.Backend.info "Board: PostgreSQL forced by MASC_BOARD_BACKEND=pg";
           match backend with
           | PostgresNative pg ->
               let pool = Backend.Postgres.get_pool pg in
               (match Board_dispatch.init_pg pool with
                | Ok () -> ()
                | Error _ -> Board_dispatch.init_jsonl ())
-          | _ -> Board_dispatch.init_jsonl ())
+          | _ -> Board_dispatch.init_jsonl ()
+        end else if Board_dispatch.jsonl_forced () then begin
+          Log.Backend.info "Board: JSONL forced by MASC_BOARD_BACKEND=jsonl";
+          Board_dispatch.init_jsonl ()
+        end else begin
+          ignore backend;
+          Log.Backend.info "Board: JSONL default backend";
+          Board_dispatch.init_jsonl ()
+        end)
       base_path
     |> Room.config_with_resolved_scope
   in

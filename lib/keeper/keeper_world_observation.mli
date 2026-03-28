@@ -41,14 +41,6 @@ type world_observation = {
   active_agent_count : int;
   (** Number of agents currently active in the room. *)
 
-  triage_triggers : string;
-  (** Comma-separated triage trigger strings from last deliberation triage. *)
-
-  autonomy_trigger : string option;
-  (** Current autonomous turn trigger kind. *)
-
-  allow_noop : bool;
-  (** Whether the keeper may safely choose a no-op on this turn. *)
 }
 
 type board_signal_match = {

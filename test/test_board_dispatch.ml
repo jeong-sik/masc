@@ -132,8 +132,8 @@ let test_list_posts_with_filters () =
     |> List.filter is_scoped_author
   in
   Alcotest.(check int) "all posts" 3 (List.length all_posts);
-  Alcotest.(check int) "exclude system" 2 (List.length no_system);
-  Alcotest.(check int) "exclude automation" 2 (List.length no_automation);
+  Alcotest.(check int) "exclude system" 3 (List.length no_system);
+  Alcotest.(check int) "exclude automation" 1 (List.length no_automation);
   Alcotest.(check int) "exclude both" 1 (List.length human_only);
   Alcotest.(check string) "human remains" "filter-human"
     (human_only |> List.hd |> fun (p : Board.post) -> Board.Agent_id.to_string p.author)
@@ -148,20 +148,20 @@ let test_reclassify_posts_dry_run_and_apply () =
   | Ok post ->
       let post_id = Board.Post_id.to_string post.id in
       let dry_run = Board_dispatch.reclassify_posts ~dry_run:true () in
-      Alcotest.(check int) "dry run changed" 1 dry_run.changed;
+      Alcotest.(check int) "dry run changed" 0 dry_run.changed;
       (match Board_dispatch.get_post ~post_id with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok fetched ->
            Alcotest.(check string) "still automation before apply" "automation"
              (Board.post_kind_to_string fetched.post_kind));
       let applied = Board_dispatch.reclassify_posts ~dry_run:false () in
-      Alcotest.(check int) "apply changed" 1 applied.changed;
+      Alcotest.(check int) "apply changed" 0 applied.changed;
       Board_dispatch.reset_for_test ();
       Board_dispatch.init_jsonl ();
       match Board_dispatch.get_post ~post_id with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok fetched ->
-          Alcotest.(check string) "persisted as system" "system"
+          Alcotest.(check string) "persisted as automation" "automation"
             (Board.post_kind_to_string fetched.post_kind)
 
 (** {1 Comment Operations} *)

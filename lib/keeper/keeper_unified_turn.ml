@@ -40,13 +40,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let has_text =
     String.trim result.response_text <> ""
   in
-  let is_autonomous_turn = Option.is_some observation.autonomy_trigger in
-  let is_board_reactive =
-    observation.autonomy_trigger = Some "board_reactive"
-  in
-  let is_mention_reactive =
-    observation.autonomy_trigger = Some "mention_reactive"
-  in
+  let is_autonomous_turn = true in
+  let is_board_reactive = observation.pending_board_events <> [] in
+  let is_mention_reactive = observation.pending_mentions <> [] in
   {
     meta with
     updated_at = now_iso ();
@@ -115,11 +111,9 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     ~(handoff_json : Yojson.Safe.t option) : unit =
   let now_ts = Time_compat.now () in
   let channel =
-    match observation.autonomy_trigger with
-    | Some "board_reactive" -> "turn"
-    | Some "mention_reactive" -> "turn"
-    | Some _ -> "proactive"
-    | None -> "turn"
+    if observation.pending_mentions <> [] || observation.pending_board_events <> [] then
+      "turn"
+    else "proactive"
   in
   let work_kind =
     if result.tools_used <> [] then "tool_use"

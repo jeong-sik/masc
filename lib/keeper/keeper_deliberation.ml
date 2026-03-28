@@ -240,11 +240,6 @@ let triage (obs : world_observation) : triage_result =
   (* L2 Proactive triggers *)
   if obs.board_mention_count > 0 then
     add (BoardActivity "mentioned_in_post");
-  if obs.board_new_post_count > 0 && obs.board_mention_count = 0 then
-    add (BoardActivity "new_posts");
-  if obs.idle_seconds > obs.idle_gate * 10
-     && obs.board_new_post_count = 0 then
-    add (BoardActivity "idle_share");
   if obs.idle_seconds > obs.idle_gate && obs.active_goal_count > 0 then
     add IdleTimeout;
   if obs.active_goal_count > 0

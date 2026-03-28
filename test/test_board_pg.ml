@@ -110,7 +110,7 @@ let test_reclassify_posts = with_pg_backend (fun t ->
       match Board_pg.get_post t ~post_id:pid with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok fetched ->
-          Alcotest.(check string) "persisted as system" "system"
+          Alcotest.(check string) "persisted as automation" "automation"
             (Board.post_kind_to_string fetched.post_kind)
 )
 

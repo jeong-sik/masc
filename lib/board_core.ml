@@ -222,10 +222,10 @@ let infer_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth =
     | Some value -> String.lowercase_ascii (String.trim value)
     | None -> ""
   in
-  if is_system_board_author author
-     || meta_source meta_json = Some "keeper_board_post"
-  then
+  if is_system_board_author author then
     System_post
+  else if meta_source meta_json = Some "keeper_board_post" then
+    Automation_post
   else if visibility = Internal && expires_at > 0.0 && hearth <> ""
           && (String.starts_with ~prefix:"mdal" hearth
               || contains_substring hearth "harness")

@@ -21,9 +21,6 @@ type world_observation = {
   unclaimed_task_count : int;
   failed_task_count : int;
   active_agent_count : int;
-  triage_triggers : string;
-  autonomy_trigger : string option;
-  allow_noop : bool;
 }
 
 type board_signal_match = {
@@ -103,13 +100,6 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
   if activity_ts <= 0.0 then 0
   else int_of_float (max 0.0 (now_ts -. activity_ts))
 
-let board_relevance_threshold = 4
-
-let nontrivial_token_overlap (left : string list) (right : string list) : int =
-  let left = dedupe_keep_order left in
-  let right = dedupe_keep_order right in
-  List.fold_left (fun acc token -> if List.mem token right then acc + 1 else acc) 0 left
-
 let board_signal_text (signal : Board_dispatch.keeper_board_signal) =
   String.concat "\n"
     (List.filter (fun part -> String.trim part <> "")
@@ -120,7 +110,7 @@ let board_signal_text (signal : Board_dispatch.keeper_board_signal) =
        ])
 
 let board_signal_match
-    ~(continuity_summary : string)
+    ~continuity_summary:(_ : string)
     ~(meta : keeper_meta)
     ~(signal : Board_dispatch.keeper_board_signal) : board_signal_match =
   let author = String.lowercase_ascii (String.trim signal.author) in
@@ -144,23 +134,7 @@ let board_signal_match
     in
     if matched_targets <> [] then
       { explicit_mention = true; matched_targets; score = 100 }
-    else
-      let signal_tokens = similarity_tokens haystack in
-      let active_goal_tokens =
-        meta.active_goal_ids |> List.concat_map similarity_tokens
-      in
-      let goal_tokens =
-        [ meta.goal; meta.short_goal; meta.mid_goal; meta.long_goal; meta.instructions ]
-        |> List.concat_map similarity_tokens
-      in
-      let continuity_tokens =
-        continuity_summary |> similarity_tokens
-      in
-      let active_goal_score = nontrivial_token_overlap signal_tokens active_goal_tokens * 6 in
-      let goal_score = nontrivial_token_overlap signal_tokens goal_tokens * 4 in
-      let continuity_score = nontrivial_token_overlap signal_tokens continuity_tokens * 2 in
-      let score = active_goal_score + goal_score + continuity_score in
-      { explicit_mention = false; matched_targets = []; score }
+    else { explicit_mention = false; matched_targets = []; score = 0 }
 
 (** Read context ratio from checkpoint if available. *)
 let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
@@ -247,7 +221,7 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
              let matched =
                board_signal_match ~continuity_summary ~meta ~signal
              in
-             matched.explicit_mention || matched.score >= board_relevance_threshold)
+             matched.explicit_mention)
     in
     let new_count = List.length recent in
     let targets =
@@ -320,22 +294,6 @@ let observe ~(pending_board_events : string list option) ~(config : Room.config)
         in
         events
   in
-  let since_last_proactive =
-    if meta.proactive.last_ts <= 0.0 then max_int
-    else int_of_float (max 0.0 (Time_compat.now () -. meta.proactive.last_ts))
-  in
-  let proactive_due =
-    meta.proactive.enabled
-    && idle_seconds >= meta.proactive.idle_sec
-    && since_last_proactive >= meta.proactive.cooldown_sec
-  in
-  let autonomy_trigger =
-    if pending_mentions <> [] then Some "mention_reactive"
-    else if pending_board_events <> [] then Some "board_reactive"
-    else if failed_task_count > 0 || unclaimed_task_count > 0 then Some "task_reactive"
-    else if proactive_due then Some "proactive_idle"
-    else None
-  in
   {
     pending_mentions;
     pending_board_events;
@@ -348,14 +306,20 @@ let observe ~(pending_board_events : string list option) ~(config : Room.config)
     unclaimed_task_count;
     failed_task_count;
     active_agent_count;
-    triage_triggers = meta.last_triage_triggers;
-    autonomy_trigger;
-    allow_noop = Option.is_none autonomy_trigger;
   }
 
 let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observation) =
-  match observation.autonomy_trigger with
-  | Some _ -> true
-  | None ->
-      meta.proactive.enabled
-      && observation.idle_seconds >= meta.proactive.idle_sec
+  let has_external_event =
+    observation.pending_mentions <> [] || observation.pending_board_events <> []
+  in
+  if has_external_event then
+    true
+  else
+    (* Zero-heuristic scheduling: periodic turns use cooldown only.
+       Idle/goal/task scoring stays in the raw world state and is left to the model. *)
+    let since_last_proactive =
+      if meta.proactive.last_ts <= 0.0 then max_int
+      else int_of_float (max 0.0 (Time_compat.now () -. meta.proactive.last_ts))
+    in
+    meta.proactive.enabled
+    && since_last_proactive >= meta.proactive.cooldown_sec

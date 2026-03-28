@@ -3,10 +3,10 @@
     Routes Board operations to either JSONL (Board.store) or PostgreSQL (Board_pg.t).
     Backend is selected once at server startup and fixed for the session.
 
-    PG is the primary backend when MASC_POSTGRES_URL is available.
-    JSONL serves as fallback when PG is unavailable or explicitly selected.
+    JSONL is the default backend for local/runtime simplicity.
+    PostgreSQL is opt-in when explicitly requested.
 
-    Control: MASC_BOARD_BACKEND env var ("pg" default, "jsonl" to force file-based).
+    Control: MASC_BOARD_BACKEND env var ("jsonl" default, "pg" to force database mode).
 
     @since 0.6.0
 *)
@@ -95,6 +95,11 @@ let reset_for_test () =
 let jsonl_forced () =
   match Env_config.Board.backend_opt () with
   | Some s -> String.lowercase_ascii s = "jsonl"
+  | None -> false
+
+let pg_forced () =
+  match Env_config.Board.backend_opt () with
+  | Some s -> String.lowercase_ascii s = "pg"
   | None -> false
 
 (** Get backend or fail.

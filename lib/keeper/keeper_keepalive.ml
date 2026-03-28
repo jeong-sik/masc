@@ -12,7 +12,6 @@ open Keeper_execution
 (* ── Board-reactive policy constants ── *)
 
 let board_reactive_debounce_sec = 60.0
-let board_reactive_threshold = 4
 
 (* OAS Event_bus ref — set via bootstrap *)
 let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
@@ -102,25 +101,7 @@ let wakeup_relevant_keeper_for_board_signal
   | (_ :: _) ->
       explicit
       |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
-  | [] ->
-      let best : (keeper_meta * Keeper_world_observation.board_signal_match) list =
-        candidates
-        |> List.filter
-             (fun (_meta, (matched : Keeper_world_observation.board_signal_match)) ->
-               matched.score >= board_reactive_threshold)
-        |> List.sort
-             (fun
-               ((meta_a, matched_a) :
-                 keeper_meta * Keeper_world_observation.board_signal_match)
-               ((meta_b, matched_b) :
-                 keeper_meta * Keeper_world_observation.board_signal_match) ->
-               let by_score = compare matched_b.score matched_a.score in
-               if by_score <> 0 then by_score
-               else compare meta_a.proactive.last_ts meta_b.proactive.last_ts)
-      in
-      (match best with
-       | (meta, _matched) :: _ -> wake_meta meta "relevance_scored"
-       | [] -> ())
+  | [] -> ()
 
 let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
     (m : keeper_meta) (stop : bool Atomic.t) ~(wakeup : bool Atomic.t) : unit =
@@ -309,112 +290,24 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  Log.Keeper.error "heartbeat snapshot write failed: %s"
                    (Printexc.to_string exn));
               last_snapshot_ts := now_ts);
-            (* Triage is always computed. Tool gating is no longer mode-based. *)
             let pending_board_events, meta_after_triage =
-              let obs =
-                Keeper_deliberation.empty_world_observation
-                  ~keeper_name:meta_current.name
-              in
-              let unclaimed_count, failed_count =
+              let pending_board_events =
                 (try
-                   let backlog = Room.read_backlog ctx.config in
-                   let unclaimed =
-                     List.length
-                       (List.filter
-                          (fun (t : Types.task) ->
-                            t.task_status = Types.Todo)
-                          backlog.tasks)
-                   in
-                   let failed =
-                     List.length
-                       (List.filter
-                          (fun (t : Types.task) ->
-                            match t.task_status with
-                            | Types.Cancelled _ -> true
-                            | _ -> false)
-                          backlog.tasks)
-                   in
-                   (unclaimed, failed)
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                     Log.Keeper.warn "keepalive: task count query failed: %s"
-                       (Printexc.to_string exn);
-                     (0, 0))
-              in
-              let current_agent_count =
-                (try
-                   List.length (Room.get_agents_raw ctx.config)
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                     Log.Keeper.warn "keepalive: agent count query failed: %s"
-                       (Printexc.to_string exn);
-                     0)
-              in
-              let agent_count_changed =
-                let last_count =
-                  Keeper_registry.get_last_agent_count
-                    ~base_path:ctx.config.base_path meta_current.name
-                in
-                let changed =
-                  last_count > 0 && current_agent_count <> last_count
-                in
-                Keeper_registry.set_last_agent_count
-                  ~base_path:ctx.config.base_path
-                  meta_current.name current_agent_count;
-                changed
-              in
-              let pending_board_events, board_new_post_count, board_mention_count =
-                (try
-                   let events, new_count, mention_count =
+                   let events, _new_count, _mention_count =
                      Keeper_world_observation.collect_board_events
                        ~base_path:ctx.config.base_path
                        ~meta:meta_current
                        ~continuity_summary:meta_current.continuity_summary
                    in
-                   (events, new_count, mention_count)
+                   events
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
                      Log.Keeper.warn "keepalive: board count query failed: %s"
                        (Printexc.to_string exn);
-                     ([], 0, 0))
+                     [])
               in
-              let obs =
-                { obs with
-                  active_goal_count = List.length meta_current.active_goal_ids;
-                  idle_seconds =
-                    (let activity_ts =
-                       max meta_current.usage.last_turn_ts
-                         meta_current.proactive.last_ts
-                     in
-                     if activity_ts <= 0.0 then 0
-                     else int_of_float (max 0.0 (now_ts -. activity_ts)));
-                  idle_gate = meta_current.proactive.idle_sec;
-                  unclaimed_task_count = unclaimed_count;
-                  failed_task_count = failed_count;
-                  active_agent_count = current_agent_count;
-                  agent_count_changed;
-                  board_new_post_count;
-                  board_mention_count;
-                }
-              in
-              let triage_result = Keeper_deliberation.triage obs in
-              let triggers_str =
-                match triage_result with
-                | Keeper_deliberation.Skip reason -> "skip:" ^ reason
-                | Keeper_deliberation.Triggered triggers ->
-                    String.concat ","
-                      (List.map
-                         Keeper_deliberation.deliberation_trigger_to_string
-                         triggers)
-              in
-              if Keeper_types.keeper_debug then
-                Log.KeeperExec.info "%s triage: %s"
-                  meta_current.name triggers_str;
-              (pending_board_events,
-               { meta_current with last_triage_triggers = triggers_str })
+              (pending_board_events, meta_current)
             in
             let proactive_warmup_elapsed =
               proactive_warmup_sec <= 0

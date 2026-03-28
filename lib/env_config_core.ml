@@ -198,30 +198,6 @@ and masc_http_base_url_result () =
         (fun host -> Printf.sprintf "http://%s:%s" host (masc_http_port ()))
         host
 
-let libdatachannel_path_candidates () =
-  let env_path =
-    Sys.getenv_opt "LIBDATACHANNEL_PATH" |> trim_opt |> Option.to_list
-  in
-  let common =
-    [
-      "/usr/local/lib/libdatachannel.dylib";
-      "/opt/homebrew/lib/libdatachannel.dylib";
-      "/usr/lib/libdatachannel.dylib";
-      "/usr/local/lib/libdatachannel.so";
-      "/usr/lib/libdatachannel.so";
-    ]
-  in
-  let home_local =
-    match home_dir_opt () with
-    | Some home -> [ Filename.concat home "local/lib/libdatachannel.dylib" ]
-    | None -> []
-  in
-  env_path @ common @ home_local
-
-let libdatachannel_path_opt () =
-  libdatachannel_path_candidates ()
-  |> List.find_opt existing_file
-
 (** {1 Additional Helpers} *)
 
 (** Read a TCP port from env, validated to [1, 65535]. Returns default on

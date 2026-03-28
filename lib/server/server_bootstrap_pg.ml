@@ -1,8 +1,8 @@
 (** Server_bootstrap_pg — Backend initialization functions.
 
-    Filesystem-first: PG schemas are only initialized when
-    MASC_STORAGE_TYPE=postgres is explicitly configured.
-    Memory_pg schema init removed (memory_oas_bridge uses JSONL). *)
+    Task and Board PG backends are initialized when [Board_dispatch]
+    reports an active PG pool (i.e. MASC_STORAGE_TYPE=postgres).
+    Memory_pg schema init removed: memory_oas_bridge always uses JSONL. *)
 
 let init_task_backend () =
   match Board_dispatch.get_pg_pool () with

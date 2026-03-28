@@ -468,6 +468,7 @@
    keeper_cdal_contract
    cdal_eval
    contract_risk
+   contract_composer
    keeper_deliberation
    keeper_types_profile
    keeper_types_support

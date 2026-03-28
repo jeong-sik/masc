@@ -78,6 +78,16 @@ require_cmd() {
   fi
 }
 
+require_value() {
+  local opt="$1"
+  local next="${2:-}"
+  if [ -z "$next" ] || [[ "$next" == --* ]]; then
+    echo "ERROR: $opt requires a value" >&2
+    usage >&2
+    exit 2
+  fi
+}
+
 current_log_date() {
   if [ -n "$DATE_OVERRIDE" ]; then
     echo "$DATE_OVERRIDE"
@@ -118,18 +128,22 @@ validate_args() {
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --base-path)
+      require_value "$1" "${2:-}"
       BASE_PATH_OVERRIDE="${2:-}"
       shift 2
       ;;
     --date)
+      require_value "$1" "${2:-}"
       DATE_OVERRIDE="${2:-}"
       shift 2
       ;;
     --lines)
+      require_value "$1" "${2:-}"
       TAIL_LINES="${2:-}"
       shift 2
       ;;
     --level)
+      require_value "$1" "${2:-}"
       MIN_LEVEL="${2:-}"
       shift 2
       ;;
@@ -138,10 +152,12 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --module)
+      require_value "$1" "${2:-}"
       MODULE_FILTER="${2:-}"
       shift 2
       ;;
     --grep)
+      require_value "$1" "${2:-}"
       MESSAGE_FILTER="${2:-}"
       shift 2
       ;;
@@ -247,7 +263,12 @@ wait_for_log_file() {
 
 run_once() {
   local log_path="$1"
-  tail -n "$TAIL_LINES" "$log_path" 2>/dev/null | while IFS= read -r line; do
+  local lines
+  lines="$(tail -n "$TAIL_LINES" "$log_path")" || {
+    echo "ERROR: failed to read log file: $log_path" >&2
+    exit 1
+  }
+  printf '%s\n' "$lines" | while IFS= read -r line; do
     process_line "$line"
   done
 }
@@ -281,7 +302,7 @@ follow_for_date() {
   TAIL_PIPE_PATH="$TAIL_PIPE_DIR/stream"
   mkfifo "$TAIL_PIPE_PATH"
 
-  tail -n "$TAIL_LINES" -F "$log_path" >"$TAIL_PIPE_PATH" 2>/dev/null &
+  tail -n "$TAIL_LINES" -F "$log_path" >"$TAIL_PIPE_PATH" &
   TAIL_PID="$!"
 
   while IFS= read -r line; do

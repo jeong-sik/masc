@@ -478,6 +478,7 @@
    cdal_friction_projection
    artifact_store
    golden_set
+   adversarial_eval
    contract_risk
    contract_composer
    keeper_deliberation

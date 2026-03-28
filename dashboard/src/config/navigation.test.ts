@@ -13,13 +13,15 @@ describe('lab navigation', () => {
       'experiments',
       'autoresearch',
       'harness',
+      'config',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
       '도구',
       '실험',
       '오토리서치',
-      '하네스 헬스',
+      '세이프티 하네스',
+      '서버 설정',
     ])
   })
 })

@@ -130,8 +130,25 @@ let violation_summary_to_json (v : violation_summary) : Yojson.Safe.t =
      | None -> `Null);
   ]
 
+let recommendation (r : eval_result) : string option =
+  match r.overall with
+  | Ok -> None
+  | Fail "cancelled by contract" ->
+    Some "contract risk_class or requested_execution_mode is incompatible with keeper capabilities; adjust scope_kind in keeper config"
+  | Fail reason -> Some (Printf.sprintf "investigate failure: %s" reason)
+  | Warn reason ->
+    if r.violations.violation_ref_count > 0 then
+      if r.violations.mode_was_downgraded then
+        Some "mode was downgraded and violations detected; widen scope_kind to match actual tool usage or remove mutating tools"
+      else
+        Some "mode violations detected; restrict tools to match execution mode or widen scope_kind"
+    else if not r.evidence.completed_normally then
+      Some "run did not complete normally; check max_turns, timeout, or model availability"
+    else
+      Some (Printf.sprintf "review: %s" reason)
+
 let to_json (r : eval_result) : Yojson.Safe.t =
-  `Assoc [
+  let base = [
     ("run_id", `String r.run_id);
     ("contract_id", `String r.contract_id);
     ("result_status",
@@ -140,4 +157,39 @@ let to_json (r : eval_result) : Yojson.Safe.t =
     ("violations", violation_summary_to_json r.violations);
     ("overall", severity_to_json r.overall);
     ("evaluated_at", `Float r.evaluated_at);
-  ]
+  ] in
+  let extra = match recommendation r with
+    | Some rec_text -> [("recommendation", `String rec_text)]
+    | None -> []
+  in
+  `Assoc (base @ extra)
+
+(* ================================================================ *)
+(* JSONL Persistence                                                 *)
+(* ================================================================ *)
+
+let store_ref : Dated_jsonl.t option ref = ref None
+
+let base_path () =
+  let root = try Sys.getenv "MASC_DATA_DIR"
+    with Not_found ->
+      try Filename.concat (Sys.getenv "ME_ROOT") "data"
+      with Not_found -> "data"
+  in
+  Filename.concat root "cdal_evals"
+
+let get_store () =
+  match !store_ref with
+  | Some s -> s
+  | None ->
+    let s = Dated_jsonl.create ~base_dir:(base_path ()) () in
+    store_ref := Some s;
+    s
+
+let reset_store_for_testing () = store_ref := None
+
+let set_store_for_testing ~base_dir =
+  store_ref := Some (Dated_jsonl.create ~base_dir ())
+
+let persist (r : eval_result) : unit =
+  Dated_jsonl.append (get_store ()) (to_json r)

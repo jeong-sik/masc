@@ -175,6 +175,74 @@ let test_json_output () =
   | _ -> Alcotest.fail "expected JSON object"
 
 (* ================================================================ *)
+(* Test: Recommendation for Ok → None                                *)
+(* ================================================================ *)
+
+let test_recommendation_ok () =
+  let proof = make_proof () in
+  let result = Masc_mcp.Cdal_eval.evaluate proof in
+  Alcotest.(check bool) "no recommendation for Ok"
+    true (Masc_mcp.Cdal_eval.recommendation result = None)
+
+(* ================================================================ *)
+(* Test: Recommendation for violations → actionable text             *)
+(* ================================================================ *)
+
+let test_recommendation_violations () =
+  let proof = make_proof
+    ~raw_evidence_refs:["proof-store://r1/evidence/mode_violations.json"] () in
+  let result = Masc_mcp.Cdal_eval.evaluate proof in
+  match Masc_mcp.Cdal_eval.recommendation result with
+  | Some text ->
+    Alcotest.(check bool) "mentions scope_kind or tools"
+      true (String.length text > 10)
+  | None -> Alcotest.fail "expected recommendation for violations"
+
+(* ================================================================ *)
+(* Test: Recommendation for cancelled → mentions scope_kind          *)
+(* ================================================================ *)
+
+let test_recommendation_cancelled () =
+  let proof = make_proof ~result_status:Cancelled () in
+  let result = Masc_mcp.Cdal_eval.evaluate proof in
+  match Masc_mcp.Cdal_eval.recommendation result with
+  | Some text ->
+    Alcotest.(check bool) "mentions scope_kind"
+      true (String.length text > 10)
+  | None -> Alcotest.fail "expected recommendation for cancelled"
+
+(* ================================================================ *)
+(* Test: JSON includes recommendation field when not Ok              *)
+(* ================================================================ *)
+
+let test_json_has_recommendation () =
+  let proof = make_proof ~result_status:Errored () in
+  let result = Masc_mcp.Cdal_eval.evaluate proof in
+  let json = Masc_mcp.Cdal_eval.to_json result in
+  match json with
+  | `Assoc fields ->
+    Alcotest.(check bool) "has recommendation"
+      true (List.mem_assoc "recommendation" fields)
+  | _ -> Alcotest.fail "expected JSON object"
+
+(* ================================================================ *)
+(* Test: Persist writes to JSONL store                               *)
+(* ================================================================ *)
+
+let test_persist () =
+  Eio_main.run @@ fun _env ->
+  let tmp_dir = Filename.concat
+    (Filename.get_temp_dir_name ())
+    (Printf.sprintf "cdal_eval_test_%d" (Unix.getpid ())) in
+  Masc_mcp.Cdal_eval.set_store_for_testing ~base_dir:tmp_dir;
+  let proof = make_proof () in
+  let result = Masc_mcp.Cdal_eval.evaluate proof in
+  Masc_mcp.Cdal_eval.persist result;
+  Alcotest.(check bool) "store dir exists"
+    true (Sys.file_exists tmp_dir);
+  Masc_mcp.Cdal_eval.reset_store_for_testing ()
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -190,5 +258,10 @@ let () =
       Alcotest.test_case "mode downgrade" `Quick test_mode_downgrade;
       Alcotest.test_case "checkpoint present" `Quick test_checkpoint_present;
       Alcotest.test_case "json output" `Quick test_json_output;
+      Alcotest.test_case "recommendation ok" `Quick test_recommendation_ok;
+      Alcotest.test_case "recommendation violations" `Quick test_recommendation_violations;
+      Alcotest.test_case "recommendation cancelled" `Quick test_recommendation_cancelled;
+      Alcotest.test_case "json has recommendation" `Quick test_json_has_recommendation;
+      Alcotest.test_case "persist" `Quick test_persist;
     ]);
   ]

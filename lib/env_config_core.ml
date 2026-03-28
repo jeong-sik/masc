@@ -109,6 +109,34 @@ let deprecated_opt ~old_name ~new_name =
       Some value
   | None -> None
 
+(** Read [primary] env var first; if unset, fall back to [deprecated] with a
+    one-time deprecation warning.  Returns [None] when neither is set. *)
+let resolve_deprecated ~primary ~deprecated =
+  match Sys.getenv_opt primary |> trim_opt with
+  | Some _ as v -> v
+  | None -> deprecated_opt ~old_name:deprecated ~new_name:primary
+
+(** Typed deprecated-fallback getters.
+    Read [primary] first, then [deprecated] with warning, then [default]. *)
+let get_float_deprecated ~default ~primary ~deprecated =
+  match resolve_deprecated ~primary ~deprecated with
+  | Some s -> Safe_ops.float_of_string_with_default ~default s
+  | None -> default
+
+let get_int_deprecated ~default ~primary ~deprecated =
+  match resolve_deprecated ~primary ~deprecated with
+  | Some s -> Safe_ops.int_of_string_with_default ~default s
+  | None -> default
+
+let get_bool_deprecated ~default ~primary ~deprecated =
+  match resolve_deprecated ~primary ~deprecated with
+  | Some v ->
+      (match String.trim v |> String.lowercase_ascii with
+       | "true" | "1" | "yes" -> true
+       | "false" | "0" | "no" -> false
+       | _ -> default)
+  | None -> default
+
 let sb_path_opt () =
   match deprecated_opt ~old_name:"MASC_SB_PATH"
           ~new_name:"MASC_WORKSPACE_ROOT or ME_ROOT" with

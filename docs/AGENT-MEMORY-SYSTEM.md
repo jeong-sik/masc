@@ -662,7 +662,7 @@ RETURN p1, p2, c1, c2 AS potential_contradiction
 | `spawn_eio.ml` | 메모리 주입 지점 | `spawn_with_memory` 추가 |
 | `handover.ml` | DNA에 학습 포함 | `key_decisions` → 학습 후보 |
 | `mitosis.ml` | 분열 시 학습 전달 | DNA 압축 시 학습 요약 포함 |
-| `lodge_heartbeat.ml` | Decay 공식 공유 | `post_freshness` 와 동일 모델 |
+| `keeper_heartbeat.ml` | Decay 공식 공유 | `post_freshness` 와 동일 모델 |
 
 ---
 

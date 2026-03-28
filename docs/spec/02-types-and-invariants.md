@@ -419,17 +419,17 @@ type masc_error =
   | TokenExpired of string
   | InvalidToken of string
   | RateLimitExceeded of rate_limit_error
-  | LodgeError of lodge_error
+  | AutonomyError of autonomy_error
   | CacheError of cache_error
 ```
 
-25개 variant. `lodge_error`(3 variants)와 `cache_error`(4 variants)는 상호 재귀 타입으로 정의된다.
+25개 variant. `autonomy_error`(3 variants)와 `cache_error`(4 variants)는 상호 재귀 타입으로 정의된다.
 
 ```ocaml
-and lodge_error =
-  | LodgeGraphQLFailed of string
-  | LodgeAgentNotCached of string
-  | LodgeInvalidResponse of string
+and autonomy_error =
+  | AutonomyGraphQLFailed of string
+  | AutonomyAgentNotCached of string
+  | AutonomyInvalidResponse of string
 
 and cache_error =
   | CacheReadFailed of string

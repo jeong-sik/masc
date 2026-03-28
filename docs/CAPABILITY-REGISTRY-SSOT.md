@@ -58,7 +58,7 @@ Example:
 - migrating those CLIs to `/mcp/managed` also requires client-side MCP server
   registration changes outside this repo
 
-### Local worker / MDAL / Lodge worker
+### Local worker / MDAL / Autonomy worker
 
 - uses the internal local-worker projection
 - may include:

@@ -34,15 +34,15 @@ let print_summary () =
   Log.Env.info "RateLimit: cleanup_interval=%.0fs entry_max_age=%.0fs"
     Env_config_governance.RateLimit.cleanup_interval_seconds
     Env_config_governance.RateLimit.entry_max_age_seconds;
-  Log.Env.info "LodgeV2: tick=%.0fs agents_per_tick=%d planner=%b reflection_thresh=%d"
-    Env_config_governance.LodgeV2.tick_interval_seconds
-    Env_config_governance.LodgeV2.agents_per_tick
-    Env_config_governance.LodgeV2.use_planner
-    Env_config_governance.LodgeV2.reflection_threshold;
-  Log.Env.info "LodgeSelection: max_starvation=%d thompson_weight=%.2f decay=%.2f"
-    Env_config_governance.LodgeSelection.max_starvation_ticks
-    Env_config_governance.LodgeSelection.thompson_weight
-    Env_config_governance.LodgeSelection.vote_decay_factor;
+  Log.Env.info "Autonomy: tick=%.0fs agents_per_tick=%d planner=%b reflection_thresh=%d"
+    Env_config_governance.Autonomy.tick_interval_seconds
+    Env_config_governance.Autonomy.agents_per_tick
+    Env_config_governance.Autonomy.use_planner
+    Env_config_governance.Autonomy.reflection_threshold;
+  Log.Env.info "AgentSelection: max_starvation=%d thompson_weight=%.2f decay=%.2f"
+    Env_config_governance.AgentSelection.max_starvation_ticks
+    Env_config_governance.AgentSelection.thompson_weight
+    Env_config_governance.AgentSelection.vote_decay_factor;
   Log.Env.info "KeeperBootstrap: enabled=%b stale_turn=%.0fs max_scan=%d"
     Env_config_keeper.KeeperBootstrap.enabled
     Env_config_keeper.KeeperBootstrap.stale_turn_seconds

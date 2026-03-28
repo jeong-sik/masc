@@ -123,6 +123,7 @@ let canonical_action_type action_type =
   match action_type with
   | "lodge_poke" -> "social_sweep"
   | "lodge_tick" -> "social_sweep"
+  | "autonomy_tick" -> "social_sweep"
   | "social_sweep" -> "social_sweep"
   | "team_turn" -> "team_turn"
   | "team_note" -> "team_note"

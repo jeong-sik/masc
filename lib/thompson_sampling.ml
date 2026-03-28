@@ -74,7 +74,14 @@ let stats_path () =
   in
   let masc_dir = Filename.concat base ".masc" in
   Fs_compat.mkdir_p masc_dir;
-  Filename.concat masc_dir "lodge_stats.jsonl"
+  (* Migrate legacy file name; ignore race if another process already renamed *)
+  let () =
+    let legacy = Filename.concat masc_dir "lodge_stats.jsonl" in
+    let current = Filename.concat masc_dir "autonomy_stats.jsonl" in
+    if (not (Sys.file_exists current)) && Sys.file_exists legacy then
+      (try Sys.rename legacy current with Sys_error _ -> ())
+  in
+  Filename.concat masc_dir "autonomy_stats.jsonl"
 
 (** {1 Beta Distribution Sampling} *)
 
@@ -124,7 +131,7 @@ let sample_beta ~alpha ~beta =
 (** Logarithmic starvation bonus to prevent agent neglect.
     Uses ln(1+ticks) to avoid dominating Thompson score. *)
 let starvation_bonus ~ticks =
-  let coefficient = Env_config.LodgeSelection.starvation_bonus_coefficient in
+  let coefficient = Env_config.AgentSelection.starvation_bonus_coefficient in
   coefficient *. Float.log (1.0 +. float_of_int ticks)
 
 (** Calculate ticks since last selection based on timestamp *)
@@ -311,7 +318,7 @@ let record_vote ~agent_name ~direction =
     Hashtbl.replace pending_votes agent_name (up', down'))
 
 let flush_pending_votes () =
-  let decay = Env_config.LodgeSelection.vote_decay_factor in
+  let decay = Env_config.AgentSelection.vote_decay_factor in
   Hashtbl.iter (fun agent_name (votes_up, votes_down) ->
     let total = votes_up + votes_down in
     if total > 0 then begin
@@ -400,7 +407,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
   ) priority_triggers;
 
   (* 2. Starvation rescue: force include agents who haven't been selected too long *)
-  let max_starvation = Env_config.LodgeSelection.max_starvation_ticks in
+  let max_starvation = Env_config.AgentSelection.max_starvation_ticks in
   let starved = List.filter_map (fun name ->
     if List.mem name !selected_names then None
     else if not (is_trigger_eligible ~agent_name:name Starved) then None
@@ -431,7 +438,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
 
   (* 3. Thompson Sampling for remaining slots *)
   if List.length !selected < max_n then begin
-    let thompson_weight = Env_config.LodgeSelection.thompson_weight in
+    let thompson_weight = Env_config.AgentSelection.thompson_weight in
     let starvation_weight = 1.0 -. thompson_weight in
 
     let candidates = List.filter_map (fun name ->

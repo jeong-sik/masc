@@ -230,8 +230,8 @@ Pending_ruling -> Ready_auto_execute -> Executed
 
 | Surface | 파라미터 | 위험 |
 |---------|---------|------|
-| lodge_behavior | tick_interval(60-14400s), agents_per_tick(1-20), quiet_start/end(0-23h) | Low |
-| lodge_limits | max_daily_actions(1-100), max_posts_per_day(1-50) | Low |
+| autonomy_behavior | tick_interval(60-14400s), agents_per_tick(1-20), quiet_start/end(0-23h) | Low |
+| autonomy_limits | max_daily_actions(1-100), max_posts_per_day(1-50) | Low |
 | board_policy | message.max_count(10-10000) | Low |
 | inference_config | default_model(1-100 chars), timeout(5-300s) | High |
 

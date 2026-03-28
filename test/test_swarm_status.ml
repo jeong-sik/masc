@@ -23,13 +23,13 @@ let test_supervised_trace_only_does_not_make_lane_present () =
   let trace : M.Swarm_status.trace_info =
     {
       event_id = "trace-1";
-      event_type = "lodge_tick";
+      event_type = "autonomy_tick";
       source = "operator";
       trace_id = "ops_1";
       operation_id = None;
       actor = Some "dashboard-kind-crane";
       timestamp = Some "2026-03-07T18:02:18Z";
-      detail = `Assoc [ ("action_type", `String "lodge_tick") ];
+      detail = `Assoc [ ("action_type", `String "autonomy_tick") ];
     }
   in
   let json =

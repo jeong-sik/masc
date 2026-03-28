@@ -244,7 +244,7 @@ Pair with masc_execute to run the action after confirming the dry-run output.";
       ("properties", `Assoc [
         ("param_key", `Assoc [
           ("type", `String "string");
-          ("description", `String "Parameter key (e.g. lodge.tick_interval_seconds). Use masc_runtime_params to list available keys.");
+          ("description", `String "Parameter key (e.g. autonomy.tick_interval_seconds). Use masc_runtime_params to list available keys.");
         ]);
         ("value", `Assoc [
           ("description", `String "New value (number, string, or boolean depending on parameter type)");

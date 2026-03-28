@@ -174,7 +174,7 @@ let test_default_config_path () =
 let test_cascade_names_produce_models () =
   let cascades = [
     "keeper_turn"; "heartbeat_action"; "heartbeat_wake";
-    "lodge_direct"; "classification"; "verifier";
+    "autonomy_direct"; "classification"; "verifier";
     "briefing"; "walph"; "routing_judge";
   ] in
   List.iter (fun name ->

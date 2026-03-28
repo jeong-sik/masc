@@ -254,8 +254,7 @@ let with_server f =
         ("MASC_SSE_RECONNECT_MIN_INTERVAL_S", "1.5");
         ("MASC_SSE_CONNECT_WINDOW_S", "5.0");
         ("MASC_SSE_CONNECT_MAX_IN_WINDOW", "1000");
-        ("MASC_LODGE_ENABLED", "0");
-        ("MASC_LODGE_DAEMON_ENABLED", "0");
+        ("MASC_AUTONOMY_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
       ]

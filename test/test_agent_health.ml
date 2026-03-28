@@ -1,4 +1,4 @@
-(** Tests for Agent_health module — Lodge-specific health gate over Circuit Breaker.
+(** Tests for Agent_health module — Autonomy-specific health gate over Circuit Breaker.
 
     All tests that touch Circuit_breaker must run inside Eio_main.run
     because Circuit_breaker uses Eio.Mutex internally. *)

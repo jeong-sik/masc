@@ -104,9 +104,7 @@ if [ "$MCP_URL" = "http://127.0.0.1:${PORT}/mcp" ]; then
     MASC_STORAGE_TYPE=filesystem \
     MASC_BASE_PATH="$BASE_PATH" \
     MASC_ORCHESTRATOR_ENABLED=false \
-    MASC_LODGE_ENABLED=false \
-    MASC_LODGE_DAEMON_ENABLED=false \
-    MASC_LODGE_NEO4J_ENABLED=false \
+    MASC_AUTONOMY_ENABLED=false \
     GRAPHQL_API_KEY="" \
     GRAPHQL_URL="http://127.0.0.1:9/graphql" \
     "$SERVER_EXE" --port "$PORT" --base-path "$BASE_PATH" >"$LOG_FILE" 2>&1 &

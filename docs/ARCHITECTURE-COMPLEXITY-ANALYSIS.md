@@ -69,7 +69,7 @@ Useful but not core to coordination.
 | tool_portal | ~200 | 1:1 secret messaging | Active |
 | tool_encryption | ~100 | AES-256 | OFF by default |
 | tool_rate_limit | ~100 | Rate limiting | Active |
-| tool_social | ~200 | Lodge social | Active |
+| tool_social | ~200 | Keeper Autonomy social | Active |
 | tool_notifications | ~100 | Notifications | Active |
 | tool_audit | ~100 | Audit logging | Active |
 

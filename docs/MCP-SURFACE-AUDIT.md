@@ -65,7 +65,7 @@ flowchart TD
 
   Canon --> Core[Room task session CPv2]
   Canon --> GameView[decision.* experiment.* trpg.* client.*]
-  Canon --> Ecosystem[keeper perpetual lodge]
+  Canon --> Ecosystem[keeper perpetual autonomy]
 
   PL --> PromptSurface[MCP prompt surface: 3 prompts]
   RL --> ResourceSurface[MCP resources and tool-help views]
@@ -123,7 +123,7 @@ flowchart TD
   Orchestration --> Workflow[Team Session and Supervisor]
   Workflow --> Operator[Operator digest and confirm flow]
 
-  Secondary1[Lodge and keeper ecosystem] -. attached subsystem .-> Workflow
+  Secondary1[Keeper Autonomy ecosystem] -. attached subsystem .-> Workflow
   Secondary2[Game-view dotted tools] -. canonical public alias layer .-> Workflow
   Secondary3[SWARM-RISC research modules] -. merged but not canonical .-> Control
 ```

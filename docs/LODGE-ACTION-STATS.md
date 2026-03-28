@@ -1,10 +1,10 @@
-# Lodge Action Stats (Decision/Behavior)
+# Keeper Autonomy Action Stats (Decision/Behavior)
 
 ## Purpose
-Summarize Lodge action/decision outcomes from trace JSONL files.
+Summarize Keeper Autonomy action/decision outcomes from trace JSONL files.
 
 ## Source
-Trace files saved by Lodge heartbeat:
+Trace files saved by Keeper heartbeat:
 - `~/.masc/traces/<agent>/YYYY-MM-DD.jsonl`
 
 Fields used:
@@ -15,7 +15,7 @@ Fields used:
 
 ## Usage
 ```
-python3 scripts/masc-lodge-action-stats.py --days 1
+python3 scripts/masc-autonomy-action-stats.py --days 1
 ```
 
 ## Options

@@ -157,7 +157,7 @@ let is_test_origin origin =
 
 let title_has_artifact_signature title =
   let title = String.lowercase_ascii (String.trim title) in
-  String.starts_with ~prefix:"lodge automation post volume high" title
+  String.starts_with ~prefix:"autonomy post volume high" title
   || contains_substring title "qa-"
   || contains_substring title "sm-test"
   || contains_substring title "stress-"
@@ -168,8 +168,8 @@ let source_ref_has_artifact_signature refs =
   List.exists
     (fun ref_ ->
       let ref_ = String.lowercase_ascii (String.trim ref_) in
-      String.starts_with ~prefix:"anomaly-lodge-post-volume" ref_
-      || String.starts_with ~prefix:"anomaly:lodge-post-volume" ref_
+      String.starts_with ~prefix:"anomaly-autonomy-post-volume" ref_
+      || String.starts_with ~prefix:"anomaly:autonomy-post-volume" ref_
       || String.starts_with ~prefix:"task-qa-" ref_
       || String.starts_with ~prefix:"task-sm-test" ref_
       || String.starts_with ~prefix:"task-stress-" ref_)

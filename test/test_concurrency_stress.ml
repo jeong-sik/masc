@@ -13,7 +13,7 @@ open Alcotest
 module Session = Masc_mcp.Session
 module Cancellation = Masc_mcp.Cancellation
 module Types = Types
-module Env_config = Masc_mcp.Env_config
+module Env_config = Env_config
 
 let num_agents = 20
 let iterations_per_agent = 100

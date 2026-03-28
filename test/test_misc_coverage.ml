@@ -12,7 +12,7 @@ open Alcotest
 module Compression_dict = Compression_dict
 module Log = Log
 module Config = Masc_mcp.Config
-module Env_config = Masc_mcp.Env_config
+module Env_config = Env_config
 
 (* ============================================================
    Compression_dict Tests

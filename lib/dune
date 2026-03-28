@@ -28,7 +28,6 @@
    bounded
    cache_eio
    cascade_inference
-   env_config
    cancellation
    command_plane_v2
    command_plane_orchestra
@@ -541,13 +540,7 @@
    oas_worker
    tool_council_oas
    oas_sse_bridge
-   env_config_core
-   env_config_runtime
-   env_config_governance
-   env_config_keeper
    env_config_introspect
-   env_config_server
-   env_config_dashboard
    runtime_params
    governance_registry
    governance_pipeline
@@ -652,10 +645,6 @@
  tool_command_plane_dispatch
  tool_command_plane_schemas_01
  tool_command_plane_schemas_02
- env_config_core
- env_config_runtime
- env_config_governance
- env_config_keeper
   keeper_exec_tools
   keeper_exec_status_metrics
   keeper_exec_status
@@ -833,6 +822,8 @@
    masc_board
    ;; Room coordination (extracted sub-library)
    masc_room
+   ;; Environment configuration (extracted sub-library)
+   masc_mcp.config
    ;; OpenTelemetry (spans + OTLP exporter + metrics)
    opentelemetry
    opentelemetry-client-cohttp-eio

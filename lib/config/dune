@@ -1,0 +1,15 @@
+(include_subdirs no)
+
+(library
+ (name masc_config)
+ (public_name masc_mcp.config)
+ (modules
+   env_config
+   env_config_core
+   env_config_dashboard
+   env_config_governance
+   env_config_keeper
+   env_config_runtime
+   env_config_server)
+ (wrapped false)
+ (libraries masc_core masc_log yojson uri))

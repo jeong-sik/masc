@@ -233,7 +233,7 @@ let test_unified_backend () =
 
 (** Test Postgres backend if URL provided (empty string treated as absent) *)
 let test_postgres_backend () =
-  match Masc_mcp.Env_config_core.postgres_url_opt () with
+  match Env_config_core.postgres_url_opt () with
   | None -> () (* Skip if no Postgres URL *)
   | Some url ->
       Eio_main.run @@ fun env ->
@@ -270,7 +270,7 @@ let test_postgres_backend () =
           Alcotest.(check bool) "pg not exists" false (Backend.Postgres.exists backend key)
 
 let test_postgres_expired_lock_reacquire () =
-  match Masc_mcp.Env_config_core.postgres_url_opt () with
+  match Env_config_core.postgres_url_opt () with
   | None -> ()
   | Some url ->
       Eio_main.run @@ fun env ->
@@ -296,7 +296,7 @@ let test_postgres_expired_lock_reacquire () =
           | Error _ -> Alcotest.fail "expired postgres lock reacquire failed"
 
 let test_postgres_lock_blocks_other_owner () =
-  match Masc_mcp.Env_config_core.postgres_url_opt () with
+  match Env_config_core.postgres_url_opt () with
   | None -> ()
   | Some url ->
       Eio_main.run @@ fun env ->
@@ -321,7 +321,7 @@ let test_postgres_lock_blocks_other_owner () =
           | Error _ -> Alcotest.fail "non-expired postgres lock check failed"
 
 let test_postgres_expired_lock_concurrent_reacquire () =
-  match Masc_mcp.Env_config_core.postgres_url_opt () with
+  match Env_config_core.postgres_url_opt () with
   | None -> ()
   | Some url ->
       Eio_main.run @@ fun env ->
@@ -356,7 +356,7 @@ let test_postgres_expired_lock_concurrent_reacquire () =
             (bool_to_int acquired_a + bool_to_int acquired_b)
 
 let test_postgres_old_owner_cannot_release_reclaimed_lock () =
-  match Masc_mcp.Env_config_core.postgres_url_opt () with
+  match Env_config_core.postgres_url_opt () with
   | None -> ()
   | Some url ->
       Eio_main.run @@ fun env ->

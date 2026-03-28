@@ -5,6 +5,7 @@ module Endpoints = struct
     match Uri.host (Uri.of_string (masc_http_base_url ())) with
     | Some host -> Ok host
     | None -> Error "MASC_HTTP_BASE_URL must include a host"
+
   (** MASC server host *)
   let masc_host () =
     match masc_host_result () with

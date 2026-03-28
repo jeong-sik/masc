@@ -475,6 +475,7 @@
    artifact_store
    golden_set
    adversarial_eval
+   labeling
    contract_risk
    contract_composer
    keeper_deliberation

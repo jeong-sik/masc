@@ -9,7 +9,7 @@ let test_session_create () =
   Alcotest.(check int) "subscriptions empty" 0 (List.length session.subscriptions)
 
 let test_session_find () =
-  let session = SH.Session.create ~transport:SH.SSE_legacy in
+  let session = SH.Session.create ~transport:SH.Streamable_HTTP in
   let found = SH.Session.find session.id in
   Alcotest.(check bool) "session found" true (Option.is_some found);
   let not_found = SH.Session.find "nonexistent-id" in

@@ -335,6 +335,7 @@ type task = {
   created_at: string;
   worktree: worktree_info option; [@default None]  (* linked worktree info *)
   required_role: role; [@default Unassigned]  (** Role required to claim this task *)
+  stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
 } [@@deriving show]
 
 (* Manual yojson for task *)
@@ -358,6 +359,12 @@ let task_to_yojson t =
     | Unassigned -> with_worktree
     | role -> with_worktree @ [("required_role", role_to_yojson role)]
   in
+  (* Add stage if present *)
+  let with_stage = match t.stage with
+    | None -> with_role
+    | Some s -> with_role @ [("stage", Task_stage.to_yojson s)]
+  in
+  let with_role = with_stage in
   (* Merge status fields into task *)
   match status_json with
   | `Assoc status_fields -> `Assoc (with_role @ status_fields)
@@ -385,8 +392,13 @@ let task_of_yojson json =
       | Some s -> role_of_string s
       | None -> Unassigned
     in
+    (* Parse optional stage field *)
+    let stage = match json |> member "stage" |> to_string_option with
+      | Some s -> (match Task_stage.of_string s with Ok st -> Some st | Error _ -> None)
+      | None -> None
+    in
     match task_status_of_yojson json with
-    | Ok task_status -> Ok { id; title; description; task_status; priority; files; created_at; worktree; required_role }
+    | Ok task_status -> Ok { id; title; description; task_status; priority; files; created_at; worktree; required_role; stage }
     | Error e -> Error e
   with e -> Error (Printexc.to_string e)
 

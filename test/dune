@@ -51,6 +51,7 @@
         test_contract_risk
         test_contract_composer
         test_cdal_conformance
+        test_task_stage
 )
  (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
           test_sse test_encryption test_cancellation test_graphql_api
@@ -83,6 +84,7 @@
           test_contract_risk
           test_contract_composer
           test_cdal_conformance
+          test_task_stage
   )
  (libraries masc_mcp agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))

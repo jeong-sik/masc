@@ -442,7 +442,7 @@ let test_task_roundtrip () =
     files = ["file1.ml"; "file2.ml"];
     created_at = "2024-01-01T00:00:00Z";
     worktree = None;
-    required_role = Types_core.Unassigned;
+    required_role = Types_core.Unassigned; stage = None;
   } in
   let json = Types.task_to_yojson task in
   let result = Types.task_of_yojson json in
@@ -463,7 +463,7 @@ let test_task_with_worktree () =
       git_root = "/project";
       repo_name = "project";
     };
-    required_role = Types_core.Unassigned;
+    required_role = Types_core.Unassigned; stage = None;
   } in
   let json = Types.task_to_yojson task in
   let result = Types.task_of_yojson json in
@@ -479,11 +479,11 @@ let test_backlog_roundtrip () =
       { id = "t1"; title = "Task 1"; description = "Desc 1";
         task_status = Todo; priority = 1; files = [];
         created_at = "2024-01-01T00:00:00Z"; worktree = None;
-        required_role = Types_core.Unassigned };
+        required_role = Types_core.Unassigned; stage = None };
       { id = "t2"; title = "Task 2"; description = "Desc 2";
         task_status = Done { assignee = "a"; completed_at = "2024-01-02T00:00:00Z"; notes = None };
         priority = 2; files = []; created_at = "2024-01-01T01:00:00Z"; worktree = None;
-        required_role = Types_core.Unassigned };
+        required_role = Types_core.Unassigned; stage = None };
     ];
     last_updated = "2024-01-02T00:00:00Z";
     version = 5;

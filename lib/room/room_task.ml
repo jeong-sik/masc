@@ -82,6 +82,7 @@ let add_task config ~title ~priority ~description =
       created_at = now_iso ();
       worktree = None;
       required_role = Types_core.Unassigned;
+      stage = None;
     } in
 
     let new_backlog = {
@@ -120,6 +121,7 @@ let add_task_with_role config ~title ~priority ~description ~required_role =
       created_at = now_iso ();
       worktree = None;
       required_role;
+      stage = None;
     } in
 
     let new_backlog = {
@@ -164,7 +166,7 @@ let batch_add_tasks config tasks =
           files = [];
           created_at = now_iso ();
           worktree = None;
-          required_role = Types_core.Unassigned;
+          required_role = Types_core.Unassigned; stage = None;
         }
       ) tasks in
       let new_backlog = {

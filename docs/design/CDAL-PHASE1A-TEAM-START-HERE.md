@@ -45,13 +45,13 @@ Start from the active-check spec and implement only that.
 
 Before writing code, confirm the producer side:
 
-- [risk_contract.mli](/Users/dancer/me/workspace/yousleepwhen/oas/lib/risk_contract.mli)
-- [cdal_proof.mli](/Users/dancer/me/workspace/yousleepwhen/oas/lib/cdal_proof.mli)
-- [cdal-proof-bundle-v1.json](/Users/dancer/me/workspace/yousleepwhen/oas/docs/schemas/cdal-proof-bundle-v1.json)
-- [mode_enforcer.ml](/Users/dancer/me/workspace/yousleepwhen/oas/lib/mode_enforcer.ml)
-- [proof_capture.ml](/Users/dancer/me/workspace/yousleepwhen/oas/lib/proof_capture.ml)
-- [proof_store.mli](/Users/dancer/me/workspace/yousleepwhen/oas/lib/proof_store.mli)
-- [cdal_eval.ml](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/cdal_eval.ml)
+- `oas/lib/risk_contract.mli` — contract type definitions
+- `oas/lib/cdal_proof.mli` — proof bundle type interface
+- `oas/docs/schemas/cdal-proof-bundle-v1.json` — proof bundle JSON Schema
+- `oas/lib/mode_enforcer.ml` — runtime enforcement logic (producer side)
+- `oas/lib/proof_capture.ml` — proof artifact writer (producer side)
+- `oas/lib/proof_store.mli` — proof store read interface
+- `masc-mcp/lib/cdal_eval.ml` — current evaluator (anti-pattern reference, not implementation guide)
 
 These files tell you what exists today.
 The docs tell you what you are allowed to claim from those fields.
@@ -133,9 +133,13 @@ Unavailable means `None`, not inference.
 1. build ref resolution and manifest/contract loading behind a small reader adapter
 2. implement per-check result evaluation for the 4 active checks
 3. implement run-level verdict derivation
-4. delete substring/ref-count logic from the old evaluator
+4. validate new evaluator against known bundles (replay determinism test)
 5. optionally add `Single_run` friction projection
 6. add tests that replay the same bundle deterministically
+
+Legacy cleanup (after Phase-1A validation):
+
+- delete substring/ref-count logic from `cdal_eval.ml` only after the new evaluator passes replay tests on real bundles
 
 ## 10. Minimum Review Checklist
 

@@ -255,8 +255,8 @@ r_keeper_status="$(call_tool 5033 'masc_keeper_status' '{"name":"public-sweep-ke
 expect_ok "masc_keeper_status" "$r_keeper_status"
 
 echo "[35/39] masc_keeper_msg"
-r_keeper_msg="$(call_tool 5034 'masc_keeper_msg' '{"name":"bad keeper!","message":"ping"}')"
-expect_ok_or_guard "masc_keeper_msg" "$r_keeper_msg" 'invalid keeper name'
+r_keeper_msg="$(call_tool 5034 'masc_keeper_msg' '{"name":"missing-keeper","message":"ping"}')"
+expect_ok_or_guard "masc_keeper_msg" "$r_keeper_msg" 'keeper not found'
 
 echo "[36/39] masc_keeper_down"
 r_keeper_down="$(call_tool 5035 'masc_keeper_down' '{"name":"public-sweep-keeper"}')"

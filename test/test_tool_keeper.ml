@@ -703,50 +703,57 @@ let test_keeper_and_persistent_agent_lists_split () =
         | Some result -> result
         | None -> fail ("missing dispatch for " ^ name)
       in
-      let ok, keeper_up_body =
-        dispatch "masc_keeper_up"
-          (`Assoc
-            [
-              ("name", `String "keeper-demo");
-              ("goal", `String "Stay available");
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      if not ok then fail keeper_up_body;
-      check bool "keeper up" true ok;
-      let ok, persistent_up_body =
-        dispatch "masc_persistent_agent_up"
-          (`Assoc
-            [
-              ("name", `String "persistent-demo");
-              ("goal", `String "Stay on demand");
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      if not ok then fail persistent_up_body;
-      check bool "persistent agent up" true ok;
-      let ok, keeper_body =
-        dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool false) ])
-      in
-      check bool "keeper list ok" true ok;
-      let keeper_json = Yojson.Safe.from_string keeper_body in
-      check bool "keeper listed" true
-        Yojson.Safe.Util.(
-          keeper_json |> member "keepers" |> to_list
-          |> List.exists (( = ) (`String "keeper-demo")));
-      check bool "second keeper also visible" true
-        Yojson.Safe.Util.(
-          keeper_json |> member "keepers" |> to_list
-          |> List.exists (( = ) (`String "persistent-demo")));
-      let ok, persistent_body =
-        dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool false) ])
-      in
-      check bool "persistent list ok" true ok;
-      let persistent_json = Yojson.Safe.from_string persistent_body in
-      check bool "persistent listed" true
-        Yojson.Safe.Util.(
-          persistent_json |> member "persistent_agents" |> to_list
-          |> List.exists (( = ) (`String "persistent-demo"))))
+      Fun.protect
+        ~finally:(fun () ->
+          Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
+          Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo")
+        (fun () ->
+          let ok, keeper_up_body =
+            dispatch "masc_keeper_up"
+              (`Assoc
+                [
+                  ("name", `String "keeper-demo");
+                  ("goal", `String "Stay available");
+                  ("proactive_enabled", `Bool false);
+                ])
+          in
+          if not ok then fail keeper_up_body;
+          check bool "keeper up" true ok;
+          let ok, persistent_up_body =
+            dispatch "masc_persistent_agent_up"
+              (`Assoc
+                [
+                  ("name", `String "persistent-demo");
+                  ("goal", `String "Stay on demand");
+                  ("proactive_enabled", `Bool false);
+                ])
+          in
+          if not ok then fail persistent_up_body;
+          check bool "persistent agent up" true ok;
+          Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
+          Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
+          let ok, keeper_body =
+            dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool false) ])
+          in
+          check bool "keeper list ok" true ok;
+          let keeper_json = Yojson.Safe.from_string keeper_body in
+          check bool "keeper listed" true
+            Yojson.Safe.Util.(
+              keeper_json |> member "keepers" |> to_list
+              |> List.exists (( = ) (`String "keeper-demo")));
+          check bool "second keeper also visible" true
+            Yojson.Safe.Util.(
+              keeper_json |> member "keepers" |> to_list
+              |> List.exists (( = ) (`String "persistent-demo")));
+          let ok, persistent_body =
+            dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool false) ])
+          in
+          check bool "persistent list ok" true ok;
+          let persistent_json = Yojson.Safe.from_string persistent_body in
+          check bool "persistent listed" true
+            Yojson.Safe.Util.(
+              persistent_json |> member "persistent_agents" |> to_list
+              |> List.exists (( = ) (`String "persistent-demo")))))
 
 let test_keeper_and_persistent_detailed_lists_annotate_runtime_class () =
   Eio_main.run @@ fun env ->

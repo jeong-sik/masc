@@ -212,13 +212,20 @@ let test_dashboard_shell_counts_keepers () =
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:None);
       Eio.Switch.run (fun sw ->
-        create_keeper env sw config "keeper-alpha";
-        create_keeper env sw config "keeper-beta";
-        let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
-        let open Yojson.Safe.Util in
-        let counts = json |> member "counts" in
-        check int "shell keeper count from keeper meta" 2
-          (counts |> member "keepers" |> to_int)))
+        Fun.protect
+          ~finally:(fun () ->
+            Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-alpha";
+            Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-beta")
+          (fun () ->
+            create_keeper env sw config "keeper-alpha";
+            create_keeper env sw config "keeper-beta";
+            Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-alpha";
+            Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-beta";
+            let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
+            let open Yojson.Safe.Util in
+            let counts = json |> member "counts" in
+            check int "shell keeper count from keeper meta" 2
+              (counts |> member "keepers" |> to_int))))
 
 let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
   let dir = test_dir () in
@@ -236,14 +243,19 @@ let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
            ~capabilities:["keeper"]
            ());
       Eio.Switch.run (fun sw ->
-        create_keeper env sw config "sangsu";
-        let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
-        let open Yojson.Safe.Util in
-        let counts = json |> member "counts" in
-        check int "keeper-backed room has no general agents" 0
-          (counts |> member "agents" |> to_int);
-        check int "keeper still counted" 1
-          (counts |> member "keepers" |> to_int)))
+        Fun.protect
+          ~finally:(fun () ->
+            Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu")
+          (fun () ->
+            create_keeper env sw config "sangsu";
+            Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+            let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
+            let open Yojson.Safe.Util in
+            let counts = json |> member "counts" in
+            check int "keeper-backed room has no general agents" 0
+              (counts |> member "agents" |> to_int);
+            check int "keeper still counted" 1
+              (counts |> member "keepers" |> to_int))))
 
 let test_dashboard_execution_fresh_join_not_marked_stale () =
   let dir = test_dir () in

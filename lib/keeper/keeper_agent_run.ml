@@ -252,14 +252,19 @@ let run_turn
               (Agent_sdk.Execution_mode.to_string p.effective_execution_mode)
               (Agent_sdk.Cdal_proof.show_result_status p.result_status)
               (List.length p.raw_evidence_refs);
-            let eval = Cdal_eval.evaluate p in
+            let store = Agent_sdk.Proof_store.default_config in
+            let eval = Cdal_eval.evaluate ~store p in
             Cdal_eval.persist eval;
             Log.Keeper.info "keeper:%s cdal_eval: %s"
               meta.name (Cdal_eval.severity_to_string eval.overall);
-            (match Cdal_eval.recommendation eval with
-             | Some rec_text ->
-               Log.Keeper.warn "keeper:%s cdal recommendation: %s"
-                 meta.name rec_text
+            (match eval.recommendation with
+             | Some r ->
+               Log.Keeper.warn
+                 "keeper:%s cdal: %d violation(s) from [%s]; mode %s needed (current: %s)"
+                 meta.name (List.length eval.evidence.violations)
+                 (String.concat ", " r.offending_tools)
+                 (Agent_sdk.Execution_mode.to_string r.minimum_required)
+                 (Agent_sdk.Execution_mode.to_string r.current_mode)
              | None -> ())
           | None -> ());
          Ok {

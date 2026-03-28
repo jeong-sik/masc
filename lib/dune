@@ -466,6 +466,9 @@
    keeper_toml_loader
    keeper_contract
    keeper_cdal_contract
+   proof_artifact_reader
+   violation_record
+   token_usage_record
    cdal_eval
    keeper_deliberation
    keeper_types_profile

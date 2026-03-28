@@ -20,7 +20,7 @@ import type {
   DashboardExecutionOperationBrief,
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
-  type DashboardExecutionResponse,
+  DashboardExecutionResponse,
 } from './types'
 import {
   fetchDashboardExecution,

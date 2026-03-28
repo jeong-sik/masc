@@ -62,9 +62,3 @@ module Relay = struct
     get_bool ~default:true "MASC_RELAY_CALIBRATION_ENABLED"
 end
 
-(** {1 Orchestrator} *)
-
-module Orchestrator = struct
-  let agent_opt () =
-    Sys.getenv_opt "MASC_ORCHESTRATOR_AGENT" |> trim_opt
-end

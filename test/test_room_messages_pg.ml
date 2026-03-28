@@ -28,8 +28,8 @@ let with_env key value f =
     f
 
 let with_pg_test_env f =
-  match Sys.getenv_opt "MASC_POSTGRES_URL" with
-  | None | Some "" -> ()
+  match Masc_mcp.Env_config_core.postgres_url_opt () with
+  | None -> ()
   | Some url ->
       let dir = test_dir () in
       Fun.protect

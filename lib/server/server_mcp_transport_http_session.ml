@@ -16,7 +16,7 @@ let mcp_profile_by_session : (string, Mcp_eio.tool_profile) Hashtbl.t =
 let session_mutex = Eio.Mutex.create ()
 
 let default_base_path () =
-  match Sys.getenv_opt "ME_ROOT" with
+  match Env_config_core.me_root_opt () with
   | Some path -> path
   | None -> Sys.getcwd ()
 

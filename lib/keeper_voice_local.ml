@@ -21,7 +21,7 @@ let masc_base_dir () =
   match resolved_base_path_opt () with
   | Some base_path -> Filename.concat base_path ".masc"
   | None -> (
-      match trim_opt (Sys.getenv_opt "ME_ROOT") with
+      match trim_opt (Env_config_core.me_root_opt ()) with
       | Some root -> Filename.concat root ".masc"
       | None -> ".masc")
 

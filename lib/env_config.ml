@@ -66,7 +66,7 @@ let print_summary () =
 let to_json () : Yojson.Safe.t =
   let mask s =
     if String.length s <= 4 then "***"
-    else String.sub s 0 2 ^ String.make (String.length s - 4) '*' ^ String.sub s (String.length s - 2) 2
+    else String.sub s 0 (min 4 (String.length s)) ^ "***"
   in
   let mask_opt f = match f () with Some v -> `String (mask v) | None -> `Null in
   let str s = `String s in
@@ -145,7 +145,7 @@ let to_json () : Yojson.Safe.t =
     ];
     "external", `Assoc [
       "graphql_url", str (Server.External.graphql_url ());
-      "neo4j_uri", str_opt Server.External.neo4j_uri_opt;
+      "neo4j_uri", mask_opt Server.External.neo4j_uri_opt;
       "neo4j_password", mask_opt Server.External.neo4j_password_opt;
       "gemini_api_key", mask_opt Server.External.gemini_api_key_opt;
       "graphql_api_key", mask_opt Server.External.graphql_api_key_opt;

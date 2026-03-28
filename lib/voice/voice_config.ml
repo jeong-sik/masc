@@ -82,7 +82,7 @@ let repo_voice_config_path_opt () =
   Some (Filename.concat root ".masc/voice_config.json")
 
 let me_root_voice_config_path_opt () =
-  trim_opt (Sys.getenv_opt "ME_ROOT")
+  trim_opt (Env_config_core.me_root_opt ())
   |> Option.map (fun root -> Filename.concat root ".masc/voice_config.json")
 
 let cwd_voice_config_path () =

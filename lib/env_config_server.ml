@@ -139,7 +139,7 @@ end
 
 module Rate = struct
   let limit =
-    get_float ~default:60.0 "MASC_RATE_LIMIT"
+    get_float ~default:100.0 "MASC_RATE_LIMIT"
 
   let burst =
     get_int ~default:150 "MASC_RATE_BURST"
@@ -155,7 +155,7 @@ module Agent = struct
     Sys.getenv_opt "MASC_AGENT_NAME" |> trim_opt
 
   let orchestrator_agent =
-    get_string ~default:"claude" "MASC_ORCHESTRATOR_AGENT"
+    get_string ~default:"orchestrator" "MASC_ORCHESTRATOR_AGENT"
 end
 
 (** {1 Config & Personas Directories} *)
@@ -210,7 +210,7 @@ module Misc = struct
     get_int ~default:5 "MASC_CIRCUIT_THRESHOLD"
 
   let circuit_cooldown =
-    get_float ~default:60.0 "MASC_CIRCUIT_COOLDOWN"
+    get_float ~default:300.0 "MASC_CIRCUIT_COOLDOWN"
 
   let pulse_max_consumer_failures =
     get_int ~default:3 "MASC_PULSE_MAX_CONSUMER_FAILURES"

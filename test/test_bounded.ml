@@ -2,7 +2,6 @@
 
 open Alcotest
 module Bounded = Masc_mcp.Bounded
-module Time_compat = Masc_mcp.Time_compat
 
 let with_eio_clock f =
   Eio_main.run @@ fun env ->

@@ -234,10 +234,6 @@ let test_env_mitosis_interval () =
   let interval = Env_config.Mitosis.trigger_interval_seconds in
   check bool "positive interval" true (interval > 0.0)
 
-let test_env_federation_timeout () =
-  let timeout = Env_config.Federation.timeout_seconds in
-  check bool "positive timeout" true (timeout > 0.0)
-
 let test_env_cancellation_max_age () =
   let max_age = Env_config.Cancellation.token_max_age_seconds in
   check bool "positive max_age" true (max_age > 0.0)
@@ -331,9 +327,6 @@ let () =
     ];
     "env_config.mitosis", [
       test_case "interval" `Quick test_env_mitosis_interval;
-    ];
-    "env_config.federation", [
-      test_case "timeout" `Quick test_env_federation_timeout;
     ];
     "env_config.cancellation", [
       test_case "max_age" `Quick test_env_cancellation_max_age;

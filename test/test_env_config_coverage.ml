@@ -2,7 +2,7 @@
 
     Tests for MASC Environment Configuration:
     - get_string, get_int, get_float, get_bool: env var readers
-    - Zombie, Lock, Session, Tempo, Orchestrator, Mitosis, Federation, Cancellation modules
+    - Zombie, Lock, Session, Tempo, Orchestrator, Mitosis, Cancellation modules
 *)
 
 open Alcotest
@@ -230,13 +230,6 @@ let test_mitosis_interval_positive () =
   check bool "interval positive" true (Env_config.Mitosis.trigger_interval_seconds > 0.0)
 
 (* ============================================================
-   Federation Module Tests
-   ============================================================ *)
-
-let test_federation_timeout_positive () =
-  check bool "timeout positive" true (Env_config.Federation.timeout_seconds > 0.0)
-
-(* ============================================================
    Cancellation Module Tests
    ============================================================ *)
 
@@ -415,9 +408,6 @@ let () =
     ];
     "mitosis", [
       test_case "interval positive" `Quick test_mitosis_interval_positive;
-    ];
-    "federation", [
-      test_case "timeout positive" `Quick test_federation_timeout_positive;
     ];
     "cancellation", [
       test_case "max age positive" `Quick test_cancellation_token_max_age_positive;

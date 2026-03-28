@@ -61,8 +61,6 @@ end
 module Mitosis : sig
   val trigger_interval_seconds : float
   val handoff_cooldown_seconds : float
-  val experiment_enabled : bool
-  val adaptive_thresholds_enabled : bool
 end
 
 module Spawn : sig
@@ -83,10 +81,6 @@ module Llama : sig
   val max_tokens : int
 end
 
-module Federation : sig
-  val timeout_seconds : float
-end
-
 module Cancellation : sig
   val token_max_age_seconds : float
 end
@@ -101,10 +95,6 @@ end
 module Voice : sig
   val default_host : string
   val default_port : int
-end
-
-module Custom_model : sig
-  val default_server_url : string
 end
 
 module Network : sig
@@ -151,6 +141,7 @@ module Chain : sig
   val checkpoint_dir_opt : unit -> string option
   val mcp_url : unit -> string
   val agent_name : string
+  val llama_swarm_model_opt : unit -> string option
 end
 
 module Transport : sig

@@ -142,18 +142,6 @@ module Mitosis = struct
   let handoff_cooldown_seconds =
     get_float ~default:60.0 "MASC_MITOSIS_HANDOFF_COOLDOWN_SEC"
 
-  (** Enable experimental mitosis path (A/B testing integration).
-      When true, run_sync_handoff logs the experimental path and can
-      participate in experiment flag checks. *)
-  let experiment_enabled =
-    get_bool ~default:false "MASC_MITOSIS_EXPERIMENT_ENABLED"
-
-  (** Enable adaptive threshold learning from handoff outcomes.
-      When true, thresholds are adjusted via EMA based on handoff quality signals.
-      Persisted per room in ~/.masc/adaptive_thresholds_{room}.json.
-      Default: false (safe rollout — uses static thresholds until enabled). *)
-  let adaptive_thresholds_enabled =
-    get_bool ~default:false "MASC_ADAPTIVE_THRESHOLDS_ENABLED"
 end
 
 (** {1 Spawn Configuration} *)
@@ -197,14 +185,6 @@ end
     continue to compile without changes. *)
 module Llama = Local_runtime
 
-(** {1 Federation Configuration} *)
-
-module Federation = struct
-  (** Cross-cluster request timeout (seconds) *)
-  let timeout_seconds =
-    get_float ~default:3600.0 "MASC_FEDERATION_TIMEOUT_SEC"
-end
-
 (** {1 Cancellation Token Configuration} *)
 
 module Cancellation = struct
@@ -246,14 +226,6 @@ module Voice = struct
   (** Default Voice MCP server port *)
   let default_port =
     get_int ~default:8936 "VOICE_MCP_PORT"
-end
-
-(** {1 MODEL Provider Defaults} *)
-
-module Custom_model = struct
-  (** Default URL for custom OpenAI-compatible server *)
-  let default_server_url =
-    get_string ~default:"http://127.0.0.1:8080" "CUSTOM_MODEL_SERVER_URL"
 end
 
 (** {1 Network Utilities} *)
@@ -393,6 +365,10 @@ module Chain = struct
   (** Agent name for chain execution. Default: "local-worker". *)
   let agent_name =
     get_string ~default:"local-worker" "MASC_AGENT_NAME"
+
+  (** Llama swarm model override. *)
+  let llama_swarm_model_opt () =
+    Sys.getenv_opt "LLAMA_SWARM_MODEL" |> trim_opt
 end
 
 (** {1 Transport Configuration} *)

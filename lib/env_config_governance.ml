@@ -116,54 +116,13 @@ end
     Primary env vars: MASC_AUTONOMY_*. *)
 
 module Autonomy = struct
-  let tick_interval_seconds =
-    get_float ~default:2700.0 "MASC_AUTONOMY_TICK_INTERVAL_SEC"
-
-  let agents_per_tick =
-    get_int ~default:3 "MASC_AUTONOMY_AGENTS_PER_TICK"
-
-  let max_posts_per_tick =
-    get_int ~default:1 "MASC_AUTONOMY_MAX_POSTS_PER_TICK"
-
-  let max_comments_per_tick =
-    get_int ~default:3 "MASC_AUTONOMY_MAX_COMMENTS_PER_TICK"
-
-  let max_daily_actions =
-    get_int ~default:10 "MASC_AUTONOMY_MAX_DAILY_ACTIONS"
-
-  let reflection_threshold =
-    get_int ~default:100 "MASC_AUTONOMY_REFLECTION_THRESHOLD"
-
-  let use_planner =
-    get_bool ~default:true "MASC_AUTONOMY_USE_PLANNER"
-
-  let enabled =
-    get_bool ~default:true "MASC_AUTONOMY_ENABLED"
-
+  (** Quiet hours start (0-23). Keeper suppresses actions in this window. *)
   let quiet_start =
     get_int ~default:3 "MASC_AUTONOMY_QUIET_START"
 
+  (** Quiet hours end (0-23). *)
   let quiet_end =
     get_int ~default:7 "MASC_AUTONOMY_QUIET_END"
-
-  let min_checkin_gap_seconds =
-    get_float ~default:1800.0 "MASC_AUTONOMY_MIN_CHECKIN_GAP"
-
-  let min_post_gap_seconds =
-    get_float ~default:600.0 "MASC_AUTONOMY_MIN_POST_GAP"
-
-  let min_comment_gap_seconds =
-    get_float ~default:8.0 "MASC_AUTONOMY_MIN_COMMENT_GAP"
-
-  let max_posts_per_day =
-    get_int ~default:8 "MASC_AUTONOMY_MAX_POSTS_PER_DAY"
-
-  let max_comments_per_day =
-    get_int ~default:40 "MASC_AUTONOMY_MAX_COMMENTS_PER_DAY"
-
-  (** Delegate MODEL calls to external Workers (Soul + Body pattern). *)
-  let delegate_inference =
-    get_bool ~default:false "MASC_DELEGATE_INFERENCE"
 end
 
 (** {1 Thompson Sampling / Agent Selection Configuration}
@@ -179,12 +138,6 @@ module AgentSelection = struct
   let thompson_weight =
     get_float ~default:0.7 "MASC_AUTONOMY_THOMPSON_WEIGHT"
 
-  let use_model_selection =
-    get_bool ~default:false "MASC_AUTONOMY_MODEL_SELECTION"
-
-  let stats_persist_interval_s =
-    get_float ~default:300.0 "MASC_AUTONOMY_STATS_PERSIST_INTERVAL"
-
   let vote_decay_factor =
     get_float ~default:0.95 "MASC_AUTONOMY_VOTE_DECAY_FACTOR"
 end
@@ -197,11 +150,6 @@ module Timeouts = struct
       Clamped to >= 1.0 to prevent tight-loop when misconfigured. *)
   let neo4j_timeout_sec =
     Float.max 1.0 (get_float ~default:60.0 "MASC_NEO4J_TIMEOUT_SEC")
-
-  (** Agent crash-recovery timeout (seconds).
-      Agents with no heartbeat beyond this threshold are considered crashed. *)
-  let agent_timeout_sec =
-    get_float ~default:360.0 "MASC_AGENT_TIMEOUT_SEC"
 
   (** SSE keepalive interval (seconds).
       Frequency of `: keepalive` frames on command-plane SSE streams.

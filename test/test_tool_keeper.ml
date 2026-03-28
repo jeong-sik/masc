@@ -1250,7 +1250,9 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> rm_rf base_dir)
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
@@ -1272,6 +1274,7 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
             ])
       in
       check bool "keeper up ok" true ok;
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       let json = Yojson.Safe.from_string body in
       (* voice_config.json presence determines voice defaults:
          present  → explicit_event_v1, voice_text, true

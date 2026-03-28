@@ -361,7 +361,7 @@ let find_by_name name =
       !registry None)
 
 let find_by_agent_name agent_name =
-  with_lock_ro (fun () ->
+  with_lock (fun () ->
     StringMap.fold
       (fun _k v acc ->
         match acc with

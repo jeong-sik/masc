@@ -106,10 +106,6 @@ let session_id_of_result_json json =
   try Some Yojson.Safe.Util.(json |> member "session_id" |> to_string)
   with Yojson.Safe.Util.Type_error _ -> None
 
-let _bool_option_to_json = function
-  | Some value -> `Bool value
-  | None -> `Null
-
 let string_option_to_json = function
   | Some value -> `String value
   | None -> `Null

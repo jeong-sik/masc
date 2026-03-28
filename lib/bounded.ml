@@ -275,7 +275,11 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
   | fallback_agent :: _ ->
       let state = create_state constraints in
       let history = ref [] in
-      let sleep_s = Time_compat.sleep in
+      (* Retry backoff must remain usable in non-Eio test and CLI contexts. *)
+      let sleep_s seconds =
+        if Time_compat.has_clock () then Time_compat.sleep seconds
+        else Unix.sleepf seconds
+      in
 
       let rec loop () =
         (* 1. Hard limit check (failsafe) *)

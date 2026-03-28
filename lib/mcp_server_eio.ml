@@ -131,7 +131,6 @@ let () =
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
   register_module_tag ~schemas:Tool_research.schemas ~tag:Mod_research;
   register_module_tag ~schemas:Tool_model_catalog.schemas ~tag:Mod_model_catalog;
-  (* Tool_trpg archived (#1668) *)
   register_module_tag ~schemas:Tool_notifications.schemas ~tag:Mod_notifications;
   (* God Schema decomposition: register modules that now own their schemas *)
   register_module_tag ~schemas:Tool_task.schemas ~tag:Mod_task;

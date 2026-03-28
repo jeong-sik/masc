@@ -95,10 +95,7 @@ let transport_entries = [
 ]
 
 let chain_entries = [
-  entry ~default:"3" "MASC_CHAIN_MAX_RETRIES" "Chain max retry attempts";
   entry ~default:"5.0" "MASC_CHAIN_TIMEOUT_S" "Chain step timeout (seconds)";
-  entry ~default:"0.6" "MASC_CHAIN_DEFAULT_TEMPERATURE" "Default sampling temperature";
-  entry ~default:"(auto)" "MASC_CHAIN_MCP_URL" "MCP endpoint URL for chain";
 ]
 
 let inference_entries = [
@@ -117,7 +114,6 @@ let keeper_entries = [
   entry ~default:"300" "MASC_KEEPER_SNAPSHOT_SEC" "Keeper keepalive snapshot interval";
   entry ~default:"false" "MASC_KEEPER_DEBUG" "Enable keeper debug logging";
   entry ~default:"0.10" "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" "Daily deliberation budget (USD)";
-  entry ~default:"(auto)" "MASC_KEEPER_SKILL_MODE" "Keeper skill selection mode";
 ]
 
 let dashboard_entries = [

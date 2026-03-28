@@ -4,24 +4,12 @@ open Server_voice_config
 open Server_routes_http
 open Server_h2_gateway_helpers
 
-let trpg_archived_json =
-  Yojson.Safe.to_string
-    (`Assoc [("error", `String "TRPG module archived"); ("status", `Int 410)])
-
 (* Dispatch board, governance, voice, karma, and static asset routes.
-   TRPG routes return 410 Gone (module archived).
    Returns [true] if the route was handled, [false] otherwise. *)
 let dispatch ~h2_reqd ~httpun_request ~cors ~path
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
   match httpun_meth, path with
-  (* ─────────────────────────────────────────────────────────────────────
-     TRPG routes — archived, return 410 Gone
-     ───────────────────────────────────────────────────────────────────── *)
-  | (`GET | `POST), p when String.starts_with ~prefix:"/api/v1/trpg/" p ->
-      h2_respond_json h2_reqd trpg_archived_json ~status:`Gone ~extra_headers:cors;
-      true
-
   | `GET, "/api/v1/voice/config" ->
       let status, json = voice_config_payload () in
       let status =

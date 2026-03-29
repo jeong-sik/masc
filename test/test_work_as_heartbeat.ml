@@ -66,6 +66,46 @@ let test_keepalive_jitter_range () =
   check bool "jitter >= 0.0" true (v >= 0.0);
   check bool "jitter <= 0.5" true (v <= 0.5)
 
+(* ── KeeperGrpc config defaults ────────────────────────── *)
+
+let test_grpc_max_reconnect_default () =
+  check int "default grpc max reconnect 5" 5
+    Cfg.KeeperGrpc.max_reconnect_attempts
+
+let test_grpc_max_reconnect_range () =
+  let v = Cfg.KeeperGrpc.max_reconnect_attempts in
+  check bool "reconnect >= 1" true (v >= 1);
+  check bool "reconnect <= 20" true (v <= 20)
+
+let test_grpc_backoff_default () =
+  check (float 0.1) "default grpc backoff 5.0s" 5.0
+    Cfg.KeeperGrpc.reconnect_backoff_sec
+
+let test_grpc_backoff_range () =
+  let v = Cfg.KeeperGrpc.reconnect_backoff_sec in
+  check bool "backoff >= 1.0" true (v >= 1.0);
+  check bool "backoff <= 60.0" true (v <= 60.0)
+
+(* ── KeeperProactive config defaults ──────────────────── *)
+
+let test_proactive_max_attempts_default () =
+  check int "default proactive max attempts 3" 3
+    Cfg.KeeperProactive.max_attempts
+
+let test_proactive_max_attempts_range () =
+  let v = Cfg.KeeperProactive.max_attempts in
+  check bool "attempts >= 1" true (v >= 1);
+  check bool "attempts <= 10" true (v <= 10)
+
+let test_timing_ring_size_default () =
+  check int "default timing ring size 100" 100
+    Cfg.KeeperProactive.stage_timing_ring_size
+
+let test_timing_ring_size_range () =
+  let v = Cfg.KeeperProactive.stage_timing_ring_size in
+  check bool "ring >= 10" true (v >= 10);
+  check bool "ring <= 1000" true (v <= 1000)
+
 (* ── Freshness decision pure logic ──────────────────────── *)
 
 let test_freshness_fresh () =
@@ -165,6 +205,18 @@ let () =
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;
       test_case "jitter default" `Quick test_keepalive_jitter_default;
       test_case "jitter range" `Quick test_keepalive_jitter_range;
+    ];
+    "grpc_config", [
+      test_case "max_reconnect default" `Quick test_grpc_max_reconnect_default;
+      test_case "max_reconnect range" `Quick test_grpc_max_reconnect_range;
+      test_case "backoff default" `Quick test_grpc_backoff_default;
+      test_case "backoff range" `Quick test_grpc_backoff_range;
+    ];
+    "proactive_config", [
+      test_case "max_attempts default" `Quick test_proactive_max_attempts_default;
+      test_case "max_attempts range" `Quick test_proactive_max_attempts_range;
+      test_case "timing_ring default" `Quick test_timing_ring_size_default;
+      test_case "timing_ring range" `Quick test_timing_ring_size_range;
     ];
     "freshness_logic", [
       test_case "within window → fresh" `Quick test_freshness_fresh;

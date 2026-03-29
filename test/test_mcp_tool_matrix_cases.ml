@@ -110,6 +110,7 @@ let all_known_tool_names =
     "masc_collaboration_evidence";
     "masc_collaboration_graph";
     "masc_compact_context";
+    "masc_config";
     "masc_config_snapshot";
     "masc_consolidate_learning";
     "masc_convo_conclude";
@@ -329,7 +330,6 @@ let all_known_tool_names =
     "masc_voice_session_start";
     "masc_voice_sessions";
     "masc_voice_speak";
-    "masc_voice_transcript";
     "masc_webrtc_answer";
     "masc_webrtc_offer";
     "masc_websocket_discovery";

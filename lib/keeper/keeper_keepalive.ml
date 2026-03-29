@@ -497,7 +497,12 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                      (Room.heartbeat_in_room ctx.config ~room_id
                         ~agent_name:meta_after_proactive.agent_name);
                    true
-                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                     Log.Keeper.debug "heartbeat_in_room failed for %s: %s"
+                       meta_after_proactive.name (Printexc.to_string exn);
+                     false
                ) meta_after_proactive.joined_room_ids in
                if hb_ok then (
                  last_successful_heartbeat_ts := Time_compat.now ();

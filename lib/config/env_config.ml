@@ -58,6 +58,12 @@ let print_summary () =
   Log.Env.info "KeeperAlert(SlackDM): enabled=%b user_id_set=%b"
     Env_config_keeper.KeeperAlert.slack_dm_enabled
     (String.trim Env_config_keeper.KeeperAlert.slack_dm_user_id <> "");
+  Log.Env.info "KeeperKeepalive: interval=%ds max_hb_failures=%d debounce=%.0fs sleep_chunk=%.1fs jitter=%.2f"
+    Env_config_keeper.KeeperKeepalive.interval_sec
+    Env_config_keeper.KeeperKeepalive.max_consecutive_failures
+    Env_config_keeper.KeeperKeepalive.board_debounce_sec
+    Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
+    Env_config_keeper.KeeperKeepalive.jitter_factor;
   Log.Env.info "WorkAsHeartbeat: enabled=%b max_silence=%.0fs"
     Env_config_keeper.WorkAsHeartbeat.enabled
     Env_config_keeper.WorkAsHeartbeat.max_silence_sec;
@@ -115,6 +121,11 @@ let to_json () : Yojson.Safe.t =
       "alert_enabled", bool_val Env_config_keeper.KeeperAlert.enabled;
       "alert_min_score", float_val Env_config_keeper.KeeperAlert.min_score;
       "alert_slack_enabled", bool_val Env_config_keeper.KeeperAlert.slack_enabled;
+      "keepalive_interval_sec", int_val Env_config_keeper.KeeperKeepalive.interval_sec;
+      "keepalive_max_hb_failures", int_val Env_config_keeper.KeeperKeepalive.max_consecutive_failures;
+      "keepalive_board_debounce_sec", float_val Env_config_keeper.KeeperKeepalive.board_debounce_sec;
+      "keepalive_sleep_chunk_sec", float_val Env_config_keeper.KeeperKeepalive.sleep_chunk_sec;
+      "keepalive_jitter_factor", float_val Env_config_keeper.KeeperKeepalive.jitter_factor;
       "work_as_heartbeat_enabled", bool_val Env_config_keeper.WorkAsHeartbeat.enabled;
       "work_as_heartbeat_max_silence_sec", float_val Env_config_keeper.WorkAsHeartbeat.max_silence_sec;
       "smart_heartbeat_enabled", bool_val Env_config_keeper.SmartHeartbeat.enabled;

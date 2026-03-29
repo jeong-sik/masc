@@ -30,6 +30,42 @@ let test_wah_max_silence_floor_logic () =
   check bool "max_silence >= 30.0 (keepalive interval)"
     true (v >= 30.0)
 
+(* ── KeeperKeepalive config defaults ───────────────────── *)
+
+let test_keepalive_interval_default () =
+  check int "default interval 30s" 30 Cfg.KeeperKeepalive.interval_sec
+
+let test_keepalive_interval_range () =
+  let v = Cfg.KeeperKeepalive.interval_sec in
+  check bool "interval >= 5" true (v >= 5);
+  check bool "interval <= 300" true (v <= 300)
+
+let test_keepalive_max_failures_default () =
+  check int "default max failures 5" 5
+    Cfg.KeeperKeepalive.max_consecutive_failures
+
+let test_keepalive_max_failures_range () =
+  let v = Cfg.KeeperKeepalive.max_consecutive_failures in
+  check bool "failures >= 2" true (v >= 2);
+  check bool "failures <= 50" true (v <= 50)
+
+let test_keepalive_board_debounce_default () =
+  check (float 0.1) "default debounce 60s" 60.0
+    Cfg.KeeperKeepalive.board_debounce_sec
+
+let test_keepalive_sleep_chunk_default () =
+  check (float 0.01) "default sleep chunk 2.0s" 2.0
+    Cfg.KeeperKeepalive.sleep_chunk_sec
+
+let test_keepalive_jitter_default () =
+  check (float 0.001) "default jitter 0.2" 0.2
+    Cfg.KeeperKeepalive.jitter_factor
+
+let test_keepalive_jitter_range () =
+  let v = Cfg.KeeperKeepalive.jitter_factor in
+  check bool "jitter >= 0.0" true (v >= 0.0);
+  check bool "jitter <= 0.5" true (v <= 0.5)
+
 (* ── Freshness decision pure logic ──────────────────────── *)
 
 let test_freshness_fresh () =
@@ -119,6 +155,16 @@ let () =
       test_case "enabled default" `Quick test_wah_enabled_default;
       test_case "max_silence default" `Quick test_wah_max_silence_default;
       test_case "max_silence floor invariant" `Quick test_wah_max_silence_floor_logic;
+    ];
+    "keepalive_config", [
+      test_case "interval default" `Quick test_keepalive_interval_default;
+      test_case "interval range" `Quick test_keepalive_interval_range;
+      test_case "max_failures default" `Quick test_keepalive_max_failures_default;
+      test_case "max_failures range" `Quick test_keepalive_max_failures_range;
+      test_case "board_debounce default" `Quick test_keepalive_board_debounce_default;
+      test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;
+      test_case "jitter default" `Quick test_keepalive_jitter_default;
+      test_case "jitter range" `Quick test_keepalive_jitter_range;
     ];
     "freshness_logic", [
       test_case "within window → fresh" `Quick test_freshness_fresh;

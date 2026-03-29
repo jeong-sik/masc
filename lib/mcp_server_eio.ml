@@ -135,12 +135,9 @@ let () =
   register_module_tag ~schemas:Tool_control.schemas ~tag:Mod_control;
   register_module_tag ~schemas:Tool_suspend.schemas ~tag:Mod_suspend;
   register_module_tag ~schemas:Tool_council_oas.schemas ~tag:Mod_council;
-  register_module_tag ~schemas:Tool_cost.schemas ~tag:Mod_cost;
-  register_module_tag ~schemas:Tool_rate_limit.schemas ~tag:Mod_rate_limit;
   register_module_tag ~schemas:Tool_relay.schemas ~tag:Mod_relay;
   register_module_tag ~schemas:Tool_handover.schemas ~tag:Mod_handover;
   register_module_tag ~schemas:Tool_walph.schemas ~tag:Mod_walph;
-  register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
   (* Monolithic schema decomposition: modules that now export their own schemas *)
   register_module_tag ~schemas:Tool_cache.schemas ~tag:Mod_cache;

@@ -65,6 +65,42 @@ let test_crash_log_empty_for_unknown () =
   check int "empty crash log" 0
     (List.length (Reg.crash_log_of ~base_path:"/tmp" "nonexistent"))
 
+let test_should_cleanup_dead_true () =
+  Reg.clear ();
+  let _entry = Reg.register ~base_path:"/tmp" "dead1"
+      (let json = `Assoc [
+        ("name", `String "dead1");
+        ("agent_name", `String "agent-dead1");
+        ("trace_id", `String "trace-dead1");
+        ("goal", `String "goal");
+      ] in
+      match KT.meta_of_json json with
+      | Ok meta -> meta
+      | Error err -> fail err)
+  in
+  Reg.mark_dead ~base_path:"/tmp" "dead1" ~at:10.0;
+  let entry = Option.get (Reg.get ~base_path:"/tmp" "dead1") in
+  check bool "ttl exceeded" true
+    (Sup.should_cleanup_dead ~now:4000.0 ~dead_ttl_sec:3600.0 entry)
+
+let test_should_cleanup_dead_false_when_recent () =
+  Reg.clear ();
+  let _entry = Reg.register ~base_path:"/tmp" "dead2"
+      (let json = `Assoc [
+        ("name", `String "dead2");
+        ("agent_name", `String "agent-dead2");
+        ("trace_id", `String "trace-dead2");
+        ("goal", `String "goal");
+      ] in
+      match KT.meta_of_json json with
+      | Ok meta -> meta
+      | Error err -> fail err)
+  in
+  Reg.mark_dead ~base_path:"/tmp" "dead2" ~at:100.0;
+  let entry = Option.get (Reg.get ~base_path:"/tmp" "dead2") in
+  check bool "ttl not exceeded" false
+    (Sup.should_cleanup_dead ~now:200.0 ~dead_ttl_sec:3600.0 entry)
+
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
@@ -83,5 +119,7 @@ let () =
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;
       test_case "registry count zero" `Quick test_registry_count_initially_zero;
       test_case "crash_log empty" `Quick test_crash_log_empty_for_unknown;
+      test_case "should cleanup dead when ttl exceeded" `Quick test_should_cleanup_dead_true;
+      test_case "should not cleanup dead when recent" `Quick test_should_cleanup_dead_false_when_recent;
     ];
   ]

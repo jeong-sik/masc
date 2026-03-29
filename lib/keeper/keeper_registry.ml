@@ -177,8 +177,10 @@ let set_state ~base_path name state =
              Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
          | _ -> ());
         let dead_since_ts =
-          match state with
-          | Dead -> entry.dead_since_ts
+          match entry.state, state with
+          | _, Dead -> entry.dead_since_ts
+          | Dead, Running -> None
+          | Dead, _ -> entry.dead_since_ts
           | _ -> None
         in
         put_entry key { entry with state; dead_since_ts }

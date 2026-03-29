@@ -25,6 +25,13 @@ let keep_last_n n item lst =
   if List.length full <= n then full
   else List.filteri (fun i _ -> i < n) full
 
+let should_cleanup_dead ~now ~dead_ttl_sec
+    (entry : Keeper_registry.registry_entry) =
+  match entry.state, entry.dead_since_ts with
+  | Keeper_registry.Dead, Some dead_since ->
+      now -. dead_since >= dead_ttl_sec
+  | _ -> false
+
 (* ── Event publishing ────────────────────────────────────── *)
 
 let publish_lifecycle event_name keeper_name detail =
@@ -40,6 +47,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
   let base_path = ctx.config.base_path in
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+    let resolved = ref false in
+    let resolve_done value =
+      if not !resolved then begin
+        resolved := true;
+        Eio.Promise.resolve reg.done_r value
+      end
+    in
     Fun.protect
       (fun () ->
         (try
@@ -48,7 +62,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
            (* Normal exit: stop flag was set *)
            Keeper_registry.set_state ~base_path meta.name
              Keeper_registry.Stopped;
-           Eio.Promise.resolve reg.done_r `Stopped;
+           resolve_done `Stopped;
            publish_lifecycle "stopped" meta.name "normal exit"
          with
          | Keeper_registry.Keeper_heartbeat_failure info ->
@@ -61,7 +75,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              Keeper_registry.record_crash ~base_path
                meta.name (Time_compat.now ()) reason;
              Keeper_registry.record_error ~base_path meta.name reason;
-             Eio.Promise.resolve reg.done_r (`Crashed reason);
+             resolve_done (`Crashed reason);
              publish_lifecycle "crashed" meta.name reason
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -73,13 +87,11 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              Keeper_registry.record_crash ~base_path
                meta.name (Time_compat.now ()) reason;
              Keeper_registry.record_error ~base_path meta.name reason;
-             Eio.Promise.resolve reg.done_r (`Crashed reason);
+             resolve_done (`Crashed reason);
              publish_lifecycle "crashed" meta.name reason))
       ~finally:(fun () ->
         Keeper_registry.cleanup_tracking ~base_path meta.name;
-        match Eio.Promise.peek reg.done_p with
-        | Some _ -> ()  (* Already resolved above *)
-        | None ->
+        if not !resolved then begin
             let reason =
               Keeper_registry.failure_reason_to_string
                 Keeper_registry.Fiber_unresolved in
@@ -90,8 +102,9 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
             Keeper_registry.record_error ~base_path meta.name reason;
             Keeper_registry.set_state ~base_path meta.name
               Keeper_registry.Crashed;
-            Eio.Promise.resolve reg.done_r (`Crashed reason);
-            publish_lifecycle "crashed" meta.name reason))
+            resolve_done (`Crashed reason);
+            publish_lifecycle "crashed" meta.name reason
+        end))
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (meta : keeper_meta) =

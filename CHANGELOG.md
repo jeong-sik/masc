@@ -1,17 +1,79 @@
 # Changelog
 
 
-## [Unreleased]
+## [2.162.0] - 2026-03-29
 
 ### Added
-- **Feature flag registry** — `Feature_flag_registry` module with 25 boolean flags, lifecycle state, `masc_feature_flags` tool for runtime enumeration (#3646 H5).
-- **CI feature flag lint** — `check-feature-flag-consistency.sh` detects duplicate `get_bool` calls and registry drift.
-
-### Fixed
-- **WebRTC default mismatch** — `env_config_server.ml` had `MASC_WEBRTC_ENABLED` default=false, corrected to true (matches runtime module, docs, and start script).
+- **H3 API contract** — sunset headers, tool deprecation notices, feature flag integration (#3698).
+- **Keeper lifecycle (Phase 0-2)** — config SSOT + per-stage keepalive profiling (#3659), work-as-heartbeat (#3671), self-preservation + structured crash + Dead tombstone (#3680).
+- **Keeper per-persona shard configuration** (#3682).
+- **Keeper memory write, config snapshot, transport health truth** (#3670).
+- **masc_config introspection tool** (#3669).
+- **Feature flag registry** — 25 boolean flags, lifecycle state, `masc_feature_flags` tool (#3646).
+- **CI feature flag lint** — `check-feature-flag-consistency.sh` detects duplicate calls and registry drift.
+- **CDAL Phase-1A evaluator kernel** — loader, judge, friction, integration (#3611).
+- **CDAL Phase-1B friction wiring** + path traversal fix (#3621).
+- **CDAL fresh-context adversarial evaluator** (#3617).
+- **CDAL golden set and baseline lock** for evaluator calibration (#3615).
+- **CDAL MASC artifact store backend** (#3614).
+- **CDAL risk_digest** — 4 structural risk signals in supervisor digest (#3613).
+- **CDAL Task_stage typed coding_task stage gates** (#3610).
+- **CDAL labeling protocol v0** — types + CLI + tests (#3623).
+- **Dashboard harness live surface** rebuild (#3579).
 
 ### Changed
-- **`env_config_server.ml` marked unused** — zero callers since creation. Added deprecation notice.
+- **Walph surface retired** — -1,172 lines removed (#3705).
+- **Perpetual dirs renamed** to `traces/keepers` with migration (#3702).
+- **24 unused tools removed** from MCP surface (#3640), 7 more in follow-up (#3662).
+- **Dead scripts removed** — masc-watch, test_grpc (-696 lines) (#3647).
+- **3 sub-libraries extracted** from monolith — config, dashboard_utils, team_session_types (#3620).
+- **Phase 0 evaluator removed** — Phase-1A is now primary (#3619).
+- **Memory V6 boundary consolidated** into `create_memory_full` (#3631).
+- **Legacy dashboard surfaces pruned**, navigation unified (#3607).
+- **Remote MCP auth defaults hardened** (#3658).
+- **Monolith decomposition** batch 1 and server_mcp prep (#3639).
+- **`env_config_server.ml` marked unused** — zero callers since creation.
+
+### Fixed
+- **Keeper ADT cohort detection** + missing test registrations (#3711).
+- **Keeper checkpoint session_id** unified to trace_id (#3679, #3688).
+- **Keeper duplicate user message** in checkpoint (#3686).
+- **GC zombie agents** reaped on set_room and join (#3689).
+- **Auth tunnel-through-loopback bypass** detected (#3667).
+- **Auth same-origin check** uses explicit port (#3629).
+- **Build: extensions field** restored in agent_entry record (#3672).
+- **Build: main repaired** after #3640 merge (#3661).
+- **CDAL adversarial red-line paths** enforced (#3634).
+- **CI: quoted Obj.magic** ignored in health ratchet (#3625).
+- **CI: manually-set labels** preserved in issue triage (#3622).
+- **WebRTC default mismatch** — env_config default corrected to true.
+- **Tests: dead masc_vote_create refs** replaced with live tool (#3707).
+
+### Performance
+- **Dashboard: skip heavy processing** for paused keepers + cp profiling (#3637).
+
+### Documentation
+- **Adaptive heartbeat RFC** — checklist 17/19 complete (#3697), scheduling RFC (#3636).
+- **Inventory Gap Analysis** — 17 gaps, deterministic boundary principle (#3646).
+- **Keeper Memory Resurrection** — 7-gap fix RFC (#3632).
+- **Keeper continuity product contract** (#3653).
+- **MCP tier guide** for ToolSearch (#3681).
+- **Bridge lossy projection field map** documented (#3609).
+- **Phase 0 dependency graph** — 586 modules, 115-module cycle (#3624).
+
+## [2.161.0] - 2026-03-28
+
+### Added
+- **CDAL PoC-1 complete** — contract risk, composer, bridge, proof, conformance (#3583).
+
+### Changed
+- **37 dead/duplicate env vars removed** from env_config (-289 lines) (#3606).
+- **HTTP transport negotiation** delegated to SDK, Accept: */* handling fixed (#3596).
+- **CDAL content-based eval** — read proof artifacts, derive recommendations (#3578).
+- **Keeper registry simplified** with update_entry helper (#3594).
+
+### Documentation
+- **CDAL contract kernel RFC** — verdict/friction/advice split with theoretical foundations (#3595).
 
 ## [2.160.0] - 2026-03-28
 

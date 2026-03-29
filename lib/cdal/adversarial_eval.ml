@@ -46,39 +46,111 @@ let banned_doc_patterns =
   [ "design"; "architecture"; "adr"; "rfc"; "spec";
     "contributing"; "changelog"; "license" ]
 
+let doc_extensions =
+  [ ".md"; ".markdown"; ".mdx"; ".txt"; ".rst"; ".adoc"; ".asciidoc" ]
+
+let data_artifact_extensions =
+  [ ".json"; ".jsonl"; ".yaml"; ".yml"; ".log"; ".txt" ]
+
+let normalize_path path =
+  String.map (fun c -> if c = '\\' then '/' else c) path
+  |> String.lowercase_ascii
+
+let contains_substring text pattern =
+  let pat_len = String.length pattern in
+  let text_len = String.length text in
+  let rec search i =
+    if i + pat_len > text_len then false
+    else if String.sub text i pat_len = pattern then true
+    else search (i + 1)
+  in
+  pat_len > 0 && search 0
+
+let has_doc_extension path =
+  List.exists (Filename.check_suffix path) doc_extensions
+
+let has_data_artifact_extension path =
+  List.exists (Filename.check_suffix path) data_artifact_extensions
+
+let has_history_artifact_extension path =
+  has_doc_extension path || has_data_artifact_extension path
+
+let split_path_segments path =
+  String.split_on_char '/' path
+  |> List.filter (fun segment -> segment <> "" && segment <> ".")
+
+let tokenize_segment segment =
+  let len = String.length segment in
+  let is_token_char = function
+    | 'a' .. 'z' | '0' .. '9' -> true
+    | _ -> false
+  in
+  let rec collect start idx acc =
+    if idx = len then
+      if start < idx then String.sub segment start (idx - start) :: acc else acc
+    else if is_token_char segment.[idx] then
+      collect start (idx + 1) acc
+    else
+      let acc =
+        if start < idx then String.sub segment start (idx - start) :: acc else acc
+      in
+      collect (idx + 1) (idx + 1) acc
+  in
+  List.rev (collect 0 0 [])
+
 let classify_path path =
-  let lower = String.lowercase_ascii (Filename.basename path) in
+  let normalized = normalize_path path in
+  let lower = Filename.basename normalized in
+  let segments = split_path_segments normalized in
+  let dir_segments =
+    match List.rev segments with
+    | _basename :: rev_dirs -> List.rev rev_dirs
+    | [] -> []
+  in
   let check_patterns patterns =
     List.exists (fun pat ->
-      String.length lower >= String.length pat &&
-      String.sub lower 0 (String.length pat) = pat) patterns
+      String.starts_with ~prefix:pat lower) patterns
+  in
+  let basename_tokens = tokenize_segment lower in
+  let segment_has_token segment token =
+    List.mem token (tokenize_segment segment)
+  in
+  let has_doc_dir =
+    List.exists
+      (fun segment ->
+        List.mem segment [ "docs"; "doc"; "design"; "adr"; "rfcs"; "rfc"; "spec"; "specs" ])
+      dir_segments
+  in
+  let has_doc_token =
+    List.exists
+      (fun segment ->
+        List.exists (segment_has_token segment) banned_doc_patterns)
+      segments
+  in
+  let has_room_history =
+    has_history_artifact_extension lower
+    && List.exists (contains_substring normalized)
+         [ "room_history"; "room-history"; "roomtaskhistory"; "room_task_history";
+           "room-task-history" ]
+  in
+  let has_task_history =
+    has_history_artifact_extension lower
+    && List.exists (contains_substring normalized)
+         [ "task_history"; "task-history"; "taskhistory"; "room/task_history";
+           "room/task-history" ]
+  in
+  let has_governance_history =
+    (List.mem "governance" basename_tokens
+     && has_data_artifact_extension lower)
+    || (has_history_artifact_extension lower
+        && List.exists (contains_substring normalized) [ "session_log"; "session-log" ])
+    || (List.mem "retrospective" basename_tokens && has_history_artifact_extension lower)
   in
   if check_patterns banned_readme_patterns then Some Readme
-  else if check_patterns banned_doc_patterns then Some Design_doc
-  else if List.exists (fun pat ->
-    try
-      let pat_len = String.length pat in
-      let lower_len = String.length lower in
-      let rec search i =
-        if i + pat_len > lower_len then false
-        else if String.sub lower i pat_len = pat then true
-        else search (i + 1)
-      in
-      search 0
-    with Invalid_argument _ -> false) [ "room_history"; "task_history" ]
-  then Some Room_history
-  else if List.exists (fun pat ->
-    try
-      let pat_len = String.length pat in
-      let lower_len = String.length lower in
-      let rec search i =
-        if i + pat_len > lower_len then false
-        else if String.sub lower i pat_len = pat then true
-        else search (i + 1)
-      in
-      search 0
-    with Invalid_argument _ -> false) [ "governance"; "session_log"; "retrospective" ]
-  then Some Governance_history
+  else if has_room_history then Some Room_history
+  else if has_task_history then Some Task_history
+  else if has_governance_history then Some Governance_history
+  else if has_doc_extension lower && (has_doc_dir || has_doc_token) then Some Design_doc
   else None
 
 let validate_inputs inputs =

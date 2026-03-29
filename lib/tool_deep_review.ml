@@ -12,6 +12,29 @@
 
 open Printf
 
+let validate_target_files target_files =
+  let inputs =
+    List.map
+      (fun rel_path ->
+        if Filename.check_suffix rel_path ".mli" then
+          Adversarial_eval.Interface_contract { path = rel_path; content = "" }
+        else
+          Adversarial_eval.Changed_file { path = rel_path; content = "" })
+      target_files
+  in
+  match Adversarial_eval.validate_inputs inputs with
+  | Ok _ -> Ok ()
+  | Error (path, kind) ->
+      let kind_str =
+        match kind with
+        | Adversarial_eval.Readme -> "README"
+        | Adversarial_eval.Design_doc -> "design_doc"
+        | Adversarial_eval.Room_history -> "room_history"
+        | Adversarial_eval.Task_history -> "task_history"
+        | Adversarial_eval.Governance_history -> "governance_history"
+      in
+      Error (sprintf "fresh-context input rejected (%s): %s" kind_str path)
+
 (** Read a file's content, returning at most [max_chars] characters.
     Returns [None] on any file error. *)
 let read_file_truncated path ~max_chars =
@@ -26,19 +49,22 @@ let read_file_truncated path ~max_chars =
 (** Build the isolated review prompt. Only file contents and the question
     are included — no external context. *)
 let build_prompt ~target_files ~question ~base_path =
-  let file_sections =
-    List.filter_map (fun rel_path ->
-      let full_path = Filename.concat base_path rel_path in
-      match read_file_truncated full_path ~max_chars:3000 with
-      | Some content -> Some (sprintf "=== %s ===\n%s" rel_path content)
-      | None -> None
-    ) target_files
-  in
-  if file_sections = [] then
-    Error "No readable target files found"
-  else
-    let files_str = String.concat "\n\n" file_sections in
-    Ok (sprintf
+  match validate_target_files target_files with
+  | Error _ as e -> e
+  | Ok () ->
+      let file_sections =
+        List.filter_map (fun rel_path ->
+          let full_path = Filename.concat base_path rel_path in
+          match read_file_truncated full_path ~max_chars:3000 with
+          | Some content -> Some (sprintf "=== %s ===\n%s" rel_path content)
+          | None -> None
+        ) target_files
+      in
+      if file_sections = [] then
+        Error "No readable target files found"
+      else
+        let files_str = String.concat "\n\n" file_sections in
+        Ok (sprintf
 {|You are an adversarial code reviewer. Your job is to find bugs, edge cases,
 and potential issues that a domain-aware reviewer might miss.
 

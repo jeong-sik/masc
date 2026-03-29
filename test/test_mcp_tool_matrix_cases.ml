@@ -353,6 +353,9 @@ let all_known_tool_names =
     "masc_voice_session_start";
     "masc_voice_sessions";
     "masc_voice_speak";
+    "masc_walph_control";
+    "masc_walph_natural";
+    "masc_walph_status";
     "masc_webrtc_answer";
     "masc_webrtc_offer";
     "masc_websocket_discovery";

@@ -1,0 +1,35 @@
+name: Install OCaml Dependencies
+description: Install OS and opam dependencies with timing, retries, and heartbeat logs.
+
+inputs:
+  install-flags:
+    description: Extra flags for opam install
+    required: false
+    default: ""
+  os-packages:
+    description: Space-separated list of additional apt packages
+    required: false
+    default: ""
+  install-timeout-minutes:
+    description: Timeout for each opam install attempt
+    required: false
+    default: "20"
+  heartbeat-seconds:
+    description: Seconds between heartbeat lines while opam install runs
+    required: false
+    default: "30"
+
+runs:
+  using: composite
+  steps:
+    - name: Install system and OCaml dependencies
+      shell: bash
+      env:
+        INSTALL_FLAGS: ${{ inputs.install-flags }}
+        OS_PACKAGES: ${{ inputs.os-packages }}
+        INSTALL_TIMEOUT_MINUTES: ${{ inputs.install-timeout-minutes }}
+        HEARTBEAT_SECONDS: ${{ inputs.heartbeat-seconds }}
+      run: |
+        set -euo pipefail
+        chmod +x .github/actions/install-ocaml-deps/install.sh
+        .github/actions/install-ocaml-deps/install.sh

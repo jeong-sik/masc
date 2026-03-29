@@ -131,7 +131,7 @@ Pair with masc_cancellation to support cooperative abort during tracked operatio
     name = "masc_governance_set";
     description = "Configure governance policies for the room including audit logging, anomaly detection, and agent isolation levels. \
 Use when setting up a new room for production or tightening security after an incident. \
-Pair with masc_governance_report to verify policy effects and masc_governance_status for current state.";
+Pair with masc_governance_status to confirm current state after changes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

@@ -160,7 +160,7 @@ let test_masc_mcp_tools_has_vote_create () =
     (List.mem "mcp__masc__masc_vote_create" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_run_deliverable () =
-  check bool "has run_deliverable" true
+  check bool "omits run_deliverable" false
     (List.mem "mcp__masc__masc_run_deliverable" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_tool_help () =

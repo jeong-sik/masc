@@ -183,7 +183,7 @@ let public_mcp_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 64 in
   List.iter (fun name -> Hashtbl.replace tbl name ()) public_mcp_tools;
   (* MASC_PUBLIC_TOOLS_EXTRA: comma-separated tool names to add at runtime.
-     Example: MASC_PUBLIC_TOOLS_EXTRA=masc_goal_upsert,masc_pause *)
+     Example: MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause *)
   (match Env_config.Tools.public_tools_extra_opt () with
    | Some raw ->
        String.split_on_char ',' raw

@@ -32,6 +32,7 @@ let make_closing_client ~sw ~net ~https =
     in
     let sock = Eio.Net.connect ~sw:conn_sw net addr in
     last_sock := Some sock;
+    (* Return type must include `Close for cohttp-eio make_generic. *)
     match Uri.scheme uri with
     | Some "https" -> (
         match https with

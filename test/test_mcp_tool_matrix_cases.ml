@@ -112,7 +112,6 @@ let all_known_tool_names =
     "masc_code_write";
     "masc_collaboration_evidence";
     "masc_collaboration_graph";
-    "masc_compact_context";
     "masc_config";
     "masc_config_snapshot";
     "masc_consolidate_learning";
@@ -159,6 +158,8 @@ let all_known_tool_names =
     "masc_governance_report";
     "masc_governance_set";
     "masc_governance_status";
+    "masc_hat_status";
+    "masc_hat_wear";
     "masc_handover_claim";
     "masc_handover_claim_and_spawn";
     "masc_handover_create";

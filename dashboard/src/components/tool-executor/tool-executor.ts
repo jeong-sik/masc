@@ -53,7 +53,7 @@ function ToolDetail() {
               ${executing.value ? '실행 중...' : '실행'}<//>
             <${ActionButton} variant="ghost" size="md" onClick=${() => { clearSelection(); showConfirm.value = false }}>초기화<//>
           </div>`}
-      ${lastResult.value ? html`<${ToolResultDisplay} ...${lastResult.value} />` : null}
+      ${lastResult.value ? html`<${ToolResultDisplay} key=${lastResult.value.timestamp} ...${lastResult.value} />` : null}
     </div>
   `
 }

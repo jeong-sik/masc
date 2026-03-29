@@ -219,10 +219,6 @@ interface McpListResponse {
   error?: { message?: string }
 }
 
-function parseMcpListResponse(raw: string): McpListResponse {
-  const line = raw.split('\n').find(l => l.startsWith('data: '))
-  const payload = line ? line.slice(6).trim() : raw.trim()
-  try {
 function extractFirstSseDataPayload(raw: string): string {
   const line = raw.split('\n').find(l => l.startsWith('data: '))
   return line ? line.slice(6).trim() : raw.trim()
@@ -232,6 +228,7 @@ function parseMcpListResponse(raw: string): McpListResponse {
   const payload = extractFirstSseDataPayload(raw)
   return parseMcpJsonText(payload) as McpListResponse
 }
+
 export async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
   await ensureSession()
   const text = await mcpPost({
@@ -241,8 +238,14 @@ export async function listMcpTools(cursor?: string): Promise<McpToolsListResult>
     id: Date.now(),
   })
   const parsed = parseMcpListResponse(text)
-  if (parsed.error?.message) throw new Error(parsed.error.message)
-  return parsed.result ?? { tools: [] }
+  if (parsed.error) {
+    const message = parsed.error.message || 'tools/list: server returned an error without a message'
+    throw new Error(message)
+  }
+  if (!parsed.result) {
+    throw new Error('tools/list: missing result in response')
+  }
+  return parsed.result
 }
 
 const MAX_TOOL_LIST_PAGES = 50

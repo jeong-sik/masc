@@ -170,7 +170,11 @@ let reconcile_keepalive_keepers (ctx : _ context) =
                  Log.Keeper.info "%s: reconciled durable keeper" meta.name
                end
              end
-         | _ -> ())
+         | Ok (Some _meta) -> () (* paused, skip *)
+         | Ok None -> ()
+         | Error err ->
+             Log.Keeper.debug "reconcile: read_meta failed for %s: %s" name err)
+
 let cleanup_dead_tombstone (ctx : _ context)
     (entry : Keeper_registry.registry_entry) =
   match read_meta ctx.config entry.name with

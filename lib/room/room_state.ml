@@ -367,10 +367,24 @@ let ensure_room_bootstrap config room_id =
   (* 1. Always ensure root infrastructure exists *)
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
+  let root_keepers_dir = Filename.concat root_dir "keepers" in
+  let root_perpetual_keepers_dir =
+    Filename.concat root_dir "perpetual-keepers"
+  in
+  let root_perpetual_dir = Filename.concat root_dir "perpetual" in
   let root_tasks_dir = Filename.concat root_dir "tasks" in
   let root_messages_dir = Filename.concat root_dir "messages" in
   let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
-  List.iter mkdir_p [ root_agents_dir; root_tasks_dir; root_messages_dir; rooms_root_dir config ];
+  List.iter mkdir_p
+    [
+      root_agents_dir;
+      root_keepers_dir;
+      root_perpetual_keepers_dir;
+      root_perpetual_dir;
+      root_tasks_dir;
+      root_messages_dir;
+      rooms_root_dir config;
+    ];
   if not (path_exists_root config (root_state_path config)) then
     write_json_root config (root_state_path config)
       (room_state_to_yojson (default_room_state config));

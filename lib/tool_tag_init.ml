@@ -88,12 +88,7 @@ let register_all () =
     "masc_heartbeat_stop"; "masc_heartbeat_list";
   ];
 
-  (* ── Mod_hat: non-schema tools ──────────────────────────────── *)
-  reg Mod_hat [
-    "masc_hat_wear";
-  ];
-
-  (* Mod_cost and Mod_rate_limit: fully covered by schemas — no entries needed *)
+  (* Mod_hat, Mod_cost, Mod_rate_limit: removed from MCP surface (#3640) *)
 
   (* Mod_suspend: fully covered by schemas — no entries needed *)
 

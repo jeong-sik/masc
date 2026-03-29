@@ -29,6 +29,8 @@ let raw_schemas : tool_schema list =
   @ Tool_code_write.schemas
   @ Tool_library.schemas
   @ Tool_heartbeat.schemas
+  @ Tool_cache.schemas
+  @ Tool_hat.schemas
 
 let all_schemas : tool_schema list = raw_schemas
 

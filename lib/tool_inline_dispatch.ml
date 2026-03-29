@@ -98,6 +98,13 @@ let dispatch (ctx : context) ~(name : string) : result option =
   | "masc_messages" -> Tool_inline_dispatch_comm.handle_messages ctx
   | "masc_listen" -> Tool_inline_dispatch_comm.handle_listen ctx
   | "masc_who" -> Tool_inline_dispatch_comm.handle_who ctx
+  | ("masc_cache_set" | "masc_cache_get" | "masc_cache_delete"
+    | "masc_cache_list" | "masc_cache_clear" | "masc_cache_stats") as tool_name ->
+      Tool_cache.dispatch { Tool_cache.config = config } ~name:tool_name ~args:arguments
+  | ("masc_hat_wear" | "masc_hat_status") as tool_name ->
+      Tool_hat.dispatch
+        { Tool_hat.config = config; agent_name }
+        ~name:tool_name ~args:arguments
 
   (* ── Verification ───────────────────────────────────────────── *)
   | "masc_verify_request" | "masc_verify_submit" | "masc_verify_status"

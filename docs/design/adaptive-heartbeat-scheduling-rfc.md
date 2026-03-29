@@ -199,38 +199,41 @@ let default_zombie_threshold =
 |------|-----|
 | Lease owner | Keepalive fiber (유일한 writer) |
 | Renew point (a) | `ensure_keeper_room_presence` 호출 시 (기존) |
-| Renew point (b) | `run_unified_turn` 완료 직후 (신규) |
+| Renew point (b) | Turn 완료 후 `Room.heartbeat_in_room` **성공** 시 (신규) |
 | Max silence budget | `MASC_KEEPER_MAX_SILENCE_SEC` (default 120s) |
 | Turn 중 갱신 | 불가 (fiber blocking). max silence = max turn duration |
-| Freshness skip | `now - last_turn_completion_ts < MAX_SILENCE_SEC`이면 presence sync skip |
-| Failure reset | Step 1.2에서 `Room.heartbeat_in_room` **성공** 시에만 `consecutive_failures := 0` (room I/O 건강 증거, turn 성공과 별개) |
+| Freshness skip | `now - !last_successful_heartbeat_ts < MAX_SILENCE_SEC`이면 presence sync skip |
+| Failure reset | `Room.heartbeat_in_room` **성공** 시에만 `consecutive_failures := 0` (room I/O 건강 증거) |
 
 **Scope boundary (필수)**:
 
-`last_turn_completion_ts`는 **room-level freshness** (presence sync skip)에만 사용한다. Supervisor의 fiber liveness 판정(`done_p` Promise)을 override하지 않는다. fiber가 `Crashed`면 `last_turn_completion_ts`와 무관하게 dead이다.
+`last_successful_heartbeat_ts`는 **room-level freshness** (presence sync skip)에만 사용한다. 이 timestamp는 `Room.heartbeat_in_room`이 **성공**한 시점에만 갱신된다. Turn 완료 시점이 아니다 — turn이 성공해도 room heartbeat가 실패하면 timestamp는 갱신되지 않고, presence sync skip도 발동하지 않는다. 이렇게 해야 filesystem/room 장애가 turn 성공으로 가려지지 않는다.
+
+Supervisor의 fiber liveness 판정(`done_p` Promise)과 완전 독립이다. fiber가 `Crashed`면 `last_successful_heartbeat_ts`와 무관하게 dead이다.
 
 ```
                         ┌─ Supervisor (Path A) ─┐
-done_p: Crashed ───────>│  restart (SSOT)       │  ← last_turn_completion_ts 관여 안 함
+done_p: Crashed ───────>│  restart (SSOT)       │  ← timestamp 관여 안 함
 done_p: None (alive) ──>│  skip                 │
                         └───────────────────────┘
 
-                        ┌─ Keepalive Loop ──────┐
-last_turn_completion_ts │  skip presence sync   │  ← freshness only
- < MAX_SILENCE_SEC ────>│  (room heartbeat      │
-                        │   already done by turn)│
-                        └───────────────────────┘
+                          ┌─ Keepalive Loop ────────────────┐
+last_successful_heartbeat │  skip presence sync             │
+ < MAX_SILENCE_SEC ──────>│  (room heartbeat already done)  │
+                          └─────────────────────────────────┘
+                          ↑ 갱신 조건: Room.heartbeat_in_room 성공
+                          ↑ turn 완료만으로는 갱신 안 됨
 ```
 
 **Implementation**:
 
-**State boundary**: `last_turn_completion_ts`는 keepalive loop 내부의 **local `ref float`**로 관리한다. keepalive loop는 `read_meta`로 상태를 읽지 `keeper_registry`를 직접 읽지 않으므로 (keeper_keepalive.ml:119), registry에 필드를 추가하면 SSOT가 분리된다. 단일 fiber 내 freshness hint이므로 local ref가 적절하다.
+**State boundary**: `last_successful_heartbeat_ts`는 keepalive loop 내부의 **local `ref float`**로 관리한다. keepalive loop는 `read_meta`로 상태를 읽지 `keeper_registry`를 직접 읽지 않으므로 (keeper_keepalive.ml:119), registry에 필드를 추가하면 SSOT가 분리된다. 단일 fiber 내 freshness hint이므로 local ref가 적절하다.
 
 | Step | File | Change |
 |------|------|--------|
-| 1.1 | `lib/keeper/keeper_keepalive.ml` | `let last_turn_completion_ts = ref 0.0` (loop 시작 시 local ref 선언) |
-| 1.2 | `lib/keeper/keeper_keepalive.ml` (unified turn 블록) | Turn 완료 후: (a) `last_turn_completion_ts := Time_compat.now ()`, (b) `Room.heartbeat_in_room` 호출 (facade 경유, keeper_coordination.ml:65과 동일 경로), (c) heartbeat 성공 시에만 `consecutive_failures := 0` |
-| 1.3 | `lib/keeper/keeper_keepalive.ml:126` | `now - !last_turn_completion_ts < MAX_SILENCE_SEC`이면 presence sync skip (lease 기반) |
+| 1.1 | `lib/keeper/keeper_keepalive.ml` | `let last_successful_heartbeat_ts = ref 0.0` (loop 시작 시 local ref 선언) |
+| 1.2 | `lib/keeper/keeper_keepalive.ml` (unified turn 블록) | Turn 완료 후: (a) `Room.heartbeat_in_room` 호출 (facade 경유, keeper_coordination.ml:65과 동일 경로), (b) heartbeat **성공** 시에만 `last_successful_heartbeat_ts := Time_compat.now ()` + `consecutive_failures := 0`, (c) heartbeat 실패 시 timestamp 갱신 안 함 (presence sync skip 미발동) |
+| 1.3 | `lib/keeper/keeper_keepalive.ml:126` | `now - !last_successful_heartbeat_ts < MAX_SILENCE_SEC`이면 presence sync skip (room-I/O 기반 lease) |
 | 1.4 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_WORK_AS_HEARTBEAT` (bool, default true), `MASC_KEEPER_MAX_SILENCE_SEC` (int, default 120) |
 | 1.5 | `test/test_work_as_heartbeat.ml` | (a) Turn 완료가 presence sync를 대체하는지, (b) heartbeat 실패 시 consecutive_failures가 유지되는지, (c) room I/O 실패가 turn 성공으로 가려지지 않는지 |
 
@@ -300,14 +303,38 @@ if !consecutive_failures >= max_consecutive_heartbeat_failures then
 type keeper_state = Running | Paused | Stopped
 
 (* After *)
-type keeper_state = Running | Paused | Stopped | Crashed
+type keeper_state = Running | Paused | Stopped | Crashed | Dead
 ```
 
-`is_running` 은 `Running`만 true를 반환하므로, `Crashed` 추가로 기존 로직은 자동으로 올바르게 동작한다. Dashboard는 `Stopped`(정상 종료)와 `Crashed`(오류 종료)를 구분할 수 있다.
+- `Crashed`: 오류 종료, restart 대상 (backoff 적용)
+- `Dead`: restart budget 소진, 재기동 금지 (tombstone)
+- `is_running`은 `Running`만 true. `is_registered`는 entry 존재 여부 (state 무관).
+
+**Dead tombstone (restart budget 보호)**:
+
+현재 exhausted keeper는 unregister 후 meta 파일이 남는다 (keeper_types.ml:601). `keepalive_keeper_names`가 meta를 읽어 reconcile 대상으로 반환하므로, unregister된 exhausted keeper가 orphan처럼 보여 즉시 재기동된다 — restart budget이 무력화된다.
+
+해결: **exhausted keeper를 unregister하지 않고 `Dead` state로 유지**한다. Dead entry는 registry에 남아 `is_registered = true` → reconcile skip.
+
+```ocaml
+(* Before: keeper_supervisor.ml:128 — exhausted *)
+if entry.restart_count >= max_restarts then
+  to_unregister := entry :: !to_unregister  (* → meta 남음 → reconcile re-launch *)
+
+(* After: Dead tombstone *)
+if entry.restart_count >= max_restarts then begin
+  Keeper_registry.set_state ~base_path entry.name Dead;
+  publish_lifecycle "dead" entry.name "restart budget exhausted";
+  (* Dead entry stays in registry. is_registered = true → reconcile skips *)
+  (* Periodic cleanup: Dead entries > DEAD_TTL (default 3600s) can be unregistered *)
+end
+```
+
+Dead entry cleanup: sweep에서 `state = Dead AND now - last_restart_ts > DEAD_TTL`이면 unregister + meta 파일에 `paused = true` 기록 (reconcile의 기존 `not meta.paused` 필터가 영구 제외).
 
 **Reconcile 제외 규칙 (필수)**:
 
-sweep 순서 변경만으로는 부족하다. backoff delay 미경과, self-preservation 억제 등으로 아직 restart되지 않은 Crashed entry가 reconcile에서 "not running"으로 잡혀 re-launch될 수 있다. reconcile은 **registry에 entry가 존재하는 keeper를 건드리면 안 된다**.
+sweep 순서 변경만으로는 부족하다. reconcile은 **registry에 entry가 존재하는 keeper를 건드리면 안 된다**.
 
 ```ocaml
 (* Before: keeper_supervisor.ml:100 — reconcile 조건 *)
@@ -326,7 +353,9 @@ sweep 순서 변경만으로는 부족하다. backoff delay 미경과, self-pres
 - `Running`: is_registered = true → reconcile skip (정상)
 - `Crashed` (backoff pending): is_registered = true → reconcile skip (backoff 경로가 소유)
 - `Crashed` (suppressed): is_registered = true → reconcile skip (다음 cycle에서 재평가)
+- `Dead` (exhausted): is_registered = true → reconcile skip (tombstone)
 - `Stopped` → unregister 후 entry 삭제 → is_registered = false → reconcile re-launch (정상)
+- `Dead` → TTL 경과 → unregister + meta `paused=true` → reconcile의 `not meta.paused`가 영구 제외
 - Server restart 후 orphaned: registry empty → is_registered = false → reconcile re-launch (정상)
 
 **Sweep 순서 변경 (보완)**:
@@ -449,7 +478,7 @@ Phase 3 착수 조건:
 | Phase | Risk | Boundary Crossing | Mitigation |
 |-------|------|-------------------|-----------|
 | Phase 0 | LOW | None (config + instrumentation) | 기존 동작 변경 없음 |
-| Phase 1 | LOW | keeper_keepalive ↔ keeper_registry (new field) | Feature flag로 즉시 복원 |
+| Phase 1 | LOW | keeper_keepalive 내부 (local ref, 모듈 경계 변경 없음) | Feature flag로 즉시 복원 |
 | Phase 2 | MEDIUM | keeper_supervisor 내부 수정 | 1 cycle 억제만 (30s), 다음 cycle에서 재평가 |
 | Phase 2b | MEDIUM | gRPC heartbeat ↔ phi detector (new module) | Shadow mode + kill switch |
 | Phase 3 | HIGH | cascade ↔ keeper (new scheduler layer) | 별도 RFC로 분리 |
@@ -463,13 +492,14 @@ Phase 3 착수 조건:
 - [ ] Phase 0.1: Per-stage timer 계측 (keeper_keepalive.ml)
 - [ ] Phase 0.2: Config SSOT (resilience.ml 하드코딩 → env_config)
 - [ ] Phase 0: 1주 측정 + 결과 기록
-- [ ] Phase 1.1: `last_turn_completion_ts` local ref in keepalive loop
-- [ ] Phase 1.2: Unified turn 완료 시 (a) timestamp 갱신, (b) `Room.heartbeat_in_room`, (c) heartbeat 성공 시에만 `consecutive_failures := 0`
+- [ ] Phase 1.1: `last_successful_heartbeat_ts` local ref in keepalive loop
+- [ ] Phase 1.2: Turn 완료 후 `Room.heartbeat_in_room` 호출, **성공 시에만** timestamp 갱신 + `consecutive_failures := 0`
 - [ ] Phase 1.3: Presence sync conditional skip (`MAX_SILENCE_SEC` 기반 lease)
 - [ ] Phase 1.4: Config (feature flag + max silence)
 - [ ] Phase 1.5: Tests (freshness skip + room I/O failure 독립 검증)
-- [ ] Phase 2.0a: `keeper_state`에 `Crashed` variant 추가 + `is_registered` 함수
+- [ ] Phase 2.0a: `keeper_state`에 `Crashed` + `Dead` variant 추가 + `is_registered` 함수
 - [ ] Phase 2.0b: `launch_supervised_fiber` body에서 structured catch + `set_state Crashed` + resolve
+- [ ] Phase 2.0c: Exhausted keeper를 unregister 대신 `Dead` state 유지 (tombstone) + TTL 후 cleanup
 - [ ] Phase 2.1: `keeper_keepalive.ml:147` self-stop → structured exception raise
 - [ ] Phase 2.2: reconcile 조건 변경 (`is_running` → `is_registered`)
 - [ ] Phase 2.3: `sweep_and_recover` 순서 변경 (restart/unregister → reconcile)

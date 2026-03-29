@@ -800,7 +800,19 @@ let test_same_trace_multi_turn_accumulation () =
         (Keeper_exec_context.save_oas_checkpoint ~session:session2
            ~agent_name:meta.agent_name
            ~model:"llama:auto" ~ctx:ctx_turn2 ~generation:1);
-      (* Verify: reload shows all 4 messages accumulated *)
+      (* Immediate verify: reload right after second save to isolate
+         save correctness from load correctness (GLM-5 review finding) *)
+      let (_session_imm, immediate_opt) =
+        Keeper_exec_context.load_context_from_checkpoint ~trace_id
+          ~primary_model_max_tokens:4096 ~base_dir
+      in
+      (match immediate_opt with
+       | Some imm ->
+           Alcotest.(check int)
+             "second save persisted 4 messages (save correctness)" 4
+             (List.length imm.messages)
+       | None -> Alcotest.fail "second save produced no loadable checkpoint");
+      (* Final verify: full roundtrip content check *)
       let (_session3, final_opt) =
         Keeper_exec_context.load_context_from_checkpoint ~trace_id
           ~primary_model_max_tokens:4096 ~base_dir

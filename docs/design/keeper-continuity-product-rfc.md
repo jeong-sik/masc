@@ -64,6 +64,8 @@ This contract is anchored to existing keeper surfaces.
 - `docs/KEEPER-CONTINUITY-VALIDATION.md`
   - operator validation harness and evidence format
 
+Current implementation already emits the continuity fields above on keeper status surfaces. This RFC is narrowing the product promise around those existing fields rather than inventing a new API.
+
 ### Non-API implementation details
 
 - raw checkpoint file paths are not part of the product contract
@@ -101,6 +103,8 @@ The feature may be described as a productized advanced capability only when all 
 - keeper read surfaces report continuity state truthfully enough for diagnosis
 - the production runbook defines evidence, monitoring, and rollback
 - docs use the bounded continuity wording consistently across README, product plan, keeper docs, and runbooks
+
+Until then, the product posture remains `Not done for product promise` even though the design docs themselves are in `Draft`.
 
 ## Follow-On Work
 

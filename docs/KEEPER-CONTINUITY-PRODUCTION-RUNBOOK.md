@@ -33,7 +33,7 @@ It does not certify:
 Keeper continuity is releaseable as an advanced feature only when all of the following are true:
 
 1. OAS checkpoint diagnosis has a closed root cause and an implemented fix
-2. `Keeper_checkpoint_store.load_oas` returns non-empty message state for the validated scenario
+2. the validated scenario includes explicit checkpoint-restore evidence from the OAS load path (for example diagnosis logs, scripted inspection output, or harness-linked artifacts)
 3. `masc_keeper_msg` same-trace continuity succeeds in live runtime
 4. `masc_keeper_status` and `masc_keeper_list(detailed=true)` report continuity fields consistently
 5. rollback instructions are tested and documented
@@ -46,7 +46,7 @@ If any gate is missing, the feature remains internal or validation-only.
 Each release or promotion decision should capture these artifacts:
 
 - validation harness report from `docs/KEEPER-CONTINUITY-VALIDATION.md`
-- checkpoint diagnosis note proving the OAS load path used for truth
+- checkpoint diagnosis note or structured inspection artifact proving the OAS load path used for truth
 - example `masc_keeper_status` output showing `trace_id`, `generation`, `trace_history_count`, and `continuity_summary`
 - operator note or PR evidence linking the implemented fix to the diagnosed root cause
 
@@ -84,6 +84,7 @@ Use the OAS checkpoint load path as the source of truth.
 
 - confirm the validated keeper trace restores from OAS checkpoint state
 - confirm the restored messages match the continuity scenario being tested
+- record this through a diagnosis note, scripted inspection output, or equivalent artifact that can be attached to the PR or release evidence bundle
 - do not rely on raw `<trace_id>.json` filesystem inspection unless the runtime is known to be in the fallback path
 
 ### 3. Read-model validation
@@ -121,10 +122,13 @@ Operator escalation rules:
 
 If continuity regresses after launch:
 
-1. downgrade public wording from advanced feature to validation-only or internal
-2. disable any newly promoted docs claims before attempting broader fixes
-3. preserve checkpoint artifacts and validation evidence for diagnosis
-4. prefer forward-fix with explicit evidence; do not widen the promise while diagnosis is open
+1. downgrade public wording from advanced feature to validation-only or internal in `README.md`, `docs/PRODUCT-OPERATING-PLAN.md`, and continuity-specific docs
+2. if the release bundles runtime continuity code changes, either revert the offending continuity change or hold the release while keeping the downgraded wording in place
+3. rerun the keeper continuity validation harness against the last known-good build or commit and store the result with the incident evidence
+4. preserve checkpoint artifacts and validation evidence for diagnosis
+5. prefer forward-fix with explicit evidence; do not widen the promise while diagnosis is open
+
+Current default: there is no dedicated runtime feature flag for keeper continuity. Rollback is therefore a combination of product-promise rollback plus code revert or release hold when implementation changes are bundled.
 
 If filesystem naming or migration work is bundled with continuity changes:
 

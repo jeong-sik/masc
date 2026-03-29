@@ -162,12 +162,14 @@ let set_state ~base_path name state =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key !registry with
   | Some entry ->
-      if entry.state <> state then begin
+      (* Dead is terminal — only unregister can remove a Dead entry *)
+      if entry.state = Dead && state <> Dead then ()
+      else if entry.state <> state then begin
         (match (entry.state, state) with
          | Running, (Paused | Stopped | Crashed | Dead) ->
              Atomic.set running_count_atomic
                (max 0 (Atomic.get running_count_atomic - 1))
-         | (Paused | Stopped | Crashed | Dead), Running ->
+         | (Paused | Stopped | Crashed), Running ->
              Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
          | _ -> ());
         put_entry key { entry with state }

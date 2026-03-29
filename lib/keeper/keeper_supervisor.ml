@@ -211,8 +211,9 @@ let sweep_and_recover (ctx : _ context) =
                ignore (write_meta ctx.config { meta with paused = true })
            | _ -> ())
         end
-    | _ ->
-      match Eio.Promise.peek entry.done_p with
+    | Keeper_registry.Running | Keeper_registry.Paused
+    | Keeper_registry.Stopped | Keeper_registry.Crashed ->
+      (match Eio.Promise.peek entry.done_p with
       | None -> ()  (* Alive — skip *)
       | Some `Stopped ->
           to_unregister := entry :: !to_unregister
@@ -230,7 +231,7 @@ let sweep_and_recover (ctx : _ context) =
             let delay = backoff_delay entry.restart_count in
             if now -. entry.last_restart_ts >= delay then
               to_restart := (entry, msg) :: !to_restart
-          end
+          end)
   ) entries;
   (* Clean up stopped entries + expired Dead tombstones *)
   List.iter (fun (entry : Keeper_registry.registry_entry) ->

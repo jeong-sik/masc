@@ -129,6 +129,21 @@ let test_state_transition_running_crashed_running () =
   let _e2 = R.register ~base_path:bp "k1" (make_meta "k1") in
   check int "1 running again" 1 (R.count_running ())
 
+(* ── Dead is terminal: set_state Dead → Running is no-op ── *)
+
+let test_dead_to_running_blocked () =
+  R.clear ();
+  let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
+  R.set_state ~base_path:bp "k1" R.Dead;
+  check int "0 running" 0 (R.count_running ());
+  (* Attempt to transition Dead → Running via set_state *)
+  R.set_state ~base_path:bp "k1" R.Running;
+  match R.get ~base_path:bp "k1" with
+  | None -> fail "expected k1"
+  | Some e ->
+    check string "still dead" "dead" (R.state_to_string e.state);
+    check int "still 0 running" 0 (R.count_running ())
+
 (* ── Test runner ──────────────────────────────────────── *)
 
 let () =
@@ -158,5 +173,6 @@ let () =
     ];
     "state_transitions", [
       eio_test "Running → Crashed → Running" test_state_transition_running_crashed_running;
+      eio_test "Dead → Running blocked" test_dead_to_running_blocked;
     ];
   ]

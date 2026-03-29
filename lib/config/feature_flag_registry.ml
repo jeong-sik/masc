@@ -184,6 +184,22 @@ let all_flags : flag list = [
     description = "Llama.cpp runtime debug output";
     default = false; category = "runtime";
     lifecycle = Active; since = "2.100.0" };
+
+  (* ── CDAL (Contract-Driven Agent Loop) ───────────────────── *)
+  { env_name = "MASC_CDAL_ENABLED";
+    description = "Contract-driven agent loop: proof capture and verdict evaluation";
+    default = true; category = "runtime";
+    lifecycle = Active; since = "2.162.0" };
+
+  { env_name = "MASC_CDAL_RISK_ENFORCEMENT";
+    description = "Enforce risk_contract constraints (fail on violation)";
+    default = false; category = "runtime";
+    lifecycle = Experimental; since = "2.162.0" };
+
+  { env_name = "MASC_CDAL_PROOF_AGGREGATION";
+    description = "Aggregate proof bundles across multi-turn sessions";
+    default = false; category = "runtime";
+    lifecycle = Experimental; since = "2.162.0" };
 ]
 
 (** Lookup a flag by env var name. O(n) — acceptable for 25 flags. *)

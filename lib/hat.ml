@@ -5,7 +5,7 @@
 
     Usage:
     - Agents can wear different hats for different tasks
-    - Walph can rotate hats during iterations
+    - Agents rotate hats during iterations
     - Broadcast format: @agent:hat (e.g., @claude:builder)
 
     @see https://github.com/mikeyobrien/ralph-orchestrator
@@ -196,7 +196,7 @@ let format_agent agent_name =
     agent_name
     (to_string agent.current_hat)
 
-(** {1 Hat Rotation for Walph} *)
+(** {1 Hat Rotation} *)
 
 (** Preset hat rotations *)
 type rotation =

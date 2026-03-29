@@ -193,6 +193,7 @@ let run_turn
     Oas_worker.run_named
       ~cascade_name
       ~goal:user_message
+      ~session_id:meta.trace_id
       ~system_prompt:turn_system_prompt
       ~tools
       ~initial_messages:ctx_work.messages

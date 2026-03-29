@@ -5,36 +5,20 @@ include Server_mcp_transport_http_conn
 include Server_mcp_transport_http_respond
 include Server_mcp_transport_http_agui
 
-let env_float_or = Server_mcp_transport_http_sse.env_float_or
+let env_float_or = Server_mcp_transport_http_conn.env_float_or
 
-let sse_retry_ms = 3000
+let body_jsonrpc_method = Server_mcp_transport_http_headers.body_jsonrpc_method
 
-let sse_prime_event () =
-  let id = Sse.next_id () in
-  Printf.sprintf "retry: %d\nid: %d\n\n" sse_retry_ms id
+let sse_prime_event = Server_mcp_transport_http_headers.sse_prime_event
 
-let sse_ping_interval_s = 30.0
+let sse_ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
 
 let post_sse_keepalive_interval_s =
   env_float_or ~name:"MASC_POST_SSE_KEEPALIVE_SEC"
     ~default:sse_ping_interval_s
   |> Float.max 0.1
 
-let get_last_event_id (request : Httpun.Request.t) =
-  match Httpun.Headers.get request.headers "last-event-id" with
-  | Some id -> (
-      try Some (int_of_string id) with Failure _ -> None)
-  | None -> None
-
-let body_jsonrpc_method body_str =
-  try
-    match Yojson.Safe.from_string body_str with
-    | `Assoc fields -> (
-        match List.assoc_opt "method" fields with
-        | Some (`String method_) -> Some (method_, List.mem_assoc "id" fields)
-        | _ -> None)
-    | _ -> None
-  with Yojson.Json_error _ -> None
+let get_last_event_id = Server_mcp_transport_http_headers.get_last_event_id
 
 let body_jsonrpc_id body_str =
   try
@@ -43,29 +27,11 @@ let body_jsonrpc_id body_str =
     | _ -> None
   with Yojson.Json_error _ -> None
 
-let session_cookie_header session_id =
-  ( "set-cookie",
-    Printf.sprintf
-      "mcp-session-id=%s; Path=/; Max-Age=86400; SameSite=Lax"
-      session_id )
+let session_cookie_header = Server_mcp_transport_http_headers.session_cookie_header
 
-let sse_headers ~deps session_id protocol_version origin =
-  [
-    ("content-type", Http_negotiation.sse_content_type);
-    session_cookie_header session_id;
-  ]
-  @ mcp_headers session_id protocol_version
-  @ deps.cors_headers origin
+let sse_headers = Server_mcp_transport_http_headers.sse_headers
 
-let sse_stream_headers ~deps session_id protocol_version origin =
-  [
-    ("content-type", Http_negotiation.sse_content_type);
-    ("cache-control", "no-cache");
-    ("connection", "keep-alive");
-    session_cookie_header session_id;
-  ]
-  @ mcp_headers session_id protocol_version
-  @ deps.cors_headers origin
+let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
 
 let stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version
     ~accept_warn_headers =

@@ -1,15 +1,10 @@
 (** Server_mcp_transport_http_respond — HTTP response factory functions. *)
 
-open Server_mcp_transport_http_protocol
-
 let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 
-let json_headers ~deps session_id protocol_version origin =
-  [ ("content-type", "application/json") ]
-  @ mcp_headers session_id protocol_version
-  @ deps.cors_headers origin
+let json_headers = Server_mcp_transport_http_headers.json_headers
 
-let respond_mcp_auth_error ?(extra_headers = []) ~deps request reqd ~session_id
+let respond_mcp_auth_error ?(extra_headers = []) ~(deps : Server_mcp_transport_http_types.deps) request reqd ~session_id
     ~protocol_version msg =
   let origin = deps.get_origin request in
   let body =
@@ -32,7 +27,7 @@ let respond_mcp_auth_error ?(extra_headers = []) ~deps request reqd ~session_id
   let response = Httpun.Response.create ~headers `Unauthorized in
   Httpun.Reqd.respond_with_string reqd response body
 
-let respond_mcp_internal_error ?(extra_headers = []) ~deps request reqd
+let respond_mcp_internal_error ?(extra_headers = []) ~(deps : Server_mcp_transport_http_types.deps) request reqd
     ~session_id ~protocol_version msg =
   let origin = deps.get_origin request in
   let body =
@@ -53,7 +48,7 @@ let respond_mcp_internal_error ?(extra_headers = []) ~deps request reqd
   let response = Httpun.Response.create ~headers `Internal_server_error in
   Httpun.Reqd.respond_with_string reqd response body
 
-let respond_not_ready ~deps request reqd =
+let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request reqd =
   let origin = deps.get_origin request in
   let body =
     Yojson.Safe.to_string
@@ -81,7 +76,7 @@ let respond_not_ready ~deps request reqd =
   let response = Httpun.Response.create ~headers `Service_unavailable in
   Httpun.Reqd.respond_with_string reqd response body
 
-let respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
+let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~origin ~session_id ~protocol_version
     ~reason ~retry_after_s reqd =
   let retry_after_s = Float.max retry_after_s 0.001 in
   let retry_after_header =

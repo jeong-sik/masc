@@ -781,7 +781,6 @@ let test_legacy_swarm_tools_removed () =
       "masc_swarm_vote";
       "masc_swarm_deposit";
       "masc_swarm_trails";
-      "masc_swarm_walph";
     ]
   in
   List.iter
@@ -868,41 +867,6 @@ let test_masc_team_session_start_schema () =
           Alcotest.(check bool) "has operation_id" true
             (List.mem_assoc "operation_id" props)
       | None -> Alcotest.fail "masc_team_session_start missing properties"
-
-(* ============================================================ *)
-(* 17. Walph Tool Tests                                          *)
-(* ============================================================ *)
-
-let test_masc_walph_loop_removed () =
-  Alcotest.(check bool) "masc_walph_loop removed" false
-    (Option.is_some (find_tool "masc_walph_loop"))
-
-let test_masc_walph_control_schema () =
-  match find_tool "masc_walph_control" with
-  | None -> Alcotest.fail "masc_walph_control not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has command" true (List.mem_assoc "command" props)
-      | None -> Alcotest.fail "masc_walph_control missing properties"
-
-let test_masc_walph_natural_schema () =
-  match find_tool "masc_walph_natural" with
-  | None -> Alcotest.fail "masc_walph_natural not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has message" true (List.mem_assoc "message" props)
-      | None -> Alcotest.fail "masc_walph_natural missing properties"
-
-let test_masc_walph_status_schema () =
-  match find_tool "masc_walph_status" with
-  | None -> Alcotest.fail "masc_walph_status not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props)
-      | None -> Alcotest.fail "masc_walph_status missing properties"
 
 (* ============================================================ *)
 (* 19. Bounded Run Tool Tests                                    *)
@@ -1145,12 +1109,6 @@ let () =
       Alcotest.test_case "detachment_list" `Quick test_masc_detachment_list_schema;
       Alcotest.test_case "detachment_status" `Quick test_masc_detachment_status_schema;
       Alcotest.test_case "observe_swarm" `Quick test_masc_observe_swarm_schema;
-    ];
-    "walph_tools", [
-      Alcotest.test_case "walph_loop removed" `Quick test_masc_walph_loop_removed;
-      Alcotest.test_case "walph_control" `Quick test_masc_walph_control_schema;
-      Alcotest.test_case "walph_natural" `Quick test_masc_walph_natural_schema;
-      Alcotest.test_case "walph_status" `Quick test_masc_walph_status_schema;
     ];
     "bounded_run", [
       Alcotest.test_case "bounded_run" `Quick test_masc_bounded_run_schema;

@@ -86,12 +86,6 @@ let register_all () =
 
   (* Mod_suspend: fully covered by schemas — no entries needed *)
 
-  (* ── Mod_walph: non-schema tools ────────────────────────────── *)
-  reg Mod_walph [
-    "masc_walph_control";
-    "masc_walph_natural";
-  ];
-
   (* ── Mod_library: Tool_library ────────────────────────────────── *)
   reg Mod_library [
     "masc_library_list"; "masc_library_read"; "masc_library_add";

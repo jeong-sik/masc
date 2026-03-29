@@ -137,7 +137,7 @@ This repo does not yet implement the OAuth/DCR flow needed for first-class ChatG
 
 - full `masc_*` tool inventory
 - A2A delegation surface
-- swarm and walph control tools
+- swarm control tools
 - TRPG tools
 - keeper lifecycle mutation tools such as `masc_keeper_up`
 

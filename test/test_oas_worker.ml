@@ -175,7 +175,7 @@ let test_cascade_names_produce_models () =
   let cascades = [
     "keeper_turn"; "heartbeat_action"; "heartbeat_wake";
     "autonomy_direct"; "classification"; "verifier";
-    "briefing"; "walph"; "routing_judge";
+    "briefing"; "routing_judge";
   ] in
   List.iter (fun name ->
     let models = Oas_worker.default_model_strings ~cascade_name:name in

@@ -8,10 +8,19 @@
 
 ## Related Documents
 
+- `./adaptive-heartbeat-production-rollout-rfc.md`
+- `./adaptive-heartbeat-observability-slo-spec.md`
 - `./contract-driven-agent-loop-rfc.md`
 - `./oas-masc-state-boundary.md`
+- `../ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
 - `../SUPERVISOR-MODE.md`
 - `../COMMAND-PLANE-RUNBOOK.md`
+
+**Document role**: 이 문서는 Phase 0-2의 implementation design RFC다. Canonical HTTP/file keeper path의 production rollout, observability/SLO, operator procedure는 아래 문서들을 canonical source로 본다.
+
+- `docs/design/adaptive-heartbeat-production-rollout-rfc.md`
+- `docs/design/adaptive-heartbeat-observability-slo-spec.md`
+- `docs/ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
 
 ## Readiness Snapshot
 

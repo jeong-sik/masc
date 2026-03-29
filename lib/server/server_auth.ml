@@ -43,13 +43,23 @@ let is_unspecified_host host =
   | Ok ip -> ipaddr_is_unspecified ip
   | Error _ -> false
 
+let base_url_has_non_loopback_host () =
+  match Env_config_core.masc_http_base_url_result () with
+  | Error _ -> false
+  | Ok url -> (
+      match Uri.host (Uri.of_string url) with
+      | None -> false
+      | Some host -> not (is_loopback_host host))
+
 let http_auth_strict_enabled () =
   env_flag_enabled "MASC_HTTP_AUTH_STRICT"
   || not (is_loopback_host (configured_bind_host ()))
+  || base_url_has_non_loopback_host ()
 
 let strict_http_auth_error endpoint =
   Printf.sprintf
-    "%s requires room auth enabled with require_token=true when server is bound to a non-loopback host."
+    "%s requires room auth enabled with require_token=true when server is \
+     bound to a non-loopback host or MASC_HTTP_BASE_URL points to a public address."
     endpoint
 
 let ensure_strict_http_token_auth ~endpoint auth_config =

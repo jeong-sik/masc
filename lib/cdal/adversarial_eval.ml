@@ -56,15 +56,7 @@ let normalize_path path =
   String.map (fun c -> if c = '\\' then '/' else c) path
   |> String.lowercase_ascii
 
-let contains_substring text pattern =
-  let pat_len = String.length pattern in
-  let text_len = String.length text in
-  let rec search i =
-    if i + pat_len > text_len then false
-    else if String.sub text i pat_len = pattern then true
-    else search (i + 1)
-  in
-  pat_len > 0 && search 0
+let contains_substring = String_util.contains_substring
 
 let has_doc_extension path =
   List.exists (Filename.check_suffix path) doc_extensions

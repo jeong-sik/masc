@@ -5,18 +5,7 @@
 
     @since 2.80.0 *)
 
-(** Check if [needle] is a substring of [haystack]. *)
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  if nlen > hlen then false
-  else
-    let found = ref false in
-    for i = 0 to hlen - nlen do
-      if not !found && String.sub haystack i nlen = needle then
-        found := true
-    done;
-    !found
+let contains_substring = String_util.contains_substring
 
 (** Shell metacharacters that indicate injection risk in metric_fn when they
     appear outside quotes. *)

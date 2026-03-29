@@ -154,7 +154,7 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
       ~fallback_route
       ~reply_raw:"No skill header here"
   in
-  check string "selection mode" "heuristic" resolved.selection_mode;
+  check string "selection mode" "agent" resolved.selection_mode;
   check string "provenance" "fallback" resolved.provenance;
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 

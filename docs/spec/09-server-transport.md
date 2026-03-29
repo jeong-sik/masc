@@ -19,8 +19,8 @@ MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebS
 
 - **httpun-eio** 기반 HTTP/1.1이 canonical transport. Eio direct-style async.
 - SSE는 per-session `Eio.Stream.t` mailbox 패턴. broadcast 시 global write-lock 없음.
-- HTTP/2는 `h2-eio` 기반 opt-in (`MASC_USE_H2=1`). SSE 멀티플렉싱으로 브라우저 6-connection 제한 해소.
-- gRPC, WebSocket, WebRTC는 보조지만 지원되는 트랜스포트다. 기본값은 활성이고 `MASC_*_ENABLED=0`으로만 비활성화한다.
+- HTTP/2는 `h2-eio` 기반이며 `MASC_USE_H2=auto|1|0`로 listener mode를 제어한다. 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다.
+- gRPC, WebSocket, WebRTC는 보조지만 지원되는 트랜스포트다. 현재 runtime 기본값은 활성이고 `MASC_*_ENABLED=0`으로만 비활성화한다.
 - stdio 모드는 Claude Code MCP 클라이언트의 표준 연결 방식.
 
 ---
@@ -88,7 +88,7 @@ graph TB
 | Transport | Protocol Stack | Module | Port | 활성화 조건 | Status |
 |-----------|---------------|--------|------|------------|--------|
 | HTTP/1.1 | httpun-eio | `server_mcp_transport_http` | 8935 | 기본값 | Canonical |
-| HTTP/2 (h2c) | h2-eio | `server_h2_gateway` | 8935 | `MASC_USE_H2=1` | Optional |
+| HTTP/2 (h2c) | h2-eio | `server_h2_gateway` | 8935 | `MASC_USE_H2=auto` (기본) 또는 `1` | Available |
 | WebSocket | httpun-ws-eio | `server_ws_standalone` + `server_mcp_transport_ws` | 8937 standalone, discovery via 8935 `/ws` | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | Available |
 | gRPC | grpc-direct (h2c) | `masc_grpc_server` | 8936 | 기본값, `MASC_GRPC_ENABLED=0`으로 비활성화 | Available |
 | WebRTC | ocaml-webrtc | `server_webrtc_transport` | 8935 `/webrtc/*` | 기본값, `MASC_WEBRTC_ENABLED=0`으로 비활성화 | Available (local); live interop env-gated |
@@ -352,11 +352,11 @@ let make_routes ~port ~host ~sw ~clock =
 |------|--------|------|----------|
 | Frontend | `/`, `/health`, `/metrics` | `_frontend` | `GET /health`, `GET /.well-known/agent.json` |
 | Dashboard | `/api/v1/dashboard/*` | `_dashboard` | `GET /api/v1/dashboard/shell` |
-| Room | `/api/v1/room/*` | `_room` | `GET /api/v1/room/current` |
+| Room | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_room` | `GET /api/v1/status` |
 | Command Plane (R) | `/api/v1/command-plane/*` | `_command_plane_read` | `GET /api/v1/command-plane/topology` |
 | Command Plane (W) | `/api/v1/command-plane/*` | `_command_plane_write` | `POST /api/v1/command-plane/operations` |
 | Provider Runs | `/api/v1/chains/*` | `_provider_runs` | `GET /api/v1/chains/summary` |
-| Activity | `/api/v1/activity/*` | `_activity` | `GET /api/v1/activity/feed` |
+| Activity | `/api/v1/activity/*` | `_activity` | `GET /api/v1/activity/events` |
 | Board | `/api/v1/board/*` | main_eio 직접 | `GET /api/v1/board/{id}` |
 | GraphQL | `/graphql` | main_eio 직접 | `POST /graphql` |
 | OpenAPI | `/api/v1/openapi.json` | `Transport.Rest` | OpenAPI 3.1 문서 자동 생성 |
@@ -738,9 +738,9 @@ sequenceDiagram
 
 | 환경변수 | 기본값 | 설명 |
 |---------|--------|------|
-| `MASC_USE_H2` | 0 | HTTP/2 h2c 활성화 |
+| `MASC_USE_H2` | `auto` | HTTP listener mode (`auto`, `1`=`h2_only`, `0`=`h1_only`) |
 | `MASC_WS_ENABLED` | 1 | WebSocket 활성화 (`0`으로 비활성화) |
-| `MASC_GRPC_ENABLED` | 0 | gRPC 활성화 |
+| `MASC_GRPC_ENABLED` | 1 | gRPC 활성화 (`0`으로 비활성화) |
 | `MASC_GRPC_PORT` | 8936 | gRPC 포트 |
 | `MASC_WEBRTC_ENABLED` | 1 | WebRTC 활성화 (`0`으로 비활성화) |
 | `MASC_AGENT_TRANSPORT` | `local` | 에이전트 측 트랜스포트 선택 |

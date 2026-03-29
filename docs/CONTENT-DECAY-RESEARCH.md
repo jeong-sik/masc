@@ -1,12 +1,12 @@
 # Content Decay Research Plan
 
 **Date**: 2026-02-03
-**Status**: Phase 1 implemented, Phase 2-3 planned
-**Location**: `lib/keeper_heartbeat.ml` — `post_freshness`, `decide_agent_action`
+**Status**: Historical research note. Formula candidates are documented here, but the implementation status/location in this note is no longer current.
+**Location**: Historical reference only. Do not treat `lib/keeper_heartbeat.ml` as current truth.
 
 ---
 
-## 1. 현재 모델 (Phase 1, Implemented)
+## 1. 연구된 모델 (historical note)
 
 ### Power Law Decay
 
@@ -85,7 +85,7 @@ Power law는 초기 급락 후 long tail이 있어 "오래됐지만 engagement �
 
 ### 현재 동작
 
-Board 시스템에서 자동 bumping:
+Board 시스템에서 자동 bumping이 존재한다:
 
 | Event | Effect | Location |
 |-------|--------|----------|

@@ -2,6 +2,10 @@
 
 `Team Session`은 장시간(기본 1시간) 에이전트 협업을 하나의 세션으로 묶어 관리합니다.
 
+주의:
+- 현재 canonical write entrypoint는 `masc_team_session_step`입니다.
+- 과거 문서에 보이던 `masc_team_session_turn` alias는 현재 tool inventory에서 제거되었습니다. plain turn 기록도 `masc_team_session_step(turn_kind="note", ...)`를 사용하세요.
+
 - 세션 시작: `masc_team_session_start`
 - 진행 조회: `masc_team_session_status`
 - 종료 요청: `masc_team_session_stop`
@@ -9,7 +13,6 @@
 - 세션 목록: `masc_team_session_list`
 - 세션 비교: `masc_team_session_compare`
 - canonical write entrypoint: `masc_team_session_step`
-- legacy compatibility turn writer: `masc_team_session_turn`
 - 이벤트 타임라인 조회: `masc_team_session_events`
 - 증명 산출: `masc_team_session_prove`
 
@@ -120,28 +123,7 @@ linked autoresearch가 연결된 session이면 stop 응답에 `linked_autoresear
 
 - `masc_team_session_step`가 모든 신규 team-session write의 canonical entrypoint입니다.
 - note-only logging도 `masc_team_session_step(turn_kind="note", message="...")`를 사용합니다.
-- `masc_team_session_turn`은 기존 호출자 호환용 plain turn subset만 제공합니다.
-
-### `masc_team_session_turn`
-
-입력:
-
-- `session_id` (required)
-- `turn_kind` (`note` | `broadcast` | `portal` | `task` | `checkpoint`, default `note`)
-- `message` (broadcast/portal/note에서 사용)
-- `target_agent` (portal에서 사용)
-- `task_title`/`task_description`/`task_priority` (task에서 사용)
-
-출력:
-
-- `turn_no`
-- `kind`
-- 액션 결과(`result`, `broadcast`, `target_agent` 등)
-
-호환성 메모:
-
-- legacy compatibility entrypoint입니다.
-- 신규 flow와 문서 예시는 `masc_team_session_step`를 사용합니다.
+- 현재 문서와 예시는 `masc_team_session_step`만 기준으로 유지합니다.
 
 ### `masc_team_session_events`
 
@@ -236,7 +218,6 @@ linked autoresearch가 연결된 session이면 stop 응답에 `linked_autoresear
 - `status/report/list/compare`는 read-only 도구로 동작합니다.
 - `status/stop/report/compare`는 세션 참여자(`created_by` 또는 `agent_names`)만 접근할 수 있습니다.
 - `turn/events/prove`도 세션 참여자만 접근할 수 있습니다.
-- default `tools/list`에서는 `masc_team_session_turn`이 숨겨집니다. 숨김/deprecated inventory는 표준 `tools/list`가 아니라 `masc_tool_admin_snapshot` 또는 `masc_tool_help`에서 확인합니다.
 - `list`는 호출자 기준 접근 가능한 세션만 반환합니다.
 - 종료 직후에도 `force_regenerate=true`로 보고서를 다시 생성할 수 있습니다.
 - `prove`는 보고서가 없을 때 자동 생성 옵션(`generate_report_if_missing`)으로 증명 산출의 일관성을 보장합니다.

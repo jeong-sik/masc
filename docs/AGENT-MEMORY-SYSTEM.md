@@ -258,7 +258,7 @@ RETURN a, l, p AS stale_memories
 
 ### 5.1 Base Decay Formula
 
-`CONTENT-DECAY-RESEARCH.md`에서 검증된 Power Law 모델 적용:
+`CONTENT-DECAY-RESEARCH.md`에 정리된 Power Law 후보 공식을 설계 참고값으로 사용:
 
 ```
 decay(t) = (1 + t/h)^(-b)
@@ -695,7 +695,7 @@ RETURN p1, p2, c1, c2 AS potential_contradiction
 - Initial design document created
 - Core principles established: Learning as Relationship
 - Neo4j schema defined
-- Decay model integrated from CONTENT-DECAY-RESEARCH.md
+- Decay model proposal linked from CONTENT-DECAY-RESEARCH.md
 - 4-stage spawn injection pipeline designed
 - Self-feedback loop: Added Open Questions section
 

@@ -21,8 +21,7 @@
 {
   "mcpServers": {
     "masc": {
-      "command": "masc-mcp",
-      "args": ["--stdio"]
+      "command": "masc-mcp-stdio"
     }
   }
 }

@@ -36,10 +36,19 @@ PORT="$(./start-masc-mcp.sh --print-port)"  # query the effective port for this 
 ```bash
 curl "http://127.0.0.1:${PORT}/health"
 
+INIT_HEADERS="$(mktemp)"
+curl -sS -D "$INIT_HEADERS" "http://127.0.0.1:${PORT}/mcp" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual-check","version":"0.1"}}}'
+
+SESSION_ID="$(awk -F': ' 'tolower($1)=="mcp-session-id"{gsub("\r", "", $2); print $2}' "$INIT_HEADERS")"
 curl -sS "http://127.0.0.1:${PORT}/mcp" \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+  -H "Mcp-Session-Id: ${SESSION_ID}" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+rm -f "$INIT_HEADERS"
 ```
 
 ## 3. MCP 연결
@@ -73,7 +82,7 @@ masc_start(path="/your/project", task_title="My first task")
 
 ```text
 masc_set_room(path="/your/project")
-masc_join()
+masc_join(agent_name="codex")
 masc_add_task(title="My task")
 masc_claim_next()
 # masc_claim_next auto-binds current_task in current builds
@@ -91,8 +100,12 @@ MASC_PUBLIC_TOOLS_EXTRA=masc_goal_upsert,masc_pause
 # Restore the full inventory (debugging)
 MASC_FULL_SURFACE=1
 
-# Query all tools via API
-{"method": "tools/list", "params": {"include_hidden": true}}
+# Query all tools via API after initialize
+curl -sS "http://127.0.0.1:${PORT}/mcp" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: ${SESSION_ID}" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"include_hidden":true}}'
 ```
 
 Allowlist SSOT: `lib/tool_catalog.ml` > `public_mcp_tools`
@@ -125,7 +138,8 @@ masc_keeper_up(name: "sangsu")
 전제조건:
 - `PERSONAS_ROOT/<name>/profile.json`이 존재해야 한다 (또는 `CONFIG_ROOT/keepers/<name>.toml`)
 - `PERSONAS_ROOT`는 `MASC_PERSONAS_DIR` 우선, 없으면 resolved `CONFIG_ROOT/personas`를 사용한다.
-- 서버가 **repo root**에서 실행되어야 `.masc/` 디렉토리에 접근 가능. worktree에서 실행하면 keeper 상태를 찾지 못한다. 필요 시 `--base-path`를 repo root로 지정.
+- `start-masc-mcp.sh`는 worktree에서 실행해도 기본적으로 git repo root를 `MASC_BASE_PATH`로 자동 해석한다.
+- shared keeper 상태 대신 별도 `.masc/`를 쓰고 싶을 때만 `--base-path`를 명시적으로 덮어쓴다.
 - repo-managed config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `~/.masc/config`를 먼저 보고, 없을 때만 repo `config/` 자동 탐색을 사용한다.
 - `MASC_PERSONAS_DIR` 환경변수로 persona만 repo 밖 경로로 분리할 수 있다.
 

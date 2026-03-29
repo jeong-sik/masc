@@ -1,7 +1,7 @@
 (** MASC gRPC Server.
 
     Runs the gRPC coordination service on a configurable port.
-    Disabled by default; enable with MASC_GRPC_ENABLED=1. *)
+    Enabled by default; disable with MASC_GRPC_ENABLED=0. *)
 
 (** Default gRPC port (8936). *)
 val default_port : int

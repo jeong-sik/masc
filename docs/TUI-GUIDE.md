@@ -11,8 +11,8 @@ dune build --root . bin/masc_tui.exe
 # Run
 ./_build/default/bin/masc_tui.exe
 
-# Or via start script
-./start-masc-mcp.sh --tui
+# Or, if installed
+masc-tui
 ```
 
 ## Modes

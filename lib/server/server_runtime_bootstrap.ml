@@ -354,7 +354,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       (* Start auxiliary transports before optional warmups and keeper loops.
          Otherwise HTTP can report ready while gRPC/WS startup is still stuck
          behind heavier startup work. *)
-      (* gRPC coordination transport (opt-in via MASC_GRPC_ENABLED=1) *)
+      (* gRPC coordination transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
       let tool_dispatcher tool_name args_json =
         let arguments =
           try Yojson.Safe.from_string args_json

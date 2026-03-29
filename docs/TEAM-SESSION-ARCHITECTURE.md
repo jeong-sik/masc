@@ -2,6 +2,10 @@
 
 This document describes the team-session orchestration model implemented in `masc-mcp`.
 
+Note:
+- Current canonical write path is `masc_team_session_step`.
+- Older notes may mention `masc_team_session_turn`, but that alias is no longer part of the current tool inventory.
+
 ## Goal
 
 Enable verifiable multi-agent collaboration sessions where spawned agents can:
@@ -15,7 +19,6 @@ Enable verifiable multi-agent collaboration sessions where spawned agents can:
 
 - `masc_team_session_start`
 - `masc_team_session_step`
-- `masc_team_session_turn` (legacy compatibility)
 - `masc_team_session_status`
 - `masc_team_session_finalize`
 - `masc_team_session_report`
@@ -41,8 +44,6 @@ Per session under `.masc/team-sessions/<session_id>/`:
    - Optional worker execution (`spawn_prompt`, `worker_class`, `worker_size`, or `spawn_batch`).
    - Optional vote evidence (`vote_topic`, `vote_options`, `vote_choice`).
    - Optional run evidence (`run_task_id`, `run_note`, `run_deliverable`).
-
-`masc_team_session_turn` remains callable for existing clients, but it is a legacy subset of `step` for plain turn recording only.
 3. `finalize`: requests stop, waits terminal state, generates report/proof.
 4. `prove`: emits formal proof artifacts with selectable proof level.
 

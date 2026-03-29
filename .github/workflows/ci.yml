@@ -52,6 +52,11 @@ jobs:
           install-flags: --with-test
           os-packages: ripgrep bc
 
+      - name: Check front-door doc truth
+        run: |
+          chmod +x scripts/check-doc-truth.sh scripts/check-version-truth.sh
+          scripts/check-doc-truth.sh
+
       - name: Fetch base branch for health ratchet
         if: github.event_name == 'pull_request'
         run: git fetch origin "${{ github.base_ref }}" --depth=1

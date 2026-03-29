@@ -442,8 +442,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_voice.dispatch { agent_name; sw; clock; net = state.Mcp_server.net } ~name ~args:arguments
     | Mod_cache ->
         Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments
-    | Mod_tempo ->
-        Tool_tempo.dispatch { Tool_tempo.config; agent_name } ~name ~args:arguments
     | Mod_portal ->
         Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:arguments
     | Mod_worktree ->
@@ -493,8 +491,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_goals.dispatch ctx ~name ~args:arguments
     | Mod_heartbeat ->
         Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:arguments
-    | Mod_encryption ->
-        Tool_encryption.dispatch { Tool_encryption.state } ~name ~args:arguments
     | Mod_auth ->
         Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:arguments
     | Mod_hat ->
@@ -591,9 +587,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_shard ->
         let (ok, json) = Tool_shard.execute name arguments in
         Some (ok, Yojson.Safe.to_string json)
-    | Mod_notifications ->
-        Tool_notifications.dispatch state.Mcp_server.session_registry
-          ~agent_name ~name arguments
     | Mod_inline ->
         let inline_ctx : Tool_inline_dispatch.context = {
           config; agent_name; registry; state; sw; clock; arguments;

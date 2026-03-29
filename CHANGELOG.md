@@ -3,6 +3,16 @@
 
 ## [Unreleased]
 
+### Removed
+- **Tempo tools** — `masc_tempo`, `masc_tempo_adjust`, `masc_tempo_get`, `masc_tempo_reset`, `masc_tempo_set` removed from MCP surface and handler code deleted.
+- **Encryption tools** — `masc_encryption_enable`, `masc_encryption_disable`, `masc_encryption_status`, `masc_generate_key` removed from MCP surface and handler code deleted.
+- **Notification tools** — `masc_notification_count`, `masc_check_notifications`, `masc_consume_notifications` removed from MCP surface and handler code deleted.
+- **Voice transcript stub** — `masc_voice_transcript` removed from schema (always returned not_implemented).
+
+### Changed
+- **CI version truth gate** — `scripts/check-version-truth.sh` now runs on every PR, not only on release tags.
+- **Keeper deny list** — annotated real vs forward-looking tools in `keeper_hooks_oas.ml`.
+
 ## [2.160.0] - 2026-03-28
 
 ### Added

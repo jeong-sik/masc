@@ -92,12 +92,6 @@ let schemas : tool_schema list =
           ];
     };
     {
-      name = "masc_voice_transcript";
-      description = "Get the current transcript (STT output). Requires STT service integration and an active voice session.";
-      input_schema =
-        `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
-    };
-    {
       name = "masc_voice_conference_start";
       description =
         "Start a multi-agent voice conference. All agent_ids should have active voice sessions first (call masc_voice_session_start for each).";
@@ -223,13 +217,6 @@ let handle_voice_agent _ctx args : result =
   else
     json_string_of_result (Voice_bridge.get_agent_voice ~agent_id)
 
-(* STT: not implemented — returns explicit error so callers do not mistake for success *)
-let handle_voice_transcript (_ctx : 'a context) _args : result =
-  (false, Yojson.Safe.to_string
-    (`Assoc
-      [ ("error", `String "not_implemented");
-        ("message", `String "masc_voice_transcript requires an external STT service that is not integrated. This tool is not functional.") ]))
-
 (* Category B: conference = batch start of local sessions for multiple agents.
    Each agent_id gets its own Voice_session_manager session; the "conference"
    is a convenience grouping, not a shared audio channel. *)
@@ -282,7 +269,6 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
   | "masc_voice_session_end" -> Some (handle_voice_session_end ctx args)
   | "masc_voice_sessions" -> Some (handle_voice_sessions ctx args)
   | "masc_voice_agent" -> Some (handle_voice_agent ctx args)
-  | "masc_voice_transcript" -> Some (handle_voice_transcript ctx args)
   | "masc_voice_conference_start" -> Some (handle_voice_conference_start ctx args)
   | "masc_voice_conference_end" -> Some (handle_voice_conference_end ctx args)
   | _ -> None

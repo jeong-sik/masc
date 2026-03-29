@@ -313,7 +313,6 @@
    tool_run
    tool_bridge
    tool_cache
-   tool_tempo
    mitosis_helpers
    mitosis_spawn
    tool_portal
@@ -336,7 +335,6 @@
    team_session_plan
    tool_team_session_schemas
    tool_heartbeat
-   tool_encryption
    tool_auth
    tool_hat
    tool_housekeep
@@ -403,7 +401,6 @@
    code_swarm_plan
    tool_code_swarm
    tool_suspend
-   tool_notifications
    tool_voice
    mention_inbox
    agent_reputation

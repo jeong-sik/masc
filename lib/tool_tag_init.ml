@@ -53,12 +53,6 @@ let register_all () =
     "masc_cache_list"; "masc_cache_clear"; "masc_cache_stats";
   ];
 
-  (* ── Mod_tempo: non-schema tools ────────────────────────────── *)
-  reg Mod_tempo [
-    "masc_tempo_get"; "masc_tempo_set"; "masc_tempo_adjust";
-    "masc_tempo";
-  ];
-
   (* ── Mod_code: Tool_code ──────────────────────────────────────── *)
   reg Mod_code [
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";
@@ -98,11 +92,6 @@ let register_all () =
   reg Mod_heartbeat [
     "masc_heartbeat"; "masc_heartbeat_start";
     "masc_heartbeat_stop"; "masc_heartbeat_list";
-  ];
-
-  (* ── Mod_encryption: non-schema tools ───────────────────────── *)
-  reg Mod_encryption [
-    "masc_generate_key";
   ];
 
   (* ── Mod_hat: non-schema tools ──────────────────────────────── *)

@@ -131,7 +131,6 @@ let () =
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
   register_module_tag ~schemas:Tool_research.schemas ~tag:Mod_research;
   register_module_tag ~schemas:Tool_model_catalog.schemas ~tag:Mod_model_catalog;
-  register_module_tag ~schemas:Tool_notifications.schemas ~tag:Mod_notifications;
   (* God Schema decomposition: register modules that now own their schemas *)
   register_module_tag ~schemas:Tool_task.schemas ~tag:Mod_task;
   register_module_tag ~schemas:Tool_control.schemas ~tag:Mod_control;
@@ -139,10 +138,8 @@ let () =
   register_module_tag ~schemas:Tool_council_oas.schemas ~tag:Mod_council;
   register_module_tag ~schemas:Tool_cost.schemas ~tag:Mod_cost;
   register_module_tag ~schemas:Tool_rate_limit.schemas ~tag:Mod_rate_limit;
-  register_module_tag ~schemas:Tool_encryption.schemas ~tag:Mod_encryption;
   register_module_tag ~schemas:Tool_relay.schemas ~tag:Mod_relay;
   register_module_tag ~schemas:Tool_handover.schemas ~tag:Mod_handover;
-  register_module_tag ~schemas:Tool_tempo.schemas ~tag:Mod_tempo;
   register_module_tag ~schemas:Tool_walph.schemas ~tag:Mod_walph;
   register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;

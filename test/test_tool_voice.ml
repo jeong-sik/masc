@@ -119,7 +119,6 @@ let test_dispatch_known_tools () =
           "masc_voice_session_end";
           "masc_voice_sessions";
           "masc_voice_agent";
-          "masc_voice_transcript";
           "masc_voice_conference_start";
           "masc_voice_conference_end";
         ]
@@ -410,14 +409,6 @@ let test_voice_sessions_without_net_errors () =
       in
       check bool "succeeds (local list)" true ok)
 
-let test_voice_transcript_without_net_errors () =
-  with_ctx_no_net (fun ctx ->
-      let ok, body =
-        dispatch_exn ctx ~name:"masc_voice_transcript" ~args:(`Assoc [])
-      in
-      check bool "returns not_implemented (STT not integrated)" false ok;
-      check bool "mentions not_implemented" true (contains body "not_implemented"))
-
 let test_voice_conference_end_without_net_errors () =
   with_ctx_no_net (fun ctx ->
       let ok, _body =
@@ -596,7 +587,6 @@ let voice_tools =
     "masc_voice_session_end";
     "masc_voice_sessions";
     "masc_voice_agent";
-    "masc_voice_transcript";
     "masc_voice_conference_start";
     "masc_voice_conference_end";
   ]
@@ -795,8 +785,6 @@ let () =
           test_case "session start no net" `Quick test_voice_session_start_without_net_errors;
           test_case "sessions no net errors" `Quick
             test_voice_sessions_without_net_errors;
-          test_case "transcript no net errors" `Quick
-            test_voice_transcript_without_net_errors;
           test_case "conference end no net errors" `Quick
             test_voice_conference_end_without_net_errors;
           test_case "conference end unavailable server errors" `Quick

@@ -25,7 +25,16 @@ let destructive_check_tools =
     Inspired by Trail of Bits' deny-rule pattern: restrict at the
     harness level so the model cannot bypass. *)
 let keeper_denied_tools = [
-  (* Admin/destructive operations *)
+  (* ── Real tools: keeper must not call these ─────────────────── *)
+  "masc_spawn";              (* Mod_inline: agent spawning *)
+  "masc_execute";            (* Mod_council: governance execution *)
+  "masc_execute_dry_run";    (* Mod_council: governance dry-run *)
+
+  (* ── Forward-looking: tools planned but not yet implemented.
+     Deny-listed preemptively so keepers cannot access them if added.
+     Last audited: 2026-03-29, RFC #3646 inventory gap analysis. ── *)
+
+  (* Admin/destructive — no implementation exists *)
   "masc_room_delete";
   "masc_room_destroy";
   "masc_force_leave";
@@ -33,15 +42,16 @@ let keeper_denied_tools = [
   "masc_admin_reset";
   "masc_admin_cleanup";
   "masc_gc_force";
+
+  (* Config mutation — read-only introspection planned (C2), write TBD *)
   "masc_config_set";
   "masc_config_reset";
-  "masc_spawn";
-  (* Operator privilege escalation *)
+
+  (* Operator privilege escalation — no implementation exists *)
   "masc_operator_action";
   "masc_operator_confirm";
   "masc_operator_judgment_write";
-  "masc_execute";
-  "masc_execute_dry_run";
+
   (* Raw database operations — keepers must use GraphQL *)
   "masc_neo4j_query";
   "masc_pg_query";

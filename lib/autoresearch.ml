@@ -94,7 +94,7 @@ let scan_persisted_loop_ids = Autoresearch_storage.scan_persisted_loop_ids
 (* Re-exports: Metric                                                *)
 (* ================================================================ *)
 
-let contains_substring = Autoresearch_metric.contains_substring
+let contains_substring = String_util.contains_substring
 let validate_metric_fn = Autoresearch_metric.validate_metric_fn
 let measure_metric = Autoresearch_metric.measure_metric
 let measure_metric_with_retry = Autoresearch_metric.measure_metric_with_retry

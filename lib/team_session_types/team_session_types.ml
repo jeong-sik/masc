@@ -5,16 +5,7 @@ include Team_session_types_enums
 open Yojson.Safe.Util
 let dedup_strings = Dashboard_utils.dedup_strings
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    if needle_len = 0 then true
-    else if idx + needle_len > text_len then false
-    else if String.sub text idx needle_len = needle then true
-    else loop (idx + 1)
-  in
-  loop 0
+let contains_substring = String_util.contains_substring
 
 let system_session_creator_prefixes =
   [ "keeper"; "dashboard"; "operator"; "system";

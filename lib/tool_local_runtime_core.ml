@@ -54,23 +54,7 @@ let split_ws text =
   |> List.map String.trim
   |> List.filter (fun item -> item <> "")
 
-let string_contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  if needle_len = 0 then
-    true
-  else if needle_len > text_len then
-    false
-  else
-    let rec loop idx =
-      if idx + needle_len > text_len then
-        false
-      else if String.sub text idx needle_len = needle then
-        true
-      else
-        loop (idx + 1)
-    in
-    loop 0
+let string_contains_substring = String_util.contains_substring
 
 let parse_pid_and_command line =
   let trimmed = String.trim line in

@@ -172,17 +172,7 @@ let post_kind_of_string = function
   | "system" -> Some System_post
   | _ -> None
 
-let contains_substring haystack needle =
-  let hay_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      if idx + needle_len > hay_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
-    in
-    loop 0
+let contains_substring = String_util.contains_substring
 
 (** Take at most [n] elements from a list. *)
 let take n lst =

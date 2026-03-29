@@ -85,7 +85,6 @@ Not related to core coordination. Candidates for separation or removal.
 | tool_autoresearch | **889** | Auto research loop | Experimental residue |
 | tool_council | **950** | Consensus protocol | Usage unclear |
 | tool_experiment | **898** | Sandbox | Experimental residue |
-| tool_walph | ~300 | Walph loop | Experimental |
 | tool_code | ~200 | Code read/search | Utility |
 | tool_tempo | ~200 | Tempo/rhythm | Experimental |
 | tool_relay | ~200 | Relay | Experimental |

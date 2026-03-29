@@ -213,6 +213,7 @@ type keeper_profile_defaults = {
   scope_kind : string option;
   mention_targets : string list;
   proactive_enabled : bool option;
+  shards : string list option;
 }
 
 type persona_summary = {
@@ -240,6 +241,7 @@ let empty_keeper_profile_defaults = {
   scope_kind = None;
   mention_targets = [];
   proactive_enabled = None;
+  shards = None;
 }
 
 let personas_root_opt () =
@@ -322,6 +324,10 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
          scope_kind = str "scope_kind";
          mention_targets = strs "mention_targets";
          proactive_enabled = bool_ "proactive_enabled";
+         shards =
+           (match strs "shards" with
+            | [] -> None
+            | xs -> Some xs);
        })
 
 let load_keeper_toml (path : string)
@@ -400,6 +406,10 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 scope_kind = Safe_ops.json_string_opt "scope_kind" keeper_json;
                 mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
                 proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
+                shards =
+                  (match Safe_ops.json_string_list "shards" keeper_json with
+                   | [] -> None
+                   | xs -> Some xs);
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 
@@ -498,14 +508,14 @@ let list_persona_summaries () : persona_summary list =
       |> List.sort (fun a b -> String.compare a.persona_name b.persona_name)
 
 let keeper_dir (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "perpetual-keepers" in
+  let d = Filename.concat (Room.masc_root_dir config) "keepers" in
   ensure_dir d
 
 let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
 let session_base_dir (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "perpetual" in
+  let d = Filename.concat (Room.masc_root_dir config) "traces" in
   ensure_dir d
 
 let keeper_agent_name name =

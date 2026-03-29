@@ -117,21 +117,6 @@ let () =
   | None ->
       failwith "Tool_cost dispatch returned None for masc_cost_log"
 
-(* Test Tool_walph dispatch *)
-let () =
-  with_fs_test @@ fun env ->
-  let config = make_test_room () in
-  let _ = Room.init config ~agent_name:(Some "evidence-agent") in
-  let clock = Eio.Stdenv.clock env in
-  let ctx : _ Tool_walph.context = { config; agent_name = "evidence-agent"; clock } in
-  let tool_name = "masc_walph_control" in
-  let json_input = `Assoc [("command", `String "STATUS")] in
-  match Tool_walph.dispatch ctx ~name:tool_name ~args:json_input with
-  | Some result ->
-      print_evidence ~tool_name ~json_input ~result ~routed_to:"Tool_walph.handle_walph_control"
-  | None ->
-      failwith "Tool_walph dispatch returned None for masc_walph_control"
-
 (* Test Tool_task dispatch *)
 let () =
   with_fs_test @@ fun _env ->

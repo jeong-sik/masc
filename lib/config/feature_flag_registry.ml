@@ -117,6 +117,11 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.150.0" };
 
+  { env_name = "MASC_KEEPER_WORK_AS_HEARTBEAT";
+    description = "Treat meaningful work as implicit heartbeat signal";
+    default = true; category = "keeper";
+    lifecycle = Active; since = "2.162.0" };
+
   { env_name = "MASC_KEEPER_DEBUG";
     description = "Keeper debug logging";
     default = false; category = "keeper";

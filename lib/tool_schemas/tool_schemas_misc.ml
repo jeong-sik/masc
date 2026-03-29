@@ -4,6 +4,21 @@ open Types
 
 let schemas : tool_schema list = [
   {
+    name = "masc_config";
+    description = "Return the effective runtime configuration with source attribution (env var or default) for each setting. \
+Sensitive values (tokens, passwords) are masked. Use to inspect or verify the server config without restarting. \
+Pass category to filter results to a single section.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("category", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional category filter: server, auth, transport, storage, runtime, rate_limiting, chain, inference, keeper, dashboard");
+        ]);
+      ]);
+    ];
+  };
+  {
     name = "masc_transport_status";
     description = "Return the active transport surfaces and runtime counters for HTTP, gRPC, WebSocket, and WebRTC. \
 Use when selecting a client transport or debugging whether realtime transports are enabled and reachable.";

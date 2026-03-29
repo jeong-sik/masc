@@ -684,7 +684,7 @@ type tool_schema = {
 
 (** Structured result for claim_next scheduling (avoids brittle string parsing).
     Defined here so that both Room_task_schedule (producer) and consumers
-    (tool_task, room_walph, orchestrator) can reference the type without
+    (tool_task, orchestrator) can reference the type without
     triggering warning 34 from [include] re-export. *)
 type claim_next_result =
   | Claim_next_claimed of {

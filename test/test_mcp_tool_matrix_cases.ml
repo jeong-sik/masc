@@ -112,7 +112,6 @@ let all_known_tool_names =
     "masc_code_write";
     "masc_collaboration_evidence";
     "masc_collaboration_graph";
-    "masc_compact_context";
     "masc_config";
     "masc_config_snapshot";
     "masc_consolidate_learning";

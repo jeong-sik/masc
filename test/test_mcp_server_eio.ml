@@ -571,9 +571,9 @@ let test_handle_request_tools_list () =
     true
     (List.mem "masc_board_post" names);
   Alcotest.(check bool)
-    "goal_upsert hidden from public surface"
+    "board_search hidden from public surface"
     false
-    (List.mem "masc_goal_upsert" names);
+    (List.mem "masc_board_search" names);
   Alcotest.(check bool)
     "legacy experiment_start hidden from list"
     false
@@ -1736,7 +1736,6 @@ let test_handle_request_invalid_json () =
   cleanup_dir base_path
 
 (* masc_cache_get structured content test removed: cache tools retired from MCP surface (#3640) *)
-
 let test_handle_request_tools_call_board_post_structured_content () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

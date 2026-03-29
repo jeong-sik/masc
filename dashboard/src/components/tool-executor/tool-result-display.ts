@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
+import { useSignal } from '@preact/signals'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
 
@@ -10,14 +10,13 @@ interface ToolResultProps {
   timestamp: number
 }
 
-const expanded = signal(true)
-
 function tryFormatJson(text: string): { isJson: boolean; formatted: string } {
   try { const parsed = JSON.parse(text); return { isJson: true, formatted: JSON.stringify(parsed, null, 2) } }
   catch { return { isJson: false, formatted: text } }
 }
 
 export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolResultProps) {
+  const expanded = useSignal(true)
   const { formatted } = tryFormatJson(text)
   const timeStr = new Date(timestamp).toLocaleTimeString('ko-KR')
   const lines = formatted.split('\n').length

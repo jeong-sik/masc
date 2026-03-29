@@ -222,7 +222,11 @@ interface McpListResponse {
 function parseMcpListResponse(raw: string): McpListResponse {
   const line = raw.split('\n').find(l => l.startsWith('data: '))
   const payload = line ? line.slice(6).trim() : raw.trim()
-  return JSON.parse(payload) as McpListResponse
+  try {
+    return JSON.parse(payload) as McpListResponse
+  } catch {
+    throw new Error(`tools/list: invalid JSON response (${payload.slice(0, 100)})`)
+  }
 }
 
 export async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
@@ -238,13 +242,18 @@ export async function listMcpTools(cursor?: string): Promise<McpToolsListResult>
   return parsed.result ?? { tools: [] }
 }
 
+const MAX_TOOL_LIST_PAGES = 50
+
 export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
   const all: McpToolsListResult['tools'] = []
   let cursor: string | undefined
+  let pages = 0
   do {
     const page = await listMcpTools(cursor)
     all.push(...page.tools)
     cursor = page.nextCursor
+    pages++
+    if (pages >= MAX_TOOL_LIST_PAGES) break
   } while (cursor)
   return all
 }

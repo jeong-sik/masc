@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
-import { signal } from '@preact/signals'
+import { useSignal } from '@preact/signals'
 import { SurfaceCard } from '../common/card'
 import { ActionButton } from '../common/button'
 import { SchemaForm } from './schema-form'
@@ -10,8 +10,6 @@ import {
   selectedTool, formValues, validationErrors, executing, lastResult,
   schemasLoading, schemasError, loadToolSchemas, updateFormValues, executeTool, clearSelection,
 } from './tool-executor-state'
-
-const showConfirm = signal(false)
 
 function ConfirmDialog({ toolName, onConfirm, onCancel }: { toolName: string; onConfirm: () => void; onCancel: () => void }) {
   return html`
@@ -26,6 +24,7 @@ function ConfirmDialog({ toolName, onConfirm, onCancel }: { toolName: string; on
 }
 
 function ToolDetail() {
+  const showConfirm = useSignal(false)
   const tool = selectedTool.value
   if (!tool) return html`<div class="flex items-center justify-center h-full text-[var(--text-muted)] text-[13px]">좌측에서 도구를 선택하세요.</div>`
 

@@ -16,7 +16,8 @@ interface NumberInputProps {
 export function NumberInput({ value, placeholder, disabled, class: cx, step, min, max, onInput }: NumberInputProps) {
   const handleInput = (e: Event) => {
     const raw = (e.target as HTMLInputElement).value
-    const num = raw === '' ? 0 : Number(raw)
+    if (raw === '') { onInput?.(undefined as unknown as number); return }
+    const num = Number(raw)
     if (!Number.isNaN(num)) onInput?.(num)
   }
   return html`

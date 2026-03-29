@@ -110,11 +110,7 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   let auth_token = deps.auth_token_from_request request in
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let origin = deps.get_origin request in
-  let base_path =
-    match deps.get_server_state_opt () with
-    | Some s -> s.Mcp_server.room_config.base_path
-    | None -> default_base_path ()
-  in
+  let base_path = deps.get_base_path () in
   let auth_result =
     match profile with
     | Mcp_eio.Full | Mcp_eio.Managed_agent ->
@@ -539,11 +535,7 @@ let sse_simple_handler ~deps request reqd =
 let handle_get_operator_mcp ~deps request reqd =
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
-  let base_path =
-    match deps.get_server_state_opt () with
-    | Some s -> s.Mcp_server.room_config.base_path
-    | None -> default_base_path ()
-  in
+  let base_path = deps.get_base_path () in
   match deps.verify_operator_mcp_auth ~base_path request with
   | Error msg ->
       respond_mcp_auth_error ~deps request reqd ~session_id ~protocol_version
@@ -579,11 +571,7 @@ let handle_post_messages ~deps request reqd =
   | Some session_id ->
       let protocol_version = get_protocol_version_for_session ~session_id request in
       let auth_token = deps.auth_token_from_request request in
-      let base_path =
-        match deps.get_server_state_opt () with
-        | Some s -> s.Mcp_server.room_config.base_path
-        | None -> default_base_path ()
-      in
+      let base_path = deps.get_base_path () in
       (match deps.verify_mcp_auth ~base_path request with
       | Error msg ->
           respond_mcp_auth_error ~deps request reqd ~session_id
@@ -615,11 +603,7 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   if Option.is_none (deps.get_server_state_opt ()) then
     respond_not_ready ~deps request reqd
   else
-  let base_path =
-    match deps.get_server_state_opt () with
-    | Some s -> s.Mcp_server.room_config.base_path
-    | None -> default_base_path ()
-  in
+  let base_path = deps.get_base_path () in
   let auth_result =
     match profile with
     | Mcp_eio.Full | Mcp_eio.Managed_agent -> Ok ()

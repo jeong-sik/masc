@@ -358,6 +358,11 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
     cors_headers;
     auth_token_from_request;
     get_server_state_opt = current_server_state_opt;
+    get_base_path =
+      (fun () ->
+        match current_server_state_opt () with
+        | Some state -> state.Mcp_server.room_config.base_path
+        | None -> Server_mcp_transport_http.default_base_path ());
     get_sw = (fun () -> state_switch_opt (current_server_state_opt ()));
     get_clock = (fun () -> state_clock_opt (current_server_state_opt ()));
     verify_mcp_auth =

@@ -313,6 +313,10 @@
    tool_improve_loop_gh
    tool_improve_loop_planner
    tool_improve_loop_executor
+   tool_repair_loop_types
+   tool_repair_loop_storage
+   tool_repair_loop_ocaml
+   tool_repair_loop_cdal
    tool_plan
    tool_run
    tool_bridge
@@ -354,6 +358,7 @@
    workflow_guide
    tool_control
    tool_improve_loop
+   tool_repair_loop
    tool_verification
    tool_misc
    tool_agent_timeline

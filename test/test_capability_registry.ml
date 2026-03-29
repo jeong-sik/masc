@@ -46,6 +46,7 @@ let test_local_worker_projection_exposes_internal_and_auditable_tools () =
       ~names:
         [
           "masc_heartbeat";
+          "masc_repair_loop_start";
           "keeper_search";
           "masc_code_search";
           "masc_run_plan";
@@ -58,6 +59,8 @@ let test_local_worker_projection_exposes_internal_and_auditable_tools () =
         List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
       in
       check bool "heartbeat" true (List.mem "masc_heartbeat" names);
+      check bool "repair loop start" true
+        (List.mem "masc_repair_loop_start" names);
       check bool "keeper_search" true (List.mem "keeper_search" names);
       check bool "masc_code_search" true (List.mem "masc_code_search" names);
       check bool "masc_run_plan" true (List.mem "masc_run_plan" names)

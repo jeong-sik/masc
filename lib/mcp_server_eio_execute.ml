@@ -517,6 +517,17 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           sw = Some sw; proc_mgr = state.Mcp_server.proc_mgr;
           worker_runner = None; clock = Some clock } in
         Tool_mdal.dispatch ctx ~name ~args:arguments
+    | Mod_repair_loop ->
+        let ctx : _ Tool_repair_loop_types.context =
+          {
+            config;
+            agent_name;
+            sw = Some sw;
+            clock = Some clock;
+            proc_mgr = state.Mcp_server.proc_mgr;
+          }
+        in
+        Tool_repair_loop.dispatch ctx ~name ~args:arguments
     | Mod_autoresearch ->
         let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_
             ~program_note:_ =

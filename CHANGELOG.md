@@ -12,6 +12,9 @@
 - **CDAL feature flags** — registry entries and keeper evaluation gate (#3742).
 - **Keeper/agent observability pipeline** — tool usage flush/restore, trajectory truncation (#3758).
 - **Dashboard autoresearch loop** — start from UI (#3734).
+- **Feature flag registry** — `Feature_flag_registry` module with 25 boolean flags, lifecycle state, `masc_feature_flags` tool for runtime enumeration (#3646 H5).
+- **CI feature flag lint** — `check-feature-flag-consistency.sh` detects duplicate `get_bool` calls and registry drift.
+- **Detachable repair-loop host** — internal `masc_repair_loop_*` host, OCaml validator/repair loop, and keeper-facing `masc_keeper_repair` / `masc_persistent_agent_repair` wrapper for delegated code repair.
 
 ### Changed
 - **CI Dashboard** — switched from npm to pnpm matching packageManager field (#3755).

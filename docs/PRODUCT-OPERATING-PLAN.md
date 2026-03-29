@@ -1,7 +1,7 @@
 # Product Operating Plan
 
-> Current package version: v2.161.0 (unreleased)
-> Latest release: v2.160.0 (2026-03-28)
+> Current package version: v2.162.0
+> Latest release: v2.162.0 (2026-03-29)
 > Updated: 2026-03-29
 
 ## Product Promise

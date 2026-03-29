@@ -158,6 +158,8 @@ let all_known_tool_names =
     "masc_governance_report";
     "masc_governance_set";
     "masc_governance_status";
+    "masc_hat_status";
+    "masc_hat_wear";
     "masc_handover_claim";
     "masc_handover_claim_and_spawn";
     "masc_handover_create";
@@ -287,6 +289,12 @@ let all_known_tool_names =
     "masc_room_strategy_set";
     "masc_route";
     "masc_ruling_status";
+    "masc_run_deliverable";
+    "masc_run_get";
+    "masc_run_init";
+    "masc_run_list";
+    "masc_run_log";
+    "masc_run_plan";
     "masc_runtime_params";
     "masc_runtime_verify";
     "masc_select_agent";

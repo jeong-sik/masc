@@ -380,6 +380,18 @@ let test_dashboard_executor_pool_contracts () =
 (* pg schema init contracts removed: init_pg_schemas_sequential was deleted in #3218 *)
 
 let test_transport_route_contracts () =
+  let transport_delete_path_verifies_full_mcp_auth =
+    file_contains_pattern "lib/server/server_mcp_transport_http.ml"
+      {|let handle_delete_mcp ~deps ?(profile = Full) request reqd =|}
+    && file_contains_pattern "lib/server/server_mcp_transport_http.ml"
+         {|deps.verify_mcp_auth ~base_path request|}
+  in
+  let h2_delete_path_verifies_full_mcp_auth =
+    file_contains_pattern "lib/server/server_h2_gateway.ml"
+      {|`DELETE, "/mcp" | `DELETE, "/mcp/managed" | `DELETE, "/mcp/operator" ->|}
+    && file_contains_pattern "lib/server/server_h2_gateway.ml"
+         {|verify_mcp_auth ~base_path httpun_request|}
+  in
   check bool "frontend exposes ws discovery route" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
        {|Http.Router.get "/ws" websocket_discovery_handler|});
@@ -402,15 +414,9 @@ let test_transport_route_contracts () =
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|`POST, "/webrtc/answer"|});
   check bool "transport delete path verifies full mcp auth" true
-    (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
-       {|let handle_delete_mcp ~deps ?(profile = Full) request reqd =|})
-    && (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
-          {|deps.verify_mcp_auth ~base_path request|});
+    transport_delete_path_verifies_full_mcp_auth;
   check bool "h2 delete path verifies full mcp auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|`DELETE, "/mcp" | `DELETE, "/mcp/managed" | `DELETE, "/mcp/operator" ->|})
-    && (file_contains_pattern "lib/server/server_h2_gateway.ml"
-          {|verify_mcp_auth ~base_path httpun_request|});
+    h2_delete_path_verifies_full_mcp_auth;
   check bool "h2 gateway webrtc routes enforce tool auth" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|authorize_tool_request

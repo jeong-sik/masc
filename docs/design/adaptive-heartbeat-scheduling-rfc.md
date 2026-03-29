@@ -27,29 +27,18 @@
 
 Keeper liveness에는 두 개의 독립 경로가 있다. RFC의 모든 제안은 이 구분을 전제한다.
 
-**Path A-1: Self-Stop → Reconcile (durable keeper 경로)**
+**Path A: Keeper Restart Cycle (supervisor 경로)**
 
 ```
-keepalive fiber: presence sync 연속 5회 실패
-  → Atomic.set stop true (keeper_keepalive.ml:147-151)
-  → run_heartbeat_loop 정상 반환
-  → launch_supervised_fiber: done_r resolve `Stopped (keeper_supervisor.ml:46-48)
-  → sweep_and_recover: done_p = `Stopped → to_unregister (keeper_supervisor.ml:125-126)
-  → reconcile_keepalive_keepers: durable keeper가 not running → supervise_keepalive 재호출 (keeper_supervisor.ml:100-113)
-  → 재기동된 keeper가 동일 실패 반복 → 무한 self-stop/reconcile 루프
-```
-
-**Path A-2: Fiber Crash → Backoff Restart**
-
-```
-keepalive fiber: unhandled exception (run_heartbeat_loop에서 catch 안 된 예외)
-  → Fun.protect ~finally: done_r resolve `Crashed msg (keeper_supervisor.ml:54-62)
-  → sweep_and_recover: done_p = `Crashed → to_restart (keeper_supervisor.ml:127)
+keepalive fiber 실패 (presence sync 등)
+  → consecutive_failures >= 5 (keeper_keepalive.ml:147)
+  → Atomic.set stop true (self-stop)
+  → Supervisor: Promise.peek done_p = `Crashed (keeper_supervisor.ml:123)
   → backoff_delay(restart_count): 10s → 20s → 40s → 80s → 160s → 300s
   → max_restarts 도달 시 "dead" 선언 (keeper_supervisor.ml:128)
 ```
 
-Storm 조건: **Path A-1이 주요 storm 경로다.** underlying cause(filesystem 장애 등)가 지속되면 self-stop → reconcile → 재기동 → 즉시 self-stop 루프가 N개 keeper에서 동시 발생한다. reconcile에는 backoff도 없고 mass failure 감지도 없다. Path A-2(Crashed → backoff)는 backoff로 자연 감속되지만, Path A-1(Stopped → reconcile)은 감속 메커니즘이 없다.
+Storm 조건: underlying cause(filesystem 장애, room directory 손상 등)가 지속되면 재기동된 keeper가 즉시 동일 실패를 반복한다. N개 keeper가 동시에 같은 원인으로 self-stop하면 supervisor가 N개를 동시에 restart 시도한다. 현재 backoff는 per-keeper이므로 mass simultaneous failure를 감지/억제하는 메커니즘이 없다.
 
 **Path B: Room Zombie Cleanup (room_gc 경로)**
 
@@ -147,47 +136,33 @@ type config = {
 
 `keeper_keepalive.ml` loop의 각 stage에 타이머 계측을 추가한다.
 
-**Observer effect 방지**: per-stage timing을 매 cycle마다 file에 쓰면 "I/O 병목" 가설을 측정 행위 자체가 악화시킨다. 따라서 **in-memory ring buffer + sampled flush** 방식을 사용한다.
-
 ```ocaml
-(* In-memory ring buffer: cycle마다 메모리에만 기록 *)
-let timing_ring = Ring_buffer.create 100 in  (* 최근 100 cycles *)
-
-(* 각 stage를 Timer.measure로 감싸되 결과는 메모리에만 *)
+(* 예시: 각 stage를 Timer.with_timing으로 감싸기 *)
 let presence_ms = Timer.measure (fun () -> ensure_keeper_room_presence ...) in
 let board_ms = Timer.measure (fun () -> collect_board_events ...) in
-Ring_buffer.push timing_ring { presence_ms; board_ms; ... };
-
-(* Flush: 기존 snapshot cadence (300s)에 맞춰 aggregate를 JSONL에 추가 *)
-(* 새로운 I/O를 만들지 않고 기존 snapshot write에 편승 *)
-if snapshot_due then begin
-  let agg = Ring_buffer.aggregate timing_ring in  (* p50, p95, max *)
-  Dated_jsonl.append metrics_store (add_timing_fields snapshot agg)
-end
+(* ... *)
+Metrics.record ~presence_ms ~board_ms ~snapshot_ms ~turn_ms ~recurring_ms ~improve_ms
 ```
 
-측정값은 기존 snapshot JSONL write에 필드를 추가하는 방식으로 flush한다. 별도 write를 만들지 않는다. 최소 1주간 수집 후 분석.
+측정값을 기존 metrics JSONL에 추가한다. 최소 1주간 수집 후 분석.
 
 **Step 0.2: Config SSOT 정비**
 
 `resilience.ml`의 하드코딩을 env_config로 연결:
 
 ```ocaml
-(* Before — resilience.ml *)
+(* Before *)
 let default_zombie_threshold = 300.0
 
-(* After — resilience.ml *)
+(* After *)
 let default_zombie_threshold =
-  Env_config_runtime.Zombie.threshold_seconds  (* MASC_ZOMBIE_THRESHOLD_SEC, default 300.0 *)
+  Env_config.Zombie.agent_threshold_sec  (* default 300.0 *)
 ```
-
-기존 env var 이름(`MASC_ZOMBIE_THRESHOLD_SEC`, `MASC_KEEPER_ZOMBIE_THRESHOLD_SEC`)과 모듈 이름(`Env_config_runtime.Zombie.threshold_seconds`, `keeper_threshold_seconds`)을 그대로 사용한다. 새 이름을 만들지 않는다.
 
 | File | Change |
 |------|--------|
-| `lib/room/resilience.ml:5` | 하드코딩 `300.0` → `Env_config_runtime.Zombie.threshold_seconds` |
-| `lib/room/resilience.ml:60` | 하드코딩 `3600.0` → `Env_config_runtime.Zombie.keeper_threshold_seconds` |
-| `lib/config/env_config_runtime.ml` | 변경 없음 (이미 `MASC_ZOMBIE_THRESHOLD_SEC`, `MASC_KEEPER_ZOMBIE_THRESHOLD_SEC` 존재) |
+| `lib/room/resilience.ml:5,60` | 하드코딩 → `Env_config.Zombie.*` 참조 |
+| `lib/config/env_config_runtime.ml` | `MASC_ZOMBIE_AGENT_THRESHOLD_SEC`, `MASC_ZOMBIE_KEEPER_THRESHOLD_SEC` 추가 |
 
 ### Phase 1: Work-as-Heartbeat (2-3주, LOW risk)
 
@@ -198,46 +173,24 @@ let default_zombie_threshold =
 | 속성 | 값 |
 |------|-----|
 | Lease owner | Keepalive fiber (유일한 writer) |
-| Renew point (a) | `ensure_keeper_room_presence` 호출 시 (기존) |
-| Renew point (b) | Turn 완료 후 `Room.heartbeat_in_room` **성공** 시 (신규) |
+| Renew point (a) | `ensure_keeper_room_presence` 시작 (기존) |
+| Renew point (b) | `run_unified_turn` 완료 직후 (신규) |
 | Max silence budget | `MASC_KEEPER_MAX_SILENCE_SEC` (default 120s) |
 | Turn 중 갱신 | 불가 (fiber blocking). max silence = max turn duration |
-| Freshness skip | `now - !last_successful_heartbeat_ts < MAX_SILENCE_SEC`이면 presence sync skip |
-| Failure reset | `Room.heartbeat_in_room` **성공** 시에만 `consecutive_failures := 0` (room I/O 건강 증거) |
-
-**Scope boundary (필수)**:
-
-`last_successful_heartbeat_ts`는 **room-level freshness** (presence sync skip)에만 사용한다. 이 timestamp는 `Room.heartbeat_in_room`이 **성공**한 시점에만 갱신된다. Turn 완료 시점이 아니다 — turn이 성공해도 room heartbeat가 실패하면 timestamp는 갱신되지 않고, presence sync skip도 발동하지 않는다. 이렇게 해야 filesystem/room 장애가 turn 성공으로 가려지지 않는다.
-
-Supervisor의 fiber liveness 판정(`done_p` Promise)과 완전 독립이다. fiber가 `Crashed`면 `last_successful_heartbeat_ts`와 무관하게 dead이다.
-
-```
-                        ┌─ Supervisor (Path A) ─┐
-done_p: Crashed ───────>│  restart (SSOT)       │  ← timestamp 관여 안 함
-done_p: None (alive) ──>│  skip                 │
-                        └───────────────────────┘
-
-                          ┌─ Keepalive Loop ────────────────┐
-last_successful_heartbeat │  skip presence sync             │
- < MAX_SILENCE_SEC ──────>│  (room heartbeat already done)  │
-                          └─────────────────────────────────┘
-                          ↑ 갱신 조건: Room.heartbeat_in_room 성공
-                          ↑ turn 완료만으로는 갱신 안 됨
-```
+| Supervisor 인식 | `last_turn_completion_ts` < MAX_SILENCE_SEC이면 alive 취급 |
+| False zombie 방지 | Turn 중 presence failure는 consecutive count에서 제외 |
 
 **Implementation**:
 
-**State boundary**: `last_successful_heartbeat_ts`는 keepalive loop 내부의 **local `ref float`**로 관리한다. keepalive loop는 `read_meta`로 상태를 읽지 `keeper_registry`를 직접 읽지 않으므로 (keeper_keepalive.ml:119), registry에 필드를 추가하면 SSOT가 분리된다. 단일 fiber 내 freshness hint이므로 local ref가 적절하다.
-
 | Step | File | Change |
 |------|------|--------|
-| 1.1 | `lib/keeper/keeper_keepalive.ml` | `let last_successful_heartbeat_ts = ref 0.0` (loop 시작 시 local ref 선언) |
-| 1.2 | `lib/keeper/keeper_keepalive.ml` (unified turn 블록) | Turn 완료 후: (a) `Room.heartbeat_in_room` 호출 (facade 경유, keeper_coordination.ml:65과 동일 경로), (b) heartbeat **성공** 시에만 `last_successful_heartbeat_ts := Time_compat.now ()` + `consecutive_failures := 0`, (c) heartbeat 실패 시 timestamp 갱신 안 함 (presence sync skip 미발동) |
-| 1.3 | `lib/keeper/keeper_keepalive.ml:126` | `now - !last_successful_heartbeat_ts < MAX_SILENCE_SEC`이면 presence sync skip (room-I/O 기반 lease) |
-| 1.4 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_WORK_AS_HEARTBEAT` (bool, default true), `MASC_KEEPER_MAX_SILENCE_SEC` (int, default 120) |
-| 1.5 | `test/test_work_as_heartbeat.ml` | (a) Turn 완료가 presence sync를 대체하는지, (b) heartbeat 실패 시 consecutive_failures가 유지되는지, (c) room I/O 실패가 turn 성공으로 가려지지 않는지 |
-
-**삭제된 Step**: 기존 1.5 (supervisor에서 `last_turn_completion_ts`로 alive 보완 판정) — `done_p`가 SSOT이므로 override 금지.
+| 1.1 | `lib/keeper/keeper_registry.ml` | `last_turn_completion_ts : float` 필드 추가 |
+| 1.2 | `lib/keeper/keeper_unified_turn.ml` | Turn 완료 후: (a) `last_turn_completion_ts` 갱신, (b) `Room_gc.heartbeat_in_room` 호출 |
+| 1.3 | `lib/keeper/keeper_keepalive.ml:126` | `now - last_turn_completion_ts < keepalive_interval_sec`이면 presence sync skip |
+| 1.4 | `lib/keeper/keeper_keepalive.ml:147` | Self-stop 기준: turn 중이면 consecutive failure 카운트 제외 |
+| 1.5 | `lib/keeper/keeper_supervisor.ml:123` | `last_turn_completion_ts` < MAX_SILENCE_SEC이면 alive 취급 (Promise 판정 보완) |
+| 1.6 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_WORK_AS_HEARTBEAT` (bool, default true), `MASC_KEEPER_MAX_SILENCE_SEC` (int, default 120) |
+| 1.7 | `test/test_work_as_heartbeat.ml` | Turn 완료가 presence sync를 대체하는지 + turn 중 false zombie 방지 검증 |
 
 **Feature flag**: `MASC_KEEPER_WORK_AS_HEARTBEAT=false`로 기존 동작 즉시 복원 가능.
 
@@ -245,191 +198,27 @@ last_successful_heartbeat │  skip presence sync             │
 
 **Objective**: Path A (supervisor restart)에 mass failure 감지 + 억제 추가.
 
-**Storm 경로 분석 (Phase 2 전제)**:
-
-Mass self-stop storm은 `to_restart`(Crashed)가 아니라 `reconcile`(Stopped → re-launch) 경로에서 발생한다 (Section 1.1 Path A-1). 따라서 self-preservation gate는 **두 경로 모두**에 적용해야 한다.
-
-**설계 선택: self-stop을 structured Crashed로 전환**
-
-현재 self-stop은 `Atomic.set stop true` → 정상 반환 → `Stopped`로 resolve된다. 이를 structured exception으로 전환하여 `Crashed` 경로로 라우팅한다.
-
-**구현 주의: `launch_supervised_fiber` 변경 필수**
-
-현재 `~finally` 블록(keeper_supervisor.ml:50-63)은 항상 generic `"fiber terminated without resolution"` 문자열을 사용한다. custom exception을 raise해도 그 메시지가 보존되지 않는다. 따라서 `launch_supervised_fiber`의 body에서 structured exception을 **명시적으로 catch하여 resolve**해야 한다:
-
-```ocaml
-(* Before: keeper_supervisor.ml:41-63 *)
-Fun.protect
-  (fun () ->
-    run_heartbeat_loop ...;
-    resolve reg.done_r `Stopped; ...)
-  ~finally:(fun () ->
-    ... resolve reg.done_r (`Crashed "fiber terminated without resolution"))
-
-(* After: body에서 structured exception catch + state 전이 + resolve *)
-Fun.protect
-  (fun () ->
-    (try
-       run_heartbeat_loop ...;
-       set_state ~base_path meta.name Stopped;  (* state 전이 *)
-       resolve reg.done_r `Stopped;
-       publish_lifecycle "stopped" meta.name "normal exit"
-     with
-     | Keeper_heartbeat_failure info ->
-         let reason = failure_reason_to_string info.reason in
-         set_state ~base_path meta.name Crashed;  (* state 전이: Running → Crashed *)
-         record_crash ... meta.name (Time_compat.now ()) reason;
-         resolve reg.done_r (`Crashed reason);
-         publish_lifecycle "crashed" meta.name reason))
-  ~finally:(fun () ->
-    ... (* generic fallback: set_state Crashed + resolve 기존 유지 *))
-```
-
-```ocaml
-(* keeper_keepalive.ml:147 — raise structured exception *)
-if !consecutive_failures >= max_consecutive_heartbeat_failures then
-  raise (Keeper_heartbeat_failure {
-    reason = Heartbeat_consecutive_failures !consecutive_failures;
-    keeper_name = m.name;
-  })
-```
-
-**`keeper_state` 확장 (필수 선행)**:
-
-현재 `keeper_state = Running | Paused | Stopped`. `Crashed` variant가 없어서 structured crash 시 state가 `Running`으로 남으면 `is_running`, `running_count`, spawn slot, reconcile 판단이 전부 꼬인다.
-
-```ocaml
-(* Before: keeper_registry.ml *)
-type keeper_state = Running | Paused | Stopped
-
-(* After *)
-type keeper_state = Running | Paused | Stopped | Crashed | Dead
-```
-
-- `Crashed`: 오류 종료, restart 대상 (backoff 적용)
-- `Dead`: restart budget 소진, 재기동 금지 (tombstone)
-- `is_running`은 `Running`만 true. `is_registered`는 entry 존재 여부 (state 무관).
-
-**Dead tombstone (restart budget 보호)**:
-
-현재 exhausted keeper는 unregister 후 meta 파일이 남는다 (keeper_types.ml:601). `keepalive_keeper_names`가 meta를 읽어 reconcile 대상으로 반환하므로, unregister된 exhausted keeper가 orphan처럼 보여 즉시 재기동된다 — restart budget이 무력화된다.
-
-해결: **exhausted keeper를 unregister하지 않고 `Dead` state로 유지**한다. Dead entry는 registry에 남아 `is_registered = true` → reconcile skip.
-
-```ocaml
-(* Before: keeper_supervisor.ml:128 — exhausted *)
-if entry.restart_count >= max_restarts then
-  to_unregister := entry :: !to_unregister  (* → meta 남음 → reconcile re-launch *)
-
-(* After: Dead tombstone *)
-if entry.restart_count >= max_restarts then begin
-  Keeper_registry.set_state ~base_path entry.name Dead;
-  publish_lifecycle "dead" entry.name "restart budget exhausted";
-  (* Dead entry stays in registry. is_registered = true → reconcile skips *)
-  (* Periodic cleanup: Dead entries > DEAD_TTL (default 3600s) can be unregistered *)
-end
-```
-
-Dead entry cleanup: sweep에서 `state = Dead AND now - last_restart_ts > DEAD_TTL`이면 unregister + meta 파일에 `paused = true` 기록 (reconcile의 기존 `not meta.paused` 필터가 영구 제외).
-
-**Reconcile 제외 규칙 (필수)**:
-
-sweep 순서 변경만으로는 부족하다. reconcile은 **registry에 entry가 존재하는 keeper를 건드리면 안 된다**.
-
-```ocaml
-(* Before: keeper_supervisor.ml:100 — reconcile 조건 *)
-| Ok (Some meta) when not meta.paused
-      && not (Keeper_registry.is_running ~base_path meta.name) ->
-    supervise_keepalive ...
-
-(* After: registry에 entry가 존재하면 skip *)
-| Ok (Some meta) when not meta.paused
-      && not (Keeper_registry.is_registered ~base_path meta.name) ->
-    (* registry에 없는 = 완전히 orphaned durable keeper만 reconcile *)
-    supervise_keepalive ...
-```
-
-`is_registered`는 entry 존재 여부만 확인한다 (state 무관). 이렇게 하면:
-- `Running`: is_registered = true → reconcile skip (정상)
-- `Crashed` (backoff pending): is_registered = true → reconcile skip (backoff 경로가 소유)
-- `Crashed` (suppressed): is_registered = true → reconcile skip (다음 cycle에서 재평가)
-- `Dead` (exhausted): is_registered = true → reconcile skip (tombstone)
-- `Stopped` → unregister 후 entry 삭제 → is_registered = false → reconcile re-launch (정상)
-- `Dead` → TTL 경과 → unregister + meta `paused=true` → reconcile의 `not meta.paused`가 영구 제외
-- Server restart 후 orphaned: registry empty → is_registered = false → reconcile re-launch (정상)
-
-**Sweep 순서 변경 (보완)**:
-
-순서 변경은 reconcile 제외 규칙의 보완이다. 단독으로는 불충분하지만, 제외 규칙과 함께 defense-in-depth를 제공한다.
-
-```ocaml
-let sweep_and_recover ctx =
-  let entries = Keeper_registry.all ~base_path () in
-  (* 1. Crashed/Stopped 분류 + restart(with backoff)/unregister 처리 *)
-  (* 2. self-preservation gate 적용 *)
-  (* 3. reconcile — registry에 없는 orphaned durable keeper만 대상 *)
-  reconcile_keepalive_keepers ctx;
-```
-
-**Failure reason codes (cohort detection 기반)**:
-
-crash_msg prefix matching은 "fiber terminated without resolution"으로 over-group되기 쉽다. 대신 structured failure_reason을 도입한다:
-
-```ocaml
-type failure_reason =
-  | Heartbeat_consecutive_failures of int   (* 연속 presence sync 실패 *)
-  | Fiber_unresolved                        (* 예상치 못한 fiber 종료 *)
-  | Exception of string                     (* 구체적 exception *)
-```
-
-cohort는 `failure_reason` variant로 판별한다 (string matching이 아닌 ADT matching).
-
 **Self-Preservation Rule**:
-
-Ratio-only 조건은 소규모 cluster에서 과도하게 공격적이다. **ratio AND 절대 수** 이중 조건을 적용한다.
 
 ```
 sweep_and_recover에서:
   restart_candidates = len(to_restart)
-  total_keepers = len(entries)  (* Running + Crashed, Stopped 제외 *)
-  ratio = restart_candidates / total_keepers
+  total_running = len(entries)
+  ratio = restart_candidates / total_running
 
-  if ratio > SELF_PRESERVATION_RATIO (default 0.3)
-     AND restart_candidates >= MIN_CANDIDATES (default 2):
-
-    (* cohort 판별: failure_reason variant 기준 *)
-    let cohorts = group_by failure_reason to_restart in
-    let dominant_cohort = largest cohort in
-
-    if dominant_cohort.size >= MIN_CANDIDATES then
-      log "self-preservation: %d/%d keepers, cohort: %s"
-        dominant_cohort.size total_keepers
-        (failure_reason_to_string dominant_cohort.reason)
-      publish OAS event "keeper_self_preservation_triggered"
-      skip restarts for dominant_cohort this cycle
-      (* 다른 cohort의 restart는 허용 *)
-    else
-      proceed with normal restart
-
-  next cycle: re-evaluate (suppression은 1 cycle = 30s만)
+  if ratio > SELF_PRESERVATION_RATIO (default 0.3):
+    log "self-preservation: %.0f%% keepers need restart, likely infra issue"
+    publish OAS event "keeper_self_preservation_triggered"
+    skip all restarts this cycle
+    next cycle: re-evaluate (suppression은 1 cycle만)
 ```
-
-소규모 예시: keeper 3개 중 1개 crash → candidates=1 < min=2 → 정상 restart. keeper 5개 중 3개 `Heartbeat_consecutive_failures` → ratio 60%, same cohort, candidates=3 → 해당 cohort만 억제.
 
 | Step | File | Change |
 |------|------|--------|
-| 2.0a | `lib/keeper/keeper_registry.ml` | `keeper_state`에 `Crashed` variant 추가 + `is_registered` 함수 추가 |
-| 2.0b | `lib/keeper/keeper_supervisor.ml:41` | `launch_supervised_fiber` body에서 `Keeper_heartbeat_failure` catch + `set_state Crashed` + structured resolve |
-| 2.1 | `lib/keeper/keeper_keepalive.ml:147` | self-stop `Atomic.set stop true` → `raise (Keeper_heartbeat_failure ...)` |
-| 2.2 | `lib/keeper/keeper_supervisor.ml:100` | reconcile 조건: `not (is_running)` → `not (is_registered)` (registry entry 있으면 skip) |
-| 2.3 | `lib/keeper/keeper_supervisor.ml:114` | `sweep_and_recover` 순서 변경: restart/unregister → reconcile |
-| 2.4 | `lib/keeper/keeper_supervisor.ml` | `failure_reason` ADT 도입 + cohort grouping |
-| 2.5 | `lib/keeper/keeper_supervisor.ml` | self-preservation gate (ratio + min_candidates + dominant cohort) |
-| 2.3 | `lib/keeper/keeper_supervisor.ml` | self-preservation event 발행 (dominant cohort 정보 포함) |
-| 2.4 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_SELF_PRESERVATION_RATIO` (float, default 0.3), `MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES` (int, default 2) |
-| 2.5 | `test/test_self_preservation.ml` | (a) 소규모 1/3 crash → restart 허용, (b) 대규모 same cohort → cohort만 억제, (c) mixed cohort → 각각 판정 |
-
-**Breaking change 주의**: Step 2.0에서 self-stop이 `Stopped` → `Crashed`로 변경되면, 기존에 `Stopped`를 기대하던 로직(dashboard, metrics)에 영향이 있을 수 있다. 구현 시 `Crashed` sub-variant 또는 별도 `SelfStopped` state 도입을 검토.
+| 2.1 | `lib/keeper/keeper_supervisor.ml:140` | restart 실행 전 비율 검사 추가 |
+| 2.2 | `lib/keeper/keeper_supervisor.ml` | self-preservation event 발행 |
+| 2.3 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_SELF_PRESERVATION_RATIO` (float, default 0.3) |
+| 2.4 | `test/test_self_preservation.ml` | 30%+ 동시 crash 시 restart 억제 검증 |
 
 ### Phase 2b: Phi Accrual — gRPC Only (선행조건: gRPC 활성화)
 
@@ -478,36 +267,27 @@ Phase 3 착수 조건:
 | Phase | Risk | Boundary Crossing | Mitigation |
 |-------|------|-------------------|-----------|
 | Phase 0 | LOW | None (config + instrumentation) | 기존 동작 변경 없음 |
-| Phase 1 | LOW | keeper_keepalive 내부 (local ref, 모듈 경계 변경 없음) | Feature flag로 즉시 복원 |
+| Phase 1 | LOW | keeper_keepalive ↔ keeper_registry (new field) | Feature flag로 즉시 복원 |
 | Phase 2 | MEDIUM | keeper_supervisor 내부 수정 | 1 cycle 억제만 (30s), 다음 cycle에서 재평가 |
 | Phase 2b | MEDIUM | gRPC heartbeat ↔ phi detector (new module) | Shadow mode + kill switch |
 | Phase 3 | HIGH | cascade ↔ keeper (new scheduler layer) | 별도 RFC로 분리 |
 
-**가장 큰 위험들**:
-1. Phase 1에서 presence skip이 downstream consumer(dashboard, SSE)가 기대하는 `last_seen` 갱신을 누락시킬 수 있음. Step 1.2에서 turn 완료 시 `Room.heartbeat_in_room`을 명시적으로 호출하여 방지.
-2. Phase 1에서 `last_successful_heartbeat_ts`가 supervisor의 `done_p` SSOT를 침범하지 않도록 scope를 엄격히 분리. freshness(presence skip)와 liveness(fiber death)는 독립 관심사.
+**가장 큰 위험**: Phase 1에서 `last_turn_completion_ts` 기반 presence skip이 downstream consumer(dashboard, SSE, 다른 agent)가 기대하는 `last_seen` 갱신을 누락시킬 수 있음. Step 1.2에서 turn 완료 시 `heartbeat_in_room`을 명시적으로 호출하여 방지.
 
 ## 6. Implementation Checklist
 
-- [x] Phase 0.1: Per-stage timer 계측 (keeper_keepalive.ml) — #3659
-- [x] Phase 0.2: Config SSOT (resilience.ml 하드코딩 → env_config) — #3659
-- [ ] Phase 0: 1주 측정 + 결과 기록 — #3693 (due 2026-04-05)
-- [x] Phase 1.1: `last_successful_heartbeat_ts` local ref in keepalive loop — #3671
-- [x] Phase 1.2: Turn 완료 후 `Room.heartbeat_in_room` 호출, **성공 시에만** timestamp 갱신 + `consecutive_failures := 0` — #3671
-- [x] Phase 1.3: Presence sync conditional skip (`MAX_SILENCE_SEC` 기반 lease) — #3671
-- [x] Phase 1.4: Config (feature flag + max silence) — #3671
-- [x] Phase 1.5: Tests (freshness skip + room I/O failure 독립 검증) — #3671
-- [x] Phase 2.0a: `keeper_state`에 `Crashed` + `Dead` variant 추가 + `is_registered` 함수 — #3680
-- [x] Phase 2.0b: `launch_supervised_fiber` body에서 structured catch + `set_state Crashed` + resolve — #3680
-- [x] Phase 2.0c: Exhausted keeper를 unregister 대신 `Dead` state 유지 (tombstone) + TTL 후 cleanup — #3680
-- [x] Phase 2.1: `keeper_keepalive.ml:147` self-stop → structured exception raise — #3680
-- [x] Phase 2.2: reconcile 조건 변경 (`is_running` → `is_registered`) — #3680
-- [x] Phase 2.3: `sweep_and_recover` 순서 변경 (restart/unregister → reconcile) — #3680
-- [x] Phase 2.4: `failure_reason` ADT 도입 — #3680
-- [x] Phase 2.5: Self-preservation gate (ratio + min_candidates + cohort) — #3680
-- [x] Phase 2.6: Config (ratio, min_candidates) — #3680
-- [x] Phase 2.7: Tests (소규모/대규모/mixed cohort + reconcile 제외 + state 전이) — #3680
-- [ ] Phase 2b (gRPC 활성화 후): Phi accrual + shadow mode — #3644 (No-Go)
+- [ ] Phase 0.1: Per-stage timer 계측 (keeper_keepalive.ml)
+- [ ] Phase 0.2: Config SSOT (resilience.ml 하드코딩 → env_config)
+- [ ] Phase 0: 1주 측정 + 결과 기록
+- [ ] Phase 1.1: `last_turn_completion_ts` registry field
+- [ ] Phase 1.2: Unified turn 완료 시 timestamp 갱신 + room heartbeat
+- [ ] Phase 1.3: Presence sync conditional skip
+- [ ] Phase 1.4: Self-stop에서 turn-in-progress 예외
+- [ ] Phase 1.5: Supervisor에서 `last_turn_completion_ts` alive 인정
+- [ ] Phase 1.6: Config (feature flag + max silence)
+- [ ] Phase 1.7: Tests
+- [ ] Phase 2.1-2.4: Self-preservation in supervisor
+- [ ] Phase 2b (gRPC 활성화 후): Phi accrual + shadow mode
 
 ## 7. Labeling Protocol
 

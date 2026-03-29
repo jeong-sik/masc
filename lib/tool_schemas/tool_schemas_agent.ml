@@ -272,7 +272,7 @@ Pair with masc_collaboration_graph to review the graph before and after consolid
     name = "masc_get_metrics";
     description = "Fetch raw performance metrics for an agent: task completion data, timing, error rates, and collaboration history. \
 Use when investigating agent performance issues or preparing data for masc_metrics_compare. \
-Pair with masc_agent_fitness for computed scores, masc_audit_stats for security-focused metrics.";
+Pair with masc_agent_fitness for computed scores and masc_status for current room context.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

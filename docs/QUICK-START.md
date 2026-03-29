@@ -95,7 +95,7 @@ masc_claim_next()
 
 ```bash
 # Add specific tools to the public surface
-MASC_PUBLIC_TOOLS_EXTRA=masc_goal_upsert,masc_pause
+MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause
 
 # Restore the full inventory (debugging)
 MASC_FULL_SURFACE=1

@@ -3,6 +3,7 @@ import { signal, useSignalEffect } from '@preact/signals'
 import { fetchLogs } from '../api/dashboard.js'
 import type { LogEntry } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
+import { TextInput } from './common/input'
 
 const logEntries = signal<LogEntry[]>([])
 const logTotal = signal(0)
@@ -234,9 +235,8 @@ export function LogViewer() {
               <option value="ERROR">ERROR</option>
             </select>
 
-            <input
-              class="logs-module-input min-w-[220px] rounded-md border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
-              type="text"
+            <${TextInput}
+              class="min-w-[220px]"
               placeholder="모듈 필터"
               value=${moduleFilter.value}
               onInput=${(e: Event) => {

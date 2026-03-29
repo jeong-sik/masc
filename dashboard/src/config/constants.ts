@@ -50,3 +50,8 @@ export const OAS_KEEPER_SNAPSHOT_MAX = 20
 // --- Text truncation (characters) ---
 export const TRIM_TEXT_DEFAULT = 120
 export const TRUNCATE_DEFAULT = 260
+
+// --- Autoresearch form defaults ---
+export const AUTORESEARCH_DEFAULT_MAX_CYCLES = 100
+export const AUTORESEARCH_DEFAULT_CYCLE_TIMEOUT_S = 300
+export const AUTORESEARCH_DEFAULT_MODEL = 'glm'

@@ -270,4 +270,14 @@ Pair with masc_tool_admin_snapshot for a broader admin view including auth and c
       ]);
     ];
   };
+  {
+    name = "masc_config_snapshot";
+    description = "Return a read-only snapshot of the current runtime configuration. \
+Env vars are categorized (server, storage, transport, chain, inference, keeper, dashboard) \
+with source (env or default) and sensitivity flags. Sensitive values are masked.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
 ]

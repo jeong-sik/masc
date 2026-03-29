@@ -109,6 +109,8 @@ let websocket_discovery_json () =
   let base_fields =
     [
       ("enabled", `Bool enabled);
+      ("listening", `Bool (Atomic.get Transport_metrics.ws_runtime_listening));
+      ("listen_status", `String (Atomic.get Transport_metrics.ws_listen_status));
       ("mode", `String "standalone");
       ("discovery_path", `String "/ws");
       ("session_count", `Int (Server_mcp_transport_ws.session_count ()));
@@ -149,6 +151,8 @@ let transport_status_json () =
         `Assoc
           ([
              ("enabled", `Bool grpc_enabled);
+             ("listening", `Bool (Transport_metrics.grpc_listening ()));
+             ("listen_status", `String (Atomic.get Transport_metrics.grpc_listen_status));
              ("port", `Int grpc_port);
              ("service", `String Masc_grpc_service.service_name);
              ("health_service", `String Masc_grpc_server.health_service_name);
@@ -214,6 +218,10 @@ let auth_snapshot_json ctx =
 
 let handle_transport_status _ctx _args : result =
   let json = transport_status_json () in
+  (true, Yojson.Safe.pretty_to_string json)
+
+let handle_config_snapshot _ctx _args : result =
+  let json = Env_config_introspect.to_json () in
   (true, Yojson.Safe.pretty_to_string json)
 
 let handle_websocket_discovery _ctx _args : result =
@@ -682,6 +690,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_tool_admin_update" -> Some (handle_tool_admin_update ctx args)
   | "masc_keeper_tool_catalog" -> Some (handle_keeper_tool_catalog ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
+  | "masc_config_snapshot" -> Some (handle_config_snapshot ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas

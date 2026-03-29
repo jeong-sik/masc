@@ -275,6 +275,21 @@ let run_turn
                  (List.length fp.review_tripwires)
              | None -> ())
           | None -> ());
+         (* Post-turn deterministic memory write.
+            Uses meta-based fallback when [STATE] parsing fails.
+            See RFC #3646 Section 3: Det/NonDet boundary. *)
+         (try
+           let (notes_written, kinds_written) =
+             Keeper_memory_bank.append_memory_notes_from_reply
+               config meta ~turn:result.turns ~reply:response_text
+           in
+           if notes_written > 0 then
+             Log.Keeper.info "keeper:%s memory_write: %d notes, kinds=[%s]"
+               meta.name notes_written (String.concat "," kinds_written)
+         with
+         | exn ->
+           Log.Keeper.warn "keeper:%s memory_write failed: %s"
+             meta.name (Printexc.to_string exn));
          Ok {
            response_text;
            model_used = model;

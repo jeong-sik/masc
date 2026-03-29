@@ -2,17 +2,6 @@
 open Types
 open Server_utils
 
-(** Extract Bearer token from Authorization header *)
-let extract_bearer_token request =
-  match Httpun.Headers.get request.Httpun.Request.headers "authorization" with
-  | Some auth_header ->
-    if String.length auth_header > 7 &&
-       String.lowercase_ascii (String.sub auth_header 0 7) = "bearer " then
-      Some (String.sub auth_header 7 (String.length auth_header - 7))
-    else
-      None
-  | None -> None
-
 let trim_opt = function
   | None -> None
   | Some raw ->
@@ -73,54 +62,6 @@ let ensure_strict_http_token_auth ~endpoint auth_config =
   else
     Ok auth_config
 
-(** Verify Bearer token for MCP endpoints *)
-let verify_mcp_auth ~base_path request =
-  let auth_config = Auth.load_auth_config base_path in
-  match ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config with
-  | Error msg -> Error msg
-  | Ok auth_config ->
-      if not auth_config.Types.enabled then
-        Ok None  (* Auth disabled - allow all *)
-      else
-        match extract_bearer_token request with
-        | None when not auth_config.require_token ->
-            Ok None  (* Token not required *)
-        | None ->
-            Error
-              "Authentication required. Use 'Authorization: Bearer <token>' header."
-        | Some token ->
-            (* Try to find agent by token hash *)
-            let token_hash = Auth.sha256_hash token in
-            let creds = Auth.list_credentials base_path in
-            match List.find_opt (fun c -> c.Types.token = token_hash) creds with
-            | None -> Error "Invalid token"
-            | Some cred -> (
-                (* Check expiry *)
-                match cred.expires_at with
-                | None -> Ok (Some cred)
-                | Some exp_str ->
-                    let now = Types.now_iso () in
-                    if now > exp_str then
-                      Error ("Token expired for " ^ cred.agent_name)
-                    else
-                      Ok (Some cred))
-
-let verify_operator_mcp_auth ~base_path request =
-  let auth_config = Auth.load_auth_config base_path in
-  if not auth_config.Types.enabled then
-    Error
-      "/mcp/operator requires room auth enabled with require_token=true."
-  else if not auth_config.require_token then
-    Error "/mcp/operator requires bearer token auth (require_token=true)."
-  else
-    match extract_bearer_token request with
-    | None ->
-        Error "Authentication required. Use 'Authorization: Bearer <token>' header."
-    | Some token -> (
-        match Auth.find_credential_by_token base_path ~token with
-        | Ok cred -> Ok (Some cred)
-        | Error err -> Error (Types.masc_error_to_string err))
-
 let bearer_token_from_header value =
   let prefix_len = 7 in (* String.length "Bearer " *)
   if String.length value > prefix_len
@@ -132,6 +73,42 @@ let auth_token_from_request request =
   Option.bind
     (Httpun.Headers.get request.Httpun.Request.headers "authorization")
     bearer_token_from_header
+
+(** Verify Bearer token for MCP endpoints *)
+let verify_mcp_auth ~base_path request =
+  let auth_config = Auth.load_auth_config base_path in
+  match ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config with
+  | Error msg -> Error msg
+  | Ok auth_config ->
+      if not auth_config.Types.enabled then
+        Ok None  (* Auth disabled - allow all *)
+      else
+        match auth_token_from_request request with
+        | None when not auth_config.require_token ->
+            Ok None  (* Token not required *)
+        | None ->
+            Error
+              "Authentication required. Use 'Authorization: Bearer <token>' header."
+        | Some token -> (
+            match Auth.find_credential_by_token base_path ~token with
+            | Ok cred -> Ok (Some cred)
+            | Error err -> Error (Types.masc_error_to_string err))
+
+let verify_operator_mcp_auth ~base_path request =
+  let auth_config = Auth.load_auth_config base_path in
+  if not auth_config.Types.enabled then
+    Error
+      "/mcp/operator requires room auth enabled with require_token=true."
+  else if not auth_config.require_token then
+    Error "/mcp/operator requires bearer token auth (require_token=true)."
+  else
+    match auth_token_from_request request with
+    | None ->
+        Error "Authentication required. Use 'Authorization: Bearer <token>' header."
+    | Some token -> (
+        match Auth.find_credential_by_token base_path ~token with
+        | Ok cred -> Ok (Some cred)
+        | Error err -> Error (Types.masc_error_to_string err))
 
 let agent_from_request request =
   let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in
@@ -214,13 +191,20 @@ let cors_allow_headers_value =
   "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
    Mcp-Protocol-Version, Last-Event-Id, X-MASC-Agent, X-MASC-Agent-Name"
 
-let cors_headers origin = [
-  ("access-control-allow-origin", origin);
-  ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
-  ("access-control-allow-headers", cors_allow_headers_value);
-  ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
-  ("access-control-allow-credentials", "true");
-]
+let cors_headers origin =
+  let base = [
+    ("access-control-allow-origin", origin);
+    ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+    ("access-control-allow-headers", cors_allow_headers_value);
+    ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
+    ("vary", "Origin");
+  ] in
+  (* CORS spec: Access-Control-Allow-Credentials must not be paired with
+     wildcard "*" origin.  Only include it when reflecting a real origin. *)
+  if origin <> "*" then
+    ("access-control-allow-credentials", "true") :: base
+  else
+    base
 
 let respond_json_with_cors ?(status = `OK) request reqd body =
   let origin = get_origin request in
@@ -258,19 +242,19 @@ let with_admin_auth handler request reqd =
           Http_server_eio.Response.json ~status:`Unauthorized
             {|{"error":"Admin token required"}|} reqd
       | Some expected, Some given ->
-          (* Timing-safe comparison: XOR all bytes, accumulate differences.
-             Runs in constant time regardless of where mismatch occurs. *)
-          let len_eq = String.length expected = String.length given in
-          let content_eq =
-            if not len_eq then false
-            else
-              let diff = ref 0 in
-              for i = 0 to String.length expected - 1 do
-                diff := !diff lor (Char.code expected.[i] lxor Char.code given.[i])
-              done;
-              !diff = 0
-          in
-          if len_eq && content_eq then
+          (* Constant-time comparison: always XOR max(len_a, len_b) bytes.
+             Length difference is folded into the diff accumulator so both
+             length and content mismatches cost the same wall-clock time. *)
+          let len_a = String.length expected in
+          let len_b = String.length given in
+          let max_len = max len_a len_b in
+          let diff = ref (len_a lxor len_b) in
+          for i = 0 to max_len - 1 do
+            let a = if i < len_a then Char.code expected.[i] else 0 in
+            let b = if i < len_b then Char.code given.[i] else 0 in
+            diff := !diff lor (a lxor b)
+          done;
+          if !diff = 0 then
             handler state request reqd
           else
             Http_server_eio.Response.json ~status:`Forbidden

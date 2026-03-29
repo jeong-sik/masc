@@ -9,9 +9,6 @@ include Env_config_runtime
 include Env_config_governance
 include Env_config_keeper
 
-module Server = Env_config_server
-module Dashboard = Env_config_dashboard
-
 let print_summary () =
   Log.Env.info "Zombie: threshold=%.0fs cleanup_interval=%.0fs"
     Env_config_runtime.Zombie.threshold_seconds
@@ -150,9 +147,9 @@ let to_json () : Yojson.Safe.t =
       "ws_port", int_val Env_config_runtime.Transport.ws_port;
       "h2_mode", str (Env_config_runtime.Transport.use_h2 ());
       "webrtc_enabled", bool_val (Env_config_runtime.Transport.webrtc_enabled ());
-      "storage_type", str Server.Storage.storage_type;
-      "pg_pool_size", int_val Server.Storage.pg_pool_size;
-      "telemetry_enabled", bool_val Server.Runtime.telemetry_enabled;
+      "storage_type", str (Env_config_core.storage_type ());
+      "pg_pool_size", int_val (Env_config_core.pg_pool_size ());
+      "telemetry_enabled", bool_val (Env_config_core.telemetry_enabled ());
       "openai_compat", bool_val Env_config_runtime.Transport.openai_compat_enabled;
       "dispatch_v2", bool_val Env_config_runtime.Tools.dispatch_v2_enabled;
       "rate_limit", float_val Env_config_runtime.Rate_bucket.rate;
@@ -170,18 +167,18 @@ let to_json () : Yojson.Safe.t =
       "llama_swarm_model", str_opt Env_config_runtime.Chain.llama_swarm_model_opt;
     ];
     "dashboard", `Assoc [
-      "fixtures_enabled", bool_val Env_config_dashboard.Fixtures.enabled;
-      "governance_judge_enabled", bool_val Env_config_dashboard.GovernanceJudge.enabled;
-      "governance_judge_interval_sec", int_val Env_config_dashboard.GovernanceJudge.interval_sec;
-      "operator_judge_enabled", bool_val Env_config_dashboard.OperatorJudge.enabled;
-      "operator_judge_interval_sec", int_val Env_config_dashboard.OperatorJudge.interval_sec;
-      "relay_calibration_enabled", bool_val Env_config_dashboard.Relay.calibration_enabled;
+      "fixtures_enabled", bool_val (Env_config_governance.Dashboard_config.fixtures_enabled ());
+      "governance_judge_enabled", bool_val Env_config_governance.Dashboard_config.governance_judge_enabled;
+      "governance_judge_interval_sec", int_val Env_config_governance.Dashboard_config.governance_judge_interval_sec;
+      "operator_judge_enabled", bool_val Env_config_governance.Operator.judge_enabled;
+      "operator_judge_interval_sec", int_val Env_config_governance.Operator.judge_interval_sec;
+      "relay_calibration_enabled", bool_val (get_bool ~default:true "MASC_RELAY_CALIBRATION_ENABLED");
     ];
     "external", `Assoc [
-      "graphql_url", str (Server.External.graphql_url ());
-      "neo4j_uri", mask_opt Server.External.neo4j_uri_opt;
-      "neo4j_password", mask_opt Server.External.neo4j_password_opt;
-      "gemini_api_key", mask_opt Server.External.gemini_api_key_opt;
-      "graphql_api_key", mask_opt Server.External.graphql_api_key_opt;
+      "graphql_url", str (match Sys.getenv_opt "GRAPHQL_URL" with Some u -> u | None -> "");
+      "neo4j_uri", mask_opt (fun () -> Sys.getenv_opt "NEO4J_URI");
+      "neo4j_password", mask_opt (fun () -> Sys.getenv_opt "NEO4J_PASSWORD");
+      "gemini_api_key", mask_opt (fun () -> Sys.getenv_opt "GEMINI_API_KEY");
+      "graphql_api_key", mask_opt (fun () -> Sys.getenv_opt "GRAPHQL_API_KEY");
     ];
   ]

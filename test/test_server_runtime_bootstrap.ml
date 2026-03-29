@@ -236,6 +236,94 @@ let test_room_init_bootstraps_keeper_runtime_dirs () =
       Alcotest.(check bool) "perpetual dir exists" true
         (Sys.file_exists perpetual_dir && Sys.is_directory perpetual_dir))
 
+let make_keeper_meta_json ?(name = "sangsu")
+    ?(trace_id = "trace-sangsu-live")
+    ?(updated_at = "2026-03-29T10:36:57Z") () =
+  match
+    Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String name);
+          ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
+          ("trace_id", `String trace_id);
+          ("goal", `String ("goal-" ^ name));
+          ("cascade_name", `String "keeper_unified");
+          ("updated_at", `String updated_at);
+          ("last_model_used", `String "llama:auto");
+        ])
+  with
+  | Ok meta -> Keeper_types.meta_to_json meta |> Yojson.Safe.pretty_to_string
+  | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
+
+let test_migrate_legacy_keeper_dirs_promotes_valid_meta () =
+  with_temp_dir "startup-legacy-keepers" (fun dir ->
+      let state = Mcp_server.create_state ~base_path:dir in
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let keepers_dir = Filename.concat masc_root "keepers" in
+      let legacy_dir = Filename.concat masc_root "perpetual-keepers" in
+      let quarantine_dir =
+        Filename.concat masc_root "_quarantine/_replaced"
+      in
+      Fs_compat.mkdir_p keepers_dir;
+      Fs_compat.mkdir_p legacy_dir;
+      write_file (Filename.concat keepers_dir "sangsu.json")
+        {|{"name":"sangsu","created_at":"2026-03-26T15:53:16Z","updated_at":"2026-03-26T17:44:32Z"}|};
+      write_file (Filename.concat legacy_dir "sangsu.json")
+        (make_keeper_meta_json ());
+      write_file (Filename.concat legacy_dir "other.json")
+        (make_keeper_meta_json ~name:"other" ~trace_id:"trace-other-live" ());
+      Server_runtime_bootstrap.migrate_legacy_dirs state;
+      let read_meta_exn path =
+        match Keeper_types.read_meta_file_path path with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.failf "missing keeper meta at %s" path
+        | Error err -> Alcotest.failf "failed to read keeper meta %s: %s" path err
+      in
+      let sangsu_meta =
+        read_meta_exn (Filename.concat keepers_dir "sangsu.json")
+      in
+      let other_meta =
+        read_meta_exn (Filename.concat keepers_dir "other.json")
+      in
+      Alcotest.(check string) "sangsu trace promoted from perpetual-keepers"
+        "trace-sangsu-live" sangsu_meta.trace_id;
+      Alcotest.(check string) "other keeper migrated from perpetual-keepers"
+        "trace-other-live" other_meta.trace_id;
+      Alcotest.(check bool) "legacy dir removed after merge" false
+        (Sys.file_exists legacy_dir);
+      Alcotest.(check bool) "replaced stale keeper quarantined" true
+        (Sys.file_exists (Filename.concat quarantine_dir "sangsu.json")))
+
+let test_migrate_legacy_keeper_dirs_keeps_fresher_current_meta () =
+  with_temp_dir "startup-legacy-keepers-current-wins" (fun dir ->
+      let state = Mcp_server.create_state ~base_path:dir in
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let keepers_dir = Filename.concat masc_root "keepers" in
+      let legacy_dir = Filename.concat masc_root "perpetual-keepers" in
+      let quarantine_path =
+        Filename.concat masc_root "_quarantine/sangsu.json"
+      in
+      Fs_compat.mkdir_p keepers_dir;
+      Fs_compat.mkdir_p legacy_dir;
+      write_file (Filename.concat keepers_dir "sangsu.json")
+        (make_keeper_meta_json ~updated_at:"2026-03-29T11:36:57Z" ());
+      write_file (Filename.concat legacy_dir "sangsu.json")
+        (make_keeper_meta_json ~updated_at:"2026-03-29T10:36:57Z" ());
+      Server_runtime_bootstrap.migrate_legacy_dirs state;
+      let current_meta =
+        match
+          Keeper_types.read_meta_file_path
+            (Filename.concat keepers_dir "sangsu.json")
+        with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "missing current keeper meta"
+        | Error err -> Alcotest.failf "failed to read current keeper meta: %s" err
+      in
+      Alcotest.(check string) "fresher current meta preserved"
+        "2026-03-29T11:36:57Z" current_meta.updated_at;
+      Alcotest.(check bool) "older legacy keeper quarantined" true
+        (Sys.file_exists quarantine_path))
+
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
@@ -390,6 +478,12 @@ let () =
             test_keeper_paths_use_cluster_root;
           Alcotest.test_case "room init bootstraps keeper runtime dirs" `Quick
             test_room_init_bootstraps_keeper_runtime_dirs;
+          Alcotest.test_case
+            "legacy keeper migration promotes valid perpetual meta"
+            `Quick test_migrate_legacy_keeper_dirs_promotes_valid_meta;
+          Alcotest.test_case
+            "legacy keeper migration keeps fresher current meta"
+            `Quick test_migrate_legacy_keeper_dirs_keeps_fresher_current_meta;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case "liveness probe is always true" `Quick

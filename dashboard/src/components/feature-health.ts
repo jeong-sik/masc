@@ -4,7 +4,6 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { get } from '../api/core'
-import { lastEvent } from '../sse'
 import { Card } from './common/card'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'

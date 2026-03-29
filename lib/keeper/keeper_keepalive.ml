@@ -9,11 +9,11 @@ open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
-let keepalive_interval_sec = 30
+let keepalive_interval_sec = Env_config.KeeperKeepalive.interval_sec
 
 (* ── Board-reactive policy constants ── *)
 
-let board_reactive_debounce_sec = 60.0
+let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
 
 (* OAS Event_bus ref — set via bootstrap *)
 let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
@@ -30,14 +30,15 @@ let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
   grpc_env_ref := env
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
-    effect within ~2 s instead of waiting for the full 30-300 s interval. *)
+    effect within ~chunk_sec instead of waiting for the full interval. *)
 let interruptible_sleep ~clock ~stop ~wakeup duration =
+  let chunk_sec = Env_config.KeeperKeepalive.sleep_chunk_sec in
   let rec wait remaining =
     if Atomic.get stop then ()
     else if Atomic.compare_and_set wakeup true false then ()
     else if remaining <= 0.0 then ()
     else begin
-      let chunk = Float.min 2.0 remaining in
+      let chunk = Float.min chunk_sec remaining in
       Eio.Time.sleep clock chunk;
       wait (remaining -. chunk)
     end
@@ -105,7 +106,8 @@ let wakeup_relevant_keeper_for_board_signal
       |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
   | [] -> ()
 
-let max_consecutive_heartbeat_failures = 5
+let max_consecutive_heartbeat_failures =
+  Env_config.KeeperKeepalive.max_consecutive_failures
 
 (* Per-stage timing accumulator for Phase 0 profiling.
    In-memory ring of last 100 cycles. Flushed as aggregate at snapshot cadence.
@@ -119,7 +121,7 @@ type stage_timing = {
   improve_ms : float;
 }
 
-let stage_timing_ring_size = 100
+let stage_timing_ring_size = Env_config.KeeperProactive.stage_timing_ring_size
 
 let percentile arr p =
   let n = Array.length arr in
@@ -495,7 +497,12 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                      (Room.heartbeat_in_room ctx.config ~room_id
                         ~agent_name:meta_after_proactive.agent_name);
                    true
-                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                     Log.Keeper.debug "heartbeat_in_room failed for %s: %s"
+                       meta_after_proactive.name (Printexc.to_string exn);
+                     false
                ) meta_after_proactive.joined_room_ids in
                if hb_ok then (
                  last_successful_heartbeat_ts := Time_compat.now ();
@@ -562,7 +569,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             timing_ring.(!timing_cursor) <- timing;
             timing_cursor := (!timing_cursor + 1) mod stage_timing_ring_size;
             if !timing_filled < stage_timing_ring_size then incr timing_filled;
-            let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
+            let jitter = base *. Env_config.KeeperKeepalive.jitter_factor *. Random.float 1.0 in
             interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
             if Atomic.get stop then ()
             else loop ())
@@ -617,8 +624,8 @@ let process_directive ~agent_name directive =
 
     Requires [grpc_client_ref] to be set (via [set_grpc_client])
     and Eio switch/env to be available in [Eio_context]. *)
-let max_reconnect_attempts = 5
-let reconnect_backoff_sec = 5.0
+let max_reconnect_attempts = Env_config.KeeperGrpc.max_reconnect_attempts
+let reconnect_backoff_sec = Env_config.KeeperGrpc.reconnect_backoff_sec
 
 let run_grpc_heartbeat_fiber ~sw ~stop
     ~(grpc_client : Masc_grpc_client.t)

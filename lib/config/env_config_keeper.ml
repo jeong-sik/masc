@@ -219,4 +219,70 @@ module SmartHeartbeat = struct
     get_bool ~default:true "MASC_KEEPER_SMART_HEARTBEAT"
 end
 
+(** {1 Keeper Keepalive Loop Constants} *)
+
+module KeeperKeepalive = struct
+  (** Heartbeat cycle interval in seconds. Default: 30.
+      Range: [5, 300]. This is the foundational timing constant — every
+      keeper cycle (presence, snapshot, board scan, turn, recurring) runs
+      at this cadence. *)
+  let interval_sec =
+    max 5 (min 300 (get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"))
+
+  (** Maximum consecutive heartbeat failures before raising
+      Keeper_heartbeat_failure (structured crash). Default: 5.
+      Range: [2, 50]. *)
+  let max_consecutive_failures =
+    max 2 (min 50 (get_int ~default:5 "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES"))
+
+  (** Board-reactive wakeup debounce in seconds. Prevents rapid repeated
+      wakeups from the same board post. Default: 60.0.
+      Range: [5, 300]. *)
+  let board_debounce_sec =
+    Float.max 5.0 (Float.min 300.0
+      (get_float ~default:60.0 "MASC_KEEPER_BOARD_DEBOUNCE_SEC"))
+
+  (** Interruptible sleep chunk size in seconds. Smaller = faster wakeup
+      response but more CPU polling. Default: 2.0.
+      Range: [0.1, 10.0]. *)
+  let sleep_chunk_sec =
+    Float.max 0.1 (Float.min 10.0
+      (get_float ~default:2.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
+
+  (** Jitter factor applied to heartbeat interval (fraction of base).
+      Default: 0.2 (20%). Range: [0.0, 0.5]. *)
+  let jitter_factor =
+    Float.max 0.0 (Float.min 0.5
+      (get_float ~default:0.2 "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"))
+end
+
+(** {1 gRPC Heartbeat Reconnect} *)
+
+module KeeperGrpc = struct
+  (** Maximum gRPC reconnect attempts before stopping the heartbeat fiber.
+      Default: 5. Range: [1, 20]. *)
+  let max_reconnect_attempts =
+    max 1 (min 20 (get_int ~default:5 "MASC_KEEPER_GRPC_MAX_RECONNECT"))
+
+  (** Backoff delay between gRPC reconnect attempts in seconds.
+      Default: 5.0. Range: [1.0, 60.0]. *)
+  let reconnect_backoff_sec =
+    Float.max 1.0 (Float.min 60.0
+      (get_float ~default:5.0 "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"))
+end
+
+(** {1 Proactive Generation} *)
+
+module KeeperProactive = struct
+  (** Maximum proactive generation attempts before falling back.
+      Default: 3. Range: [1, 10]. *)
+  let max_attempts =
+    max 1 (min 10 (get_int ~default:3 "MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS"))
+
+  (** Stage timing ring buffer size for Phase 0 profiling.
+      Default: 100. Range: [10, 1000]. *)
+  let stage_timing_ring_size =
+    max 10 (min 1000 (get_int ~default:100 "MASC_KEEPER_STAGE_TIMING_RING_SIZE"))
+end
+
 (** Print configuration summary for debugging *)

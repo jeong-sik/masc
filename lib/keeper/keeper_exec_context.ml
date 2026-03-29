@@ -523,7 +523,7 @@ let run_proactive_generation
   let base_prompt =
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
   in
-  let max_attempts = 3 in
+  let max_attempts = Env_config.KeeperProactive.max_attempts in
   let previous_preview = String.trim meta.proactive.last_preview in
   let similarity_threshold = Keeper_config.keeper_proactive_similarity_threshold () in
   let fallback_skill_route =

@@ -172,7 +172,8 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
   | None, None ->
       (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
 
-let keepers_json ?keeper_names ?(include_recent_activity = true) config =
+let keepers_json ?keeper_names ?(include_recent_activity = true)
+    ?(lightweight = false) config =
   let names = match keeper_names with
     | Some n -> n
     | None -> Keeper_types.keeper_names config
@@ -182,6 +183,22 @@ let keepers_json ?keeper_names ?(include_recent_activity = true) config =
       (fun name ->
         match Keeper_types.read_meta config name with
         | Error _ | Ok None -> None
+        | Ok (Some meta) when lightweight && meta.paused ->
+            Some
+              (`Assoc
+                [
+                  ("runtime_class", `String "keeper");
+                  ("pipeline_stage", `String "paused");
+                  ("name", `String meta.name);
+                  ("agent_name", `String meta.agent_name);
+                  ("status", `String "paused");
+                  ("paused", `Bool true);
+                  ("goal", `String meta.goal);
+                  ("short_goal", `String meta.short_goal);
+                  ("turn_count", `Int meta.usage.total_turns);
+                  ("updated_at", `String meta.updated_at);
+                  ("created_at", `String meta.created_at);
+                ])
         | Ok (Some meta) ->
             let agent_json =
               Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
@@ -582,7 +599,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
              keepers_ref :=
                timed "keepers_json" (fun () ->
                  if initialized && include_keepers then
-                   keepers_json ~keeper_names
+                   keepers_json ~keeper_names ~lightweight:lightweight_summary
                      ~include_recent_activity:(not lightweight_summary) config
                  else empty_section));
            (fun () ->

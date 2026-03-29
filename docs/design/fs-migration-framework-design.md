@@ -50,12 +50,16 @@ let migrations : migration list = [
         Unix.rename src dst };
 ]
 
-(** Apply all pending migrations from current version to latest. *)
+(** Apply all pending migrations sequentially from current version. *)
 let migrate ~base_path =
-  let current = read_schema_version ~base_path in
-  let pending = List.filter (fun m -> m.from_version >= current) migrations in
-  List.iter (fun m -> m.apply ~base_path) (List.sort compare pending);
-  write_schema_version ~base_path (latest_version ())
+  let current = ref (read_schema_version ~base_path) in
+  let sorted = List.sort (fun a b -> compare a.from_version b.from_version) migrations in
+  List.iter (fun m ->
+    if m.from_version = !current then begin
+      m.apply ~base_path;
+      current := m.to_version
+    end) sorted;
+  write_schema_version ~base_path !current
 ```
 
 ### Startup Integration

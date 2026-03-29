@@ -158,12 +158,6 @@ let all_known_tool_names =
     "masc_governance_report";
     "masc_governance_set";
     "masc_governance_status";
-    "masc_goal_dispatch";
-    "masc_goal_list";
-    "masc_goal_refresh";
-    "masc_goal_review";
-    "masc_goal_snapshot";
-    "masc_goal_upsert";
     "masc_handover_claim";
     "masc_handover_claim_and_spawn";
     "masc_handover_create";

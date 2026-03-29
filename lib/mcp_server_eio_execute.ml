@@ -479,8 +479,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments
     | Mod_hat ->
         Tool_hat.dispatch { Tool_hat.config; agent_name } ~name ~args:arguments
-    | Mod_cache ->
-        Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments
     | Mod_goals ->
         Tool_goals.dispatch { Tool_goals.config; agent_name; call_keeper_msg = None } ~name ~args:arguments
     | Mod_compact ->

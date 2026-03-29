@@ -69,10 +69,12 @@ let test_dashboard_tools_projection () =
         (match usage |> member "dispatch_v2_enabled" with
          | `Bool _ -> true
          | _ -> false);
+      (* masc_team_session_step: schema registered, not in public_mcp_tools,
+         so auto-hidden by Tool_catalog.metadata fallback. *)
       let hidden_tool =
         inventory_rows
         |> List.find_opt (fun row ->
-               row |> member "name" |> to_string = "masc_vote_create")
+               row |> member "name" |> to_string = "masc_team_session_step")
       in
       check bool "includes hidden tool" true (Option.is_some hidden_tool);
       match hidden_tool with

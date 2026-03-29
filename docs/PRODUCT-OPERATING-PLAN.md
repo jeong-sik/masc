@@ -28,6 +28,7 @@ The front-door promise is level 1. Levels 2-4 are real, but they are not the fir
 | Room and task hygiene | Done | Front door | `docs/spec/C-implementation-status.md`, `README.md` | docs were too spread out | keep as default entry path |
 | Worktree and collision control | Done | Front door | README, room/tool coverage, live usage | onboarding clarity | keep in front-door docs |
 | Team Session + Supervisor | Working | Advanced | `docs/SWARM-DELIVERY-RUNBOOK.md`, `docs/SUPERVISOR-MODE.md` | still not the safest starting path | present as advanced flow |
+| Keeper continuity | Not done for product promise | Advanced | `docs/design/keeper-continuity-product-rfc.md`, `docs/KEEPER-CONTINUITY-VALIDATION.md` | checkpoint truth and bounded contract are not productized yet | ship as bounded same-trace continuity with explicit runbook |
 | Dashboard core read models | Working | Supporting | `docs/qa/REQUIREMENTS-REVERSE-ENGINEERED.md` | transport truth and config visibility gaps | harden read truth and config introspection |
 | Remote-safe operator | Working | Supporting | `docs/REMOTE-MCP-OPERATOR.md` | auth and release posture still need tightening | keep surface reduced and explicit |
 | Multi-transport matrix | Working but not front-door | Experimental | implementation status appendix, live transport issues | reachable state and reported state can diverge | fix health truth before promotion |
@@ -147,6 +148,7 @@ Research next:
 
 - non-local auth defaults and REST contract versioning
 - delivery-swarm readiness and verifier budget reliability
+- bounded keeper continuity contract and release evidence
 - read-only diagnosis bundles for operator workflows
 
 Keep visible, but defer:

@@ -152,6 +152,8 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) — product promise, GitHub operating model, 6-8 week execution tracks
 - [ROADMAP.md](ROADMAP.md) — current package version, latest release truth, active tracks
 - [docs/PRODUCT-REVIEW.md](docs/PRODUCT-REVIEW.md) — current product posture by promise level
+- [docs/design/keeper-continuity-product-rfc.md](docs/design/keeper-continuity-product-rfc.md) — bounded keeper continuity contract and promise level
+- [docs/KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md](docs/KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md) — release gate, evidence, monitoring, and rollback for keeper continuity
 
 ## Document Map
 

@@ -31,6 +31,30 @@ All keepers receive: base + board + fs + shell + library + taskboard + governanc
 Voice tools are added when `policy_voice_enabled = true`.
 `write_done = true` returns empty tool list (session terminated).
 
+## Continuity Contract
+
+Keeper continuity is a bounded advanced capability, not a general memory promise.
+
+What the product should promise:
+
+- `masc_keeper_msg` can continue a same-trace conversation when checkpoint restore is healthy
+- `masc_keeper_status` and `masc_keeper_list(detailed=true)` expose enough continuity state to diagnose restore and handoff behavior
+- validation should rely on OAS checkpoint truth plus live runtime evidence
+
+What the product should not promise:
+
+- long-term or general conversational memory
+- cross-generation recall
+- assistant reply recall outside the active checkpoint window
+- memory bank resurrection as part of keeper continuity
+
+Primary continuity fields:
+
+- `trace_id`
+- `generation`
+- `trace_history_count`
+- `continuity_summary`
+
 ## Triage System
 
 Triage evaluates 9 trigger types on each heartbeat:

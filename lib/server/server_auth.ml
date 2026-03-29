@@ -140,14 +140,11 @@ let agent_from_request request =
   first_some [ hdr "x-masc-agent"; hdr "x-masc-agent-name"; qp "agent"; qp "agent_name" ]
   |> Option.map Uri.pct_decode
 
-let effective_port_of_uri (uri : Uri.t) =
-  match Uri.port uri with
-  | Some _ as p -> p
-  | None -> (
-      match Uri.scheme uri with
-      | Some "http" -> Some 80
-      | Some "https" -> Some 443
-      | _ -> None)
+(** Extract host and explicit port only.
+    Host header carries no scheme, so inferring a default port from scheme
+    (80 for http, 443 for https) causes mismatches when the browser Origin
+    uses https (port 443) but we parse Host with a synthetic "http://" prefix
+    (port 80).  Comparing explicit ports avoids this class of bug. *)
 
 let host_port_of_origin origin =
   try
@@ -155,9 +152,7 @@ let host_port_of_origin origin =
     match Uri.host uri with
     | None -> None
     | Some host ->
-        Some
-          ( String.trim host |> String.lowercase_ascii,
-            effective_port_of_uri uri )
+        Some (String.trim host |> String.lowercase_ascii, Uri.port uri)
   with exn ->
     Log.Auth.debug "host_port_of_origin: parse failed for %S: %s"
       origin (Printexc.to_string exn);
@@ -172,9 +167,7 @@ let host_port_of_request request =
         match Uri.host uri with
         | None -> None
         | Some host ->
-            Some
-              ( String.trim host |> String.lowercase_ascii,
-                effective_port_of_uri uri )
+            Some (String.trim host |> String.lowercase_ascii, Uri.port uri)
       with exn ->
         Log.Auth.debug "host_port_of_request: parse failed for %S: %s"
           host_header (Printexc.to_string exn);
@@ -191,6 +184,11 @@ let ensure_same_origin_browser_request request :
              && origin_port = request_port ->
           Ok ()
       | _ ->
+          Log.Auth.debug
+            "same-origin check failed: origin=%S host=%s"
+            origin
+            (match Httpun.Headers.get request.Httpun.Request.headers "host" with
+             | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
           Error
             (Types.Forbidden
                {

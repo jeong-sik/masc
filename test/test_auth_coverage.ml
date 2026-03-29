@@ -321,6 +321,35 @@ let test_same_origin_browser_request_rejects_cross_origin () =
   | Error (Types.Forbidden _) -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
+let test_same_origin_https_tunnel_same_host () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "masc.crying.pictures");
+        ("origin", "https://masc.crying.pictures");
+      ]
+  in
+  let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
+  match Server_auth.ensure_same_origin_browser_request request with
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
+let test_same_origin_rejects_different_explicit_port () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "localhost:9000");
+        ("origin", "http://localhost:8935");
+      ]
+  in
+  let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
+  match Server_auth.ensure_same_origin_browser_request request with
+  | Ok () -> fail "expected different-port request to be rejected"
+  | Error (Types.Forbidden _) -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
 (* ============================================================
    HTTP auth extraction regressions
    ============================================================ *)
@@ -614,5 +643,9 @@ let () =
         test_same_origin_browser_request_allows_matching_origin;
       test_case "same-origin rejects cross origin" `Quick
         test_same_origin_browser_request_rejects_cross_origin;
+      test_case "same-origin allows https tunnel same host" `Quick
+        test_same_origin_https_tunnel_same_host;
+      test_case "same-origin rejects different explicit port" `Quick
+        test_same_origin_rejects_different_explicit_port;
     ];
   ]

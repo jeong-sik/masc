@@ -263,21 +263,23 @@ Fun.protect
   ~finally:(fun () ->
     ... resolve reg.done_r (`Crashed "fiber terminated without resolution"))
 
-(* After: body에서 structured exception catch + resolve *)
+(* After: body에서 structured exception catch + state 전이 + resolve *)
 Fun.protect
   (fun () ->
     (try
        run_heartbeat_loop ...;
+       set_state ~base_path meta.name Stopped;  (* state 전이 *)
        resolve reg.done_r `Stopped;
        publish_lifecycle "stopped" meta.name "normal exit"
      with
      | Keeper_heartbeat_failure info ->
          let reason = failure_reason_to_string info.reason in
+         set_state ~base_path meta.name Crashed;  (* state 전이: Running → Crashed *)
          record_crash ... meta.name (Time_compat.now ()) reason;
          resolve reg.done_r (`Crashed reason);
          publish_lifecycle "crashed" meta.name reason))
   ~finally:(fun () ->
-    ... (* generic fallback은 기존 유지: 예상치 못한 exception용 *))
+    ... (* generic fallback: set_state Crashed + resolve 기존 유지 *))
 ```
 
 ```ocaml
@@ -289,30 +291,56 @@ if !consecutive_failures >= max_consecutive_heartbeat_failures then
   })
 ```
 
-**Reconcile 경합 방지**:
+**`keeper_state` 확장 (필수 선행)**:
 
-현재 `sweep_and_recover`는 reconcile → restart 순서로 실행(line 118 → 146). self-stop이 Crashed로 바뀌면, reconcile이 먼저 실행되어 "not running" durable keeper를 re-launch할 수 있고, 이는 backoff 경로를 우회한다.
-
-해결: **sweep 순서 변경 — restart/unregister 먼저, reconcile 나중**.
+현재 `keeper_state = Running | Paused | Stopped`. `Crashed` variant가 없어서 structured crash 시 state가 `Running`으로 남으면 `is_running`, `running_count`, spawn slot, reconcile 판단이 전부 꼬인다.
 
 ```ocaml
-(* Before: keeper_supervisor.ml:114 *)
-let sweep_and_recover ctx =
-  reconcile_keepalive_keepers ctx;   (* ← 먼저 실행: Crashed를 re-launch할 수 있음 *)
-  let entries = ... in
-  (* process to_restart, to_unregister *)
-  reconcile_keepalive_keepers ctx;   (* 두 번째 pass *)
+(* Before: keeper_registry.ml *)
+type keeper_state = Running | Paused | Stopped
 
-(* After: restart 처리를 reconcile보다 먼저 *)
-let sweep_and_recover ctx =
-  let entries = Keeper_registry.all ~base_path () in
-  (* 1. Crashed/Stopped 분류 + restart/unregister 처리 *)
-  (* 2. self-preservation gate 적용 *)
-  (* 3. reconcile — 이 시점에서 Crashed entries는 이미 처리됨 *)
-  reconcile_keepalive_keepers ctx;
+(* After *)
+type keeper_state = Running | Paused | Stopped | Crashed
 ```
 
-이렇게 하면 Crashed entry가 reconcile에 도달하기 전에 backoff + self-preservation gate를 통과한다.
+`is_running` 은 `Running`만 true를 반환하므로, `Crashed` 추가로 기존 로직은 자동으로 올바르게 동작한다. Dashboard는 `Stopped`(정상 종료)와 `Crashed`(오류 종료)를 구분할 수 있다.
+
+**Reconcile 제외 규칙 (필수)**:
+
+sweep 순서 변경만으로는 부족하다. backoff delay 미경과, self-preservation 억제 등으로 아직 restart되지 않은 Crashed entry가 reconcile에서 "not running"으로 잡혀 re-launch될 수 있다. reconcile은 **registry에 entry가 존재하는 keeper를 건드리면 안 된다**.
+
+```ocaml
+(* Before: keeper_supervisor.ml:100 — reconcile 조건 *)
+| Ok (Some meta) when not meta.paused
+      && not (Keeper_registry.is_running ~base_path meta.name) ->
+    supervise_keepalive ...
+
+(* After: registry에 entry가 존재하면 skip *)
+| Ok (Some meta) when not meta.paused
+      && not (Keeper_registry.is_registered ~base_path meta.name) ->
+    (* registry에 없는 = 완전히 orphaned durable keeper만 reconcile *)
+    supervise_keepalive ...
+```
+
+`is_registered`는 entry 존재 여부만 확인한다 (state 무관). 이렇게 하면:
+- `Running`: is_registered = true → reconcile skip (정상)
+- `Crashed` (backoff pending): is_registered = true → reconcile skip (backoff 경로가 소유)
+- `Crashed` (suppressed): is_registered = true → reconcile skip (다음 cycle에서 재평가)
+- `Stopped` → unregister 후 entry 삭제 → is_registered = false → reconcile re-launch (정상)
+- Server restart 후 orphaned: registry empty → is_registered = false → reconcile re-launch (정상)
+
+**Sweep 순서 변경 (보완)**:
+
+순서 변경은 reconcile 제외 규칙의 보완이다. 단독으로는 불충분하지만, 제외 규칙과 함께 defense-in-depth를 제공한다.
+
+```ocaml
+let sweep_and_recover ctx =
+  let entries = Keeper_registry.all ~base_path () in
+  (* 1. Crashed/Stopped 분류 + restart(with backoff)/unregister 처리 *)
+  (* 2. self-preservation gate 적용 *)
+  (* 3. reconcile — registry에 없는 orphaned durable keeper만 대상 *)
+  reconcile_keepalive_keepers ctx;
+```
 
 **Failure reason codes (cohort detection 기반)**:
 
@@ -361,11 +389,13 @@ sweep_and_recover에서:
 
 | Step | File | Change |
 |------|------|--------|
-| 2.0 | `lib/keeper/keeper_supervisor.ml:41` | `launch_supervised_fiber` body에서 `Keeper_heartbeat_failure` catch + structured `Crashed reason` resolve |
+| 2.0a | `lib/keeper/keeper_registry.ml` | `keeper_state`에 `Crashed` variant 추가 + `is_registered` 함수 추가 |
+| 2.0b | `lib/keeper/keeper_supervisor.ml:41` | `launch_supervised_fiber` body에서 `Keeper_heartbeat_failure` catch + `set_state Crashed` + structured resolve |
 | 2.1 | `lib/keeper/keeper_keepalive.ml:147` | self-stop `Atomic.set stop true` → `raise (Keeper_heartbeat_failure ...)` |
-| 2.2 | `lib/keeper/keeper_supervisor.ml:114` | `sweep_and_recover` 순서 변경: restart/unregister → reconcile (reconcile 경합 방지) |
-| 2.3 | `lib/keeper/keeper_supervisor.ml` | `failure_reason` ADT 도입 + cohort grouping |
-| 2.4 | `lib/keeper/keeper_supervisor.ml` | self-preservation gate (ratio + min_candidates + dominant cohort) |
+| 2.2 | `lib/keeper/keeper_supervisor.ml:100` | reconcile 조건: `not (is_running)` → `not (is_registered)` (registry entry 있으면 skip) |
+| 2.3 | `lib/keeper/keeper_supervisor.ml:114` | `sweep_and_recover` 순서 변경: restart/unregister → reconcile |
+| 2.4 | `lib/keeper/keeper_supervisor.ml` | `failure_reason` ADT 도입 + cohort grouping |
+| 2.5 | `lib/keeper/keeper_supervisor.ml` | self-preservation gate (ratio + min_candidates + dominant cohort) |
 | 2.3 | `lib/keeper/keeper_supervisor.ml` | self-preservation event 발행 (dominant cohort 정보 포함) |
 | 2.4 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_SELF_PRESERVATION_RATIO` (float, default 0.3), `MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES` (int, default 2) |
 | 2.5 | `test/test_self_preservation.ml` | (a) 소규모 1/3 crash → restart 허용, (b) 대규모 same cohort → cohort만 억제, (c) mixed cohort → 각각 판정 |
@@ -438,13 +468,15 @@ Phase 3 착수 조건:
 - [ ] Phase 1.3: Presence sync conditional skip (`MAX_SILENCE_SEC` 기반 lease)
 - [ ] Phase 1.4: Config (feature flag + max silence)
 - [ ] Phase 1.5: Tests (freshness skip + room I/O failure 독립 검증)
-- [ ] Phase 2.0: `launch_supervised_fiber` body에서 `Keeper_heartbeat_failure` 명시적 catch + structured Crashed resolve
+- [ ] Phase 2.0a: `keeper_state`에 `Crashed` variant 추가 + `is_registered` 함수
+- [ ] Phase 2.0b: `launch_supervised_fiber` body에서 structured catch + `set_state Crashed` + resolve
 - [ ] Phase 2.1: `keeper_keepalive.ml:147` self-stop → structured exception raise
-- [ ] Phase 2.2: `sweep_and_recover` 순서 변경 (restart/unregister → reconcile)
-- [ ] Phase 2.3: `failure_reason` ADT 도입
-- [ ] Phase 2.4: Self-preservation gate (ratio + min_candidates + cohort)
-- [ ] Phase 2.5: Config (ratio, min_candidates)
-- [ ] Phase 2.6: Tests (소규모/대규모/mixed cohort + reconcile 순서)
+- [ ] Phase 2.2: reconcile 조건 변경 (`is_running` → `is_registered`)
+- [ ] Phase 2.3: `sweep_and_recover` 순서 변경 (restart/unregister → reconcile)
+- [ ] Phase 2.4: `failure_reason` ADT 도입
+- [ ] Phase 2.5: Self-preservation gate (ratio + min_candidates + cohort)
+- [ ] Phase 2.6: Config (ratio, min_candidates)
+- [ ] Phase 2.7: Tests (소규모/대규모/mixed cohort + reconcile 제외 + state 전이)
 - [ ] Phase 2b (gRPC 활성화 후): Phi accrual + shadow mode
 
 ## 7. Labeling Protocol

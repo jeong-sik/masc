@@ -1735,32 +1735,6 @@ let test_handle_request_invalid_json () =
 
   cleanup_dir base_path
 
-let test_handle_request_tools_call_cache_get_structured_content () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 116);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String "masc_cache_get");
-      ("arguments", `Assoc [ ("key", `String "missing") ]);
-    ]);
-  ]) in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  let structured = structured_content_exn response in
-  Alcotest.(check bool) "cache hit false" false
-    Yojson.Safe.Util.(structured |> member "hit" |> to_bool);
-  Alcotest.(check string) "cache key" "missing"
-    Yojson.Safe.Util.(structured |> member "key" |> to_string);
-  cleanup_dir base_path
-
 let test_handle_request_tools_call_board_post_structured_content () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2652,8 +2626,6 @@ let eio_tests = [
     test_handle_request_tools_call_transition_done_guidance;
   "handle tools/call transition claim requires action", `Quick,
     test_handle_request_tools_call_transition_claim_requires_action;
-  "handle tools/call cache get structured content", `Quick,
-    test_handle_request_tools_call_cache_get_structured_content;
   "handle tools/call board post structured content", `Quick,
     test_handle_request_tools_call_board_post_structured_content;
   "handle invalid json", `Quick, test_handle_request_invalid_json;

@@ -72,7 +72,7 @@ let test_dashboard_tools_projection () =
       let hidden_tool =
         inventory_rows
         |> List.find_opt (fun row ->
-               row |> member "name" |> to_string = "masc_goal_upsert")
+               row |> member "name" |> to_string = "masc_code_search")
       in
       check bool "includes hidden tool" true (Option.is_some hidden_tool);
       match hidden_tool with

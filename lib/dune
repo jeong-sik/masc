@@ -303,6 +303,7 @@
    tempo
    tools
    tool_args
+   tool_schema_dsl
    task_sandbox
    tool_fire_task
    tool_improve_loop_schemas

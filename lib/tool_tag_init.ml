@@ -41,12 +41,6 @@ let register_all () =
     "masc_transition";
   ];
 
-  (* ── Mod_run: Tool_run ────────────────────────────────────────── *)
-  reg Mod_run [
-    "masc_run_init"; "masc_run_plan"; "masc_run_log";
-    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
-  ];
-
   (* ── Mod_code: Tool_code ──────────────────────────────────────── *)
   reg Mod_code [
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";

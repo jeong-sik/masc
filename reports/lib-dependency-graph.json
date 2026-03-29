@@ -1,8 +1,8 @@
 {
   "stats": {
-    "total_modules": 551,
-    "total_edges": 1824,
-    "avg_out_degree": 3.31,
+    "total_modules": 550,
+    "total_edges": 1804,
+    "avg_out_degree": 3.28,
     "leaf_count": 157,
     "root_count": 112
   },
@@ -44,10 +44,6 @@
       20
     ],
     [
-      "Response",
-      20
-    ],
-    [
       "Session",
       19
     ],
@@ -86,6 +82,10 @@
     [
       "Oas_model_resolve",
       15
+    ],
+    [
+      "Provider_adapter",
+      14
     ]
   ],
   "top_importers": [
@@ -111,14 +111,14 @@
     ],
     [
       "Server_routes_http_routes_dashboard",
-      28
-    ],
-    [
-      "Server_h2_gateway",
-      23
+      27
     ],
     [
       "Server_dashboard_http",
+      22
+    ],
+    [
+      "Server_h2_gateway",
       22
     ],
     [
@@ -138,15 +138,15 @@
       19
     ],
     [
-      "Server_routes_http_runtime",
-      18
-    ],
-    [
       "Keeper_keepalive",
       18
     ],
     [
       "Server_dashboard_http_core",
+      17
+    ],
+    [
+      "Server_routes_http_runtime",
       17
     ],
     [
@@ -272,8 +272,8 @@
         "Server_mcp_transport_ws"
       ],
       "internal_edges": 14,
-      "external_dep_count": 6,
-      "coupling_ratio": 0.7
+      "external_dep_count": 5,
+      "coupling_ratio": 0.737
     },
     {
       "prefix": "tool_command",
@@ -374,6 +374,20 @@
       "coupling_ratio": 0.333
     },
     {
+      "prefix": "server_command",
+      "module_count": 5,
+      "members": [
+        "Server_command_plane_http",
+        "Server_command_plane_http_help",
+        "Server_command_plane_http_mutations",
+        "Server_command_plane_http_stream",
+        "Server_command_plane_http_support"
+      ],
+      "internal_edges": 6,
+      "external_dep_count": 13,
+      "coupling_ratio": 0.316
+    },
+    {
       "prefix": "tool_autoresearch",
       "module_count": 6,
       "members": [
@@ -404,20 +418,6 @@
       "internal_edges": 9,
       "external_dep_count": 20,
       "coupling_ratio": 0.31
-    },
-    {
-      "prefix": "server_command",
-      "module_count": 5,
-      "members": [
-        "Server_command_plane_http",
-        "Server_command_plane_http_help",
-        "Server_command_plane_http_mutations",
-        "Server_command_plane_http_stream",
-        "Server_command_plane_http_support"
-      ],
-      "internal_edges": 6,
-      "external_dep_count": 14,
-      "coupling_ratio": 0.3
     },
     {
       "prefix": "tool_team",
@@ -468,8 +468,8 @@
         "Server_routes_http_runtime"
       ],
       "internal_edges": 18,
-      "external_dep_count": 60,
-      "coupling_ratio": 0.231
+      "external_dep_count": 59,
+      "coupling_ratio": 0.234
     },
     {
       "prefix": "operator_digest",
@@ -563,6 +563,19 @@
       "coupling_ratio": 0.148
     },
     {
+      "prefix": "server_h2",
+      "module_count": 4,
+      "members": [
+        "Server_h2_gateway",
+        "Server_h2_gateway_helpers",
+        "Server_h2_gateway_routes_cp",
+        "Server_h2_gateway_routes_extra"
+      ],
+      "internal_edges": 4,
+      "external_dep_count": 25,
+      "coupling_ratio": 0.138
+    },
+    {
       "prefix": "dashboard_mission",
       "module_count": 4,
       "members": [
@@ -573,19 +586,6 @@
       ],
       "internal_edges": 2,
       "external_dep_count": 13,
-      "coupling_ratio": 0.133
-    },
-    {
-      "prefix": "server_h2",
-      "module_count": 4,
-      "members": [
-        "Server_h2_gateway",
-        "Server_h2_gateway_helpers",
-        "Server_h2_gateway_routes_cp",
-        "Server_h2_gateway_routes_extra"
-      ],
-      "internal_edges": 4,
-      "external_dep_count": 26,
       "coupling_ratio": 0.133
     },
     {
@@ -1054,7 +1054,6 @@
       "Config",
       "Http_server_eio",
       "Mcp_server",
-      "Response",
       "Server_utils"
     ],
     "Server_voice_config": [
@@ -1186,7 +1185,6 @@
     ],
     "Server_routes_http_pages": [
       "Graphql_api",
-      "Response",
       "Server_auth",
       "Web_dashboard"
     ],
@@ -1198,7 +1196,6 @@
       "Keeper_registry",
       "Masc_grpc_server",
       "Masc_grpc_service",
-      "Response",
       "Server_auth",
       "Server_mcp_transport_ws",
       "Server_routes_http_common",
@@ -1219,7 +1216,6 @@
       "Keeper_config",
       "Keeper_execution",
       "Mcp_server",
-      "Response",
       "Server_auth",
       "Telemetry_eio",
       "Tool_keeper",
@@ -1228,7 +1224,6 @@
     "Server_routes_http_routes_frontend": [
       "Credits_dashboard",
       "Prometheus",
-      "Response",
       "Server_auth",
       "Server_routes_http_common",
       "Server_routes_http_pages",
@@ -1242,7 +1237,6 @@
     "Server_routes_http_routes_room": [
       "Dashboard_execution_helpers",
       "Mcp_server",
-      "Response",
       "Room",
       "Server_auth",
       "Server_routes_http_common",
@@ -1266,7 +1260,6 @@
       "Keeper_turn_up_update",
       "Keeper_types",
       "Mcp_server",
-      "Response",
       "Room",
       "Server_auth",
       "Server_dashboard_http",
@@ -1280,13 +1273,11 @@
       "Tool_unified"
     ],
     "Server_routes_http_routes_command_plane_read": [
-      "Response",
       "Server_auth",
       "Server_routes_http_common",
       "Server_utils"
     ],
     "Server_routes_http_routes_command_plane_write": [
-      "Response",
       "Server_auth",
       "Server_dashboard_http",
       "Server_routes_http_common"
@@ -1294,7 +1285,6 @@
     "Server_routes_http_routes_provider_runs": [
       "Dashboard_provider_runs",
       "Mcp_server",
-      "Response",
       "Server_auth",
       "Server_utils"
     ],
@@ -1305,7 +1295,6 @@
       "Board_dispatch",
       "Mcp_server",
       "Mention_inbox",
-      "Response",
       "Server_auth",
       "Server_mcp_transport_http",
       "Server_routes_http_common",
@@ -1322,7 +1311,6 @@
       "Graphql_api",
       "Mcp_server",
       "Prometheus",
-      "Response",
       "Room",
       "Server_auth",
       "Server_dashboard_http",
@@ -1339,15 +1327,12 @@
       "Transport",
       "Transport_metrics"
     ],
-    "Server_h2_gateway_helpers": [
-      "Response"
-    ],
+    "Server_h2_gateway_helpers": [],
     "Server_h2_gateway_routes_extra": [
       "Board",
       "Board_dispatch",
       "Http_server_eio",
       "Mcp_server",
-      "Response",
       "Server_h2_gateway_helpers",
       "Server_routes_http",
       "Server_utils",
@@ -1478,7 +1463,6 @@
     "Server_command_plane_http_stream": [
       "Chain_native_eio",
       "Chain_telemetry",
-      "Response",
       "Server_command_plane_http_support",
       "Sse",
       "Transport"
@@ -1490,12 +1474,10 @@
     ],
     "Server_command_plane_http_help": [],
     "Server_activity_http": [
-      "Mcp_server",
-      "Response"
+      "Mcp_server"
     ],
     "Server_mcp_transport_http": [
       "Mcp_server",
-      "Response",
       "Server_mcp_transport_http_conn",
       "Server_mcp_transport_http_headers",
       "Sse"
@@ -1504,13 +1486,11 @@
       "Sse"
     ],
     "Server_mcp_transport_http_respond": [
-      "Response",
       "Server_mcp_transport_http_headers",
       "Server_mcp_transport_http_types"
     ],
     "Server_mcp_transport_http_agui": [
       "Ag_ui",
-      "Response",
       "Server_mcp_transport_http_conn",
       "Server_mcp_transport_http_headers",
       "Server_mcp_transport_http_protocol",
@@ -2198,7 +2178,6 @@
       "Room",
       "Swarm_checkpoint"
     ],
-    "Response": [],
     "Room": [
       "Agent_economy",
       "Audit_log",
@@ -2976,7 +2955,6 @@
     "Voice_bridge": [
       "Code",
       "Provider_adapter",
-      "Response",
       "Transport",
       "Voice_config"
     ],

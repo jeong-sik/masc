@@ -7,8 +7,6 @@
     - JSON serialization
 *)
 
-open Masc_mcp
-
 (* Test utilities *)
 let assert_true msg cond =
   if not cond then failwith (Printf.sprintf "Assertion failed: %s" msg)

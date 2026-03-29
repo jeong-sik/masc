@@ -272,7 +272,6 @@
    goal_orchestrator
    goal_scheduler
    swarm_goal_loop
-   response
    room
    run_eio
    team_context
@@ -789,6 +788,8 @@
    ;; MCP transport/session leaf primitives (extracted sub-libraries)
    masc_mcp.mcp_transport_protocol
    masc_mcp.mcp_session
+   ;; Response envelope leaf primitive (extracted sub-library)
+   masc_mcp.response
    ;; OpenTelemetry (spans + OTLP exporter + metrics)
    opentelemetry
    opentelemetry-client-cohttp-eio

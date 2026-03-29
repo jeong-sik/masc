@@ -147,6 +147,7 @@ let all_known_tool_names =
     "masc_find_by_capability";
     "masc_fire_task";
     "masc_gc";
+    "masc_generate_key";
     "masc_get_metrics";
     "masc_goal_dispatch";
     "masc_goal_list";
@@ -216,6 +217,7 @@ let all_known_tool_names =
     "masc_mdal_swarm_start";
     "masc_memento_mori";
     "masc_messages";
+    "masc_model_catalog";
     "masc_note_add";
     "masc_observe_alerts";
     "masc_observe_capacity";
@@ -340,10 +342,6 @@ let all_known_tool_names =
     "masc_verify_request";
     "masc_verify_status";
     "masc_verify_submit";
-    "masc_vote_cast";
-    "masc_vote_create";
-    "masc_vote_status";
-    "masc_votes";
     "masc_voice_agent";
     "masc_voice_conference_end";
     "masc_voice_conference_start";

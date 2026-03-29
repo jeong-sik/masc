@@ -742,39 +742,7 @@ let test_masc_tool_admin_update_schema () =
 (* 13. Cache Tool Tests                                          *)
 (* ============================================================ *)
 
-let test_masc_cache_set_schema () =
-  match find_tool "masc_cache_set" with
-  | None -> Alcotest.fail "masc_cache_set not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has key" true (List.mem_assoc "key" props);
-          Alcotest.(check bool) "has value" true (List.mem_assoc "value" props)
-      | None -> Alcotest.fail "masc_cache_set missing properties"
-
-let test_masc_cache_get_schema () =
-  match find_tool "masc_cache_get" with
-  | None -> Alcotest.fail "masc_cache_get not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has key" true (List.mem_assoc "key" props)
-      | None -> Alcotest.fail "masc_cache_get missing properties"
-
-let test_masc_cache_delete_schema () =
-  match find_tool "masc_cache_delete" with
-  | None -> Alcotest.fail "masc_cache_delete not found"
-  | Some _ -> ()
-
-let test_masc_cache_list_schema () =
-  match find_tool "masc_cache_list" with
-  | None -> Alcotest.fail "masc_cache_list not found"
-  | Some _ -> ()
-
-let test_masc_cache_stats_schema () =
-  match find_tool "masc_cache_stats" with
-  | None -> Alcotest.fail "masc_cache_stats not found"
-  | Some _ -> ()
+(* cache tools removed from MCP surface in #3640 *)
 
 (* ============================================================ *)
 (* 14. Handover Tool Tests                                       *)
@@ -942,24 +910,7 @@ let test_masc_walph_status_schema () =
           Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props)
       | None -> Alcotest.fail "masc_walph_status missing properties"
 
-(* ============================================================ *)
-(* 18. Hat Tool Tests                                            *)
-(* ============================================================ *)
-
-let test_masc_hat_wear_schema () =
-  match find_tool "masc_hat_wear" with
-  | None -> Alcotest.fail "masc_hat_wear not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has hat" true (List.mem_assoc "hat" props);
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props)
-      | None -> Alcotest.fail "masc_hat_wear missing properties"
-
-let test_masc_hat_status_schema () =
-  match find_tool "masc_hat_status" with
-  | None -> Alcotest.fail "masc_hat_status not found"
-  | Some _ -> ()
+(* hat tools removed from MCP surface in #3640 *)
 
 (* ============================================================ *)
 (* 19. Bounded Run Tool Tests                                    *)
@@ -1182,13 +1133,7 @@ let () =
       Alcotest.test_case "team-session-step-spawn-batch" `Quick
         test_masc_team_session_step_spawn_batch_schema;
     ];
-    "cache_tools", [
-      Alcotest.test_case "cache_set" `Quick test_masc_cache_set_schema;
-      Alcotest.test_case "cache_get" `Quick test_masc_cache_get_schema;
-      Alcotest.test_case "cache_delete" `Quick test_masc_cache_delete_schema;
-      Alcotest.test_case "cache_list" `Quick test_masc_cache_list_schema;
-      Alcotest.test_case "cache_stats" `Quick test_masc_cache_stats_schema;
-    ];
+    (* cache_tools: removed from MCP surface in #3640 *)
     "handover_tools", [
       Alcotest.test_case "handover_create" `Quick test_masc_handover_create_schema;
       Alcotest.test_case "handover_list" `Quick test_masc_handover_list_schema;
@@ -1216,10 +1161,7 @@ let () =
       Alcotest.test_case "walph_natural" `Quick test_masc_walph_natural_schema;
       Alcotest.test_case "walph_status" `Quick test_masc_walph_status_schema;
     ];
-    "hat_tools", [
-      Alcotest.test_case "hat_wear" `Quick test_masc_hat_wear_schema;
-      Alcotest.test_case "hat_status" `Quick test_masc_hat_status_schema;
-    ];
+    (* hat_tools: removed from MCP surface in #3640 *)
     "bounded_run", [
       Alcotest.test_case "bounded_run" `Quick test_masc_bounded_run_schema;
     ];

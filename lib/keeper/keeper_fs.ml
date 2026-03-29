@@ -44,16 +44,20 @@ let clear_dir_cache () : unit =
 let save_atomic (path : string) (content : string) : unit =
   let dir = Filename.dirname path in
   ignore (ensure_dir dir);
-  let tmp_path =
-    Filename.temp_file ~temp_dir:dir (Filename.basename path ^ ".") ".tmp"
+  let tmp_path, oc =
+    Filename.open_temp_file ~temp_dir:dir (Filename.basename path ^ ".") ".tmp"
   in
+  let closed = ref false in
   Fun.protect ~finally:(fun () ->
-    try
-      if Sys.file_exists tmp_path then Sys.remove tmp_path
-    with
-    | Sys_error _ -> ())
+    if not !closed then begin
+      close_out_noerr oc;
+      closed := true
+    end;
+    try Sys.remove tmp_path with Sys_error _ -> ())
     (fun () ->
-      Fs_compat.save_file tmp_path content;
+      output_string oc content;
+      close_out oc;
+      closed := true;
       Unix.rename tmp_path path)
 
 (** Atomically save a Yojson value as pretty-printed JSON. *)

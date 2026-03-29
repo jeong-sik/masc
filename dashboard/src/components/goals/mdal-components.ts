@@ -193,7 +193,7 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
           <div class="flex gap-1.5 flex-wrap items-center">
             <${StatusBadge} status=${loop.status} />
             <span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${loop.current_iteration}${loop.max_iterations > 0 ? `/${loop.max_iterations}` : ''}</span>
-            ${loop.status === 'running' || loop.status === 'active' ? html`
+            ${loop.status === 'running' ? html`
               <button type="button"
                 class="text-[10px] py-0.5 px-2 rounded-full border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors cursor-pointer disabled:opacity-50"
                 disabled=${stoppingLoops.value[loop.loop_id] ?? false}

@@ -523,7 +523,8 @@ let test_budget_check_zero_cost () =
     (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.0)
 
 let test_default_daily_budget () =
-  check (float 0.001) "default budget" 0.10 D.default_daily_budget_usd
+  (* default is 0.10 in env_config_keeper.ml KeeperRuntime *)
+  check (float 0.001) "default budget" 0.10 (D.daily_budget_usd_from_env ())
 
 let test_daily_budget_from_env_default () =
   (* Unset the env var to get default *)
@@ -539,7 +540,7 @@ let test_daily_budget_from_env_default () =
    | Some v -> Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" v
    | None -> ());
   (* Empty string causes Failure in float_of_string, so default applies *)
-  check (float 0.001) "env default budget" D.default_daily_budget_usd budget
+  check (float 0.001) "env default budget" 0.10 budget
 
 let test_daily_budget_from_env_custom () =
   let saved = Sys.getenv_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" in

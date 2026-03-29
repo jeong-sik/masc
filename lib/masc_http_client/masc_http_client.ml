@@ -37,9 +37,9 @@ let make_closing_client ~sw ~net ~https =
         match https with
         | Some wrap ->
             (wrap uri sock
-              :> [ `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
+              :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
         | None -> failwith "HTTPS requested but not enabled")
-    | _ -> (sock :> [ `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
+    | _ -> (sock :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
   in
   let client = Cohttp_eio.Client.make_generic connect in
   Eio.Switch.on_release sw (fun () ->

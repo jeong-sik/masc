@@ -55,7 +55,7 @@ Primary continuity fields:
 - `trace_history_count`
 - `continuity_summary`
 
-`continuity_summary` is the latest continuity snapshot text. It may be empty or `null` when no continuity snapshot is available yet; a successful validated turn should eventually replace that empty state with a newer snapshot in detailed keeper status.
+`continuity_summary` is the latest continuity snapshot text. It may be empty or `null` before the first continuity snapshot exists. After a harness-validated continuity update, detailed keeper status should expose a non-empty latest snapshot for that keeper.
 
 ## Triage System
 

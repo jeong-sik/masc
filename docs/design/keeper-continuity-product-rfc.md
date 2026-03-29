@@ -106,6 +106,8 @@ The feature may be described as a productized advanced capability only when all 
 
 Until then, the product posture remains `Not done for product promise` even though the design docs themselves are in `Draft`.
 
+The current production promotion bar is intentionally stricter than the base user-facing contract. The existing validation harness also uses compaction and handoff evidence as resilience signals before promotion.
+
 ## Follow-On Work
 
 Out of scope for this RFC, but explicitly related:

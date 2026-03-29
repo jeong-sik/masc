@@ -104,7 +104,9 @@ The read surfaces must agree on:
 - active `trace_id`
 - `generation`
 - whether handoff occurred
-- whether `continuity_summary` is no longer empty/stale for the validated turn, with `last_continuity_update_ts` from detailed status used as the tie-breaker when needed
+- whether `continuity_summary` reflects the latest harness-validated continuity update, with `last_continuity_update_ts` from detailed status used as the tie-breaker when needed
+
+For timing-sensitive interpretation, the harness result (`PASS` / `PARTIAL` / `FAIL`) remains authoritative. Read-model checks are used to confirm consistency, not to redefine the harness outcome.
 
 ## Monitoring And Alerts
 
@@ -121,6 +123,8 @@ Operator escalation rules:
 - any sustained checkpoint load failure blocks keeper continuity promotion
 - any empty-message restore regression pages or creates a release blocker
 - any mismatch between live keeper state and read surfaces blocks promotion until resolved
+
+If these metrics are not yet exported in the current telemetry stack, keeper continuity remains blocked from production promotion until equivalent dashboards or reports are defined.
 
 ## Rollback And Containment
 

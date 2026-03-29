@@ -230,3 +230,29 @@ export async function fetchKeeperChatHistory(
     return []
   }
 }
+
+// --- Keeper lifecycle (boot / shutdown) ---
+
+export interface KeeperLifecycleResponse {
+  ok: boolean
+  action?: 'boot' | 'shutdown'
+  name?: string
+  detail?: unknown
+  error?: string
+}
+
+export async function bootKeeper(name: string): Promise<KeeperLifecycleResponse> {
+  const resp = await fetch(`/api/v1/keepers/${encodeURIComponent(name)}/boot`, {
+    method: 'POST',
+    headers: jsonHeaders(),
+  })
+  return resp.json() as Promise<KeeperLifecycleResponse>
+}
+
+export async function shutdownKeeper(name: string): Promise<KeeperLifecycleResponse> {
+  const resp = await fetch(`/api/v1/keepers/${encodeURIComponent(name)}/shutdown`, {
+    method: 'POST',
+    headers: jsonHeaders(),
+  })
+  return resp.json() as Promise<KeeperLifecycleResponse>
+}

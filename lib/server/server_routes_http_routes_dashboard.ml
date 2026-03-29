@@ -462,6 +462,112 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
+  (* Keeper boot — POST /api/v1/keepers/:name/boot *)
+  |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun state agent_name req reqd ->
+           let req_path = Http.Request.path req in
+           let prefix = "/api/v1/keepers/" in
+           let suffix = "/boot" in
+           let plen = String.length prefix in
+           let slen = String.length suffix in
+           let tlen = String.length req_path in
+           if tlen > plen + slen
+              && String.sub req_path 0 plen = prefix
+              && String.sub req_path (tlen - slen) slen = suffix
+           then
+             let name =
+               String.trim
+                 (String.sub req_path plen (tlen - plen - slen))
+             in
+             if String.length name = 0 then
+               Http.Response.json ~status:`Bad_request
+                 {|{"error":"keeper name is required"}|} reqd
+             else
+               let config = state.Mcp_server.room_config in
+               let keeper_ctx : _ Tool_keeper.context =
+                 {
+                   config;
+                   agent_name;
+                   sw;
+                   clock;
+                   proc_mgr = state.Mcp_server.proc_mgr;
+                 }
+               in
+               let args = `Assoc [("name", `String name)] in
+               (match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up" ~args with
+               | Some (true, body) ->
+                   Http.Response.json ~compress:true ~request:req
+                     (Printf.sprintf {|{"ok":true,"action":"boot","name":"%s","detail":%s}|}
+                        (String.escaped name) body)
+                     reqd
+               | Some (false, body) ->
+                   Http.Response.json ~status:`Bad_request ~request:req
+                     (Yojson.Safe.to_string
+                        (`Assoc [("ok", `Bool false); ("error", `String body)]))
+                     reqd
+               | None ->
+                   Http.Response.json ~status:`Internal_server_error ~request:req
+                     {|{"ok":false,"error":"dispatch returned None"}|}
+                     reqd)
+           else
+             Http.Response.json ~status:`Not_found
+               {|{"error":"not found"}|} reqd
+         ) request reqd)
+
+  (* Keeper shutdown — POST /api/v1/keepers/:name/shutdown *)
+  |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun state agent_name req reqd ->
+           let req_path = Http.Request.path req in
+           let prefix = "/api/v1/keepers/" in
+           let suffix = "/shutdown" in
+           let plen = String.length prefix in
+           let slen = String.length suffix in
+           let tlen = String.length req_path in
+           if tlen > plen + slen
+              && String.sub req_path 0 plen = prefix
+              && String.sub req_path (tlen - slen) slen = suffix
+           then
+             let name =
+               String.trim
+                 (String.sub req_path plen (tlen - plen - slen))
+             in
+             if String.length name = 0 then
+               Http.Response.json ~status:`Bad_request
+                 {|{"error":"keeper name is required"}|} reqd
+             else
+               let config = state.Mcp_server.room_config in
+               let keeper_ctx : _ Tool_keeper.context =
+                 {
+                   config;
+                   agent_name;
+                   sw;
+                   clock;
+                   proc_mgr = state.Mcp_server.proc_mgr;
+                 }
+               in
+               let args = `Assoc [("name", `String name)] in
+               (match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_down" ~args with
+               | Some (true, _body) ->
+                   Http.Response.json ~compress:true ~request:req
+                     (Printf.sprintf {|{"ok":true,"action":"shutdown","name":"%s"}|}
+                        (String.escaped name))
+                     reqd
+               | Some (false, body) ->
+                   Http.Response.json ~status:`Bad_request ~request:req
+                     (Yojson.Safe.to_string
+                        (`Assoc [("ok", `Bool false); ("error", `String body)]))
+                     reqd
+               | None ->
+                   Http.Response.json ~status:`Internal_server_error ~request:req
+                     {|{"ok":false,"error":"dispatch returned None"}|}
+                     reqd)
+           else
+             Http.Response.json ~status:`Not_found
+               {|{"error":"not found"}|} reqd
+         ) request reqd)
+
   (* Agent activity — per-agent tool call stats from telemetry *)
   |> Http.Router.get "/api/v1/agent-activity" (fun request reqd ->
        with_public_read (fun state req reqd ->

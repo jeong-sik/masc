@@ -18,8 +18,13 @@ import {
   sendKeeperThreadMessage,
 } from '../keeper-runtime'
 import { isVisibleDirectConversationEntry } from '../keeper-state'
+import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
+import { signal } from '@preact/signals'
+
+const keeperBooting = signal<Record<string, boolean>>({})
+const keeperShuttingDown = signal<Record<string, boolean>>({})
 
 const KEEPER_CHAT_METADATA_VISIBLE_KEY = 'masc_keeper_chat_metadata_visible'
 
@@ -348,17 +353,61 @@ export function KeeperRuntimeActions({
   const diagnostic = effectiveDiagnostic(keeper)
   const probing = keeperProbing.value[keeper.name] ?? false
   const recovering = keeperRecovering.value[keeper.name] ?? false
+  const booting = keeperBooting.value[keeper.name] ?? false
+  const shuttingDown = keeperShuttingDown.value[keeper.name] ?? false
   const recommended = diagnostic?.next_action_path ?? null
   const canRecover = diagnostic?.recoverable === true
+  const isOffline = keeper.status === 'offline' || keeper.status === 'inactive'
+  const isRunning = keeper.status === 'active' || keeper.status === 'running' || keeper.status === 'idle' || keeper.status === 'watching' || keeper.status === 'listening'
 
   const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-medium cursor-pointer transition-colors border'
   const ghostBtn = `${btnBase} border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]`
   const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.2)]`
   const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[rgba(251,191,36,0.08)] text-[#fbbf24] hover:bg-[rgba(251,191,36,0.15)]`
   const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[rgba(251,191,36,0.15)] text-[#fbbf24] hover:bg-[rgba(251,191,36,0.2)]`
+  const bootBtn = `${btnBase} border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[#4ade80] hover:bg-[rgba(34,197,94,0.15)]`
+  const shutdownBtn = `${btnBase} border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)]`
 
   return html`
     <div class="flex flex-wrap gap-2">
+      ${isOffline ? html`
+        <button type="button"
+          class=${bootBtn}
+          onClick=${() => {
+            keeperBooting.value = { ...keeperBooting.value, [keeper.name]: true }
+            void bootKeeper(keeper.name).then(res => {
+              if (res.ok) showToast(`${keeper.name} booted`, 'success')
+              else showToast(res.error ?? 'Boot failed', 'error')
+            }).catch(err => {
+              showToast(err instanceof Error ? err.message : `Failed to boot ${keeper.name}`, 'error')
+            }).finally(() => {
+              keeperBooting.value = { ...keeperBooting.value, [keeper.name]: false }
+            })
+          }}
+          disabled=${booting}
+        >
+          ${booting ? 'Booting...' : 'Boot'}
+        </button>
+      ` : null}
+      ${isRunning ? html`
+        <button type="button"
+          class=${shutdownBtn}
+          onClick=${() => {
+            keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: true }
+            void shutdownKeeper(keeper.name).then(res => {
+              if (res.ok) showToast(`${keeper.name} shut down`, 'success')
+              else showToast(res.error ?? 'Shutdown failed', 'error')
+            }).catch(err => {
+              showToast(err instanceof Error ? err.message : `Failed to shut down ${keeper.name}`, 'error')
+            }).finally(() => {
+              keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: false }
+            })
+          }}
+          disabled=${shuttingDown}
+        >
+          ${shuttingDown ? 'Shutting down...' : 'Shutdown'}
+        </button>
+      ` : null}
       <button type="button"
         class=${recommended === 'probe' ? activeGhostBtn : ghostBtn}
         onClick=${() => {

@@ -437,6 +437,7 @@ let create_memory_full ~(agent_name : string)
     ?(session_id : string option)
     ?(config : Room_utils.config option)
     ?(episode_limit = 50) ?(procedure_limit = 20)
+    ?(global_procedure_limit = 0)
     () : Agent_sdk.Memory.t =
   let base_dir =
     match base_dir with
@@ -451,6 +452,9 @@ let create_memory_full ~(agent_name : string)
   let _proc_count =
     seed_procedures_as_oas ~memory ~agent_name ~limit:procedure_limit
   in
+  (* Global procedures as Long_term JSON (keeper pattern) *)
+  if global_procedure_limit > 0 then
+    ignore (seed_procedures ~memory ~agent_name:"_global" ~limit:global_procedure_limit);
   (* Optional Long_term seeds *)
   (match config with
    | Some cfg ->

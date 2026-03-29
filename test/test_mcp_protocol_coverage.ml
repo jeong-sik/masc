@@ -51,6 +51,11 @@ let test_protocol_version_from_body_non_initialize () =
     (Mcp_transport_protocol.protocol_version_from_body
        {|{"jsonrpc":"2.0","method":"tools/list"}|})
 
+let test_protocol_version_from_body_missing_jsonrpc () =
+  check (option string) "missing jsonrpc rejected" None
+    (Mcp_transport_protocol.protocol_version_from_body
+       {|{"method":"initialize","params":{"protocolVersion":"2025-06-18"}}|})
+
 (* ============================================================
    accepts_json Tests (new: delegates to SDK with wildcard support)
    ============================================================ *)
@@ -208,6 +213,8 @@ let () =
         test_protocol_version_from_body_invalid_normalizes;
       test_case "from_body non_initialize" `Quick
         test_protocol_version_from_body_non_initialize;
+      test_case "from_body missing jsonrpc" `Quick
+        test_protocol_version_from_body_missing_jsonrpc;
     ];
     "accepts_json", [
       test_case "none" `Quick test_accepts_json_none;

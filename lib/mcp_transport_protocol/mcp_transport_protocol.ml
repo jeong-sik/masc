@@ -90,8 +90,10 @@ let protocol_version_from_params = function
 
 let protocol_version_from_initialize_request_json = function
   | `Assoc fields -> (
-      match List.assoc_opt "method" fields with
-      | Some (`String "initialize") ->
+      match
+        (List.assoc_opt "jsonrpc" fields, List.assoc_opt "method" fields)
+      with
+      | Some (`String "2.0"), Some (`String "initialize") ->
           let params = List.assoc_opt "params" fields in
           Some
             (protocol_version_from_params params |> normalize_protocol_version)

@@ -186,18 +186,23 @@ let cleanup_dead_tombstone (ctx : _ context)
                 entry.name err;
               false
       in
+      Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
       if persisted_paused then begin
-        Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
         publish_lifecycle "dead_cleaned" entry.name "paused meta persisted";
         Log.Keeper.info "%s: dead tombstone cleaned up" entry.name
+      end else begin
+        publish_lifecycle "dead_cleaned" entry.name "meta write failed, unregistered anyway";
+        Log.Keeper.warn "%s: dead tombstone unregistered despite meta write failure" entry.name
       end
   | Ok None ->
-      Log.Keeper.warn
-        "%s: dead tombstone cleanup skipped (meta missing)"
-        entry.name
+      Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
+      publish_lifecycle "dead_cleaned" entry.name "meta missing";
+      Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name
   | Error err ->
-      Log.Keeper.warn
-        "%s: dead tombstone cleanup skipped (%s)"
+      Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
+      publish_lifecycle "dead_cleaned" entry.name
+        (Printf.sprintf "meta read error: %s" err);
+      Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)"
         entry.name err
 
 (** Cohort key from structured failure_reason ADT.

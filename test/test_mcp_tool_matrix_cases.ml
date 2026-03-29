@@ -59,6 +59,9 @@ let all_known_tool_names =
     "masc_auth_refresh";
     "masc_auth_revoke";
     "masc_auth_status";
+    "masc_audit_query";
+    "masc_audit_stats";
+    "masc_audit_trail";
     "masc_autoresearch_cycle";
     "masc_autoresearch_inject";
     "masc_autoresearch_record_finding";
@@ -118,6 +121,8 @@ let all_known_tool_names =
     "masc_convo_list";
     "masc_convo_reply";
     "masc_convo_start";
+    "masc_cost_log";
+    "masc_cost_report";
     "masc_dashboard";
     "masc_deliver";
     "masc_detachment_list";
@@ -130,6 +135,9 @@ let all_known_tool_names =
     "masc_dispatch_tick";
     "masc_episode_flush";
     "masc_episode_list";
+    "masc_encryption_disable";
+    "masc_encryption_enable";
+    "masc_encryption_status";
     "masc_error_add";
     "masc_error_resolve";
     "masc_execute";
@@ -137,6 +145,7 @@ let all_known_tool_names =
     "masc_execution_orders";
     "masc_feature_flags";
     "masc_find_by_capability";
+    "masc_fire_task";
     "masc_gc";
     "masc_get_metrics";
     "masc_goal_dispatch";
@@ -146,8 +155,15 @@ let all_known_tool_names =
     "masc_goal_snapshot";
     "masc_goal_upsert";
     "masc_governance_feed";
+    "masc_governance_report";
     "masc_governance_set";
     "masc_governance_status";
+    "masc_goal_dispatch";
+    "masc_goal_list";
+    "masc_goal_refresh";
+    "masc_goal_review";
+    "masc_goal_snapshot";
+    "masc_goal_upsert";
     "masc_handover_claim";
     "masc_handover_claim_and_spawn";
     "masc_handover_create";
@@ -260,6 +276,8 @@ let all_known_tool_names =
     "masc_portal_send";
     "masc_portal_status";
     "masc_progress";
+    "masc_rate_limit_config";
+    "masc_rate_limit_status";
     "masc_recall_search";
     "masc_register_capabilities";
     "masc_reject";
@@ -294,6 +312,11 @@ let all_known_tool_names =
     "masc_suspend";
     "masc_task_history";
     "masc_tasks";
+    "masc_tempo";
+    "masc_tempo_adjust";
+    "masc_tempo_get";
+    "masc_tempo_reset";
+    "masc_tempo_set";
     "masc_team_session_compare";
     "masc_team_session_events";
     "masc_team_session_finalize";

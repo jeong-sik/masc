@@ -130,7 +130,7 @@ let mkdir_p path =
 let _ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 8
 
 let ensure_dir d =
-  if not (Hashtbl.mem _ensured_dirs d) then begin
+  if not (Hashtbl.mem _ensured_dirs d) || not (Sys.file_exists d) then begin
     mkdir_p d;
     Hashtbl.replace _ensured_dirs d ()
   end;

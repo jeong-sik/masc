@@ -7,7 +7,8 @@
 
 open Alcotest
 
-module Cfg = Masc_mcp.Env_config
+(* Env_config from masc_mcp.config (unwrapped library) *)
+module Cfg = Env_config
 module KK = Masc_mcp.Keeper_keepalive
 
 (* ── Config default values ──────────────────────────────── *)

@@ -57,7 +57,6 @@
         test_adversarial_eval
         test_labeling
         test_tool_deep_review
-        test_work_as_heartbeat
 )
  (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
           test_sse test_encryption test_cancellation test_graphql_api
@@ -96,7 +95,6 @@
           test_adversarial_eval
           test_labeling
           test_tool_deep_review
-          test_work_as_heartbeat
   )
  (libraries masc_mcp masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.response agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))
@@ -1175,3 +1173,9 @@
  (name test_cdal_friction_projection)
  (modules test_cdal_friction_projection)
  (libraries masc_mcp agent_sdk alcotest yojson unix str))
+
+; Phase 1: Work-as-heartbeat config + freshness logic + percentile
+(test
+ (name test_work_as_heartbeat)
+ (modules test_work_as_heartbeat)
+ (libraries masc_mcp masc_mcp.config alcotest unix))

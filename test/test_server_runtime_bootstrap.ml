@@ -221,6 +221,21 @@ let test_keeper_paths_use_cluster_root () =
           Alcotest.(check bool) "keeper dir under cluster root" true
             (String.starts_with ~prefix:expected_root keeper_dir)))
 
+let test_room_init_bootstraps_keeper_runtime_dirs () =
+  with_temp_dir "startup-keeper-dirs" (fun dir ->
+      let config = Room.default_config dir |> Room.config_with_resolved_scope in
+      ignore (Room.init config ~agent_name:None);
+      let root_dir = Room.masc_root_dir config in
+      let legacy_keepers_dir = Filename.concat root_dir "keepers" in
+      let keeper_dir = Filename.concat root_dir "perpetual-keepers" in
+      let perpetual_dir = Filename.concat root_dir "perpetual" in
+      Alcotest.(check bool) "legacy keeper dir exists" true
+        (Sys.file_exists legacy_keepers_dir && Sys.is_directory legacy_keepers_dir);
+      Alcotest.(check bool) "keeper dir exists" true
+        (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir);
+      Alcotest.(check bool) "perpetual dir exists" true
+        (Sys.file_exists perpetual_dir && Sys.is_directory perpetual_dir))
+
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
@@ -373,6 +388,8 @@ let () =
             `Quick test_restore_persisted_sessions_uses_scoped_agents_dir;
           Alcotest.test_case "keeper paths use cluster root" `Quick
             test_keeper_paths_use_cluster_root;
+          Alcotest.test_case "room init bootstraps keeper runtime dirs" `Quick
+            test_room_init_bootstraps_keeper_runtime_dirs;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case "liveness probe is always true" `Quick

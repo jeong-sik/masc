@@ -127,6 +127,11 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.50.0" };
 
+  { env_name = "MASC_KEEPER_WORK_AS_HEARTBEAT";
+    description = "Treat successful keeper work cycles as heartbeat presence proof";
+    default = true; category = "keeper";
+    lifecycle = Active; since = "2.163.0" };
+
   (* ── Dashboard & Governance ───────────────────────────────── *)
   { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";
     description = "Load dashboard fixture data for testing";

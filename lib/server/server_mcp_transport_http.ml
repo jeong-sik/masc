@@ -395,9 +395,9 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
   let base_path = deps.get_base_path () in
   let auth_result =
     match profile with
-    | Mcp_eio.Full | Mcp_eio.Managed_agent ->
+    | Full | Managed_agent ->
         deps.verify_mcp_auth ~base_path request
-    | Mcp_eio.Operator_remote ->
+    | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in
   let legacy_headers =

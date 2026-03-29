@@ -399,8 +399,8 @@ let tool_usage_of_by_name name =
 (* -- Tool usage persistence ---------------------------------------- *)
 
 let tool_usage_path ~base_path name =
-  let dir = Filename.concat (Filename.concat base_path ".masc") "keepers" in
-  Filename.concat dir (name ^ ".tool_usage.json")
+  let dir = Filename.concat (Filename.concat base_path ".masc") "keepers/tool_usage" in
+  Filename.concat dir (name ^ ".json")
 
 let flush_tool_usage ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with

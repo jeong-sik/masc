@@ -84,6 +84,10 @@ export function statusLabel(value?: string | null): string {
       return '진행 중'
     case 'todo':
       return '대기'
+    case 'preview':
+      return '미리보기'
+    case 'captured':
+      return '기록됨'
     case 'unknown':
     case '':
       return '확인 필요'

@@ -3,6 +3,7 @@ import { ActionButton } from '../common/button'
 import { CARD_STANDARD } from '../common/card'
 import { EmptyState } from '../common/empty-state'
 import { StatusChip } from '../common/status-chip'
+import { statusLabel as operationStatusLabel } from '../../lib/status-label'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type {
   ChainHistoryEventSummary,
@@ -45,27 +46,7 @@ import {
   toneClass,
 } from './helpers'
 
-function operationStatusLabel(value?: string | null): string {
-  switch ((value ?? '').trim().toLowerCase()) {
-    case 'active':
-      return '가동 중'
-    case 'paused':
-      return '일시정지'
-    case 'failed':
-      return '실패'
-    case 'completed':
-    case 'done':
-      return '완료'
-    case 'disconnected':
-      return '끊김'
-    case 'preview':
-      return '미리보기'
-    case 'captured':
-      return '기록됨'
-    default:
-      return value?.trim() || '확인 필요'
-  }
-}
+
 
 function MermaidGraph({ source }: { source: string }) {
   const hostRef = useRef<HTMLDivElement | null>(null)

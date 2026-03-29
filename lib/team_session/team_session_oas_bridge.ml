@@ -235,6 +235,126 @@ let create_team_session_raw_trace ~(config : Room.config) ~(session_id : string)
         agent_name (Oas.Error.to_string err);
       None
 
+let trace_ref_to_json (trace_ref : Oas.Raw_trace.run_ref) =
+  `Assoc
+    [
+      ("worker_run_id", `String trace_ref.worker_run_id);
+      ("path", `String trace_ref.path);
+      ("start_seq", `Int trace_ref.start_seq);
+      ("end_seq", `Int trace_ref.end_seq);
+      ("agent_name", `String trace_ref.agent_name);
+      ( "session_id",
+        match trace_ref.session_id with
+        | Some session_id -> `String session_id
+        | None -> `Null );
+    ]
+
+let preview_text text =
+  String.sub text 0 (min 200 (String.length text))
+
+let proof_result_status_to_string = function
+  | Oas.Cdal_proof.Completed -> "completed"
+  | Errored -> "errored"
+  | Timed_out -> "timed_out"
+  | Cancelled -> "cancelled"
+
+let worker_name_of_planned_worker ~(fallback : string)
+    (pw : Team_session_types.planned_worker) =
+  match pw.runtime_actor with
+  | Some actor when String.trim actor <> "" -> String.trim actor
+  | _ -> fallback
+
+let persist_worker_run_proof_if_present ~(config : Room.config)
+    ~(session_id : string)
+    ~(fallback_name : string)
+    ~(planned_worker : Team_session_types.planned_worker)
+    ~(resolved_model : string option)
+    ~(trace_ref : Oas.Raw_trace.run_ref option)
+    ~(success : bool)
+    ~(output_preview : string option)
+    ~(error : string option)
+    (proof_opt : Oas.Cdal_proof.t option) =
+  match proof_opt with
+  | None -> ()
+  | Some proof ->
+      let worker_run_id = proof.run_id in
+      let worker_name =
+        worker_name_of_planned_worker ~fallback:fallback_name planned_worker
+      in
+      let proof_path =
+        Team_session_store.worker_run_proof_path config session_id worker_run_id
+      in
+      Team_session_store.save_worker_run_proof_json config session_id worker_run_id
+        (Oas.Cdal_proof.to_json proof);
+      Team_session_store.save_worker_run_meta_json config session_id worker_run_id
+        (`Assoc
+          [
+            ("worker_run_id", `String worker_run_id);
+            ("worker_name", `String worker_name);
+            ("mode", `String "swarm");
+            ("status", `String (if success then "completed" else "failed"));
+            ("wait_mode", `String "background");
+            ( "trace_capability",
+              `String
+                (if Option.is_some trace_ref then "raw" else "summary_only") );
+            ("success", `Bool success);
+            ( "execution_scope",
+              Option.fold ~none:`Null
+                ~some:(fun scope ->
+                  `String (Team_session_types.execution_scope_to_string scope))
+                planned_worker.execution_scope );
+            ( "requested_worker_class",
+              Option.fold ~none:`Null
+                ~some:(fun kind ->
+                  `String (Team_session_types.worker_class_to_string kind))
+                planned_worker.worker_class );
+            ("requested_worker_size", `Null);
+            ("resolved_runtime", `String "oas_swarm");
+            ( "resolved_model",
+              Option.fold ~none:`Null ~some:(fun value -> `String value)
+                resolved_model );
+            ( "routing_reason",
+              Option.fold ~none:`Null ~some:(fun value -> `String value)
+                planned_worker.routing_reason );
+            ( "output_preview",
+              Option.fold ~none:`Null ~some:(fun value -> `String value)
+                output_preview );
+            ("error", Option.fold ~none:`Null ~some:(fun value -> `String value) error);
+            ( "trace_ref",
+              Option.fold ~none:`Null ~some:trace_ref_to_json trace_ref );
+            ("trace_summary", `Null);
+            ("trace_validation", `Null);
+            ("evidence_session_id", `Null);
+            ("oas_worker_run", `Null);
+            ("session_conformance", `Null);
+            ("validated", `Null);
+            ("final_text", Option.fold ~none:`Null ~some:(fun value -> `String value) output_preview);
+            ("stop_reason", `Null);
+            ("failure_reason", Option.fold ~none:`Null ~some:(fun value -> `String value) error);
+            ("ts_iso", `String (Types.now_iso ()));
+            ("cdal_run_id", `String proof.run_id);
+            ("contract_id", `String proof.contract_id);
+            ( "requested_execution_mode",
+              `String
+                (Oas.Execution_mode.to_string proof.requested_execution_mode) );
+            ( "effective_execution_mode",
+              `String
+                (Oas.Execution_mode.to_string proof.effective_execution_mode) );
+            ("risk_class", `String (Oas.Risk_class.to_string proof.risk_class));
+            ("result_status", `String (proof_result_status_to_string proof.result_status));
+            ( "tool_trace_refs",
+              `List
+                (List.map (fun ref_ -> `String ref_) proof.tool_trace_refs) );
+            ( "raw_evidence_refs",
+              `List
+                (List.map (fun ref_ -> `String ref_) proof.raw_evidence_refs) );
+            ( "checkpoint_ref",
+              Option.fold ~none:`Null ~some:(fun ref_ -> `String ref_)
+                proof.checkpoint_ref );
+            ("proof_path", `String proof_path);
+            ("proof_present", `Bool true);
+          ])
+
 let make_convergence_metric ~(entry_count : int)
     (success_by_agent : (string, bool) Hashtbl.t) :
     Swarm.Swarm_types.convergence_config option =
@@ -308,6 +428,7 @@ let planned_worker_to_entry_with_state
     let raw_trace =
       create_team_session_raw_trace ~config ~session_id ~agent_name:name
     in
+    let proof_ref = ref None in
     let dispatch_with_defaults ~name:(tool_name : string) ~(args : Yojson.Safe.t)
       =
       dispatch ~name:tool_name
@@ -325,15 +446,33 @@ let planned_worker_to_entry_with_state
           ~cascade_name ~fallback:(fun () -> 0.3))
         ~max_tokens:(Cascade_inference.resolve_max_tokens
           ~cascade_name ~fallback:(fun () -> 4096))
-        ?raw_trace ?contract ~sw ()
+        ?raw_trace ~proof_ref ?contract ~sw ()
     with
     | Ok result ->
         Hashtbl.replace success_by_agent name true;
         telemetry_ref := telemetry_of_run_result result;
+        let output_preview =
+          let text =
+            Oas.Types.text_of_content result.response.content |> String.trim
+          in
+          if text = "" then None else Some (preview_text text)
+        in
+        let proof_opt =
+          match result.proof with Some _ as proof -> proof | None -> !proof_ref
+        in
+        persist_worker_run_proof_if_present ~config ~session_id
+          ~fallback_name:name ~planned_worker:pw
+          ~resolved_model:(Some result.response.model)
+          ~trace_ref:result.trace_ref ~success:true ~output_preview
+          ~error:None proof_opt;
         Ok result.response
     | Error e ->
         Hashtbl.replace success_by_agent name false;
         telemetry_ref := Swarm.Swarm_types.empty_telemetry;
+        persist_worker_run_proof_if_present ~config ~session_id
+          ~fallback_name:name ~planned_worker:pw ~resolved_model:None
+          ~trace_ref:None ~success:false
+          ~output_preview:(Some (preview_text e)) ~error:(Some e) !proof_ref;
         Error
           (Oas.Error.Config
              (Oas.Error.InvalidConfig
@@ -404,9 +543,9 @@ let session_to_swarm_config
 
 let final_outcome_of_swarm_result
     (result : Swarm.Swarm_types.swarm_result)
-  : Team_session_types.session_status * string =
+  : Team_session_state.terminal_status * string =
   if result.converged then
-    (Team_session_types.Completed, "swarm_converged")
+    (Team_session_state.Completed, "swarm_converged")
   else
     let last_agent_results =
       match List.rev result.iterations with
@@ -424,11 +563,11 @@ let final_outcome_of_swarm_result
         (0, 0) last_agent_results
     in
     if success_count > 0 then
-      (Team_session_types.Interrupted, "swarm_partial_completion")
+      (Team_session_state.Interrupted, "swarm_partial_completion")
     else if error_count > 0 then
-      (Team_session_types.Failed, "swarm_all_agents_failed")
+      (Team_session_state.Failed, "swarm_all_agents_failed")
     else
-      (Team_session_types.Failed, "swarm_exhausted")
+      (Team_session_state.Failed, "swarm_exhausted")
 
 let apply_swarm_result
     (session : Team_session_types.session)
@@ -436,12 +575,23 @@ let apply_swarm_result
   : Team_session_types.session =
   let final_status, stop_reason = final_outcome_of_swarm_result result in
   let now = Time_compat.now () in
-  { session with
-    status = final_status;
-    turn_count = session.turn_count +
-      List.fold_left (fun acc (r : Swarm.Swarm_types.iteration_record) ->
-        acc + List.length r.agent_results) 0 result.iterations;
-    stopped_at = Some now;
-    last_event_at = Some now;
-    updated_at_iso = Types.now_iso ();
-    stop_reason = Some stop_reason }
+  let running =
+    match Team_session_state.of_running session with
+    | Some running -> running
+    | None ->
+        invalid_arg
+          "team_session_oas_bridge.apply_swarm_result: expected running session"
+  in
+  let finalized =
+    Team_session_state.finalize running ~final_status ~reason:stop_reason ~now
+    |> Team_session_state.session
+  in
+  {
+    finalized with
+    turn_count =
+      session.turn_count
+      + List.fold_left
+          (fun acc (record : Swarm.Swarm_types.iteration_record) ->
+            acc + List.length record.agent_results)
+          0 result.iterations;
+  }

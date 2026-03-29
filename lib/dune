@@ -91,6 +91,7 @@
    dashboard_http_repo_synthesis
    dashboard_provider_runs
    proactive_refresh
+   cdal_contract_bridge
    server_dashboard_http_runtime_support
    server_dashboard_http
    server_dashboard_http_cache
@@ -276,6 +277,7 @@
    run_eio
    team_context
    team_session_store
+   team_session_state
    team_session_report
    team_session_report_core
    team_session_report_proof_helpers

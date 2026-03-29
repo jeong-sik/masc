@@ -395,16 +395,29 @@ let finalize_session ~(config : Room.config) ~(session_id : string)
             let final_done_delta_by_agent, final_done_delta_total =
               compute_live_done_delta config session
             in
+            let terminal_status =
+              match Team_session_state.terminal_status_of_session_status final_status with
+              | Some status -> status
+              | None ->
+                  invalid_arg
+                    "team_session_engine_policy.finalize_session: expected terminal status"
+            in
+            let running =
+              match Team_session_state.of_running session with
+              | Some running -> running
+              | None ->
+                  invalid_arg
+                    "team_session_engine_policy.finalize_session: expected running session"
+            in
             let updated =
+              Team_session_state.finalize running ~final_status:terminal_status
+                ~reason ~now
+              |> Team_session_state.session
+              |> fun value ->
               {
-                session with
-                status = final_status;
-                stopped_at = Some now;
-                stop_reason = Some reason;
+                value with
                 final_done_delta_total = Some final_done_delta_total;
                 final_done_delta_by_agent = Some final_done_delta_by_agent;
-                last_event_at = Some now;
-                updated_at_iso = now_iso ();
               }
             in
             Team_session_store.save_session config updated;

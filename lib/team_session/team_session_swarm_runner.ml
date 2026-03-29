@@ -14,12 +14,11 @@ let run_swarm ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.Proce
   : (Team_session_types.session, string) result =
   match Team_session_store.load_session config session_id with
   | None -> Error (Printf.sprintf "session %s not found" session_id)
-  | Some session ->
-    if session.status <> Team_session_types.Running then
-      Error (Printf.sprintf "session %s is not running (status: %s)"
-        session_id
-        (Team_session_types.status_to_string session.status))
-    else
+  | Some session -> (
+      match Team_session_state.require_running session with
+      | Error msg -> Error (Printf.sprintf "session %s %s" session_id msg)
+      | Ok running_session ->
+      let session = Team_session_state.session running_session in
       let swarm_config =
         Team_session_oas_bridge.session_to_swarm_config
           ~config ~masc_tools ~dispatch session
@@ -70,4 +69,4 @@ let run_swarm ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.Proce
               updated_at_iso = Types.now_iso () }
           in
           Team_session_store.save_session config updated;
-          Error reason
+          Error reason)

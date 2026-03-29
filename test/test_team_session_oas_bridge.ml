@@ -347,6 +347,24 @@ let test_dispatch_supported_tool_heartbeat_autojoin () =
   Alcotest.(check bool) "worker auto-joined" true
     (Room.is_agent_joined config ~agent_name:"worker-heartbeat")
 
+let test_apply_swarm_result_requires_running_session () =
+  let session =
+    { (make_session ()) with status = Team_session_types.Paused }
+  in
+  let swarm_result : Swarm.Swarm_types.swarm_result =
+    {
+      iterations = [];
+      final_metric = None;
+      converged = false;
+      total_elapsed = 0.0;
+      total_usage = Oas.Types.empty_usage;
+    }
+  in
+  Alcotest.check_raises "paused session rejected"
+    (Invalid_argument
+       "team_session_oas_bridge.apply_swarm_result: expected running session")
+    (fun () -> ignore (Team_session_oas_bridge.apply_swarm_result session swarm_result))
+
 (* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
@@ -396,5 +414,7 @@ let () =
         test_dispatch_supported_tool_status;
       Alcotest.test_case "heartbeat autojoin" `Quick
         test_dispatch_supported_tool_heartbeat_autojoin;
+      Alcotest.test_case "apply_swarm_result requires running" `Quick
+        test_apply_swarm_result_requires_running_session;
     ];
   ]

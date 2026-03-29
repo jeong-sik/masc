@@ -222,7 +222,6 @@
    mdal
    mdal_swarm
    mdal_worker
-   mcp_transport_protocol
    mcp_prompt_surface
    mcp_sdk_adapter_masc
    mcp_server
@@ -236,7 +235,6 @@
    masc_error_recovery
    mcp_server_eio_tool_profile
    mcp_server_eio_protocol
-   mcp_session
    metrics_store_eio
    handoff_quality
    adaptive_thresholds
@@ -788,6 +786,9 @@
    masc_mcp.prompt_registry
    ;; Swarm status core/helpers (wrapper + inputs remain in monolith)
    masc_mcp.swarm_status
+   ;; MCP transport/session leaf primitives (extracted sub-libraries)
+   masc_mcp.mcp_transport_protocol
+   masc_mcp.mcp_session
    ;; OpenTelemetry (spans + OTLP exporter + metrics)
    opentelemetry
    opentelemetry-client-cohttp-eio

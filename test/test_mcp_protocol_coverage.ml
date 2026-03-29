@@ -6,7 +6,7 @@
 
 open Alcotest
 
-module Http_negotiation = Masc_mcp.Mcp_transport_protocol.Http_negotiation
+module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 
 (* ============================================================
    Content Type Constants Tests

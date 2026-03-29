@@ -7,11 +7,11 @@ Issue: #3593
 
 | Metric | Value |
 |--------|-------|
-| Sub-libraries extracted | 23 |
-| Monolith modules remaining | 553 (in dependency graph) |
-| Total dependency edges | 1,835 |
-| Avg dependencies per module | 3.32 |
-| Leaf modules (0 internal deps) | 159 |
+| Sub-libraries extracted | 25 |
+| Monolith modules remaining | 551 (in dependency graph) |
+| Total dependency edges | 1,824 |
+| Avg dependencies per module | 3.31 |
+| Leaf modules (0 internal deps) | 157 |
 | Root modules (nothing depends on them) | 112 |
 
 ## Critical Finding: 81-Module Cycle
@@ -39,7 +39,7 @@ These modules have the highest in-degree (most depended-upon):
 | Keeper_types | 44 | Keeper type definitions |
 | Mcp_server | 39 | MCP protocol server |
 | Team_session_store | 38 | Session persistence |
-| Sse | 30 | Server-sent events |
+| Sse | 29 | Server-sent events |
 | Chain_types | 25 | Chain type definitions |
 
 Room (136 dependents = 25% of all modules) is the gravity well.
@@ -47,13 +47,14 @@ Room (136 dependents = 25% of all modules) is the gravity well.
 ## Extraction Candidates (by coupling ratio)
 
 High coupling ratio = internal edges dominate over external deps = easier to extract.
-`tool_schemas`, `activity_graph`, `prompt_registry`, and the `swarm_status`
-core/helper set are already extracted in this branch, so the next candidates
-start at Batch 2.
+`tool_schemas`, `activity_graph`, `prompt_registry`, the `swarm_status`
+core/helper set, and the `Mcp_session` / `Mcp_transport_protocol` leaf
+primitives are already extracted in this branch, so the next candidates
+start at Batch 2 with a cleaner `server_mcp` boundary.
 
 | Prefix Group | Modules | Coupling | Ext Deps | Status |
 |-------------|---------|----------|----------|--------|
-| server_mcp | 10 | 0.652 | 8 | Medium |
+| server_mcp | 10 | 0.700 | 6 | Medium |
 | tool_command | 9 | 0.630 | 10 | Medium |
 | dashboard_proof | 5 | 0.556 | 4 | Medium |
 | tool_improve | 6 | 0.500 | 5 | Medium |
@@ -83,11 +84,14 @@ Completed in this branch:
 4. **swarm_status** core/helpers (6 modules) — extracted as `masc_mcp.swarm_status`
    with `Swarm_status` wrapper and `Swarm_status_inputs` left in the monolith to bridge
    `Command_plane_v2` and `Team_session_store`
+5. **Mcp_session** (leaf primitive) — extracted as `masc_mcp.mcp_session`
+6. **Mcp_transport_protocol** (leaf primitive) — extracted as `masc_mcp.mcp_transport_protocol`
+   to reduce direct `server_mcp` transport dependencies before Batch 2
 
 **Batch 1 status**: complete. No remaining low-risk 3+ module clusters.
 
 ### Batch 2: Medium-risk extractions
-5. **server_mcp** (10 modules, coupling 0.652)
+5. **server_mcp** (10 modules, coupling 0.700, ext deps 6 after primitive extraction)
 6. **tool_command** (9 modules, coupling 0.630)
 7. **dashboard_proof** (5 modules, coupling 0.556)
 8. **masc_grpc** (5 modules, coupling 0.429)

@@ -12,7 +12,6 @@ open Cmdliner
 (** Module aliases *)
 module Http = Masc_mcp.Http_server_eio
 module Http_h2 = Masc_mcp.Http_server_h2
-module Mcp_session = Masc_mcp.Mcp_session
 module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Room = Masc_mcp.Room
@@ -40,7 +39,7 @@ module Board_dispatch = Masc_mcp.Board_dispatch
 module Board_listener = Masc_mcp.Board_listener
 module Council = Council
 module Task_dispatch = Masc_mcp.Task_dispatch
-module Http_negotiation = Masc_mcp.Mcp_transport_protocol.Http_negotiation
+module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
 module Safe_ops = Safe_ops

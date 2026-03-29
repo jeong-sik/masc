@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_mcp_session)
+ (public_name masc_mcp.mcp_session)
+ (modules mcp_session)
+ (wrapped false)
+ (libraries time_compat unix))

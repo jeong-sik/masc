@@ -1,9 +1,9 @@
 {
   "stats": {
-    "total_modules": 553,
-    "total_edges": 1835,
-    "avg_out_degree": 3.32,
-    "leaf_count": 159,
+    "total_modules": 551,
+    "total_edges": 1824,
+    "avg_out_degree": 3.31,
+    "leaf_count": 157,
     "root_count": 112
   },
   "top_imported": [
@@ -29,7 +29,7 @@
     ],
     [
       "Sse",
-      30
+      29
     ],
     [
       "Chain_types",
@@ -40,11 +40,11 @@
       24
     ],
     [
-      "Response",
-      21
+      "Oas_worker",
+      20
     ],
     [
-      "Oas_worker",
+      "Response",
       20
     ],
     [
@@ -115,19 +115,19 @@
     ],
     [
       "Server_h2_gateway",
-      24
+      23
     ],
     [
       "Server_dashboard_http",
       22
     ],
     [
-      "Tool_inline_dispatch",
+      "Keeper_exec_context",
       21
     ],
     [
-      "Keeper_exec_context",
-      21
+      "Tool_inline_dispatch",
+      20
     ],
     [
       "Tool_misc",
@@ -271,9 +271,9 @@
         "Server_mcp_transport_http_types",
         "Server_mcp_transport_ws"
       ],
-      "internal_edges": 15,
-      "external_dep_count": 8,
-      "coupling_ratio": 0.652
+      "internal_edges": 14,
+      "external_dep_count": 6,
+      "coupling_ratio": 0.7
     },
     {
       "prefix": "tool_command",
@@ -451,6 +451,27 @@
       "coupling_ratio": 0.25
     },
     {
+      "prefix": "server_routes",
+      "module_count": 12,
+      "members": [
+        "Server_routes_http",
+        "Server_routes_http_common",
+        "Server_routes_http_keeper_stream",
+        "Server_routes_http_pages",
+        "Server_routes_http_routes_activity",
+        "Server_routes_http_routes_command_plane_read",
+        "Server_routes_http_routes_command_plane_write",
+        "Server_routes_http_routes_dashboard",
+        "Server_routes_http_routes_frontend",
+        "Server_routes_http_routes_provider_runs",
+        "Server_routes_http_routes_room",
+        "Server_routes_http_runtime"
+      ],
+      "internal_edges": 18,
+      "external_dep_count": 60,
+      "coupling_ratio": 0.231
+    },
+    {
       "prefix": "operator_digest",
       "module_count": 5,
       "members": [
@@ -479,27 +500,6 @@
       "coupling_ratio": 0.231
     },
     {
-      "prefix": "server_routes",
-      "module_count": 12,
-      "members": [
-        "Server_routes_http",
-        "Server_routes_http_common",
-        "Server_routes_http_keeper_stream",
-        "Server_routes_http_pages",
-        "Server_routes_http_routes_activity",
-        "Server_routes_http_routes_command_plane_read",
-        "Server_routes_http_routes_command_plane_write",
-        "Server_routes_http_routes_dashboard",
-        "Server_routes_http_routes_frontend",
-        "Server_routes_http_routes_provider_runs",
-        "Server_routes_http_routes_room",
-        "Server_routes_http_runtime"
-      ],
-      "internal_edges": 18,
-      "external_dep_count": 61,
-      "coupling_ratio": 0.228
-    },
-    {
       "prefix": "tool_inline",
       "module_count": 6,
       "members": [
@@ -511,8 +511,8 @@
         "Tool_inline_dispatch_types"
       ],
       "internal_edges": 7,
-      "external_dep_count": 28,
-      "coupling_ratio": 0.2
+      "external_dep_count": 27,
+      "coupling_ratio": 0.206
     },
     {
       "prefix": "mcp_server",
@@ -585,8 +585,8 @@
         "Server_h2_gateway_routes_extra"
       ],
       "internal_edges": 4,
-      "external_dep_count": 27,
-      "coupling_ratio": 0.129
+      "external_dep_count": 26,
+      "coupling_ratio": 0.133
     },
     {
       "prefix": "keeper_status",
@@ -1180,7 +1180,6 @@
       "Server_routes_http_routes_room"
     ],
     "Server_routes_http_common": [
-      "Mcp_transport_protocol",
       "Server_auth",
       "Server_dashboard_http",
       "Server_utils"
@@ -1322,7 +1321,6 @@
       "Env_config_introspect",
       "Graphql_api",
       "Mcp_server",
-      "Mcp_session",
       "Prometheus",
       "Response",
       "Room",
@@ -1493,29 +1491,25 @@
     "Server_command_plane_http_help": [],
     "Server_activity_http": [
       "Mcp_server",
-      "Mcp_session",
       "Response"
     ],
     "Server_mcp_transport_http": [
       "Mcp_server",
-      "Mcp_session",
       "Response",
+      "Server_mcp_transport_http_conn",
       "Server_mcp_transport_http_headers",
-      "Server_mcp_transport_http_sse",
       "Sse"
     ],
     "Server_mcp_transport_http_conn": [
-      "Server_mcp_transport_http_sse",
       "Sse"
     ],
     "Server_mcp_transport_http_respond": [
       "Response",
       "Server_mcp_transport_http_headers",
-      "Server_mcp_transport_http_protocol"
+      "Server_mcp_transport_http_types"
     ],
     "Server_mcp_transport_http_agui": [
       "Ag_ui",
-      "Mcp_session",
       "Response",
       "Server_mcp_transport_http_conn",
       "Server_mcp_transport_http_headers",
@@ -1526,7 +1520,6 @@
     ],
     "Server_mcp_transport_http_protocol": [
       "Mcp_server",
-      "Mcp_transport_protocol",
       "Server_mcp_transport_http_headers",
       "Server_mcp_transport_http_types"
     ],
@@ -1537,16 +1530,13 @@
       "Mcp_server"
     ],
     "Server_mcp_transport_http_headers": [
-      "Mcp_transport_protocol",
       "Server_mcp_transport_http_session",
       "Server_mcp_transport_http_types",
       "Sse"
     ],
     "Server_mcp_transport_http_sse": [
-      "Response",
-      "Server_mcp_transport_http_headers",
-      "Server_mcp_transport_http_types",
-      "Sse"
+      "Server_mcp_transport_http_respond",
+      "Server_mcp_transport_http_types"
     ],
     "Server_mcp_transport_ws": [
       "Sse",
@@ -1858,7 +1848,6 @@
       "Room",
       "Worker_runtime"
     ],
-    "Mcp_transport_protocol": [],
     "Mcp_prompt_surface": [
       "Cp_snapshot",
       "Dashboard_proof",
@@ -2067,7 +2056,6 @@
       "Tool_help_registry",
       "Version"
     ],
-    "Mcp_session": [],
     "Metrics_store_eio": [],
     "Handoff_quality": [],
     "Adaptive_thresholds": [
@@ -2825,7 +2813,6 @@
       "Config",
       "Mcp_server",
       "Mcp_server_eio_governance",
-      "Mcp_session",
       "Mitosis",
       "Notify",
       "Progress",

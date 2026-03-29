@@ -26,6 +26,10 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let has_tmp_files dir =
+  Sys.readdir dir
+  |> Array.exists (fun name -> Filename.check_suffix name ".tmp")
+
 (* ================================================================ *)
 (* ensure_dir tests                                                 *)
 (* ================================================================ *)
@@ -78,8 +82,7 @@ let test_save_atomic_basic () =
   KF.save_atomic path content;
   let loaded = read_file path in
   check string "content matches" content loaded;
-  (* Verify no .tmp file left behind *)
-  check bool "no tmp file" false (Sys.file_exists (path ^ ".tmp"));
+  check bool "no tmp file" false (has_tmp_files base);
   cleanup_dir base
 
 let test_save_atomic_overwrites () =
@@ -163,6 +166,7 @@ let test_concurrent_save_atomic () =
   let content = read_file path in
   check bool "contains fiber-" true (String.length content > 0
     && String.sub content 0 6 = "fiber-");
+  check bool "no tmp file left behind" false (has_tmp_files base);
   cleanup_dir base
 
 (* ================================================================ *)

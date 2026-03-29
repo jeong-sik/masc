@@ -44,7 +44,9 @@ let clear_dir_cache () : unit =
 let save_atomic (path : string) (content : string) : unit =
   let dir = Filename.dirname path in
   ignore (ensure_dir dir);
-  let tmp_path = path ^ ".tmp" in
+  let tmp_path =
+    Filename.temp_file ~temp_dir:dir (Filename.basename path ^ ".") ".tmp"
+  in
   Fun.protect ~finally:(fun () ->
     try
       if Sys.file_exists tmp_path then Sys.remove tmp_path

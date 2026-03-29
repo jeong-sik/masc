@@ -473,8 +473,11 @@ function StartFormButton({ class: cx }: { class?: string }) {
   `
 }
 
+const canSubmit = computed(() =>
+  formGoal.value.trim() !== '' && formMetricFn.value.trim() !== '' && formTargetFile.value.trim() !== '' && !startFormBusy.value
+)
+
 function StartAutoresearchForm() {
-  const canSubmit = formGoal.value.trim() && formMetricFn.value.trim() && formTargetFile.value.trim() && !startFormBusy.value
 
   return html`
     <${DialogOverlay}
@@ -604,11 +607,11 @@ function StartAutoresearchForm() {
           </button>
           <button type="button"
             class="px-4 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-              canSubmit
+              canSubmit.value
                 ? 'border-accent/60 bg-accent/15 text-accent hover:bg-accent/25'
                 : 'border-card-border bg-card/60 text-[var(--text-muted)] cursor-not-allowed opacity-50'
             }"
-            disabled=${!canSubmit}
+            disabled=${!canSubmit.value}
             onClick=${() => { void handleStartSubmit() }}
           >
             ${startFormBusy.value ? '시작 중...' : '시작'}

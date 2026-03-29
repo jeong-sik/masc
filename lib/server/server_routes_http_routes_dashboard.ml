@@ -652,8 +652,8 @@ let add_routes ~sw ~clock router =
                    (Yojson.Safe.to_string result) reqd
              | Error message ->
                  Http.Response.json ~status:`Bad_request ~request:req
-                   (Printf.sprintf {|{"ok":false,"error":"%s"}|}
-                      (String.escaped message))
+                   (Yojson.Safe.to_string
+                      (`Assoc [("ok", `Bool false); ("error", `String message)]))
                    reqd)
            with Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req

@@ -171,13 +171,9 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
     Moves contents via recursive merge. Conflicting files go to _quarantine/,
     except keeper meta files where a fresher valid legacy record may replace a
     stale or invalid current record. *)
-let keeper_meta_updated_ts path =
-  match Keeper_types.read_meta_file_path path with
-  | Ok (Some meta) ->
-      Some
-        (Resilience.Time.parse_iso8601_opt meta.updated_at
-        |> Option.value ~default:0.0)
-  | Ok None | Error _ -> None
+let keeper_meta_updated_ts (meta : Keeper_types.keeper_meta) =
+  Resilience.Time.parse_iso8601_opt meta.updated_at
+  |> Option.value ~default:0.0
 
 let should_promote_legacy_keeper_meta ~legacy_path ~current_path =
   match
@@ -185,13 +181,7 @@ let should_promote_legacy_keeper_meta ~legacy_path ~current_path =
     Keeper_types.read_meta_file_path current_path
   with
   | Ok (Some _legacy), Ok (Some _current) -> (
-      match
-        keeper_meta_updated_ts legacy_path,
-        keeper_meta_updated_ts current_path
-      with
-      | Some legacy_ts, Some current_ts -> legacy_ts > current_ts
-      | Some _, None -> true
-      | None, Some _ | None, None -> false)
+      keeper_meta_updated_ts _legacy > keeper_meta_updated_ts _current)
   | Ok (Some _), Ok None | Ok (Some _), Error _ -> true
   | _ -> false
 

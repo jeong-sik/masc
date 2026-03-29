@@ -294,7 +294,36 @@ let test_migrate_legacy_keeper_dirs_promotes_valid_meta () =
       Alcotest.(check bool) "replaced stale keeper quarantined" true
         (Sys.file_exists (Filename.concat quarantine_dir "sangsu.json")))
 
->>>>>>> 0e4314ccf (fix(keeper): migrate perpetual keeper metadata)
+let test_migrate_legacy_keeper_dirs_keeps_fresher_current_meta () =
+  with_temp_dir "startup-legacy-keepers-current-wins" (fun dir ->
+      let state = Mcp_server.create_state ~base_path:dir in
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let keepers_dir = Filename.concat masc_root "keepers" in
+      let legacy_dir = Filename.concat masc_root "perpetual-keepers" in
+      let quarantine_path =
+        Filename.concat masc_root "_quarantine/sangsu.json"
+      in
+      Fs_compat.mkdir_p keepers_dir;
+      Fs_compat.mkdir_p legacy_dir;
+      write_file (Filename.concat keepers_dir "sangsu.json")
+        (make_keeper_meta_json ~updated_at:"2026-03-29T11:36:57Z" ());
+      write_file (Filename.concat legacy_dir "sangsu.json")
+        (make_keeper_meta_json ~updated_at:"2026-03-29T10:36:57Z" ());
+      Server_runtime_bootstrap.migrate_legacy_dirs state;
+      let current_meta =
+        match
+          Keeper_types.read_meta_file_path
+            (Filename.concat keepers_dir "sangsu.json")
+        with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "missing current keeper meta"
+        | Error err -> Alcotest.failf "failed to read current keeper meta: %s" err
+      in
+      Alcotest.(check string) "fresher current meta preserved"
+        "2026-03-29T11:36:57Z" current_meta.updated_at;
+      Alcotest.(check bool) "older legacy keeper quarantined" true
+        (Sys.file_exists quarantine_path))
+
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
@@ -452,6 +481,9 @@ let () =
           Alcotest.test_case
             "legacy keeper migration promotes valid perpetual meta"
             `Quick test_migrate_legacy_keeper_dirs_promotes_valid_meta;
+          Alcotest.test_case
+            "legacy keeper migration keeps fresher current meta"
+            `Quick test_migrate_legacy_keeper_dirs_keeps_fresher_current_meta;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case "liveness probe is always true" `Quick

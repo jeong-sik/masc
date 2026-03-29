@@ -627,6 +627,7 @@ let write_meta config (m : keeper_meta) : (unit, string) result =
   let path = keeper_meta_path config persisted.name in
   let content = Yojson.Safe.pretty_to_string (meta_to_json persisted) in
   try
+    Fs_compat.mkdir_p (Filename.dirname path);
     Fs_compat.save_file path content;
     (!runtime_meta_write_sync_hook) config persisted;
     Ok ()

@@ -150,10 +150,6 @@
    graphql_client
    graphql_endpoint
    graphql_api
-   activity_graph
-   activity_graph_types
-   activity_graph_registry
-   activity_graph_reducer
    handover_eio
    hat
    hebbian_eio
@@ -319,18 +315,8 @@
    tempo
    tools
    tool_args
-   tool_schemas_plan
-   tool_schemas_portal
-   tool_schemas_worktree
-   tool_schemas_fire_task
    task_sandbox
    tool_fire_task
-   tool_schemas_auth
-   tool_schemas_agent
-   tool_schemas_room
-   tool_schemas_control
-   tool_schemas_a2a
-   tool_schemas_misc
    tool_improve_loop_schemas
    tool_improve_loop_types
    tool_improve_loop_gh
@@ -558,15 +544,6 @@
    tool_autoresearch
    ;; Code Research Loop — tool_research adapter (core logic in masc_research library)
    tool_research
-   ;; godsplit-phase1: type/schema sub-modules
-   tool_schemas_room_core
-   tool_schemas_room_extra
-   tool_schemas_inline_room
-   tool_schemas_inline_verify
-   tool_schemas_inline_infra
-   tool_schemas_inline_episodes
-   tool_schemas_inline_convo
-   tool_schemas_inline
 )
 (private_modules
  dashboard_http_keeper_metrics
@@ -680,15 +657,12 @@
   team_session_report_core
   team_session_report_proof_helpers
   team_session_report_proof
-  ;; godsplit-phase1: type/schema sub-modules
-  tool_schemas_room_core
   ;; godsplit-phase1: chain_executor sub-modules
   chain_executor_complex
   chain_executor_search
   chain_executor_resilience
   ;; godsplit-phase1: file split sub-modules
   tool_team_session_step_exec
-  tool_schemas_room_extra
   tool_council_feed
   tool_council_helpers
   tool_council_internal_schemas
@@ -717,10 +691,6 @@
   tool_inline_dispatch_types
   tool_inline_dispatch_room
   tool_inline_dispatch_comm
-  ;; activity_graph sub-modules
-  activity_graph_types
-  activity_graph_registry
-  activity_graph_reducer
   ;; tool_improve_loop sub-modules
   tool_improve_loop_types
   tool_improve_loop_gh
@@ -825,6 +795,10 @@
    masc_mcp.dashboard_utils
    ;; Team session types (extracted sub-library)
    masc_mcp.team_session_types
+   ;; MCP tool schema cluster (extracted sub-library)
+   masc_mcp.tool_schemas
+   ;; Activity graph event/model cluster (extracted sub-library)
+   masc_mcp.activity_graph
    ;; OpenTelemetry (spans + OTLP exporter + metrics)
    opentelemetry
    opentelemetry-client-cohttp-eio

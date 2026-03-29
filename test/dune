@@ -218,7 +218,7 @@
 (test
  (name test_dashboard_collaboration_evidence)
  (modules test_dashboard_collaboration_evidence test_tool_team_session_support)
- (libraries masc_mcp alcotest yojson unix eio eio_main))
+ (libraries masc_mcp masc_mcp.activity_graph alcotest yojson unix eio eio_main))
 
 (test
  (name test_masc_log)
@@ -233,7 +233,7 @@
 (test
  (name test_activity_graph)
  (modules test_activity_graph)
- (libraries masc_mcp alcotest unix yojson eio eio_main))
+ (libraries masc_mcp masc_mcp.activity_graph alcotest unix yojson eio eio_main))
 
 (test
  (name test_ci_hardening_source)

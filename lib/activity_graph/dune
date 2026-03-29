@@ -1,0 +1,21 @@
+(include_subdirs no)
+
+(library
+ (name masc_activity_graph)
+ (public_name masc_mcp.activity_graph)
+ (modules
+   activity_graph
+   activity_graph_types
+   activity_graph_registry
+   activity_graph_reducer)
+ (wrapped false)
+ (libraries
+   masc_room
+   masc_core
+   masc_types
+   masc_log
+   fs_compat
+   time_compat
+   yojson
+   eio
+   unix))

@@ -7,24 +7,23 @@ Issue: #3593
 
 | Metric | Value |
 |--------|-------|
-| Sub-libraries extracted | 19 |
-| Monolith modules remaining | 586 (in lib/dune) |
-| Total dependency edges | 1,961 |
-| Avg dependencies per module | 3.35 |
-| Leaf modules (0 internal deps) | 170 |
-| Root modules (nothing depends on them) | 109 |
+| Sub-libraries extracted | 21 |
+| Monolith modules remaining | 562 (in dependency graph) |
+| Total dependency edges | 1,871 |
+| Avg dependencies per module | 3.33 |
+| Leaf modules (0 internal deps) | 160 |
+| Root modules (nothing depends on them) | 112 |
 
-## Critical Finding: 115-Module Cycle
+## Critical Finding: 81-Module Cycle
 
-The monolith contains 3 strongly connected components (cycles):
+After removing analysis false positives from comments and nested in-file modules,
+the monolith contains 1 strongly connected component (cycle):
 
 | SCC | Size | Composition |
 |-----|------|-------------|
-| SCC-1 | 115 modules | Tool_* (49), Keeper_* (17), + 49 others |
-| SCC-2 | 2 modules | Keeper_toml_loader <-> Keeper_types_profile |
-| SCC-3 | 2 modules | Drift_guard <-> Level2_config |
+| SCC-1 | 81 modules | Tool_* (28), Keeper_* (14), Server_* (3), + 36 others |
 
-**SCC-1 is the primary obstacle to decomposition.** 20% of all modules are locked in a single cycle. The cycle is driven by:
+**SCC-1 is the primary obstacle to decomposition.** 14% of all modules are locked in a single cycle. The cycle is driven by:
 - Tool modules calling Keeper for context
 - Keeper calling Tool dispatch for execution
 - Both depending on Room, Mcp_server, and Config
@@ -35,32 +34,32 @@ These modules have the highest in-degree (most depended-upon):
 
 | Module | Dependents | Role |
 |--------|------------|------|
-| Room | 139 | Central state container |
+| Room | 136 | Central state container |
 | Tool_args | 59 | Tool argument types |
 | Keeper_types | 44 | Keeper type definitions |
-| Mcp_server | 41 | MCP protocol server |
+| Mcp_server | 39 | MCP protocol server |
 | Team_session_store | 38 | Session persistence |
 | Sse | 30 | Server-sent events |
 | Chain_types | 25 | Chain type definitions |
 
-Room (139 dependents = 24% of all modules) is the gravity well.
+Room (136 dependents = 23% of all modules) is the gravity well.
 
 ## Extraction Candidates (by coupling ratio)
 
 High coupling ratio = internal edges dominate over external deps = easier to extract.
+`tool_schemas` and `activity_graph` are already extracted in this branch, so the
+remaining low-risk candidates start from `prompt_registry`.
 
 | Prefix Group | Modules | Coupling | Ext Deps | Status |
 |-------------|---------|----------|----------|--------|
-| activity_graph | 4 | 1.000 | 0 | Ready |
 | prompt_registry | 3 | 1.000 | 0 | Ready |
 | swarm_status | 8 | 0.889 | 2 | Ready |
-| tool_schemas | 18 | 0.875 | 1 | Ready |
-| server_mcp | 10 | 0.667 | 8 | Medium |
+| server_mcp | 10 | 0.652 | 8 | Medium |
 | tool_command | 9 | 0.630 | 10 | Medium |
 | dashboard_proof | 5 | 0.556 | 4 | Medium |
 | tool_improve | 6 | 0.500 | 5 | Medium |
+| team_session | 13 | 0.436 | 22 | Hard (high ext deps) |
 | masc_grpc | 5 | 0.429 | 4 | Medium |
-| team_session | 13 | 0.415 | 24 | Hard (high ext deps) |
 
 ## vs. Issue #3593 Proposed Plan
 
@@ -78,12 +77,15 @@ High coupling ratio = internal edges dominate over external deps = easier to ext
 **Principle**: Extract leaf clusters first (high coupling, low external deps), then progressively tackle hub modules.
 
 ### Batch 1: Low-risk extractions (no SCC involvement)
-1. **activity_graph** (4 modules, coupling 1.0) — zero external deps
-2. **prompt_registry** (3 modules, coupling 1.0) — zero external deps
-3. **swarm_status** (8 modules, coupling 0.889) — 2 external deps
-4. **tool_schemas** (18 modules, coupling 0.875) — 1 external dep
+Completed in this branch:
+1. **tool_schemas** (18 modules, coupling 1.0) — extracted as `masc_mcp.tool_schemas`
+2. **activity_graph** (4 modules, coupling 1.0) — extracted as `masc_mcp.activity_graph`
 
-**Total**: 33 modules extracted with minimal risk.
+Remaining low-risk candidates:
+3. **prompt_registry** (3 modules, coupling 1.0) — zero external deps
+4. **swarm_status** (8 modules, coupling 0.889) — 2 external deps
+
+**Remaining in Batch 1**: 11 modules.
 
 ### Batch 2: Medium-risk extractions
 5. **server_mcp** (10 modules, coupling 0.667)
@@ -97,16 +99,17 @@ High coupling ratio = internal edges dominate over external deps = easier to ext
 11. Extract remaining tool_* modules
 12. Extract server_* modules
 
-## SCC-2 and SCC-3 (Quick Fixes)
+## Analysis Corrections Applied
 
-- **SCC-2**: Keeper_toml_loader <-> Keeper_types_profile — likely a type definition cycle. Fix by merging or splitting the shared type.
-- **SCC-3**: Drift_guard <-> Level2_config — similar pattern.
+- Previous SCC-2 (`Keeper_toml_loader <-> Keeper_types_profile`) was a false positive from module-like text in comments.
+- Previous SCC-3 (`Drift_guard <-> Level2_config`) was a false positive from nested in-file module references such as `module Drift_guard = struct`.
+- The analysis script now strips OCaml comments/strings and ignores locally defined nested modules before dependency extraction.
 
-These should be fixed before Batch 2.
+With those heuristics corrected, the graph collapses to one real SCC.
 
 ## Next Steps
 
-1. Fix SCC-2 and SCC-3 (trivial cycles) in a quick PR
-2. Extract Batch 1 (33 modules, 4 sub-libraries) — 1-2 sessions
-3. Re-run analysis to validate reduced SCC-1 size
-4. Plan Batch 2 based on updated graph
+1. Extract `prompt_registry` as the next zero-risk sub-library
+2. Extract `swarm_status` and re-run analysis again
+3. Plan Batch 2 from the updated graph once Batch 1 is fully complete
+4. Re-evaluate whether `masc_chain` is still a sensible Phase 1 target after Batch 1

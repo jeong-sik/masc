@@ -1,15 +1,15 @@
 {
   "stats": {
-    "total_modules": 586,
-    "total_edges": 1961,
-    "avg_out_degree": 3.35,
-    "leaf_count": 170,
-    "root_count": 109
+    "total_modules": 562,
+    "total_edges": 1871,
+    "avg_out_degree": 3.33,
+    "leaf_count": 160,
+    "root_count": 112
   },
   "top_imported": [
     [
       "Room",
-      139
+      136
     ],
     [
       "Tool_args",
@@ -21,7 +21,7 @@
     ],
     [
       "Mcp_server",
-      41
+      39
     ],
     [
       "Team_session_store",
@@ -41,14 +41,6 @@
     ],
     [
       "Response",
-      23
-    ],
-    [
-      "Session",
-      21
-    ],
-    [
-      "Board",
       21
     ],
     [
@@ -56,16 +48,20 @@
       20
     ],
     [
-      "Board_dispatch",
-      20
-    ],
-    [
       "Command_plane_v2",
       20
     ],
     [
-      "Tool_dispatch",
-      16
+      "Session",
+      19
+    ],
+    [
+      "Board",
+      19
+    ],
+    [
+      "Board_dispatch",
+      19
     ],
     [
       "Keeper_memory",
@@ -80,11 +76,15 @@
       16
     ],
     [
-      "Config",
+      "Oas_response",
       15
     ],
     [
-      "Oas_response",
+      "Spawn",
+      15
+    ],
+    [
+      "Oas_model_resolve",
       15
     ]
   ],
@@ -95,19 +95,19 @@
     ],
     [
       "Mcp_server_eio",
-      57
+      56
     ],
     [
       "Server_bootstrap_loops",
       46
     ],
     [
-      "Tools",
-      41
+      "Server_runtime_bootstrap",
+      33
     ],
     [
-      "Server_runtime_bootstrap",
-      34
+      "Tools",
+      29
     ],
     [
       "Server_routes_http_routes_dashboard",
@@ -131,19 +131,11 @@
     ],
     [
       "Tool_misc",
-      20
-    ],
-    [
-      "Keeper_exec_tools",
       19
     ],
     [
       "Keeper_agent_run",
       19
-    ],
-    [
-      "Config",
-      18
     ],
     [
       "Server_routes_http_runtime",
@@ -158,7 +150,7 @@
       17
     ],
     [
-      "Server_routes_http_routes_activity",
+      "Keeper_exec_tools",
       17
     ],
     [
@@ -166,8 +158,16 @@
       16
     ],
     [
-      "Keeper_turn",
-      16
+      "Config",
+      15
+    ],
+    [
+      "Server_routes_http_routes_activity",
+      15
+    ],
+    [
+      "Chain_native_eio",
+      15
     ]
   ],
   "cycles": [
@@ -183,17 +183,13 @@
       "Cascade_inference",
       "Chain_native_eio",
       "Config",
-      "Context_compact_oas",
       "Dashboard_harness_health",
       "Dashboard_operator_judge",
       "Eval_calibration",
       "Handover_eio",
       "Keeper_agent_run",
-      "Keeper_alerting",
-      "Keeper_config",
       "Keeper_coordination",
       "Keeper_exec_context",
-      "Keeper_exec_persona",
       "Keeper_exec_tools",
       "Keeper_execution",
       "Keeper_keepalive",
@@ -210,38 +206,25 @@
       "Masc_grpc_service",
       "Masc_grpc_transport",
       "Mcp_server",
-      "Mcp_server_eio_tool_profile",
       "Mdal",
-      "Mdal_swarm",
       "Mdal_worker",
       "Mitosis",
-      "Oas_events",
       "Oas_worker",
       "Operator_control",
       "Operator_pending_confirm",
-      "Orchestrator",
       "Server_mcp_transport_ws",
       "Server_webrtc_transport",
       "Server_ws_standalone",
       "Spawn",
       "Sse",
-      "Swarm_goal_loop",
       "Team_session_engine_eio",
       "Team_session_oas_bridge",
       "Team_session_swarm_runner",
-      "Tool_args",
-      "Tool_audit",
       "Tool_autoresearch",
       "Tool_autoresearch_broadcast",
       "Tool_autoresearch_cycle",
       "Tool_autoresearch_registry",
-      "Tool_autoresearch_repo_synthesis",
-      "Tool_board",
-      "Tool_budget",
-      "Tool_cache",
       "Tool_catalog",
-      "Tool_code",
-      "Tool_code_write",
       "Tool_command_plane",
       "Tool_command_plane_chain_common",
       "Tool_command_plane_chain_launch",
@@ -252,65 +235,27 @@
       "Tool_command_plane_schemas_02",
       "Tool_command_plane_support",
       "Tool_compact",
-      "Tool_cost",
       "Tool_council_oas",
       "Tool_dispatch",
       "Tool_encryption",
-      "Tool_goals",
       "Tool_handover",
-      "Tool_hat",
-      "Tool_heartbeat",
       "Tool_help_registry",
-      "Tool_improve_loop",
       "Tool_keeper",
       "Tool_mdal",
-      "Tool_metrics",
       "Tool_operator",
       "Tool_permissions",
       "Tool_relay",
       "Tool_research",
-      "Tool_room",
-      "Tool_run",
-      "Tool_shard",
-      "Tool_suspend",
       "Tool_task",
-      "Tool_tempo",
       "Tool_voice",
-      "Tool_walph",
-      "Tool_worktree",
       "Tools",
       "Transport",
       "Transport_metrics",
-      "Verifier_oas",
       "Voice_bridge",
-      "Voice_session_manager",
-      "Worker_container",
-      "Worker_container_types",
-      "Worker_oas"
-    ],
-    [
-      "Keeper_toml_loader",
-      "Keeper_types_profile"
-    ],
-    [
-      "Drift_guard",
-      "Level2_config"
+      "Voice_session_manager"
     ]
   ],
   "clusters": [
-    {
-      "prefix": "activity_graph",
-      "module_count": 4,
-      "members": [
-        "Activity_graph",
-        "Activity_graph_reducer",
-        "Activity_graph_registry",
-        "Activity_graph_types"
-      ],
-      "internal_edges": 2,
-      "external_dep_count": 0,
-      "coupling_ratio": 1.0
-    },
     {
       "prefix": "prompt_registry",
       "module_count": 3,
@@ -341,33 +286,6 @@
       "coupling_ratio": 0.889
     },
     {
-      "prefix": "tool_schemas",
-      "module_count": 18,
-      "members": [
-        "Tool_schemas_a2a",
-        "Tool_schemas_agent",
-        "Tool_schemas_auth",
-        "Tool_schemas_control",
-        "Tool_schemas_fire_task",
-        "Tool_schemas_inline",
-        "Tool_schemas_inline_convo",
-        "Tool_schemas_inline_episodes",
-        "Tool_schemas_inline_infra",
-        "Tool_schemas_inline_room",
-        "Tool_schemas_inline_verify",
-        "Tool_schemas_misc",
-        "Tool_schemas_plan",
-        "Tool_schemas_portal",
-        "Tool_schemas_room",
-        "Tool_schemas_room_core",
-        "Tool_schemas_room_extra",
-        "Tool_schemas_worktree"
-      ],
-      "internal_edges": 7,
-      "external_dep_count": 1,
-      "coupling_ratio": 0.875
-    },
-    {
       "prefix": "server_mcp",
       "module_count": 10,
       "members": [
@@ -382,9 +300,9 @@
         "Server_mcp_transport_http_types",
         "Server_mcp_transport_ws"
       ],
-      "internal_edges": 16,
+      "internal_edges": 15,
       "external_dep_count": 8,
-      "coupling_ratio": 0.667
+      "coupling_ratio": 0.652
     },
     {
       "prefix": "tool_command",
@@ -434,20 +352,6 @@
       "coupling_ratio": 0.5
     },
     {
-      "prefix": "masc_grpc",
-      "module_count": 5,
-      "members": [
-        "Masc_grpc_client",
-        "Masc_grpc_server",
-        "Masc_grpc_service",
-        "Masc_grpc_transport",
-        "Masc_grpc_types"
-      ],
-      "internal_edges": 3,
-      "external_dep_count": 4,
-      "coupling_ratio": 0.429
-    },
-    {
       "prefix": "team_session",
       "module_count": 13,
       "members": [
@@ -466,8 +370,22 @@
         "Team_session_swarm_runner"
       ],
       "internal_edges": 17,
-      "external_dep_count": 24,
-      "coupling_ratio": 0.415
+      "external_dep_count": 22,
+      "coupling_ratio": 0.436
+    },
+    {
+      "prefix": "masc_grpc",
+      "module_count": 5,
+      "members": [
+        "Masc_grpc_client",
+        "Masc_grpc_server",
+        "Masc_grpc_service",
+        "Masc_grpc_transport",
+        "Masc_grpc_types"
+      ],
+      "internal_edges": 3,
+      "external_dep_count": 4,
+      "coupling_ratio": 0.429
     },
     {
       "prefix": "tool_local",
@@ -500,25 +418,6 @@
       "coupling_ratio": 0.312
     },
     {
-      "prefix": "tool_team",
-      "module_count": 10,
-      "members": [
-        "Tool_team_session",
-        "Tool_team_session_handlers",
-        "Tool_team_session_routing",
-        "Tool_team_session_routing_workers",
-        "Tool_team_session_schemas",
-        "Tool_team_session_step",
-        "Tool_team_session_step_exec",
-        "Tool_team_session_step_spawn",
-        "Tool_team_session_step_types",
-        "Tool_team_session_support"
-      ],
-      "internal_edges": 7,
-      "external_dep_count": 16,
-      "coupling_ratio": 0.304
-    },
-    {
       "prefix": "keeper_turn",
       "module_count": 8,
       "members": [
@@ -532,8 +431,8 @@
         "Keeper_turn_up_update"
       ],
       "internal_edges": 9,
-      "external_dep_count": 21,
-      "coupling_ratio": 0.3
+      "external_dep_count": 20,
+      "coupling_ratio": 0.31
     },
     {
       "prefix": "server_command",
@@ -548,6 +447,25 @@
       "internal_edges": 6,
       "external_dep_count": 14,
       "coupling_ratio": 0.3
+    },
+    {
+      "prefix": "tool_team",
+      "module_count": 10,
+      "members": [
+        "Tool_team_session",
+        "Tool_team_session_handlers",
+        "Tool_team_session_routing",
+        "Tool_team_session_routing_workers",
+        "Tool_team_session_schemas",
+        "Tool_team_session_step",
+        "Tool_team_session_step_exec",
+        "Tool_team_session_step_spawn",
+        "Tool_team_session_step_types",
+        "Tool_team_session_support"
+      ],
+      "internal_edges": 6,
+      "external_dep_count": 16,
+      "coupling_ratio": 0.273
     },
     {
       "prefix": "tool_code",
@@ -593,8 +511,8 @@
         "Server_routes_http_runtime"
       ],
       "internal_edges": 18,
-      "external_dep_count": 65,
-      "coupling_ratio": 0.217
+      "external_dep_count": 62,
+      "coupling_ratio": 0.225
     },
     {
       "prefix": "tool_council",
@@ -622,37 +540,8 @@
         "Tool_inline_dispatch_types"
       ],
       "internal_edges": 7,
-      "external_dep_count": 29,
-      "coupling_ratio": 0.194
-    },
-    {
-      "prefix": "dashboard_mission",
-      "module_count": 4,
-      "members": [
-        "Dashboard_mission",
-        "Dashboard_mission_agents",
-        "Dashboard_mission_assembly",
-        "Dashboard_mission_briefing"
-      ],
-      "internal_edges": 3,
-      "external_dep_count": 13,
-      "coupling_ratio": 0.188
-    },
-    {
-      "prefix": "chain_executor",
-      "module_count": 7,
-      "members": [
-        "Chain_executor_complex",
-        "Chain_executor_eio",
-        "Chain_executor_helpers",
-        "Chain_executor_leaf",
-        "Chain_executor_resilience",
-        "Chain_executor_retry",
-        "Chain_executor_search"
-      ],
-      "internal_edges": 5,
-      "external_dep_count": 24,
-      "coupling_ratio": 0.172
+      "external_dep_count": 28,
+      "coupling_ratio": 0.2
     },
     {
       "prefix": "mcp_server",
@@ -670,8 +559,8 @@
         "Mcp_server_eio_types"
       ],
       "internal_edges": 17,
-      "external_dep_count": 85,
-      "coupling_ratio": 0.167
+      "external_dep_count": 84,
+      "coupling_ratio": 0.168
     },
     {
       "prefix": "cp_snapshot",
@@ -685,6 +574,35 @@
       "internal_edges": 1,
       "external_dep_count": 5,
       "coupling_ratio": 0.167
+    },
+    {
+      "prefix": "chain_executor",
+      "module_count": 7,
+      "members": [
+        "Chain_executor_complex",
+        "Chain_executor_eio",
+        "Chain_executor_helpers",
+        "Chain_executor_leaf",
+        "Chain_executor_resilience",
+        "Chain_executor_retry",
+        "Chain_executor_search"
+      ],
+      "internal_edges": 4,
+      "external_dep_count": 24,
+      "coupling_ratio": 0.143
+    },
+    {
+      "prefix": "dashboard_mission",
+      "module_count": 4,
+      "members": [
+        "Dashboard_mission",
+        "Dashboard_mission_agents",
+        "Dashboard_mission_assembly",
+        "Dashboard_mission_briefing"
+      ],
+      "internal_edges": 2,
+      "external_dep_count": 13,
+      "coupling_ratio": 0.133
     },
     {
       "prefix": "server_h2",
@@ -738,9 +656,9 @@
         "Keeper_exec_status_metrics",
         "Keeper_exec_tools"
       ],
-      "internal_edges": 3,
-      "external_dep_count": 34,
-      "coupling_ratio": 0.081
+      "internal_edges": 2,
+      "external_dep_count": 32,
+      "coupling_ratio": 0.059
     },
     {
       "prefix": "server_dashboard",
@@ -886,14 +804,12 @@
   "graph": {
     "A2a_types": [],
     "A2a_tools": [
-      "A2a_types",
       "Agent_card",
       "Room",
       "Sse"
     ],
     "Ag_ui": [],
     "Agent_card": [
-      "Config",
       "Masc_grpc_server",
       "Server_webrtc_transport",
       "Server_ws_standalone",
@@ -930,8 +846,7 @@
     "Board": [],
     "Board_core": [
       "Agent_economy",
-      "Board",
-      "Board_dispatch"
+      "Board"
     ],
     "Board_votes": [
       "Agent_economy",
@@ -954,9 +869,7 @@
     ],
     "Capability_registry": [
       "Agent_tool_surfaces",
-      "Mcp_server_eio_tool_profile",
       "Tool_catalog",
-      "Tool_dispatch",
       "Tool_help_registry",
       "Tool_shard"
     ],
@@ -1037,9 +950,6 @@
       "Tool_mdal",
       "Tool_model_catalog",
       "Tool_operator",
-      "Tool_schemas_a2a",
-      "Tool_schemas_control",
-      "Tool_schemas_misc",
       "Tool_team_session",
       "Tool_voice",
       "Tools"
@@ -1067,7 +977,6 @@
       "Telemetry_eio"
     ],
     "Dashboard_collaboration_evidence": [
-      "Activity_graph",
       "Dashboard_proof",
       "Room",
       "Team_session_store"
@@ -1112,7 +1021,6 @@
     ],
     "Dashboard_mission_assembly": [
       "A2a_tools",
-      "Dashboard_mission_agents",
       "Keeper_tools_oas"
     ],
     "Dashboard_mission": [
@@ -1164,8 +1072,7 @@
       "Room"
     ],
     "Drift_guard": [
-      "Level2_config",
-      "Room"
+      "Level2_config"
     ],
     "Server_utils": [
       "Board",
@@ -1306,12 +1213,9 @@
       "Server_routes_http_routes_room"
     ],
     "Server_routes_http_common": [
-      "Mcp_server",
       "Mcp_transport_protocol",
       "Server_auth",
-      "Server_command_plane_http",
       "Server_dashboard_http",
-      "Server_mcp_transport_http",
       "Server_utils"
     ],
     "Server_routes_http_pages": [
@@ -1430,7 +1334,6 @@
     ],
     "Server_routes_http_routes_activity": [
       "Activity_feed",
-      "Activity_graph",
       "Agent_reputation",
       "Board",
       "Board_dispatch",
@@ -1438,7 +1341,6 @@
       "Mention_inbox",
       "Prompt_registry",
       "Response",
-      "Server_activity_http",
       "Server_auth",
       "Server_mcp_transport_http",
       "Server_routes_http_common",
@@ -1564,7 +1466,6 @@
       "Masc_grpc_client",
       "Masc_grpc_server",
       "Masc_grpc_transport",
-      "Mcp_server",
       "Mcp_server_eio_execute",
       "Prometheus",
       "Prompt_defaults",
@@ -1626,7 +1527,6 @@
     ],
     "Server_command_plane_http_help": [],
     "Server_activity_http": [
-      "Activity_graph",
       "Mcp_server",
       "Mcp_session",
       "Response"
@@ -1663,7 +1563,6 @@
       "Mcp_server",
       "Mcp_transport_protocol",
       "Server_mcp_transport_http_headers",
-      "Server_mcp_transport_http_session",
       "Server_mcp_transport_http_types"
     ],
     "Server_mcp_transport_http_types": [
@@ -1728,17 +1627,7 @@
       "Graphql_endpoint"
     ],
     "Graphql_endpoint": [],
-    "Graphql_api": [
-      "Room"
-    ],
-    "Activity_graph": [],
-    "Activity_graph_types": [],
-    "Activity_graph_registry": [
-      "Activity_graph_types"
-    ],
-    "Activity_graph_reducer": [
-      "Activity_graph_types"
-    ],
+    "Graphql_api": [],
     "Handover_eio": [
       "Spawn"
     ],
@@ -1749,20 +1638,15 @@
     "Http_server_eio": [
       "Discovery_cache",
       "Prometheus",
-      "Response",
       "Streamable_http",
       "Version"
     ],
-    "Http_server_h2": [
-      "Response"
-    ],
+    "Http_server_h2": [],
     "Http_protocol_detect": [],
     "Institution_eio": [
       "Level4_config"
     ],
-    "Level2_config": [
-      "Drift_guard"
-    ],
+    "Level2_config": [],
     "Level4_config": [],
     "Local_runtime_pool": [
       "Discovery_cache"
@@ -1788,8 +1672,7 @@
       "Room",
       "Team_session_store",
       "Telemetry_eio",
-      "Worker_dev_tools",
-      "Worker_oas"
+      "Worker_dev_tools"
     ],
     "Worker_container_runners": [
       "Agent_tool_surfaces",
@@ -1860,15 +1743,13 @@
       "Chain_types"
     ],
     "Chain_mermaid_parse": [
-      "Chain_types",
-      "Safe_parse"
+      "Chain_types"
     ],
     "Chain_mermaid_node_content": [
       "Chain_types",
       "Safe_parse"
     ],
     "Chain_mermaid_graph": [
-      "Chain_parser",
       "Chain_types"
     ],
     "Chain_mermaid_parser": [
@@ -1927,7 +1808,6 @@
     "Chain_executor_leaf": [
       "Chain_adapter_eio",
       "Chain_category",
-      "Chain_executor_eio",
       "Chain_types",
       "Chain_utils",
       "Prompt_registry",
@@ -2002,7 +1882,6 @@
     "Memory_pg": [],
     "Memory_jsonl": [],
     "Memory_oas_bridge": [
-      "Agent",
       "Institution_eio",
       "Memory_jsonl",
       "Procedural_memory"
@@ -2099,7 +1978,6 @@
       "Tool_research",
       "Tool_room",
       "Tool_run",
-      "Tool_schemas_inline",
       "Tool_suspend",
       "Tool_tag_init",
       "Tool_task",
@@ -2245,9 +2123,7 @@
       "Bounded",
       "Mdal"
     ],
-    "Verification": [
-      "Agent"
-    ],
+    "Verification": [],
     "Mitosis": [
       "Dashboard_harness_health",
       "Harness",
@@ -2328,6 +2204,7 @@
       "Tool_args"
     ],
     "Operator_judgment": [
+      "Auth",
       "Room"
     ],
     "Notify": [],
@@ -2375,14 +2252,12 @@
       "Room"
     ],
     "Swarm_goal_loop": [
-      "Bounded",
       "Goal_orchestrator",
       "Room",
       "Swarm_checkpoint"
     ],
     "Response": [],
     "Room": [
-      "Activity_graph",
       "Agent_economy",
       "Audit_log",
       "Board",
@@ -2399,7 +2274,6 @@
       "Team_session_store"
     ],
     "Team_session_store": [
-      "Activity_graph",
       "Session"
     ],
     "Team_session_report": [],
@@ -2439,7 +2313,6 @@
       "Progress",
       "Room",
       "Session",
-      "Supervisor",
       "Team_session_oas_bridge",
       "Team_session_report",
       "Team_session_store",
@@ -2488,13 +2361,9 @@
     "Sse": [
       "Transport_metrics"
     ],
-    "Streamable_http": [
-      "Session"
-    ],
+    "Streamable_http": [],
     "Subsystem_health": [],
-    "Subscriptions": [
-      "Session"
-    ],
+    "Subscriptions": [],
     "Swarm_status": [],
     "Swarm_status_types": [],
     "Swarm_status_json": [
@@ -2561,18 +2430,6 @@
       "Tool_rate_limit",
       "Tool_relay",
       "Tool_run",
-      "Tool_schemas_a2a",
-      "Tool_schemas_agent",
-      "Tool_schemas_auth",
-      "Tool_schemas_control",
-      "Tool_schemas_fire_task",
-      "Tool_schemas_inline",
-      "Tool_schemas_misc",
-      "Tool_schemas_plan",
-      "Tool_schemas_portal",
-      "Tool_schemas_room_core",
-      "Tool_schemas_room_extra",
-      "Tool_schemas_worktree",
       "Tool_shard",
       "Tool_suspend",
       "Tool_task",
@@ -2581,32 +2438,13 @@
       "Tool_voice",
       "Tool_walph"
     ],
-    "Tool_args": [
-      "Tool_command_plane_support",
-      "Tool_goals"
-    ],
-    "Tool_schemas_plan": [],
-    "Tool_schemas_portal": [],
-    "Tool_schemas_worktree": [],
-    "Tool_schemas_fire_task": [],
+    "Tool_args": [],
     "Task_sandbox": [],
     "Tool_fire_task": [
       "Room",
       "Spawn",
       "Task_sandbox",
-      "Tool_args",
-      "Tool_schemas_fire_task"
-    ],
-    "Tool_schemas_auth": [],
-    "Tool_schemas_agent": [],
-    "Tool_schemas_room": [
-      "Tool_schemas_room_core",
-      "Tool_schemas_room_extra"
-    ],
-    "Tool_schemas_control": [],
-    "Tool_schemas_a2a": [],
-    "Tool_schemas_misc": [
-      "WebRTC"
+      "Tool_args"
     ],
     "Tool_improve_loop_schemas": [],
     "Tool_improve_loop_types": [
@@ -2629,8 +2467,7 @@
     "Tool_plan": [
       "Planning_eio",
       "Room",
-      "Tool_args",
-      "Tool_schemas_plan"
+      "Tool_args"
     ],
     "Tool_run": [
       "Room",
@@ -2650,7 +2487,6 @@
     ],
     "Mitosis_helpers": [
       "Mitosis",
-      "Mitosis_spawn",
       "Provider_adapter",
       "Room",
       "Spawn",
@@ -2665,20 +2501,17 @@
     "Tool_portal": [
       "Notify",
       "Room",
-      "Tool_args",
-      "Tool_schemas_portal"
+      "Tool_args"
     ],
     "Tool_worktree": [
       "Room",
-      "Tool_args",
-      "Tool_schemas_worktree"
+      "Tool_args"
     ],
     "Tool_a2a": [
       "A2a_tools",
       "Config",
       "Room",
-      "Tool_args",
-      "Tool_schemas_a2a"
+      "Tool_args"
     ],
     "Tool_handover": [
       "Handover_eio",
@@ -2743,7 +2576,6 @@
       "Team_session_store",
       "Tool_args",
       "Tool_team_session_step_exec",
-      "Tool_team_session_step_spawn",
       "Worker_runtime",
       "Worker_verification"
     ],
@@ -2783,8 +2615,7 @@
     "Tool_auth": [
       "Auth",
       "Room",
-      "Tool_args",
-      "Tool_schemas_auth"
+      "Tool_args"
     ],
     "Tool_hat": [
       "Hat",
@@ -2817,8 +2648,7 @@
       "Hebbian_eio",
       "Metrics_store_eio",
       "Room",
-      "Tool_args",
-      "Tool_schemas_agent"
+      "Tool_args"
     ],
     "Tool_task": [
       "A2a_tools",
@@ -2844,14 +2674,12 @@
       "Planning_eio",
       "Room",
       "Tool_args",
-      "Tool_schemas_room",
       "Workflow_guide"
     ],
     "Workflow_guide": [],
     "Tool_control": [
       "Room",
-      "Tool_args",
-      "Tool_schemas_control"
+      "Tool_args"
     ],
     "Tool_improve_loop": [
       "Room",
@@ -2881,8 +2709,7 @@
       "Tool_catalog",
       "Tool_deep_review",
       "Tool_help_registry",
-      "Tool_registry",
-      "Tool_schemas_misc"
+      "Tool_registry"
     ],
     "Tool_agent_timeline": [
       "Room",
@@ -3014,7 +2841,6 @@
       "Tools"
     ],
     "Tool_catalog": [
-      "Tool_dispatch",
       "Tools"
     ],
     "Tool_result": [],
@@ -3099,7 +2925,6 @@
     ],
     "Tool_inline_dispatch_extra": [
       "A2a_tools",
-      "Activity_graph",
       "Audit_log",
       "Auto_recall",
       "Auto_responder",
@@ -3264,9 +3089,7 @@
     "Trajectory": [
       "Keeper"
     ],
-    "Eval_gate": [
-      "Trajectory"
-    ],
+    "Eval_gate": [],
     "Eval_harness": [
       "Trajectory"
     ],
@@ -3279,9 +3102,7 @@
     "Keeper_config": [
       "Tool_args"
     ],
-    "Keeper_toml_loader": [
-      "Keeper_types_profile"
-    ],
+    "Keeper_toml_loader": [],
     "Keeper_contract": [],
     "Keeper_cdal_contract": [
       "Keeper_types"
@@ -3296,17 +3117,22 @@
       "Cdal_types"
     ],
     "Cdal_eval_v1": [
+      "Cdal_friction_projection",
       "Cdal_judge",
       "Cdal_loader",
       "Cdal_types"
     ],
     "Cdal_friction_projection": [
+      "Cdal_types",
       "Proof_artifact_reader",
       "Violation_record"
     ],
     "Artifact_store": [],
     "Golden_set": [],
     "Adversarial_eval": [],
+    "Labeling": [
+      "Cdal_types"
+    ],
     "Contract_risk": [],
     "Contract_composer": [
       "Contract_risk"
@@ -3337,8 +3163,7 @@
       "Keeper_types"
     ],
     "Keeper_memory_bank": [
-      "Keeper_types",
-      "Room"
+      "Keeper_types"
     ],
     "Keeper_memory_recall": [
       "Keeper_types",
@@ -3360,7 +3185,6 @@
       "Room"
     ],
     "Keeper_exec_tools": [
-      "Agent",
       "Keeper",
       "Keeper_alerting",
       "Keeper_memory",
@@ -3375,7 +3199,6 @@
       "Tool_library",
       "Tool_research",
       "Tool_shard",
-      "Tools",
       "Voice_bridge",
       "Voice_session_manager",
       "Worker_dev_tools"
@@ -3385,7 +3208,6 @@
     ],
     "Keeper_exec_status_metrics": [],
     "Keeper_exec_status": [
-      "Keeper_exec_status_metrics",
       "Keeper_types",
       "Oas_model_resolve",
       "Room"
@@ -3434,7 +3256,6 @@
       "Sse"
     ],
     "Keeper_tools_oas": [
-      "Agent",
       "Keeper",
       "Keeper_exec_tools",
       "Keeper_registry",
@@ -3445,7 +3266,6 @@
       "Worktree_live_context"
     ],
     "Keeper_hooks_oas": [
-      "Agent",
       "Eval_gate",
       "Keeper",
       "Keeper_types",
@@ -3498,7 +3318,6 @@
       "Prompt_registry"
     ],
     "Keeper_unified_turn": [
-      "Agent",
       "Cascade_inference",
       "Keeper",
       "Keeper_agent_run",
@@ -3513,7 +3332,6 @@
       "Room"
     ],
     "Keeper_prompt": [
-      "Board",
       "Cascade_inference",
       "Keeper_config",
       "Keeper_memory",
@@ -3558,7 +3376,6 @@
       "Keeper_types"
     ],
     "Keeper_supervisor": [
-      "Agent",
       "Keeper",
       "Keeper_execution",
       "Keeper_keepalive",
@@ -3578,7 +3395,6 @@
       "Pulse"
     ],
     "Keeper_turn_session": [
-      "Agent",
       "Keeper",
       "Keeper_types",
       "Oas_model_resolve",
@@ -3626,7 +3442,6 @@
       "Tool_args"
     ],
     "Keeper_turn": [
-      "Agent",
       "Keeper_agent_run",
       "Keeper_alerting",
       "Keeper_exec_tools",
@@ -3691,8 +3506,7 @@
       "Provider_adapter"
     ],
     "Context_compact_oas": [
-      "Keeper_working_context",
-      "Keeper_world_observation"
+      "Keeper_working_context"
     ],
     "Verifier_oas": [
       "Eval_gate",
@@ -3700,11 +3514,7 @@
       "Oas_worker"
     ],
     "Procedural_memory": [],
-    "Oas_events": [
-      "Context_compact_oas",
-      "Eval_calibration",
-      "Mitosis"
-    ],
+    "Oas_events": [],
     "Oas_worker": [
       "Agent",
       "Config_dir_resolver",
@@ -3734,7 +3544,6 @@
       "Config"
     ],
     "Governance_registry": [
-      "Eval_gate",
       "Runtime_params"
     ],
     "Governance_pipeline": [
@@ -3750,11 +3559,9 @@
       "Keeper_exec_context"
     ],
     "Tool_shard": [
-      "Board",
       "Tool_autoresearch_schemas",
       "Tool_code",
-      "Tool_council_internal_schemas",
-      "Tool_schemas_worktree"
+      "Tool_council_internal_schemas"
     ],
     "Tool_keeper": [
       "Keeper",
@@ -3829,23 +3636,6 @@
     ],
     "Adapter": [],
     "Logic": [],
-    "Masc_research": [],
-    "Godsplit-phase1:": [],
-    "Type/schema": [],
-    "Sub-modules": [],
-    "Tool_schemas_room_core": [],
-    "Tool_schemas_room_extra": [],
-    "Tool_schemas_inline_room": [],
-    "Tool_schemas_inline_verify": [],
-    "Tool_schemas_inline_infra": [],
-    "Tool_schemas_inline_episodes": [],
-    "Tool_schemas_inline_convo": [],
-    "Tool_schemas_inline": [
-      "Tool_schemas_inline_convo",
-      "Tool_schemas_inline_episodes",
-      "Tool_schemas_inline_infra",
-      "Tool_schemas_inline_room",
-      "Tool_schemas_inline_verify"
-    ]
+    "Masc_research": []
   }
 }

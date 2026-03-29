@@ -3,9 +3,7 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_auth_enable";
-    description = "Enable authentication for this room and return a room secret for authorized agents. \
-Use when setting up a production room that needs access control. \
-After enabling, create tokens with masc_auth_create_token; check state with masc_auth_status.";
+    description = "Enable authentication for this room and return a room secret.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -19,9 +17,7 @@ After enabling, create tokens with masc_auth_create_token; check state with masc
   };
   {
     name = "masc_auth_disable";
-    description = "Disable authentication for this room, allowing all agents unrestricted access. \
-Use when reverting to development mode or troubleshooting auth issues. \
-Pair with masc_auth_status to confirm auth is off.";
+    description = "Disable authentication for this room, allowing all agents unrestricted access.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -29,9 +25,7 @@ Pair with masc_auth_status to confirm auth is off.";
   };
   {
     name = "masc_auth_status";
-    description = "Check the current authentication configuration for this room (enabled, require_token, default_role). \
-Use when verifying auth state before performing privileged operations. \
-Pair with masc_auth_enable or masc_auth_disable to change settings.";
+    description = "Check the current authentication configuration (enabled, require_token, default_role).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -39,9 +33,7 @@ Pair with masc_auth_enable or masc_auth_disable to change settings.";
   };
   {
     name = "masc_auth_create_token";
-    description = "Create a new authentication token for an agent with a specified role (reader, worker, admin). \
-Use when onboarding a new agent to an auth-enabled room. \
-After masc_auth_enable; the token should be passed in subsequent requests.";
+    description = "Create a new authentication token for an agent with a specified role (reader, worker, admin).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -60,9 +52,7 @@ After masc_auth_enable; the token should be passed in subsequent requests.";
   };
   {
     name = "masc_auth_refresh";
-    description = "Refresh an expired or soon-to-expire token, returning a new one. \
-Use when your current token is about to expire and you need continued access. \
-After masc_auth_create_token issued the original token.";
+    description = "Refresh an expired or soon-to-expire token, returning a new one.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -80,9 +70,7 @@ After masc_auth_create_token issued the original token.";
   };
   {
     name = "masc_auth_revoke";
-    description = "Revoke an agent's authentication token, requiring them to obtain a new one. \
-Use when removing an agent's access or rotating compromised credentials. \
-Pair with masc_auth_create_token to issue a replacement if needed.";
+    description = "Revoke an agent's authentication token, requiring them to obtain a new one.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -96,9 +84,7 @@ Pair with masc_auth_create_token to issue a replacement if needed.";
   };
   {
     name = "masc_auth_list";
-    description = "List all agent credentials including names, roles, and token expiry times (admin only). \
-Use when auditing who has access to the room and their permission levels. \
-Pair with masc_auth_revoke to remove stale credentials.";
+    description = "List all agent credentials including names, roles, and token expiry times (admin only).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

@@ -23,7 +23,7 @@ let test_default_zombie_threshold_positive () =
 
 let test_default_zombie_threshold_matches_env_config () =
   check (float 0.01) "matches env config"
-    Env_config_runtime.Zombie.threshold_seconds
+    Env_config.Zombie.threshold_seconds
     Resilience.default_zombie_threshold
 
 let test_default_zombie_threshold_reasonable () =
@@ -135,7 +135,7 @@ let test_keeper_zombie_threshold_matches_env_config () =
   let old_ts = "2020-01-01T00:00:00Z" in
   let expected =
     Resilience.Zombie.is_zombie
-      ~threshold:Env_config_runtime.Zombie.keeper_threshold_seconds
+      ~threshold:Env_config.Zombie.keeper_threshold_seconds
       old_ts
   in
   check bool "keeper threshold uses env config" expected

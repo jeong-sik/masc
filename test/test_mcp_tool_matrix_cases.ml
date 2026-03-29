@@ -52,9 +52,6 @@ let all_known_tool_names =
     "masc_agents";
     "masc_approve";
     "masc_archive_view";
-    "masc_audit_query";
-    "masc_audit_stats";
-    "masc_audit_trail";
     "masc_auth_create_token";
     "masc_auth_disable";
     "masc_auth_enable";
@@ -86,12 +83,6 @@ let all_known_tool_names =
     "masc_bounded_run";
     "masc_branch";
     "masc_broadcast";
-    "masc_cache_clear";
-    "masc_cache_delete";
-    "masc_cache_get";
-    "masc_cache_list";
-    "masc_cache_set";
-    "masc_cache_stats";
     "masc_cancellation";
     "masc_case_brief_submit";
     "masc_case_status";
@@ -112,15 +103,12 @@ let all_known_tool_names =
     "masc_code_write";
     "masc_collaboration_evidence";
     "masc_collaboration_graph";
-    "masc_compact_context";
     "masc_consolidate_learning";
     "masc_convo_conclude";
     "masc_convo_get";
     "masc_convo_list";
     "masc_convo_reply";
     "masc_convo_start";
-    "masc_cost_log";
-    "masc_cost_report";
     "masc_dashboard";
     "masc_deliver";
     "masc_detachment_list";
@@ -131,9 +119,6 @@ let all_known_tool_names =
     "masc_dispatch_rebalance";
     "masc_dispatch_recall";
     "masc_dispatch_tick";
-    "masc_encryption_disable";
-    "masc_encryption_enable";
-    "masc_encryption_status";
     "masc_episode_flush";
     "masc_episode_list";
     "masc_error_add";
@@ -142,18 +127,10 @@ let all_known_tool_names =
     "masc_execute_dry_run";
     "masc_execution_orders";
     "masc_find_by_capability";
-    "masc_fire_task";
     "masc_gc";
     "masc_generate_key";
     "masc_get_metrics";
-    "masc_goal_dispatch";
-    "masc_goal_list";
-    "masc_goal_refresh";
-    "masc_goal_review";
-    "masc_goal_snapshot";
-    "masc_goal_upsert";
     "masc_governance_feed";
-    "masc_governance_report";
     "masc_governance_set";
     "masc_governance_status";
     "masc_handover_claim";
@@ -161,8 +138,6 @@ let all_known_tool_names =
     "masc_handover_create";
     "masc_handover_get";
     "masc_handover_list";
-    "masc_hat_status";
-    "masc_hat_wear";
     "masc_heartbeat";
     "masc_heartbeat_list";
     "masc_heartbeat_result";
@@ -269,8 +244,6 @@ let all_known_tool_names =
     "masc_portal_send";
     "masc_portal_status";
     "masc_progress";
-    "masc_rate_limit_config";
-    "masc_rate_limit_status";
     "masc_recall_search";
     "masc_register_capabilities";
     "masc_reject";
@@ -316,11 +289,6 @@ let all_known_tool_names =
     "masc_team_session_step";
     "masc_team_session_stop";
     "masc_team_session_verify_trace";
-    "masc_tempo";
-    "masc_tempo_adjust";
-    "masc_tempo_get";
-    "masc_tempo_reset";
-    "masc_tempo_set";
     "masc_tool_admin_snapshot";
     "masc_tool_admin_update";
     "masc_tool_help";
@@ -376,17 +344,9 @@ let strict_success_names =
     "masc_board_post";
     "masc_board_vote";
     "masc_broadcast";
-    "masc_cache_delete";
-    "masc_cache_get";
-    "masc_cache_list";
-    "masc_cache_set";
-    "masc_cache_stats";
     "masc_check";
     "masc_claim_next";
     "masc_dashboard";
-    "masc_goal_list";
-    "masc_goal_snapshot";
-    "masc_goal_upsert";
     "masc_handover_create";
     "masc_handover_list";
     "masc_heartbeat";
@@ -405,10 +365,6 @@ let strict_success_names =
     "masc_set_room";
     "masc_start";
     "masc_status";
-    "masc_tempo_adjust";
-    "masc_tempo_get";
-    "masc_tempo_reset";
-    "masc_tempo_set";
     "masc_tool_help";
     "masc_transition";
     "masc_transport_status";
@@ -736,16 +692,6 @@ let ensure_verification_request fixture =
       fixture.verification_id <- Some req_id;
       req_id
 
-let ensure_cache_entry fixture =
-  ignore
-    (execute_tool_ok fixture ~name:"masc_cache_set"
-       ~arguments:
-         (`Assoc
-           [
-             ("key", `String "tool-matrix-cache");
-             ("value", `String "cached value");
-           ]))
-
 let ensure_webrtc_offer fixture =
   match fixture.webrtc_offer_id with
   | Some offer_id -> offer_id
@@ -854,8 +800,6 @@ let prepare_for_name fixture name =
     ignore (ensure_task fixture);
   if List.mem name [ "masc_plan_get"; "masc_plan_update"; "masc_plan_get_task"; "masc_plan_clear_task" ] then
     ensure_plan_initialized fixture;
-  if List.mem name [ "masc_cache_get"; "masc_cache_delete" ] then
-    ensure_cache_entry fixture;
   if List.mem name [ "masc_board_get"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote" ] then
     ignore (ensure_board_post fixture);
   if List.mem name [ "masc_verify_submit"; "masc_verify_status"; "masc_verify_auto"; "masc_verify_pending" ] then
@@ -1035,7 +979,6 @@ let field_value fixture ~tool_name field_name schema =
   | "files" | "channels" -> `List []
   | "bpm" -> `Int 120
   | "param" -> `String "volume"
-  | "value" when tool_name = "masc_cache_set" -> `String "cached value"
   | "value" -> `Float 0.5
   | "replace_all" | "create_dirs" | "dry_run" | "force" | "clear" ->
       `Bool true
@@ -1059,7 +1002,6 @@ let tool_arguments fixture (schema : Types.tool_schema) =
       match name with
       | "masc_start" -> [ "path"; "task_title" ]
       | "masc_worktree_create" -> [ "base_branch" ]
-      | "masc_goal_upsert" -> [ "title"; "horizon" ]
       | "masc_heartbeat_start" -> [ "interval" ]
       | "masc_listen" -> [ "timeout" ]
       | "masc_verify_request" -> [ "verifier" ]

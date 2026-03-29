@@ -306,8 +306,6 @@ let deterministic_baseline_action (obs : world_observation) : deliberation_actio
 
 (* ---------- Budget check ---------- *)
 
-let default_daily_budget_usd = 0.10
-
 (** Read the daily budget from env, returning the default if absent or invalid. *)
 let daily_budget_usd_from_env () : float =
   Env_config.KeeperRuntime.deliberation_daily_budget_usd ()

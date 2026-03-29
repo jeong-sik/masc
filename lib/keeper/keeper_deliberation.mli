@@ -95,11 +95,8 @@ val deterministic_baseline_action : world_observation -> deliberation_action
 
 (** {1 Phase 2: MODEL-Driven Deliberation} *)
 
-(** Default daily budget in USD for deliberation MODEL calls. *)
-val default_daily_budget_usd : float
-
 (** Read the daily budget from [MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD]
-    env var, returning [default_daily_budget_usd] if absent or invalid. *)
+    env var (default: 0.10). *)
 val daily_budget_usd_from_env : unit -> float
 
 (** Check whether the keeper has remaining budget for deliberation.

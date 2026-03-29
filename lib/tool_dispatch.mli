@@ -79,22 +79,20 @@ val is_join_required : string -> bool
 
 type module_tag =
   | Mod_plan | Mod_run | Mod_operator | Mod_command_plane
-  | Mod_local_runtime | Mod_team_session | Mod_voice | Mod_cache
-  | Mod_tempo | Mod_portal | Mod_worktree
-  | Mod_code_swarm | Mod_code | Mod_code_write
+  | Mod_local_runtime | Mod_team_session | Mod_voice
+  | Mod_portal | Mod_worktree
+  | Mod_code | Mod_code_write
   | Mod_council | Mod_a2a | Mod_handover
-  | Mod_relay | Mod_goals | Mod_heartbeat | Mod_encryption
-  | Mod_auth | Mod_hat | Mod_audit | Mod_rate_limit
-  | Mod_cost | Mod_walph | Mod_agent | Mod_task | Mod_room
+  | Mod_relay | Mod_heartbeat
+  | Mod_auth | Mod_walph | Mod_agent | Mod_task | Mod_room
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
-  | Mod_library | Mod_keeper | Mod_compact | Mod_mdal
-  | Mod_notifications | Mod_inline
+  | Mod_library | Mod_keeper | Mod_mdal
+  | Mod_inline
   | Mod_improve_loop
   | Mod_autoresearch
   | Mod_research
   | Mod_model_catalog
   | Mod_shard
-  | Mod_fire_task
 
 val register_module_tag : schemas:Types.tool_schema list -> tag:module_tag -> unit
 (** Register tool names from a schema list with a module tag. *)

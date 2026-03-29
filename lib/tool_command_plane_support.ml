@@ -298,43 +298,9 @@ let handle_unit_define (ctx : (_, _) context) args : result =
 let handle_unit_list (ctx : (_, _) context) : result =
   (true, Yojson.Safe.to_string (Command_plane_v2.list_units_json ctx.config))
 
-let object_schema ?(required = []) properties =
-  `Assoc
-    [
-      ("type", `String "object");
-      ("properties", `Assoc properties);
-      ("required", `List (List.map (fun key -> `String key) required));
-    ]
-
-let string_prop description =
-  `Assoc [ ("type", `String "string"); ("description", `String description) ]
-
-let integer_prop ?default description =
-  `Assoc
-    ([
-       ("type", `String "integer");
-       ("description", `String description);
-     ]
-    @
-    match default with
-    | Some value -> [ ("default", `Int value) ]
-    | None -> [])
-
-let boolean_prop ?default description =
-  `Assoc
-    ([
-       ("type", `String "boolean");
-       ("description", `String description);
-     ]
-    @
-    match default with
-    | Some value -> [ ("default", `Bool value) ]
-    | None -> [])
-
-let string_array_prop description =
-  `Assoc
-    [
-      ("type", `String "array");
-      ("description", `String description);
-      ("items", `Assoc [ ("type", `String "string") ]);
+let object_schema = Tool_schema_dsl.object_schema
+let string_prop = Tool_schema_dsl.string_prop
+let integer_prop = Tool_schema_dsl.integer_prop
+let boolean_prop = Tool_schema_dsl.boolean_prop
+let string_array_prop = Tool_schema_dsl.string_array_prop
     ]

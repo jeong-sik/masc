@@ -324,7 +324,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                     remember_mcp_profile session_id profile;
                     (match auth_result with
                      | Error msg ->
-                         let body = Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"}}|} msg in
+                         let body = json_rpc_error (-32001) msg in
                          h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
                      | Ok _cred_opt ->
                          h2_read_body h2_reqd (fun body_str ->
@@ -413,9 +413,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           (match auth_result with
            | Error msg ->
-               let body =
-                 Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"}}|} msg
-               in
+               let body = json_rpc_error (-32001) msg in
                h2_respond_json h2_reqd body ~status:`Unauthorized
                  ~extra_headers:(("www-authenticate", "Bearer") :: cors)
            | Ok _ ->
@@ -423,18 +421,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                 | Some session_id -> (
                     match validate_mcp_session_delete_profile ~profile session_id with
                     | Error msg ->
-                        let body =
-                          Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32600,"message":"%s"}}|} msg
-                        in
+                        let body = json_rpc_error (-32600) msg in
                         h2_respond_json h2_reqd body ~status:`Conflict
                           ~extra_headers:cors
                     | Ok () ->
                         (match Server_mcp_transport_http.validate_protocol_version_continuity
                                  ~session_id httpun_request with
                          | Error msg ->
-                             let body =
-                               Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32600,"message":"%s"}}|} msg
-                             in
+                             let body = json_rpc_error (-32600) msg in
                              h2_respond_json h2_reqd body ~status:`Bad_request
                                ~extra_headers:(cors @ mcp_headers session_id (get_protocol_version httpun_request))
                          | Ok () ->

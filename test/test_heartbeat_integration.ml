@@ -327,6 +327,39 @@ let test_restart_state_preservation () =
     check string "state running after restart" "running"
       (R.state_to_string e.state)
 
+(* ══════════════════════════════════════════════════════════
+   7. Turn failure → Crashed with Turn_consecutive_failures reason
+   ══════════════════════════════════════════════════════════ *)
+
+(** Simulate the turn failure crash path: supervisor catch sets
+    Turn_consecutive_failures as failure_reason, state = Crashed. *)
+let test_crash_turn_failures () =
+  R.clear ();
+  let meta = make_meta "turn-crash" in
+  let reg = R.register ~base_path:bp "turn-crash" meta in
+  let reason = R.Turn_consecutive_failures 10 in
+  let reason_str = R.failure_reason_to_string reason in
+  R.set_failure_reason ~base_path:bp "turn-crash" (Some reason);
+  R.set_state ~base_path:bp "turn-crash" R.Crashed;
+  R.record_crash ~base_path:bp "turn-crash" 2000.0 reason_str;
+  R.record_error ~base_path:bp "turn-crash" reason_str;
+  Eio.Promise.resolve reg.done_r (`Crashed reason_str);
+  match R.get ~base_path:bp "turn-crash" with
+  | None -> fail "expected turn-crash"
+  | Some e ->
+    check string "state crashed" "crashed" (R.state_to_string e.state);
+    (match e.last_failure_reason with
+     | Some (R.Turn_consecutive_failures n) ->
+       check int "turn failure count" 10 n
+     | _ -> fail "expected Turn_consecutive_failures");
+    check bool "crash log" true (List.length e.crash_log > 0)
+
+(** Turn failures produce a distinct cohort key for self-preservation. *)
+let test_cohort_key_turn_failures () =
+  let key = Sup.cohort_key_of_reason
+    (Some (R.Turn_consecutive_failures 10)) in
+  check string "turn failure cohort" "turn_failures" key
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -351,5 +384,9 @@ let () =
     ];
     "restart_flow", [
       eio_test "state preservation across restart" test_restart_state_preservation;
+    ];
+    "turn_failure", [
+      eio_test "turn crash flow" test_crash_turn_failures;
+      test_case "cohort key" `Quick test_cohort_key_turn_failures;
     ];
   ]

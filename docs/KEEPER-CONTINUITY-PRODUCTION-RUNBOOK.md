@@ -88,6 +88,8 @@ Compaction and handoff are therefore treated here as resilience evidence for rel
 
 `PARTIAL` is not production-ready for feature promotion. It is evidence for debugging only.
 
+If pre-release validation returns `PARTIAL`, the release gate remains blocked and the result should be escalated back into diagnosis rather than accepted as launch evidence.
+
 ### 2. Checkpoint truth validation
 
 Use the OAS checkpoint load path as the source of truth.

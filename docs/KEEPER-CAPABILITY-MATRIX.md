@@ -54,9 +54,12 @@ Primary continuity fields:
 - `generation`
 - `trace_history_count`
 - `continuity_summary`
+
+Supporting diagnostic field:
+
 - `last_continuity_update_ts` (detailed status tie-breaker)
 
-`continuity_summary` is the latest continuity snapshot text. It may be empty or `null` before the first continuity snapshot exists. After a harness-validated continuity update, detailed keeper status should expose a non-empty latest snapshot for that keeper.
+`continuity_summary` is the latest continuity snapshot text. It may be empty or `null` before the first continuity snapshot exists. During validation, a harness-validated continuity update should correlate with a non-empty latest snapshot in detailed keeper status.
 
 ## Triage System
 

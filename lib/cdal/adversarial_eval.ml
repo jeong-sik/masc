@@ -49,6 +49,9 @@ let banned_doc_patterns =
 let doc_extensions =
   [ ".md"; ".markdown"; ".mdx"; ".txt"; ".rst"; ".adoc"; ".asciidoc" ]
 
+let data_artifact_extensions =
+  [ ".json"; ".jsonl"; ".yaml"; ".yml"; ".log"; ".txt" ]
+
 let normalize_path path =
   String.map (fun c -> if c = '\\' then '/' else c) path
   |> String.lowercase_ascii
@@ -65,6 +68,12 @@ let contains_substring text pattern =
 
 let has_doc_extension path =
   List.exists (Filename.check_suffix path) doc_extensions
+
+let has_data_artifact_extension path =
+  List.exists (Filename.check_suffix path) data_artifact_extensions
+
+let has_history_artifact_extension path =
+  has_doc_extension path || has_data_artifact_extension path
 
 let split_path_segments path =
   String.split_on_char '/' path
@@ -119,21 +128,23 @@ let classify_path path =
       segments
   in
   let has_room_history =
-    List.exists (contains_substring normalized)
-      [ "room_history"; "room-history"; "roomtaskhistory"; "room_task_history";
-        "room-task-history" ]
+    has_history_artifact_extension lower
+    && List.exists (contains_substring normalized)
+         [ "room_history"; "room-history"; "roomtaskhistory"; "room_task_history";
+           "room-task-history" ]
   in
   let has_task_history =
-    List.exists (contains_substring normalized)
-      [ "task_history"; "task-history"; "taskhistory"; "room/task_history";
-        "room/task-history" ]
+    has_history_artifact_extension lower
+    && List.exists (contains_substring normalized)
+         [ "task_history"; "task-history"; "taskhistory"; "room/task_history";
+           "room/task-history" ]
   in
   let has_governance_history =
     (List.mem "governance" basename_tokens
-     && List.exists (Filename.check_suffix lower)
-          [ ".json"; ".jsonl"; ".yaml"; ".yml"; ".log"; ".txt" ])
-    || List.exists (contains_substring normalized) [ "session_log"; "session-log" ]
-    || (List.mem "retrospective" basename_tokens && has_doc_extension lower)
+     && has_data_artifact_extension lower)
+    || (has_history_artifact_extension lower
+        && List.exists (contains_substring normalized) [ "session_log"; "session-log" ])
+    || (List.mem "retrospective" basename_tokens && has_history_artifact_extension lower)
   in
   if check_patterns banned_readme_patterns then Some Readme
   else if has_room_history then Some Room_history

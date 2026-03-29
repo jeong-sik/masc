@@ -37,6 +37,8 @@ let test_classify_history () =
     (Option.is_some (Adversarial_eval.classify_path "governance_v2.json"));
   Alcotest.(check bool) "session_log.jsonl is banned" true
     (Option.is_some (Adversarial_eval.classify_path "session_log.jsonl"));
+  Alcotest.(check bool) "retrospective.json is banned" true
+    (Option.is_some (Adversarial_eval.classify_path "retrospective.json"));
   Alcotest.(check bool) "room-task-history path is banned" true
     (Option.is_some
        (Adversarial_eval.classify_path "memory/room-task-history.jsonl"))
@@ -51,7 +53,9 @@ let test_classify_allowed () =
   Alcotest.(check bool) "spec_decoder.ml is allowed" true
     (Option.is_none (Adversarial_eval.classify_path "lib/spec_decoder.ml"));
   Alcotest.(check bool) "governance source file is allowed" true
-    (Option.is_none (Adversarial_eval.classify_path "lib/governance_pipeline.ml"))
+    (Option.is_none (Adversarial_eval.classify_path "lib/governance_pipeline.ml"));
+  Alcotest.(check bool) "room history source file is allowed" true
+    (Option.is_none (Adversarial_eval.classify_path "lib/room_history_parser.ml"))
 
 let test_validate_clean_inputs () =
   let inputs =

@@ -163,6 +163,11 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
     { presence_ms = 0.0; snapshot_ms = 0.0; board_ms = 0.0;
       turn_ms = 0.0; recurring_ms = 0.0; improve_ms = 0.0 } in
   let timing_count = ref 0 in
+  (* Phase 1: work-as-heartbeat freshness tracking.
+     Updated ONLY on Room.heartbeat_in_room success after turn. *)
+  let last_successful_heartbeat_ts = ref 0.0 in
+  let work_as_hb = Env_config.WorkAsHeartbeat.enabled in
+  let max_silence = Env_config.WorkAsHeartbeat.max_silence_sec in
   let rec loop () =
     if Atomic.get stop then ()
     else (
@@ -173,28 +178,39 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               | Ok (Some latest) -> latest
               | _ -> m
             in
+            (* Phase 1: skip presence sync when recent room heartbeat proves freshness *)
+            let presence_fresh =
+              work_as_hb
+              && t_presence_start -. !last_successful_heartbeat_ts < max_silence
+            in
             let meta_current =
-              try
-                let synced = ensure_keeper_room_presence ctx.config meta_current in
-                if synced.joined_room_ids = [] then (
+              if presence_fresh then (
+                Log.Keeper.debug "presence sync skipped: fresh heartbeat %.0fs ago"
+                  (t_presence_start -. !last_successful_heartbeat_ts);
+                meta_current)
+              else
+                try
+                  let synced = ensure_keeper_room_presence ctx.config meta_current in
+                  if synced.joined_room_ids = [] then (
+                    incr consecutive_failures;
+                    Log.Keeper.warn "room presence returned empty rooms (%d/%d)"
+                      !consecutive_failures max_consecutive_heartbeat_failures)
+                  else (
+                    consecutive_failures := 0;
+                    last_successful_heartbeat_ts := Time_compat.now ());
+                  (match write_meta ctx.config synced with
+                   | Ok () -> synced
+                   | Error e ->
+                     Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
+                     synced)
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
                   incr consecutive_failures;
-                  Log.Keeper.warn "room presence returned empty rooms (%d/%d)"
-                    !consecutive_failures max_consecutive_heartbeat_failures)
-                else
-                  consecutive_failures := 0;
-                (match write_meta ctx.config synced with
-                 | Ok () -> synced  (* use written value directly, no second read_meta *)
-                 | Error e ->
-                   Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
-                   synced)
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                incr consecutive_failures;
-                Log.Keeper.error "room heartbeat failed (%d/%d): %s"
-                  !consecutive_failures max_consecutive_heartbeat_failures
-                  (Printexc.to_string exn);
-                meta_current
+                  Log.Keeper.error "room heartbeat failed (%d/%d): %s"
+                    !consecutive_failures max_consecutive_heartbeat_failures
+                    (Printexc.to_string exn);
+                  meta_current
             in
             if !consecutive_failures >= max_consecutive_heartbeat_failures then (
               Log.Keeper.error
@@ -427,6 +443,22 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    meta_after_triage)
               else meta_after_triage
             in
+            (* Phase 1: work-as-heartbeat — renew point (b).
+               After turn, call Room.heartbeat_in_room to prove room I/O health.
+               On success: refresh freshness lease + reset consecutive_failures.
+               On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
+            (if work_as_hb && proactive_warmup_elapsed then
+               let hb_ok = List.exists (fun room_id ->
+                 try
+                   ignore
+                     (Room.heartbeat_in_room ctx.config ~room_id
+                        ~agent_name:meta_after_proactive.agent_name);
+                   true
+                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
+               ) meta_after_proactive.joined_room_ids in
+               if hb_ok then (
+                 last_successful_heartbeat_ts := Time_compat.now ();
+                 consecutive_failures := 0));
             let t_turn_end = Time_compat.now () in
             let t_recurring_start = t_turn_end in
             (* Recurring task dispatch (#3190) *)

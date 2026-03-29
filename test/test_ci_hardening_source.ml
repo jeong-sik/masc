@@ -403,12 +403,14 @@ let test_transport_route_contracts () =
        {|`POST, "/webrtc/answer"|});
   check bool "transport delete path verifies full mcp auth" true
     (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
-       {|Mcp_eio.Full | Mcp_eio.Managed_agent ->
-        deps.verify_mcp_auth ~base_path request|});
+       {|let handle_delete_mcp ~deps ?(profile = Full) request reqd =|})
+    && (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
+          {|deps.verify_mcp_auth ~base_path request|});
   check bool "h2 delete path verifies full mcp auth" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|Mcp_eio.Full | Mcp_eio.Managed_agent ->
-                verify_mcp_auth ~base_path httpun_request|});
+       {|`DELETE, "/mcp" | `DELETE, "/mcp/managed" | `DELETE, "/mcp/operator" ->|})
+    && (file_contains_pattern "lib/server/server_h2_gateway.ml"
+          {|verify_mcp_auth ~base_path httpun_request|});
   check bool "h2 gateway webrtc routes enforce tool auth" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|authorize_tool_request

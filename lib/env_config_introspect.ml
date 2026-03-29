@@ -192,5 +192,5 @@ let to_json_filtered ?cat () =
     `Assoc [
       ("generated_at", `String (Types.now_iso ()));
       ("server", server_meta ());
-      ("categories", `Assoc (if filtered = [] then cats else filtered));
+      ("categories", `Assoc filtered);
     ]

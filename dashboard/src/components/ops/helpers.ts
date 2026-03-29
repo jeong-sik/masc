@@ -4,8 +4,10 @@ import { showToast } from '../common/toast'
 import { prettyJson, displayStatus, statusLabel } from '../../lib/status-label'
 import type {
   OperatorAttentionItem,
+  OperatorDigest,
   OperatorGuidanceSummary,
   OperatorKeeperSnapshot,
+  OperatorReviewItem,
   PendingConfirmation,
   OperatorRecommendedAction,
   OperatorJudgeRuntime,
@@ -21,6 +23,9 @@ import {
   actorName,
   broadcastMessage,
   pauseReason,
+  selectedReviewItemId,
+  selectedReviewTab,
+  reviewDecisionReason,
   taskTitle,
   taskDescription,
   taskPriority,
@@ -42,6 +47,9 @@ export {
   actorName,
   broadcastMessage,
   pauseReason,
+  selectedReviewItemId,
+  selectedReviewTab,
+  reviewDecisionReason,
   taskTitle,
   taskDescription,
   taskPriority,
@@ -262,6 +270,14 @@ export function actionTypeLabel(value?: string | null): string {
       return '세션 중지'
     case 'keeper_message':
       return '키퍼 메시지'
+    case 'keeper_probe':
+      return '키퍼 점검'
+    case 'keeper_recover':
+      return '키퍼 복구'
+    case 'review_resolve':
+      return '검토 해결'
+    case 'review_defer':
+      return '검토 보류'
     default:
       return value?.trim() || '액션'
   }
@@ -275,6 +291,8 @@ export function targetTypeLabel(value?: string | null): string {
       return '세션'
     case 'keeper':
       return '키퍼'
+    case 'review_item':
+      return '리뷰 항목'
     case 'swarm_run':
       return '스웜 실행'
     default:
@@ -448,8 +466,8 @@ export function workflowTargetReady(
 }
 
 export async function executeAction(input: {
-  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message'
-  target_type: 'room' | 'team_session' | 'keeper'
+  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover' | 'review_resolve' | 'review_defer'
+  target_type: 'room' | 'team_session' | 'keeper' | 'review_item'
   target_id?: string
   payload: Record<string, unknown>
   successMessage: string
@@ -474,6 +492,73 @@ export async function executeAction(input: {
     showToast(message, 'error')
     return null
   }
+}
+
+export async function submitReviewDecision(
+  item: OperatorReviewItem,
+  decision: 'review_resolve' | 'review_defer',
+) {
+  const reason = reviewDecisionReason.value.trim()
+  if (!reason) {
+    showToast('처리 이유를 먼저 남기세요', 'warning')
+    return null
+  }
+  const result = await executeAction({
+    action_type: decision,
+    target_type: 'review_item',
+    target_id: item.id,
+    payload: {
+      item_id: item.id,
+      fingerprint: item.fingerprint,
+      item_target_type: item.target_type,
+      item_target_id: item.target_id ?? undefined,
+      recommended_action_type: item.recommended_action?.action_type ?? undefined,
+      reason,
+    },
+    successMessage: decision === 'review_resolve' ? '검토 항목을 해결 처리했습니다' : '검토 항목을 보류 처리했습니다',
+  })
+  if (result) reviewDecisionReason.value = ''
+  return result
+}
+
+export async function executeRecommendedAction(action: OperatorRecommendedAction) {
+  const payload =
+    action.suggested_payload && typeof action.suggested_payload === 'object' && !Array.isArray(action.suggested_payload)
+      ? action.suggested_payload as Record<string, unknown>
+      : {}
+  return executeAction({
+    action_type: action.action_type as 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover',
+    target_type: action.target_type as 'room' | 'team_session' | 'keeper',
+    target_id: action.target_id ?? undefined,
+    payload,
+    successMessage: `${actionTypeLabel(action.action_type)}을(를) 요청했습니다`,
+  })
+}
+
+export function primaryActionForReviewItem(item: OperatorReviewItem): OperatorRecommendedAction | null {
+  if (item.recommended_action) return item.recommended_action
+  if (item.kind === 'room_gate') {
+    return {
+      action_type: 'room_resume',
+      target_type: 'room',
+      target_id: null,
+      severity: item.severity,
+      reason: item.why_now,
+      suggested_payload: {},
+    }
+  }
+  return null
+}
+
+export function detailDigestForItem(
+  item: OperatorReviewItem | null,
+  roomDigest: OperatorDigest | null,
+  sessionDigest: OperatorDigest | null,
+): OperatorDigest | null {
+  if (!item) return null
+  if (item.target_type === 'team_session' && sessionDigest?.target_id === item.target_id) return sessionDigest
+  if (item.target_type === 'room') return roomDigest
+  return null
 }
 
 export async function submitBroadcast() {

@@ -132,6 +132,8 @@ let canonical_action_type action_type =
   | "keeper_message" -> "keeper_message"
   | "keeper_probe" -> "keeper_probe"
   | "keeper_recover" -> "keeper_recover"
+  | "review_resolve" -> "review_resolve"
+  | "review_defer" -> "review_defer"
   | other -> other
 
 let default_target_type_for action_type =
@@ -141,6 +143,7 @@ let default_target_type_for action_type =
   | "team_worker_spawn_batch" | "team_stop" ->
       "team_session"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
+  | "review_resolve" | "review_defer" -> "review_item"
   | _ -> ""
 
 let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
@@ -215,6 +218,7 @@ let delegated_tool_for action_type =
   | "keeper_probe" -> "masc_keeper_status"
   | "keeper_recover" -> "masc_keeper_recover"
   | "task_inject" -> "masc_add_task"
+  | "review_resolve" | "review_defer" -> "review_state"
   | _ -> "unknown"
 
 let confirm_required = Operator_approval.confirm_required
@@ -262,6 +266,5 @@ let parse_turn_kind payload =
   | None ->
       Error
         "payload.turn_kind must be one of: note, broadcast, portal, task, checkpoint"
-
 
 

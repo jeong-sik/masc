@@ -251,6 +251,7 @@
    operator_digest_types
    risk_digest
    operator_digest_session
+   operator_review_state
    operator_control
    operator_control_snapshot
    operator_control_action

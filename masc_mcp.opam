@@ -12,7 +12,7 @@ doc: "https://github.com/jeong-sik/masc-mcp"
 bug-reports: "https://github.com/jeong-sik/masc-mcp/issues"
 depends: [
   "ocaml" {>= "5.4"}
-  "dune" {>= "3.13" & >= "3.13"}
+  "dune" {>= "3.17" & >= "3.17"}
   "mcp_protocol" {>= "1.2.0"}
   "ocaml-webrtc" {>= "0.2.3"}
   "grpc-direct-core" {>= "0.1.0"}
@@ -23,11 +23,11 @@ depends: [
   "graphql_parser" {>= "0.14.0"}
   "cmdliner" {>= "1.1"}
   "cohttp" {>= "5.0"}
-  "cohttp-eio" {>= "6.0" & < "6.2"}
+  "cohttp-eio" {>= "6.0"}
   "agent_sdk" {>= "0.93.2"}
   "uri" {>= "4.4"}
-  "tls" {>= "0.16"}
-  "tls-eio" {>= "0.16"}
+  "tls" {>= "2.0"}
+  "tls-eio" {>= "2.0"}
   "domain-name" {>= "0.4"}
   "ca-certs" {>= "0.2"}
   "ppx_deriving_yojson" {>= "3.6"}
@@ -55,8 +55,8 @@ depends: [
   "ocaml-protoc-plugin" {>= "4.0"}
   "pbrt" {>= "3.0" & < "4.0"}
   "pbrt_services" {>= "3.0" & < "4.0"}
-  "h2" {>= "0.10"}
-  "h2-eio" {>= "0.10"}
+  "h2" {>= "0.13"}
+  "h2-eio" {>= "0.13"}
   "alcotest" {with-test & >= "1.6"}
   "qcheck-core" {with-test & >= "0.21"}
   "qcheck-alcotest" {with-test & >= "0.21"}

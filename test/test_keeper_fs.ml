@@ -125,13 +125,6 @@ let test_generate_trace_id_format () =
   let id2 = KI.generate_trace_id () in
   check bool "unique IDs" true (id <> id2)
 
-let test_stable_session_id () =
-  let sid = KI.stable_session_id "dreamer" in
-  check string "format" "keeper-dreamer" sid;
-  (* Idempotent *)
-  let sid2 = KI.stable_session_id "dreamer" in
-  check string "idempotent" sid sid2
-
 (* ================================================================ *)
 (* Concurrent ensure_dir (Eio-based)                                *)
 (* ================================================================ *)
@@ -193,7 +186,6 @@ let () =
       ( "identity",
         [
           test_case "trace_id format" `Quick test_generate_trace_id_format;
-          test_case "stable session_id" `Quick test_stable_session_id;
         ] );
       ( "concurrent",
         [

@@ -92,8 +92,7 @@ let starts_with ~prefix s =
     Special cases: Memory summaries and goal messages are boosted to 0.95
     regardless of computed score — they anchor the keeper's purpose.
 
-    TODO(#2886): Extract generic scoring to OAS with ~boost_predicate injection
-    for MASC-specific prefixes (goal_prefix, memory_summary_prefix). *)
+    Memory summaries and goal messages use MASC-specific prefix matching. *)
 let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
   let n = List.length msgs in
   List.mapi (fun i (m : Agent_sdk.Types.message) ->

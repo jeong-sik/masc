@@ -17,13 +17,23 @@ let test_classify_design_doc () =
   Alcotest.(check bool) "architecture.md is banned" true
     (Option.is_some (Adversarial_eval.classify_path "architecture.md"));
   Alcotest.(check bool) "ADR-001.md is banned" true
-    (Option.is_some (Adversarial_eval.classify_path "ADR-001.md"))
+    (Option.is_some (Adversarial_eval.classify_path "ADR-001.md"));
+  Alcotest.(check bool) "docs/design/... is banned" true
+    (Option.is_some
+       (Adversarial_eval.classify_path
+          "docs/design/contract-driven-agent-loop-rfc.md"));
+  Alcotest.(check bool) "docs/spec/... is banned" true
+    (Option.is_some
+       (Adversarial_eval.classify_path "docs/spec/13-oas-integration.md"))
 
 let test_classify_history () =
   Alcotest.(check bool) "governance_v2.json is banned" true
     (Option.is_some (Adversarial_eval.classify_path "governance_v2.json"));
   Alcotest.(check bool) "session_log.jsonl is banned" true
-    (Option.is_some (Adversarial_eval.classify_path "session_log.jsonl"))
+    (Option.is_some (Adversarial_eval.classify_path "session_log.jsonl"));
+  Alcotest.(check bool) "room-task-history path is banned" true
+    (Option.is_some
+       (Adversarial_eval.classify_path "memory/room-task-history.jsonl"))
 
 let test_classify_allowed () =
   Alcotest.(check bool) "module.ml is allowed" true
@@ -31,7 +41,9 @@ let test_classify_allowed () =
   Alcotest.(check bool) "module.mli is allowed" true
     (Option.is_none (Adversarial_eval.classify_path "module.mli"));
   Alcotest.(check bool) "test_foo.ml is allowed" true
-    (Option.is_none (Adversarial_eval.classify_path "test_foo.ml"))
+    (Option.is_none (Adversarial_eval.classify_path "test_foo.ml"));
+  Alcotest.(check bool) "spec_decoder.ml is allowed" true
+    (Option.is_none (Adversarial_eval.classify_path "lib/spec_decoder.ml"))
 
 let test_validate_clean_inputs () =
   let inputs =
@@ -60,13 +72,29 @@ let test_validate_rejects_readme () =
 let test_validate_rejects_design_doc () =
   let inputs =
     Adversarial_eval.[
-      Interface_contract { path = "DESIGN.md"; content = "..." };
+      Interface_contract
+        {
+          path = "docs/design/contract-driven-agent-loop-rfc.md";
+          content = "...";
+        };
     ]
   in
   match Adversarial_eval.validate_inputs inputs with
   | Error (_, Adversarial_eval.Design_doc) -> ()
   | Error (_, _) -> Alcotest.fail "wrong rejection kind"
   | Ok _ -> Alcotest.fail "should reject design doc"
+
+let test_validate_rejects_room_history_path () =
+  let inputs =
+    Adversarial_eval.[
+      Changed_file
+        { path = "memory/room-task-history.jsonl"; content = "{}\n" };
+    ]
+  in
+  match Adversarial_eval.validate_inputs inputs with
+  | Error (_, Adversarial_eval.Room_history) -> ()
+  | Error (_, _) -> Alcotest.fail "wrong rejection kind"
+  | Ok _ -> Alcotest.fail "should reject room history"
 
 (* --- Structural check tests --- *)
 
@@ -182,6 +210,8 @@ let () =
           Alcotest.test_case "validate clean" `Quick test_validate_clean_inputs;
           Alcotest.test_case "reject readme" `Quick test_validate_rejects_readme;
           Alcotest.test_case "reject design doc" `Quick test_validate_rejects_design_doc;
+          Alcotest.test_case "reject room history path" `Quick
+            test_validate_rejects_room_history_path;
         ] );
       ( "structural_checks",
         [

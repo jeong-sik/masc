@@ -56,6 +56,7 @@
         test_golden_set
         test_adversarial_eval
         test_labeling
+        test_tool_deep_review
 )
  (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
           test_sse test_encryption test_cancellation test_graphql_api
@@ -93,6 +94,7 @@
           test_golden_set
           test_adversarial_eval
           test_labeling
+          test_tool_deep_review
   )
  (libraries masc_mcp masc_mcp.team_session_types agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))

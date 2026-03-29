@@ -8,10 +8,27 @@
 
 ## Related Documents
 
+- `./adaptive-heartbeat-production-rollout-rfc.md`
+- `./adaptive-heartbeat-observability-slo-spec.md`
+- `./adaptive-heartbeat-validation-and-alert-wiring-spec.md`
+- `./adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
+- `./adaptive-heartbeat-phi-enforcement-rfc.md`
+- `./adaptive-heartbeat-safety-harness-spec.md`
 - `./contract-driven-agent-loop-rfc.md`
 - `./oas-masc-state-boundary.md`
+- `../ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
 - `../SUPERVISOR-MODE.md`
 - `../COMMAND-PLANE-RUNBOOK.md`
+
+**Document role**: 이 문서는 Phase 0-2의 implementation design RFC다. Canonical HTTP/file keeper path의 production rollout, observability/SLO, operator procedure는 아래 문서들을 canonical source로 본다.
+
+- `docs/design/adaptive-heartbeat-production-rollout-rfc.md`
+- `docs/design/adaptive-heartbeat-observability-slo-spec.md`
+- `docs/design/adaptive-heartbeat-validation-and-alert-wiring-spec.md`
+- `docs/design/adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
+- `docs/design/adaptive-heartbeat-phi-enforcement-rfc.md`
+- `docs/design/adaptive-heartbeat-safety-harness-spec.md`
+- `docs/ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
 
 ## Readiness Snapshot
 
@@ -330,7 +347,7 @@ if entry.restart_count >= max_restarts then begin
 end
 ```
 
-Dead entry cleanup: sweep에서 `state = Dead AND now - last_restart_ts > DEAD_TTL`이면 unregister + meta 파일에 `paused = true` 기록 (reconcile의 기존 `not meta.paused` 필터가 영구 제외).
+Dead entry cleanup: sweep에서 `state = Dead AND now - last_restart_ts > DEAD_TTL`이면 먼저 meta 파일에 `paused = true` 를 durable write 하고, 그 write가 성공했을 때만 unregister 한다. paused write가 실패하면 tombstone을 registry에 유지하고 다음 sweep에서 retry 한다. 이렇게 해야 unregister-only 성공으로 orphaned durable keeper가 되어 reconcile re-launch 되는 경로를 막을 수 있다.
 
 **Reconcile 제외 규칙 (필수)**:
 
@@ -489,25 +506,25 @@ Phase 3 착수 조건:
 
 ## 6. Implementation Checklist
 
-- [x] Phase 0.1: Per-stage timer 계측 (keeper_keepalive.ml) — #3659
-- [x] Phase 0.2: Config SSOT (resilience.ml 하드코딩 → env_config) — #3659
-- [ ] Phase 0: 1주 측정 + 결과 기록 — #3693 (due 2026-04-05)
-- [x] Phase 1.1: `last_successful_heartbeat_ts` local ref in keepalive loop — #3671
-- [x] Phase 1.2: Turn 완료 후 `Room.heartbeat_in_room` 호출, **성공 시에만** timestamp 갱신 + `consecutive_failures := 0` — #3671
-- [x] Phase 1.3: Presence sync conditional skip (`MAX_SILENCE_SEC` 기반 lease) — #3671
-- [x] Phase 1.4: Config (feature flag + max silence) — #3671
-- [x] Phase 1.5: Tests (freshness skip + room I/O failure 독립 검증) — #3671
-- [x] Phase 2.0a: `keeper_state`에 `Crashed` + `Dead` variant 추가 + `is_registered` 함수 — #3680
-- [x] Phase 2.0b: `launch_supervised_fiber` body에서 structured catch + `set_state Crashed` + resolve — #3680
-- [x] Phase 2.0c: Exhausted keeper를 unregister 대신 `Dead` state 유지 (tombstone) + TTL 후 cleanup — #3680
-- [x] Phase 2.1: `keeper_keepalive.ml:147` self-stop → structured exception raise — #3680
-- [x] Phase 2.2: reconcile 조건 변경 (`is_running` → `is_registered`) — #3680
-- [x] Phase 2.3: `sweep_and_recover` 순서 변경 (restart/unregister → reconcile) — #3680
-- [x] Phase 2.4: `failure_reason` ADT 도입 — #3680
-- [x] Phase 2.5: Self-preservation gate (ratio + min_candidates + cohort) — #3680
-- [x] Phase 2.6: Config (ratio, min_candidates) — #3680
-- [x] Phase 2.7: Tests (소규모/대규모/mixed cohort + reconcile 제외 + state 전이) — #3680
-- [ ] Phase 2b (gRPC 활성화 후): Phi accrual + shadow mode — #3644 (No-Go)
+- [ ] Phase 0.1: Per-stage timer 계측 (keeper_keepalive.ml)
+- [ ] Phase 0.2: Config SSOT (resilience.ml 하드코딩 → env_config)
+- [ ] Phase 0: 1주 측정 + 결과 기록
+- [ ] Phase 1.1: `last_successful_heartbeat_ts` local ref in keepalive loop
+- [ ] Phase 1.2: Turn 완료 후 `Room.heartbeat_in_room` 호출, **성공 시에만** timestamp 갱신 + `consecutive_failures := 0`
+- [ ] Phase 1.3: Presence sync conditional skip (`MAX_SILENCE_SEC` 기반 lease)
+- [ ] Phase 1.4: Config (feature flag + max silence)
+- [ ] Phase 1.5: Tests (freshness skip + room I/O failure 독립 검증)
+- [ ] Phase 2.0a: `keeper_state`에 `Crashed` + `Dead` variant 추가 + `is_registered` 함수
+- [ ] Phase 2.0b: `launch_supervised_fiber` body에서 structured catch + `set_state Crashed` + resolve
+- [ ] Phase 2.0c: Exhausted keeper를 unregister 대신 `Dead` state 유지 (tombstone) + TTL 후 cleanup
+- [ ] Phase 2.1: `keeper_keepalive.ml:147` self-stop → structured exception raise
+- [ ] Phase 2.2: reconcile 조건 변경 (`is_running` → `is_registered`)
+- [ ] Phase 2.3: `sweep_and_recover` 순서 변경 (restart/unregister → reconcile)
+- [ ] Phase 2.4: `failure_reason` ADT 도입
+- [ ] Phase 2.5: Self-preservation gate (ratio + min_candidates + cohort)
+- [ ] Phase 2.6: Config (ratio, min_candidates)
+- [ ] Phase 2.7: Tests (소규모/대규모/mixed cohort + reconcile 제외 + state 전이)
+- [ ] Phase 2b (gRPC 활성화 후): Phi accrual + shadow mode
 
 ## 7. Labeling Protocol
 

@@ -63,6 +63,7 @@ type registry_entry = {
   done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
   restart_count : int;
   last_restart_ts : float;
+  dead_since_ts : float option;
   crash_log : (float * string) list;
   last_error : string option;
   last_failure_reason : failure_reason option;
@@ -117,6 +118,7 @@ let register ~base_path name meta =
     done_r;
     restart_count = 0;
     last_restart_ts = 0.0;
+    dead_since_ts = None;
     crash_log = [];
     last_error = None;
     last_failure_reason = None;
@@ -174,9 +176,28 @@ let set_state ~base_path name state =
          | (Paused | Stopped | Crashed), Running ->
              Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
          | _ -> ());
-        put_entry key { entry with state }
+        let dead_since_ts =
+          match entry.state, state with
+          | _, Dead -> entry.dead_since_ts
+          | Dead, Running -> None
+          | Dead, _ -> entry.dead_since_ts
+          | _ -> None
+        in
+        put_entry key { entry with state; dead_since_ts }
       end
   | None -> ()
+
+let mark_dead ~base_path name ~at =
+  update_entry ~base_path name (fun entry ->
+    if entry.state <> Dead then begin
+      (match entry.state with
+       | Running ->
+           Atomic.set running_count_atomic
+             (max 0 (Atomic.get running_count_atomic - 1))
+       | _ -> ());
+      { entry with state = Dead; dead_since_ts = Some at }
+    end else
+      { entry with dead_since_ts = Some (Option.value ~default:at entry.dead_since_ts) })
 
 let record_restart ~base_path name =
   update_entry ~base_path name (fun e ->
@@ -228,7 +249,7 @@ let started_at ~base_path name =
 let spawn_slots_available () =
   let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
   max_keepers <= 0
-  || StringMap.cardinal !registry < max_keepers
+  || Atomic.get running_count_atomic < max_keepers
 
 let wakeup ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
@@ -246,14 +267,16 @@ let fiber_health_of ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
   | None -> Fiber_unknown
   | Some entry ->
-      match Eio.Promise.peek entry.done_p with
-      | None -> Fiber_alive
-      | Some `Stopped -> Fiber_unknown
-      | Some (`Crashed _) ->
-          let max_restarts = Env_config.KeeperSupervisor.max_restarts in
-          if entry.restart_count >= max_restarts
-          then Fiber_dead
-          else Fiber_zombie
+      if entry.state = Dead then Fiber_dead
+      else
+        match Eio.Promise.peek entry.done_p with
+        | None -> Fiber_alive
+        | Some `Stopped -> Fiber_unknown
+        | Some (`Crashed _) ->
+            let max_restarts = Env_config.KeeperSupervisor.max_restarts in
+            if entry.restart_count >= max_restarts
+            then Fiber_dead
+            else Fiber_zombie
 
 let crash_log_of ~base_path name =
   match get ~base_path name with
@@ -263,7 +286,14 @@ let crash_log_of ~base_path name =
 let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts
     ~crash_log =
   update_entry ~base_path name (fun e ->
-    { e with restart_count; last_restart_ts; crash_log })
+    {
+      e with
+      restart_count;
+      last_restart_ts;
+      dead_since_ts = None;
+      crash_log;
+      last_failure_reason = None;
+    })
 
 let get_last_agent_count ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with

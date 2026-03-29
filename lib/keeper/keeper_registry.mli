@@ -47,6 +47,7 @@ type registry_entry = {
           Only the fiber owning this keeper should call [Eio.Promise.resolve]. *)
   restart_count : int;
   last_restart_ts : float;
+  dead_since_ts : float option;
   crash_log : (float * string) list;
   last_error : string option;
   last_failure_reason : failure_reason option;
@@ -100,6 +101,9 @@ val is_running : base_path:string -> string -> bool
 (** Check if a keeper has ANY registry entry (regardless of state).
     Used by reconcile to skip Crashed/Dead keepers. *)
 val is_registered : base_path:string -> string -> bool
+
+(** Mark a keeper as dead tombstone and record the transition timestamp. *)
+val mark_dead : base_path:string -> string -> at:float -> unit
 
 (** Return the started_at timestamp, or None if not registered. *)
 val started_at : base_path:string -> string -> float option

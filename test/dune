@@ -1181,3 +1181,9 @@
  (name test_phase2_self_preservation)
  (modules test_phase2_self_preservation)
  (libraries masc_mcp masc_mcp.config alcotest eio eio_main unix fs_compat))
+
+; Heartbeat integration: cross-module supervisor→registry scenario tests
+(test
+ (name test_heartbeat_integration)
+ (modules test_heartbeat_integration)
+ (libraries masc_mcp masc_mcp.config fs_compat alcotest eio eio_main unix))

@@ -352,6 +352,50 @@ let add_routes ~sw ~clock router =
              in
              Http.Response.json ~status ~compress:true ~request:req
                (Yojson.Safe.to_string json) reqd
+         else if ends_with "/trajectory" then
+           let name = extract_name "/trajectory" in
+           if String.length name = 0 then
+             Http.Response.json ~status:`Bad_request
+               {|{"error":"keeper name is required"}|} reqd
+           else
+             let config = state.Mcp_server.room_config in
+             (match Keeper_types.read_meta config name with
+              | Error e ->
+                Http.Response.json ~status:`Internal_server_error
+                  (Printf.sprintf {|{"error":"%s"}|} (String.escaped e)) reqd
+              | Ok None ->
+                Http.Response.json ~status:`Not_found
+                  (Printf.sprintf {|{"error":"keeper %S not found"}|} name) reqd
+              | Ok (Some m) ->
+                let trajectory_default_limit = 50 in
+                let trajectory_max_limit = 500 in
+                let limit =
+                  Server_utils.int_query_param req "limit"
+                    ~default:trajectory_default_limit
+                  |> max 1 |> min trajectory_max_limit
+                in
+                let masc_root = Filename.concat config.base_path ".masc" in
+                let entries =
+                  Trajectory.read_entries ~masc_root ~keeper_name:m.name
+                    ~trace_id:m.trace_id
+                in
+                let total = List.length entries in
+                let recent =
+                  if total <= limit then entries
+                  else
+                    let drop = total - limit in
+                    List.filteri (fun i _e -> i >= drop) entries
+                in
+                let json = `Assoc [
+                  ("keeper", `String name);
+                  ("trace_id", `String m.trace_id);
+                  ("generation", `Int m.generation);
+                  ("total_entries", `Int total);
+                  ("showing", `Int (List.length recent));
+                  ("entries", `List (List.map (Trajectory.entry_to_json ~result_max_len:2000) recent));
+                ] in
+                Http.Response.json ~compress:true ~request:req
+                  (Yojson.Safe.to_string json) reqd)
          else
            Http.Response.json ~status:`Not_found
              {|{"error":"not found"}|} reqd

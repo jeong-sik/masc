@@ -27,11 +27,11 @@ const keeperBooting = signal<Record<string, boolean>>({})
 const keeperShuttingDown = signal<Record<string, boolean>>({})
 
 const KEEPER_CHAT_METADATA_VISIBLE_KEY = 'masc_keeper_chat_metadata_visible'
+const KEEPER_CHAT_INTERNAL_VISIBLE_KEY = 'masc_keeper_chat_internal_visible'
 
 function readKeeperChatMetadataVisible(): boolean {
   try {
     const stored = localStorage.getItem(KEEPER_CHAT_METADATA_VISIBLE_KEY)
-    // Default to hidden so the direct lane reads like chat first.
     return stored === null ? false : stored === 'true'
   } catch {
     return false
@@ -41,9 +41,22 @@ function readKeeperChatMetadataVisible(): boolean {
 function writeKeeperChatMetadataVisible(value: boolean): void {
   try {
     localStorage.setItem(KEEPER_CHAT_METADATA_VISIBLE_KEY, value ? 'true' : 'false')
+  } catch {}
+}
+
+function readKeeperChatInternalVisible(): boolean {
+  try {
+    const stored = localStorage.getItem(KEEPER_CHAT_INTERNAL_VISIBLE_KEY)
+    return stored === null ? false : stored === 'true'
   } catch {
-    // Ignore persistence failures.
+    return false
   }
+}
+
+function writeKeeperChatInternalVisible(value: boolean): void {
+  try {
+    localStorage.setItem(KEEPER_CHAT_INTERNAL_VISIBLE_KEY, value ? 'true' : 'false')
+  } catch {}
 }
 
 function quietReasonLabel(reason?: string | null): string {
@@ -226,17 +239,20 @@ export function KeeperConversationPanel({
 }) {
   const [draft, setDraft] = useState('')
   const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
+  const [showInternal, setShowInternal] = useState(readKeeperChatInternalVisible())
 
   useEffect(() => {
     writeKeeperChatMetadataVisible(showMetadata)
   }, [showMetadata])
 
+  useEffect(() => {
+    writeKeeperChatInternalVisible(showInternal)
+  }, [showInternal])
+
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const rawThread = keeperThreads.value[keeperName] ?? []
-  const thread = rawThread.filter(isVisibleDirectConversationEntry)
-  const hiddenHistoryCount = rawThread.filter(
-    entry => entry.delivery === 'history' && !isVisibleDirectConversationEntry(entry),
-  ).length
+  const thread = showInternal ? rawThread : rawThread.filter(isVisibleDirectConversationEntry)
+  const hiddenCount = rawThread.length - thread.length
   const sending = keeperSending.value[keeperName] ?? false
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
@@ -283,6 +299,13 @@ export function KeeperConversationPanel({
             >
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
             </button>
+            <button
+              type="button"
+              class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[#a78bfa]' : ''}"
+              onClick=${() => { setShowInternal(!showInternal) }}
+            >
+              ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
+            </button>
             ${!historyExpanded
               ? html`
                   <button
@@ -311,10 +334,10 @@ export function KeeperConversationPanel({
           />
         </div>
 
-        ${hiddenHistoryCount > 0
+        ${!showInternal && hiddenCount > 0
           ? html`
               <div class="mx-4 mb-4 rounded-[16px] border border-[rgba(245,158,11,0.16)] bg-[rgba(245,158,11,0.06)] px-3 py-2 text-[11px] leading-[1.55] text-[#f4d79e]">
-                이 대화에서 ${hiddenHistoryCount}개의 내부 이력이 가독성을 위해 숨겨져 있습니다.
+                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `
           : null}

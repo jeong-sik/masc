@@ -128,21 +128,34 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
 
 (* ── Sweep and recover ───────────────────────────────────── *)
 
-(** Phase 2: reconcile only orphaned durable keepers (no registry entry).
-    is_registered checks entry existence regardless of state, so Crashed/Dead
-    keepers are excluded from reconcile. *)
+(** Reconcile only orphaned or cleanly stopped durable keepers.
+    Running/Paused/Crashed/Dead entries are actively managed by sweep
+    and must NOT be re-launched by reconcile. Stopped entries with
+    unresolved fibers (done_p = None) are also skipped — sweep will
+    handle them once the fiber terminates. *)
 let reconcile_keepalive_keepers (ctx : _ context) =
   let base_path = ctx.config.base_path in
   Keeper_types.keepalive_keeper_names ctx.config
   |> List.iter (fun name ->
          match read_meta ctx.config name with
-         | Ok (Some meta)
-           when not meta.paused
-                && not (Keeper_registry.is_registered ~base_path meta.name) ->
-             supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
-             if Keeper_registry.is_running ~base_path meta.name then begin
-               publish_lifecycle "reconciled" meta.name "durable keeper";
-               Log.Keeper.info "%s: reconciled durable keeper" meta.name
+         | Ok (Some meta) when not meta.paused ->
+             let dominated_by_sweep =
+               match Keeper_registry.get ~base_path meta.name with
+               | None -> false  (* no entry = orphaned, reconcile OK *)
+               | Some e ->
+                 match e.state with
+                 | Keeper_registry.Running | Keeper_registry.Paused -> true
+                 | Keeper_registry.Crashed | Keeper_registry.Dead -> true
+                 | Keeper_registry.Stopped ->
+                     (* Stopped with unresolved fiber → sweep will clean up *)
+                     Eio.Promise.peek e.done_p = None
+             in
+             if not dominated_by_sweep then begin
+               supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
+               if Keeper_registry.is_running ~base_path meta.name then begin
+                 publish_lifecycle "reconciled" meta.name "durable keeper";
+                 Log.Keeper.info "%s: reconciled durable keeper" meta.name
+               end
              end
          | _ -> ())
 (** Cohort key from structured failure_reason ADT.

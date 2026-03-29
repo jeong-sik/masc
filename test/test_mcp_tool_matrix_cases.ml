@@ -82,13 +82,13 @@ let all_known_tool_names =
     "masc_board_vote";
     "masc_bounded_run";
     "masc_branch";
+    "masc_broadcast";
     "masc_cache_clear";
     "masc_cache_delete";
     "masc_cache_get";
     "masc_cache_list";
     "masc_cache_set";
     "masc_cache_stats";
-    "masc_broadcast";
     "masc_cancellation";
     "masc_case_brief_submit";
     "masc_case_status";
@@ -108,10 +108,10 @@ let all_known_tool_names =
     "masc_code_symbols";
     "masc_code_write";
     "masc_collaboration_evidence";
+    "masc_collaboration_graph";
     "masc_compact_context";
     "masc_config";
     "masc_config_snapshot";
-    "masc_collaboration_graph";
     "masc_consolidate_learning";
     "masc_convo_conclude";
     "masc_convo_get";
@@ -135,9 +135,9 @@ let all_known_tool_names =
     "masc_execute";
     "masc_execute_dry_run";
     "masc_execution_orders";
+    "masc_feature_flags";
     "masc_find_by_capability";
     "masc_gc";
-    "masc_feature_flags";
     "masc_get_metrics";
     "masc_goal_dispatch";
     "masc_goal_list";

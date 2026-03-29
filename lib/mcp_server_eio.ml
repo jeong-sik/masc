@@ -134,6 +134,9 @@ let () =
   register_module_tag ~schemas:Tool_relay.schemas ~tag:Mod_relay;
   register_module_tag ~schemas:Tool_handover.schemas ~tag:Mod_handover;
   register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
+  register_module_tag ~schemas:Tool_cache.schemas ~tag:Mod_cache;
+  register_module_tag ~schemas:Tool_goals.schemas ~tag:Mod_goals;
+  register_module_tag ~schemas:Tool_compact.schemas ~tag:Mod_compact;
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
   (* Monolithic schema decomposition: modules that now export their own schemas *)
   register_module_tag ~schemas:Tool_code.schemas ~tag:Mod_code;

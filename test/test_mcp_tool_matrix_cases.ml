@@ -52,6 +52,9 @@ let all_known_tool_names =
     "masc_agents";
     "masc_approve";
     "masc_archive_view";
+    "masc_audit_query";
+    "masc_audit_stats";
+    "masc_audit_trail";
     "masc_auth_create_token";
     "masc_auth_disable";
     "masc_auth_enable";
@@ -59,9 +62,6 @@ let all_known_tool_names =
     "masc_auth_refresh";
     "masc_auth_revoke";
     "masc_auth_status";
-    "masc_audit_query";
-    "masc_audit_stats";
-    "masc_audit_trail";
     "masc_autoresearch_cycle";
     "masc_autoresearch_inject";
     "masc_autoresearch_record_finding";
@@ -132,11 +132,11 @@ let all_known_tool_names =
     "masc_dispatch_rebalance";
     "masc_dispatch_recall";
     "masc_dispatch_tick";
-    "masc_episode_flush";
-    "masc_episode_list";
     "masc_encryption_disable";
     "masc_encryption_enable";
     "masc_encryption_status";
+    "masc_episode_flush";
+    "masc_episode_list";
     "masc_error_add";
     "masc_error_resolve";
     "masc_execute";
@@ -158,8 +158,6 @@ let all_known_tool_names =
     "masc_governance_report";
     "masc_governance_set";
     "masc_governance_status";
-    "masc_hat_status";
-    "masc_hat_wear";
     "masc_handover_claim";
     "masc_handover_claim_and_spawn";
     "masc_handover_create";
@@ -309,11 +307,6 @@ let all_known_tool_names =
     "masc_suspend";
     "masc_task_history";
     "masc_tasks";
-    "masc_tempo";
-    "masc_tempo_adjust";
-    "masc_tempo_get";
-    "masc_tempo_reset";
-    "masc_tempo_set";
     "masc_team_session_compare";
     "masc_team_session_events";
     "masc_team_session_finalize";
@@ -325,6 +318,11 @@ let all_known_tool_names =
     "masc_team_session_step";
     "masc_team_session_stop";
     "masc_team_session_verify_trace";
+    "masc_tempo";
+    "masc_tempo_adjust";
+    "masc_tempo_get";
+    "masc_tempo_reset";
+    "masc_tempo_set";
     "masc_tool_admin_snapshot";
     "masc_tool_admin_update";
     "masc_tool_help";

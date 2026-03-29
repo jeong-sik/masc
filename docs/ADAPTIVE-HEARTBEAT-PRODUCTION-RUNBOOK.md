@@ -2,6 +2,15 @@
 
 이 runbook은 canonical HTTP/file keeper path에서 adaptive heartbeat를 production에 올릴 때 사용하는 절차다.
 
+## Related Documents
+
+- `docs/design/adaptive-heartbeat-production-rollout-rfc.md`
+- `docs/design/adaptive-heartbeat-observability-slo-spec.md`
+- `docs/design/adaptive-heartbeat-validation-and-alert-wiring-spec.md`
+- `docs/design/adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
+- `docs/MCP-READPATH-REVALIDATION-RUNBOOK.md`
+- `docs/TRANSPORT-PRACTICAL-PLAYBOOK.md`
+
 ## Scope
 
 - 포함: `work-as-heartbeat`, `self-preservation`, `Crashed/Dead` keeper state
@@ -200,4 +209,4 @@ Do not continue rollout if any of the following occur:
 ## Notes
 
 - This runbook intentionally reuses existing harnesses. It does not require a new heartbeat-only harness to start rollout.
-- gRPC and phi-accrual are explicitly out of scope for this production runbook.
+- gRPC and phi-accrual are explicitly out of scope for this production runbook. Follow-up production scope is documented in `docs/design/adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`.

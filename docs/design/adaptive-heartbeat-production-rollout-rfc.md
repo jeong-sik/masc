@@ -9,6 +9,8 @@
 
 - `./adaptive-heartbeat-scheduling-rfc.md`
 - `./adaptive-heartbeat-observability-slo-spec.md`
+- `./adaptive-heartbeat-validation-and-alert-wiring-spec.md`
+- `./adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
 - `./error-handling-and-operations-spec.md`
 - `../ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
 - `../PERFORMANCE-SLO.md`
@@ -41,7 +43,7 @@
 - cascade scheduler rollout
 - 코드 구현 상세 알고리즘 설명 자체
 
-gRPC / phi-accrual은 후속 RFC에서 다룬다. 이 문서의 production sign-off는 canonical path에만 유효하다.
+gRPC / phi-accrual은 `adaptive-heartbeat-grpc-and-phi-rollout-rfc.md` 에서 다룬다. 이 문서의 production sign-off는 canonical path에만 유효하다.
 
 ## 3. Runtime Contract
 

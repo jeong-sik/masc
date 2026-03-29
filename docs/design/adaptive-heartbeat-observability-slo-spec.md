@@ -9,6 +9,8 @@
 
 - `./adaptive-heartbeat-scheduling-rfc.md`
 - `./adaptive-heartbeat-production-rollout-rfc.md`
+- `./adaptive-heartbeat-validation-and-alert-wiring-spec.md`
+- `./adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
 - `./error-handling-and-operations-spec.md`
 - `../PERFORMANCE-SLO.md`
 - `../ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`

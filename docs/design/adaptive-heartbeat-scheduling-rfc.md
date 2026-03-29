@@ -10,6 +10,8 @@
 
 - `./adaptive-heartbeat-production-rollout-rfc.md`
 - `./adaptive-heartbeat-observability-slo-spec.md`
+- `./adaptive-heartbeat-validation-and-alert-wiring-spec.md`
+- `./adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
 - `./contract-driven-agent-loop-rfc.md`
 - `./oas-masc-state-boundary.md`
 - `../ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
@@ -20,6 +22,8 @@
 
 - `docs/design/adaptive-heartbeat-production-rollout-rfc.md`
 - `docs/design/adaptive-heartbeat-observability-slo-spec.md`
+- `docs/design/adaptive-heartbeat-validation-and-alert-wiring-spec.md`
+- `docs/design/adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
 - `docs/ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
 
 ## Readiness Snapshot

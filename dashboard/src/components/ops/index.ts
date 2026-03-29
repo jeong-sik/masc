@@ -51,6 +51,7 @@ import {
   targetTypeLabel,
   workflowTargetReady,
 } from './helpers'
+import { FlowControlPanel } from '../flow-control/flow-control-panel'
 
 function severityClass(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
@@ -362,6 +363,8 @@ export function Ops() {
           </div>
         </section>
       ` : null}
+
+      <${FlowControlPanel} />
 
       <section class="${CARD_STANDARD} grid grid-cols-4 gap-3 max-[1200px]:grid-cols-2 max-[880px]:grid-cols-1">
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">

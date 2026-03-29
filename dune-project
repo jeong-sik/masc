@@ -25,7 +25,7 @@
   (ocaml (>= 5.4))
   (dune (>= 3.17))
   ; External dependencies (opam pin)
-  (mcp_protocol (>= 1.2.0))
+  (mcp_protocol (>= 1.3.0))
   (ocaml-webrtc (>= 0.2.3))
   (grpc-direct-core (>= 0.1.0))
   (grpc-direct (>= 0.1.0))

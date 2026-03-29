@@ -118,7 +118,7 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_a2a_delegate" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits vote_create (hidden)" false
     (List.mem "mcp__masc__masc_vote_create" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains run_deliverable" true
+  Alcotest.(check bool) "omits run_deliverable" false
     (List.mem "mcp__masc__masc_run_deliverable" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains board_post" true
     (List.mem "mcp__masc__masc_board_post" Spawn.masc_mcp_tools);

@@ -188,7 +188,6 @@ let all_known_tool_names =
     "masc_mdal_swarm_start";
     "masc_memento_mori";
     "masc_messages";
-    "masc_model_catalog";
     "masc_note_add";
     "masc_observe_alerts";
     "masc_observe_capacity";
@@ -257,12 +256,6 @@ let all_known_tool_names =
     "masc_room_strategy_set";
     "masc_route";
     "masc_ruling_status";
-    "masc_run_deliverable";
-    "masc_run_get";
-    "masc_run_init";
-    "masc_run_list";
-    "masc_run_log";
-    "masc_run_plan";
     "masc_runtime_params";
     "masc_runtime_verify";
     "masc_select_agent";

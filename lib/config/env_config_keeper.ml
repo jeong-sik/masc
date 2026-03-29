@@ -209,4 +209,14 @@ module WorkAsHeartbeat = struct
     Float.max 30.0 (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
 end
 
+(** {1 Smart Heartbeat Configuration (Phase 2)} *)
+
+module SmartHeartbeat = struct
+  (** Master switch for adaptive heartbeat scheduling in the keepalive loop.
+      When true, Heartbeat_smart.should_emit gates presence/snapshot/board/turn
+      blocks, skipping cycles when the keeper is busy or deeply idle. *)
+  let enabled =
+    get_bool ~default:true "MASC_KEEPER_SMART_HEARTBEAT"
+end
+
 (** Print configuration summary for debugging *)

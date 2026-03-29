@@ -61,6 +61,8 @@ let print_summary () =
   Log.Env.info "WorkAsHeartbeat: enabled=%b max_silence=%.0fs"
     Env_config_keeper.WorkAsHeartbeat.enabled
     Env_config_keeper.WorkAsHeartbeat.max_silence_sec;
+  Log.Env.info "SmartHeartbeat: enabled=%b"
+    Env_config_keeper.SmartHeartbeat.enabled;
   Log.Env.info "SelfPreservation: ratio=%.2f min_candidates=%d dead_ttl=%.0fs"
     Env_config_keeper.KeeperSupervisor.self_preservation_ratio
     Env_config_keeper.KeeperSupervisor.self_preservation_min_candidates
@@ -115,6 +117,7 @@ let to_json () : Yojson.Safe.t =
       "alert_slack_enabled", bool_val Env_config_keeper.KeeperAlert.slack_enabled;
       "work_as_heartbeat_enabled", bool_val Env_config_keeper.WorkAsHeartbeat.enabled;
       "work_as_heartbeat_max_silence_sec", float_val Env_config_keeper.WorkAsHeartbeat.max_silence_sec;
+      "smart_heartbeat_enabled", bool_val Env_config_keeper.SmartHeartbeat.enabled;
       "self_preservation_ratio", float_val Env_config_keeper.KeeperSupervisor.self_preservation_ratio;
       "self_preservation_min_candidates", int_val Env_config_keeper.KeeperSupervisor.self_preservation_min_candidates;
       "dead_ttl_sec", float_val Env_config_keeper.KeeperSupervisor.dead_ttl_sec;

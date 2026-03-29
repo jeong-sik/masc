@@ -292,6 +292,11 @@ jobs:
           chmod +x scripts/check-eio-conventions.sh
           scripts/check-eio-conventions.sh
 
+      - name: Check feature flag consistency
+        run: |
+          chmod +x scripts/check-feature-flag-consistency.sh
+          scripts/check-feature-flag-consistency.sh
+
       - name: Build with warnings as errors
         run: |
           opam exec -- dune build @install --force

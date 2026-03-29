@@ -224,6 +224,33 @@ let handle_config_snapshot _ctx _args : result =
   let json = Env_config_introspect.to_json () in
   (true, Yojson.Safe.pretty_to_string json)
 
+let handle_feature_flags _ctx args : result =
+  let category_filter =
+    match U.member "category" args with
+    | `String c when String.trim c <> "" -> Some (String.lowercase_ascii (String.trim c))
+    | _ -> None
+  in
+  let only_overridden =
+    match U.member "only_overridden" args with
+    | `Bool true -> true
+    | _ -> false
+  in
+  let flags =
+    if only_overridden then Feature_flag_registry.overridden_flags ()
+    else Feature_flag_registry.all_flags
+  in
+  let flags = match category_filter with
+    | None -> flags
+    | Some cat -> List.filter (fun (f : Feature_flag_registry.flag) -> f.category = cat) flags
+  in
+  let json = `Assoc [
+    ("total", `Int (List.length Feature_flag_registry.all_flags));
+    ("shown", `Int (List.length flags));
+    ("flags", `List (List.map Feature_flag_registry.flag_to_json flags));
+    ("deprecated", `Int (List.length (Feature_flag_registry.deprecated_flags ())));
+  ] in
+  (true, Yojson.Safe.pretty_to_string json)
+
 let handle_websocket_discovery _ctx _args : result =
   let json = websocket_discovery_json () in
   (true, Yojson.Safe.pretty_to_string json)
@@ -691,6 +718,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_keeper_tool_catalog" -> Some (handle_keeper_tool_catalog ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
   | "masc_config_snapshot" -> Some (handle_config_snapshot ctx args)
+  | "masc_feature_flags" -> Some (handle_feature_flags ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas

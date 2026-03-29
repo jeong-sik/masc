@@ -562,6 +562,49 @@ export interface OperatorJudgment {
   provenance?: string | null
 }
 
+export interface OperatorReviewDecision {
+  item_id: string
+  fingerprint: string
+  decision: 'resolved' | 'deferred' | string
+  actor: string
+  reason: string
+  at: string
+  target_type: string
+  target_id?: string | null
+  recommended_action_type?: string | null
+}
+
+export interface OperatorReviewItem {
+  id: string
+  kind: 'pending_confirm' | 'room_gate' | 'session_risk' | 'keeper_pressure' | string
+  target_type: 'room' | 'team_session' | 'keeper' | string
+  target_id?: string | null
+  severity: string
+  urgency: 'now' | 'soon' | string
+  summary: string
+  why_now: string
+  source?: string
+  authoritative?: boolean
+  fingerprint: string
+  stale_sec?: number | null
+  confirm_required?: boolean
+  recommended_action?: OperatorRecommendedAction | null
+  truth_ref?: { target_type?: string | null; target_id?: string | null } | null
+  friction?: unknown
+  advice?: {
+    active_summary?: OperatorGuidanceSummary | null
+    active_guidance_layer?: string | null
+    authoritative_judgment_available?: boolean
+  } | null
+}
+
+export interface OperatorReviewSummary {
+  active_count: number
+  deferred_count: number
+  recent_count: number
+  top_item?: OperatorReviewItem | null
+}
+
 export interface OperatorDigest {
   trace_id?: string
   target_type: 'room' | 'team_session' | string
@@ -579,8 +622,13 @@ export interface OperatorDigest {
   fallback_recommended_actions?: OperatorRecommendedAction[]
   recommendation_summary?: OperatorGuidanceSummary | null
   swarm_status?: CommandPlaneSwarmStatus
+  room?: OperatorRoomSnapshot
   attention_items: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]
+  review_queue: OperatorReviewItem[]
+  deferred_queue: OperatorReviewItem[]
+  review_summary?: OperatorReviewSummary | null
+  recent_reviews: OperatorReviewDecision[]
   session_cards: OperatorSessionCard[]
   worker_cards: OperatorWorkerCard[]
 }
@@ -628,8 +676,10 @@ export type OperatorActionType =
   | 'keeper_message'
   | 'keeper_probe'
   | 'keeper_recover'
+  | 'review_resolve'
+  | 'review_defer'
 
-export type OperatorTargetType = 'room' | 'team_session' | 'keeper'
+export type OperatorTargetType = 'room' | 'team_session' | 'keeper' | 'review_item'
 
 export interface OperatorActionRequest {
   actor: string

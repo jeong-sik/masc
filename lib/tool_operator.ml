@@ -28,6 +28,8 @@ let strict_action_enums =
     `String "keeper_message";
     `String "keeper_probe";
     `String "keeper_recover";
+    `String "review_resolve";
+    `String "review_defer";
   ]
 
 let legacy_action_alias_enums =
@@ -35,7 +37,7 @@ let legacy_action_alias_enums =
     `String "autonomy_tick" ]
 
 let target_type_enums =
-  [ `String "room"; `String "team_session"; `String "keeper" ]
+  [ `String "room"; `String "team_session"; `String "keeper"; `String "review_item" ]
 
 let snapshot_schema ~remote =
   {

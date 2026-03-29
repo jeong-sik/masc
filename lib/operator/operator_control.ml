@@ -493,6 +493,60 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
           ])
   | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)
 
+let execute_review_action (ctx : 'a context) (request : action_request) =
+  let* () = validate_target_type "review_item" request in
+  let* item_id =
+    require_payload_field request.payload "item_id"
+      "payload.item_id is required"
+  in
+  let* fingerprint =
+    require_payload_field request.payload "fingerprint"
+      "payload.fingerprint is required"
+  in
+  let* item_target_type =
+    require_payload_field request.payload "item_target_type"
+      "payload.item_target_type is required"
+  in
+  let reason =
+    get_string request.payload "reason" "" |> String.trim
+  in
+  if reason = "" then Error "payload.reason is required"
+  else
+    let decision =
+      if String.equal request.action_type "review_resolve"
+      then "resolved"
+      else "deferred"
+    in
+    let entry : Operator_review_state.review_decision =
+      {
+        item_id;
+        fingerprint;
+        decision;
+        actor = request.actor;
+        reason;
+        at = Types.now_iso ();
+        target_type = item_target_type;
+        target_id = get_string_opt request.payload "item_target_id";
+        recommended_action_type =
+          get_string_opt request.payload "recommended_action_type";
+      }
+    in
+    Operator_review_state.upsert_review_decision ctx.config entry;
+    Ok
+      (`Assoc
+        [
+          ("delegated_tool", `String "review_state");
+          ( "result",
+            `Assoc
+              [
+                ("item_id", `String item_id);
+                ("fingerprint", `String fingerprint);
+                ("decision", `String decision);
+                ("actor", `String request.actor);
+                ("reason", `String reason);
+              ] );
+        ])
+
 let execute_action (ctx : 'a context) (request : action_request) :
     (Yojson.Safe.t, string) result =
   match request.action_type with
@@ -503,6 +557,8 @@ let execute_action (ctx : 'a context) (request : action_request) :
       execute_team_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
+  | "review_resolve" | "review_defer" ->
+      execute_review_action ctx request
   | "" -> Error "action_type is required"
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
@@ -513,6 +569,7 @@ let validate_request request =
   | "team_broadcast" | "team_task_inject" | "team_worker_spawn_batch"
   | "team_stop"
   | "keeper_message" | "keeper_probe" | "keeper_recover"
+  | "review_resolve" | "review_defer"
   | "task_inject" ->
       Ok ()
   | "" -> Error "action_type is required"

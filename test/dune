@@ -1169,3 +1169,15 @@
  (name test_cdal_friction_projection)
  (modules test_cdal_friction_projection)
  (libraries masc_mcp agent_sdk alcotest yojson unix str))
+
+; Phase 1: Work-as-heartbeat config + freshness logic + percentile
+(test
+ (name test_work_as_heartbeat)
+ (modules test_work_as_heartbeat)
+ (libraries masc_mcp masc_mcp.config alcotest unix))
+
+; Phase 2: Self-preservation, keeper_state, failure_reason, cohort detection
+(test
+ (name test_phase2_self_preservation)
+ (modules test_phase2_self_preservation)
+ (libraries masc_mcp masc_mcp.config alcotest eio eio_main unix))

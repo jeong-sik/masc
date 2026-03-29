@@ -36,3 +36,6 @@ val backoff_delay : int -> float
 
 val keep_last_n : int -> 'a -> 'a list -> 'a list
 (** [keep_last_n n item lst] prepends [item] and keeps at most [n] entries. *)
+
+val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
+(** Map a structured failure_reason to a cohort key for self-preservation grouping. *)

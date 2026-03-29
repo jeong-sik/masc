@@ -49,6 +49,7 @@ type registry_entry = {
   last_restart_ts : float;
   crash_log : (float * string) list;
   last_error : string option;
+  last_failure_reason : failure_reason option;
   last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
   board_cursor_ts : float;
@@ -83,6 +84,9 @@ val record_restart : base_path:string -> string -> unit
 
 (** Record an error message. *)
 val record_error : base_path:string -> string -> string -> unit
+
+(** Set the structured failure reason for cohort detection. *)
+val set_failure_reason : base_path:string -> string -> failure_reason option -> unit
 
 (** Record a crash entry in the crash log (keeps last 5). *)
 val record_crash : base_path:string -> string -> float -> string -> unit

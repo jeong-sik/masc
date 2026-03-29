@@ -27,18 +27,29 @@
 
 Keeper liveness에는 두 개의 독립 경로가 있다. RFC의 모든 제안은 이 구분을 전제한다.
 
-**Path A: Keeper Restart Cycle (supervisor 경로)**
+**Path A-1: Self-Stop → Reconcile (durable keeper 경로)**
 
 ```
-keepalive fiber 실패 (presence sync 등)
-  → consecutive_failures >= 5 (keeper_keepalive.ml:147)
-  → Atomic.set stop true (self-stop)
-  → Supervisor: Promise.peek done_p = `Crashed (keeper_supervisor.ml:123)
+keepalive fiber: presence sync 연속 5회 실패
+  → Atomic.set stop true (keeper_keepalive.ml:147-151)
+  → run_heartbeat_loop 정상 반환
+  → launch_supervised_fiber: done_r resolve `Stopped (keeper_supervisor.ml:46-48)
+  → sweep_and_recover: done_p = `Stopped → to_unregister (keeper_supervisor.ml:125-126)
+  → reconcile_keepalive_keepers: durable keeper가 not running → supervise_keepalive 재호출 (keeper_supervisor.ml:100-113)
+  → 재기동된 keeper가 동일 실패 반복 → 무한 self-stop/reconcile 루프
+```
+
+**Path A-2: Fiber Crash → Backoff Restart**
+
+```
+keepalive fiber: unhandled exception (run_heartbeat_loop에서 catch 안 된 예외)
+  → Fun.protect ~finally: done_r resolve `Crashed msg (keeper_supervisor.ml:54-62)
+  → sweep_and_recover: done_p = `Crashed → to_restart (keeper_supervisor.ml:127)
   → backoff_delay(restart_count): 10s → 20s → 40s → 80s → 160s → 300s
   → max_restarts 도달 시 "dead" 선언 (keeper_supervisor.ml:128)
 ```
 
-Storm 조건: underlying cause(filesystem 장애, room directory 손상 등)가 지속되면 재기동된 keeper가 즉시 동일 실패를 반복한다. N개 keeper가 동시에 같은 원인으로 self-stop하면 supervisor가 N개를 동시에 restart 시도한다. 현재 backoff는 per-keeper이므로 mass simultaneous failure를 감지/억제하는 메커니즘이 없다.
+Storm 조건: **Path A-1이 주요 storm 경로다.** underlying cause(filesystem 장애 등)가 지속되면 self-stop → reconcile → 재기동 → 즉시 self-stop 루프가 N개 keeper에서 동시 발생한다. reconcile에는 backoff도 없고 mass failure 감지도 없다. Path A-2(Crashed → backoff)는 backoff로 자연 감속되지만, Path A-1(Stopped → reconcile)은 감속 메커니즘이 없다.
 
 **Path B: Room Zombie Cleanup (room_gc 경로)**
 
@@ -192,7 +203,7 @@ let default_zombie_threshold =
 | Max silence budget | `MASC_KEEPER_MAX_SILENCE_SEC` (default 120s) |
 | Turn 중 갱신 | 불가 (fiber blocking). max silence = max turn duration |
 | Freshness skip | `now - last_turn_completion_ts < MAX_SILENCE_SEC`이면 presence sync skip |
-| False zombie 방지 | Turn 중 presence failure는 consecutive count에서 제외 |
+| Failure reset | Unified turn 성공 완료 후 `consecutive_failures := 0` (turn 성공 = 시스템 건강 증거) |
 
 **Scope boundary (필수)**:
 
@@ -218,7 +229,7 @@ last_turn_completion_ts │  skip presence sync   │  ← freshness only
 | 1.1 | `lib/keeper/keeper_registry.ml` | `last_turn_completion_ts : float` 필드 추가 |
 | 1.2 | `lib/keeper/keeper_unified_turn.ml` | Turn 완료 후: (a) `last_turn_completion_ts` 갱신, (b) `Room.heartbeat_in_room` 호출 (facade 경유, keeper_coordination.ml:65과 동일 경로) |
 | 1.3 | `lib/keeper/keeper_keepalive.ml:126` | `now - last_turn_completion_ts < MAX_SILENCE_SEC`이면 presence sync skip (lease 기반, 한 사이클이 아닌 silence budget 전체) |
-| 1.4 | `lib/keeper/keeper_keepalive.ml:147` | Self-stop 기준: turn 중이면 consecutive failure 카운트 제외 |
+| 1.4 | `lib/keeper/keeper_keepalive.ml` | Unified turn 완료 후 `consecutive_failures := 0` (성공한 turn은 시스템 건강 증거이므로, 이전 presence failure 누적을 리셋) |
 | 1.5 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_WORK_AS_HEARTBEAT` (bool, default true), `MASC_KEEPER_MAX_SILENCE_SEC` (int, default 120) |
 | 1.6 | `test/test_work_as_heartbeat.ml` | Turn 완료가 presence sync를 대체하는지 + turn 중 false zombie 방지 검증 |
 
@@ -230,42 +241,87 @@ last_turn_completion_ts │  skip presence sync   │  ← freshness only
 
 **Objective**: Path A (supervisor restart)에 mass failure 감지 + 억제 추가.
 
+**Storm 경로 분석 (Phase 2 전제)**:
+
+Mass self-stop storm은 `to_restart`(Crashed)가 아니라 `reconcile`(Stopped → re-launch) 경로에서 발생한다 (Section 1.1 Path A-1). 따라서 self-preservation gate는 **두 경로 모두**에 적용해야 한다.
+
+**설계 선택: self-stop을 structured Crashed로 전환**
+
+현재 self-stop은 `Atomic.set stop true` → 정상 반환 → `Stopped`로 resolve된다. 이를 structured exception으로 전환하여 `Crashed` 경로로 라우팅한다. 이렇게 하면:
+- backoff 메커니즘이 자동 적용됨 (현재 reconcile에는 backoff 없음)
+- self-preservation gate가 `to_restart`에서 자연스럽게 작동
+- failure_reason이 구조화되어 cohort detection 가능
+
+```ocaml
+(* Before: keeper_keepalive.ml:147 *)
+if !consecutive_failures >= max_consecutive_heartbeat_failures then
+  Atomic.set stop true  (* → Stopped → reconcile without backoff *)
+
+(* After: structured crash *)
+if !consecutive_failures >= max_consecutive_heartbeat_failures then
+  raise (Keeper_heartbeat_failure {
+    reason = Heartbeat_consecutive_failures !consecutive_failures;
+    keeper_name = m.name;
+  })
+  (* → ~finally catches → Crashed "heartbeat_consecutive_failures:5" *)
+  (* → to_restart with backoff + self-preservation gate *)
+```
+
+**Failure reason codes (cohort detection 기반)**:
+
+crash_msg prefix matching은 "fiber terminated without resolution"으로 over-group되기 쉽다. 대신 structured failure_reason을 도입한다:
+
+```ocaml
+type failure_reason =
+  | Heartbeat_consecutive_failures of int   (* 연속 presence sync 실패 *)
+  | Fiber_unresolved                        (* 예상치 못한 fiber 종료 *)
+  | Exception of string                     (* 구체적 exception *)
+```
+
+cohort는 `failure_reason` variant로 판별한다 (string matching이 아닌 ADT matching).
+
 **Self-Preservation Rule**:
 
-Ratio-only 조건은 소규모 cluster에서 과도하게 공격적이다 (3 keeper 중 1 crash = 33% → 전원 억제). 따라서 **ratio AND 절대 수** 이중 조건을 적용한다.
+Ratio-only 조건은 소규모 cluster에서 과도하게 공격적이다. **ratio AND 절대 수** 이중 조건을 적용한다.
 
 ```
 sweep_and_recover에서:
   restart_candidates = len(to_restart)
-  total_running = len(entries)
-  ratio = restart_candidates / total_running
+  total_keepers = len(entries)  (* Running + Crashed, Stopped 제외 *)
+  ratio = restart_candidates / total_keepers
 
-  (* 이중 조건: ratio 초과 AND 절대 수 초과 *)
   if ratio > SELF_PRESERVATION_RATIO (default 0.3)
-     AND restart_candidates >= MIN_CANDIDATES_FOR_PRESERVATION (default 2):
+     AND restart_candidates >= MIN_CANDIDATES (default 2):
 
-    (* 추가 검증: 동일 failure cohort인지 확인 *)
-    (* crash_msg 패턴이 동일하면 공통 원인 가능성 높음 *)
-    let same_cause = all crash messages share common prefix in
-    if same_cause then
-      log "self-preservation: %d/%d keepers (%.0f%%), same cause: %s"
+    (* cohort 판별: failure_reason variant 기준 *)
+    let cohorts = group_by failure_reason to_restart in
+    let dominant_cohort = largest cohort in
+
+    if dominant_cohort.size >= MIN_CANDIDATES then
+      log "self-preservation: %d/%d keepers, cohort: %s"
+        dominant_cohort.size total_keepers
+        (failure_reason_to_string dominant_cohort.reason)
       publish OAS event "keeper_self_preservation_triggered"
-      skip all restarts this cycle
+      skip restarts for dominant_cohort this cycle
+      (* 다른 cohort의 restart는 허용 *)
     else
-      (* 다른 원인이면 개별 restart 허용 *)
       proceed with normal restart
 
   next cycle: re-evaluate (suppression은 1 cycle = 30s만)
 ```
 
-소규모 예시: keeper 3개 중 1개 crash → ratio 33%이지만 candidates=1 < min=2 → 정상 restart. keeper 5개 중 2개 crash, 같은 원인 → ratio 40% AND candidates=2 → 억제.
+소규모 예시: keeper 3개 중 1개 crash → candidates=1 < min=2 → 정상 restart. keeper 5개 중 3개 `Heartbeat_consecutive_failures` → ratio 60%, same cohort, candidates=3 → 해당 cohort만 억제.
 
 | Step | File | Change |
 |------|------|--------|
-| 2.1 | `lib/keeper/keeper_supervisor.ml:140` | restart 전 ratio + 절대 수 + cohort 검사 추가 |
-| 2.2 | `lib/keeper/keeper_supervisor.ml` | self-preservation event 발행 (cohort pattern 포함) |
-| 2.3 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_SELF_PRESERVATION_RATIO` (float, default 0.3), `MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES` (int, default 2) |
-| 2.4 | `test/test_self_preservation.ml` | (a) 소규모 cluster 1/3 crash → restart 허용, (b) 대규모 같은 원인 → 억제 |
+| 2.0 | `lib/keeper/keeper_keepalive.ml:147` | self-stop을 `Keeper_heartbeat_failure` exception으로 전환 (Crashed 경로 라우팅) |
+| 2.1 | `lib/keeper/keeper_supervisor.ml` | `failure_reason` type 도입 + crash_msg → reason 파싱 |
+| 2.2 | `lib/keeper/keeper_supervisor.ml:140` | restart 전 ratio + 절대 수 + cohort(failure_reason ADT) 검사 |
+| 2.3 | `lib/keeper/keeper_supervisor.ml` | self-preservation event 발행 (dominant cohort 정보 포함) |
+| 2.4 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_SELF_PRESERVATION_RATIO` (float, default 0.3), `MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES` (int, default 2) |
+| 2.5 | `test/test_self_preservation.ml` | (a) 소규모 1/3 crash → restart 허용, (b) 대규모 same cohort → cohort만 억제, (c) mixed cohort → 각각 판정 |
+
+**Breaking change 주의**: Step 2.0에서 self-stop이 `Stopped` → `Crashed`로 변경되면, 기존에 `Stopped`를 기대하던 로직(dashboard, metrics)에 영향이 있을 수 있다. 구현 시 `Crashed` sub-variant 또는 별도 `SelfStopped` state 도입을 검토.
 
 ### Phase 2b: Phi Accrual — gRPC Only (선행조건: gRPC 활성화)
 
@@ -334,7 +390,11 @@ Phase 3 착수 조건:
 - [ ] Phase 1.4: Self-stop에서 turn-in-progress 예외
 - [ ] Phase 1.5: Config (feature flag + max silence)
 - [ ] Phase 1.6: Tests
-- [ ] Phase 2.1-2.4: Self-preservation in supervisor
+- [ ] Phase 2.0: Self-stop → structured Crashed 전환 (keeper_keepalive.ml:147)
+- [ ] Phase 2.1: failure_reason ADT 도입 (keeper_supervisor.ml)
+- [ ] Phase 2.2-2.3: Self-preservation gate (ratio + min_candidates + cohort)
+- [ ] Phase 2.4: Config (ratio, min_candidates)
+- [ ] Phase 2.5: Tests (소규모/대규모/mixed cohort)
 - [ ] Phase 2b (gRPC 활성화 후): Phi accrual + shadow mode
 
 ## 7. Labeling Protocol

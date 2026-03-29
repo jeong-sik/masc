@@ -2,15 +2,27 @@ include Cp_lifecycle_intents
 open Result_syntax
 
 let snapshot_json ?sessions config =
-  let state = build_snapshot_state ?sessions config in
-  let topology = topology_json_from_state state in
-  let intents = intents_summary_json_from_state state in
-  let operations = list_operations_json_from_state state in
-  let detachments = list_detachments_json_from_state state in
-  let alerts = list_alerts_json_from_state config state in
-  let decisions = list_policy_decisions_json_from_state state in
-  let capacity = capacity_json_from_state state in
-  let traces = list_traces_json config ~limit:10 () in
+  let t0 = Unix.gettimeofday () in
+  let timed label f =
+    let t_start = Unix.gettimeofday () in
+    let result = f () in
+    let elapsed = Unix.gettimeofday () -. t_start in
+    if elapsed > 0.5 then
+      Log.Dashboard.info "[cp_snapshot] %s: %.0fms" label (elapsed *. 1000.0);
+    result
+  in
+  let state = timed "build_state" (fun () -> build_snapshot_state ?sessions config) in
+  let topology = timed "topology" (fun () -> topology_json_from_state state) in
+  let intents = timed "intents" (fun () -> intents_summary_json_from_state state) in
+  let operations = timed "operations" (fun () -> list_operations_json_from_state state) in
+  let detachments = timed "detachments" (fun () -> list_detachments_json_from_state state) in
+  let alerts = timed "alerts" (fun () -> list_alerts_json_from_state config state) in
+  let decisions = timed "decisions" (fun () -> list_policy_decisions_json_from_state state) in
+  let capacity = timed "capacity" (fun () -> capacity_json_from_state state) in
+  let traces = timed "traces" (fun () -> list_traces_json config ~limit:10 ()) in
+  let dt_total = Unix.gettimeofday () -. t0 in
+  if dt_total > 1.0 then
+    Log.Dashboard.warn "[cp_snapshot] total: %.0fms" (dt_total *. 1000.0);
   `Assoc
     [
       ("version", `String "cp-v2");

@@ -1,6 +1,43 @@
 # Changelog
 
 
+## [2.163.0] - 2026-03-30
+
+### Added
+- **Heartbeat_smart** — adaptive scheduling wired into keepalive loop with feature flag gate (#3744).
+- **Operator review queue workbench** — review decision CRUD + dashboard UI (#3737).
+- **Feature health monitoring** — dashboard panel for feature flag status (#3731).
+- **CDAL golden set** — calibration baseline and eval harness (#3752).
+- **CDAL protocol_version** — labeling output contract versioning (#3740).
+- **CDAL feature flags** — registry entries and keeper evaluation gate (#3742).
+- **Keeper/agent observability pipeline** — tool usage flush/restore, trajectory truncation (#3758).
+- **Dashboard autoresearch loop** — start from UI (#3734).
+
+### Changed
+- **CI Dashboard** — switched from npm to pnpm matching packageManager field (#3755).
+- **command_plane .mli** — 4 interfaces added (cp_types, cp_paths, cp_cleanup, cp_snapshot_section_cache) (#3749).
+- **String_util** — consolidated 10 duplicate `contains_substring` implementations (#3748).
+- **Keeper ensure_dir** — centralized into Keeper_fs with Eio.Mutex + atomic writes (#3736).
+- **Keeper keepalive constants** — extracted hardcoded values to env_config (#3746).
+- **Dashboard status labels** — consolidated, removed hardcoding (#3743).
+- **Dashboard actor reader** — deduplicated to SSOT currentDashboardActor (#3763).
+
+### Fixed
+- **Keeper supervisor** — hardened ownership, dead tombstone cleanup (#3678).
+- **Keeper metadata migration** — perpetual keeper meta with timestamp comparison (#3732).
+- **Keeper dir cache** — stale ensure_dir cache after base reset (#3714).
+- **Tool dispatch** — wired 3 missing modules (Cache, Goals, Compact) (#3716).
+- **Contract Harness** — mkdir_p keepers dir before writing meta (#3715).
+- **H2 JSON-RPC** — proper message escaping via json_rpc_error helper (#3760).
+- **Spawn** — handle partial write when piping stdin (#3765).
+- **Timing ring** — cursor overflow fix + RFC state machine diagram (#3735).
+- **Test boundaries** — clear keeper registry between tests (#3739).
+
+### Removed
+- 4 dead functions with zero callers (#3753).
+- Stale TODOs referencing closed issues + dead `stable_session_id` (#3762, #3764).
+- Stale removed-tool references (#3727).
+
 ## [2.162.0] - 2026-03-29
 
 ### Added

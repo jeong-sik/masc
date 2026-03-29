@@ -280,10 +280,13 @@ let fork_with_cwd ~cmd_array ~stdin_content ~working_dir ~config_working_dir =
         in
         Unix.close stdout_write;
         Unix.close stdin_read;
-        let _ =
-          Unix.write_substring stdin_write stdin_content 0
-            (String.length stdin_content)
+        let rec write_all off len =
+          if len > 0 then begin
+            let written = Unix.write_substring stdin_write stdin_content off len in
+            write_all (off + written) (len - written)
+          end
         in
+        write_all 0 (String.length stdin_content);
         Unix.close stdin_write;
         (pid, stdout_read)))
 

@@ -202,6 +202,53 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   }
 }
 
+// --- MCP tools/list — fetch tool schemas with inputSchema ---
+
+interface McpToolsListResult {
+  tools: Array<{
+    name: string
+    description: string
+    inputSchema: Record<string, unknown>
+    annotations?: Record<string, unknown>
+  }>
+  nextCursor?: string
+}
+
+interface McpListResponse {
+  result?: McpToolsListResult
+  error?: { message?: string }
+}
+
+function parseMcpListResponse(raw: string): McpListResponse {
+  const line = raw.split('\n').find(l => l.startsWith('data: '))
+  const payload = line ? line.slice(6).trim() : raw.trim()
+  return JSON.parse(payload) as McpListResponse
+}
+
+export async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
+  await ensureSession()
+  const text = await mcpPost({
+    jsonrpc: '2.0',
+    method: 'tools/list',
+    params: cursor ? { cursor } : {},
+    id: Date.now(),
+  })
+  const parsed = parseMcpListResponse(text)
+  if (parsed.error?.message) throw new Error(parsed.error.message)
+  return parsed.result ?? { tools: [] }
+}
+
+export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
+  const all: McpToolsListResult['tools'] = []
+  let cursor: string | undefined
+  do {
+    const page = await listMcpTools(cursor)
+    all.push(...page.tools)
+    cursor = page.nextCursor
+  } while (cursor)
+  return all
+}
+
 function parseMcpJsonText(text: string): Record<string, unknown> {
   const trimmed = text.trim()
   if (!trimmed) return {}

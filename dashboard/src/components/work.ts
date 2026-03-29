@@ -8,6 +8,7 @@ import { Proof } from './proof'
 import { Planning } from './goals'
 import { Worktrees } from './worktrees'
 import { ErrorBoundary } from './common/error-boundary'
+import { TaskCreateForm } from './task-manage/task-create-form'
 
 type WorkSection = 'board' | 'evidence' | 'planning' | 'worktrees'
 
@@ -24,7 +25,7 @@ export function Work() {
     <div class="flex flex-col gap-4">
       <div class="transition-opacity duration-300">
         <${ErrorBoundary} label=${current}>
-          ${current === 'board' ? html`<${Memory} />`
+          ${current === 'board' ? html`<${TaskCreateForm} /><${Memory} />`
             : current === 'evidence' ? html`<${Proof} />`
             : current === 'planning' ? html`<${Planning} />`
             : html`<${Worktrees} />`

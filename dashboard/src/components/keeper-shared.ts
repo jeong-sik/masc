@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { shutdownKeeper } from './keeper-spawn/keeper-spawn-state'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -460,6 +461,16 @@ export function KeeperRuntimeActions({
         onClick=${onSocialSweep}
       >
         Social sweep
+      </button>
+      <button type="button"
+        class="${btnBase} border-[rgba(251,113,133,0.3)] bg-[rgba(251,113,133,0.06)] text-[#fda4af] hover:bg-[rgba(251,113,133,0.12)]"
+        onClick=${() => {
+          if (confirm('키퍼를 종료합니까?')) {
+            void shutdownKeeper(keeper.name)
+          }
+        }}
+      >
+        종료
       </button>
     </div>
   `

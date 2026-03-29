@@ -45,10 +45,10 @@ let is_unspecified_host host =
 
 let base_url_has_non_loopback_host () =
   match Env_config_core.masc_http_base_url_result () with
-  | Error _ -> false
+  | Error _ -> false  (* no base URL configured — defer to bind-host check *)
   | Ok url -> (
       match Uri.host (Uri.of_string url) with
-      | None -> false
+      | None -> true  (* fail-closed: unparseable host → treat as non-local *)
       | Some host -> not (is_loopback_host host))
 
 let http_auth_strict_enabled () =

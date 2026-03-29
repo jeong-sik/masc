@@ -88,6 +88,7 @@
    dashboard_http_mdal
    dashboard_http_autoresearch
    dashboard_harness_health
+   dashboard_feature_health
    dashboard_http_repo_synthesis
    dashboard_provider_runs
    proactive_refresh

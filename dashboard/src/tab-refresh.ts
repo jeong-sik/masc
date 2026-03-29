@@ -19,6 +19,11 @@ async function refreshHarnessLabSurface(): Promise<void> {
   await refreshHarnessSurface()
 }
 
+async function refreshFeatureHealthSurface(): Promise<void> {
+  const { refreshFeatureHealth } = await import('./components/feature-health')
+  await refreshFeatureHealth()
+}
+
 async function refreshGovernanceSurface(): Promise<void> {
   const { refreshGovernance } = await import('./components/governance-store')
   await refreshGovernance()
@@ -33,6 +38,7 @@ export type RefreshTask =
   | 'goals'
   | 'autoresearch'
   | 'harness'
+  | 'featureHealth'
   | 'operatorSnapshot'
   | 'operatorRoomDigest'
   | 'governance'
@@ -72,6 +78,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'harness') {
         return ['harness']
       }
+      if (routeState.params.section === 'features') {
+        return ['featureHealth']
+      }
       return []
     case 'logs':
     default:
@@ -88,6 +97,7 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
   goals: () => { void refreshGoals() },
   autoresearch: () => { void refreshAutoresearchLabSurface() },
   harness: () => { void refreshHarnessLabSurface() },
+  featureHealth: () => { void refreshFeatureHealthSurface() },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },
   governance: () => { void refreshGovernanceSurface() },

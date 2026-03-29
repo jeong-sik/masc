@@ -44,7 +44,3 @@ let all_schemas_extended =
   @ Tool_operator.schemas @ Tool_local_runtime.schemas @ Tool_command_plane.schemas
   @ Tool_team_session.schemas @ Tool_voice.schemas @ Tool_shard.schemas
   @ Tool_autoresearch.schemas
-
-(** Get tool by name *)
-let find_tool name =
-  List.find_opt (fun s -> s.name = name) all_schemas_extended
